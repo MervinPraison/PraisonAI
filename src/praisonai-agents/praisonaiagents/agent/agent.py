@@ -552,6 +552,7 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
         parallel_tool_calls: bool = False,  # Gap 2: Enable parallel execution of batched LLM tool calls
         learn: Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
         backend: Optional[Any] = None,  # External managed agent backend (e.g., ManagedAgentIntegration)
+        cli_backend: Optional[Union[str, Any]] = None,  # CLI backend for delegating turns (e.g., "claude-code")
         interrupt_controller: Optional['InterruptController'] = None,  # G2: Cooperative cancellation
     ):
         """Initialize an Agent instance.
@@ -649,6 +650,13 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
                 - None: Use local execution (default)
                 When provided, agent can delegate execution to managed infrastructure
                 for long-running tasks or when local resources are constrained.
+            cli_backend: CLI backend for delegating full turns to external CLI tools. Accepts:
+                - str: Backend ID ("claude-code", "codex-cli", "gemini-cli")
+                - CliBackendProtocol: Custom CLI backend instance
+                - None: Use standard LLM execution (default)
+                When provided, agent delegates entire conversation turns to the CLI tool
+                instead of using the built-in LLM. Enables session continuity and 
+                tool integration through external AI coding assistants.
 
         Raises:
             ValueError: If all of name, role, goal, backstory, and instructions are None.
@@ -1916,6 +1924,11 @@ Your Goal: {self.goal}
 
         # Backend - external managed agent backend for hybrid execution
         self.backend = backend
+        
+        # CLI Backend - external CLI backend for delegating full turns
+        self._cli_backend = None
+        if cli_backend is not None:
+            self._cli_backend = self._resolve_cli_backend(cli_backend)
 
         # Telemetry - lazy initialized via property for performance
         self.__telemetry = None
@@ -4676,6 +4689,141 @@ Answer:"""
     #                       History Management Methods
     # -------------------------------------------------------------------------
     
+    
+    # -------------------------------------------------------------------------
+    #                       CLI Backend Management
+    # -------------------------------------------------------------------------
+    
+    def _resolve_cli_backend(self, cli_backend):
+        """Validate and return CLI backend protocol instance.
+        
+        Args:
+            cli_backend: CliBackendProtocol instance or callable that returns one
+            
+        Returns:
+            CliBackendProtocol instance
+            
+        Note:
+            String backend IDs must be resolved to instances in the wrapper layer
+            before passing to Agent. This maintains proper dependency direction
+            per AGENTS.md (core SDK should not import from wrapper).
+        """
+        # Import protocols
+        try:
+            from ..cli_backend import CliBackendProtocol
+        except ImportError:
+            raise ImportError(
+                "CLI backend features requested but protocols not available. "
+                "This should not happen in a properly installed praisonaiagents package."
+            )
+        
+        # If already a protocol instance, return as-is
+        if hasattr(cli_backend, 'execute') and hasattr(cli_backend, 'stream'):
+            return cli_backend
+            
+        # If callable (factory function), call it to get instance
+        if callable(cli_backend):
+            instance = cli_backend()
+            if hasattr(instance, 'execute') and hasattr(instance, 'stream'):
+                return instance
+            raise TypeError(f"CLI backend factory returned invalid type: {type(instance)}. Expected CliBackendProtocol.")
+        
+        # String IDs are no longer supported at core level - must be resolved in wrapper
+        if isinstance(cli_backend, str):
+            raise TypeError(
+                f"String CLI backend IDs ('{cli_backend}') must be resolved to instances "
+                "in the wrapper layer. Use: praisonai.Agent(cli_backend='claude-code') "
+                "or manually resolve: agent = praisonaiagents.Agent(cli_backend=resolve_cli_backend('claude-code'))"
+            )
+        
+        raise TypeError(f"Invalid cli_backend type: {type(cli_backend)}. Expected CliBackendProtocol instance or factory callable.")
+    
+    async def _chat_via_cli_backend(self, prompt: str, **kwargs) -> Optional[str]:
+        """Chat implementation using CLI backend delegation.
+        
+        Args:
+            prompt: User prompt
+            **kwargs: Additional chat parameters (passed through as metadata)
+            
+        Returns:
+            CLI backend response content
+        """
+        if not self._cli_backend:
+            raise RuntimeError("CLI backend not configured")
+        
+        try:
+            # Import backend types
+            from ..cli_backend import CliSessionBinding
+            
+            # Build session binding for state management
+            session_id = getattr(self, '_session_id', None) or f"agent-{self.agent_id}"
+            session_binding = CliSessionBinding(session_id=session_id)
+            
+            # Get system prompt from agent configuration
+            system_prompt = None
+            if hasattr(self, 'system_prompt') and self.system_prompt:
+                system_prompt = self.system_prompt
+            elif self.backstory or self.role or self.goal:
+                # Build system prompt from agent identity
+                parts = []
+                if self.backstory:
+                    parts.append(self.backstory)
+                if self.role:
+                    parts.append(f"Your Role: {self.role}")
+                if self.goal:
+                    parts.append(f"Your Goal: {self.goal}")
+                system_prompt = "\n".join(parts)
+            
+            # Extract images from attachments (if any)
+            images = kwargs.get('attachments')
+            if images:
+                # Filter for image files
+                image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'}
+                images = [
+                    img for img in images 
+                    if any(img.lower().endswith(ext) for ext in image_extensions)
+                ]
+                if not images:
+                    images = None
+            
+            # Execute CLI backend
+            result = await self._cli_backend.execute(
+                prompt=prompt,
+                session=session_binding,
+                images=images,
+                system_prompt=system_prompt
+            )
+            
+            # Check for CLI backend errors
+            if result is None:
+                raise RuntimeError(
+                    f"CLI backend returned no result for agent={self.display_name!r}, "
+                    f"session_id={session_id!r}"
+                )
+            if getattr(result, "error", None):
+                raise RuntimeError(
+                    f"CLI backend failed for agent={self.display_name!r}, "
+                    f"session_id={session_id!r}: {result.error}"
+                )
+            
+            # Update chat history with the exchange
+            if hasattr(self, '_append_to_chat_history'):
+                self._append_to_chat_history({
+                    "role": "user", 
+                    "content": prompt
+                })
+                if result.content:
+                    self._append_to_chat_history({
+                        "role": "assistant", 
+                        "content": result.content
+                    })
+            
+            return result.content if result else None
+            
+        except Exception as e:
+            raise RuntimeError(
+                f"CLI backend execution failed for agent={self.display_name!r}: {e}"
+            ) from e
     
     # -------------------------------------------------------------------------
     #                       Resource Lifecycle Management
