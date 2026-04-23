@@ -1247,6 +1247,30 @@ class AgentsGenerator:
             # string, or a full SkillsConfig dict (paths/dirs/auto_discover).
             agent_skills = details.get('skills')
 
+            # H17: CLI Backend support - delegates full turns to external CLI tools
+            cli_backend_config = details.get('cli_backend')
+            cli_backend_resolved = None
+            if cli_backend_config:
+                try:
+                    if isinstance(cli_backend_config, str):
+                        # Simple string ID: "claude-code"
+                        from praisonai.cli_backends import resolve_cli_backend
+                        cli_backend_resolved = resolve_cli_backend(cli_backend_config)
+                    elif isinstance(cli_backend_config, dict):
+                        # Dict format: {id: "claude-code", overrides: {timeout_ms: 60000}}
+                        backend_id = cli_backend_config.get('id')
+                        overrides = cli_backend_config.get('overrides', {})
+                        if not backend_id:
+                            raise ValueError(f"cli_backend dict must contain 'id' field: {cli_backend_config}")
+                        from praisonai.cli_backends import resolve_cli_backend
+                        cli_backend_resolved = resolve_cli_backend(backend_id, overrides=overrides)
+                    else:
+                        raise ValueError(f"cli_backend must be string or dict, got: {type(cli_backend_config)}")
+                except ImportError:
+                    self.logger.warning(f"CLI backend '{cli_backend_config}' requested but not available")
+                except Exception as e:
+                    self.logger.warning(f"Failed to resolve CLI backend '{cli_backend_config}': {e}")
+
             agent = PraisonAgent(
                 name=role_filled,
                 role=role_filled,
@@ -1264,6 +1288,7 @@ class AgentsGenerator:
                 approval=approval_config,
                 output=output_config,
                 skills=agent_skills,
+                cli_backend=cli_backend_resolved,
             )
             
             if self.agent_callback:

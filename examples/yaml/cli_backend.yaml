@@ -1,0 +1,12 @@
+framework: praisonai
+topic: coding
+roles:
+  coder:
+    role: Code refactorer
+    goal: Refactor Python modules for better maintainability
+    backstory: Senior engineer with expertise in clean code principles
+    cli_backend: claude-code
+    tasks:
+      refactor:
+        description: Refactor utils.py to improve code quality
+        expected_output: Refactored code with improved structure and documentation
