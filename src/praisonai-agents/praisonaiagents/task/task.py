@@ -660,76 +660,77 @@ class Task:
 
         logger.info(f"Task output: {task_output.raw[:100]}...")
 
-        if self.quality_check and self.memory:
-            try:
-                logger.info(f"Task {self.id}: Starting memory operations")
-                logger.info(f"Task {self.id}: Calculating quality metrics for output: {task_output.raw[:100]}...")
+        if self.quality_check:
+            if self.memory and self._verify_memory_ready():
+                try:
+                    logger.info(f"Task {self.id}: Starting memory operations")
+                    logger.info(f"Task {self.id}: Calculating quality metrics for output: {task_output.raw[:100]}...")
 
-                # Get quality metrics from LLM
-                # Determine which LLM model to use based on agent configuration
-                llm_model = None
-                if self.agent:
-                    if getattr(self.agent, '_using_custom_llm', False) and hasattr(self.agent, 'llm_instance'):
-                        # For custom LLM instances (like Ollama)
-                        # Extract the model name from the LLM instance
-                        if hasattr(self.agent.llm_instance, 'model'):
-                            llm_model = self.agent.llm_instance.model
-                        else:
-                            llm_model = "gpt-4o-mini"  # Default fallback
-                    elif hasattr(self.agent, 'llm') and self.agent.llm:
-                        # For standard model strings
-                        llm_model = self.agent.llm
-                
-                metrics = self.memory.calculate_quality_metrics(
-                    task_output.raw,
-                    self.expected_output,
-                    llm=llm_model
-                )
-                logger.info(f"Task {self.id}: Quality metrics calculated: {metrics}")
+                    # Get quality metrics from LLM
+                    # Determine which LLM model to use based on agent configuration
+                    llm_model = None
+                    if self.agent:
+                        if getattr(self.agent, '_using_custom_llm', False) and hasattr(self.agent, 'llm_instance'):
+                            # For custom LLM instances (like Ollama)
+                            # Extract the model name from the LLM instance
+                            if hasattr(self.agent.llm_instance, 'model'):
+                                llm_model = self.agent.llm_instance.model
+                            else:
+                                llm_model = "gpt-4o-mini"  # Default fallback
+                        elif hasattr(self.agent, 'llm') and self.agent.llm:
+                            # For standard model strings
+                            llm_model = self.agent.llm
 
-                quality_score = metrics.get("accuracy", 0.0)
-                logger.info(f"Task {self.id}: Quality score: {quality_score}")
-
-                # Store in both short and long-term memory with higher threshold
-                logger.info(f"Task {self.id}: Finalizing task output in memory...")
-                self.memory.finalize_task_output(
-                    content=task_output.raw,
-                    agent_name=self.agent.name if self.agent else "Agent",
-                    quality_score=quality_score,
-                    threshold=0.7,  # Only high quality outputs in long-term memory
-                    metrics=metrics,
-                    task_id=self.id
-                )
-                logger.info(f"Task {self.id}: Finalized task output in memory")
-
-                # Store quality metrics separately
-                logger.info(f"Task {self.id}: Storing quality metrics...")
-                self.memory.store_quality(
-                    text=task_output.raw,
-                    quality_score=quality_score,
-                    task_id=self.id,
-                    metrics=metrics
-                )
-
-                # Build context for next tasks
-                if self.next_tasks:
-                    logger.info(f"Task {self.id}: Building context for next tasks...")
-                    context = self.memory.build_context_for_task(
-                        task_descr=task_output.raw,
-                        max_items=5
+                    metrics = self.memory.calculate_quality_metrics(
+                        task_output.raw,
+                        self.expected_output,
+                        llm=llm_model
                     )
-                    logger.info(f"Task {self.id}: Built context for next tasks: {len(context)} items")
+                    logger.info(f"Task {self.id}: Quality metrics calculated: {metrics}")
 
-                logger.info(f"Task {self.id}: Memory operations complete")
-            except Exception as e:
-                error_msg = f"memory operations: {e}"
-                self.non_fatal_errors.append(error_msg)
-                logger.error(f"Task {self.id}: Failed to process memory operations: {e}")
-                logger.exception(e)  # Print full stack trace
-                # Continue execution even if memory operations fail
-        else:
-            logger.warning(f"Task {self.id}: Memory not available, skipping memory operations")
-            self.non_fatal_errors.append("memory not available for operations")
+                    quality_score = metrics.get("accuracy", 0.0)
+                    logger.info(f"Task {self.id}: Quality score: {quality_score}")
+
+                    # Store in both short and long-term memory with higher threshold
+                    logger.info(f"Task {self.id}: Finalizing task output in memory...")
+                    self.memory.finalize_task_output(
+                        content=task_output.raw,
+                        agent_name=self.agent.name if self.agent else "Agent",
+                        quality_score=quality_score,
+                        threshold=0.7,  # Only high quality outputs in long-term memory
+                        metrics=metrics,
+                        task_id=self.id
+                    )
+                    logger.info(f"Task {self.id}: Finalized task output in memory")
+
+                    # Store quality metrics separately
+                    logger.info(f"Task {self.id}: Storing quality metrics...")
+                    self.memory.store_quality(
+                        text=task_output.raw,
+                        quality_score=quality_score,
+                        task_id=self.id,
+                        metrics=metrics
+                    )
+
+                    # Build context for next tasks
+                    if self.next_tasks:
+                        logger.info(f"Task {self.id}: Building context for next tasks...")
+                        context = self.memory.build_context_for_task(
+                            task_descr=task_output.raw,
+                            max_items=5
+                        )
+                        logger.info(f"Task {self.id}: Built context for next tasks: {len(context)} items")
+
+                    logger.info(f"Task {self.id}: Memory operations complete")
+                except Exception as e:
+                    error_msg = f"memory operations: {e}"
+                    self.non_fatal_errors.append(error_msg)
+                    logger.error(f"Task {self.id}: Failed to process memory operations: {e}")
+                    logger.exception(e)  # Print full stack trace
+                    # Continue execution even if memory operations fail
+            else:
+                logger.warning(f"Task {self.id}: Memory not available, skipping memory operations")
+                self.non_fatal_errors.append("memory not available for operations")
 
         # Execute original callback with metadata support
         if self.callback:
@@ -741,11 +742,12 @@ class Task:
                 logger.error(f"Task {self.id}: Failed to execute callback: {e}")
                 logger.exception(e)
                 # Attach error to output for workflow orchestrator visibility
-                if hasattr(task_output, 'callback_error'):
-                    task_output.callback_error = str(e)
+                task_output.callback_error = str(e)
                 # TODO: Consider raising if callback is marked as critical
                 # if getattr(self, 'callback_critical', False):
                 #     raise
+        if self.non_fatal_errors:
+            task_output.non_fatal_errors = list(self.non_fatal_errors)
 
         task_prompt = f"""
 You need to do the following task: {self.description}.
