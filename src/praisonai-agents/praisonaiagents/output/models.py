@@ -24,6 +24,8 @@ class TaskOutput(BaseModel):
     agent: str
     output_format: Literal["RAW", "JSON", "Pydantic"] = "RAW"
     token_metrics: Optional['TokenMetrics'] = None
+    callback_error: Optional[str] = None
+    non_fatal_errors: Optional[list[str]] = None
 
     def json(self) -> Optional[str]:
         if self.output_format == "JSON" and self.json_dict:
