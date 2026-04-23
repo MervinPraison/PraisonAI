@@ -350,6 +350,7 @@ class PraisonAI:
         self.args = args
         invocation_cmd = "praisonai"
         version_string = f"PraisonAI version {__version__}"
+        
 
         # Handle -p/--prompt flag - treat as direct prompt
         if getattr(args, 'prompt_flag', None):
@@ -393,6 +394,28 @@ class PraisonAI:
                     exit_code = AgentSchedulerHandler.handle_schedule_command(args, unknown_args, daemon_mode=daemon_mode)
                 
                 sys.exit(exit_code)
+            
+            # Handle backends command
+            elif args.command == "backends":
+                from rich import print
+                subcommand = unknown_args[0] if unknown_args and not unknown_args[0].startswith('-') else None
+                
+                if subcommand == "list" or subcommand is None:
+                    # List registered CLI backends
+                    try:
+                        from praisonai.cli_backends import list_cli_backends
+                        backends = list_cli_backends()
+                        for backend in backends:
+                            print(backend)
+                        return ""
+                    except ImportError:
+                        print("[red]CLI backends not available[/red]")
+                        return None
+                else:
+                    print(f"[red]Unknown backends subcommand: {subcommand}[/red]")
+                    print("Available subcommands: list")
+                    return None
+            
             elif args.command.startswith("tests.test") or args.command.startswith("tests/test"):  # Argument used for testing purposes
                 print("test")
                 return "test"
@@ -875,7 +898,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'recipe', 'endpoints', 'audio', 'embed', 'embedding', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor', 'registry', 'package', 'install', 'uninstall', 'acp', 'debug', 'lsp', 'diag', 'browser', 'replay', 'bot', 'gateway', 'sandbox', 'wizard', 'migrate', 'security', 'persistence', 'paths', 'claw', 'github', 'managed', 'flow', 'dashboard']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'recipe', 'endpoints', 'audio', 'embed', 'embedding', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor', 'registry', 'package', 'install', 'uninstall', 'acp', 'debug', 'lsp', 'diag', 'browser', 'replay', 'bot', 'gateway', 'sandbox', 'wizard', 'migrate', 'security', 'persistence', 'paths', 'claw', 'github', 'managed', 'flow', 'dashboard', 'backends']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -1057,9 +1080,23 @@ class PraisonAI:
         # Sandbox Execution - secure command execution
         parser.add_argument("--sandbox", type=str, choices=["off", "basic", "strict"], help="Enable sandboxed command execution")
         
-        # External Agent - use external AI CLI tools
-        parser.add_argument("--external-agent", type=str, choices=["claude", "gemini", "codex", "cursor"],
+        # Backend group - mutually exclusive external agent and CLI backend options
+        backend_group = parser.add_mutually_exclusive_group()
+        backend_group.add_argument("--external-agent", type=str, choices=["claude", "gemini", "codex", "cursor"],
                           help="Use external AI CLI tool (claude, gemini, codex, cursor)")
+        
+        # CLI Backend - delegate agent turns to CLI backend
+        # Dynamically populate choices from registered backends
+        try:
+            from praisonai.cli_backends import list_cli_backends
+            cli_backend_choices = list_cli_backends() or None
+        except ImportError:
+            cli_backend_choices = None
+        
+        backend_group.add_argument("--cli-backend", type=str, choices=cli_backend_choices,
+                          help="Delegate agent turns to a CLI backend (see praisonai backends list)")
+        
+        # External agent direct mode (not mutually exclusive with backend choice)
         parser.add_argument("--external-agent-direct", action="store_true",
                           help="Use external agent as direct proxy (skip manager Agent delegation)")
         
@@ -4506,6 +4543,14 @@ Do NOT add any explanations or formatting."""
                             print(f"URL: {result['data'][0]['url']}")
                 
                 return result
+            
+            # CLI Backend - delegate agent turns to external CLI tools
+            if hasattr(self, 'args') and getattr(self.args, 'cli_backend', None):
+                try:
+                    from praisonai.cli_backends import resolve_cli_backend
+                    agent_config["cli_backend"] = resolve_cli_backend(self.args.cli_backend)
+                except Exception as e:
+                    self.logger.warning(f"Failed to resolve CLI backend '{self.args.cli_backend}': {e}")
             
             # Flow Display - Visual workflow tracking
             if hasattr(self, 'args') and getattr(self.args, 'flow_display', False):
