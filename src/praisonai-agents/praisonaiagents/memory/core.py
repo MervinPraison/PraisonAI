@@ -416,7 +416,7 @@ class MemoryCoreMixin:
 
     # Async variants to prevent event loop blocking
     async def store_short_term_async(self, content: str, metadata: Optional[Dict] = None, quality_score: Optional[float] = None, 
-                                   user_id: Optional[str] = None, auto_promote: bool = True) -> str:
+                                   user_id: Optional[str] = None, auto_promote: bool = True, **kwargs) -> str:
         """
         Async version of store_short_term to prevent event loop blocking.
         
@@ -463,7 +463,7 @@ class MemoryCoreMixin:
         # Only use SQLite fallback if primary storage failed completely
         if not memory_id and hasattr(self, '_sqlite_adapter') and self._sqlite_adapter != getattr(self, 'memory_adapter', None):
             try:
-                memory_id = await asyncio.to_thread(self._store_sqlite_stm, content, clean_metadata, quality_score)
+                memory_id = await asyncio.to_thread(self._sqlite_adapter.store_short_term, content, metadata=clean_metadata, **kwargs)
                 self._log_verbose(f"Stored in SQLite async STM as fallback: {content[:100]}...")
             except Exception as e:
                 logging.error(f"Failed to store in SQLite async STM fallback: {e}")

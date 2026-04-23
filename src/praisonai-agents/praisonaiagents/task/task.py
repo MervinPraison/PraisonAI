@@ -221,6 +221,7 @@ class Task:
         self.validation_feedback = None  # Store validation failure feedback for retry attempts
         self.agent_config = agent_config  # Per-task agent configuration {role, goal, backstory, llm}
         self.variables = variables if variables else {}  # Variables for substitution in description
+        self.non_fatal_errors = []  # Accumulate non-fatal errors for visibility
 
         # ============================================================
         # ROBUSTNESS PARAMS (graceful degradation & retry control)
@@ -601,6 +602,15 @@ class Task:
                         return None
             return self.memory
         return None
+    
+    def _verify_memory_ready(self) -> bool:
+        """Verify that memory is properly initialized and ready for operations."""
+        if not self.memory:
+            return False
+        
+        # Additional checks could be added here
+        # For example, verify database connectivity, etc.
+        return True
 
     def store_in_memory(self, content: str, agent_name: str = None, task_id: str = None):
         """Store content in memory with metadata"""
@@ -633,7 +643,7 @@ class Task:
             self.memory = await self.initialize_memory_async()
 
         logger.info(f"Memory object exists: {self.memory is not None}")
-        if self.memory:
+        if self.memory and self._verify_memory_ready():
             logger.info(f"Memory config: {self.memory.cfg}")
             # Store task output in memory
             try:
@@ -701,14 +711,6 @@ class Task:
                     metrics=metrics
                 )
 
-                # Store in both short and long-term memory with higher threshold
-                self.memory.finalize_task_output(
-                    content=task_output.raw,
-                    agent_name=self.agent.name if self.agent else "Agent",
-                    quality_score=quality_score,
-                    threshold=0.7  # Only high quality outputs in long-term memory
-                )
-
                 # Build context for next tasks
                 if self.next_tasks:
                     logger.info(f"Task {self.id}: Building context for next tasks...")
@@ -720,17 +722,30 @@ class Task:
 
                 logger.info(f"Task {self.id}: Memory operations complete")
             except Exception as e:
+                error_msg = f"memory operations: {e}"
+                self.non_fatal_errors.append(error_msg)
                 logger.error(f"Task {self.id}: Failed to process memory operations: {e}")
                 logger.exception(e)  # Print full stack trace
                 # Continue execution even if memory operations fail
+        else:
+            logger.warning(f"Task {self.id}: Memory not available, skipping memory operations")
+            self.non_fatal_errors.append("memory not available for operations")
 
         # Execute original callback with metadata support
         if self.callback:
             try:
                 await self._execute_callback_with_metadata(task_output)
             except Exception as e:
+                error_msg = f"callback: {e}"
+                self.non_fatal_errors.append(error_msg)
                 logger.error(f"Task {self.id}: Failed to execute callback: {e}")
                 logger.exception(e)
+                # Attach error to output for workflow orchestrator visibility
+                if hasattr(task_output, 'callback_error'):
+                    task_output.callback_error = str(e)
+                # TODO: Consider raising if callback is marked as critical
+                # if getattr(self, 'callback_critical', False):
+                #     raise
 
         task_prompt = f"""
 You need to do the following task: {self.description}.
