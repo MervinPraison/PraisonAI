@@ -1,17 +1,17 @@
 {
   "version": "1.5.87",
-  "lastUpdated": "2026-04-22",
+  "lastUpdated": "2026-04-23",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 329,
+    "pythonCoreFeatures": 334,
     "pythonWrapperFeatures": 99,
     "typescriptFeatures": 1192,
-    "gapCount": 37,
+    "gapCount": 42,
     "priorityP0": 1,
     "priorityP1": 0,
     "priorityP2": 0,
-    "priorityP3": 36
+    "priorityP3": 41
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -58,6 +58,11 @@
       "ChunkingStrategy",
       "Citation",
       "CitationsMode",
+      "CliBackendConfig",
+      "CliBackendDelta",
+      "CliBackendProtocol",
+      "CliBackendResult",
+      "CliSessionBinding",
       "CodeAgent",
       "CodeConfig",
       "CodeExecutionStep",
@@ -576,6 +581,11 @@
         "AsyncLearnProtocol",
         "AutonomyConfig",
         "BudgetExceededError",
+        "CliBackendConfig",
+        "CliBackendDelta",
+        "CliBackendProtocol",
+        "CliBackendResult",
+        "CliSessionBinding",
         "CustomToolUseEvent",
         "DoomLoopDetector",
         "ErrorContextProtocol",
@@ -4188,6 +4198,51 @@
         "effort": "high",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "CliBackendConfig",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "CliBackendDelta",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "CliBackendProtocol",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "medium",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "CliBackendResult",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "CliSessionBinding",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "ConditionProtocol",

@@ -1,14 +1,14 @@
 {
   "version": "1.5.87",
-  "lastUpdated": "2026-04-22",
+  "lastUpdated": "2026-04-23",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 329,
+    "pythonCoreFeatures": 334,
     "rustFeatures": 667,
-    "gapCount": 50,
-    "parityPercentage": 202.7
+    "gapCount": 55,
+    "parityPercentage": 199.7
   },
   "pythonCoreSDK": {
     "exports": [
@@ -54,6 +54,11 @@
       "ChunkingStrategy",
       "Citation",
       "CitationsMode",
+      "CliBackendConfig",
+      "CliBackendDelta",
+      "CliBackendProtocol",
+      "CliBackendResult",
+      "CliSessionBinding",
       "CodeAgent",
       "CodeConfig",
       "CodeExecutionStep",
@@ -1099,7 +1104,6 @@
         "WebSearchProvider"
       ],
       "config_loader": [
-        "AutoRagConfig",
         "SessionConfig"
       ],
       "context": [
@@ -1734,6 +1738,9 @@
       "sandbox": [],
       "session": [],
       "skills": [],
+      "specialized": [
+        "AutoRagConfig"
+      ],
       "specialized_agents": [],
       "streaming": [],
       "task": [],
@@ -3101,6 +3108,51 @@
         "effort": "high",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "CliBackendConfig",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "CliBackendDelta",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "CliBackendProtocol",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "medium",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "CliBackendResult",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "CliSessionBinding",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "ConditionProtocol",
