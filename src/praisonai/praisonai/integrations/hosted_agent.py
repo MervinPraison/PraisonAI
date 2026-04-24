@@ -28,7 +28,6 @@ Architecture:
     - Tools are co-located with the provider infrastructure
 """
 
-import os
 from typing import Optional, Any
 from .managed_agents import AnthropicManagedAgent, ManagedConfig
 
@@ -64,11 +63,30 @@ class HostedAgent(AnthropicManagedAgent):
         **kwargs,
     ):
         if provider != "anthropic":
+            # Provide differentiated guidance based on provider type
+            _llm_hints = {"openai", "gemini", "ollama", "local"}
+            _compute_hints = {"e2b", "modal", "flyio", "daytona", "docker"}
+            
+            if provider in _llm_hints:
+                hint = (
+                    f"For local agent loops with this LLM, use: "
+                    f"LocalAgent(config=LocalAgentConfig(model='...')) "
+                    f"(e.g. 'gpt-4o-mini', 'gemini/gemini-2.0-flash', 'ollama/llama3')."
+                )
+            elif provider in _compute_hints:
+                hint = (
+                    f"For local execution with cloud compute, use: "
+                    f"LocalAgent(compute='{provider}', config=LocalAgentConfig(...))"
+                )
+            else:
+                hint = (
+                    "Use LocalAgent(config=LocalAgentConfig(model='...')) for local loops, "
+                    "or LocalAgent(compute='e2b'|'modal'|'docker'|...) for cloud-sandboxed tools."
+                )
+            
             raise ValueError(
                 f"Managed runtime for provider '{provider}' is not yet available. "
-                f"Currently supported: 'anthropic'. "
-                f"For local execution with cloud compute, use: "
-                f"LocalAgent(compute='{provider}', config=LocalAgentConfig(...))"
+                f"Currently supported: 'anthropic'. {hint}"
             )
         
         # Pass through to the existing Anthropic implementation

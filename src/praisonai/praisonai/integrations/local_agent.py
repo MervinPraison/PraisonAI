@@ -67,6 +67,7 @@ class LocalAgent(LocalManagedAgent):
         **kwargs,
     ):
         # Reject the provider= overload pattern to force clean usage
+        provider_for_routing = "local"  # Default provider for model routing
         if 'provider' in kwargs:
             provider_value = kwargs.pop('provider')
             warnings.warn(
@@ -77,6 +78,9 @@ class LocalAgent(LocalManagedAgent):
                 DeprecationWarning,
                 stacklevel=2
             )
+            # Preserve the provider value for LLM routing to maintain backward compatibility
+            # This ensures _resolve_model() can still apply proper prefixes (ollama/, gemini/, etc.)
+            provider_for_routing = provider_value
         
-        # Pass compute= as the compute parameter to the underlying implementation
-        super().__init__(compute=compute, config=config, **kwargs)
+        # Pass compute= as the compute parameter and provider for LLM routing
+        super().__init__(compute=compute, config=config, provider=provider_for_routing, **kwargs)

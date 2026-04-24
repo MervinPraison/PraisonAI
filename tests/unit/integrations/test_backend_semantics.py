@@ -68,10 +68,14 @@ def test_local_agent_rejects_provider_overload():
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
         LocalAgent(provider="openai", config=LocalAgentConfig(model="gpt-4o-mini"))
-        assert len(w) == 1
-        assert issubclass(w[0].category, DeprecationWarning)
-        assert "provider=" in str(w[0].message)
-        assert "config.model=" in str(w[0].message)
+        # Filter to only DeprecationWarning containing provider= to avoid false positives
+        dep_warnings = [
+            rec for rec in w
+            if issubclass(rec.category, DeprecationWarning)
+            and "provider=" in str(rec.message)
+            and "config.model=" in str(rec.message)
+        ]
+        assert len(dep_warnings) == 1, f"Expected 1 provider= deprecation warning, got {len(dep_warnings)} from {len(w)} total warnings"
 
 
 def test_managed_agent_deprecation_warnings():
@@ -171,10 +175,10 @@ def test_config_aliases():
     from praisonai.integrations.managed_local import LocalManagedConfig
     
     # HostedAgentConfig should alias ManagedConfig
-    assert HostedAgentConfig == ManagedConfig
+    assert HostedAgentConfig is ManagedConfig
     
     # LocalAgentConfig should alias LocalManagedConfig  
-    assert LocalAgentConfig == LocalManagedConfig
+    assert LocalAgentConfig is LocalManagedConfig
 
 
 def test_unknown_provider_error():

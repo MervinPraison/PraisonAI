@@ -1097,7 +1097,9 @@ def ManagedAgent(
     Raises:
         ValueError: For compute-provider names that should use LocalAgent(compute=).
     """
-    if provider is None:
+    # Track if provider was auto-detected to avoid spurious deprecation warnings
+    auto_detected = provider is None
+    if auto_detected:
         # Auto-detect
         if os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"):
             provider = "anthropic"
@@ -1108,23 +1110,27 @@ def ManagedAgent(
     if provider == "anthropic":
         return AnthropicManagedAgent(provider=provider, **kwargs)
     
-    # Compute provider names should use LocalAgent(compute=)
+    # Compute provider names - maintain backward compatibility by passing to LocalManagedAgent
     elif provider in {"e2b", "modal", "flyio", "daytona", "docker"}:
-        raise ValueError(
-            f"Cloud compute provider '{provider}' belongs on LocalAgent(compute='{provider}', ...). "
-            f"Hosted runtimes for these providers are not yet available. "
-            f"Use: LocalAgent(compute='{provider}', config=LocalAgentConfig(model='gpt-4o-mini'))"
-        )
-    
-    # LLM routing hints (deprecated usage)
-    elif provider in {"openai", "gemini", "ollama", "local"}:
         warnings.warn(
-            f"ManagedAgent(provider='{provider}') is deprecated. "
-            f"Use LocalAgent directly with model= instead: "
-            f"LocalAgent(config=LocalAgentConfig(model='gpt-4o-mini'))",
+            f"ManagedAgent(provider='{provider}') for compute providers is deprecated. "
+            f"Use LocalAgent(compute='{provider}', config=LocalAgentConfig(...)) instead.",
             DeprecationWarning,
             stacklevel=2
         )
+        from .managed_local import LocalManagedAgent
+        return LocalManagedAgent(provider="local", compute=provider, **kwargs)
+    
+    # LLM routing hints (deprecated usage) - only warn if explicitly passed by user
+    elif provider in {"openai", "gemini", "ollama", "local"}:
+        if not auto_detected:
+            warnings.warn(
+                f"ManagedAgent(provider='{provider}') is deprecated. "
+                f"Use LocalAgent directly with model= instead: "
+                f"LocalAgent(config=LocalAgentConfig(model='gpt-4o-mini'))",
+                DeprecationWarning,
+                stacklevel=2
+            )
         from .managed_local import LocalManagedAgent
         return LocalManagedAgent(provider=provider, **kwargs)
     
