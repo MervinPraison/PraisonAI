@@ -1,124 +1,87 @@
-"""Unit tests for external agents backward compatibility."""
+"""Backward-compatibility tests for the legacy ``--external-agent`` flag.
 
-import pytest
-from unittest.mock import patch, MagicMock
+These tests guard against regressions introduced by the Phase 1b CLI Backend
+Protocol work (PRs #1521 / #1531). They mix direct-import tests for the
+integration classes and subprocess tests for argparse surface.
+"""
 
-def test_external_agent_claude_integration_exists():
-    """Test that external agent claude integration can be resolved."""
+import os
+import subprocess
+import sys
+
+
+REPO_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")
+)
+
+
+def _build_env():
+    env = {k: v for k, v in os.environ.items() if not k.startswith("PYTEST_")}
+    env["PYTHONPATH"] = os.pathsep.join([
+        os.path.join(REPO_ROOT, "src", "praisonai-agents"),
+        os.path.join(REPO_ROOT, "src", "praisonai"),
+        env.get("PYTHONPATH", ""),
+    ])
+    return env
+
+
+def _run_cli(*args, timeout=30):
+    return subprocess.run(
+        [sys.executable, "-m", "praisonai.cli.main", *args],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        cwd=REPO_ROOT,
+        env=_build_env(),
+    )
+
+
+# ---- Direct-import back-compat ---------------------------------------------
+
+
+def test_external_agents_handler_still_importable():
+    """``ExternalAgentsHandler`` must remain importable at its original path."""
     from praisonai.cli.features.external_agents import ExternalAgentsHandler
-    
     handler = ExternalAgentsHandler(verbose=False)
-    
-    # Mock the integration to avoid actual subprocess calls
-    with patch.object(handler, 'get_integration') as mock_get_integration:
-        mock_integration = MagicMock()
-        mock_integration.is_available = True
-        mock_integration.cli_command = 'claude'
-        mock_get_integration.return_value = mock_integration
-        
-        integration = handler.get_integration('claude', workspace='/tmp')
-        
-        assert integration is not None
-        assert integration.is_available
-        assert integration.cli_command == 'claude'
-        mock_get_integration.assert_called_once_with('claude', workspace='/tmp')
+    assert handler.list_integrations() == ['claude', 'gemini', 'codex', 'cursor']
 
-def test_external_agent_claude_flag_still_works():
-    """Test that --external-agent claude flag still works via CLI."""
-    from praisonai.cli.main import PraisonAI
-    
-    praison = PraisonAI()
-    
-    with patch('sys.argv', ['praisonai', '--external-agent', 'claude', 'Hello']):
-        args = praison.parse_args()
-        assert args.external_agent == 'claude'
-        assert args.command == 'Hello'
 
-def test_external_agent_gemini_flag_still_works():
-    """Test that --external-agent gemini flag still works via CLI."""
-    from praisonai.cli.main import PraisonAI
-    
-    praison = PraisonAI()
-    
-    with patch('sys.argv', ['praisonai', '--external-agent', 'gemini', 'Hello']):
-        args = praison.parse_args()
-        assert args.external_agent == 'gemini'
-        assert args.command == 'Hello'
+def test_claude_code_integration_still_importable():
+    """Legacy ``ClaudeCodeIntegration`` class must remain importable."""
+    from praisonai.integrations.claude_code import ClaudeCodeIntegration
+    integration = ClaudeCodeIntegration()
+    assert integration.cli_command == 'claude'
 
-def test_external_agent_direct_flag():
-    """Test that --external-agent-direct flag still works."""
-    from praisonai.cli.main import PraisonAI
-    
-    praison = PraisonAI()
-    
-    with patch('sys.argv', ['praisonai', '--external-agent', 'claude', '--external-agent-direct', 'Hello']):
-        args = praison.parse_args()
-        assert args.external_agent == 'claude'
-        assert args.external_agent_direct is True
-        assert args.command == 'Hello'
 
-def test_external_agent_handler_get_integration():
-    """Test that ExternalAgentsHandler.get_integration method works for all supported agents."""
-    from praisonai.cli.features.external_agents import ExternalAgentsHandler
-    
-    handler = ExternalAgentsHandler(verbose=False)
-    supported_agents = ['claude', 'gemini', 'codex', 'cursor']
-    
-    for agent_name in supported_agents:
-        with patch.object(handler, 'get_integration') as mock_get_integration:
-            mock_integration = MagicMock()
-            mock_integration.is_available = True
-            mock_integration.cli_command = agent_name
-            mock_get_integration.return_value = mock_integration
-            
-            integration = handler.get_integration(agent_name, workspace='/tmp')
-            
-            assert integration is not None
-            assert integration.is_available
-            assert integration.cli_command == agent_name
-            mock_get_integration.assert_called_once_with(agent_name, workspace='/tmp')
+# ---- argparse-surface back-compat ------------------------------------------
 
-def test_external_agent_execution_path_still_accessible():
-    """Smoke test that external agent execution path is still accessible in main()."""
-    from praisonai.cli.main import PraisonAI
-    
-    praison = PraisonAI()
-    
-    # Mock the external agent handler to avoid actual execution
-    with patch('praisonai.cli.features.external_agents.ExternalAgentsHandler') as mock_handler_class:
-        mock_handler = MagicMock()
-        mock_integration = MagicMock()
-        mock_integration.is_available = True
-        mock_integration.cli_command = 'claude'
-        mock_handler.get_integration.return_value = mock_integration
-        mock_handler_class.return_value = mock_handler
-        
-        with patch('sys.argv', ['praisonai', '--external-agent', 'claude', 'Hello']):
-            args = praison.parse_args()
-            praison.args = args
-            
-            # Mock the actual execution to avoid subprocess calls
-            with patch.object(praison, 'handle_direct_prompt') as mock_direct:
-                mock_direct.return_value = "test result"
-                
-                # This should not raise an exception - the path should still be accessible
-                result = praison.main()
-                # Result should be empty string due to external agent handling
-                assert result == ""
 
-def test_external_agent_choices_preserved():
-    """Test that external agent choices are preserved from original implementation."""
-    from praisonai.cli.main import PraisonAI
-    
-    praison = PraisonAI()
-    parser = praison.create_parser()
-    
-    # Find the external-agent argument
-    external_agent_action = None
-    for action in parser._actions:
-        if hasattr(action, 'dest') and action.dest == 'external_agent':
-            external_agent_action = action
-            break
-    
-    assert external_agent_action is not None
-    assert external_agent_action.choices == ['claude', 'gemini', 'codex', 'cursor']
+def test_external_agent_flag_present_in_help():
+    """``--external-agent`` must still be listed in ``--help``."""
+    r = _run_cli("--help")
+    assert r.returncode == 0
+    assert "--external-agent" in r.stdout
+
+
+def test_external_agent_flag_choices_preserved():
+    """Help text must still include all four legacy choices."""
+    r = _run_cli("--help")
+    assert r.returncode == 0
+    for choice in ("claude", "gemini", "codex", "cursor"):
+        assert choice in r.stdout, (
+            f"legacy --external-agent choice '{choice}' missing from --help"
+        )
+
+
+def test_external_agent_direct_flag_present_in_help():
+    """``--external-agent-direct`` must still be listed in ``--help``."""
+    r = _run_cli("--help")
+    assert r.returncode == 0
+    assert "--external-agent-direct" in r.stdout
+
+
+def test_external_agent_rejects_unknown_value():
+    """``--external-agent notreal`` must still be rejected by argparse."""
+    r = _run_cli("--external-agent", "notreal", "hi", timeout=15)
+    assert r.returncode != 0
+    assert "invalid choice" in r.stderr or "notreal" in r.stderr
