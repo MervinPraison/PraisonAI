@@ -77,7 +77,7 @@ def _run_typer(argv):
     # Set up safer encoding for Windows legacy terminals
     if sys.platform == "win32" and hasattr(sys.stdout, 'encoding'):
         encoding = getattr(sys.stdout, 'encoding', '').lower()
-        if encoding in ('cp1252', 'cp1251', 'cp850', 'ascii') or 'cp' in encoding:
+        if encoding in ('cp1252', 'cp1251', 'cp850', 'ascii') or ('cp' in encoding and encoding != 'cp65001'):
             # Force UTF-8 mode for subprocess safety
             if 'PYTHONIOENCODING' not in os.environ:
                 os.environ['PYTHONIOENCODING'] = 'utf-8'
@@ -93,7 +93,7 @@ def _run_typer(argv):
         # Handle Unicode encoding errors gracefully
         print("Error: Unable to display help due to terminal encoding limitations.", file=sys.stderr)
         print("Try setting: $env:PYTHONIOENCODING='utf-8' (PowerShell) or set PYTHONIOENCODING=utf-8 (cmd)", file=sys.stderr)
-        sys.exit(1)
+        sys.exit(0)
     except SystemExit as e:
         sys.exit(e.code if isinstance(e.code, int) else 0)
     finally:

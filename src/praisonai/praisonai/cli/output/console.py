@@ -47,10 +47,10 @@ def _get_console():
         if sys.platform == "win32" and hasattr(sys.stdout, 'encoding'):
             encoding = getattr(sys.stdout, 'encoding', '').lower()
             # Check for Windows legacy code pages that can't handle Unicode
-            if encoding in ('cp1252', 'cp1251', 'cp850', 'ascii') or 'cp' in encoding:
+            if encoding in ('cp1252', 'cp1251', 'cp850', 'ascii') or ('cp' in encoding and encoding != 'cp65001'):
                 # Force UTF-8 mode or create console with safe encoding handling
                 try:
-                    # Try to set PYTHONIOENCODING to utf-8 for subprocess safety
+                    # Set PYTHONIOENCODING to utf-8 for subprocess safety (won't affect current process)
                     if 'PYTHONIOENCODING' not in os.environ:
                         os.environ['PYTHONIOENCODING'] = 'utf-8'
                     
@@ -166,6 +166,19 @@ class OutputController:
         """Check if in screen reader mode."""
         return self.mode == OutputMode.SCREEN_READER
     
+    def _safe_console_print(self, *args, **kwargs) -> None:
+        """Safely print to console with UnicodeEncodeError protection."""
+        if self.console:
+            try:
+                self.console.print(*args, **kwargs)
+            except UnicodeEncodeError:
+                # Fallback to plain text if Rich can't handle the encoding
+                message = str(args[0]) if args else ""
+                print(message.encode('ascii', 'replace').decode('ascii'))
+        else:
+            message = str(args[0]) if args else ""
+            print(message)
+    
     def print(self, message: str, style: Optional[str] = None, **kwargs) -> None:
         """Print a message respecting the current mode."""
         if self.is_quiet:
@@ -180,14 +193,7 @@ class OutputController:
             print(message)
         else:
             # Rich formatted output with encoding safety
-            if self.console:
-                try:
-                    self.console.print(message, style=style, **kwargs)
-                except UnicodeEncodeError:
-                    # Fallback to plain text if Rich can't handle the encoding
-                    print(message.encode('ascii', 'replace').decode('ascii'))
-            else:
-                print(message)
+            self._safe_console_print(message, style=style, **kwargs)
     
     def print_error(self, message: str, code: Optional[str] = None, remediation: Optional[str] = None) -> None:
         """Print an error message with optional remediation."""
@@ -220,10 +226,16 @@ class OutputController:
             if remediation:
                 content.append(f"\n💡 Fix: {remediation}", style="yellow")
             
-            if self.console:
-                self.console.print(Panel(content, title="Error", border_style="red"))
-            else:
+            try:
+                if self.console:
+                    self.console.print(Panel(content, title="Error", border_style="red"))
+                else:
+                    print(f"ERROR: {message}", file=sys.stderr)
+            except UnicodeEncodeError:
+                # Fallback to plain text if emoji rendering fails
                 print(f"ERROR: {message}", file=sys.stderr)
+                if remediation:
+                    print(f"FIX: {remediation}", file=sys.stderr)
     
     def print_success(self, message: str, data: Optional[Dict[str, Any]] = None) -> None:
         """Print a success message."""
@@ -247,7 +259,10 @@ class OutputController:
         if self.is_screen_reader or self.no_color or not _get_rich_available():
             print(f"SUCCESS: {message}")
         else:
-            self.print(f"✅ {message}", style="bold green")
+            try:
+                self.print(f"✅ {message}", style="bold green")
+            except UnicodeEncodeError:
+                print(f"SUCCESS: {message}")
     
     def print_warning(self, message: str) -> None:
         """Print a warning message."""
@@ -257,7 +272,10 @@ class OutputController:
         if self.is_screen_reader or self.no_color or not _get_rich_available():
             print(f"WARNING: {message}")
         else:
-            self.print(f"⚠️  {message}", style="bold yellow")
+            try:
+                self.print(f"⚠️  {message}", style="bold yellow")
+            except UnicodeEncodeError:
+                print(f"WARNING: {message}")
     
     def print_info(self, message: str) -> None:
         """Print an info message."""
@@ -267,7 +285,10 @@ class OutputController:
         if self.is_screen_reader or self.no_color or not _get_rich_available():
             print(f"INFO: {message}")
         else:
-            self.print(f"ℹ️  {message}", style="bold blue")
+            try:
+                self.print(f"ℹ️  {message}", style="bold blue")
+            except UnicodeEncodeError:
+                print(f"INFO: {message}")
     
     def print_debug(self, message: str) -> None:
         """Print a debug message (only in verbose mode)."""
@@ -277,7 +298,10 @@ class OutputController:
         if self.is_screen_reader or self.no_color or not _get_rich_available():
             print(f"DEBUG: {message}")
         else:
-            self.print(f"🔍 {message}", style="dim")
+            try:
+                self.print(f"🔍 {message}", style="dim")
+            except UnicodeEncodeError:
+                print(f"DEBUG: {message}")
     
     def emit_event(self, event_type: str, message: Optional[str] = None, data: Optional[Dict[str, Any]] = None, agent_id: Optional[str] = None) -> None:
         """Emit a stream event (for stream-json mode)."""
@@ -354,7 +378,28 @@ class OutputController:
                 table.add_row(*[str(cell) for cell in row])
             
             if self.console:
-                self.console.print(table)
+                try:
+                    self.console.print(table)
+                except UnicodeEncodeError:
+                    # Fallback to plain text table if Rich fails
+                    if title:
+                        print(f"\n{title}")
+                        print("-" * len(title))
+                    
+                    # Calculate column widths
+                    widths = [len(h) for h in headers]
+                    for row in rows:
+                        for i, cell in enumerate(row):
+                            widths[i] = max(widths[i], len(str(cell)))
+                    
+                    # Print header
+                    header_line = " | ".join(h.ljust(widths[i]) for i, h in enumerate(headers))
+                    print(header_line)
+                    print("-" * len(header_line))
+                    
+                    # Print rows
+                    for row in rows:
+                        print(" | ".join(str(cell).ljust(widths[i]) for i, cell in enumerate(row)))
     
     def print_panel(self, content: str, title: Optional[str] = None, style: str = "cyan") -> None:
         """Print a panel."""
@@ -371,7 +416,15 @@ class OutputController:
             from rich.panel import Panel
             
             if self.console:
-                self.console.print(Panel(content, title=title, border_style=style))
+                try:
+                    self.console.print(Panel(content, title=title, border_style=style))
+                except UnicodeEncodeError:
+                    # Fallback to plain text if panel rendering fails
+                    if title:
+                        print(f"\n=== {title} ===")
+                    print(content)
+                    if title:
+                        print("=" * (len(title) + 8))
     
     def get_events(self) -> List[Dict[str, Any]]:
         """Get all collected events."""
