@@ -140,6 +140,51 @@ def sanitize_agent_name_for_autogen_v4(name):
     
     return sanitized
 
+def _resolve_yaml_cli_backend(cli_backend_config, logger):
+    """Resolve a YAML ``cli_backend`` field to a CliBackendProtocol instance.
+
+    Accepts ``None`` (no backend), a string id (e.g. ``"claude-code"``), or a
+    dict of shape ``{"id": "claude-code", "overrides": {...}}``. Returns
+    ``None`` on any error after logging a warning, so YAML parsing never raises.
+
+    Kept at module scope so it is unit-testable without constructing a full
+    ``AgentsGenerator`` instance.
+    """
+    if not cli_backend_config:
+        return None
+
+    # Pre-seed label from config before import so we can show it in error logs
+    if isinstance(cli_backend_config, str):
+        label = cli_backend_config
+    elif isinstance(cli_backend_config, dict):
+        label = cli_backend_config.get('id') or "<missing>"
+    else:
+        label = type(cli_backend_config).__name__
+
+    try:
+        from praisonai.cli_backends import resolve_cli_backend
+        if isinstance(cli_backend_config, str):
+            return resolve_cli_backend(cli_backend_config)
+        if isinstance(cli_backend_config, dict):
+            backend_id = cli_backend_config.get('id')
+            if not backend_id:
+                raise ValueError("cli_backend dict must contain an 'id' field")
+            overrides = cli_backend_config.get('overrides') or {}
+            return resolve_cli_backend(backend_id, overrides=overrides)
+        raise ValueError(
+            f"cli_backend must be string or dict, got: {type(cli_backend_config).__name__}"
+        )
+    except ImportError:
+        logger.warning(
+            "CLI backend '%s' requested but not available", label
+        )
+    except Exception as e:
+        logger.warning(
+            "Failed to resolve CLI backend '%s': %s", label, e
+        )
+    return None
+
+
 class AgentsGenerator:
     def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None, tools=None, cli_config=None):
         """
@@ -1248,31 +1293,9 @@ class AgentsGenerator:
             agent_skills = details.get('skills')
 
             # H17: CLI Backend support - delegates full turns to external CLI tools
-            cli_backend_config = details.get('cli_backend')
-            cli_backend_resolved = None
-            cli_backend_label = None
-            if cli_backend_config:
-                try:
-                    from praisonai.cli_backends import resolve_cli_backend
-                    if isinstance(cli_backend_config, str):
-                        # Simple string ID: "claude-code"
-                        cli_backend_label = cli_backend_config
-                        cli_backend_resolved = resolve_cli_backend(cli_backend_config)
-                    elif isinstance(cli_backend_config, dict):
-                        # Dict format: {id: "claude-code", overrides: {timeout_ms: 60000}}
-                        backend_id = cli_backend_config.get('id')
-                        cli_backend_label = backend_id or "<missing>"
-                        overrides = cli_backend_config.get('overrides', {})
-                        if not backend_id:
-                            raise ValueError("cli_backend dict must contain an 'id' field")
-                        cli_backend_resolved = resolve_cli_backend(backend_id, overrides=overrides)
-                    else:
-                        cli_backend_label = type(cli_backend_config).__name__
-                        raise ValueError(f"cli_backend must be string or dict, got: {type(cli_backend_config).__name__}")
-                except ImportError:
-                    self.logger.warning("CLI backend '%s' requested but not available", cli_backend_label or "<unknown>")
-                except Exception as e:
-                    self.logger.warning("Failed to resolve CLI backend '%s': %s", cli_backend_label or "<unknown>", e)
+            cli_backend_resolved = _resolve_yaml_cli_backend(
+                details.get('cli_backend'), self.logger
+            )
 
             agent = PraisonAgent(
                 name=role_filled,
