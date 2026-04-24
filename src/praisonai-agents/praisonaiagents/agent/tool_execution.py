@@ -604,10 +604,15 @@ class ToolExecutionMixin:
         Returns:
             Tool execution result or circuit breaker error
         """
+        # Import circuit breaker components first (lazy import for performance)
         try:
-            # Import circuit breaker components (lazy import for performance)
-            from ..tools.circuit_breaker import get_circuit_breaker, CircuitBreakerConfig
-            from ..tools.circuit_breaker import CircuitBreakerException
+            from ..tools.circuit_breaker import get_circuit_breaker, CircuitBreakerConfig, CircuitBreakerException
+        except ImportError:
+            # Circuit breaker not available - fallback to direct execution
+            logging.debug("Circuit breaker not available, falling back to direct tool execution")
+            return self._execute_tool_impl(function_name, arguments)
+
+        try:
             
             # Get or create circuit breaker for this tool
             breaker_name = f"tool_{function_name}"
@@ -619,25 +624,42 @@ class ToolExecutionMixin:
             )
             breaker = get_circuit_breaker(breaker_name, config)
             
-            # Execute tool through circuit breaker
-            result = breaker.call(self._execute_tool_impl, function_name, arguments)
-            return result
+            # Execute tool through circuit breaker with failure detection wrapper
+            def _tool_wrapper():
+                result = self._execute_tool_impl(function_name, arguments)
+                # Convert error dicts to exceptions so circuit breaker can detect failures
+                # Don't treat approval/permission denials as circuit breaker failures
+                if isinstance(result, dict) and result.get("error") and \
+                   not result.get("approval_denied") and \
+                   not result.get("permission_denied") and \
+                   not result.get("approval_error"):
+                    # Create a sentinel exception to register failure with circuit breaker
+                    class _ToolFailure(Exception):
+                        def __init__(self, error_dict):
+                            self.error_dict = error_dict
+                            super().__init__(error_dict.get("error", "Tool execution failed"))
+                    raise _ToolFailure(result)
+                return result
+            
+            try:
+                return breaker.call(_tool_wrapper)
+            except Exception as e:
+                # Check if this is our sentinel exception
+                if hasattr(e, 'error_dict'):
+                    return e.error_dict  # Return the original error dict
+                else:
+                    raise  # Re-raise other exceptions
             
         except CircuitBreakerException as e:
             # Circuit breaker is open - return error dict instead of raising
             logging.warning(f"Tool '{function_name}' circuit breaker open: {e}")
             return {
                 "error": f"Tool '{function_name}' circuit breaker open - too many recent failures",
-                "circuit_open": True
+                "circuit_open": True,
+                "agent_name": getattr(self, "name", None),
+                "session_id": getattr(self, "_session_id", None),
+                "remediation": "Wait for recovery_timeout (60s) or investigate recent tool failures.",
             }
-        except ImportError:
-            # Circuit breaker not available - fallback to direct execution
-            logging.debug("Circuit breaker not available, falling back to direct tool execution")
-            return self._execute_tool_impl(function_name, arguments)
-        except Exception as e:
-            # Other unexpected errors - fallback to direct execution
-            logging.debug(f"Circuit breaker error, falling back to direct execution: {e}")
-            return self._execute_tool_impl(function_name, arguments)
 
     def _execute_tool_impl(self, function_name, arguments):
         """Internal tool execution implementation."""
