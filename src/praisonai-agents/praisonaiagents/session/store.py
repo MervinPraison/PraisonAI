@@ -5,7 +5,6 @@ JSON-based session persistence with file locking and atomic writes.
 Zero dependencies beyond stdlib.
 """
 
-import fcntl
 import json
 import logging
 from praisonaiagents._logging import get_logger
@@ -14,6 +13,13 @@ import sys
 import tempfile
 import threading
 import time
+
+# fcntl is Unix-only; on Windows, use msvcrt for file locking
+if sys.platform != 'win32':
+    import fcntl
+    _HAS_FCNTL = True
+else:
+    _HAS_FCNTL = False
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -150,7 +156,8 @@ class FileLock:
                     msvcrt.locking(self._lock_file.fileno(), msvcrt.LK_NBLCK, 1)
                 else:
                     # Unix locking
-                    fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    if _HAS_FCNTL:
+                        fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 return True
             except (IOError, OSError, BlockingIOError):
                 if self._lock_file:
@@ -171,7 +178,8 @@ class FileLock:
                     import msvcrt
                     msvcrt.locking(self._lock_file.fileno(), msvcrt.LK_UNLCK, 1)
                 else:
-                    fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
+                    if _HAS_FCNTL:
+                        fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
             except (IOError, OSError):
                 pass
             finally:
