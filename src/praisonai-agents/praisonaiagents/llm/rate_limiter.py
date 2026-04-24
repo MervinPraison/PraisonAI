@@ -69,12 +69,14 @@ class RateLimiter:
     _last_update: float = field(default=None, init=False, repr=False)
     _lock: asyncio.Lock = field(default=None, init=False, repr=False)
     _lock_init: "threading.Lock" = field(default=None, init=False, repr=False)
+    _sync_lock: "threading.Lock" = field(default=None, init=False, repr=False)
 
     # Internal state for token-based limiting
     _api_tokens: float = field(default=None, init=False, repr=False)
     _api_tokens_last_update: float = field(default=None, init=False, repr=False)
     _api_tokens_lock: asyncio.Lock = field(default=None, init=False, repr=False)
     _api_tokens_lock_init: "threading.Lock" = field(default=None, init=False, repr=False)
+    _sync_api_tokens_lock: "threading.Lock" = field(default=None, init=False, repr=False)
 
     # Injectable functions for testing
     _get_time: Callable[[], float] = field(default=None, init=False, repr=False)
@@ -93,6 +95,7 @@ class RateLimiter:
         self._lock = None
         if self._lock_init is None:
             self._lock_init = threading.Lock()  # Threading lock for async lock initialization
+        self._sync_lock = threading.Lock()
 
         # Token-based limiting
         if self.tokens_per_minute is not None:
@@ -105,6 +108,7 @@ class RateLimiter:
         self._api_tokens_lock = None
         if self._api_tokens_lock_init is None:
             self._api_tokens_lock_init = threading.Lock()  # Threading lock for async lock initialization
+        self._sync_api_tokens_lock = threading.Lock()
 
         # Default implementations (can be overridden for testing)
         if self._get_time is None:
@@ -184,15 +188,18 @@ class RateLimiter:
         if self.requests_per_minute is None:
             return
 
-        self._refill()
-
-        wait = self._wait_time()
+        with self._sync_lock:
+            self._refill()
+            wait = self._wait_time()
         if wait > 0:
             logger.debug(f"Rate limit: waiting {wait:.2f}s before next request")
             self._sleep(wait)
-            self._refill()
-
-        self._tokens -= 1.0
+            with self._sync_lock:
+                self._refill()
+                self._tokens -= 1.0
+        else:
+            with self._sync_lock:
+                self._tokens -= 1.0
 
     def acquire_tokens(self, num_tokens: int) -> None:
         """Acquire API tokens, blocking if necessary.
@@ -208,17 +215,20 @@ class RateLimiter:
         if self.tokens_per_minute is None:
             return
 
-        self._refill_api_tokens()
-
-        wait = self._wait_time_for_tokens(num_tokens)
+        with self._sync_api_tokens_lock:
+            self._refill_api_tokens()
+            wait = self._wait_time_for_tokens(num_tokens)
         if wait > 0:
             # Do NOT cap internal wait time - this ensures correct rate limiting
             # The wait time is calculated based on token refill rate and must be honored
             logger.debug(f"Token limit: waiting {wait:.2f}s for {num_tokens} tokens")
             self._sleep(wait)
-            self._refill_api_tokens()
-
-        self._api_tokens -= num_tokens
+            with self._sync_api_tokens_lock:
+                self._refill_api_tokens()
+                self._api_tokens -= num_tokens
+        else:
+            with self._sync_api_tokens_lock:
+                self._api_tokens -= num_tokens
 
     async def acquire_async(self) -> None:
         """Acquire a request token asynchronously, waiting if necessary.
@@ -274,23 +284,24 @@ class RateLimiter:
         if self.requests_per_minute is None:
             return True
 
-        self._refill()
-
-        if self._tokens >= 1.0:
-            self._tokens -= 1.0
-            return True
+        with self._sync_lock:
+            self._refill()
+            if self._tokens >= 1.0:
+                self._tokens -= 1.0
+                return True
         return False
 
     def reset(self) -> None:
         """Reset the rate limiter to initial state."""
-        if self.requests_per_minute is not None:
-            self._tokens = float(self.burst)
-        self._last_update = self._get_time()
-
-        if self.tokens_per_minute is not None:
-            token_burst = max(self.burst, self.tokens_per_minute // 60)
-            self._api_tokens = float(token_burst)
-        self._api_tokens_last_update = self._get_time()
+        with self._sync_lock:
+            if self.requests_per_minute is not None:
+                self._tokens = float(self.burst)
+            self._last_update = self._get_time()
+        with self._sync_api_tokens_lock:
+            if self.tokens_per_minute is not None:
+                token_burst = max(self.burst, self.tokens_per_minute // 60)
+                self._api_tokens = float(token_burst)
+            self._api_tokens_last_update = self._get_time()
 
     def wait_for_retry(self, retry_delay: float) -> None:
         """Wait for a specified retry delay (for handling 429 errors).
@@ -315,14 +326,16 @@ class RateLimiter:
     @property
     def available_tokens(self) -> float:
         """Get current available request tokens (for monitoring)."""
-        self._refill()
-        return self._tokens
+        with self._sync_lock:
+            self._refill()
+            return self._tokens
 
     @property
     def available_api_tokens(self) -> float:
         """Get current available API tokens (for monitoring)."""
-        self._refill_api_tokens()
-        return self._api_tokens
+        with self._sync_api_tokens_lock:
+            self._refill_api_tokens()
+            return self._api_tokens
 
     def __repr__(self) -> str:
         parts = []
