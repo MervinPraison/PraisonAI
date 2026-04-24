@@ -17,10 +17,8 @@ import re
 import keyword
 
 # Import new architecture components
-from .framework_adapters import (
-    FrameworkAdapter, CrewAIAdapter, AutoGenAdapter, 
-    AutoGenV4Adapter, AG2Adapter, PraisonAIAdapter
-)
+from .framework_adapters.base import FrameworkAdapter
+from .framework_adapters.registry import FrameworkAdapterRegistry
 from .tool_registry import ToolRegistry
 
 # Import availability flags
@@ -51,14 +49,8 @@ try:
 except ImportError:
     pass
 
-# Registry of available adapters (lazy-loaded)
-FRAMEWORK_ADAPTERS = {
-    "crewai": CrewAIAdapter,
-    "autogen": AutoGenAdapter, 
-    "autogen_v4": AutoGenV4Adapter,
-    "ag2": AG2Adapter,
-    "praisonai": PraisonAIAdapter
-}
+# Framework adapter registry - now uses proper registry pattern
+# This replaces the hardcoded FRAMEWORK_ADAPTERS dict
 
 # Note: OTEL_SDK_DISABLED moved to CLI entry point per issue requirements
 
@@ -258,12 +250,8 @@ class AgentsGenerator:
         Raises:
             ValueError: If framework is not supported
         """
-        if framework not in FRAMEWORK_ADAPTERS:
-            raise ValueError(f"Unsupported framework: {framework}. "
-                           f"Supported frameworks: {list(FRAMEWORK_ADAPTERS.keys())}")
-        
-        adapter_class = FRAMEWORK_ADAPTERS[framework]
-        return adapter_class()
+        adapter_registry = FrameworkAdapterRegistry.get_instance()
+        return adapter_registry.create(framework)
 
     def _merge_cli_config(self, config, cli_config):
         """

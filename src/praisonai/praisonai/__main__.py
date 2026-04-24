@@ -3,118 +3,43 @@
 PraisonAI CLI — Unified Entry Point.
 
 Single entry point for all CLI invocations.
-Routes to Typer-based commands for known subcommands,
-falls back to legacy argparse for direct prompts and YAML files.
+Makes Typer the single dispatcher with narrow legacy shim for bare prompts/YAML.
 
 Design:
-  - Typer-first: all registered commands auto-discovered via Click
-  - Legacy fallback: prompts, .yaml paths, and deprecated --flags
-  - No manual command lists needed — adding a Typer command Just Works
+  - Typer owns all command resolution
+  - Legacy shim only for bare prompt/YAML invocations via Typer callback
+  - Fail loud on registration errors - no silent degradation
 """
 
 import sys
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-_typer_commands_cache = None
-
-
-def _get_typer_commands():
-    """Auto-discover registered Typer commands via Click introspection.
-
-    Returns a set of command names that the Typer app knows about.
-    This is populated from app.py's register_commands() — no manual
-    lists to maintain.
+def _is_legacy_invocation(argv: list[str]) -> bool:
+    """Check if this is a bare prompt or bare YAML invocation.
+    
+    Legacy invocations are:
+    - Bare YAML file: "agents.yaml"
+    - Free-text prompt: "Create a weather app"
+    
+    All other invocations should be handled by Typer commands.
     """
-    global _typer_commands_cache
-    if _typer_commands_cache is not None:
-        return _typer_commands_cache
-
-    try:
-        from praisonai.cli.app import app, register_commands
-        register_commands()
-
-        import typer.main
-        import click
-        click_app = typer.main.get_command(app)
-        ctx = click.Context(click_app, info_name="praisonai")
-        _typer_commands_cache = set(click_app.list_commands(ctx))
-    except Exception:
-        _typer_commands_cache = set()
-
-    return _typer_commands_cache
-
-
-def _find_first_command(argv):
-    """Find the first non-flag argument in argv.
-
-    Skips global flags (--json, --verbose, etc.) and their values.
-    Returns the first positional arg, or None if only flags are present.
-    """
-    # Flags that consume a following value
-    VALUE_FLAGS = {"--output-format", "-o"}
-
-    skip_next = False
     for arg in argv:
-        if skip_next:
-            skip_next = False
-            continue
         if arg.startswith("-"):
-            if arg in VALUE_FLAGS:
-                skip_next = True
             continue
-        return arg  # First non-flag arg
-    return None
+        # Check if it's a YAML file or contains spaces (free-text prompt)
+        return (arg.endswith((".yaml", ".yml")) or 
+                " " in arg or 
+                not arg.isidentifier())
+    return False
 
-
-def _run_typer(argv):
-    """Dispatch to the Typer CLI app."""
-    from praisonai.cli.app import app, register_commands
-    register_commands()  # idempotent
-
-    original = sys.argv
-    sys.argv = ["praisonai"] + list(argv)
-    try:
-        app()
-    except SystemExit as e:
-        sys.exit(e.code if isinstance(e.code, int) else 0)
-    finally:
-        sys.argv = original
-
-
-def _run_legacy(argv):
-    """Dispatch to the legacy argparse CLI (prompts, YAML, deprecated flags)."""
-    from praisonai.cli.main import PraisonAI
-
-    original = sys.argv
-    sys.argv = ["praisonai"] + list(argv)
-    try:
-        praison = PraisonAI()
-        result = praison.main()
-        code = 0 if result is None else (1 if result is False else 0)
-        sys.exit(code)
-    except SystemExit as e:
-        sys.exit(e.code if isinstance(e.code, int) else 0)
-    finally:
-        sys.argv = original
-
-
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
 
 def main():
-    """Unified CLI entry point — Typer-first, legacy fallback.
+    """Unified CLI entry point - Typer is the single dispatcher.
 
     Routing rules (in order):
-      1. --version / -V          → print version and exit
-      2. --help / -h             → Typer help (global or command-level)
-      3. No arguments            → Typer interactive TUI
-      4. First arg is a Typer cmd→ Typer (auto-discovered from app.py)
-      5. Everything else         → Legacy (prompt, .yaml, deprecated flags)
+      1. --version / -V    → print version and exit
+      2. Legacy invocation → legacy shim (bare prompts/YAML only)
+      3. Everything else   → Typer (owns all subcommands)
     """
     argv = sys.argv[1:]
 
@@ -124,30 +49,36 @@ def main():
         print(f"PraisonAI version {__version__}")
         return
 
-    # 2. Help flags → always Typer (global help or command help)
-    if "--help" in argv or "-h" in argv:
-        _run_typer(argv)
+    # 2. Check for legacy invocation (bare prompt/YAML)
+    if _is_legacy_invocation(argv):
+        from praisonai.cli.main import PraisonAI
+        original = sys.argv
+        sys.argv = ["praisonai"] + list(argv)
+        try:
+            praison = PraisonAI()
+            result = praison.main()
+            code = 0 if result is None else (1 if result is False else 0)
+            sys.exit(code)
+        except SystemExit as e:
+            sys.exit(e.code if isinstance(e.code, int) else 0)
+        finally:
+            sys.argv = original
         return
 
-    # 3. No arguments → Typer (interactive TUI)
-    if not argv:
-        _run_typer(argv)
-        return
-
-    # 4. Find first non-flag argument and check if it's a Typer command
-    first_cmd = _find_first_command(argv)
-
-    if first_cmd is None:
-        # Only flags, no command → Typer handles global flags
-        _run_typer(argv)
-        return
-
-    if first_cmd in _get_typer_commands():
-        # Known Typer command → Typer
-        _run_typer(argv)
-    else:
-        # Prompt, YAML file, or legacy invocation → legacy
-        _run_legacy(argv)
+    # 3. All other invocations → Typer (fail loud on registration errors)
+    from praisonai.cli.app import app, register_commands
+    
+    # CRITICAL: Fail loud - do not swallow registration exceptions
+    register_commands()  # Let any ImportError/other exceptions propagate
+    
+    original = sys.argv
+    sys.argv = ["praisonai"] + list(argv)
+    try:
+        app()
+    except SystemExit as e:
+        sys.exit(e.code if isinstance(e.code, int) else 0)
+    finally:
+        sys.argv = original
 
 
 if __name__ == "__main__":

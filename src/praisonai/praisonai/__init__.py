@@ -27,26 +27,37 @@ __all__ = [
     'LocalManagedConfig',
 ]
 
-# Telemetry initialization state
+# Telemetry initialization state - thread-safe
+import threading
+
+_telemetry_lock = threading.Lock()
 _telemetry_initialized = False
 
 def _ensure_telemetry_defaults() -> None:
-    """Apply telemetry env defaults exactly once, on first observability use."""
+    """Apply telemetry env defaults exactly once, on first observability use.
+    
+    Thread-safe implementation using double-checked locking pattern.
+    """
     global _telemetry_initialized
     if _telemetry_initialized:
         return
-    import os
-    langfuse_configured = bool(
-        os.getenv("LANGFUSE_PUBLIC_KEY")
-        or os.path.exists(os.path.expanduser("~/.praisonai/langfuse.env"))
-    )
-    if langfuse_configured:
-        # Explicitly enable OTEL for Langfuse integration
-        os.environ["OTEL_SDK_DISABLED"] = "false"
-    else:
-        os.environ.setdefault("OTEL_SDK_DISABLED", "true")
-    os.environ.setdefault("EC_TELEMETRY", "false")  # respect user overrides
-    _telemetry_initialized = True
+    
+    with _telemetry_lock:
+        if _telemetry_initialized:
+            return
+        
+        import os
+        langfuse_configured = bool(
+            os.getenv("LANGFUSE_PUBLIC_KEY")
+            or os.path.exists(os.path.expanduser("~/.praisonai/langfuse.env"))
+        )
+        if langfuse_configured:
+            # Explicitly enable OTEL for Langfuse integration
+            os.environ["OTEL_SDK_DISABLED"] = "false"
+        else:
+            os.environ.setdefault("OTEL_SDK_DISABLED", "true")
+        os.environ.setdefault("EC_TELEMETRY", "false")  # respect user overrides
+        _telemetry_initialized = True
 
 
 # Lazy loading for heavy imports

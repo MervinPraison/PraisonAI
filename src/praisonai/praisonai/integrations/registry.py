@@ -107,7 +107,9 @@ class ExternalAgentRegistry:
                 f"Integration class {integration_class.__name__} must inherit from BaseCLIIntegration"
             )
         
-        self._integrations[name] = integration_class
+        # Thread-safe registration
+        with self._instance_lock:
+            self._integrations[name] = integration_class
     
     def unregister(self, name: str) -> bool:
         """
@@ -119,10 +121,12 @@ class ExternalAgentRegistry:
         Returns:
             bool: True if the integration was found and removed, False otherwise
         """
-        if name in self._integrations:
-            del self._integrations[name]
-            return True
-        return False
+        # Thread-safe unregistration with atomic check-then-delete
+        with self._instance_lock:
+            if name in self._integrations:
+                del self._integrations[name]
+                return True
+            return False
     
     def create(self, name: str, **kwargs: Any) -> Optional[BaseCLIIntegration]:
         """
