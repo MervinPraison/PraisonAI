@@ -354,6 +354,7 @@ Respond with ONLY a valid JSON tool call in this format:
         web_fetch: Optional[Union[bool, Dict[str, Any]]] = None,
         prompt_caching: Optional[bool] = None,
         claude_memory: Optional[Union[bool, Any]] = None,
+        failover_manager: Optional[Any] = None,
         **extra_settings
     ):
         # Configure logging only once at the class level
@@ -429,6 +430,10 @@ Respond with ONLY a valid JSON tool call in this format:
         self._rate_limiter = extra_settings.get('rate_limiter', None)
         self._max_retries = extra_settings.get('max_retries', 3)
         self._retry_delay = extra_settings.get('retry_delay', 60)  # Default 60 seconds
+        
+        # Failover management
+        self._failover_manager = failover_manager
+        self._current_profile = None  # Track current auth profile for failover
 
         # Cache for formatted tools and messages
         self._formatted_tools_cache = {}
@@ -685,8 +690,23 @@ Respond with ONLY a valid JSON tool call in this format:
             delay = self._parse_retry_delay(str(error)) if is_rate_limit else 0.0
             return "rate_limit" if is_rate_limit else "unknown", is_rate_limit, delay
 
+    def _switch_to_profile(self, profile):
+        """Switch to a new auth profile for failover.
+        
+        Args:
+            profile: AuthProfile to switch to
+        """
+        if profile.api_key:
+            self.api_key = profile.api_key
+        if profile.base_url:
+            self.base_url = profile.base_url
+        if profile.model and profile.model != self.model:
+            # Only log if model actually changes
+            logging.info(f"Failover: switching from {self.model} to {profile.model}")
+            self.model = profile.model
+
     def _call_with_retry(self, func, *args, **kwargs):
-        """Call a function with automatic retry on rate limit errors.
+        """Call a function with automatic retry on rate limit errors and failover support.
 
         Args:
             func: The function to call (e.g., litellm.completion)
@@ -707,7 +727,13 @@ Respond with ONLY a valid JSON tool call in this format:
                 if self._rate_limiter is not None:
                     self._rate_limiter.acquire()
 
-                return func(*args, **kwargs)
+                result = func(*args, **kwargs)
+                
+                # Mark success if failover is configured
+                if self._failover_manager and self._current_profile:
+                    self._failover_manager.mark_success(self._current_profile)
+                    
+                return result
 
             except Exception as e:
                 category, can_retry, retry_delay = self._classify_error_and_should_retry(e, attempt + 1)
@@ -716,6 +742,18 @@ Respond with ONLY a valid JSON tool call in this format:
 
                 last_error = e
                 error_str = str(e)
+
+                # Failover: mark failure and try next profile
+                if self._failover_manager and self._current_profile:
+                    is_rate_limit = 'rate' in error_str.lower() or '429' in error_str
+                    self._failover_manager.mark_failure(
+                        self._current_profile, error_str, is_rate_limit=is_rate_limit
+                    )
+                    next_profile = self._failover_manager.get_next_profile()
+                    if next_profile and next_profile != self._current_profile:
+                        self._switch_to_profile(next_profile)
+                        self._current_profile = next_profile
+                        logging.info(f"Failover: switched to profile '{next_profile.name}'")
 
                 if attempt < self._max_retries:
                     logging.warning(
@@ -746,7 +784,7 @@ Respond with ONLY a valid JSON tool call in this format:
         raise last_error
 
     async def _call_with_retry_async(self, func, *args, **kwargs):
-        """Async version of _call_with_retry.
+        """Async version of _call_with_retry with failover support.
 
         Args:
             func: The async function to call
@@ -767,7 +805,13 @@ Respond with ONLY a valid JSON tool call in this format:
                 if self._rate_limiter is not None:
                     await self._rate_limiter.acquire_async()
 
-                return await func(*args, **kwargs)
+                result = await func(*args, **kwargs)
+                
+                # Mark success if failover is configured
+                if self._failover_manager and self._current_profile:
+                    self._failover_manager.mark_success(self._current_profile)
+                    
+                return result
 
             except Exception as e:
                 category, can_retry, retry_delay = self._classify_error_and_should_retry(e, attempt + 1)
@@ -776,6 +820,18 @@ Respond with ONLY a valid JSON tool call in this format:
 
                 last_error = e
                 error_str = str(e)
+
+                # Failover: mark failure and try next profile
+                if self._failover_manager and self._current_profile:
+                    is_rate_limit = 'rate' in error_str.lower() or '429' in error_str
+                    self._failover_manager.mark_failure(
+                        self._current_profile, error_str, is_rate_limit=is_rate_limit
+                    )
+                    next_profile = self._failover_manager.get_next_profile()
+                    if next_profile and next_profile != self._current_profile:
+                        self._switch_to_profile(next_profile)
+                        self._current_profile = next_profile
+                        logging.info(f"Failover: switched to profile '{next_profile.name}'")
 
                 if attempt < self._max_retries:
                     logging.warning(
