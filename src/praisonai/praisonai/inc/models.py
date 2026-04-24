@@ -13,25 +13,24 @@ logging.basicConfig(level=_loglevel, format='%(asctime)s - %(levelname)s - %(mes
 # Constants
 LOCAL_SERVER_API_KEY_PLACEHOLDER = "not-needed"
 
+def _is_module_available(module_name: str) -> bool:
+    """Safely check if a module spec is importable.
+
+    Guards against missing parent packages (e.g. `google.generativeai`
+    when the `google` namespace is absent) so test collection in a
+    base install does not fail.
+    """
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except (ImportError, AttributeError, ValueError):
+        return False
+
 # Use find_spec for fast availability checks (no actual import)
 # This avoids the ~3200ms langchain_openai import at module load
-OPENAI_AVAILABLE = importlib.util.find_spec("openai") is not None
-
-# Guard against missing parent packages (fixes test collection in base install)
-try:
-    GOOGLE_GENAI_AVAILABLE = importlib.util.find_spec("google.generativeai") is not None
-except (ImportError, AttributeError, ValueError):
-    GOOGLE_GENAI_AVAILABLE = False
-
-try:
-    ANTHROPIC_AVAILABLE = importlib.util.find_spec("anthropic") is not None
-except (ImportError, AttributeError, ValueError):
-    ANTHROPIC_AVAILABLE = False
-
-try:
-    COHERE_AVAILABLE = importlib.util.find_spec("cohere") is not None
-except (ImportError, AttributeError, ValueError):
-    COHERE_AVAILABLE = False
+OPENAI_AVAILABLE = _is_module_available("openai")
+GOOGLE_GENAI_AVAILABLE = _is_module_available("google.generativeai")
+ANTHROPIC_AVAILABLE = _is_module_available("anthropic")
+COHERE_AVAILABLE = _is_module_available("cohere")
 
 # Lazy import helpers for provider SDKs
 def _get_openai_client():
