@@ -3417,8 +3417,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     # Yield the follow-up response after tool execution
                                     yield follow_up_content
                         except Exception as e:
-                            logging.error(f"Follow-up response failed after retries: {e}")
-                            yield f"\n\n[Error: Failed to generate final response after tool execution: {e}]"
+                            import time
+                            error_ref = f"followup-{int(time.time() * 1000)}"
+                            logging.error(
+                                "Follow-up response failed after retries (ref=%s, model=%s): %s",
+                                error_ref, getattr(self, 'model', 'unknown'), e
+                            )
+                            yield (
+                                f"\n\n[Error: Failed to generate final response after tool execution "
+                                f"(ref: {error_ref}). Please retry. If it continues, try reducing prompt size.]"
+                            )
                             
                 except Exception as e:
                     error_msg = str(e).lower()
