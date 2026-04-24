@@ -23,8 +23,10 @@ __all__ = [
     'ManagedAgent',
     'ManagedConfig',
     'AnthropicManagedAgent',
-    'LocalManagedAgent',
-    'LocalManagedConfig',
+    'LocalManagedAgent',          # backward compat alias
+    'LocalManagedConfig',         # backward compat alias
+    'SandboxedAgent',             # new honest name
+    'SandboxedAgentConfig',       # new honest name
 ]
 
 # Telemetry initialization state
@@ -112,6 +114,12 @@ def __getattr__(name):
     elif name == 'LocalManagedConfig':
         from .integrations.managed_local import LocalManagedConfig
         return LocalManagedConfig
+    elif name == 'SandboxedAgent':
+        from .integrations.sandboxed_agent import SandboxedAgent
+        return SandboxedAgent
+    elif name == 'SandboxedAgentConfig':
+        from .integrations.sandboxed_agent import SandboxedAgentConfig
+        return SandboxedAgentConfig
     elif name in ('ManagedConfig', 'ManagedBackendConfig'):
         from .integrations.managed_agents import ManagedConfig
         return ManagedConfig

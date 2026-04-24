@@ -1038,3 +1038,12 @@ class LocalManagedAgent:
                 self._compute_instance_id,
             )
             self._compute_instance_id = None
+
+
+# ── Backward compatibility aliases ──
+# Silent aliases for the old names to maintain 100% backward compatibility
+# These refer to the same classes but communicate the intent more clearly
+
+# The new honest names
+SandboxedAgent = LocalManagedAgent
+SandboxedAgentConfig = LocalManagedConfig
