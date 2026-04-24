@@ -26,7 +26,6 @@ T = TypeVar('T', bound=BaseModel)
 # =============================================================================
 
 import threading
-from functools import lru_cache
 
 # Thread-safe lazy cache for optional dependencies
 _optional_lock = threading.Lock()
@@ -173,48 +172,38 @@ def _get_praisonai_tools():
 # --- LiteLLM lazy loading ---
 def _check_litellm_available() -> bool:
     """Check if litellm is available (cached)."""
-    global _litellm_available
-    if _litellm_available is None:
-        try:
-            import litellm  # noqa: F401
-            _litellm_available = True
-        except ImportError:
-            _litellm_available = False
-    return _litellm_available
+    result = _load_optional("litellm")
+    return result is not None
 
 
 def _get_litellm():
     """Lazy load litellm module."""
-    global _litellm
-    if _litellm is None:
-        import litellm as _litellm_module
-        _litellm = _litellm_module
-    return _litellm
+    result = _load_optional("litellm")
+    if result is None:
+        raise ImportError("Install with: pip install litellm")
+    return result
 
 
 # --- OpenAI lazy loading ---
 def _check_openai_available() -> bool:
     """Check if openai is available (cached)."""
-    global _openai_available
-    if _openai_available is None:
-        try:
-            import openai  # noqa: F401
-            _openai_available = True
-        except ImportError:
-            _openai_available = False
-    return _openai_available
+    result = _load_optional("openai")
+    return result is not None
 
 
 def _get_openai_client(api_key: str = None, base_url: str = None):
     """Lazy load OpenAI client."""
-    global _openai_client
-    if _openai_client is None:
+    def create_openai_client():
         from openai import OpenAI
-        _openai_client = OpenAI(
+        return OpenAI(
             api_key=api_key or os.environ.get("OPENAI_API_KEY"),
             base_url=base_url
         )
-    return _openai_client
+    
+    result = _load_optional("openai_client", create_openai_client)
+    if result is None:
+        raise ImportError("Install with: pip install openai")
+    return result
 
 
 _loglevel = os.environ.get('LOGLEVEL', 'INFO').strip().upper() or 'INFO'

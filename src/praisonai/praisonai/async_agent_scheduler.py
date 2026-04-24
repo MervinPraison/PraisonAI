@@ -183,12 +183,30 @@ class AsyncAgentScheduler:
         """
         Stop the scheduler gracefully with proper cancellation.
         
+        IMPORTANT: This method must be called from the same event loop
+        that was used to start the scheduler.
+        
         Returns:
             True if stopped successfully
+            
+        Raises:
+            RuntimeError: If called from a different event loop than start()
         """
         if not self._is_running:
             logger.info("Scheduler is not running")
             return True
+        
+        # Ensure we're on the same loop that was bound during start()
+        try:
+            current_loop = asyncio.get_running_loop()
+            if self._bound_loop is not None and current_loop is not self._bound_loop:
+                raise RuntimeError(
+                    "stop() must be called from the same event loop as start(). "
+                    f"Expected: {self._bound_loop}, got: {current_loop}"
+                )
+        except RuntimeError:
+            # No running loop - this is fine if scheduler was never started
+            pass
             
         logger.info("Stopping async agent scheduler...")
         self._cancel_event.set()

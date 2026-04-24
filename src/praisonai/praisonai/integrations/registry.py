@@ -48,6 +48,7 @@ class ExternalAgentRegistry:
     def __init__(self):
         """Initialize the registry with built-in integrations."""
         self._integrations: Dict[str, Type[BaseCLIIntegration]] = {}
+        self._lock = threading.Lock()
         self._register_builtin_integrations()
     
     @classmethod
@@ -108,7 +109,7 @@ class ExternalAgentRegistry:
             )
         
         # Thread-safe registration
-        with self._instance_lock:
+        with self._lock:
             self._integrations[name] = integration_class
     
     def unregister(self, name: str) -> bool:
@@ -122,11 +123,8 @@ class ExternalAgentRegistry:
             bool: True if the integration was found and removed, False otherwise
         """
         # Thread-safe unregistration with atomic check-then-delete
-        with self._instance_lock:
-            if name in self._integrations:
-                del self._integrations[name]
-                return True
-            return False
+        with self._lock:
+            return self._integrations.pop(name, None) is not None
     
     def create(self, name: str, **kwargs: Any) -> Optional[BaseCLIIntegration]:
         """
@@ -139,7 +137,9 @@ class ExternalAgentRegistry:
         Returns:
             BaseCLIIntegration: Instance of the integration, or None if not found
         """
-        integration_class = self._integrations.get(name)
+        with self._lock:
+            integration_class = self._integrations.get(name)
+        
         if integration_class is None:
             return None
         
@@ -152,7 +152,8 @@ class ExternalAgentRegistry:
         Returns:
             List[str]: List of registered integration names
         """
-        return list(self._integrations.keys())
+        with self._lock:
+            return list(self._integrations.keys())
     
     async def get_available(self) -> Dict[str, bool]:
         """
@@ -164,7 +165,10 @@ class ExternalAgentRegistry:
         import inspect
         availability = {}
         
-        for name, integration_class in self._integrations.items():
+        with self._lock:
+            snapshot = list(self._integrations.items())
+        
+        for name, integration_class in snapshot:
             try:
                 # Check if constructor requires parameters beyond self
                 sig = inspect.signature(integration_class.__init__)

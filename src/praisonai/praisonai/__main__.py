@@ -18,18 +18,27 @@ def _is_legacy_invocation(argv: list[str]) -> bool:
     """Check if this is a bare prompt or bare YAML invocation.
     
     Legacy invocations are:
-    - Bare YAML file: "agents.yaml"
+    - Bare YAML file: "agents.yaml" 
     - Free-text prompt: "Create a weather app"
     
     All other invocations should be handled by Typer commands.
     """
-    for arg in argv:
-        if arg.startswith("-"):
-            continue
-        # Check if it's a YAML file or contains spaces (free-text prompt)
-        return (arg.endswith((".yaml", ".yml")) or 
-                " " in arg or 
-                not arg.isidentifier())
+    import os
+    
+    # Only the very first positional token is considered; option values never are.
+    if not argv or argv[0].startswith("-"):
+        return False
+    
+    first = argv[0]
+    
+    # Check for free-text prompt (contains spaces)
+    if " " in first:
+        return True
+        
+    # Check for YAML file that actually exists on disk
+    if first.endswith((".yaml", ".yml")) and os.path.isfile(first):
+        return True
+        
     return False
 
 

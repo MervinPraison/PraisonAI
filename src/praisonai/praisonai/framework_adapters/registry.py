@@ -167,6 +167,11 @@ class FrameworkAdapterRegistry:
         """
         try:
             adapter = self.create(name)
+        except ValueError:
+            return False
+        
+        try:
             return adapter.is_available()
-        except (ValueError, Exception):
+        except Exception:
+            logger.warning("is_available() raised for adapter %r", name, exc_info=True)
             return False
