@@ -3401,7 +3401,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         
                         # Continue conversation after tool execution - get follow-up response
                         try:
-                            follow_up_response = litellm.completion(
+                            follow_up_response = self._completion_with_retry(
                                 **self._build_completion_params(
                                     messages=messages,
                                     tools=formatted_tools,
@@ -3417,7 +3417,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     # Yield the follow-up response after tool execution
                                     yield follow_up_content
                         except Exception as e:
-                            logging.error(f"Follow-up response failed: {e}")
+                            logging.error(f"Follow-up response failed after retries: {e}")
+                            yield f"\n\n[Error: Failed to generate final response after tool execution: {e}]"
                             
                 except Exception as e:
                     error_msg = str(e).lower()
@@ -3436,7 +3437,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if not use_streaming:
                 # Fall back to non-streaming and yield the complete response
                 try:
-                    response = litellm.completion(
+                    response = self._completion_with_retry(
                         **self._build_completion_params(
                             messages=messages,
                             tools=formatted_tools,
