@@ -293,12 +293,17 @@ class ManagedRuntimeProtocol(Protocol):
         """
         ...
 
-    async def stream_events(self, session_id: str) -> AsyncIterator[Dict[str, Any]]:
+    def stream_events(self, session_id: str) -> AsyncIterator[Dict[str, Any]]:
         """Stream events from running session.
-        
+
+        Implementations should be async generators: ``async def`` with ``yield``.
+        Declared without ``async def`` here so the protocol signature matches the
+        async-generator return type (``AsyncIterator``) rather than a coroutine
+        that resolves to one, letting callers write ``async for e in runtime.stream_events(sid)``.
+
         Args:
             session_id: Session ID from create_session()
-            
+
         Yields:
             Event dicts (agent.message, agent.tool_use, session.status_idle, etc.)
         """

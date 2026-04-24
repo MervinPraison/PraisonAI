@@ -30,22 +30,11 @@ Usage::
     result = agent.start("Create a Python script that prints hello")
 """
 
-# Import entire implementation from managed_local and re-export with new names
-from .managed_local import (
-    LocalManagedAgent as SandboxedAgent,
-    LocalManagedConfig as SandboxedAgentConfig,
-    _translate_anthropic_tools,
-    _build_custom_tool_fn,
-    _DEFAULT_SYSTEM,
-    _DEFAULT_TOOLS,
-)
+# Single source of truth: aliases are defined in managed_local.py.
+# This module only re-exports them as a discoverable import path.
+from .managed_local import SandboxedAgent, SandboxedAgentConfig
 
-# Re-export for import consistency
 __all__ = [
-    "_build_custom_tool_fn", 
-    "_DEFAULT_SYSTEM",
-    "_DEFAULT_TOOLS",
-    "_translate_anthropic_tools",
     "SandboxedAgent",
     "SandboxedAgentConfig",
 ]
