@@ -40,7 +40,36 @@ def _get_console():
     global _console
     if _console is None and _get_rich_available():
         from rich.console import Console
-        _console = Console()
+        import sys
+        import os
+        
+        # Detect Windows legacy encoding (CP1252) and use safe fallback
+        if sys.platform == "win32" and hasattr(sys.stdout, 'encoding'):
+            encoding = getattr(sys.stdout, 'encoding', '').lower()
+            # Check for Windows legacy code pages that can't handle Unicode
+            if encoding in ('cp1252', 'cp1251', 'cp850', 'ascii') or 'cp' in encoding:
+                # Force UTF-8 mode or create console with safe encoding handling
+                try:
+                    # Try to set PYTHONIOENCODING to utf-8 for subprocess safety
+                    if 'PYTHONIOENCODING' not in os.environ:
+                        os.environ['PYTHONIOENCODING'] = 'utf-8'
+                    
+                    # Create console with safe encoding options
+                    _console = Console(
+                        force_terminal=True,
+                        legacy_windows=True,  # Use legacy Windows mode
+                        safe_box=True,        # Use safe box characters
+                        emoji=False,          # Disable emojis on Windows legacy
+                        color_system='standard',  # Use basic colors
+                        _environ=os.environ   # Pass updated environment
+                    )
+                except Exception:
+                    # Fallback to basic console if Rich options fail
+                    _console = Console(force_terminal=False, no_color=True)
+            else:
+                _console = Console()
+        else:
+            _console = Console()
     return _console
 
 
@@ -150,9 +179,13 @@ class OutputController:
             # Plain text output
             print(message)
         else:
-            # Rich formatted output
+            # Rich formatted output with encoding safety
             if self.console:
-                self.console.print(message, style=style, **kwargs)
+                try:
+                    self.console.print(message, style=style, **kwargs)
+                except UnicodeEncodeError:
+                    # Fallback to plain text if Rich can't handle the encoding
+                    print(message.encode('ascii', 'replace').decode('ascii'))
             else:
                 print(message)
     

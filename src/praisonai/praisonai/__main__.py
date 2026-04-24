@@ -72,6 +72,16 @@ def _find_first_command(argv):
 
 def _run_typer(argv):
     """Dispatch to the Typer CLI app."""
+    import os
+    
+    # Set up safer encoding for Windows legacy terminals
+    if sys.platform == "win32" and hasattr(sys.stdout, 'encoding'):
+        encoding = getattr(sys.stdout, 'encoding', '').lower()
+        if encoding in ('cp1252', 'cp1251', 'cp850', 'ascii') or 'cp' in encoding:
+            # Force UTF-8 mode for subprocess safety
+            if 'PYTHONIOENCODING' not in os.environ:
+                os.environ['PYTHONIOENCODING'] = 'utf-8'
+    
     from praisonai.cli.app import app, register_commands
     register_commands()  # idempotent
 
@@ -79,6 +89,11 @@ def _run_typer(argv):
     sys.argv = ["praisonai"] + list(argv)
     try:
         app()
+    except UnicodeEncodeError as e:
+        # Handle Unicode encoding errors gracefully
+        print("Error: Unable to display help due to terminal encoding limitations.", file=sys.stderr)
+        print("Try setting: $env:PYTHONIOENCODING='utf-8' (PowerShell) or set PYTHONIOENCODING=utf-8 (cmd)", file=sys.stderr)
+        sys.exit(1)
     except SystemExit as e:
         sys.exit(e.code if isinstance(e.code, int) else 0)
     finally:
