@@ -31,6 +31,10 @@ def __getattr__(name: str):
     raise AttributeError(f"module 'praisonai_platform' has no attribute '{name}'")
 
 
+def __dir__() -> list[str]:
+    return sorted(list(globals().keys()) + ["create_app", "PlatformClient"])
+
+
 __all__ = [
     "__version__",
     "create_app",

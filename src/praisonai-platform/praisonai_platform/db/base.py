@@ -3,7 +3,6 @@
 import os
 from typing import AsyncGenerator
 
-from sqlalchemy import Engine
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -23,15 +22,21 @@ _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
-def get_engine() -> AsyncEngine:
-    """Get the database engine."""
+def get_engine(database_url: str | None = None) -> AsyncEngine:
+    """Get (and lazily create) the cached async database engine.
+
+    If ``database_url`` is provided and no engine is cached yet, it overrides
+    the ``DATABASE_URL`` env var / in-memory default. To switch URLs after an
+    engine has already been created, call ``reset_engine()`` first.
+    """
     global _engine
     if _engine is None:
-        # Default to in-memory SQLite for testing
-        database_url = os.environ.get(
-            "DATABASE_URL", 
-            "sqlite+aiosqlite:///:memory:"
-        )
+        if database_url is None:
+            # Default to in-memory SQLite for testing
+            database_url = os.environ.get(
+                "DATABASE_URL",
+                "sqlite+aiosqlite:///:memory:",
+            )
         _engine = create_async_engine(
             database_url,
             echo=False,
@@ -40,9 +45,15 @@ def get_engine() -> AsyncEngine:
     return _engine
 
 
-def reset_engine() -> None:
-    """Reset the global engine (for testing)."""
+async def reset_engine() -> None:
+    """Reset the global engine (for testing).
+
+    Disposes the existing async engine (if any) before clearing
+    cached references so connection pools don't leak across tests.
+    """
     global _engine, _session_factory
+    if _engine is not None:
+        await _engine.dispose()
     _engine = None
     _session_factory = None
 

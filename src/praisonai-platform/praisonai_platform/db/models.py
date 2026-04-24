@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import (
-    Boolean,
     DateTime,
     ForeignKey,
     Integer,
@@ -34,11 +33,11 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
-    username: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
-    hashed_password: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+    password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     # Relationships
     memberships: Mapped[List["Member"]] = relationship("Member", back_populates="user")
@@ -53,8 +52,8 @@ class Workspace(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     settings: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True, default=dict)
     issue_prefix: Mapped[str] = mapped_column(String, default="ISSUE")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     # Relationships
     members: Mapped[List["Member"]] = relationship("Member", back_populates="workspace")
@@ -71,8 +70,8 @@ class Member(Base):
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False)
     workspace_id: Mapped[str] = mapped_column(String, ForeignKey("workspaces.id"), nullable=False)
     role: Mapped[str] = mapped_column(String, nullable=False, default="member")  # owner, admin, member
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="memberships")
@@ -92,8 +91,8 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     settings: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     # Relationships
     workspace: Mapped["Workspace"] = relationship("Workspace", back_populates="projects")
@@ -111,11 +110,11 @@ class Issue(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="backlog")
     priority: Mapped[str] = mapped_column(String, nullable=False, default="medium")
-    assignee_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    created_by_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    assignee_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("users.id"), nullable=True)
+    created_by_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("users.id"), nullable=True)
     issue_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     # Relationships
     workspace: Mapped["Workspace"] = relationship("Workspace", back_populates="issues")
@@ -130,10 +129,10 @@ class Comment(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     issue_id: Mapped[str] = mapped_column(String, ForeignKey("issues.id"), nullable=False)
-    author_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    author_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("users.id"), nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     # Relationships
     issue: Mapped["Issue"] = relationship("Issue", back_populates="comments")
@@ -149,8 +148,8 @@ class Agent(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False, default="idle")
     config: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     # Relationships
     workspace: Mapped["Workspace"] = relationship("Workspace", back_populates="agents")
@@ -165,8 +164,8 @@ class IssueLabel(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     color: Mapped[str] = mapped_column(String, nullable=False, default="#000000")
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
     # Relationships
     issues: Mapped[List["IssueLabelLink"]] = relationship("IssueLabelLink", back_populates="label")
@@ -179,7 +178,7 @@ class IssueLabelLink(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     issue_id: Mapped[str] = mapped_column(String, ForeignKey("issues.id"), nullable=False)
     label_id: Mapped[str] = mapped_column(String, ForeignKey("issue_labels.id"), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     # Relationships
     issue: Mapped["Issue"] = relationship("Issue", back_populates="labels")
@@ -198,7 +197,7 @@ class IssueDependency(Base):
     issue_id: Mapped[str] = mapped_column(String, ForeignKey("issues.id"), nullable=False)
     depends_on_id: Mapped[str] = mapped_column(String, ForeignKey("issues.id"), nullable=False)
     dependency_type: Mapped[str] = mapped_column(String, nullable=False)  # blocks, blocked_by, related
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     __table_args__ = (
         UniqueConstraint("issue_id", "depends_on_id", "dependency_type", name="uq_issue_dependency"),
@@ -214,6 +213,6 @@ class ActivityLog(Base):
     entity_type: Mapped[str] = mapped_column(String, nullable=False)  # issue, project, workspace, etc.
     entity_id: Mapped[str] = mapped_column(String, nullable=False)
     action: Mapped[str] = mapped_column(String, nullable=False)  # created, updated, deleted, etc.
-    actor_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    actor_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("users.id"), nullable=True)
     details: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
