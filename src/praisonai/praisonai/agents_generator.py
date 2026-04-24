@@ -153,30 +153,34 @@ def _resolve_yaml_cli_backend(cli_backend_config, logger):
     if not cli_backend_config:
         return None
 
-    label = None
+    # Pre-seed label from config before import so we can show it in error logs
+    if isinstance(cli_backend_config, str):
+        label = cli_backend_config
+    elif isinstance(cli_backend_config, dict):
+        label = cli_backend_config.get('id') or "<missing>"
+    else:
+        label = type(cli_backend_config).__name__
+
     try:
         from praisonai.cli_backends import resolve_cli_backend
         if isinstance(cli_backend_config, str):
-            label = cli_backend_config
             return resolve_cli_backend(cli_backend_config)
         if isinstance(cli_backend_config, dict):
             backend_id = cli_backend_config.get('id')
-            label = backend_id or "<missing>"
             if not backend_id:
                 raise ValueError("cli_backend dict must contain an 'id' field")
             overrides = cli_backend_config.get('overrides') or {}
             return resolve_cli_backend(backend_id, overrides=overrides)
-        label = type(cli_backend_config).__name__
         raise ValueError(
             f"cli_backend must be string or dict, got: {type(cli_backend_config).__name__}"
         )
     except ImportError:
         logger.warning(
-            "CLI backend '%s' requested but not available", label or "<unknown>"
+            "CLI backend '%s' requested but not available", label
         )
     except Exception as e:
         logger.warning(
-            "Failed to resolve CLI backend '%s': %s", label or "<unknown>", e
+            "Failed to resolve CLI backend '%s': %s", label, e
         )
     return None
 

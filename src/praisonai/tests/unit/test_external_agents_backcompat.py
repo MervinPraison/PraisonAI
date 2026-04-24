@@ -17,11 +17,14 @@ REPO_ROOT = os.path.abspath(
 
 def _build_env():
     env = {k: v for k, v in os.environ.items() if not k.startswith("PYTEST_")}
-    env["PYTHONPATH"] = os.pathsep.join([
+    # Build PYTHONPATH without trailing separator
+    pythonpath_parts = [
         os.path.join(REPO_ROOT, "src", "praisonai-agents"),
         os.path.join(REPO_ROOT, "src", "praisonai"),
-        env.get("PYTHONPATH", ""),
-    ])
+    ]
+    if env.get("PYTHONPATH"):
+        pythonpath_parts.append(env["PYTHONPATH"])
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
     return env
 
 

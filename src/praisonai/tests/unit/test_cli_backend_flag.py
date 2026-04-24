@@ -26,11 +26,14 @@ def _build_env():
         k: v for k, v in os.environ.items()
         if not k.startswith("PYTEST_")
     }
-    env["PYTHONPATH"] = os.pathsep.join([
+    # Build PYTHONPATH without trailing separator
+    pythonpath_parts = [
         os.path.join(REPO_ROOT, "src", "praisonai-agents"),
         os.path.join(REPO_ROOT, "src", "praisonai"),
-        env.get("PYTHONPATH", ""),
-    ])
+    ]
+    if env.get("PYTHONPATH"):
+        pythonpath_parts.append(env["PYTHONPATH"])
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
     return env
 
 
@@ -56,17 +59,10 @@ def test_cli_backend_flag_in_help():
 
 
 def test_cli_backend_flag_accepts_registered_backend():
-    """``--cli-backend claude-code <prompt>`` must parse without argparse error."""
-    # We intentionally pass an unrealistic prompt that won't trigger LLM work and
-    # rely on the default timeout to abort quickly. We only assert that argparse
-    # accepts the flag (no "invalid choice" or "unrecognized" in stderr).
-    try:
-        r = _run_cli(
-            "--cli-backend", "claude-code", "--help",
-            timeout=15,
-        )
-    except subprocess.TimeoutExpired:
-        pytest.skip("CLI startup exceeded timeout; unrelated to flag parsing")
+    """``--cli-backend claude-code --help`` must parse without argparse error."""
+    # Use --help to short-circuit argparse; we only want to prove the flag+value
+    # is accepted (no "invalid choice" / "unrecognized" in stderr).
+    r = _run_cli("--cli-backend", "claude-code", "--help", timeout=15)
     assert r.returncode == 0
     assert "invalid choice" not in r.stderr
     assert "unrecognized arguments" not in r.stderr
@@ -108,6 +104,7 @@ def test_backends_bare_subcommand_lists():
 def test_backends_unknown_subcommand_reports_error():
     """``praisonai backends bogus`` prints an error message."""
     r = _run_cli("backends", "bogus", timeout=15)
-    # Must not crash, must surface the unknown subcommand in stdout or stderr
+    # Must exit with error and surface the unknown subcommand in stdout or stderr
+    assert r.returncode != 0
     combined = (r.stdout + r.stderr).lower()
     assert "unknown" in combined or "bogus" in combined
