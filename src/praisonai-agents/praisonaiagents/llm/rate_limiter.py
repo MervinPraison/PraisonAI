@@ -188,18 +188,15 @@ class RateLimiter:
         if self.requests_per_minute is None:
             return
 
-        with self._sync_lock:
-            self._refill()
-            wait = self._wait_time()
-        if wait > 0:
-            logger.debug(f"Rate limit: waiting {wait:.2f}s before next request")
-            self._sleep(wait)
+        while True:
             with self._sync_lock:
                 self._refill()
-                self._tokens -= 1.0
-        else:
-            with self._sync_lock:
-                self._tokens -= 1.0
+                if self._tokens >= 1.0:
+                    self._tokens -= 1.0
+                    return
+                wait = self._wait_time()
+            logger.debug(f"Rate limit: waiting {wait:.2f}s before next request")
+            self._sleep(wait)
 
     def acquire_tokens(self, num_tokens: int) -> None:
         """Acquire API tokens, blocking if necessary.
@@ -215,20 +212,17 @@ class RateLimiter:
         if self.tokens_per_minute is None:
             return
 
-        with self._sync_api_tokens_lock:
-            self._refill_api_tokens()
-            wait = self._wait_time_for_tokens(num_tokens)
-        if wait > 0:
+        while True:
+            with self._sync_api_tokens_lock:
+                self._refill_api_tokens()
+                if self._api_tokens >= num_tokens:
+                    self._api_tokens -= num_tokens
+                    return
+                wait = self._wait_time_for_tokens(num_tokens)
             # Do NOT cap internal wait time - this ensures correct rate limiting
             # The wait time is calculated based on token refill rate and must be honored
             logger.debug(f"Token limit: waiting {wait:.2f}s for {num_tokens} tokens")
             self._sleep(wait)
-            with self._sync_api_tokens_lock:
-                self._refill_api_tokens()
-                self._api_tokens -= num_tokens
-        else:
-            with self._sync_api_tokens_lock:
-                self._api_tokens -= num_tokens
 
     async def acquire_async(self) -> None:
         """Acquire a request token asynchronously, waiting if necessary.
