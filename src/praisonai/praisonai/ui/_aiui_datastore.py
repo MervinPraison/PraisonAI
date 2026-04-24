@@ -11,30 +11,40 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-# Fail loudly on missing optional dependencies per AGENTS.md §4.2
-try:
-    from praisonaiui.datastore import BaseDataStore
-except ImportError as e:
-    raise ImportError(
-        "praisonaiui is required for PraisonAISessionDataStore. "
-        "Install with: pip install 'praisonai[ui]'"
-    ) from e
 
-try:
-    from praisonaiagents.session import SessionStoreProtocol
-    from praisonaiagents.session import get_hierarchical_session_store
-except ImportError as e:
-    raise ImportError(
-        "praisonaiagents is required for PraisonAISessionDataStore. "
-        "Install with: pip install praisonaiagents"
-    ) from e
-
-
-class PraisonAISessionDataStore(BaseDataStore):
-    """Adapter that bridges PraisonAI SessionStoreProtocol to aiui BaseDataStore."""
+class PraisonAISessionDataStore:
+    """Adapter that bridges PraisonAI SessionStoreProtocol to aiui BaseDataStore.
     
-    def __init__(self, store: Optional[SessionStoreProtocol] = None):
-        """Initialize with an optional session store, defaults to hierarchical store."""
+    Note: This class defers dependency imports until instantiation to allow
+    test collection without optional modules installed.
+    """
+    
+    def __init__(self, store: Optional[Any] = None):
+        """Initialize with an optional session store, defaults to hierarchical store.
+        
+        Args:
+            store: Optional SessionStoreProtocol implementation
+        """
+        # Lazy import dependencies only when class is instantiated
+        try:
+            from praisonaiui.datastore import BaseDataStore
+            # Make this class inherit from BaseDataStore at runtime
+            if BaseDataStore not in self.__class__.__bases__:
+                self.__class__.__bases__ = (BaseDataStore,) + self.__class__.__bases__
+        except ImportError as e:
+            raise ImportError(
+                "praisonaiui is required for PraisonAISessionDataStore. "
+                "Install with: pip install 'praisonai[ui]'"
+            ) from e
+
+        try:
+            from praisonaiagents.session import get_hierarchical_session_store
+        except ImportError as e:
+            raise ImportError(
+                "praisonaiagents is required for PraisonAISessionDataStore. "
+                "Install with: pip install praisonaiagents"
+            ) from e
+            
         self._store = store or get_hierarchical_session_store()
 
     def _new_id(self) -> str:

@@ -16,9 +16,22 @@ LOCAL_SERVER_API_KEY_PLACEHOLDER = "not-needed"
 # Use find_spec for fast availability checks (no actual import)
 # This avoids the ~3200ms langchain_openai import at module load
 OPENAI_AVAILABLE = importlib.util.find_spec("openai") is not None
-GOOGLE_GENAI_AVAILABLE = importlib.util.find_spec("google.generativeai") is not None
-ANTHROPIC_AVAILABLE = importlib.util.find_spec("anthropic") is not None
-COHERE_AVAILABLE = importlib.util.find_spec("cohere") is not None
+
+# Guard against missing parent packages (fixes test collection in base install)
+try:
+    GOOGLE_GENAI_AVAILABLE = importlib.util.find_spec("google.generativeai") is not None
+except (ImportError, AttributeError, ValueError):
+    GOOGLE_GENAI_AVAILABLE = False
+
+try:
+    ANTHROPIC_AVAILABLE = importlib.util.find_spec("anthropic") is not None
+except (ImportError, AttributeError, ValueError):
+    ANTHROPIC_AVAILABLE = False
+
+try:
+    COHERE_AVAILABLE = importlib.util.find_spec("cohere") is not None
+except (ImportError, AttributeError, ValueError):
+    COHERE_AVAILABLE = False
 
 # Lazy import helpers for provider SDKs
 def _get_openai_client():
