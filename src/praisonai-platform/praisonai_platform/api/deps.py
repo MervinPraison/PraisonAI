@@ -16,8 +16,7 @@ from ..services.member_service import MemberService
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Yield an async DB session per request."""
-    factory = get_session()
-    async with factory() as session:
+    async for session in get_session():
         try:
             yield session
             await session.commit()
