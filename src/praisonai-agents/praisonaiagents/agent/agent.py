@@ -1785,7 +1785,9 @@ Your Goal: {self.goal}
                 _preset_deny = PERMISSION_PRESETS.get(_resolved_safety_env)
                 if _preset_deny is None and _safety_env:
                     # Unknown env value - fall back to safe default and log warning
-                    import logging
+                    # (logging is already imported at module level; a local `import logging`
+                    # here would shadow it and cause UnboundLocalError on earlier uses
+                    # inside __init__ such as the custom-LLM tools branch.)
                     logging.getLogger(__name__).warning(
                         "Unknown PRAISONAI_TOOL_SAFETY value %r; falling back to 'default' preset.",
                         _raw_safety_env,
