@@ -28,7 +28,7 @@ import importlib.util
 import inspect
 import threading
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional
 from types import MappingProxyType
 
 logger = logging.getLogger(__name__)
@@ -53,12 +53,12 @@ class ToolResolver:
             tools_py_path: Optional path to tools.py. If None, uses ./tools.py
         """
         self._tools_py_path = tools_py_path or "tools.py"
-        self._local_tools_cache: Dict[str, Callable] = {}
+        self._local_tools_cache: Mapping[str, Callable] = MappingProxyType({})
         self._local_tools_loaded: bool = False
         self._praisonai_tools_available: Optional[bool] = None
         self._local_tools_lock = threading.Lock()
     
-    def _load_local_tools(self) -> Dict[str, Callable]:
+    def _load_local_tools(self) -> Mapping[str, Callable]:
         """Load tools from local tools.py file.
         
         Security: Requires PRAISONAI_ALLOW_LOCAL_TOOLS=true to prevent

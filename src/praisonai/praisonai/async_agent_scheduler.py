@@ -7,9 +7,11 @@ scheduler package for full functionality including async support.
 import warnings
 
 warnings.warn(
-    "praisonai.async_agent_scheduler is deprecated; "
-    "use 'from praisonai.scheduler import AsyncAgentScheduler' instead.",
-    DeprecationWarning, stacklevel=2,
+    "praisonai.async_agent_scheduler is pending deprecation; it will be moved to "
+    "praisonai.scheduler.async_agent_scheduler in a future release. Continue "
+    "importing from praisonai.async_agent_scheduler until then.",
+    PendingDeprecationWarning,
+    stacklevel=2,
 )
 
 # TODO: Once AsyncAgentScheduler is moved to scheduler package, import from there

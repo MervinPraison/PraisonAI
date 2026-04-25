@@ -13,6 +13,7 @@ warnings.warn(
 )
 
 from praisonai.scheduler.agent_scheduler import (  # noqa: F401
-    AgentScheduler, PraisonAgentExecutor, AgentExecutorInterface,
-    create_agent_scheduler
+    AgentScheduler, PraisonAgentExecutor, create_agent_scheduler
 )
+# Preserve the legacy public name as an alias of the canonical interface
+from praisonai.scheduler.base import ExecutorInterface as AgentExecutorInterface  # noqa: F401
