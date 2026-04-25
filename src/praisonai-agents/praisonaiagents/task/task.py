@@ -128,6 +128,9 @@ class Task:
         caching: Optional[Any] = None,
         # Output variable name for workflow variable assignment
         output_variable: Optional[str] = None,
+        # Failure handling policy configuration
+        fail_on_callback_error: bool = False,
+        fail_on_memory_error: bool = False,
     ):
         # Add check if memory config is provided
         if memory is not None or (config and config.get('memory_config')):
@@ -222,6 +225,10 @@ class Task:
         self.agent_config = agent_config  # Per-task agent configuration {role, goal, backstory, llm}
         self.variables = variables if variables else {}  # Variables for substitution in description
         self.non_fatal_errors = []  # Accumulate non-fatal errors for visibility
+        
+        # Failure handling policy configuration
+        self.fail_on_callback_error = fail_on_callback_error
+        self.fail_on_memory_error = fail_on_memory_error
 
         # ============================================================
         # ROBUSTNESS PARAMS (graceful degradation & retry control)
@@ -615,9 +622,13 @@ class Task:
             # Also check for SQLite fallback
             has_sqlite = hasattr(self.memory, '_sqlite_adapter') and self.memory._sqlite_adapter is not None
             
+            if not (has_adapter or has_sqlite):
+                logger.warning(f"Task {self.id}: Memory initialized but no adapter available — check memory configuration")
+            
             return has_adapter or has_sqlite
-        except Exception:
-            # If any error occurs during readiness check, consider memory not ready
+        except Exception as e:
+            # Surface configuration errors instead of hiding them
+            logger.error(f"Task {self.id}: Memory readiness check failed: {e}")
             return False
 
     def store_in_memory(self, content: str, agent_name: str = None, task_id: str = None):
@@ -635,8 +646,12 @@ class Task:
                 )
                 logger.info(f"Task {self.id}: Content stored in memory")
             except Exception as e:
+                error_msg = f"store_in_memory: {e}"
+                self.non_fatal_errors.append(error_msg)
                 logger.error(f"Task {self.id}: Failed to store content in memory: {e}")
                 logger.exception(e)
+                if self.fail_on_memory_error:
+                    raise
 
     async def execute_callback(self, task_output: TaskOutput) -> None:
         """Execute callback and store quality metrics if enabled"""
@@ -751,9 +766,8 @@ class Task:
                 logger.exception(e)
                 # Attach error to output for workflow orchestrator visibility
                 task_output.callback_error = str(e)
-                # TODO: Consider raising if callback is marked as critical
-                # if getattr(self, 'callback_critical', False):
-                #     raise
+                if self.fail_on_callback_error:
+                    raise
         if self.non_fatal_errors:
             task_output.non_fatal_errors = list(self.non_fatal_errors)
 

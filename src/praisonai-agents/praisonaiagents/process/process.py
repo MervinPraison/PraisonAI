@@ -940,6 +940,7 @@ Provide a JSON with the structure:
             stacklevel=3
         )
         current_iter = 0  # Track how many times we've looped
+        workflow_start = time.monotonic()  # For timeout enforcement
         # Build workflow relationships first
         for task in self.tasks.values():
             if task.next_tasks:
@@ -1067,6 +1068,14 @@ Provide a JSON with the structure:
             if current_iter > self.max_iter:
                 logging.info(f"Max iteration limit {self.max_iter} reached, ending workflow.")
                 break
+
+            # Enforce workflow timeout if set
+            if self.workflow_timeout is not None:
+                elapsed = time.monotonic() - workflow_start
+                if elapsed > self.workflow_timeout:
+                    logging.warning(f"Workflow timeout ({self.workflow_timeout}s) exceeded after {elapsed:.1f}s, ending workflow.")
+                    self.workflow_cancelled = True
+                    break
 
             # ADDED: Check workflow finished flag at the start of each cycle
             if self.workflow_finished:

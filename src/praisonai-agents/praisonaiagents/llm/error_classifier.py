@@ -6,6 +6,7 @@ error classification for better handling of different failure modes.
 """
 
 import re
+import random
 from enum import Enum
 from typing import Dict, Tuple, List, Optional
 
@@ -145,6 +146,9 @@ def should_retry(category: ErrorCategory) -> bool:
 def get_retry_delay(category: ErrorCategory, attempt: int = 1, base_delay: float = 1.0) -> float:
     """Get the appropriate delay before retrying based on error category.
     
+    Uses full jitter to prevent thundering herd problems in multi-agent setups
+    where multiple agents hit rate limits simultaneously.
+    
     Args:
         category: Error category
         attempt: Current attempt number (1-based)
@@ -154,12 +158,10 @@ def get_retry_delay(category: ErrorCategory, attempt: int = 1, base_delay: float
         Delay in seconds, or 0 if should not retry
         
     Examples:
-        >>> get_retry_delay(ErrorCategory.RATE_LIMIT, attempt=1)
-        3.0
-        >>> get_retry_delay(ErrorCategory.TRANSIENT, attempt=3)
-        8.0
-        >>> get_retry_delay(ErrorCategory.AUTH, attempt=1)
-        0
+        >>> # With jitter, these will return random values in range:
+        >>> get_retry_delay(ErrorCategory.RATE_LIMIT, attempt=1)  # 0.0 to 3.0
+        >>> get_retry_delay(ErrorCategory.TRANSIENT, attempt=3)   # 0.0 to 8.0
+        >>> get_retry_delay(ErrorCategory.AUTH, attempt=1)        # Always 0
     """
     attempt = max(1, attempt)
 
@@ -167,16 +169,18 @@ def get_retry_delay(category: ErrorCategory, attempt: int = 1, base_delay: float
         return 0
     
     if category == ErrorCategory.RATE_LIMIT:
-        # Longer delay for rate limits to avoid hitting limits again
-        return min(base_delay * (3 ** attempt), 60.0)
+        # Exponential backoff with full jitter for rate limits
+        max_delay = min(base_delay * (3 ** attempt), 60.0)
+        return random.uniform(0, max_delay)
     
     elif category == ErrorCategory.CONTEXT_LIMIT:
-        # Short delay for context limits (compression should be tried)
+        # Short delay for context limits (no jitter needed - not a contention issue)
         return base_delay * 0.5
     
     elif category == ErrorCategory.TRANSIENT:
-        # Exponential backoff for transient errors
-        return min(base_delay * (2 ** attempt), 30.0)
+        # Exponential backoff with full jitter for transient errors
+        max_delay = min(base_delay * (2 ** attempt), 30.0)
+        return random.uniform(0, max_delay)
     
     return 0
 
