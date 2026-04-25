@@ -344,7 +344,7 @@ def register_cli_tools() -> None:
     def schedule_list() -> str:
         """List scheduled tasks."""
         try:
-            from praisonai.agent_scheduler import AgentScheduler
+            from praisonai.scheduler import AgentScheduler
             scheduler = AgentScheduler()
             tasks = scheduler.list_tasks()
             return str(tasks)
@@ -361,7 +361,7 @@ def register_cli_tools() -> None:
     ) -> str:
         """Add a scheduled task."""
         try:
-            from praisonai.agent_scheduler import AgentScheduler
+            from praisonai.scheduler import AgentScheduler
             scheduler = AgentScheduler()
             scheduler.add_task(task_name, cron, workflow_path)
             return f"Task scheduled: {task_name}"
@@ -374,7 +374,7 @@ def register_cli_tools() -> None:
     def schedule_remove(task_name: str) -> str:
         """Remove a scheduled task."""
         try:
-            from praisonai.agent_scheduler import AgentScheduler
+            from praisonai.scheduler import AgentScheduler
             scheduler = AgentScheduler()
             scheduler.remove_task(task_name)
             return f"Task removed: {task_name}"
