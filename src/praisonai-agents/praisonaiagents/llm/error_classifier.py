@@ -169,18 +169,18 @@ def get_retry_delay(category: ErrorCategory, attempt: int = 1, base_delay: float
         return 0
     
     if category == ErrorCategory.RATE_LIMIT:
-        # Exponential backoff with full jitter for rate limits
+        # Exponential backoff with equal jitter for rate limits (minimum floor to prevent instant retries)
         max_delay = min(base_delay * (3 ** attempt), 60.0)
-        return random.uniform(0, max_delay)
+        return base_delay + random.uniform(0, max_delay - base_delay)
     
     elif category == ErrorCategory.CONTEXT_LIMIT:
         # Short delay for context limits (no jitter needed - not a contention issue)
         return base_delay * 0.5
     
     elif category == ErrorCategory.TRANSIENT:
-        # Exponential backoff with full jitter for transient errors
+        # Exponential backoff with equal jitter for transient errors (minimum floor to prevent instant retries)
         max_delay = min(base_delay * (2 ** attempt), 30.0)
-        return random.uniform(0, max_delay)
+        return base_delay + random.uniform(0, max_delay - base_delay)
     
     return 0
 

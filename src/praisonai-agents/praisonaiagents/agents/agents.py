@@ -1056,6 +1056,11 @@ class AgentTeam:
                     except Exception as e:
                         logger.error(f"Error executing memory callback for task {task_id}: {e}")
                         logger.exception(e)
+                        # Respect task failure policies - re-raise if configured
+                        if hasattr(task, 'fail_on_callback_error') and task.fail_on_callback_error:
+                            raise
+                        if hasattr(task, 'fail_on_memory_error') and task.fail_on_memory_error:
+                            raise
                     
                     # Run task callback if exists
                     if task.callback:

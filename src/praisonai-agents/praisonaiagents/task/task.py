@@ -680,6 +680,9 @@ class Task:
             except Exception as e:
                 logger.error(f"Task {self.id}: Failed to store task output in memory: {e}")
                 logger.exception(e)
+                # store_in_memory already appended to non_fatal_errors; respect policy
+                if self.fail_on_memory_error:
+                    raise
 
         logger.info(f"Task output: {task_output.raw[:100]}...")
 
@@ -767,8 +770,12 @@ class Task:
                 # Attach error to output for workflow orchestrator visibility
                 task_output.callback_error = str(e)
                 if self.fail_on_callback_error:
+                    # Attach errors before re-raising
+                    if self.non_fatal_errors:
+                        task_output.non_fatal_errors = list(self.non_fatal_errors)
                     raise
-        if self.non_fatal_errors:
+        # Attach non_fatal_errors to output if not already attached due to re-raise
+        if self.non_fatal_errors and not hasattr(task_output, 'non_fatal_errors'):
             task_output.non_fatal_errors = list(self.non_fatal_errors)
 
         task_prompt = f"""
