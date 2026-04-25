@@ -27,6 +27,11 @@ __all__ = [
     'LocalManagedConfig',         # backward compat alias
     'SandboxedAgent',             # new honest name
     'SandboxedAgentConfig',       # new honest name
+    # New canonical agent backends
+    'HostedAgent',
+    'HostedAgentConfig', 
+    'LocalAgent',
+    'LocalAgentConfig',
 ]
 
 # Telemetry initialization state
@@ -123,6 +128,19 @@ def __getattr__(name):
     elif name in ('ManagedConfig', 'ManagedBackendConfig'):
         from .integrations.managed_agents import ManagedConfig
         return ManagedConfig
+    # New canonical agent backends
+    elif name == 'HostedAgent':
+        from .integrations.hosted_agent import HostedAgent
+        return HostedAgent
+    elif name == 'HostedAgentConfig':
+        from .integrations.hosted_agent import HostedAgentConfig
+        return HostedAgentConfig
+    elif name == 'LocalAgent':
+        from .integrations.local_agent import LocalAgent
+        return LocalAgent
+    elif name == 'LocalAgentConfig':
+        from .integrations.local_agent import LocalAgentConfig
+        return LocalAgentConfig
     elif name in ('DB', 'PraisonAIDB', 'PraisonDB'):
         from .db.adapter import DB
         return DB

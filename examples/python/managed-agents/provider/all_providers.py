@@ -1,7 +1,7 @@
 """All compute providers — comprehensive test across Local, Docker, E2B, and Modal.
 
-This example mirrors the Anthropic app.py but uses the local provider with
-various compute backends instead of Anthropic's managed infrastructure.
+This example demonstrates local agent loops with various compute backends for tool sandboxing.
+Uses the new LocalAgent class to clearly indicate local execution with optional cloud compute.
 
 Requires:
   - Docker running locally
@@ -9,7 +9,8 @@ Requires:
   - modal CLI configured (modal token set)
 """
 import asyncio
-from praisonai import Agent, ManagedAgent, LocalManagedConfig
+from praisonai import Agent
+from praisonai.integrations import LocalAgent, LocalAgentConfig
 
 
 async def test_provider(name, compute, extra_provision_kwargs=None):
@@ -18,10 +19,9 @@ async def test_provider(name, compute, extra_provision_kwargs=None):
     print(f"  PROVIDER: {name}")
     print(f"{'='*60}")
 
-    managed = ManagedAgent(
-        provider="local",
+    managed = LocalAgent(
         compute=compute,
-        config=LocalManagedConfig(
+        config=LocalAgentConfig(
             model="gpt-4o-mini",
             system="You are a helpful assistant. Be concise.",
             name=f"{name}Agent",

@@ -1,13 +1,14 @@
-"""Local provider — basic managed agent with gpt-4o-mini.
+"""Local agent — basic local execution with gpt-4o-mini.
 
 No external infrastructure needed. Runs the agent loop locally.
+Uses the new canonical LocalAgent class for clarity.
 """
-from praisonai import Agent, ManagedAgent, LocalManagedConfig
+from praisonai import Agent
+from praisonai.integrations import LocalAgent, LocalAgentConfig
 
-# Create a local managed agent (auto-detects local when no ANTHROPIC_API_KEY)
-managed = ManagedAgent(
-    provider="local",
-    config=LocalManagedConfig(
+# Create a local agent (runs locally, no managed runtime)
+managed = LocalAgent(
+    config=LocalAgentConfig(
         model="gpt-4o-mini",
         system="You are a helpful assistant. Be concise.",
         name="LocalAgent",
