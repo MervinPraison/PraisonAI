@@ -3,6 +3,21 @@
 Uses the new canonical LocalAgent class which clearly communicates that only the
 agent loop runs locally. The LLM calls go to a local Ollama instance, no managed runtime involved.
 """
+import os
+import sys
+import requests
+
+# Skip guards - exit cleanly if prerequisites not met  
+# Check if Ollama daemon is running
+try:
+    response = requests.get("http://localhost:11434/api/tags", timeout=2)
+    if response.status_code != 200:
+        raise Exception("Ollama not responding")
+except Exception:
+    print("[skip] Ollama daemon not running at localhost:11434")
+    sys.exit(0)
+
+# Heavy imports only after skip-guards pass
 from praisonai import Agent
 from praisonai.integrations import LocalAgent, LocalAgentConfig
 
