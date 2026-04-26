@@ -373,74 +373,76 @@ class ToolResolver:
         self._local_tools_loaded = False
 
 
-# Global resolver instance (lazy initialized)
-_global_resolver: Optional[ToolResolver] = None
-_resolver_lock = threading.Lock()
-
-
-def _get_resolver() -> ToolResolver:
-    """Get or create the global resolver instance."""
-    global _global_resolver
-    if _global_resolver is None:
-        with _resolver_lock:
-            if _global_resolver is None:
-                _global_resolver = ToolResolver()
-    return _global_resolver
-
-
-# Convenience functions
-def resolve_tool(name: str) -> Optional[Callable]:
+# Convenience functions with optional resolver parameter
+def resolve_tool(name: str, *, resolver: Optional[ToolResolver] = None) -> Optional[Callable]:
     """Resolve a tool name to a callable.
     
     Args:
         name: Tool name to resolve
+        resolver: Optional ToolResolver instance. If None, creates a new one.
         
     Returns:
         Callable if found, None otherwise
     """
-    return _get_resolver().resolve(name)
+    if resolver is None:
+        resolver = ToolResolver()
+    return resolver.resolve(name)
 
 
-def resolve_tools(names: List[str]) -> List[Callable]:
+def resolve_tools(names: List[str], *, resolver: Optional[ToolResolver] = None) -> List[Callable]:
     """Resolve multiple tool names to callables.
     
     Args:
         names: List of tool names
+        resolver: Optional ToolResolver instance. If None, creates a new one.
         
     Returns:
         List of resolved callables
     """
-    return _get_resolver().resolve_many(names)
+    if resolver is None:
+        resolver = ToolResolver()
+    return resolver.resolve_many(names)
 
 
-def list_available_tools() -> Dict[str, str]:
+def list_available_tools(*, resolver: Optional[ToolResolver] = None) -> Dict[str, str]:
     """List all available tools with descriptions.
+    
+    Args:
+        resolver: Optional ToolResolver instance. If None, creates a new one.
     
     Returns:
         Dict mapping tool names to descriptions
     """
-    return _get_resolver().list_available()
+    if resolver is None:
+        resolver = ToolResolver()
+    return resolver.list_available()
 
 
-def has_tool(name: str) -> bool:
+def has_tool(name: str, *, resolver: Optional[ToolResolver] = None) -> bool:
     """Check if a tool name can be resolved.
     
     Args:
         name: Tool name to check
+        resolver: Optional ToolResolver instance. If None, creates a new one.
         
     Returns:
         True if tool exists, False otherwise
     """
-    return _get_resolver().has_tool(name)
+    if resolver is None:
+        resolver = ToolResolver()
+    return resolver.has_tool(name)
 
 
-def validate_yaml_tools(yaml_config: Dict[str, Any]) -> List[str]:
+def validate_yaml_tools(yaml_config: Dict[str, Any], *, resolver: Optional[ToolResolver] = None) -> List[str]:
     """Validate that all tools in YAML config can be resolved.
     
     Args:
         yaml_config: Parsed YAML configuration
+        resolver: Optional ToolResolver instance. If None, creates a new one.
         
     Returns:
         List of missing tool names
     """
-    return _get_resolver().validate_yaml_tools(yaml_config)
+    if resolver is None:
+        resolver = ToolResolver()
+    return resolver.validate_yaml_tools(yaml_config)

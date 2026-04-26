@@ -18,6 +18,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import weakref
+from collections import OrderedDict
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -62,11 +64,17 @@ class BotSessionManager:
         max_history: int = 100,
         store: Optional[Any] = None,
         platform: str = "",
+        max_sessions: int = 10_000,
+        idle_ttl_seconds: int = 24 * 3600,
     ) -> None:
-        self._histories: Dict[str, List[Dict[str, Any]]] = {}
+        # Use OrderedDict for LRU eviction
+        self._histories: "OrderedDict[str, List[Dict[str, Any]]]" = OrderedDict()
         self._locks: Dict[str, asyncio.Lock] = {}
-        self._agent_locks: Dict[int, asyncio.Lock] = {}
+        # Use WeakValueDictionary for agent locks to auto-cleanup
+        self._agent_locks: "weakref.WeakValueDictionary[int, asyncio.Lock]" = weakref.WeakValueDictionary()
         self._max_history = max_history
+        self._max_sessions = max_sessions
+        self._idle_ttl = idle_ttl_seconds
         self._store = store
         self._platform = platform
         self._last_active: Dict[str, float] = {}
@@ -75,6 +83,24 @@ class BotSessionManager:
         """Generate a deterministic session key for persistent storage."""
         prefix = f"bot_{self._platform}" if self._platform else "bot"
         return f"{prefix}_{user_id}"
+
+    def _touch(self, user_id: str) -> None:
+        """Mark user as active and move to end of LRU order."""
+        self._last_active[user_id] = time.monotonic()
+        if user_id in self._histories:
+            self._histories.move_to_end(user_id, last=True)
+        
+        # Auto-evict if over capacity
+        if len(self._histories) > self._max_sessions:
+            self._evict_lru()
+
+    def _evict_lru(self) -> None:
+        """Evict least recently used sessions until under capacity."""
+        while len(self._histories) > self._max_sessions:
+            uid, _ = self._histories.popitem(last=False)
+            self._locks.pop(uid, None)
+            self._last_active.pop(uid, None)
+            logger.debug(f"BotSessionManager: evicted LRU session {uid}")
 
     def _get_lock(self, user_id: str) -> asyncio.Lock:
         """Get or create an asyncio.Lock for *user_id*."""
@@ -108,8 +134,9 @@ class BotSessionManager:
         if self._max_history > 0 and len(history) > self._max_history:
             history = history[-self._max_history:]
 
-        # Always update in-memory cache
+        # Always update in-memory cache and move to end of LRU
         self._histories[user_id] = history
+        self._histories.move_to_end(user_id, last=True)
 
         if self._store is not None:
             key = self._session_key(user_id)
@@ -140,7 +167,7 @@ class BotSessionManager:
         Uses both a per-user lock (serialise same user) and a per-agent
         lock (prevent concurrent history swaps on a shared Agent).
         """
-        self._last_active[user_id] = time.monotonic()
+        self._touch(user_id)
         user_lock = self._get_lock(user_id)
         agent_lock = self._get_agent_lock(agent)
         async with user_lock:
@@ -170,12 +197,13 @@ class BotSessionManager:
 
             return response
 
-    def reap_stale(self, max_age_seconds: int) -> int:
+    def reap_stale(self, max_age_seconds: int = 0) -> int:
         """Remove sessions older than *max_age_seconds*.  Returns count reaped.
 
         Call this periodically or lazily (e.g. on each chat() call) to
         auto-clean inactive sessions and free memory.
         """
+        max_age_seconds = max_age_seconds or self._idle_ttl
         if max_age_seconds <= 0:
             return 0
         now = time.monotonic()
@@ -224,7 +252,11 @@ class BotSessionManager:
                 except Exception as e:
                     logger.warning("Failed to clear session %s: %s", key, e)
 
+        # Clear all data structures
         self._histories.clear()
+        self._locks.clear()
+        self._last_active.clear()
+        # _agent_locks self-cleans via weak refs
         return count
 
     @property
