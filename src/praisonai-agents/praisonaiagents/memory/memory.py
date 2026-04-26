@@ -1979,7 +1979,18 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
             # Clear the registry
             self._all_connections.clear()
         
-        # Close MongoDB client if it exists
+        # Close memory adapter if it exists (protocol-driven path)
+        if hasattr(self, 'memory_adapter') and self.memory_adapter:
+            try:
+                if hasattr(self.memory_adapter, 'close') and callable(self.memory_adapter.close):
+                    self.memory_adapter.close()
+                    logger.debug("Memory adapter closed successfully")
+            except Exception as e:
+                logger.warning(f"Error closing memory adapter: {e}")
+            finally:
+                self.memory_adapter = None
+        
+        # Close MongoDB client if it exists (legacy path)
         if hasattr(self, 'mongo_client') and self.mongo_client:
             try:
                 self.mongo_client.close()

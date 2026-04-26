@@ -429,22 +429,24 @@ def _get_bg_loop() -> asyncio.AbstractEventLoop:
 def _shutdown_bg_loop():
     """Gracefully shutdown the background event loop."""
     global _bg_loop
-    if _bg_loop is not None and _bg_loop.is_running():
-        # Stop the loop gracefully
+    if _bg_loop is None or not _bg_loop.is_running():
+        return
+
+    async def _cancel_pending():
+        current = asyncio.current_task()
+        pending = [t for t in asyncio.all_tasks() if t is not current]
+        for t in pending:
+            t.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    try:
+        fut = asyncio.run_coroutine_threadsafe(_cancel_pending(), _bg_loop)
+        fut.result(timeout=2)
+    except Exception:
+        pass
+    finally:
         _bg_loop.call_soon_threadsafe(_bg_loop.stop)
-        
-        # Give pending tasks a short time to complete
-        import time
-        time.sleep(0.1)
-        
-        # Cancel any remaining tasks to prevent warnings
-        try:
-            pending = asyncio.all_tasks(_bg_loop)
-            for task in pending:
-                task.cancel()
-        except RuntimeError:
-            # Loop may already be closed
-            pass
 
 
 # Register cleanup on process exit

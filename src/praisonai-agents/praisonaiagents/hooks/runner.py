@@ -146,36 +146,12 @@ class HookRunner:
             loop = None
 
         if loop is not None and loop.is_running():
-            # Already inside a running async loop — cannot use run_until_complete.
-            # Use ThreadPoolExecutor to run async code in a separate thread to avoid
-            # fire-and-forget behavior that silently discards results.
-            import concurrent.futures
-            import threading
-            
-            def _run_in_thread():
-                new_loop = asyncio.new_event_loop()
-                try:
-                    asyncio.set_event_loop(new_loop)
-                    return new_loop.run_until_complete(
-                        self.execute(event, input_data, target)
-                    )
-                finally:
-                    new_loop.close()
-            
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                try:
-                    # Give hooks reasonable timeout to complete (30s)
-                    future = pool.submit(_run_in_thread)
-                    return future.result(timeout=30)
-                except concurrent.futures.TimeoutError:
-                    # If hooks timeout, log warning and return empty results
-                    # rather than blocking indefinitely
-                    logging.warning(f"Hook execution timeout for event {event}")
-                    return []
-                except Exception as e:
-                    # Log execution errors but don't crash the caller
-                    logging.error(f"Hook execution failed for event {event}: {e}")
-                    return []
+            # Cannot execute sync in running event loop - would block the loop
+            # Guide users to use the async API instead
+            raise RuntimeError(
+                "execute_sync() cannot be called from within a running event loop. "
+                "Use 'await runner.execute(event, input_data, target)' instead in async contexts."
+            )
 
         # No running loop — safe to create one
         return asyncio.run(self.execute(event, input_data, target))

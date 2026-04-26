@@ -184,7 +184,7 @@ class Process:
             # Mark task as failed to ensure error is visible
             loop_task.status = "failed"
             if hasattr(loop_task, 'result') and loop_task.result is None:
-                from praisonaiagents.task import TaskOutput
+                from ..output.models import TaskOutput
                 loop_task.result = TaskOutput(
                     raw=f"Failed to read input file: {e}",
                     task_id=loop_task.id
@@ -836,6 +836,11 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
         completed_count = 0
         total_tasks = len(self.tasks) - 1
         logging.info(f"Need to complete {total_tasks} tasks (excluding manager task)")
+        
+        # Track invalid selection attempts and error context
+        invalid_selection_attempts = 0
+        MAX_INVALID_SELECTIONS = 3
+        error_context = ""
 
         while completed_count < total_tasks:
             tasks_summary = []
@@ -862,7 +867,7 @@ Provide a JSON with the structure:
    "agent_name": "<string>",
    "action": "<execute or stop>"
 }}
-"""
+""" + error_context
 
             # Retry logic for manager instruction failures
             MAX_MANAGER_RETRIES = 3
@@ -876,7 +881,9 @@ Provide a JSON with the structure:
                             manager_task, manager_prompt, ManagerInstructions
                         )
                     else:
-                        parsed_instructions = self._get_manager_instructions_with_fallback(
+                        # Offload sync call to thread to avoid blocking event loop
+                        parsed_instructions = await asyncio.to_thread(
+                            self._get_manager_instructions_with_fallback,
                             manager_task, manager_prompt, ManagerInstructions
                         )
                     logging.info(f"Manager instructions: {parsed_instructions}")
@@ -889,11 +896,8 @@ Provide a JSON with the structure:
                             f"Manager parse error (attempt {manager_attempt + 1}/{MAX_MANAGER_RETRIES}), "
                             f"retrying in {delay}s: {e}"
                         )
-                        if manager_task.async_execution:
-                            await asyncio.sleep(delay)
-                        else:
-                            import time
-                            time.sleep(delay)
+                        # Always use async sleep in async context
+                        await asyncio.sleep(delay)
                     else:
                         # Final attempt failed
                         display_error(f"Manager failed after {MAX_MANAGER_RETRIES} attempts: {e}")
@@ -915,14 +919,28 @@ Provide a JSON with the structure:
 
             if selected_task_id not in self.tasks:
                 # Re-prompt the manager with valid task IDs instead of terminating
+                invalid_selection_attempts += 1
+                if invalid_selection_attempts > MAX_INVALID_SELECTIONS:
+                    logging.error(
+                        f"Manager produced {invalid_selection_attempts} invalid task selections; aborting."
+                    )
+                    break
+                
                 valid_task_ids = list(self.tasks.keys())
-                error_msg = f"Manager selected invalid task_id={selected_task_id}. Valid task IDs are: {valid_task_ids}"
-                logging.warning(error_msg)
-                manager_prompt += (
+                logging.warning(
+                    f"Manager selected invalid task_id={selected_task_id} "
+                    f"(attempt {invalid_selection_attempts}/{MAX_INVALID_SELECTIONS}); valid IDs: {valid_task_ids}"
+                )
+                # Set error context for next iteration (instead of appending to prompt that gets rebuilt)
+                error_context = (
                     f"\n\n[ERROR] Your previous selection of task_id={selected_task_id} was invalid. "
                     f"Valid task IDs are: {valid_task_ids}. Please select again from the valid options."
                 )
                 continue  # Re-prompt the manager instead of breaking
+            
+            # Reset on valid selection
+            invalid_selection_attempts = 0
+            error_context = ""
 
             original_agent = self.tasks[selected_task_id].agent.name if self.tasks[selected_task_id].agent else "None"
             for a in self.agents:
@@ -1533,6 +1551,11 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
         completed_count = 0
         total_tasks = len(self.tasks) - 1
         logging.info(f"Need to complete {total_tasks} tasks (excluding manager task)")
+        
+        # Track invalid selection attempts and error context
+        invalid_selection_attempts = 0
+        MAX_INVALID_SELECTIONS = 3
+        error_context = ""
 
         while completed_count < total_tasks:
             tasks_summary = []
@@ -1559,7 +1582,7 @@ Provide a JSON with the structure:
    "agent_name": "<string>",
    "action": "<execute or stop>"
 }}
-"""
+""" + error_context
 
             try:
                 logging.info("Requesting manager instructions...")
@@ -1584,14 +1607,28 @@ Provide a JSON with the structure:
 
             if selected_task_id not in self.tasks:
                 # Re-prompt the manager with valid task IDs instead of terminating
+                invalid_selection_attempts += 1
+                if invalid_selection_attempts > MAX_INVALID_SELECTIONS:
+                    logging.error(
+                        f"Manager produced {invalid_selection_attempts} invalid task selections; aborting."
+                    )
+                    break
+                
                 valid_task_ids = list(self.tasks.keys())
-                error_msg = f"Manager selected invalid task_id={selected_task_id}. Valid task IDs are: {valid_task_ids}"
-                logging.warning(error_msg)
-                manager_prompt += (
+                logging.warning(
+                    f"Manager selected invalid task_id={selected_task_id} "
+                    f"(attempt {invalid_selection_attempts}/{MAX_INVALID_SELECTIONS}); valid IDs: {valid_task_ids}"
+                )
+                # Set error context for next iteration (instead of appending to prompt that gets rebuilt)
+                error_context = (
                     f"\n\n[ERROR] Your previous selection of task_id={selected_task_id} was invalid. "
                     f"Valid task IDs are: {valid_task_ids}. Please select again from the valid options."
                 )
                 continue  # Re-prompt the manager instead of breaking
+            
+            # Reset on valid selection
+            invalid_selection_attempts = 0
+            error_context = ""
 
             original_agent = self.tasks[selected_task_id].agent.name if self.tasks[selected_task_id].agent else "None"
             for a in self.agents:

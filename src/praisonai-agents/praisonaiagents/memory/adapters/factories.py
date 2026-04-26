@@ -307,13 +307,9 @@ class ChromaMemoryAdapter:
     
     def close(self):
         """Clean up ChromaDB resources."""
-        try:
-            # ChromaDB PersistentClient doesn't have explicit close,
-            # but we should release references
-            self.client = None
-            self.collection = None
-        except Exception:
-            pass  # Ignore cleanup errors
+        # ChromaDB PersistentClient has no explicit close; release references.
+        self.client = None
+        self.collection = None
 
 
 class MongoDBMemoryAdapter:
