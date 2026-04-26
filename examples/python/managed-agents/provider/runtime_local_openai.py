@@ -3,6 +3,21 @@
 Uses the new canonical LocalAgent class which clearly communicates that only the
 agent loop runs locally. The LLM calls go to OpenAI, but there's no managed runtime involved.
 """
+import os
+import sys
+
+# Skip guards - exit cleanly if prerequisites not met
+if not os.getenv("OPENAI_API_KEY"):
+    print("[skip] OPENAI_API_KEY not set")
+    sys.exit(0)
+
+try:
+    import openai
+except ImportError:
+    print("[skip] openai SDK not installed")
+    sys.exit(0)
+
+# Heavy imports only after skip-guards pass
 from praisonai import Agent
 from praisonai.integrations import LocalAgent, LocalAgentConfig
 
