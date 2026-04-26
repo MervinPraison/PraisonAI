@@ -3,6 +3,21 @@
 Uses the new canonical HostedAgent class which clearly communicates that the entire
 agent loop runs in Anthropic's cloud, not locally.
 """
+import os
+import sys
+
+# Skip guards - exit cleanly if prerequisites not met
+if not (os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY")):
+    print("[skip] ANTHROPIC_API_KEY or CLAUDE_API_KEY not set")
+    sys.exit(0)
+
+try:
+    import anthropic
+except ImportError:
+    print("[skip] anthropic SDK not installed")
+    sys.exit(0)
+
+# Heavy imports only after skip-guards pass
 from praisonai import Agent
 from praisonai.integrations import HostedAgent, HostedAgentConfig
 

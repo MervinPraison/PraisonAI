@@ -3,6 +3,21 @@
 Uses the new canonical LocalAgent class which clearly communicates that only the
 agent loop runs locally. The LLM calls go to Google's Gemini API, but there's no managed runtime involved.
 """
+import os
+import sys
+
+# Skip guards - exit cleanly if prerequisites not met
+if not (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")):
+    print("[skip] GEMINI_API_KEY or GOOGLE_API_KEY not set")
+    sys.exit(0)
+
+try:
+    import google.generativeai
+except ImportError:
+    print("[skip] google-generativeai SDK not installed")
+    sys.exit(0)
+
+# Heavy imports only after skip-guards pass
 from praisonai import Agent
 from praisonai.integrations import LocalAgent, LocalAgentConfig
 
