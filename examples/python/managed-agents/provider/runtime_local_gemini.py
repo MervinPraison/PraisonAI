@@ -11,11 +11,8 @@ if not (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")):
     print("[skip] GEMINI_API_KEY or GOOGLE_API_KEY not set")
     sys.exit(0)
 
-try:
-    import google.generativeai
-except ImportError:
-    print("[skip] google-generativeai SDK not installed")
-    sys.exit(0)
+# Note: google.generativeai SDK is not required - litellm handles Gemini via REST API
+# Only GEMINI_API_KEY/GOOGLE_API_KEY is needed for the gemini/ model prefix
 
 # Heavy imports only after skip-guards pass
 from praisonai import Agent

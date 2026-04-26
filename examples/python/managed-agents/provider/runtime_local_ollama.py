@@ -5,15 +5,20 @@ agent loop runs locally. The LLM calls go to a local Ollama instance, no managed
 """
 import os
 import sys
-import requests
 
 # Skip guards - exit cleanly if prerequisites not met  
-# Check if Ollama daemon is running
+# Check if requests is available and Ollama daemon is running
+try:
+    import requests
+except ImportError:
+    print("[skip] requests library not installed")
+    sys.exit(0)
+
 try:
     response = requests.get("http://localhost:11434/api/tags", timeout=2)
-    if response.status_code != 200:
-        raise Exception("Ollama not responding")
-except Exception:
+except requests.RequestException:
+    response = None
+if response is None or response.status_code != 200:
     print("[skip] Ollama daemon not running at localhost:11434")
     sys.exit(0)
 

@@ -94,22 +94,15 @@ def test_managed_agent_deprecation_warnings():
             assert "LocalAgent" in str(w[0].message)
 
 
-def test_managed_agent_compute_provider_warnings():
-    """Test that ManagedAgent(provider='modal'|'e2b'|...) emits DeprecationWarning and returns LocalManagedAgent."""
+@pytest.mark.parametrize("provider", ["modal", "e2b", "docker", "flyio", "daytona"])
+def test_managed_agent_compute_provider_warnings(provider):
+    """Test that ManagedAgent(provider=<compute>) emits DeprecationWarning and returns LocalManagedAgent."""
     from praisonai.integrations.managed_agents import ManagedAgent
     from praisonai.integrations.managed_local import LocalManagedAgent
     
     # Compute providers should emit DeprecationWarning and return LocalManagedAgent (backward compatibility)
     with pytest.warns(DeprecationWarning, match="compute.*deprecated"):
-        obj = ManagedAgent(provider="modal")
-    assert isinstance(obj, LocalManagedAgent)
-    
-    with pytest.warns(DeprecationWarning, match="compute.*deprecated"):
-        obj = ManagedAgent(provider="e2b")
-    assert isinstance(obj, LocalManagedAgent)
-    
-    with pytest.warns(DeprecationWarning, match="compute.*deprecated"):
-        obj = ManagedAgent(provider="docker")
+        obj = ManagedAgent(provider=provider)
     assert isinstance(obj, LocalManagedAgent)
 
 
