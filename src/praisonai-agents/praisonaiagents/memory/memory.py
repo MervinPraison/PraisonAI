@@ -460,6 +460,9 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
     def _init_mongodb(self):
         """Initialize MongoDB client for memory storage."""
         try:
+            # Import MongoClient locally to handle optional dependency
+            from pymongo import MongoClient
+            
             mongo_cfg = self.cfg.get("config", {})
             self.connection_string = mongo_cfg.get("connection_string", "mongodb://localhost:27017/")
             self.database_name = mongo_cfg.get("database", "praisonai")

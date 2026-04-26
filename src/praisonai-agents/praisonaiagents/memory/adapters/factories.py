@@ -304,6 +304,16 @@ class ChromaMemoryAdapter:
             else:
                 sanitized[k] = str(v)
         return sanitized
+    
+    def close(self):
+        """Clean up ChromaDB resources."""
+        try:
+            # ChromaDB PersistentClient doesn't have explicit close,
+            # but we should release references
+            self.client = None
+            self.collection = None
+        except Exception:
+            pass  # Ignore cleanup errors
 
 
 class MongoDBMemoryAdapter:
@@ -493,3 +503,14 @@ class MongoDBMemoryAdapter:
             return result.embeddings[0] if result.embeddings else None
         except Exception:
             return None
+    
+    def close(self):
+        """Clean up MongoDB resources."""
+        if hasattr(self, 'client') and self.client:
+            try:
+                self.client.close()
+            except Exception as e:
+                import logging
+                logging.warning(f"MongoDB cleanup failed: {e}")
+            finally:
+                self.client = None

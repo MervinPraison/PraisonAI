@@ -181,6 +181,14 @@ class Process:
             logging.error(f"Failed to create subtasks for loop task {loop_task.name}: {e}")
             import traceback
             traceback.print_exc()
+            # Mark task as failed to ensure error is visible
+            loop_task.status = "failed"
+            if hasattr(loop_task, 'result') and loop_task.result is None:
+                from praisonaiagents.task import TaskOutput
+                loop_task.result = TaskOutput(
+                    raw=f"Failed to read input file: {e}",
+                    task_id=loop_task.id
+                )
 
     def _build_task_context(self, current_task: Task) -> str:
         """Build context for a task based on its retain_full_context setting"""
@@ -856,20 +864,43 @@ Provide a JSON with the structure:
 }}
 """
 
-            try:
-                logging.info("Requesting manager instructions...")
-                if manager_task.async_execution:
-                    parsed_instructions = await self._get_manager_instructions_with_fallback_async(
-                        manager_task, manager_prompt, ManagerInstructions
-                    )
-                else:
-                    parsed_instructions = self._get_manager_instructions_with_fallback(
-                        manager_task, manager_prompt, ManagerInstructions
-                    )
-                logging.info(f"Manager instructions: {parsed_instructions}")
-            except Exception as e:
-                display_error(f"Manager parse error: {e}")
-                logging.error(f"Manager parse error: {str(e)}", exc_info=True)
+            # Retry logic for manager instruction failures
+            MAX_MANAGER_RETRIES = 3
+            parsed_instructions = None
+            
+            for manager_attempt in range(MAX_MANAGER_RETRIES):
+                try:
+                    logging.info(f"Requesting manager instructions (attempt {manager_attempt + 1}/{MAX_MANAGER_RETRIES})...")
+                    if manager_task.async_execution:
+                        parsed_instructions = await self._get_manager_instructions_with_fallback_async(
+                            manager_task, manager_prompt, ManagerInstructions
+                        )
+                    else:
+                        parsed_instructions = self._get_manager_instructions_with_fallback(
+                            manager_task, manager_prompt, ManagerInstructions
+                        )
+                    logging.info(f"Manager instructions: {parsed_instructions}")
+                    break  # Success, exit retry loop
+                except Exception as e:
+                    if manager_attempt < MAX_MANAGER_RETRIES - 1:
+                        # Not the last attempt, wait with exponential backoff
+                        delay = 2 ** manager_attempt
+                        logging.warning(
+                            f"Manager parse error (attempt {manager_attempt + 1}/{MAX_MANAGER_RETRIES}), "
+                            f"retrying in {delay}s: {e}"
+                        )
+                        if manager_task.async_execution:
+                            await asyncio.sleep(delay)
+                        else:
+                            import time
+                            time.sleep(delay)
+                    else:
+                        # Final attempt failed
+                        display_error(f"Manager failed after {MAX_MANAGER_RETRIES} attempts: {e}")
+                        logging.error(f"Manager parse error: {str(e)}", exc_info=True)
+            
+            # If all retries failed, break out of the main loop
+            if parsed_instructions is None:
                 break
 
             selected_task_id = parsed_instructions.task_id
@@ -883,10 +914,15 @@ Provide a JSON with the structure:
                 break
 
             if selected_task_id not in self.tasks:
-                error_msg = f"Manager selected invalid task id {selected_task_id}"
-                display_error(error_msg)
-                logging.error(error_msg)
-                break
+                # Re-prompt the manager with valid task IDs instead of terminating
+                valid_task_ids = list(self.tasks.keys())
+                error_msg = f"Manager selected invalid task_id={selected_task_id}. Valid task IDs are: {valid_task_ids}"
+                logging.warning(error_msg)
+                manager_prompt += (
+                    f"\n\n[ERROR] Your previous selection of task_id={selected_task_id} was invalid. "
+                    f"Valid task IDs are: {valid_task_ids}. Please select again from the valid options."
+                )
+                continue  # Re-prompt the manager instead of breaking
 
             original_agent = self.tasks[selected_task_id].agent.name if self.tasks[selected_task_id].agent else "None"
             for a in self.agents:
@@ -1547,10 +1583,15 @@ Provide a JSON with the structure:
                 break
 
             if selected_task_id not in self.tasks:
-                error_msg = f"Manager selected invalid task id {selected_task_id}"
-                display_error(error_msg)
-                logging.error(error_msg)
-                break
+                # Re-prompt the manager with valid task IDs instead of terminating
+                valid_task_ids = list(self.tasks.keys())
+                error_msg = f"Manager selected invalid task_id={selected_task_id}. Valid task IDs are: {valid_task_ids}"
+                logging.warning(error_msg)
+                manager_prompt += (
+                    f"\n\n[ERROR] Your previous selection of task_id={selected_task_id} was invalid. "
+                    f"Valid task IDs are: {valid_task_ids}. Please select again from the valid options."
+                )
+                continue  # Re-prompt the manager instead of breaking
 
             original_agent = self.tasks[selected_task_id].agent.name if self.tasks[selected_task_id].agent else "None"
             for a in self.agents:
