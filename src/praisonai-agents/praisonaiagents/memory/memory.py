@@ -1058,29 +1058,28 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
                 
                 if query_embedding is None:
                     self._log_verbose("Failed to get embedding for query", logging.WARNING)
-                    return []
-                
-                # Search ChromaDB with embedding
-                resp = self.chroma_col.query(
-                    query_embeddings=[query_embedding],
-                    n_results=limit,
-                    include=["documents", "metadatas", "distances"]
-                )
-                
-                results = []
-                if resp["ids"]:
-                    for i in range(len(resp["ids"][0])):
-                        metadata = resp["metadatas"][0][i] if "metadatas" in resp else {}
-                        text = resp["documents"][0][i]
-                        # Add memory record citation
-                        text = f"{text} (Memory record: {resp['ids'][0][i]})"
-                        found.append({
-                            "id": resp["ids"][0][i],
-                            "text": text,
-                            "metadata": metadata,
-                            "score": 1.0 - (resp["distances"][0][i] if "distances" in resp else 0.0)
-                        })
-                logger.info(f"Found {len(found)} results in ChromaDB")
+                else:
+                    # Search ChromaDB with embedding
+                    resp = self.chroma_col.query(
+                        query_embeddings=[query_embedding],
+                        n_results=limit,
+                        include=["documents", "metadatas", "distances"]
+                    )
+                    
+                    results = []
+                    if resp["ids"]:
+                        for i in range(len(resp["ids"][0])):
+                            metadata = resp["metadatas"][0][i] if "metadatas" in resp else {}
+                            text = resp["documents"][0][i]
+                            # Add memory record citation
+                            text = f"{text} (Memory record: {resp['ids'][0][i]})"
+                            found.append({
+                                "id": resp["ids"][0][i],
+                                "text": text,
+                                "metadata": metadata,
+                                "score": 1.0 - (resp["distances"][0][i] if "distances" in resp else 0.0)
+                            })
+                    logger.info(f"Found {len(found)} results in ChromaDB")
 
             except Exception as e:
                 self._log_verbose(f"Error searching ChromaDB: {e}", logging.ERROR)
@@ -1958,10 +1957,12 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
     def close_connections(self):
         """
         Close database connections.
-        
-        Closes the current thread's connections and attempts to close all known
-        connections from other threads. Each thread should call this method before
-        terminating to ensure proper cleanup.
+
+        Closes only the calling thread's STM/LTM SQLite connections (and the
+        process-wide MongoDB client, if any). Connections owned by other threads
+        are left untouched so concurrent agents are not interfered with — each
+        thread is responsible for calling this before terminating. For full
+        process shutdown, use the adapter's own bulk-close path.
         """
         # Close current thread's connections
         if hasattr(self._local, 'stm_conn') and self._local.stm_conn:

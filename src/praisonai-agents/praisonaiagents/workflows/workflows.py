@@ -214,6 +214,12 @@ class Parallel:
     on_failure: str = "partial_ok"  # "partial_ok" | "fail_fast" | "fail_all"
     
     def __init__(self, steps: List, max_workers: Optional[int] = None, on_failure: str = "partial_ok"):
+        valid_on_failure = {"partial_ok", "fail_fast", "fail_all"}
+        if on_failure not in valid_on_failure:
+            raise ValueError(
+                f"Invalid on_failure='{on_failure}'. Must be one of {valid_on_failure}. "
+                "See Parallel docstring for semantics."
+            )
         self.steps = steps
         self.max_workers = max_workers
         self.on_failure = on_failure
@@ -333,15 +339,20 @@ def route(routes: Dict[str, List], default: Optional[List] = None) -> Route:
     """Create a routing decision point."""
     return Route(routes=routes, default=default)
 
-def parallel(steps: List, max_workers: Optional[int] = None) -> Parallel:
+def parallel(
+    steps: List,
+    max_workers: Optional[int] = None,
+    on_failure: str = "partial_ok",
+) -> Parallel:
     """Execute steps in parallel.
 
     Args:
         steps: Steps to execute concurrently.
         max_workers: Optional cap on ThreadPoolExecutor workers. When unset,
             defaults to min(DEFAULT_MAX_PARALLEL_WORKERS, len(steps)).
+        on_failure: Failure strategy — "partial_ok" (default), "fail_fast", or "fail_all".
     """
-    return Parallel(steps=steps, max_workers=max_workers)
+    return Parallel(steps=steps, max_workers=max_workers, on_failure=on_failure)
 
 def loop(step: Any = None, steps: Optional[List[Any]] = None,
          over: Optional[str] = None, from_csv: Optional[str] = None, 
@@ -2415,7 +2426,7 @@ CONCISE SUMMARY:"""
                         # Cancel remaining futures
                         for _, f in futures:
                             f.cancel()
-                        raise WorkflowStepError(f"Parallel branch {idx} failed", cause=e)
+                        raise WorkflowStepError(f"Parallel branch {idx} failed", cause=e) from e
                     elif parallel_step.on_failure == "partial_ok":
                         # Add error as output but continue
                         results.append({"step": f"parallel_{idx}", "output": f"Error: {e}"})
@@ -2423,7 +2434,7 @@ CONCISE SUMMARY:"""
             
             # Check if we should fail after all branches completed
             if errors and parallel_step.on_failure == "fail_all":
-                raise WorkflowStepError(f"{len(errors)} parallel branches failed", errors=errors)
+                raise WorkflowStepError(f"{len(errors)} parallel branches failed", errors=errors) from errors[0]["error"]
         
         # Combine outputs
         combined_output = "\n---\n".join(str(o) for o in outputs)

@@ -827,11 +827,16 @@ class ToolExecutionMixin:
 
         tracking_id = str(uuid.uuid4())[:8]
         task = asyncio.ensure_future(backend.request_approval(request))
+        
+        # Make defensive copy to prevent TOCTOU mutations
+        import copy
+        frozen_args = copy.deepcopy(arguments)
+        
         async with self._approvals_lock:
             self._pending_approvals[tracking_id] = {
                 "task": task,
                 "function_name": function_name,
-                "arguments": arguments,
+                "arguments": frozen_args,
                 "request": request,
             }
         logging.info(f"Approval request submitted: {tracking_id} for {function_name}")
