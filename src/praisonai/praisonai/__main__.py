@@ -47,6 +47,11 @@ def _get_typer_commands():
             commands = set(click_app.list_commands(ctx))
         except Exception:
             # Do NOT poison the cache on failure — let the next caller retry.
+            import logging
+            logging.getLogger("praisonai.__main__").warning(
+                "Typer command discovery failed; falling back to legacy dispatch.",
+                exc_info=True,
+            )
             return set()
 
         _typer_commands_cache = commands

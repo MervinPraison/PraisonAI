@@ -17,6 +17,7 @@ import json
 import yaml
 from rich import print
 import threading
+from praisonai._logging import get_logger
 
 # Type variable for Pydantic models
 T = TypeVar('T', bound=BaseModel)
@@ -244,13 +245,20 @@ def _get_openai_client(api_key: str = None, base_url: str = None):
     with _openai_client_lock:
         if _openai_client is None or _openai_client_key != key:
             from openai import OpenAI
-            _openai_client = OpenAI(api_key=key[0], base_url=key[1])
+            old_client = _openai_client
+            # Set key first to maintain fast-path invariant
             _openai_client_key = key
+            _openai_client = OpenAI(api_key=key[0], base_url=key[1])
+            # Close old client to prevent httpx connection leaks
+            if old_client is not None:
+                try:
+                    old_client.close()
+                except Exception:
+                    pass  # Best-effort cleanup
         return _openai_client
 
 
-# Use namespaced logger; root logger is configured only by the CLI (see _logging.py)
-from praisonai._logging import get_logger
+# Use namespaced logger; root logger is configured only by the CLI
 logger = get_logger("auto")
 
 # =============================================================================
