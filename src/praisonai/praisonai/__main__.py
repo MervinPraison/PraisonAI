@@ -13,6 +13,7 @@ Design:
 """
 
 import sys
+import threading
 
 
 # ---------------------------------------------------------------------------
@@ -20,32 +21,36 @@ import sys
 # ---------------------------------------------------------------------------
 
 _typer_commands_cache = None
+_typer_commands_lock = threading.Lock()
 
 
 def _get_typer_commands():
-    """Auto-discover registered Typer commands via Click introspection.
-
-    Returns a set of command names that the Typer app knows about.
-    This is populated from app.py's register_commands() — no manual
-    lists to maintain.
-    """
+    """Auto-discover registered Typer commands via Click introspection."""
     global _typer_commands_cache
+
+    # Fast path
     if _typer_commands_cache is not None:
         return _typer_commands_cache
 
-    try:
-        from praisonai.cli.app import app, register_commands
-        register_commands()
+    with _typer_commands_lock:
+        if _typer_commands_cache is not None:  # Double-check
+            return _typer_commands_cache
 
-        import typer.main
-        import click
-        click_app = typer.main.get_command(app)
-        ctx = click.Context(click_app, info_name="praisonai")
-        _typer_commands_cache = set(click_app.list_commands(ctx))
-    except Exception:
-        _typer_commands_cache = set()
+        try:
+            from praisonai.cli.app import app, register_commands
+            register_commands()
 
-    return _typer_commands_cache
+            import typer.main
+            import click
+            click_app = typer.main.get_command(app)
+            ctx = click.Context(click_app, info_name="praisonai")
+            commands = set(click_app.list_commands(ctx))
+        except Exception:
+            # Do NOT poison the cache on failure — let the next caller retry.
+            return set()
+
+        _typer_commands_cache = commands
+        return _typer_commands_cache
 
 
 def _find_first_command(argv):

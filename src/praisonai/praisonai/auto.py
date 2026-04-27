@@ -17,6 +17,7 @@ import json
 import yaml
 from rich import print
 import logging
+import threading
 
 # Type variable for Pydantic models
 T = TypeVar('T', bound=BaseModel)
@@ -42,6 +43,8 @@ _praisonai_classes = None  # (PraisonAgent, PraisonTask, Agents)
 _praisonai_tools = None  # dict of tool classes
 _litellm = None
 _openai_client = None
+_openai_client_lock = threading.Lock()
+_openai_client_key = None  # (api_key, base_url) the cached client was built with
 
 
 # --- CrewAI lazy loading ---
@@ -231,19 +234,25 @@ def _check_openai_available() -> bool:
 
 
 def _get_openai_client(api_key: str = None, base_url: str = None):
-    """Lazy load OpenAI client."""
-    global _openai_client
-    if _openai_client is None:
-        from openai import OpenAI
-        _openai_client = OpenAI(
-            api_key=api_key or os.environ.get("OPENAI_API_KEY"),
-            base_url=base_url
-        )
-    return _openai_client
+    """Lazy load OpenAI client (thread-safe, key-aware)."""
+    global _openai_client, _openai_client_key
+    key = (api_key or os.environ.get("OPENAI_API_KEY"), base_url)
+
+    # Fast path: already initialized with the same key
+    if _openai_client is not None and _openai_client_key == key:
+        return _openai_client
+
+    with _openai_client_lock:
+        if _openai_client is None or _openai_client_key != key:
+            from openai import OpenAI
+            _openai_client = OpenAI(api_key=key[0], base_url=key[1])
+            _openai_client_key = key
+        return _openai_client
 
 
-_loglevel = os.environ.get('LOGLEVEL', 'INFO').strip().upper() or 'INFO'
-logging.basicConfig(level=_loglevel, format='%(asctime)s - %(levelname)s - %(message)s')
+# Replace module-level basicConfig() with namespaced logger (see _logging.py:1-29)
+from praisonai._logging import get_logger
+logger = get_logger("auto")
 
 # =============================================================================
 # Available Tools List (shared between generators) - Legacy for praisonai_tools
@@ -684,13 +693,13 @@ AG2 is not installed. Please install with:
         # Only show tools message if using a framework and tools are needed
         if (framework in ["crewai", "autogen"]) and not _check_praisonai_tools_available():
             if framework == "autogen":
-                logging.warning("""
+                logger.warning("""
 Tools are not available for autogen. To use tools, install:
     pip install "praisonai[autogen]" for v0.2
     pip install "praisonai[autogen-v4]" for v0.4
 """)
             else:
-                logging.warning(f"""
+                logger.warning(f"""
 Tools are not available for {framework}. To use tools, install:
     pip install "praisonai[{framework}]"
 """)
@@ -820,8 +829,8 @@ Tools are not available for {framework}. To use tools, install:
                 # If existing file is empty, treat as new file
                 existing_data = {"roles": {}, "dependencies": []}
         except (yaml.YAMLError, FileNotFoundError) as e:
-            logging.warning(f"Could not load existing agents file {self.agent_file}: {e}")
-            logging.warning("Creating new file instead of merging")
+            logger.warning(f"Could not load existing agents file {self.agent_file}: {e}")
+            logger.warning("Creating new file instead of merging")
             existing_data = {"roles": {}, "dependencies": []}
         
         # Start with existing data structure
@@ -1191,7 +1200,7 @@ Respond with:
             if not existing_data:
                 return new_data
         except (yaml.YAMLError, FileNotFoundError) as e:
-            logging.warning(f"Could not load existing workflow file {self.workflow_file}: {e}")
+            logger.warning(f"Could not load existing workflow file {self.workflow_file}: {e}")
             return new_data
         
         # Merge agents (avoid duplicates)
