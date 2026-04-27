@@ -16,7 +16,6 @@ import os
 import json
 import yaml
 from rich import print
-import logging
 import threading
 
 # Type variable for Pydantic models
@@ -250,7 +249,7 @@ def _get_openai_client(api_key: str = None, base_url: str = None):
         return _openai_client
 
 
-# Replace module-level basicConfig() with namespaced logger (see _logging.py:1-29)
+# Use namespaced logger; root logger is configured only by the CLI (see _logging.py)
 from praisonai._logging import get_logger
 logger = get_logger("auto")
 
