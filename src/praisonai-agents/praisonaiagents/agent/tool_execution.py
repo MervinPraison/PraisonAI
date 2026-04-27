@@ -845,9 +845,14 @@ class ToolExecutionMixin:
         and their results included.
         """
         results = {}
-        completed_ids = []
+        # Collect completed items under the lock, then execute tools outside the lock
+        # to avoid holding it during potentially slow async tool execution.
+        approved_items = []
+        denied_items = []
+        error_items = []
 
         async with self._approvals_lock:
+            completed_ids = []
             for tid, info in list(self._pending_approvals.items()):
                 task = info["task"]
                 if task.done():
@@ -855,32 +860,48 @@ class ToolExecutionMixin:
                     try:
                         decision = task.result()
                         if decision.approved:
-                            # Auto-execute the approved tool
-                            tool_result = await self.execute_tool_async(
-                                info["function_name"], info["arguments"],
-                            )
-                            results[tid] = {
-                                "status": "approved_and_executed",
-                                "tool_name": info["function_name"],
-                                "decision": decision,
-                                "result": tool_result,
-                            }
+                            approved_items.append((tid, info, decision))
                         else:
-                            results[tid] = {
-                                "status": "denied",
-                                "tool_name": info["function_name"],
-                                "decision": decision,
-                            }
+                            denied_items.append((tid, info, decision))
                     except Exception as e:
-                        results[tid] = {
-                            "status": "error",
-                            "tool_name": info["function_name"],
-                            "error": str(e),
-                        }
+                        error_items.append((tid, info, e))
 
-            # Delete completed items within the lock
+            # Remove completed entries while still holding the lock
             for tid in completed_ids:
                 del self._pending_approvals[tid]
+
+        # Execute approved tools outside the lock to avoid long lock hold
+        for tid, info, decision in approved_items:
+            try:
+                tool_result = await self.execute_tool_async(
+                    info["function_name"], info["arguments"],
+                )
+                results[tid] = {
+                    "status": "approved_and_executed",
+                    "tool_name": info["function_name"],
+                    "decision": decision,
+                    "result": tool_result,
+                }
+            except Exception as e:
+                results[tid] = {
+                    "status": "error",
+                    "tool_name": info["function_name"],
+                    "error": str(e),
+                }
+
+        for tid, info, decision in denied_items:
+            results[tid] = {
+                "status": "denied",
+                "tool_name": info["function_name"],
+                "decision": decision,
+            }
+
+        for tid, info, exc in error_items:
+            results[tid] = {
+                "status": "error",
+                "tool_name": info["function_name"],
+                "error": str(exc),
+            }
 
         return results
 

@@ -2248,7 +2248,6 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         matched_route = None
         prev_lower = str(previous_output).lower() if previous_output else ""
         
-        import re
         for key in route_step.routes:
             if key == "default":
                 continue
