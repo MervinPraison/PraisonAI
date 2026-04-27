@@ -41,6 +41,13 @@ logger = get_logger(__name__)
 # Default maximum parallel workers to prevent rate limiting issues
 DEFAULT_MAX_PARALLEL_WORKERS = 3
 
+class WorkflowStepError(Exception):
+    """Exception raised when workflow step execution fails."""
+    def __init__(self, message: str, cause: Exception = None, errors: List = None):
+        super().__init__(message)
+        self.cause = cause
+        self.errors = errors or []
+
 def _parse_json_output(output: Any, step_name: str = "step") -> Any:
     """
     Parse JSON from LLM output if it's a string.
@@ -193,16 +200,23 @@ class Parallel:
     
     Usage:
         workflow = Workflow(steps=[
-            parallel([agent1, agent2, agent3], max_workers=5),
+            parallel([agent1, agent2, agent3], max_workers=5, on_failure="partial_ok"),
             aggregator
         ])
+    
+    Failure strategies:
+    - "partial_ok": Continue with partial results if some branches fail (default)
+    - "fail_fast": Cancel remaining branches and fail immediately on first error
+    - "fail_all": Wait for all branches to complete, then fail if any failed
     """
     steps: List = field(default_factory=list)
     max_workers: Optional[int] = None  # None = use system default
+    on_failure: str = "partial_ok"  # "partial_ok" | "fail_fast" | "fail_all"
     
-    def __init__(self, steps: List, max_workers: Optional[int] = None):
+    def __init__(self, steps: List, max_workers: Optional[int] = None, on_failure: str = "partial_ok"):
         self.steps = steps
         self.max_workers = max_workers
+        self.on_failure = on_failure
 
 @dataclass
 class Loop:
@@ -2234,11 +2248,15 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         matched_route = None
         prev_lower = str(previous_output).lower() if previous_output else ""
         
+        import re
         for key in route_step.routes:
-            if key.lower() in prev_lower or key == "default":
-                if key != "default":
-                    matched_route = route_step.routes[key]
-                    break
+            if key == "default":
+                continue
+            # Use word-boundary matching instead of substring containment
+            pattern = r'\b' + re.escape(key.lower()) + r'\b'
+            if re.search(pattern, prev_lower):
+                matched_route = route_step.routes[key]
+                break
         
         if matched_route is None:
             matched_route = route_step.default or []
@@ -2385,14 +2403,28 @@ CONCISE SUMMARY:"""
                 future = executor.submit(copy_context_to_callable(execute_with_branch))
                 futures.append((idx, future))
             
+            errors = []
             for idx, future in futures:
                 try:
                     step_result = future.result()
                     results.append({"step": step_result["step"], "output": step_result["output"]})
                     outputs.append(step_result["output"])
                 except Exception as e:
-                    results.append({"step": f"parallel_{idx}", "output": f"Error: {e}"})
-                    outputs.append(f"Error: {e}")
+                    logger.error(f"Parallel branch {idx} failed: {e}")
+                    errors.append({"step": idx, "error": e})
+                    if parallel_step.on_failure == "fail_fast":
+                        # Cancel remaining futures
+                        for _, f in futures:
+                            f.cancel()
+                        raise WorkflowStepError(f"Parallel branch {idx} failed", cause=e)
+                    elif parallel_step.on_failure == "partial_ok":
+                        # Add error as output but continue
+                        results.append({"step": f"parallel_{idx}", "output": f"Error: {e}"})
+                        outputs.append(f"Error: {e}")
+            
+            # Check if we should fail after all branches completed
+            if errors and parallel_step.on_failure == "fail_all":
+                raise WorkflowStepError(f"{len(errors)} parallel branches failed", errors=errors)
         
         # Combine outputs
         combined_output = "\n---\n".join(str(o) for o in outputs)

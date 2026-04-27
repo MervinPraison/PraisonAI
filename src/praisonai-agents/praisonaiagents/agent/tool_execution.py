@@ -827,12 +827,13 @@ class ToolExecutionMixin:
 
         tracking_id = str(uuid.uuid4())[:8]
         task = asyncio.ensure_future(backend.request_approval(request))
-        self._pending_approvals[tracking_id] = {
-            "task": task,
-            "function_name": function_name,
-            "arguments": arguments,
-            "request": request,
-        }
+        async with self._approvals_lock:
+            self._pending_approvals[tracking_id] = {
+                "task": task,
+                "function_name": function_name,
+                "arguments": arguments,
+                "request": request,
+            }
         logging.info(f"Approval request submitted: {tracking_id} for {function_name}")
         return tracking_id
 
@@ -846,38 +847,40 @@ class ToolExecutionMixin:
         results = {}
         completed_ids = []
 
-        for tid, info in self._pending_approvals.items():
-            task = info["task"]
-            if task.done():
-                completed_ids.append(tid)
-                try:
-                    decision = task.result()
-                    if decision.approved:
-                        # Auto-execute the approved tool
-                        tool_result = await self.execute_tool_async(
-                            info["function_name"], info["arguments"],
-                        )
+        async with self._approvals_lock:
+            for tid, info in list(self._pending_approvals.items()):
+                task = info["task"]
+                if task.done():
+                    completed_ids.append(tid)
+                    try:
+                        decision = task.result()
+                        if decision.approved:
+                            # Auto-execute the approved tool
+                            tool_result = await self.execute_tool_async(
+                                info["function_name"], info["arguments"],
+                            )
+                            results[tid] = {
+                                "status": "approved_and_executed",
+                                "tool_name": info["function_name"],
+                                "decision": decision,
+                                "result": tool_result,
+                            }
+                        else:
+                            results[tid] = {
+                                "status": "denied",
+                                "tool_name": info["function_name"],
+                                "decision": decision,
+                            }
+                    except Exception as e:
                         results[tid] = {
-                            "status": "approved_and_executed",
+                            "status": "error",
                             "tool_name": info["function_name"],
-                            "decision": decision,
-                            "result": tool_result,
+                            "error": str(e),
                         }
-                    else:
-                        results[tid] = {
-                            "status": "denied",
-                            "tool_name": info["function_name"],
-                            "decision": decision,
-                        }
-                except Exception as e:
-                    results[tid] = {
-                        "status": "error",
-                        "tool_name": info["function_name"],
-                        "error": str(e),
-                    }
 
-        for tid in completed_ids:
-            del self._pending_approvals[tid]
+            # Delete completed items within the lock
+            for tid in completed_ids:
+                del self._pending_approvals[tid]
 
         return results
 

@@ -1821,6 +1821,7 @@ Your Goal: {self.goal}
             self._approval_backend = AutoApproveBackend()
         # Pending approvals for async (non-blocking) mode
         self._pending_approvals = {}
+        self._approvals_lock = asyncio.Lock()
         
         # P8/G11: Tool timeout - prevent slow tools from blocking
         self._tool_timeout = tool_timeout
@@ -4900,6 +4901,14 @@ Answer:"""
                     task.cancel()
         except Exception as e:
             logger.warning(f"Task cleanup failed: {e}")
+
+        # ThreadPoolExecutor cleanup
+        try:
+            if hasattr(self, '_tool_executor') and self._tool_executor:
+                self._tool_executor.shutdown(wait=False, cancel_futures=True)
+                delattr(self, '_tool_executor')
+        except Exception as e:
+            logger.warning(f"ThreadPoolExecutor cleanup failed: {e}")
 
         # Always set closed flag
         self._closed = True

@@ -635,36 +635,49 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
         ident = str(time.time_ns())
         created_at = time.time()
         
-        # Store in MongoDB if enabled
-        if self.use_mongodb and hasattr(self, "mongo_short_term"):
+        # Protocol-driven storage: Try adapter first if available
+        adapter_success = False
+        if hasattr(self, 'memory_adapter') and self.memory_adapter:
             try:
-                doc = {
-                    "_id": ident,
-                    "content": text,
-                    "metadata": metadata,
-                    "created_at": datetime.utcnow(),
-                    "memory_type": "short_term"
-                }
-                self.mongo_short_term.insert_one(doc)
-                logger.info(f"Successfully stored in MongoDB short-term memory with ID: {ident}")
+                result_id = self.memory_adapter.store_short_term(text, metadata=metadata)
+                logger.info(f"Successfully stored via memory adapter with ID: {result_id}")
+                adapter_success = True
+                ident = result_id  # Use adapter-provided ID
             except Exception as e:
-                logger.error(f"Failed to store in MongoDB short-term memory: {e}")
-                raise
+                logger.warning(f"Failed to store via memory adapter, falling back to direct storage: {e}")
+        
+        # Only use direct storage if adapter failed or doesn't exist
+        if not adapter_success:
+            # Store in MongoDB if enabled
+            if self.use_mongodb and hasattr(self, "mongo_short_term"):
+                try:
+                    doc = {
+                        "_id": ident,
+                        "content": text,
+                        "metadata": metadata,
+                        "created_at": datetime.utcnow(),
+                        "memory_type": "short_term"
+                    }
+                    self.mongo_short_term.insert_one(doc)
+                    logger.info(f"Successfully stored in MongoDB short-term memory with ID: {ident}")
+                except Exception as e:
+                    logger.error(f"Failed to store in MongoDB short-term memory: {e}")
+                    raise
 
-        # Existing SQLite store logic (with write lock for concurrency safety)
-        try:
-            conn = self._get_stm_conn()
-            with self._write_lock:  # Serialize write operations
-                conn.execute(
-                    "INSERT INTO short_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
-                    (ident, text, json.dumps(metadata), created_at)
-                )
-                conn.commit()
-            logger.info(f"Successfully stored in SQLite short-term memory with ID: {ident}")
-        except Exception as e:
-            logger.error(f"Failed to store in SQLite short-term memory: {e}")
-            if not self.use_mongodb:  # Only raise if we're not using MongoDB as fallback
-                raise
+            # Existing SQLite store logic (with write lock for concurrency safety)
+            try:
+                conn = self._get_stm_conn()
+                with self._write_lock:  # Serialize write operations
+                    conn.execute(
+                        "INSERT INTO short_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
+                        (ident, text, json.dumps(metadata), created_at)
+                    )
+                    conn.commit()
+                logger.info(f"Successfully stored in SQLite short-term memory with ID: {ident}")
+            except Exception as e:
+                logger.error(f"Failed to store in SQLite short-term memory: {e}")
+                if not self.use_mongodb:  # Only raise if we're not using MongoDB as fallback
+                    raise
         
         # Emit trace event for memory store
         self._emit_memory_event("store", "short_term", len(text), metadata=metadata)
@@ -965,9 +978,9 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
             # Filter by quality
             filtered = [r for r in results if r.get("metadata", {}).get("quality", 0.0) >= min_quality]
             logger.info(f"Found {len(filtered)} results in Mem0")
-            return filtered
+            found.extend(filtered)
 
-        elif self.use_mongodb and hasattr(self, "mongo_long_term"):
+        if not found and self.use_mongodb and hasattr(self, "mongo_long_term"):
             try:
                 results = []
                 
@@ -1031,13 +1044,13 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
                         })
                 
                 logger.info(f"Found {len(results)} results in MongoDB")
-                return results
+                found.extend(results)
                 
             except Exception as e:
                 self._log_verbose(f"Error searching MongoDB long-term memory: {e}", logging.ERROR)
                 # Fall through to SQLite search
 
-        elif self.use_rag and hasattr(self, "chroma_col"):
+        if not found and self.use_rag and hasattr(self, "chroma_col"):
             try:
                 from praisonaiagents.embedding import embedding as get_embedding
                 result = get_embedding(query, model=self.embedding_model)
@@ -1085,7 +1098,7 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
             text = row[1]
             # Add memory record citation if not already present
             if "(Memory record:" not in text:
-                text = f"{text} (Memory record: {text})"
+                text = f"{text} (Memory record: {row[0]})"
             # Only add if not already found by ChromaDB/Mem0
             if not any(f["id"] == row[0] for f in found):
                 found.append({
@@ -1953,6 +1966,9 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
         # Close current thread's connections
         if hasattr(self._local, 'stm_conn') and self._local.stm_conn:
             try:
+                # Remove from registry before closing
+                with self._connection_lock:
+                    self._all_connections.discard(self._local.stm_conn)
                 self._local.stm_conn.close()
                 self._local.stm_conn = None
             except Exception as e:
@@ -1960,21 +1976,17 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
         
         if hasattr(self._local, 'ltm_conn') and self._local.ltm_conn:
             try:
+                # Remove from registry before closing
+                with self._connection_lock:
+                    self._all_connections.discard(self._local.ltm_conn)
                 self._local.ltm_conn.close()
                 self._local.ltm_conn = None
             except Exception as e:
                 logger.warning(f"Error closing current thread's LTM connection: {e}")
         
-        # Close all known connections from the registry
-        with self._connection_lock:  # Ensure thread safety during cleanup
-            connections_to_close = list(self._all_connections)
-            for conn in connections_to_close:
-                try:
-                    conn.close()
-                except Exception as e:
-                    logger.debug(f"Error closing registered connection: {e}")
-            # Clear the registry
-            self._all_connections.clear()
+        # NOTE: Only close THIS thread's connections, not ALL connections
+        # Other active threads should manage their own connections
+        # Only clear full registry in __del__ or explicit shutdown
         
         # Close MongoDB client if it exists
         if hasattr(self, 'mongo_client') and self.mongo_client:

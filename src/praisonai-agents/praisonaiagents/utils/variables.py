@@ -280,4 +280,5 @@ def substitute_variables(text: str, variables: Dict[str, Any]) -> str:
         # Keep original if not found
         return match.group(0)
     
-    return re.sub(r'\{\{(\w+)\}\}', replace, text)
+    # Support both {{var}} and {{var.property}} patterns  
+    return re.sub(r'\{\{([\w.]+)\}\}', replace, text)
