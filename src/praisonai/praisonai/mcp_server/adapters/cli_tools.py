@@ -344,12 +344,10 @@ def register_cli_tools() -> None:
     def schedule_list() -> str:
         """List scheduled tasks."""
         try:
-            from praisonai.agent_scheduler import AgentScheduler
-            scheduler = AgentScheduler()
-            tasks = scheduler.list_tasks()
-            return str(tasks)
+            from praisonaiagents.tools.schedule_tools import schedule_list as _schedule_list
+            return _schedule_list()
         except ImportError:
-            return "Error: Scheduler not available"
+            return "Error: Schedule tools not available"
         except Exception as e:
             return f"Error: {e}"
     
@@ -361,12 +359,10 @@ def register_cli_tools() -> None:
     ) -> str:
         """Add a scheduled task."""
         try:
-            from praisonai.agent_scheduler import AgentScheduler
-            scheduler = AgentScheduler()
-            scheduler.add_task(task_name, cron, workflow_path)
-            return f"Task scheduled: {task_name}"
+            from praisonaiagents.tools.schedule_tools import schedule_add as _schedule_add
+            return _schedule_add(task_name, cron, workflow_path)
         except ImportError:
-            return "Error: Scheduler not available"
+            return "Error: Schedule tools not available"
         except Exception as e:
             return f"Error: {e}"
     
@@ -374,12 +370,10 @@ def register_cli_tools() -> None:
     def schedule_remove(task_name: str) -> str:
         """Remove a scheduled task."""
         try:
-            from praisonai.agent_scheduler import AgentScheduler
-            scheduler = AgentScheduler()
-            scheduler.remove_task(task_name)
-            return f"Task removed: {task_name}"
+            from praisonaiagents.tools.schedule_tools import schedule_remove as _schedule_remove
+            return _schedule_remove(task_name)
         except ImportError:
-            return "Error: Scheduler not available"
+            return "Error: Schedule tools not available"
         except Exception as e:
             return f"Error: {e}"
     

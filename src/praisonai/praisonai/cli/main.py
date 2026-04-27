@@ -248,6 +248,9 @@ class PraisonAI:
         """
         Initialize the PraisonAI object with default parameters.
         """
+        # Initialize telemetry defaults (moved from lazy __getattr__ hook)
+        from praisonai import _ensure_telemetry_defaults
+        _ensure_telemetry_defaults()
         self.agent_yaml = agent_yaml
         self._interactive_mode = False  # Flag for interactive TUI mode
         # Create config_list with AutoGen compatibility
@@ -331,9 +334,7 @@ class PraisonAI:
         initializes the necessary attributes, and then calls the appropriate methods based on the
         provided arguments.
         """
-        # Set OpenTelemetry SDK to disabled to prevent telemetry collection
-        # Moved from agents_generator.py to CLI entry point per architecture requirements
-        os.environ.setdefault("OTEL_SDK_DISABLED", "true")
+        # Telemetry defaults now handled in PraisonAI.__init__ with Langfuse awareness
         
         # Store the original agent_file from constructor
         original_agent_file = self.agent_file
