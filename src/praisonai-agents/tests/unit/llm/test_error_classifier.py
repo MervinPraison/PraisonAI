@@ -113,38 +113,43 @@ class TestErrorClassification:
 class TestRetryLogic:
     
     def test_retry_delays(self):
-        """Test retry delay calculation for different categories."""
-        # Rate limit delays (exponential with factor of 3)
-        assert get_retry_delay(ErrorCategory.RATE_LIMIT, attempt=1) == 3.0
-        assert get_retry_delay(ErrorCategory.RATE_LIMIT, attempt=2) == 9.0
-        assert get_retry_delay(ErrorCategory.RATE_LIMIT, attempt=3) == 27.0
-        
-        # Context limit delays (short, for immediate retry with compression)
+        """Test retry delay ranges for different categories.
+
+        After issue #1553, RATE_LIMIT and TRANSIENT use equal-jitter to prevent
+        thundering-herd retry storms across multi-agent workflows. Delays are
+        bounded in [base_delay, exp_max] rather than deterministic.
+        """
+        # Rate limit delays (exponential factor 3, jittered floor=base_delay=1.0)
+        assert 1.0 <= get_retry_delay(ErrorCategory.RATE_LIMIT, attempt=1) <= 3.0
+        assert 1.0 <= get_retry_delay(ErrorCategory.RATE_LIMIT, attempt=2) <= 9.0
+        assert 1.0 <= get_retry_delay(ErrorCategory.RATE_LIMIT, attempt=3) <= 27.0
+
+        # Context limit delays remain deterministic (no contention concern)
         assert get_retry_delay(ErrorCategory.CONTEXT_LIMIT, attempt=1) == 0.5
         assert get_retry_delay(ErrorCategory.CONTEXT_LIMIT, attempt=2) == 0.5
-        
-        # Transient delays (exponential with factor of 2)
-        assert get_retry_delay(ErrorCategory.TRANSIENT, attempt=1) == 2.0
-        assert get_retry_delay(ErrorCategory.TRANSIENT, attempt=2) == 4.0
-        assert get_retry_delay(ErrorCategory.TRANSIENT, attempt=3) == 8.0
-        
+
+        # Transient delays (exponential factor 2, jittered floor=base_delay=1.0)
+        assert 1.0 <= get_retry_delay(ErrorCategory.TRANSIENT, attempt=1) <= 2.0
+        assert 1.0 <= get_retry_delay(ErrorCategory.TRANSIENT, attempt=2) <= 4.0
+        assert 1.0 <= get_retry_delay(ErrorCategory.TRANSIENT, attempt=3) <= 8.0
+
         # No retry for permanent errors
         assert get_retry_delay(ErrorCategory.AUTH, attempt=1) == 0
         assert get_retry_delay(ErrorCategory.INVALID_REQUEST, attempt=1) == 0
         assert get_retry_delay(ErrorCategory.PERMANENT, attempt=1) == 0
-    
+
     def test_retry_delay_caps(self):
-        """Test that retry delays have appropriate caps."""
-        # Rate limit cap at 60 seconds
-        assert get_retry_delay(ErrorCategory.RATE_LIMIT, attempt=10) == 60.0
-        
-        # Transient cap at 30 seconds  
-        assert get_retry_delay(ErrorCategory.TRANSIENT, attempt=10) == 30.0
-    
+        """Test that jittered retry delays remain within their respective caps."""
+        # Rate limit cap at 60 seconds (jittered floor=base_delay=1.0)
+        assert 1.0 <= get_retry_delay(ErrorCategory.RATE_LIMIT, attempt=10) <= 60.0
+
+        # Transient cap at 30 seconds (jittered floor=base_delay=1.0)
+        assert 1.0 <= get_retry_delay(ErrorCategory.TRANSIENT, attempt=10) <= 30.0
+
     def test_base_delay_scaling(self):
-        """Test custom base delay scaling."""
-        assert get_retry_delay(ErrorCategory.TRANSIENT, attempt=1, base_delay=2.0) == 4.0
-        assert get_retry_delay(ErrorCategory.RATE_LIMIT, attempt=1, base_delay=2.0) == 6.0
+        """Test custom base delay scaling — base_delay sets the jitter floor."""
+        assert 2.0 <= get_retry_delay(ErrorCategory.TRANSIENT, attempt=1, base_delay=2.0) <= 4.0
+        assert 2.0 <= get_retry_delay(ErrorCategory.RATE_LIMIT, attempt=1, base_delay=2.0) <= 6.0
 
 
 class TestRetryAfterExtraction:
