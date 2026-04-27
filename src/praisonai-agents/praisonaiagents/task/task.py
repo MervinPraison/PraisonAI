@@ -774,8 +774,10 @@ class Task:
                     if self.non_fatal_errors:
                         task_output.non_fatal_errors = list(self.non_fatal_errors)
                     raise
-        # Attach non_fatal_errors to output if not already attached due to re-raise
-        if self.non_fatal_errors and not hasattr(task_output, 'non_fatal_errors'):
+        # Attach non_fatal_errors to output if not already attached
+        # (TaskOutput.non_fatal_errors is a Pydantic field that defaults to None,
+        #  so check the value, not field existence)
+        if self.non_fatal_errors and getattr(task_output, 'non_fatal_errors', None) is None:
             task_output.non_fatal_errors = list(self.non_fatal_errors)
 
         task_prompt = f"""
