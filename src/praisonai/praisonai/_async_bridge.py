@@ -27,9 +27,15 @@ class _BackgroundLoop:
         The thread is marked ``daemon=True`` so that short-lived scripts
         (e.g. CLI commands, smoke tests) exit cleanly without waiting on
         the background loop to be shut down explicitly. Long-running
-        server processes should call :func:`shutdown`
-        explicitly to cancel in-flight tasks before process exit.
+        server processes should call :func:`shutdown` explicitly to cancel
+        in-flight tasks before process exit.
         """
+        # Enforce the documented invariant. ``threading.Lock.locked()``
+        # is process-wide, not thread-local, but combined with the fact
+        # that the only callers are :py:meth:`get` and :py:meth:`get_unlocked`
+        # (the latter only invoked from inside ``run_sync`` while holding
+        # the lock), this catches the "forgot to hold the lock" mistake.
+        assert self._lock.locked(), "_spawn_locked() requires self._lock to be held"
         if self._loop is None or self._loop.is_closed():
             self._loop = asyncio.new_event_loop()
             self._thread = threading.Thread(

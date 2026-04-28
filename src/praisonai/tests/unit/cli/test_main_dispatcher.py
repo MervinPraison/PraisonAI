@@ -95,14 +95,28 @@ class TestVersionShortCircuit(unittest.TestCase):
         self.assertIn("PraisonAI version", printed)
 
     def test_version_does_not_import_typer_app(self):
-        """The version path is on the hot import path; it must stay light."""
+        """The version path is on the hot import path; it must stay light.
+
+        We deliberately avoid ``mock.patch("praisonai.cli.app.register_commands")``
+        here: ``mock.patch`` with a dotted target imports the target module
+        when the patch context is entered, which would itself defeat the
+        invariant we are trying to verify. Instead, evict any cached
+        ``praisonai.cli.*`` modules from ``sys.modules`` before invoking
+        ``main()``, then assert they are still absent afterwards.
+        """
         sys.argv = ["praisonai", "--version"]
-        with mock.patch("praisonai.cli.app.register_commands") as reg, \
-             mock.patch("praisonai.cli.main.PraisonAI") as legacy, \
-             mock.patch("builtins.print"):
-            dispatcher.main()
-        reg.assert_not_called()
-        legacy.assert_not_called()
+        cli_mods = [m for m in list(sys.modules) if m.startswith("praisonai.cli")]
+        saved = {m: sys.modules.pop(m) for m in cli_mods}
+        try:
+            with mock.patch("builtins.print"):
+                dispatcher.main()
+            still_loaded = [m for m in sys.modules if m.startswith("praisonai.cli")]
+            self.assertEqual(
+                still_loaded, [],
+                f"--version must not import praisonai.cli.*, but loaded: {still_loaded}",
+            )
+        finally:
+            sys.modules.update(saved)
 
 
 class TestLegacyRouting(unittest.TestCase):
@@ -154,8 +168,14 @@ class TestLegacyRouting(unittest.TestCase):
         self.assertEqual(cm.exception.code, 1)
 
     def test_legacy_path_restores_argv(self):
-        # Use different argv to test that restoration actually happens
-        original = ["praisonai", "Build weather app", "--extra-arg"]
+        # NOTE: argv[0] differs from the dispatcher's rewrite ("praisonai"),
+        # so the restoration assertion has real discriminating power.
+        # If the ``finally`` clause were removed, ``sys.argv[0]`` would
+        # remain "praisonai" after dispatch, and ``assertEqual`` would fail.
+        # (Claude's earlier '--extra-arg' variant did not catch this because
+        # the dispatcher rewrites to ``["praisonai"] + sys.argv[1:]`` —
+        # identical to the original when ``argv[0] == "praisonai"``.)
+        original = ["/usr/local/bin/some-launcher", "Build weather app", "--extra-arg"]
         sys.argv = list(original)
         fake = mock.MagicMock()
         fake.main.return_value = None
@@ -204,13 +224,15 @@ class TestTyperRouting(unittest.TestCase):
         legacy.assert_not_called()
 
     def test_typer_path_restores_argv(self):
-        # Use different argv to test that restoration actually happens
-        original = ["praisonai", "chat", "--model", "gpt-4"]
+        # See note in test_legacy_path_restores_argv — differing argv[0]
+        # is what gives this assertion discriminating power.
+        original = ["/usr/local/bin/some-launcher", "chat", "--model", "gpt-4"]
         sys.argv = list(original)
         with mock.patch("praisonai.cli.app.app"), \
              mock.patch("praisonai.cli.app.register_commands"):
             dispatcher.main()
         self.assertEqual(sys.argv, original)
+        self.assertNotEqual(sys.argv[0], "praisonai")
 
     def test_typer_registration_failure_propagates(self):
         """``register_commands()`` errors must NOT be swallowed (fail-loud design)."""
