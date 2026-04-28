@@ -213,7 +213,7 @@ Methods:
 * <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">store_in_memory</a>(content: str, agent_name: str = None, task_id: str = None)</code>
 * <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">to_dict</a>() -> Dict[str, Any]</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">loop</a>(step: Any = None, steps: Optional[List[Any]] = None, over: Optional[str] = None, from_csv: Optional[str] = None, from_file: Optional[str] = None, var_name: str = 'item', parallel: bool = False, max_workers: Optional[int] = None, output_variable: Optional[str] = None) -> Loop</code>
-* <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">parallel</a>(steps: List, max_workers: Optional[int] = None) -> Parallel</code>
+* <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">parallel</a>(steps: List, max_workers: Optional[int] = None, on_failure: str = 'partial_ok') -> Parallel</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">repeat</a>(step: Any, until: Optional[Callable[[WorkflowContext], bool]] = None, max_iterations: int = 10) -> Repeat</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">route</a>(routes: Dict[str, List], default: Optional[List] = None) -> Route</code>
 
