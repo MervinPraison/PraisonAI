@@ -1821,6 +1821,7 @@ Your Goal: {self.goal}
             self._approval_backend = AutoApproveBackend()
         # Pending approvals for async (non-blocking) mode
         self._pending_approvals = {}
+        self._approvals_lock = asyncio.Lock()
         
         # P8/G11: Tool timeout - prevent slow tools from blocking
         self._tool_timeout = tool_timeout
@@ -4901,6 +4902,19 @@ Answer:"""
         except Exception as e:
             logger.warning(f"Task cleanup failed: {e}")
 
+        # ThreadPoolExecutor cleanup
+        try:
+            if hasattr(self, '_tool_executor') and self._tool_executor:
+                # Use cancel_futures only if supported (Python 3.9+)
+                import sys
+                if sys.version_info >= (3, 9):
+                    self._tool_executor.shutdown(wait=False, cancel_futures=True)
+                else:
+                    self._tool_executor.shutdown(wait=False)
+                delattr(self, '_tool_executor')
+        except Exception as e:
+            logger.warning(f"ThreadPoolExecutor cleanup failed: {e}")
+
         # Always set closed flag
         self._closed = True
     
@@ -4935,6 +4949,23 @@ Answer:"""
                         await task
                     except asyncio.CancelledError:
                         pass
+
+            # ThreadPoolExecutor cleanup (async-safe)
+            if hasattr(self, '_tool_executor') and self._tool_executor:
+                import sys
+                loop = asyncio.get_running_loop()
+                # Use run_in_executor to avoid blocking the event loop
+                if sys.version_info >= (3, 9):
+                    await loop.run_in_executor(
+                        None, 
+                        lambda: self._tool_executor.shutdown(wait=False, cancel_futures=True)
+                    )
+                else:
+                    await loop.run_in_executor(
+                        None, 
+                        lambda: self._tool_executor.shutdown(wait=False)
+                    )
+                delattr(self, '_tool_executor')
             
             self._closed = True
             
