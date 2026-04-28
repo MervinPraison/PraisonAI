@@ -17,6 +17,7 @@ import json
 import yaml
 from rich import print
 import threading
+from collections import OrderedDict
 from praisonai._logging import get_logger
 
 # Type variable for Pydantic models
@@ -42,9 +43,9 @@ _autogen_v4_classes = None  # (AssistantAgent, OpenAIChatCompletionClient)
 _praisonai_classes = None  # (PraisonAgent, PraisonTask, Agents)
 _praisonai_tools = None  # dict of tool classes
 _litellm = None
-_openai_client = None
-_openai_client_lock = threading.Lock()
-_openai_client_key = None  # (api_key, base_url) the cached client was built with
+_OPENAI_CLIENT_CACHE_MAX = 8
+_openai_clients: "OrderedDict[tuple, object]" = OrderedDict()
+_openai_clients_lock = threading.Lock()
 
 
 # --- CrewAI lazy loading ---
@@ -234,28 +235,34 @@ def _check_openai_available() -> bool:
 
 
 def _get_openai_client(api_key: str = None, base_url: str = None):
-    """Lazy load OpenAI client (thread-safe, key-aware)."""
-    global _openai_client, _openai_client_key
+    """Lazy load OpenAI client with bounded LRU cache (thread-safe, multi-tenant)."""
     key = (api_key or os.environ.get("OPENAI_API_KEY"), base_url)
+    
+    # Fast path: check if client exists
+    client = _openai_clients.get(key)
+    if client is not None:
+        return client
 
-    # Fast path: already initialized with the same key
-    if _openai_client is not None and _openai_client_key == key:
-        return _openai_client
+    with _openai_clients_lock:
+        # Double-check pattern
+        client = _openai_clients.get(key)
+        if client is not None:
+            _openai_clients.move_to_end(key)
+            return client
 
-    with _openai_client_lock:
-        if _openai_client is None or _openai_client_key != key:
-            from openai import OpenAI
-            old_client = _openai_client
-            # Set key first to maintain fast-path invariant
-            _openai_client_key = key
-            _openai_client = OpenAI(api_key=key[0], base_url=key[1])
-            # Close old client to prevent httpx connection leaks
-            if old_client is not None:
-                try:
-                    old_client.close()
-                except Exception:
-                    pass  # Best-effort cleanup
-        return _openai_client
+        from openai import OpenAI
+        client = OpenAI(api_key=key[0], base_url=key[1])
+        _openai_clients[key] = client
+        
+        # Bound the cache; close the LRU victim
+        if len(_openai_clients) > _OPENAI_CLIENT_CACHE_MAX:
+            _, victim = _openai_clients.popitem(last=False)
+            try:
+                victim.close()
+            except Exception:
+                pass  # Best-effort cleanup
+        
+        return client
 
 
 # Use namespaced logger; root logger is configured only by the CLI

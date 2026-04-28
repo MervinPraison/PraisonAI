@@ -63,9 +63,18 @@ import cProfile
 import pstats
 import io
 import statistics
+from collections import deque
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Callable, Any
 from contextlib import contextmanager, asynccontextmanager
+
+
+# ============================================================================
+# Configuration
+# ============================================================================
+
+# Maximum number of records per profiler buffer
+_PROFILER_MAX = int(os.environ.get("PRAISONAI_PROFILE_MAX", "10000"))
 
 
 # ============================================================================
@@ -215,7 +224,7 @@ class StreamingTracker:
 
 class Profiler:
     """
-    Centralized profiler for performance monitoring.
+    Centralized profiler for performance monitoring with bounded buffers.
     
     Thread-safe singleton pattern for global access.
     
@@ -228,23 +237,11 @@ class Profiler:
     - Statistics (p50, p95, p99)
     - cProfile integration
     - Export (JSON, HTML)
+    - Bounded per-instance buffers (default 10k records each)
     """
     
     _instance: Optional['Profiler'] = None
     _lock = threading.Lock()
-    
-    # Class-level storage
-    _timings: List[TimingRecord] = []
-    _imports: List[ImportRecord] = []
-    _flow: List[FlowRecord] = []
-    _api_calls: List[APICallRecord] = []
-    _streaming: List[StreamingRecord] = []
-    _memory: List[MemoryRecord] = []
-    _enabled: bool = False
-    _flow_step: int = 0
-    _files_accessed: Dict[str, int] = {}
-    _line_profile_data: Dict[str, Any] = {}
-    _cprofile_stats: List[Dict[str, Any]] = []
     
     def __new__(cls):
         if cls._instance is None:
@@ -252,6 +249,19 @@ class Profiler:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
         return cls._instance
+    
+    # Class-level storage with bounded deque buffers
+    _timings = deque(maxlen=_PROFILER_MAX)
+    _imports = deque(maxlen=_PROFILER_MAX) 
+    _flow = deque(maxlen=_PROFILER_MAX)
+    _api_calls = deque(maxlen=_PROFILER_MAX)
+    _streaming = deque(maxlen=_PROFILER_MAX)
+    _memory = deque(maxlen=_PROFILER_MAX)
+    _enabled: bool = False
+    _flow_step: int = 0
+    _files_accessed: Dict[str, int] = {}
+    _line_profile_data: Dict[str, Any] = {}
+    _cprofile_stats = deque(maxlen=_PROFILER_MAX)
     
     @classmethod
     def enable(cls) -> None:
@@ -1181,6 +1191,14 @@ def check_module_available(module_name: str) -> bool:
     """
     import importlib.util
     return importlib.util.find_spec(module_name) is not None
+
+
+# ============================================================================
+# Default Profiler Instance
+# ============================================================================
+
+# Module-level default for backward compatibility
+default_profiler = Profiler()
 
 
 # ============================================================================

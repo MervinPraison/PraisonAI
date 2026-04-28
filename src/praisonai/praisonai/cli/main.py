@@ -6,41 +6,51 @@ import warnings
 import os
 import json
 
-# Suppress Pydantic serialization warnings from LiteLLM BEFORE any imports
-# These warnings occur when LiteLLM's response objects have field mismatches
-# Using both filterwarnings AND patching warnings.warn for complete suppression
+# Warning filter support - now opt-in only (no global mutation at import)
+import atexit
 
-warnings.filterwarnings("ignore", message=".*Pydantic serializer warnings.*")
-warnings.filterwarnings("ignore", message=".*PydanticSerializationUnexpectedValue.*")
-warnings.filterwarnings("ignore", message=".*Expected \\d+ fields but got.*")
-warnings.filterwarnings("ignore", message=".*Expected `StreamingChoices`.*")
-warnings.filterwarnings("ignore", message=".*Expected `Message`.*")
-warnings.filterwarnings("ignore", message=".*serialized value may not be as expected.*")
-warnings.filterwarnings("ignore", category=UserWarning, module="pydantic.*")
-
-# Patch warnings.showwarning to intercept ALL warnings including those from crewai's patched warn
-# This is the final output function that actually displays warnings
-_SUPPRESSED_PATTERNS = [
+_SUPPRESSED_PATTERNS = (
     "Pydantic serializer warnings",
     "PydanticSerializationUnexpectedValue",
-    "Expected",  # Catches "Expected N fields but got M"
+    "Expected ",  # Narrowed from just "Expected" to avoid false positives
     "StreamingChoices",
     "serialized value may not be as expected",
-    "duckduckgo_search",  # Suppress duckduckgo rename warning
-]
+    "duckduckgo_search",
+)
 
-_original_showwarning = warnings.showwarning
+_installed = False
+_original_showwarning = None
 
-def _patched_showwarning(message, category, filename, lineno, file=None, line=None):
-    msg_str = str(message)
-    for pattern in _SUPPRESSED_PATTERNS:
-        if pattern in msg_str:
-            return
-    if category is UserWarning and "pydantic" in filename.lower():
+def install_warning_filters() -> None:
+    """Install PraisonAI's noise filters. Idempotent. CLI-only."""
+    global _installed, _original_showwarning
+    if _installed:
         return
-    _original_showwarning(message, category, filename, lineno, file, line)
+    _original_showwarning = warnings.showwarning
 
-warnings.showwarning = _patched_showwarning
+    # Install filterwarnings for common patterns
+    for pattern in _SUPPRESSED_PATTERNS:
+        warnings.filterwarnings("ignore", message=f".*{pattern}.*")
+    warnings.filterwarnings("ignore", category=UserWarning, module="pydantic.*")
+
+    def _filtered_showwarning(message, category, filename, lineno, file=None, line=None):
+        msg_str = str(message)
+        if any(pattern in msg_str for pattern in _SUPPRESSED_PATTERNS):
+            return
+        if category is UserWarning and "pydantic" in filename.lower():
+            return
+        _original_showwarning(message, category, filename, lineno, file, line)
+
+    warnings.showwarning = _filtered_showwarning
+    atexit.register(_uninstall_warning_filters)
+    _installed = True
+
+def _uninstall_warning_filters() -> None:
+    """Restore original warnings behavior on exit."""
+    global _installed
+    if _installed and _original_showwarning is not None:
+        warnings.showwarning = _original_showwarning
+        _installed = False
 
 # Suppress crewai RuntimeWarning about module loading order (only in non-debug mode)
 # This warning is harmless and occurs when running as `python -m praisonai.cli.main`
@@ -334,6 +344,9 @@ class PraisonAI:
         initializes the necessary attributes, and then calls the appropriate methods based on the
         provided arguments.
         """
+        # Install warning filters when running CLI (opt-in behavior)
+        install_warning_filters()
+        
         # Telemetry defaults now handled in PraisonAI.__init__ with Langfuse awareness
         
         # Store the original agent_file from constructor
@@ -6779,5 +6792,7 @@ Provide a concise summary (max 200 words):"""
                 logging.getLogger(logger_name).setLevel(level)
 
 if __name__ == "__main__":
+    # Install warning filters when run as script
+    install_warning_filters()
     praison_ai = PraisonAI()
     praison_ai.main()
