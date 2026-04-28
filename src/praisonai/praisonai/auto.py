@@ -238,18 +238,14 @@ def _get_openai_client(api_key: str = None, base_url: str = None):
     """Lazy load OpenAI client with bounded LRU cache (thread-safe, multi-tenant)."""
     key = (api_key or os.environ.get("OPENAI_API_KEY"), base_url)
     
-    # Fast path: check if client exists
-    client = _openai_clients.get(key)
-    if client is not None:
-        return client
-
     with _openai_clients_lock:
-        # Double-check pattern
+        # Check if client exists and update LRU position
         client = _openai_clients.get(key)
         if client is not None:
             _openai_clients.move_to_end(key)
             return client
 
+        # Create new client
         from openai import OpenAI
         client = OpenAI(api_key=key[0], base_url=key[1])
         _openai_clients[key] = client

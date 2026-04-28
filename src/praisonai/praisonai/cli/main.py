@@ -20,13 +20,15 @@ _SUPPRESSED_PATTERNS = (
 
 _installed = False
 _original_showwarning = None
+_original_filters = None
 
 def install_warning_filters() -> None:
     """Install PraisonAI's noise filters. Idempotent. CLI-only."""
-    global _installed, _original_showwarning
+    global _installed, _original_showwarning, _original_filters
     if _installed:
         return
     _original_showwarning = warnings.showwarning
+    _original_filters = list(warnings.filters)
 
     # Install filterwarnings for common patterns
     for pattern in _SUPPRESSED_PATTERNS:
@@ -47,9 +49,11 @@ def install_warning_filters() -> None:
 
 def _uninstall_warning_filters() -> None:
     """Restore original warnings behavior on exit."""
-    global _installed
+    global _installed, _original_filters, _original_showwarning
     if _installed and _original_showwarning is not None:
         warnings.showwarning = _original_showwarning
+        if _original_filters is not None:
+            warnings.filters[:] = _original_filters
         _installed = False
 
 # Suppress crewai RuntimeWarning about module loading order (only in non-debug mode)
@@ -344,8 +348,7 @@ class PraisonAI:
         initializes the necessary attributes, and then calls the appropriate methods based on the
         provided arguments.
         """
-        # Install warning filters when running CLI (opt-in behavior)
-        install_warning_filters()
+        # Warning filters now installed via Typer callback for CLI-only usage
         
         # Telemetry defaults now handled in PraisonAI.__init__ with Langfuse awareness
         

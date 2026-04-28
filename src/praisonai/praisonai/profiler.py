@@ -74,7 +74,15 @@ from contextlib import contextmanager, asynccontextmanager
 # ============================================================================
 
 # Maximum number of records per profiler buffer
-_PROFILER_MAX = int(os.environ.get("PRAISONAI_PROFILE_MAX", "10000"))
+def _get_profiler_max() -> int:
+    raw = os.environ.get("PRAISONAI_PROFILE_MAX", "10000")
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        return 10000
+
+
+_PROFILER_MAX = _get_profiler_max()
 
 
 # ============================================================================
@@ -364,7 +372,7 @@ class Profiler:
         with cls._lock:
             if category:
                 return [t for t in cls._timings if t.category == category]
-            return cls._timings.copy()
+            return list(cls._timings)
     
     @classmethod
     def get_imports(cls, min_duration_ms: float = 0) -> List[ImportRecord]:
@@ -372,13 +380,13 @@ class Profiler:
         with cls._lock:
             if min_duration_ms > 0:
                 return [i for i in cls._imports if i.duration_ms >= min_duration_ms]
-            return cls._imports.copy()
+            return list(cls._imports)
     
     @classmethod
     def get_flow(cls) -> List[FlowRecord]:
         """Get flow records."""
         with cls._lock:
-            return cls._flow.copy()
+            return list(cls._flow)
     
     @classmethod
     def get_files_accessed(cls) -> Dict[str, int]:
@@ -486,7 +494,7 @@ class Profiler:
     def get_api_calls(cls) -> List[APICallRecord]:
         """Get API call records."""
         with cls._lock:
-            return cls._api_calls.copy()
+            return list(cls._api_calls)
     
     @classmethod
     @contextmanager
@@ -532,7 +540,7 @@ class Profiler:
     def get_streaming_records(cls) -> List[StreamingRecord]:
         """Get streaming records."""
         with cls._lock:
-            return cls._streaming.copy()
+            return list(cls._streaming)
     
     @classmethod
     @contextmanager
@@ -577,7 +585,7 @@ class Profiler:
     def get_memory_records(cls) -> List[MemoryRecord]:
         """Get memory records."""
         with cls._lock:
-            return cls._memory.copy()
+            return list(cls._memory)
     
     @classmethod
     @contextmanager
@@ -680,7 +688,7 @@ class Profiler:
     def get_cprofile_stats(cls) -> List[Dict[str, Any]]:
         """Get cProfile statistics."""
         with cls._lock:
-            return cls._cprofile_stats.copy()
+            return list(cls._cprofile_stats)
     
     # ========================================================================
     # Line-Level Profiling
@@ -862,13 +870,13 @@ class Profiler:
     <h2>API Calls</h2>
     <table>
         <tr><th>Endpoint</th><th>Method</th><th>Duration (ms)</th><th>Status</th></tr>
-        {''.join(f"<tr><td>{a.endpoint}</td><td>{a.method}</td><td>{a.duration_ms:.2f}</td><td>{a.status_code}</td></tr>" for a in cls._api_calls[:20])}
+        {''.join(f"<tr><td>{a.endpoint}</td><td>{a.method}</td><td>{a.duration_ms:.2f}</td><td>{a.status_code}</td></tr>" for a in list(cls._api_calls)[:20])}
     </table>
     
     <h2>Streaming</h2>
     <table>
         <tr><th>Name</th><th>TTFT (ms)</th><th>Total (ms)</th><th>Chunks</th><th>Tokens</th></tr>
-        {''.join(f"<tr><td>{s.name}</td><td>{s.ttft_ms:.2f}</td><td>{s.total_ms:.2f}</td><td>{s.chunk_count}</td><td>{s.total_tokens}</td></tr>" for s in cls._streaming[:20])}
+        {''.join(f"<tr><td>{s.name}</td><td>{s.ttft_ms:.2f}</td><td>{s.total_ms:.2f}</td><td>{s.chunk_count}</td><td>{s.total_tokens}</td></tr>" for s in list(cls._streaming)[:20])}
     </table>
 </body>
 </html>'''
