@@ -192,9 +192,10 @@ class AsyncAgentScheduler:
                     self._task.cancel()
                     try:
                         await self._task
-                    except (asyncio.CancelledError, Exception) as e:
-                        if not isinstance(e, asyncio.CancelledError):
-                            logger.error(f"Scheduler task raised on cancel: {e}")
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as e:
+                        logger.error(f"Scheduler task raised on cancel: {e}")
         finally:
             self.is_running = False
         
