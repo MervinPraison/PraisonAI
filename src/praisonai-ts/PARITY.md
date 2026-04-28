@@ -1,6 +1,6 @@
 # Feature Parity Tracker
 
-> **Version:** 1.5.87 | **Last Updated:** 2026-04-27
+> **Version:** 1.5.87 | **Last Updated:** 2026-04-28
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 ## Summary
