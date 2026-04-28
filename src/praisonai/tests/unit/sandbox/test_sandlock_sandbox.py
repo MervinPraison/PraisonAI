@@ -219,7 +219,7 @@ class TestSandlockSandbox:
         # ``sandbox._temp_dir`` holds the unresolved ``mkdtemp`` output.
         normal = sandbox._safe_sandbox_path("subdir/file.txt")
         assert normal is not None
-        assert normal.startswith(os.path.realpath(sandbox._temp_dir))
+        assert normal.startswith(os.path.realpath(sandbox._temp_dir) + os.sep)
 
         await sandbox.stop()
 

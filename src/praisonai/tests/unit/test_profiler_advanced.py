@@ -61,8 +61,8 @@ class TestAPICallProfiler:
         calls = Profiler.get_api_calls()
         assert len(calls) >= 1
         # Use a loose lower bound: ``time.sleep`` can under-deliver by a few ms
-        # on busy CI runners, so we only require a non-trivial positive value.
-        assert calls[-1].duration_ms > 0
+        # on busy CI runners, so we require at least 5ms to catch unit errors.
+        assert calls[-1].duration_ms >= 5
         
         Profiler.disable()
         Profiler.clear()
@@ -139,7 +139,7 @@ class TestStreamingProfiler:
         streams = Profiler.get_streaming_records()
         assert len(streams) >= 1
         # Loose lower bound: ``time.sleep`` precision varies on CI runners.
-        assert streams[-1].ttft_ms > 0
+        assert streams[-1].ttft_ms >= 5
         assert streams[-1].chunk_count == 2
         
         Profiler.disable()
