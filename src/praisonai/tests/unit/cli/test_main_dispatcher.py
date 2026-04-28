@@ -1,78 +1,137 @@
 """Unit tests for the unified CLI dispatcher in `praisonai.__main__`.
 
-The dispatcher is the single entry point for all CLI invocations. It must:
-  - Short-circuit on ``--version`` / ``-V`` before importing any heavy modules
-    (so version reporting stays fast even with broken optional deps).
-  - Treat free-text prompts and bare ``.yaml``/``.yml`` paths (existing on
-    disk) as legacy invocations and route them to ``PraisonAI()``.
-  - Hand every other invocation, including ``--help``, to Typer so registered
-    subcommands and global flags work.
-  - Always restore ``sys.argv`` after dispatch — Typer mutates ``argv`` and
+The dispatcher is Typer-first with a legacy fallback for bare prompts and
+YAML invocations. It must:
+
+  - Short-circuit on ``--version`` / ``-V`` before importing any heavy
+    Typer or legacy modules (so version reporting stays fast even with
+    broken optional deps).
+  - Route ``--help`` / ``-h`` to Typer (so help text auto-discovers
+    subcommands).
+  - Route bare argv (no positional) to Typer.
+  - Auto-discover registered Typer commands via Click introspection,
+    cached behind a thread-safe lock that does not poison on failure.
+  - Route the first non-flag positional through the discovered command
+    set: known commands → Typer; everything else (prompts, YAML paths,
+    legacy flags) → legacy.
+  - Always restore ``sys.argv`` after dispatch — Typer mutates argv and
     legacy invocations also rewrite it.
-  - Fail loud on Typer command-registration errors (no silent degradation).
+  - Skip global flags (``--verbose``, ``-o`` + value, etc.) when looking
+    for the first positional command.
 """
 
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
 import praisonai.__main__ as dispatcher
 
 
-class TestIsLegacyInvocation(unittest.TestCase):
-    """``_is_legacy_invocation`` only matches bare prompts and existing YAML files.
+class TestFindFirstCommand(unittest.TestCase):
+    """``_find_first_command`` skips global flags + value-flag values."""
 
-    It must NOT match:
-      - empty argv
-      - argv whose first token is a flag
-      - YAML-looking arguments that don't exist on disk (could be a typo or
-        a Typer subcommand name that happens to end in ``.yml``).
-    """
+    def test_returns_first_positional(self):
+        self.assertEqual(dispatcher._find_first_command(["chat", "hello"]), "chat")
 
-    def test_empty_argv_is_not_legacy(self):
-        self.assertFalse(dispatcher._is_legacy_invocation([]))
+    def test_skips_leading_flags(self):
+        self.assertEqual(dispatcher._find_first_command(["--verbose", "ui"]), "ui")
+        self.assertEqual(dispatcher._find_first_command(["--debug", "--json", "chat"]), "chat")
 
-    def test_leading_flag_is_not_legacy(self):
-        self.assertFalse(dispatcher._is_legacy_invocation(["--verbose", "agents.yaml"]))
-        self.assertFalse(dispatcher._is_legacy_invocation(["-V"]))
-
-    def test_freetext_prompt_is_legacy(self):
-        self.assertTrue(dispatcher._is_legacy_invocation(["Create a weather app"]))
-
-    def test_existing_yaml_file_is_legacy(self):
-        with tempfile.NamedTemporaryFile(suffix=".yaml", delete=False) as fh:
-            fh.write(b"agents: []\n")
-            path = fh.name
-        try:
-            self.assertTrue(dispatcher._is_legacy_invocation([path]))
-        finally:
-            os.unlink(path)
-
-    def test_existing_yml_file_is_legacy(self):
-        with tempfile.NamedTemporaryFile(suffix=".yml", delete=False) as fh:
-            fh.write(b"agents: []\n")
-            path = fh.name
-        try:
-            self.assertTrue(dispatcher._is_legacy_invocation([path]))
-        finally:
-            os.unlink(path)
-
-    def test_nonexistent_yaml_path_is_not_legacy(self):
-        # If the file doesn't exist, fall through to Typer so it can show a
-        # proper command-not-found error instead of silently routing to legacy.
-        self.assertFalse(
-            dispatcher._is_legacy_invocation(["/nonexistent/agents.yaml"])
+    def test_skips_value_flags_and_their_values(self):
+        # --output-format json should not be treated as the command.
+        self.assertEqual(
+            dispatcher._find_first_command(["--output-format", "json", "chat"]),
+            "chat",
+        )
+        self.assertEqual(
+            dispatcher._find_first_command(["-o", "yaml", "ui"]),
+            "ui",
         )
 
-    def test_typer_subcommand_is_not_legacy(self):
-        self.assertFalse(dispatcher._is_legacy_invocation(["chat"]))
-        self.assertFalse(dispatcher._is_legacy_invocation(["ui", "--port", "8080"]))
+    def test_only_flags_returns_none(self):
+        self.assertIsNone(dispatcher._find_first_command(["--verbose", "--debug"]))
+
+    def test_empty_argv_returns_none(self):
+        self.assertIsNone(dispatcher._find_first_command([]))
+
+    def test_yaml_path_returned_as_first(self):
+        self.assertEqual(
+            dispatcher._find_first_command(["agents.yaml"]),
+            "agents.yaml",
+        )
+
+    def test_freetext_prompt_returned_as_first(self):
+        # Whole token returned, including the embedded space.
+        self.assertEqual(
+            dispatcher._find_first_command(["Build a weather agent"]),
+            "Build a weather agent",
+        )
+
+
+class TestGetTyperCommandsCache(unittest.TestCase):
+    """``_get_typer_commands`` caches its result under a lock and does
+    not poison the cache on failure."""
+
+    def setUp(self):
+        # Reset module-level cache between tests.
+        dispatcher._typer_commands_cache = None
+
+    def tearDown(self):
+        dispatcher._typer_commands_cache = None
+
+    def test_returns_set_on_success(self):
+        result = dispatcher._get_typer_commands()
+        self.assertIsInstance(result, set)
+        # Cache is populated after a successful call.
+        self.assertIsNotNone(dispatcher._typer_commands_cache)
+
+    def test_cache_is_reused_on_second_call(self):
+        first = dispatcher._get_typer_commands()
+        second = dispatcher._get_typer_commands()
+        self.assertIs(first, second)
+
+    def test_failure_does_not_poison_cache(self):
+        """If discovery fails, the next caller must be allowed to retry."""
+        with mock.patch(
+            "praisonai.cli.app.register_commands",
+            side_effect=ImportError("simulated optional dep missing"),
+        ):
+            result = dispatcher._get_typer_commands()
+        # Failed discovery returns an empty set ...
+        self.assertEqual(result, set())
+        # ... but the cache stays None so a subsequent call can retry.
+        self.assertIsNone(dispatcher._typer_commands_cache)
+
+    def test_concurrent_callers_get_same_result(self):
+        """No double-initialization under contention."""
+        results = []
+        errors = []
+
+        def worker():
+            try:
+                results.append(dispatcher._get_typer_commands())
+            except Exception as e:  # pragma: no cover - unexpected
+                errors.append(e)
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(errors, [])
+        # All threads must observe the same cached set object.
+        first = results[0]
+        for r in results[1:]:
+            self.assertIs(r, first)
 
 
 class TestVersionShortCircuit(unittest.TestCase):
-    """``--version`` / ``-V`` must print and return without importing Typer."""
+    """``--version`` / ``-V`` must print and return without importing
+    Typer or legacy modules."""
 
     def setUp(self):
         self._saved_argv = sys.argv
@@ -94,15 +153,15 @@ class TestVersionShortCircuit(unittest.TestCase):
         printed = " ".join(str(c.args[0]) for c in mock_print.call_args_list)
         self.assertIn("PraisonAI version", printed)
 
-    def test_version_does_not_import_typer_app(self):
+    def test_version_does_not_import_typer_or_legacy(self):
         """The version path is on the hot import path; it must stay light.
 
         We deliberately avoid ``mock.patch("praisonai.cli.app.register_commands")``
-        here: ``mock.patch`` with a dotted target imports the target module
-        when the patch context is entered, which would itself defeat the
-        invariant we are trying to verify. Instead, evict any cached
+        and friends here: ``mock.patch`` with a dotted target imports the
+        target module when the patch context is entered, which would
+        defeat the invariant under test. Instead, evict any cached
         ``praisonai.cli.*`` modules from ``sys.modules`` before invoking
-        ``main()``, then assert they are still absent afterwards.
+        ``main()`` and assert they remain absent afterwards.
         """
         sys.argv = ["praisonai", "--version"]
         cli_mods = [m for m in list(sys.modules) if m.startswith("praisonai.cli")]
@@ -119,8 +178,100 @@ class TestVersionShortCircuit(unittest.TestCase):
             sys.modules.update(saved)
 
 
-class TestLegacyRouting(unittest.TestCase):
-    """Bare prompts and existing YAML paths must reach the legacy ``PraisonAI()``."""
+class TestMainRouting(unittest.TestCase):
+    """``main()`` routes argv to version / Typer / legacy according to
+    routing rules 1-5 from the module docstring."""
+
+    def setUp(self):
+        self._saved_argv = sys.argv
+        dispatcher._typer_commands_cache = None
+
+    def tearDown(self):
+        sys.argv = self._saved_argv
+        dispatcher._typer_commands_cache = None
+
+    def test_help_flag_routes_to_typer(self):
+        sys.argv = ["praisonai", "--help"]
+        with mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_typer.assert_called_once()
+        run_legacy.assert_not_called()
+
+    def test_short_help_flag_routes_to_typer(self):
+        sys.argv = ["praisonai", "-h"]
+        with mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_typer.assert_called_once()
+        run_legacy.assert_not_called()
+
+    def test_no_args_routes_to_typer(self):
+        sys.argv = ["praisonai"]
+        with mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_typer.assert_called_once()
+        run_legacy.assert_not_called()
+
+    def test_only_global_flags_routes_to_typer(self):
+        """Argv with only flags (no positional command) → Typer for global flag handling."""
+        sys.argv = ["praisonai", "--verbose"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat"}
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_typer.assert_called_once()
+        run_legacy.assert_not_called()
+
+    def test_known_typer_command_routes_to_typer(self):
+        sys.argv = ["praisonai", "fake-cmd", "--opt"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"fake-cmd"}
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_typer.assert_called_once()
+        run_legacy.assert_not_called()
+
+    def test_freetext_prompt_routes_to_legacy(self):
+        sys.argv = ["praisonai", "Create a weather app"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_legacy.assert_called_once()
+        run_typer.assert_not_called()
+
+    def test_yaml_path_routes_to_legacy(self):
+        # Routing decision is by command-set membership, NOT by file
+        # existence — the original auto-discovery dispatcher does not
+        # touch the filesystem.
+        sys.argv = ["praisonai", "agents.yaml"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat", "ui"}
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_legacy.assert_called_once()
+        run_typer.assert_not_called()
+
+    def test_unknown_command_routes_to_legacy(self):
+        sys.argv = ["praisonai", "totally-unknown"]
+        with mock.patch.object(
+            dispatcher, "_get_typer_commands", return_value={"chat"}
+        ), mock.patch.object(dispatcher, "_run_typer") as run_typer, \
+             mock.patch.object(dispatcher, "_run_legacy") as run_legacy:
+            dispatcher.main()
+        run_legacy.assert_called_once()
+        run_typer.assert_not_called()
+
+
+class TestRunLegacyArgvRestoration(unittest.TestCase):
+    """``_run_legacy`` must always restore ``sys.argv``, even on
+    SystemExit, AND that restoration must have discriminating power."""
 
     def setUp(self):
         self._saved_argv = sys.argv
@@ -128,65 +279,52 @@ class TestLegacyRouting(unittest.TestCase):
     def tearDown(self):
         sys.argv = self._saved_argv
 
-    def test_freetext_prompt_routes_to_legacy(self):
-        sys.argv = ["praisonai", "Build a weather agent"]
+    def test_argv_restored_after_normal_exit(self):
+        # NOTE: argv[0] differs from the dispatcher's rewrite ("praisonai")
+        # so the assertion has discriminating power: if the ``finally``
+        # clause were missing, ``sys.argv[0]`` would still be "praisonai"
+        # after dispatch, and the equality check would fail.
+        original = ["/usr/local/bin/some-launcher", "agents.yaml"]
+        sys.argv = list(original)
+
         fake = mock.MagicMock()
         fake.main.return_value = None
-        with mock.patch("praisonai.cli.main.PraisonAI", return_value=fake) as PraisonAI, \
-             mock.patch("praisonai.cli.app.register_commands") as reg, \
-             self.assertRaises(SystemExit):
-            dispatcher.main()
-        PraisonAI.assert_called_once()
-        fake.main.assert_called_once()
-        reg.assert_not_called()
 
-    def test_existing_yaml_routes_to_legacy(self):
-        with tempfile.NamedTemporaryFile(suffix=".yaml", delete=False) as fh:
-            fh.write(b"agents: []\n")
-            path = fh.name
-        try:
-            sys.argv = ["praisonai", path]
-            fake = mock.MagicMock()
-            fake.main.return_value = None
-            with mock.patch(
-                "praisonai.cli.main.PraisonAI", return_value=fake
-            ) as PraisonAI, self.assertRaises(SystemExit):
-                dispatcher.main()
-            PraisonAI.assert_called_once()
-            fake.main.assert_called_once()
-        finally:
-            os.unlink(path)
+        with mock.patch("praisonai.cli.main.PraisonAI", return_value=fake), \
+             self.assertRaises(SystemExit) as cm:
+            dispatcher._run_legacy(["agents.yaml"])
 
-    def test_legacy_translates_bool_false_to_exit_code_1(self):
-        """Legacy ``main()`` returning ``False`` must propagate as exit code 1."""
-        sys.argv = ["praisonai", "Topic prompt"]
+        self.assertEqual(cm.exception.code, 0)
+        self.assertEqual(sys.argv, original)
+        self.assertNotEqual(sys.argv[0], "praisonai")  # invariant pin
+
+    def test_argv_restored_after_systemexit(self):
+        original = ["/usr/local/bin/some-launcher", "topic"]
+        sys.argv = list(original)
+
+        fake = mock.MagicMock()
+        fake.main.side_effect = SystemExit(2)
+
+        with mock.patch("praisonai.cli.main.PraisonAI", return_value=fake), \
+             self.assertRaises(SystemExit) as cm:
+            dispatcher._run_legacy(["topic"])
+
+        self.assertEqual(cm.exception.code, 2)
+        self.assertEqual(sys.argv, original)
+        self.assertNotEqual(sys.argv[0], "praisonai")
+
+    def test_main_returning_false_translates_to_exit_code_1(self):
+        sys.argv = ["/usr/local/bin/some-launcher", "topic"]
         fake = mock.MagicMock()
         fake.main.return_value = False
         with mock.patch("praisonai.cli.main.PraisonAI", return_value=fake), \
              self.assertRaises(SystemExit) as cm:
-            dispatcher.main()
+            dispatcher._run_legacy(["topic"])
         self.assertEqual(cm.exception.code, 1)
 
-    def test_legacy_path_restores_argv(self):
-        # NOTE: argv[0] differs from the dispatcher's rewrite ("praisonai"),
-        # so the restoration assertion has real discriminating power.
-        # If the ``finally`` clause were removed, ``sys.argv[0]`` would
-        # remain "praisonai" after dispatch, and ``assertEqual`` would fail.
-        # (Claude's earlier '--extra-arg' variant did not catch this because
-        # the dispatcher rewrites to ``["praisonai"] + sys.argv[1:]`` —
-        # identical to the original when ``argv[0] == "praisonai"``.)
-        original = ["/usr/local/bin/some-launcher", "Build weather app", "--extra-arg"]
-        sys.argv = list(original)
-        fake = mock.MagicMock()
-        fake.main.return_value = None
-        with mock.patch("praisonai.cli.main.PraisonAI", return_value=fake), \
-             self.assertRaises(SystemExit):
-            dispatcher.main()
-        self.assertEqual(sys.argv, original)
 
-
-class TestTyperRouting(unittest.TestCase):
-    """Anything that is not version/legacy must reach the Typer app."""
+class TestRunTyperArgvRestoration(unittest.TestCase):
+    """``_run_typer`` must restore argv even if the Typer app raises."""
 
     def setUp(self):
         self._saved_argv = sys.argv
@@ -194,63 +332,15 @@ class TestTyperRouting(unittest.TestCase):
     def tearDown(self):
         sys.argv = self._saved_argv
 
-    def test_no_args_routes_to_typer(self):
-        sys.argv = ["praisonai"]
-        with mock.patch("praisonai.cli.app.app") as app, \
-             mock.patch("praisonai.cli.app.register_commands") as reg, \
-             mock.patch("praisonai.cli.main.PraisonAI") as legacy:
-            dispatcher.main()
-        reg.assert_called_once()
-        app.assert_called_once()
-        legacy.assert_not_called()
-
-    def test_help_flag_routes_to_typer(self):
-        sys.argv = ["praisonai", "--help"]
-        with mock.patch("praisonai.cli.app.app") as app, \
-             mock.patch("praisonai.cli.app.register_commands"), \
-             mock.patch("praisonai.cli.main.PraisonAI") as legacy:
-            dispatcher.main()
-        app.assert_called_once()
-        legacy.assert_not_called()
-
-    def test_subcommand_routes_to_typer(self):
-        sys.argv = ["praisonai", "chat", "--model", "gpt-4o"]
-        with mock.patch("praisonai.cli.app.app") as app, \
-             mock.patch("praisonai.cli.app.register_commands") as reg, \
-             mock.patch("praisonai.cli.main.PraisonAI") as legacy:
-            dispatcher.main()
-        reg.assert_called_once()
-        app.assert_called_once()
-        legacy.assert_not_called()
-
-    def test_typer_path_restores_argv(self):
-        # See note in test_legacy_path_restores_argv — differing argv[0]
-        # is what gives this assertion discriminating power.
-        original = ["/usr/local/bin/some-launcher", "chat", "--model", "gpt-4"]
+    def test_argv_restored_after_systemexit(self):
+        original = ["/usr/local/bin/some-launcher", "chat"]
         sys.argv = list(original)
-        with mock.patch("praisonai.cli.app.app"), \
-             mock.patch("praisonai.cli.app.register_commands"):
-            dispatcher.main()
+        with mock.patch("praisonai.cli.app.register_commands"), \
+             mock.patch("praisonai.cli.app.app", side_effect=SystemExit(0)), \
+             self.assertRaises(SystemExit):
+            dispatcher._run_typer(["chat"])
         self.assertEqual(sys.argv, original)
         self.assertNotEqual(sys.argv[0], "praisonai")
-
-    def test_typer_registration_failure_propagates(self):
-        """``register_commands()`` errors must NOT be swallowed (fail-loud design)."""
-        sys.argv = ["praisonai", "chat"]
-        with mock.patch(
-            "praisonai.cli.app.register_commands",
-            side_effect=ImportError("missing optional dep"),
-        ), self.assertRaises(ImportError):
-            dispatcher.main()
-
-    def test_systemexit_from_typer_propagates_code(self):
-        sys.argv = ["praisonai", "chat"]
-        fake_app = mock.MagicMock(side_effect=SystemExit(2))
-        with mock.patch("praisonai.cli.app.app", fake_app), \
-             mock.patch("praisonai.cli.app.register_commands"), \
-             self.assertRaises(SystemExit) as cm:
-            dispatcher.main()
-        self.assertEqual(cm.exception.code, 2)
 
 
 if __name__ == "__main__":
