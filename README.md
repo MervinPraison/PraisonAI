@@ -23,7 +23,7 @@
 
 </div>
 
-PraisonAI 🦞 — **Hire a 24/7 AI Workforce.** Stop writing boilerplate and start shipping autonomous agents that research, plan, and execute tasks across your apps. From one agent to an entire organization, deployed in 5 lines of code.
+PraisonAI 🦞 — **Hire a 24/7 AI Workforce.** Stop writing boilerplate and start shipping autonomous, self-improving agents that research, plan, and execute tasks across your apps. From one agent to an entire organization, deployed in 5 lines of code.
 
 ```bash
 curl -fsSL https://praison.ai/install.sh | bash
