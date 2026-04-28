@@ -24,25 +24,42 @@ from praisonai._logging import get_logger
 T = TypeVar('T', bound=BaseModel)
 
 # =============================================================================
-# LAZY LOADING INFRASTRUCTURE - All heavy imports are deferred
+# THREAD-SAFE LAZY LOADING INFRASTRUCTURE - All heavy imports are deferred
 # =============================================================================
 
-# Cached availability flags (None = not checked yet)
-_crewai_available = None
-_autogen_available = None
-_autogen_v4_available = None
-_praisonai_available = None
-_praisonai_tools_available = None
-_litellm_available = None
-_openai_available = None
+import threading
 
-# Cached module/class references
-_crewai_classes = None  # (Agent, Task, Crew)
-_autogen_module = None
-_autogen_v4_classes = None  # (AssistantAgent, OpenAIChatCompletionClient)
-_praisonai_classes = None  # (PraisonAgent, PraisonTask, Agents)
-_praisonai_tools = None  # dict of tool classes
-_litellm = None
+# Thread-safe lazy cache for optional dependencies
+_optional_lock = threading.Lock()
+_optional_cache: dict[str, object] = {}
+
+
+def _load_optional(key: str, loader):
+    """Thread-safe lazy loading for optional dependencies.
+    
+    Args:
+        key: Unique key for the dependency
+        loader: Function that imports and returns the dependency
+        
+    Returns:
+        The loaded dependency or None if import fails
+    """
+    if key in _optional_cache:
+        return _optional_cache[key]
+    
+    with _optional_lock:
+        if key in _optional_cache:
+            return _optional_cache[key]
+        
+        try:
+            _optional_cache[key] = loader()
+        except ImportError:
+            _optional_cache[key] = None
+        
+        return _optional_cache[key]
+
+
+# Bounded LRU cache for OpenAI clients (one per (api_key, base_url) tuple)
 _OPENAI_CLIENT_CACHE_MAX = 8
 _openai_clients: "OrderedDict[tuple, object]" = OrderedDict()
 _openai_clients_lock = threading.Lock()
@@ -50,126 +67,86 @@ _openai_clients_lock = threading.Lock()
 
 # --- CrewAI lazy loading ---
 def _check_crewai_available() -> bool:
-    """Check if crewai is available (cached)."""
-    global _crewai_available
-    if _crewai_available is None:
-        try:
-            import crewai  # noqa: F401
-            _crewai_available = True
-        except ImportError:
-            _crewai_available = False
-    return _crewai_available
+    """Check if crewai is available (cached, thread-safe)."""
+    result = _load_optional("crewai_check", lambda: __import__("crewai"))
+    return result is not None
 
 
 def _get_crewai():
-    """Lazy load crewai classes."""
-    global _crewai_classes
-    if _crewai_classes is None:
-        from crewai import Agent, Task, Crew
-        _crewai_classes = (Agent, Task, Crew)
-    return _crewai_classes
+    """Lazy load crewai classes (thread-safe)."""
+    return _load_optional("crewai_classes", lambda: (
+        __import__("crewai", fromlist=["Agent", "Task", "Crew"]).Agent,
+        __import__("crewai", fromlist=["Agent", "Task", "Crew"]).Task,
+        __import__("crewai", fromlist=["Agent", "Task", "Crew"]).Crew,
+    ))
 
 
 # --- AutoGen lazy loading ---
 def _check_autogen_available() -> bool:
-    """Check if autogen v0.2 is available (cached)."""
-    global _autogen_available
-    if _autogen_available is None:
-        try:
-            import autogen  # noqa: F401
-            _autogen_available = True
-        except ImportError:
-            _autogen_available = False
-    return _autogen_available
+    """Check if autogen v0.2 is available (cached, thread-safe)."""
+    result = _load_optional("autogen_check", lambda: __import__("autogen"))
+    return result is not None
 
 
 def _check_autogen_v4_available() -> bool:
-    """Check if autogen v0.4 is available (cached)."""
-    global _autogen_v4_available
-    if _autogen_v4_available is None:
-        try:
-            from autogen_agentchat.agents import AssistantAgent  # noqa: F401
-            _autogen_v4_available = True
-        except ImportError:
-            _autogen_v4_available = False
-    return _autogen_v4_available
+    """Check if autogen v0.4 is available (cached, thread-safe)."""
+    result = _load_optional("autogen_v4_check", lambda: __import__("autogen_agentchat.agents", fromlist=["AssistantAgent"]))
+    return result is not None
 
-
-# --- AG2 lazy loading ---
-_ag2_available = None
 
 def _check_ag2_available() -> bool:
-    """Check if AG2 (community fork of AutoGen) is available (cached)."""
-    global _ag2_available
-    if _ag2_available is None:
-        try:
-            import importlib.metadata
-            importlib.metadata.distribution('ag2')
-            from autogen import LLMConfig  # noqa: F401 — AG2-exclusive class
-            _ag2_available = True
-        except Exception:
-            _ag2_available = False
-    return _ag2_available
+    """Check if AG2 (community fork of AutoGen) is available (cached, thread-safe)."""
+    def ag2_loader():
+        import importlib.metadata
+        importlib.metadata.distribution('ag2')
+        from autogen import LLMConfig  # AG2-exclusive class
+        return True
+    
+    result = _load_optional("ag2_check", ag2_loader)
+    return result is not None
 
 
 def _get_autogen():
-    """Lazy load autogen module."""
-    global _autogen_module
-    if _autogen_module is None:
-        import autogen
-        _autogen_module = autogen
-    return _autogen_module
+    """Lazy load autogen module (thread-safe)."""
+    return _load_optional("autogen_module", lambda: __import__("autogen"))
 
 
 def _get_autogen_v4():
-    """Lazy load autogen v0.4 classes."""
-    global _autogen_v4_classes
-    if _autogen_v4_classes is None:
+    """Lazy load autogen v0.4 classes (thread-safe)."""
+    def autogen_v4_loader():
         from autogen_agentchat.agents import AssistantAgent
         from autogen_ext.models.openai import OpenAIChatCompletionClient
-        _autogen_v4_classes = (AssistantAgent, OpenAIChatCompletionClient)
-    return _autogen_v4_classes
+        return (AssistantAgent, OpenAIChatCompletionClient)
+    
+    return _load_optional("autogen_v4_classes", autogen_v4_loader)
 
 
 # --- PraisonAI Agents lazy loading ---
 def _check_praisonai_available() -> bool:
-    """Check if praisonaiagents is available (cached)."""
-    global _praisonai_available
-    if _praisonai_available is None:
-        try:
-            import praisonaiagents  # noqa: F401
-            _praisonai_available = True
-        except ImportError:
-            _praisonai_available = False
-    return _praisonai_available
+    """Check if praisonaiagents is available (cached, thread-safe)."""
+    result = _load_optional("praisonai_check", lambda: __import__("praisonaiagents"))
+    return result is not None
 
 
 def _get_praisonai():
-    """Lazy load praisonaiagents classes."""
-    global _praisonai_classes
-    if _praisonai_classes is None:
-        from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, AgentTeam
-        _praisonai_classes = (PraisonAgent, PraisonTask, Agents)
-    return _praisonai_classes
+    """Lazy load praisonaiagents classes (thread-safe)."""
+    def praisonai_loader():
+        from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, AgentTeam as Agents
+        return (PraisonAgent, PraisonTask, Agents)
+    
+    return _load_optional("praisonai_classes", praisonai_loader)
 
 
 # --- PraisonAI Tools lazy loading ---
 def _check_praisonai_tools_available() -> bool:
-    """Check if praisonai_tools is available (cached)."""
-    global _praisonai_tools_available
-    if _praisonai_tools_available is None:
-        try:
-            import praisonai_tools  # noqa: F401
-            _praisonai_tools_available = True
-        except ImportError:
-            _praisonai_tools_available = False
-    return _praisonai_tools_available
+    """Check if praisonai_tools is available (cached, thread-safe)."""
+    result = _load_optional("praisonai_tools_check", lambda: __import__("praisonai_tools"))
+    return result is not None
 
 
 def _get_praisonai_tools():
-    """Lazy load praisonai_tools classes."""
-    global _praisonai_tools
-    if _praisonai_tools is None:
+    """Lazy load praisonai_tools classes (thread-safe)."""
+    def tools_loader():
         from praisonai_tools import (
             CodeDocsSearchTool, CSVSearchTool, DirectorySearchTool, DOCXSearchTool,
             DirectoryReadTool, FileReadTool, TXTSearchTool, JSONSearchTool,
@@ -177,7 +154,7 @@ def _get_praisonai_tools():
             ScrapeWebsiteTool, WebsiteSearchTool, XMLSearchTool,
             YoutubeChannelSearchTool, YoutubeVideoSearchTool
         )
-        _praisonai_tools = {
+        return {
             'CodeDocsSearchTool': CodeDocsSearchTool,
             'CSVSearchTool': CSVSearchTool,
             'DirectorySearchTool': DirectorySearchTool,
@@ -196,48 +173,40 @@ def _get_praisonai_tools():
             'YoutubeChannelSearchTool': YoutubeChannelSearchTool,
             'YoutubeVideoSearchTool': YoutubeVideoSearchTool,
         }
-    return _praisonai_tools
+    
+    return _load_optional("praisonai_tools_dict", tools_loader)
 
 
 # --- LiteLLM lazy loading ---
 def _check_litellm_available() -> bool:
     """Check if litellm is available (cached)."""
-    global _litellm_available
-    if _litellm_available is None:
-        try:
-            import litellm  # noqa: F401
-            _litellm_available = True
-        except ImportError:
-            _litellm_available = False
-    return _litellm_available
+    result = _load_optional("litellm_check", lambda: __import__("litellm"))
+    return result is not None
 
 
 def _get_litellm():
     """Lazy load litellm module."""
-    global _litellm
-    if _litellm is None:
-        import litellm as _litellm_module
-        _litellm = _litellm_module
-    return _litellm
+    result = _load_optional("litellm", lambda: __import__("litellm"))
+    if result is None:
+        raise ImportError("Install with: pip install litellm")
+    return result
 
 
 # --- OpenAI lazy loading ---
 def _check_openai_available() -> bool:
     """Check if openai is available (cached)."""
-    global _openai_available
-    if _openai_available is None:
-        try:
-            import openai  # noqa: F401
-            _openai_available = True
-        except ImportError:
-            _openai_available = False
-    return _openai_available
+    result = _load_optional("openai_check", lambda: __import__("openai"))
+    return result is not None
 
 
 def _get_openai_client(api_key: str = None, base_url: str = None):
-    """Lazy load OpenAI client with bounded LRU cache (thread-safe, multi-tenant)."""
+    """Lazy load OpenAI client with bounded LRU cache (thread-safe, multi-tenant).
+
+    Multi-tenant safe: each (api_key, base_url) tuple gets its own cached client.
+    Bounded by _OPENAI_CLIENT_CACHE_MAX with proper LRU eviction.
+    """
     key = (api_key or os.environ.get("OPENAI_API_KEY"), base_url)
-    
+
     with _openai_clients_lock:
         # Check if client exists and update LRU position
         client = _openai_clients.get(key)
@@ -246,10 +215,13 @@ def _get_openai_client(api_key: str = None, base_url: str = None):
             return client
 
         # Create new client
-        from openai import OpenAI
+        try:
+            from openai import OpenAI
+        except ImportError as e:
+            raise ImportError("Install with: pip install openai") from e
         client = OpenAI(api_key=key[0], base_url=key[1])
         _openai_clients[key] = client
-        
+
         # Bound the cache; close the LRU victim
         if len(_openai_clients) > _OPENAI_CLIENT_CACHE_MAX:
             _, victim = _openai_clients.popitem(last=False)
@@ -257,7 +229,7 @@ def _get_openai_client(api_key: str = None, base_url: str = None):
                 victim.close()
             except Exception:
                 pass  # Best-effort cleanup
-        
+
         return client
 
 

@@ -35,12 +35,15 @@ __all__ = [
     'LocalAgentConfig',
 ]
 
-# Telemetry initialization state
+# Telemetry initialization state - thread-safe (threading imported above)
 _telemetry_lock = threading.Lock()
 _telemetry_initialized = False
 
 def _ensure_telemetry_defaults() -> None:
-    """Apply telemetry env defaults exactly once, on first observability use."""
+    """Apply telemetry env defaults exactly once, on first observability use.
+    
+    Thread-safe implementation using double-checked locking pattern.
+    """
     global _telemetry_initialized
     if _telemetry_initialized:  # fast path, OK without lock
         return
