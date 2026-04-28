@@ -86,10 +86,9 @@ class TestStopAlwaysClearsIsRunning:
         assert scheduler.is_running is False
 
     @pytest.mark.asyncio
-    async def test_stop_finally_clears_is_running_on_task_exception(self):
-        """Even when the awaited task raises, is_running must end up False."""
+    async def test_stop_logs_task_exception_and_returns_true(self):
+        """Task exceptions from wait_for should be logged and stop should return True."""
         scheduler = _make_scheduler()
-        # Manually set state as if the scheduler is running
         scheduler.is_running = True
 
         # Create a task that raises a non-cancellation exception
@@ -99,12 +98,15 @@ class TestStopAlwaysClearsIsRunning:
         scheduler._task = asyncio.create_task(_raise())
         scheduler._stop_event.set()
 
-        # wait_for will propagate the RuntimeError, which reaches the outer
-        # try/finally → is_running must still be cleared
-        with pytest.raises(RuntimeError):
-            await scheduler.stop()
+        # The exception should be caught, logged, and stop should return True
+        with patch("praisonai.async_agent_scheduler.logger") as mock_logger:
+            result = await scheduler.stop()
 
+        assert result is True
         assert scheduler.is_running is False
+        mock_logger.error.assert_called()
+        logged_msg = mock_logger.error.call_args[0][0]
+        assert "unexpected" in logged_msg
 
 
 # ---------------------------------------------------------------------------

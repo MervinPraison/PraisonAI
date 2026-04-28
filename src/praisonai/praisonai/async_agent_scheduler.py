@@ -196,6 +196,11 @@ class AsyncAgentScheduler:
                         pass
                     except Exception as e:
                         logger.error(f"Scheduler task raised on cancel: {e}")
+                except asyncio.CancelledError:
+                    # Task already cancelled; treat as expected during shutdown
+                    pass
+                except Exception as e:
+                    logger.error(f"Scheduler task raised during stop: {e}")
         finally:
             self.is_running = False
         
