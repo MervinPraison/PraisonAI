@@ -146,12 +146,12 @@ class HookRunner:
             loop = None
 
         if loop is not None and loop.is_running():
-            # Already inside a running async loop — cannot use run_until_complete.
-            # Schedule as fire-and-forget task to avoid leaking unawaited coroutines.
-            # Callers that need results in async context should use
-            # ``await runner.execute(...)`` directly.
-            loop.create_task(self.execute(event, input_data, target))
-            return []
+            # Cannot execute sync in running event loop - would block the loop
+            # Guide users to use the async API instead
+            raise RuntimeError(
+                "execute_sync() cannot be called from within a running event loop. "
+                "Use 'await runner.execute(event, input_data, target)' instead in async contexts."
+            )
 
         # No running loop — safe to create one
         return asyncio.run(self.execute(event, input_data, target))
