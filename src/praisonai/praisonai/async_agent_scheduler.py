@@ -183,18 +183,27 @@ class AsyncAgentScheduler:
         logger.info("Stopping async agent scheduler...")
         self._stop_event.set()
         
-        if self._task:
-            try:
-                await asyncio.wait_for(self._task, timeout=10)
-            except asyncio.TimeoutError:
-                logger.warning("Scheduler task didn't stop gracefully, cancelling")
-                self._task.cancel()
+        try:
+            if self._task:
                 try:
-                    await self._task
+                    await asyncio.wait_for(self._task, timeout=10)
+                except asyncio.TimeoutError:
+                    logger.warning("Scheduler task didn't stop gracefully, cancelling")
+                    self._task.cancel()
+                    try:
+                        await self._task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as e:
+                        logger.error(f"Scheduler task raised on cancel: {e}")
                 except asyncio.CancelledError:
+                    # Task already cancelled; treat as expected during shutdown
                     pass
-            
-        self.is_running = False
+                except Exception as e:
+                    logger.error(f"Scheduler task raised during stop: {e}")
+        finally:
+            self.is_running = False
+        
         logger.info("Async agent scheduler stopped")
         logger.info(f"Execution stats - Total: {self._execution_count}, Success: {self._success_count}, Failed: {self._failure_count}")
         return True
@@ -216,18 +225,21 @@ class AsyncAgentScheduler:
     
     async def _run_schedule(self, interval: int, max_retries: int):
         """Internal method to run scheduled agent executions."""
-        while not self._stop_event.is_set():
-            logger.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Starting async scheduled agent execution")
-            
-            await self._execute_with_retry(max_retries)
-            
-            # Wait for next scheduled time or stop event
-            logger.info(f"Next execution in {interval} seconds ({interval/3600:.1f} hours)")
-            try:
-                await asyncio.wait_for(self._stop_event.wait(), timeout=interval)
-                break  # Stop event was set
-            except asyncio.TimeoutError:
-                continue  # Timeout reached, continue with next execution
+        try:
+            while not self._stop_event.is_set():
+                logger.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Starting async scheduled agent execution")
+                
+                await self._execute_with_retry(max_retries)
+                
+                # Wait for next scheduled time or stop event
+                logger.info(f"Next execution in {interval} seconds ({interval/3600:.1f} hours)")
+                try:
+                    await asyncio.wait_for(self._stop_event.wait(), timeout=interval)
+                    break  # Stop event was set
+                except asyncio.TimeoutError:
+                    continue  # Timeout reached, continue with next execution
+        finally:
+            self.is_running = False
     
     async def _execute_with_retry(self, max_retries: int):
         """Execute agent with retry logic."""
