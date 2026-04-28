@@ -154,7 +154,8 @@ class TestLegacyRouting(unittest.TestCase):
         self.assertEqual(cm.exception.code, 1)
 
     def test_legacy_path_restores_argv(self):
-        original = ["praisonai", "Topic prompt"]
+        # Use different argv to test that restoration actually happens
+        original = ["praisonai", "Build weather app", "--extra-arg"]
         sys.argv = list(original)
         fake = mock.MagicMock()
         fake.main.return_value = None
@@ -203,7 +204,8 @@ class TestTyperRouting(unittest.TestCase):
         legacy.assert_not_called()
 
     def test_typer_path_restores_argv(self):
-        original = ["praisonai", "chat"]
+        # Use different argv to test that restoration actually happens
+        original = ["praisonai", "chat", "--model", "gpt-4"]
         sys.argv = list(original)
         with mock.patch("praisonai.cli.app.app"), \
              mock.patch("praisonai.cli.app.register_commands"):

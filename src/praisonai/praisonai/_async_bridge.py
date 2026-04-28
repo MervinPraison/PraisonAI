@@ -27,7 +27,7 @@ class _BackgroundLoop:
         The thread is marked ``daemon=True`` so that short-lived scripts
         (e.g. CLI commands, smoke tests) exit cleanly without waiting on
         the background loop to be shut down explicitly. Long-running
-        servers (gateway, a2u, mcp_server) should call :func:`shutdown`
+        server processes should call :func:`shutdown`
         explicitly to cancel in-flight tasks before process exit.
         """
         if self._loop is None or self._loop.is_closed():
@@ -110,5 +110,5 @@ def run_sync(coro: Awaitable[T], *, timeout: float | None = _DEFAULT_TIMEOUT) ->
 
 
 def shutdown() -> None:
-    """Public hook for servers (gateway, a2u, mcp_server) to stop the bridge cleanly."""
+    """Public hook for long-running server processes to stop the bridge cleanly."""
     _BG.shutdown()
