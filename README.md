@@ -1,4 +1,8 @@
-[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/mervinpraison-praisonai-badge.png)](https://mseep.ai/app/mervinpraison-praisonai)
+<p align="center">
+  <a href="https://mseep.ai/app/mervinpraison-praisonai">
+    <img src="https://mseep.net/pr/mervinpraison-praisonai-badge.png" alt="MseeP.ai Security Assessment Badge" />
+  </a>
+</p>
 
 <p align="center">
   <picture>
