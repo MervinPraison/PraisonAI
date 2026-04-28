@@ -511,7 +511,7 @@ Your Goal: {self.goal}"""
             emit_events=True
         )
 
-    def _chat_completion(self, messages, temperature=1.0, tools=None, stream=True, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None):
+    def _chat_completion(self, messages, temperature=1.0, tools=None, stream=True, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, _retry_depth=0):
         start_time = time.time()
 
         # --- Context compaction (opt-in via ExecutionConfig.context_compaction) ---
@@ -667,6 +667,7 @@ Your Goal: {self.goal}"""
         except BudgetExceededError:
             raise
         except Exception as e:
+            from ..errors import LLMError
             error_str = str(e).lower()
             
             # Check if this is a context overflow error
@@ -699,11 +700,22 @@ Your Goal: {self.goal}"""
                         f"{estimate_messages_tokens(truncated_messages)} tokens"
                     )
                     
-                    # Retry with truncated messages (recursive call with truncated context)
-                    return self._chat_completion(
-                        truncated_messages, temperature, tools, stream, 
-                        reasoning_steps, task_name, task_description, task_id, response_format
-                    )
+                    # Retry with truncated messages (recursive call with depth limit)
+                    if _retry_depth < 2:
+                        return self._chat_completion(
+                            truncated_messages, temperature, tools, stream, 
+                            reasoning_steps, task_name, task_description, task_id, response_format, 
+                            _retry_depth=_retry_depth + 1
+                        )
+                    else:
+                        logging.error(f"[{self.name}] Context overflow retry limit exceeded")
+                        raise LLMError(
+                            f"Context overflow could not be resolved after {_retry_depth} attempts", 
+                            model_name=model_name, agent_id=self.name, is_retryable=False
+                        ) from e
+                except LLMError:
+                    # Re-raise LLMError (including depth limit errors) without swallowing
+                    raise
                 except Exception as recovery_error:
                     logging.error(f"[{self.name}] Overflow recovery failed: {recovery_error}")
             
@@ -715,8 +727,47 @@ Your Goal: {self.goal}"""
                 finish_reason="error",
                 response_content=str(e),  # Include error for context replay
             )
-            _get_display_functions()['display_error'](f"Error in chat completion: {e}")
-            return None
+            
+            # Classify and raise structured error with improved transient failure detection
+            model_name = self.llm if isinstance(self.llm, str) else "unknown"
+            session_id = getattr(self, '_session_id', 'unknown')
+            
+            # Check for retryable errors (rate limits, transient network issues, provider errors)
+            retryable_indicators = [
+                "rate limit", "429", "too many requests",
+                "timeout", "connection reset", "connection error", "socket error",
+                "500", "502", "503", "504", "service unavailable", "internal server error",
+                "dns", "network", "connection refused"
+            ]
+            
+            # Check for non-retryable errors (auth issues)
+            auth_indicators = ["401", "403", "authentication", "unauthorized", "invalid_api_key"]
+            
+            if any(phrase in error_str.lower() for phrase in retryable_indicators):
+                is_retryable = True
+            elif any(phrase in error_str.lower() for phrase in auth_indicators):
+                is_retryable = False
+            else:
+                # Default to retryable for unknown errors to be more resilient
+                is_retryable = True
+            
+            # Create LLMError with contextual metadata
+            error = LLMError(
+                str(e), 
+                model_name=model_name, 
+                agent_id=self.name, 
+                is_retryable=is_retryable,
+                session_id=session_id
+            )
+            
+            # Call error hook if available for error interception
+            if hasattr(self, 'on_error') and self.on_error:
+                try:
+                    self.on_error(error)
+                except Exception as hook_error:
+                    logging.debug(f"Error in on_error hook: {hook_error}")
+            
+            raise error from e
 
     def _execute_unified_chat_completion(
         self, 
@@ -2164,13 +2215,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     except Exception as _hook_err:
                         logging.debug(f"BEFORE_TOOL hook error (non-fatal): {_hook_err}")
 
-                    # Check if the tool is async
-                    if asyncio.iscoroutinefunction(tool):
-                        result = await tool(**arguments)
-                    else:
-                        # Run sync function in executor to avoid blocking
-                        loop = asyncio.get_running_loop()
-                        result = await loop.run_in_executor(None, lambda: tool(**arguments))
+                    # Route through safety pipeline instead of direct execution
+                    # Pass the tools list to honor task-scoped tools
+                    result = await self.execute_tool_async(function_name, arguments, tools_override=tools)
 
                     # --- AFTER_TOOL hook ---
                     try:

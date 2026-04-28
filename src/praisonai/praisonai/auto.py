@@ -16,7 +16,9 @@ import os
 import json
 import yaml
 from rich import print
-import logging
+import threading
+from collections import OrderedDict
+from praisonai._logging import get_logger
 
 # Type variable for Pydantic models
 T = TypeVar('T', bound=BaseModel)
@@ -55,6 +57,12 @@ def _load_optional(key: str, loader):
             _optional_cache[key] = None
         
         return _optional_cache[key]
+
+
+# Bounded LRU cache for OpenAI clients (one per (api_key, base_url) tuple)
+_OPENAI_CLIENT_CACHE_MAX = 8
+_openai_clients: "OrderedDict[tuple, object]" = OrderedDict()
+_openai_clients_lock = threading.Lock()
 
 
 # --- CrewAI lazy loading ---
@@ -172,13 +180,13 @@ def _get_praisonai_tools():
 # --- LiteLLM lazy loading ---
 def _check_litellm_available() -> bool:
     """Check if litellm is available (cached)."""
-    result = _load_optional("litellm")
+    result = _load_optional("litellm_check", lambda: __import__("litellm"))
     return result is not None
 
 
 def _get_litellm():
     """Lazy load litellm module."""
-    result = _load_optional("litellm")
+    result = _load_optional("litellm", lambda: __import__("litellm"))
     if result is None:
         raise ImportError("Install with: pip install litellm")
     return result
@@ -187,27 +195,46 @@ def _get_litellm():
 # --- OpenAI lazy loading ---
 def _check_openai_available() -> bool:
     """Check if openai is available (cached)."""
-    result = _load_optional("openai")
+    result = _load_optional("openai_check", lambda: __import__("openai"))
     return result is not None
 
 
 def _get_openai_client(api_key: str = None, base_url: str = None):
-    """Lazy load OpenAI client."""
-    def create_openai_client():
-        from openai import OpenAI
-        return OpenAI(
-            api_key=api_key or os.environ.get("OPENAI_API_KEY"),
-            base_url=base_url
-        )
-    
-    result = _load_optional("openai_client", create_openai_client)
-    if result is None:
-        raise ImportError("Install with: pip install openai")
-    return result
+    """Lazy load OpenAI client with bounded LRU cache (thread-safe, multi-tenant).
+
+    Multi-tenant safe: each (api_key, base_url) tuple gets its own cached client.
+    Bounded by _OPENAI_CLIENT_CACHE_MAX with proper LRU eviction.
+    """
+    key = (api_key or os.environ.get("OPENAI_API_KEY"), base_url)
+
+    with _openai_clients_lock:
+        # Check if client exists and update LRU position
+        client = _openai_clients.get(key)
+        if client is not None:
+            _openai_clients.move_to_end(key)
+            return client
+
+        # Create new client
+        try:
+            from openai import OpenAI
+        except ImportError as e:
+            raise ImportError("Install with: pip install openai") from e
+        client = OpenAI(api_key=key[0], base_url=key[1])
+        _openai_clients[key] = client
+
+        # Bound the cache; close the LRU victim
+        if len(_openai_clients) > _OPENAI_CLIENT_CACHE_MAX:
+            _, victim = _openai_clients.popitem(last=False)
+            try:
+                victim.close()
+            except Exception:
+                pass  # Best-effort cleanup
+
+        return client
 
 
-_loglevel = os.environ.get('LOGLEVEL', 'INFO').strip().upper() or 'INFO'
-logging.basicConfig(level=_loglevel, format='%(asctime)s - %(levelname)s - %(message)s')
+# Use namespaced logger; root logger is configured only by the CLI
+logger = get_logger("auto")
 
 # =============================================================================
 # Available Tools List (shared between generators) - Legacy for praisonai_tools
@@ -648,13 +675,13 @@ AG2 is not installed. Please install with:
         # Only show tools message if using a framework and tools are needed
         if (framework in ["crewai", "autogen"]) and not _check_praisonai_tools_available():
             if framework == "autogen":
-                logging.warning("""
+                logger.warning("""
 Tools are not available for autogen. To use tools, install:
     pip install "praisonai[autogen]" for v0.2
     pip install "praisonai[autogen-v4]" for v0.4
 """)
             else:
-                logging.warning(f"""
+                logger.warning(f"""
 Tools are not available for {framework}. To use tools, install:
     pip install "praisonai[{framework}]"
 """)
@@ -784,8 +811,8 @@ Tools are not available for {framework}. To use tools, install:
                 # If existing file is empty, treat as new file
                 existing_data = {"roles": {}, "dependencies": []}
         except (yaml.YAMLError, FileNotFoundError) as e:
-            logging.warning(f"Could not load existing agents file {self.agent_file}: {e}")
-            logging.warning("Creating new file instead of merging")
+            logger.warning(f"Could not load existing agents file {self.agent_file}: {e}")
+            logger.warning("Creating new file instead of merging")
             existing_data = {"roles": {}, "dependencies": []}
         
         # Start with existing data structure
@@ -1155,7 +1182,7 @@ Respond with:
             if not existing_data:
                 return new_data
         except (yaml.YAMLError, FileNotFoundError) as e:
-            logging.warning(f"Could not load existing workflow file {self.workflow_file}: {e}")
+            logger.warning(f"Could not load existing workflow file {self.workflow_file}: {e}")
             return new_data
         
         # Merge agents (avoid duplicates)

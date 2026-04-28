@@ -1,19 +1,28 @@
-"""
-Async-native agent scheduler for PraisonAI.
+"""Backward-compatible re-export. Prefer `praisonai.scheduler`.
 
-Replaces the daemon thread-based scheduler with proper async execution
-that supports cancellation and doesn't use process-global state.
+This module is deprecated. Use the canonical implementation in the
+scheduler package for full functionality including async support.
 """
 
+import warnings
+
+warnings.warn(
+    "praisonai.async_agent_scheduler is pending deprecation; it will be moved to "
+    "praisonai.scheduler.async_agent_scheduler in a future release. Continue "
+    "importing from praisonai.async_agent_scheduler until then.",
+    PendingDeprecationWarning,
+    stacklevel=2,
+)
+
+# TODO: Once AsyncAgentScheduler is moved to scheduler package, import from there
+# For now, re-export the existing implementation to avoid breaking changes
+from .scheduler.shared import ScheduleParser, backoff_delay, safe_call
 import asyncio
 import logging
 import threading
 from datetime import datetime
 from typing import Optional, Dict, Any, Callable, Union
 from abc import ABC, abstractmethod
-
-# Import shared schedule parser
-from .scheduler.shared import ScheduleParser, backoff_delay, safe_call
 
 logger = logging.getLogger(__name__)
 
@@ -50,43 +59,50 @@ class AsyncPraisonAgentExecutor(AsyncAgentExecutorInterface):
             Agent execution result
         """
         try:
-            # Use the agent's async start method if available, otherwise run_until_complete
+            # Check if agent has async support
             if hasattr(self.agent, 'astart'):
                 result = await self.agent.astart(task)
             elif hasattr(self.agent, 'start'):
-                # Run sync method in thread pool to avoid blocking
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(None, self.agent.start, task)
+                # Wrap sync call in executor
+                result = await asyncio.to_thread(self.agent.start, task)
             else:
-                raise AttributeError("Agent does not have start() or astart() method")
-                
-            logger.info(f"Agent execution completed successfully")
+                raise AttributeError("Agent must have either 'start' or 'astart' method")
             return result
-            
         except Exception as e:
-            logger.error(f"Agent execution failed: {e}")
+            logger.error(f"Async agent execution failed: {e}")
             raise
 
 
 class AsyncAgentScheduler:
     """
-    Async-native agent scheduler that replaces daemon threads with proper
-    async execution and cooperative cancellation.
+    Async-native scheduler for running PraisonAI agents periodically.
+    
+    Features:
+    - Proper async/await execution
+    - Cancellation support  
+    - No global state pollution
+    - Native async coordination
+    
+    Example:
+        scheduler = AsyncAgentScheduler(agent, task="Check news")
+        await scheduler.start(schedule_expr="hourly")
+        await asyncio.sleep(3600)  # Let it run
+        await scheduler.stop()
     """
     
     def __init__(
         self,
-        agent: Any,
+        agent,
         task: str,
         config: Optional[Dict[str, Any]] = None,
-        on_success: Optional[Callable[[Any], None]] = None,
-        on_failure: Optional[Callable[[Exception], None]] = None
+        on_success: Optional[Callable] = None,
+        on_failure: Optional[Callable] = None
     ):
         """
         Initialize async agent scheduler.
         
         Args:
-            agent: Agent instance to schedule
+            agent: PraisonAI Agent instance
             task: Task description to execute
             config: Optional configuration dict
             on_success: Callback function on successful execution
@@ -98,13 +114,12 @@ class AsyncAgentScheduler:
         self.on_success = on_success
         self.on_failure = on_failure
         
-        self._is_running = False
-        self._task_handle: Optional[asyncio.Task] = None
+        self.is_running = False
+        self._task: Optional[asyncio.Task] = None
+        self._stop_event = asyncio.Event()
         self._executor = AsyncPraisonAgentExecutor(agent)
-        
-        # Counters
         self._execution_count = 0
-        self._success_count = 0  
+        self._success_count = 0
         self._failure_count = 0
         
         # Sync lock for async primitives creation and bound loop tracking
@@ -112,7 +127,7 @@ class AsyncAgentScheduler:
         self._cancel_event: Optional[asyncio.Event] = None
         self._stats_lock: Optional[asyncio.Lock] = None
         self._bound_loop: Optional[asyncio.AbstractEventLoop] = None
-        
+
     def _ensure_async_primitives(self) -> None:
         """Create async primitives if they don't exist yet.
         
@@ -126,7 +141,8 @@ class AsyncAgentScheduler:
                 self._cancel_event = asyncio.Event()
                 self._stats_lock = asyncio.Lock()
                 self._bound_loop = loop
-        
+
+
     async def start(
         self,
         schedule_expr: str,
@@ -137,37 +153,33 @@ class AsyncAgentScheduler:
         Start scheduled agent execution.
         
         Args:
-            schedule_expr: Schedule expression (e.g., "hourly", "*/1h", "3600")
-            max_retries: Maximum total execution attempts (including the first).
-                A value of 3 means 1 initial attempt + up to 2 retries.
+            schedule_expr: Schedule expression (e.g., "hourly", "*/6h", "3600")
+            max_retries: Maximum retry attempts on failure
             run_immediately: If True, run agent immediately before starting schedule
             
         Returns:
             True if scheduler started successfully
         """
-        if self._is_running:
-            logger.warning("Scheduler is already running")
+        if self.is_running:
+            logger.warning("Async scheduler is already running")
             return False
             
-        self._ensure_async_primitives()
-        
         try:
             interval = ScheduleParser.parse(schedule_expr)
-            self._is_running = True
-            self._cancel_event.clear()
+            self.is_running = True
+            self._stop_event.clear()
             
             logger.info(f"Starting async agent scheduler: {getattr(self.agent, 'name', 'Agent')}")
             logger.info(f"Task: {self.task}")
             logger.info(f"Schedule: {schedule_expr} ({interval}s interval)")
-            logger.info(f"Max retries: {max_retries}")
             
             # Run immediately if requested
             if run_immediately:
                 logger.info("Running agent immediately before starting schedule...")
                 await self._execute_with_retry(max_retries)
             
-            # Start the async scheduling task
-            self._task_handle = asyncio.create_task(
+            # Start background task
+            self._task = asyncio.create_task(
                 self._run_schedule(interval, max_retries)
             )
             
@@ -175,13 +187,13 @@ class AsyncAgentScheduler:
             return True
             
         except Exception as e:
-            logger.error(f"Failed to start scheduler: {e}")
-            self._is_running = False
+            logger.error(f"Failed to start async scheduler: {e}")
+            self.is_running = False
             return False
     
     async def stop(self) -> bool:
         """
-        Stop the scheduler gracefully with proper cancellation.
+        Stop the scheduler gracefully.
         
         IMPORTANT: This method must be called from the same event loop
         that was used to start the scheduler.
@@ -192,8 +204,8 @@ class AsyncAgentScheduler:
         Raises:
             RuntimeError: If called from a different event loop than start()
         """
-        if not self._is_running:
-            logger.info("Scheduler is not running")
+        if not self.is_running:
+            logger.info("Async scheduler is not running")
             return True
         
         # Ensure we're on the same loop that was bound during start()
@@ -209,127 +221,131 @@ class AsyncAgentScheduler:
             pass
             
         logger.info("Stopping async agent scheduler...")
-        self._cancel_event.set()
+        self._stop_event.set()
         
-        if self._task_handle:
-            try:
-                # Wait for the current execution to complete or cancel
-                await asyncio.wait_for(self._task_handle, timeout=30.0)
-            except asyncio.TimeoutError:
-                logger.warning("Scheduler did not stop gracefully, cancelling...")
-                self._task_handle.cancel()
+        try:
+            if self._task:
                 try:
-                    await self._task_handle
+                    await asyncio.wait_for(self._task, timeout=10)
+                except asyncio.TimeoutError:
+                    logger.warning("Scheduler task didn't stop gracefully, cancelling")
+                    self._task.cancel()
+                    try:
+                        await self._task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as e:
+                        logger.error(f"Scheduler task raised on cancel: {e}")
                 except asyncio.CancelledError:
+                    # Task already cancelled; treat as expected during shutdown
                     pass
-            except asyncio.CancelledError:
-                pass
-            
-        self._is_running = False
-        async with self._stats_lock:
-            logger.info("Async agent scheduler stopped")
-            logger.info(f"Execution stats - Total: {self._execution_count}, "
-                       f"Success: {self._success_count}, Failed: {self._failure_count}")
+                except Exception as e:
+                    logger.error(f"Scheduler task raised during stop: {e}")
+        finally:
+            self.is_running = False
+        
+        logger.info("Async agent scheduler stopped")
+        logger.info(f"Execution stats - Total: {self._execution_count}, Success: {self._success_count}, Failed: {self._failure_count}")
         return True
     
-    async def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> Dict[str, Any]:
         """
-        Get execution statistics in a thread-safe manner.
+        Get execution statistics.
         
         Returns:
             Dictionary with execution stats
         """
-        self._ensure_async_primitives()
-        async with self._stats_lock:
-            return {
-                "is_running": self._is_running,
-                "execution_count": self._execution_count,
-                "success_count": self._success_count,
-                "failure_count": self._failure_count,
-                "agent_name": getattr(self.agent, 'name', 'Agent'),
-                "task": self.task
-            }
+        return {
+            "is_running": self.is_running,
+            "total_executions": self._execution_count,
+            "successful_executions": self._success_count,
+            "failed_executions": self._failure_count,
+            "success_rate": (self._success_count / self._execution_count * 100) if self._execution_count > 0 else 0
+        }
     
-    async def _run_schedule(self, interval: int, max_retries: int) -> None:
-        """
-        Main scheduling loop with cooperative cancellation.
-        
-        Args:
-            interval: Execution interval in seconds
-            max_retries: Maximum retry attempts
-        """
+    async def _run_schedule(self, interval: int, max_retries: int):
+        """Internal method to run scheduled agent executions."""
         try:
-            while not self._cancel_event.is_set():
-                try:
-                    await self._execute_with_retry(max_retries)
-                except asyncio.CancelledError:
-                    logger.info("Scheduler execution cancelled")
-                    break
-                except Exception as e:
-                    logger.error(f"Unexpected error in scheduler loop: {e}")
+            while not self._stop_event.is_set():
+                logger.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Starting async scheduled agent execution")
                 
-                # Wait for next execution or cancellation
+                await self._execute_with_retry(max_retries)
+                
+                # Wait for next scheduled time or stop event
+                logger.info(f"Next execution in {interval} seconds ({interval/3600:.1f} hours)")
                 try:
-                    await asyncio.wait_for(self._cancel_event.wait(), timeout=interval)
-                    # If we get here, cancellation was requested
-                    break
+                    await asyncio.wait_for(self._stop_event.wait(), timeout=interval)
+                    break  # Stop event was set
                 except asyncio.TimeoutError:
-                    # Timeout is expected - continue to next execution
-                    continue
-                    
-        except asyncio.CancelledError:
-            logger.info("Schedule loop cancelled")
+                    continue  # Timeout reached, continue with next execution
         finally:
-            self._is_running = False
+            self.is_running = False
     
-    async def _execute_with_retry(self, max_retries: int) -> None:
-        """
-        Execute agent task with retry logic.
+    async def _execute_with_retry(self, max_retries: int):
+        """Execute agent with retry logic."""
+        self._execution_count += 1
         
-        Args:
-            max_retries: Maximum number of retry attempts
-        """
-        async with self._stats_lock:
-            self._execution_count += 1
-            
         last_exc: Optional[Exception] = None
         for attempt in range(max_retries):
             try:
-                logger.info(f"Executing agent task (attempt {attempt + 1}/{max_retries})")
+                logger.info(f"Async attempt {attempt + 1}/{max_retries}")
                 result = await self._executor.execute(self.task)
                 
-                async with self._stats_lock:
-                    self._success_count += 1
-                    
+                logger.info(f"Async agent execution successful on attempt {attempt + 1}")
+                logger.info(f"Result: {result}")
+                
+                self._success_count += 1
                 safe_call(self.on_success, result)
-                logger.info("Agent task executed successfully")
                 return
                 
-            except asyncio.CancelledError:
-                logger.info("Agent execution cancelled")
-                raise
             except Exception as e:
                 last_exc = e
-                logger.error(f"Agent execution failed on attempt {attempt + 1}: {e}")
+                logger.error(f"Async agent execution failed on attempt {attempt + 1}: {e}")
+                
                 if attempt < max_retries - 1:
-                    # Wait before retry (with cancellation support)
-                    try:
-                        await asyncio.wait_for(
-                            self._cancel_event.wait(), 
-                            timeout=backoff_delay(attempt)
-                        )
-                        # If we get here, cancellation was requested
-                        raise asyncio.CancelledError()
-                    except asyncio.TimeoutError:
-                        # Timeout is expected - continue to retry
-                        continue
+                    wait_time = backoff_delay(attempt)
+                    logger.info(f"Waiting {wait_time}s before async retry...")
+                    await asyncio.sleep(wait_time)
         
-        # Final attempt failed
-        async with self._stats_lock:
-            self._failure_count += 1
-            
+        self._failure_count += 1
+        logger.error(f"Async agent execution failed after {max_retries} attempts")
         safe_call(
             self.on_failure,
             last_exc if last_exc is not None
             else RuntimeError(f"Failed after {max_retries} attempts")
         )
+    
+    async def execute_once(self) -> Any:
+        """
+        Execute agent immediately (one-time execution).
+        
+        Returns:
+            Agent execution result
+        """
+        logger.info("Executing agent once (async)")
+        try:
+            result = await self._executor.execute(self.task)
+            logger.info(f"One-time async execution successful: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"One-time async execution failed: {e}")
+            raise
+
+
+def create_async_agent_scheduler(
+    agent,
+    task: str,
+    config: Optional[Dict[str, Any]] = None
+) -> AsyncAgentScheduler:
+    """
+    Factory function to create async agent scheduler.
+    
+    Args:
+        agent: PraisonAI Agent instance
+        task: Task description
+        config: Optional configuration
+        
+    Returns:
+        Configured AsyncAgentScheduler instance
+    """
+    return AsyncAgentScheduler(agent, task, config)

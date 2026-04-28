@@ -109,3 +109,115 @@ class TestSafeStringSubstitution:
         
         assert 'AI' in result
         assert 'coding' in result
+
+
+class TestThreadSafety:
+    """Test thread-safe patterns added in the wrapper layer."""
+
+    def test_get_openai_client_returns_same_instance_for_same_key(self):
+        """Multiple threads requesting the same key must get the same client object."""
+        import threading
+        import praisonai.auto as auto
+
+        auto._openai_client = None
+        auto._openai_client_key = None
+
+        results = []
+        errors = []
+
+        def call_client():
+            try:
+                client = auto._get_openai_client(api_key="test-thread-key")
+                results.append(id(client))
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=call_client) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Unexpected errors: {errors}"
+        assert len(results) == 8
+        # All threads must receive the exact same cached instance
+        assert len(set(results)) == 1, "Got different client instances across threads"
+
+    def test_get_openai_client_rebuilds_on_key_change(self):
+        """Changing the (api_key, base_url) pair must produce a new client."""
+        import praisonai.auto as auto
+
+        auto._openai_client = None
+        auto._openai_client_key = None
+
+        client_a = auto._get_openai_client(api_key="key-a")
+        client_b = auto._get_openai_client(api_key="key-b")
+
+        assert id(client_a) != id(client_b), "Different keys must yield different clients"
+
+    def test_get_openai_client_no_root_logger_mutation(self):
+        """Importing auto must not add any new handlers to the root logger."""
+        import logging
+        import sys
+
+        # Record handlers before re-importing auto
+        root_before = set(id(h) for h in logging.getLogger().handlers)
+
+        # Force a fresh import of auto to trigger any module-level side effects
+        for key in list(sys.modules.keys()):
+            if key in ("praisonai.auto", "praisonai.praisonai.auto"):
+                del sys.modules[key]
+
+        import praisonai.auto  # noqa: F401
+
+        root_after = set(id(h) for h in logging.getLogger().handlers)
+        new_handlers = root_after - root_before
+        assert not new_handlers, (
+            "auto.py must not add handlers to the root logger on import; "
+            f"found {len(new_handlers)} new handler(s)"
+        )
+
+    def test_typer_commands_concurrent_calls_all_return_set(self):
+        """Concurrent callers of _get_typer_commands must all get a set back."""
+        import threading
+        import praisonai.__main__ as main_mod
+
+        # Reset cache so we exercise the lock path
+        main_mod._typer_commands_cache = None
+
+        results = []
+        errors = []
+
+        def call_commands():
+            try:
+                result = main_mod._get_typer_commands()
+                results.append(result)
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=call_commands) for _ in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Unexpected errors: {errors}"
+        assert len(results) == 10
+        assert all(isinstance(r, set) for r in results), "All results must be sets"
+
+    def test_typer_commands_failure_does_not_poison_cache(self):
+        """A failed discovery must not cache the empty set (allows retries)."""
+        import praisonai.__main__ as main_mod
+
+        main_mod._typer_commands_cache = None
+
+        # Patch register_commands to raise
+        import unittest.mock as mock
+        with mock.patch("praisonai.cli.app.register_commands", side_effect=RuntimeError("boom")):
+            result = main_mod._get_typer_commands()
+
+        assert result == set(), "Should return empty set on failure"
+        assert main_mod._typer_commands_cache is None, (
+            "Cache must remain None after failure to allow retries"
+        )
+

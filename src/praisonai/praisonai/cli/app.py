@@ -236,6 +236,10 @@ def main_callback(
     else:
         mode = OutputMode.TEXT
     
+    # Install warning filters for CLI usage only
+    from .main import install_warning_filters
+    install_warning_filters()
+    
     # Create run context
     context = create_context()
     

@@ -5,7 +5,6 @@ JSON-based session persistence with file locking and atomic writes.
 Zero dependencies beyond stdlib.
 """
 
-import fcntl
 import json
 import logging
 from praisonaiagents._logging import get_logger
@@ -14,6 +13,13 @@ import sys
 import tempfile
 import threading
 import time
+
+# fcntl is Unix-only; on Windows, use msvcrt for file locking
+if sys.platform != 'win32':
+    import fcntl
+    _HAS_FCNTL = True
+else:
+    _HAS_FCNTL = False
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -21,6 +27,9 @@ from typing import Any, Dict, List, Optional
 from ..paths import get_sessions_dir
 
 logger = get_logger(__name__)
+
+# Module-level sentinel to track if we've warned about degraded locking
+_WARNED_NO_FCNTL = False
 
 # Default session directory (uses centralized paths - DRY)
 DEFAULT_SESSION_DIR = str(get_sessions_dir())
@@ -150,7 +159,17 @@ class FileLock:
                     msvcrt.locking(self._lock_file.fileno(), msvcrt.LK_NBLCK, 1)
                 else:
                     # Unix locking
-                    fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    if _HAS_FCNTL:
+                        fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    else:
+                        # Warn once about degraded locking (should never happen with current platform detection)
+                        global _WARNED_NO_FCNTL
+                        if not _WARNED_NO_FCNTL:
+                            logger.warning(
+                                "File locking unavailable on this platform (no fcntl/msvcrt); "
+                                "concurrent writers may corrupt session files."
+                            )
+                            _WARNED_NO_FCNTL = True
                 return True
             except (IOError, OSError, BlockingIOError):
                 if self._lock_file:
@@ -171,7 +190,9 @@ class FileLock:
                     import msvcrt
                     msvcrt.locking(self._lock_file.fileno(), msvcrt.LK_UNLCK, 1)
                 else:
-                    fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
+                    if _HAS_FCNTL:
+                        fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_UN)
+                    # Note: No warning needed in release() as it mirrors acquire() logic
             except (IOError, OSError):
                 pass
             finally:

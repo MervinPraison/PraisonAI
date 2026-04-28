@@ -1,5 +1,6 @@
 # Suppress crewai.cli.config logger BEFORE any imports to prevent INFO log
 import logging
+import threading
 logging.getLogger('crewai.cli.config').setLevel(logging.ERROR)
 
 # Version is lightweight, import directly
@@ -23,13 +24,18 @@ __all__ = [
     'ManagedAgent',
     'ManagedConfig',
     'AnthropicManagedAgent',
-    'LocalManagedAgent',
-    'LocalManagedConfig',
+    'LocalManagedAgent',          # backward compat alias
+    'LocalManagedConfig',         # backward compat alias
+    'SandboxedAgent',             # new honest name
+    'SandboxedAgentConfig',       # new honest name
+    # New canonical agent backends
+    'HostedAgent',
+    'HostedAgentConfig', 
+    'LocalAgent',
+    'LocalAgentConfig',
 ]
 
-# Telemetry initialization state - thread-safe
-import threading
-
+# Telemetry initialization state - thread-safe (threading imported above)
 _telemetry_lock = threading.Lock()
 _telemetry_initialized = False
 
@@ -39,23 +45,19 @@ def _ensure_telemetry_defaults() -> None:
     Thread-safe implementation using double-checked locking pattern.
     """
     global _telemetry_initialized
-    if _telemetry_initialized:
+    if _telemetry_initialized:  # fast path, OK without lock
         return
-    
     with _telemetry_lock:
         if _telemetry_initialized:
             return
-        
         import os
-        langfuse_configured = bool(
-            os.getenv("LANGFUSE_PUBLIC_KEY")
-            or os.path.exists(os.path.expanduser("~/.praisonai/langfuse.env"))
-        )
-        if langfuse_configured:
-            # Explicitly enable OTEL for Langfuse integration
-            os.environ["OTEL_SDK_DISABLED"] = "false"
-        else:
-            os.environ.setdefault("OTEL_SDK_DISABLED", "true")
+        # Respect any value the user already set
+        if "OTEL_SDK_DISABLED" not in os.environ:
+            langfuse_configured = bool(
+                os.getenv("LANGFUSE_PUBLIC_KEY")
+                or os.path.exists(os.path.expanduser("~/.praisonai/langfuse.env"))
+            )
+            os.environ["OTEL_SDK_DISABLED"] = "false" if langfuse_configured else "true"
         os.environ.setdefault("EC_TELEMETRY", "false")  # respect user overrides
         _telemetry_initialized = True
 
@@ -63,8 +65,8 @@ def _ensure_telemetry_defaults() -> None:
 # Lazy loading for heavy imports
 def __getattr__(name):
     """Lazy load heavy modules to improve import time."""
-    # Ensure telemetry defaults before any lazy import that may touch OTEL.
-    _ensure_telemetry_defaults()
+    # Note: Telemetry initialization moved out of lazy hook to avoid side effects
+    # It should be called explicitly from cli.PraisonAI.__init__ instead
 
     if name == 'PraisonAI':
         from .cli import PraisonAI
@@ -123,9 +125,28 @@ def __getattr__(name):
     elif name == 'LocalManagedConfig':
         from .integrations.managed_local import LocalManagedConfig
         return LocalManagedConfig
+    elif name == 'SandboxedAgent':
+        from .integrations.sandboxed_agent import SandboxedAgent
+        return SandboxedAgent
+    elif name == 'SandboxedAgentConfig':
+        from .integrations.sandboxed_agent import SandboxedAgentConfig
+        return SandboxedAgentConfig
     elif name in ('ManagedConfig', 'ManagedBackendConfig'):
         from .integrations.managed_agents import ManagedConfig
         return ManagedConfig
+    # New canonical agent backends
+    elif name == 'HostedAgent':
+        from .integrations.hosted_agent import HostedAgent
+        return HostedAgent
+    elif name == 'HostedAgentConfig':
+        from .integrations.hosted_agent import HostedAgentConfig
+        return HostedAgentConfig
+    elif name == 'LocalAgent':
+        from .integrations.local_agent import LocalAgent
+        return LocalAgent
+    elif name == 'LocalAgentConfig':
+        from .integrations.local_agent import LocalAgentConfig
+        return LocalAgentConfig
     elif name in ('DB', 'PraisonAIDB', 'PraisonDB'):
         from .db.adapter import DB
         return DB

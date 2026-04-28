@@ -6,11 +6,17 @@ import re
 import inspect
 import asyncio
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union, Literal, Callable, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Union, Literal, Callable, TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from rich.console import Console
     from rich.live import Live
+    
+class FailoverManagerProtocol(Protocol):
+    """Protocol for failover manager implementations."""
+    def get_next_profile(self) -> Optional["AuthProfile"]: ...
+    def mark_failure(self, profile: "AuthProfile", error: str, is_rate_limit: bool = False) -> None: ...
+    def mark_success(self, profile: "AuthProfile") -> None: ...
 from pydantic import BaseModel
 import time
 import json
@@ -354,6 +360,7 @@ Respond with ONLY a valid JSON tool call in this format:
         web_fetch: Optional[Union[bool, Dict[str, Any]]] = None,
         prompt_caching: Optional[bool] = None,
         claude_memory: Optional[Union[bool, Any]] = None,
+        failover_manager: Optional[FailoverManagerProtocol] = None,
         **extra_settings
     ):
         # Configure logging only once at the class level
@@ -429,6 +436,14 @@ Respond with ONLY a valid JSON tool call in this format:
         self._rate_limiter = extra_settings.get('rate_limiter', None)
         self._max_retries = extra_settings.get('max_retries', 3)
         self._retry_delay = extra_settings.get('retry_delay', 60)  # Default 60 seconds
+        
+        # Failover management
+        self._failover_manager = failover_manager
+        self._current_profile = None  # Track current auth profile for failover
+        if self._failover_manager:
+            self._current_profile = self._failover_manager.get_next_profile()
+            if self._current_profile:
+                self._switch_to_profile(self._current_profile)
 
         # Cache for formatted tools and messages
         self._formatted_tools_cache = {}
@@ -685,8 +700,23 @@ Respond with ONLY a valid JSON tool call in this format:
             delay = self._parse_retry_delay(str(error)) if is_rate_limit else 0.0
             return "rate_limit" if is_rate_limit else "unknown", is_rate_limit, delay
 
+    def _switch_to_profile(self, profile: "AuthProfile") -> None:
+        """Switch to a new auth profile for failover.
+        
+        Args:
+            profile: AuthProfile to switch to
+        """
+        if profile.api_key:
+            self.api_key = profile.api_key
+        if profile.base_url:
+            self.base_url = profile.base_url
+        if profile.model and profile.model != self.model:
+            # Only log if model actually changes
+            logging.info(f"Failover: switching from {self.model} to {profile.model}")
+            self.model = profile.model
+
     def _call_with_retry(self, func, *args, **kwargs):
-        """Call a function with automatic retry on rate limit errors.
+        """Call a function with automatic retry on rate limit errors and failover support.
 
         Args:
             func: The function to call (e.g., litellm.completion)
@@ -707,15 +737,44 @@ Respond with ONLY a valid JSON tool call in this format:
                 if self._rate_limiter is not None:
                     self._rate_limiter.acquire()
 
-                return func(*args, **kwargs)
+                result = func(*args, **kwargs)
+                
+                # Mark success if failover is configured
+                if self._failover_manager and self._current_profile:
+                    self._failover_manager.mark_success(self._current_profile)
+                    
+                return result
 
             except Exception as e:
                 category, can_retry, retry_delay = self._classify_error_and_should_retry(e, attempt + 1)
-                if not can_retry:
-                    raise
-
+                
                 last_error = e
                 error_str = str(e)
+
+                # Failover: mark failure and try next profile (do this before early exit)
+                if self._failover_manager and self._current_profile:
+                    is_rate_limit = (category == "rate_limit")
+                    self._failover_manager.mark_failure(
+                        self._current_profile, error_str, is_rate_limit=is_rate_limit
+                    )
+                    next_profile = self._failover_manager.get_next_profile()
+                    if next_profile and next_profile != self._current_profile:
+                        self._switch_to_profile(next_profile)
+                        self._current_profile = next_profile
+                        # Update the kwargs with new profile values for the next retry
+                        if "api_key" in kwargs:
+                            kwargs["api_key"] = self.api_key
+                        if "base_url" in kwargs:
+                            kwargs["base_url"] = self.base_url
+                        if "model" in kwargs:
+                            kwargs["model"] = self.model
+                        # Enable retry for profile switch even if originally non-retryable
+                        can_retry = True
+                        retry_delay = 0.0
+                        logging.info(f"Failover: switched to profile '{next_profile.name}'")
+                
+                if not can_retry:
+                    raise
 
                 if attempt < self._max_retries:
                     logging.warning(
@@ -746,7 +805,7 @@ Respond with ONLY a valid JSON tool call in this format:
         raise last_error
 
     async def _call_with_retry_async(self, func, *args, **kwargs):
-        """Async version of _call_with_retry.
+        """Async version of _call_with_retry with failover support.
 
         Args:
             func: The async function to call
@@ -767,15 +826,44 @@ Respond with ONLY a valid JSON tool call in this format:
                 if self._rate_limiter is not None:
                     await self._rate_limiter.acquire_async()
 
-                return await func(*args, **kwargs)
+                result = await func(*args, **kwargs)
+                
+                # Mark success if failover is configured
+                if self._failover_manager and self._current_profile:
+                    self._failover_manager.mark_success(self._current_profile)
+                    
+                return result
 
             except Exception as e:
                 category, can_retry, retry_delay = self._classify_error_and_should_retry(e, attempt + 1)
-                if not can_retry:
-                    raise
-
+                
                 last_error = e
                 error_str = str(e)
+
+                # Failover: mark failure and try next profile (do this before early exit)
+                if self._failover_manager and self._current_profile:
+                    is_rate_limit = (category == "rate_limit")
+                    self._failover_manager.mark_failure(
+                        self._current_profile, error_str, is_rate_limit=is_rate_limit
+                    )
+                    next_profile = self._failover_manager.get_next_profile()
+                    if next_profile and next_profile != self._current_profile:
+                        self._switch_to_profile(next_profile)
+                        self._current_profile = next_profile
+                        # Update the kwargs with new profile values for the next retry
+                        if "api_key" in kwargs:
+                            kwargs["api_key"] = self.api_key
+                        if "base_url" in kwargs:
+                            kwargs["base_url"] = self.base_url
+                        if "model" in kwargs:
+                            kwargs["model"] = self.model
+                        # Enable retry for profile switch even if originally non-retryable
+                        can_retry = True
+                        retry_delay = 0.0
+                        logging.info(f"Failover: switched to profile '{next_profile.name}'")
+                
+                if not can_retry:
+                    raise
 
                 if attempt < self._max_retries:
                     logging.warning(
@@ -3401,7 +3489,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         
                         # Continue conversation after tool execution - get follow-up response
                         try:
-                            follow_up_response = litellm.completion(
+                            follow_up_response = self._completion_with_retry(
                                 **self._build_completion_params(
                                     messages=messages,
                                     tools=formatted_tools,
@@ -3417,7 +3505,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     # Yield the follow-up response after tool execution
                                     yield follow_up_content
                         except Exception as e:
-                            logging.error(f"Follow-up response failed: {e}")
+                            import time
+                            error_ref = f"followup-{int(time.time() * 1000)}"
+                            logging.error(
+                                "Follow-up response failed after retries (ref=%s, model=%s): %s",
+                                error_ref, getattr(self, 'model', 'unknown'), e
+                            )
+                            yield (
+                                f"\n\n[Error: Failed to generate final response after tool execution "
+                                f"(ref: {error_ref}). Please retry. If it continues, try reducing prompt size.]"
+                            )
                             
                 except Exception as e:
                     error_msg = str(e).lower()
@@ -3436,7 +3533,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if not use_streaming:
                 # Fall back to non-streaming and yield the complete response
                 try:
-                    response = litellm.completion(
+                    response = self._completion_with_retry(
                         **self._build_completion_params(
                             messages=messages,
                             tools=formatted_tools,

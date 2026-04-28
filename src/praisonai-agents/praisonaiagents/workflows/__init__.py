@@ -15,6 +15,7 @@ from .workflows import (
     WorkflowContext,
     StepResult,
     WorkflowManager,
+    WorkflowStepError,
     
     # Pattern helpers
     Route,
@@ -96,6 +97,9 @@ __all__ = [
     
     # Constants
     "MAX_NESTING_DEPTH",
+    
+    # Exceptions
+    "WorkflowStepError",
     
     # Workflow Config Classes
     "WorkflowOutputConfig",
