@@ -7,11 +7,14 @@ Supports runtime tool registration with context manager pattern.
 
 import ast
 import importlib.util
+import logging
 import os
 import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def _autoload_tools_enabled() -> bool:
@@ -361,7 +364,13 @@ def create_tool_registry_with_overrides(
                 tools = loader.load_from_file(str(cwd_tools_py))
                 registry.update(tools)
             except Exception:
-                pass
+                # Skip-on-error is the documented contract here, but log
+                # at debug level so opt-in users can troubleshoot a
+                # broken cwd ``tools.py`` without us going silent.
+                logger.debug(
+                    "failed to autoload cwd tools.py at %s", cwd_tools_py,
+                    exc_info=True,
+                )
 
         # 4. Template-local tools.py
         if template_dir:
@@ -371,7 +380,10 @@ def create_tool_registry_with_overrides(
                     tools = loader.load_from_file(str(tools_py))
                     registry.update(tools)
                 except Exception:
-                    pass
+                    logger.debug(
+                        "failed to autoload template tools.py at %s", tools_py,
+                        exc_info=True,
+                    )
     
     # 3. Template tools_sources (from TEMPLATE.yaml)
     if tools_sources:
@@ -460,7 +472,10 @@ def resolve_tools(
                 local_tools = loader.load_from_file(str(tools_py))
                 registry.update(local_tools)
             except Exception:
-                pass
+                logger.debug(
+                    "failed to autoload template tools.py at %s", tools_py,
+                    exc_info=True,
+                )
     
     for tool in tool_names:
         if callable(tool):

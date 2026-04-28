@@ -103,6 +103,25 @@ def test_opt_in_env_var_re_enables_autoload(
     assert "evil_tool" in registry
 
 
+def test_opt_in_env_var_re_enables_cwd_autoload(tmp_path: Path, monkeypatch):
+    """Mirror of :func:`test_opt_in_env_var_re_enables_autoload` for the
+    *current working directory* autoload path.
+
+    The original PR description guarantees that legacy local workflows
+    keep working when the operator sets ``PRAISONAI_ALLOW_TEMPLATE_TOOLS=1``.
+    The previous opt-in test only covered ``template_dir``; this one
+    covers the CWD path that ``test_cwd_tools_py_not_executed_by_default``
+    asserts is denied by default.
+    """
+    (tmp_path / "tools.py").write_text(PAYLOAD)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PRAISONAI_ALLOW_TEMPLATE_TOOLS", "1")
+
+    registry = create_tool_registry_with_overrides(include_defaults=False)
+    # Legacy CWD autoload behaviour is preserved on opt-in.
+    assert "evil_tool" in registry
+
+
 def test_explicit_override_files_still_work_without_opt_in(
     malicious_template: Path,
 ):
