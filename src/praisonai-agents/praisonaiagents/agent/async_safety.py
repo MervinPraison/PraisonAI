@@ -46,9 +46,9 @@ class DualLock:
             
     @asynccontextmanager
     async def async_lock(self):
-        """Acquire lock in asynchronous context using threading.Lock via asyncio.to_thread()."""
-        # Use asyncio.to_thread to acquire the thread lock without blocking the event loop
-        await asyncio.to_thread(self._thread_lock.acquire)
+        """Acquire lock in asynchronous context using the thread lock directly."""
+        # Acquire and release on the same thread; RLock requires same-thread ownership
+        self._thread_lock.acquire()
         try:
             yield
         finally:
@@ -114,7 +114,7 @@ class AsyncSafeState:
         
     async def __aenter__(self):
         """Support for asynchronous context manager protocol."""
-        await asyncio.to_thread(self._lock._thread_lock.acquire)
+        self._lock._thread_lock.acquire()
         return self.value
         
     async def __aexit__(self, exc_type, exc_val, exc_tb):
