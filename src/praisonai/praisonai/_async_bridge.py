@@ -6,7 +6,6 @@ handling nested event loop scenarios without creating a new event loop
 on every call (which is expensive and breaks multi-agent workflows).
 """
 import asyncio
-import atexit
 import os
 import threading
 from concurrent.futures import Future
@@ -22,30 +21,32 @@ class _BackgroundLoop:
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
 
-    def get(self) -> asyncio.AbstractEventLoop:
-        with self._lock:
-            if self._loop is None or self._loop.is_closed():
-                self._loop = asyncio.new_event_loop()
-                # non-daemon so shutdown must be explicit and clean
-                self._thread = threading.Thread(
-                    target=self._loop.run_forever,
-                    name="praisonai-async",
-                    daemon=False,
-                )
-                self._thread.start()
-            return self._loop
-            
-    def get_unlocked(self) -> asyncio.AbstractEventLoop:
-        """Get loop assuming caller holds _lock. For run_sync() use only."""
+    def _spawn_locked(self) -> asyncio.AbstractEventLoop:
+        """Create the loop+thread; caller must hold ``self._lock``.
+
+        The thread is marked ``daemon=True`` so that short-lived scripts
+        (e.g. CLI commands, smoke tests) exit cleanly without waiting on
+        the background loop to be shut down explicitly. Long-running
+        servers (gateway, a2u, mcp_server) should call :func:`shutdown`
+        explicitly to cancel in-flight tasks before process exit.
+        """
         if self._loop is None or self._loop.is_closed():
             self._loop = asyncio.new_event_loop()
             self._thread = threading.Thread(
                 target=self._loop.run_forever,
                 name="praisonai-async",
-                daemon=False,
+                daemon=True,
             )
             self._thread.start()
         return self._loop
+
+    def get(self) -> asyncio.AbstractEventLoop:
+        with self._lock:
+            return self._spawn_locked()
+
+    def get_unlocked(self) -> asyncio.AbstractEventLoop:
+        """Get loop assuming caller holds _lock. For run_sync() use only."""
+        return self._spawn_locked()
 
     def shutdown(self, timeout: float = 5.0) -> None:
         with self._lock:
@@ -70,7 +71,6 @@ class _BackgroundLoop:
                 self._thread = None
 
 _BG = _BackgroundLoop()
-atexit.register(_BG.shutdown)
 
 
 def run_sync(coro: Awaitable[T], *, timeout: float | None = _DEFAULT_TIMEOUT) -> T:
