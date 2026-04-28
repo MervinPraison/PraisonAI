@@ -38,6 +38,17 @@ class SpiderTools:
             bool: True if URL is safe, False otherwise
         """
         try:
+            # Reject URLs containing characters that cause urlparse and the
+            # underlying HTTP client (e.g. requests) to disagree on the
+            # destination host. Backslashes and ASCII control characters in
+            # the authority portion can be used to smuggle a private host
+            # past hostname-based SSRF checks (e.g. ``http://127.0.0.1:6666\@1.1.1.1``
+            # parses as host ``1.1.1.1`` but is dispatched to ``127.0.0.1``).
+            if not isinstance(url, str):
+                return False
+            if "\\" in url or any(ord(c) < 0x20 or ord(c) == 0x7f for c in url):
+                return False
+
             parsed = urlparse(url)
             
             # Only allow http/https protocols
