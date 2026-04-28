@@ -1104,6 +1104,7 @@
         "WebSearchProvider"
       ],
       "config_loader": [
+        "AutoRagConfig",
         "SessionConfig"
       ],
       "context": [
@@ -1738,9 +1739,6 @@
       "sandbox": [],
       "session": [],
       "skills": [],
-      "specialized": [
-        "AutoRagConfig"
-      ],
       "specialized_agents": [],
       "streaming": [],
       "task": [],
