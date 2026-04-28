@@ -713,6 +713,9 @@ Your Goal: {self.goal}"""
                             f"Context overflow could not be resolved after {_retry_depth} attempts", 
                             model_name=model_name, agent_id=self.name, is_retryable=False
                         ) from e
+                except LLMError:
+                    # Re-raise LLMError (including depth limit errors) without swallowing
+                    raise
                 except Exception as recovery_error:
                     logging.error(f"[{self.name}] Overflow recovery failed: {recovery_error}")
             
@@ -725,14 +728,46 @@ Your Goal: {self.goal}"""
                 response_content=str(e),  # Include error for context replay
             )
             
-            # Classify and raise structured error instead of returning None
+            # Classify and raise structured error with improved transient failure detection
             model_name = self.llm if isinstance(self.llm, str) else "unknown"
-            if any(phrase in error_str for phrase in ["rate limit", "429", "too many requests"]):
-                raise LLMError(str(e), model_name=model_name, agent_id=self.name, is_retryable=True) from e
-            elif any(phrase in error_str for phrase in ["401", "403", "authentication", "unauthorized"]):
-                raise LLMError(str(e), model_name=model_name, agent_id=self.name, is_retryable=False) from e
+            session_id = getattr(self, '_session_id', 'unknown')
+            
+            # Check for retryable errors (rate limits, transient network issues, provider errors)
+            retryable_indicators = [
+                "rate limit", "429", "too many requests",
+                "timeout", "connection reset", "connection error", "socket error",
+                "500", "502", "503", "504", "service unavailable", "internal server error",
+                "dns", "network", "connection refused"
+            ]
+            
+            # Check for non-retryable errors (auth issues)
+            auth_indicators = ["401", "403", "authentication", "unauthorized", "invalid_api_key"]
+            
+            if any(phrase in error_str.lower() for phrase in retryable_indicators):
+                is_retryable = True
+            elif any(phrase in error_str.lower() for phrase in auth_indicators):
+                is_retryable = False
             else:
-                raise LLMError(str(e), model_name=model_name, agent_id=self.name, is_retryable=False) from e
+                # Default to retryable for unknown errors to be more resilient
+                is_retryable = True
+            
+            # Create LLMError with contextual metadata
+            error = LLMError(
+                str(e), 
+                model_name=model_name, 
+                agent_id=self.name, 
+                is_retryable=is_retryable,
+                session_id=session_id
+            )
+            
+            # Call error hook if available for error interception
+            if hasattr(self, 'on_error') and self.on_error:
+                try:
+                    self.on_error(error)
+                except Exception as hook_error:
+                    logging.debug(f"Error in on_error hook: {hook_error}")
+            
+            raise error from e
 
     def _execute_unified_chat_completion(
         self, 
@@ -2181,7 +2216,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         logging.debug(f"BEFORE_TOOL hook error (non-fatal): {_hook_err}")
 
                     # Route through safety pipeline instead of direct execution
-                    result = await self.execute_tool_async(function_name, arguments)
+                    # Pass the tools list to honor task-scoped tools
+                    result = await self.execute_tool_async(function_name, arguments, tools_override=tools)
 
                     # --- AFTER_TOOL hook ---
                     try:

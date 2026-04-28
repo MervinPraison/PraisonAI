@@ -1010,8 +1010,10 @@ class AgentTeam:
             logger.info(f"Task with ID {task_id} is already completed")
             return
 
+        # Use per-task max_retries if available
+        task_max = getattr(task, "max_retries", self.max_retries)
         retries = 0
-        while task.status != "completed" and retries < self.max_retries:
+        while task.status != "completed" and retries < task_max:
             logger.debug(f"Attempt {retries+1} for task {task_id}")
             if task.status in ["not started", "in progress"]:
                 task_output = await self.aexecute_task(task_id)
@@ -1038,6 +1040,11 @@ class AgentTeam:
                                 if isinstance(guardrail_result.result, str):
                                     # Update the task output with the modified result
                                     task_output.raw = guardrail_result.result
+                                    # Clear structured fields to avoid stale cache
+                                    if hasattr(task_output, 'json_dict'):
+                                        task_output.json_dict = None
+                                    if hasattr(task_output, 'pydantic'):
+                                        task_output.pydantic = None
                                     task.result = task_output
                                 elif hasattr(guardrail_result.result, 'raw'):
                                     # Replace with the new task output
@@ -1047,7 +1054,17 @@ class AgentTeam:
                             logger.info(f"Task {task_id}: Guardrail validation passed")
                         except Exception as e:
                             logger.error(f"Task {task_id}: Error in guardrail processing: {e}")
-                            # Continue execution even if guardrail fails to avoid breaking the task
+                            # Handle guardrail failure with retry logic
+                            if task.retry_count >= task.max_retries:
+                                raise Exception(
+                                    f"Task failed due to guardrail processing error after {task.max_retries} retries. "
+                                    f"Last error: {e}"
+                                ) from e
+                            task.retry_count += 1
+                            task.status = "in progress"
+                            logger.warning(f"Task {task_id}: Guardrail processing error (retry {task.retry_count}/{task.max_retries}): {e}")
+                            retries += 1
+                            continue  # Retry the task
                     
                     task.status = "completed"
                     # Run execute_callback for memory operations
@@ -1083,9 +1100,11 @@ class AgentTeam:
                     task.status = "in progress"
                     if self.verbose >= 1:
                         logger.info(f"Task {task_id} not completed, retrying")
-                    # Use task's retry policy instead of hardcoded sleep
+                    # Use task's retry policy instead of hardcoded sleep (with cap)
                     delay = getattr(task, 'retry_delay', 1)
-                    await asyncio.sleep(delay * (2 ** retries))  # exponential backoff
+                    max_delay = getattr(task, 'max_retry_delay', 300)  # 5 min cap
+                    actual_delay = min(delay * (2 ** retries), max_delay)
+                    await asyncio.sleep(actual_delay)
                     retries += 1
             else:
                 if task.status == "failed":
@@ -1095,8 +1114,9 @@ class AgentTeam:
                     logger.info("Invalid Task status")
                     break
 
-        if retries == self.max_retries and task.status != "completed":
-            logger.info(f"Task {task_id} failed after {self.max_retries} retries.")
+        if retries == task_max and task.status != "completed":
+            task.status = "failed"  # Set failed status to match sync behavior
+            logger.info(f"Task {task_id} failed after {task_max} retries.")
 
     async def arun_all_tasks(self):
         """Async version of run_all_tasks method"""
@@ -1278,8 +1298,10 @@ class AgentTeam:
         if self.variables and not getattr(task, 'variables', None):
             task.variables = self.variables
         
+        # Use per-task max_retries if available
+        task_max = getattr(task, "max_retries", self.max_retries)
         retries = 0
-        while task.status != "completed" and retries < self.max_retries:
+        while task.status != "completed" and retries < task_max:
             logger.debug(f"Attempt {retries+1} for task {task_id}")
             if task.status in ["not started", "in progress"]:
                 task_output = self.execute_task(task_id)
@@ -1305,6 +1327,11 @@ class AgentTeam:
                                 if isinstance(guardrail_result.result, str):
                                     # Update the task output with the modified result
                                     task_output.raw = guardrail_result.result
+                                    # Clear structured fields to avoid stale cache
+                                    if hasattr(task_output, 'json_dict'):
+                                        task_output.json_dict = None
+                                    if hasattr(task_output, 'pydantic'):
+                                        task_output.pydantic = None
                                     task.result = task_output
                                 elif hasattr(guardrail_result.result, 'raw'):
                                     # Replace with the new task output
@@ -1314,7 +1341,17 @@ class AgentTeam:
                             logger.info(f"Task {task_id}: Guardrail validation passed")
                         except Exception as e:
                             logger.error(f"Task {task_id}: Error in guardrail processing: {e}")
-                            # Continue execution even if guardrail fails to avoid breaking the task
+                            # Handle guardrail failure with retry logic
+                            if task.retry_count >= task.max_retries:
+                                raise Exception(
+                                    f"Task failed due to guardrail processing error after {task.max_retries} retries. "
+                                    f"Last error: {e}"
+                                ) from e
+                            task.retry_count += 1
+                            task.status = "in progress"
+                            logger.warning(f"Task {task_id}: Guardrail processing error (retry {task.retry_count}/{task.max_retries}): {e}")
+                            retries += 1
+                            continue  # Retry the task
                     
                     task.status = "completed"
                     # Run execute_callback for memory operations
@@ -1354,9 +1391,11 @@ class AgentTeam:
                     task.status = "in progress"
                     if self.verbose >= 1:
                         logger.info(f"Task {task_id} not completed, retrying")
-                    # Use task's retry policy instead of hardcoded sleep
+                    # Use task's retry policy instead of hardcoded sleep (with cap)
                     delay = getattr(task, 'retry_delay', 1)
-                    time.sleep(delay * (2 ** retries))  # exponential backoff
+                    max_delay = getattr(task, 'max_retry_delay', 300)  # 5 min cap
+                    actual_delay = min(delay * (2 ** retries), max_delay)
+                    time.sleep(actual_delay)
                     retries += 1
             else:
                 if task.status == "failed":
@@ -1366,9 +1405,9 @@ class AgentTeam:
                     logger.info("Invalid Task status")
                     break
 
-        if retries == self.max_retries and task.status != "completed":
+        if retries == task_max and task.status != "completed":
             task.status = "failed"  # Set failed status
-            logger.info(f"Task {task_id} failed after {self.max_retries} retries.")
+            logger.info(f"Task {task_id} failed after {task_max} retries.")
 
     def run_all_tasks(self):
         """Synchronous version of run_all_tasks method"""
@@ -1549,11 +1588,34 @@ class AgentTeam:
                 except Exception as e:
                     logging.debug(f"Error in verbose task complete callback: {e}")
             
-            # Set callbacks for verbose display
+            # Set callbacks for verbose display (compose with existing callbacks)
             original_on_task_start = self.on_task_start
             original_on_task_complete = self.on_task_complete
-            self.on_task_start = verbose_task_start_callback
-            self.on_task_complete = verbose_task_complete_callback
+            
+            def composed_on_task_start(task):
+                try:
+                    verbose_task_start_callback(task)
+                except Exception as e:
+                    logging.debug(f"Error in verbose task start callback: {e}")
+                if original_on_task_start:
+                    try:
+                        original_on_task_start(task)
+                    except Exception as e:
+                        logging.debug(f"Error in original task start callback: {e}")
+            
+            def composed_on_task_complete(task):
+                try:
+                    verbose_task_complete_callback(task)
+                except Exception as e:
+                    logging.debug(f"Error in verbose task complete callback: {e}")
+                if original_on_task_complete:
+                    try:
+                        original_on_task_complete(task)
+                    except Exception as e:
+                        logging.debug(f"Error in original task complete callback: {e}")
+            
+            self.on_task_start = composed_on_task_start
+            self.on_task_complete = composed_on_task_complete
             
             # Use proper process orchestration with verbose callbacks
             try:
