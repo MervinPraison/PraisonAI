@@ -92,8 +92,19 @@ def _run_typer(argv):
             if 'PYTHONIOENCODING' not in os.environ:
                 os.environ['PYTHONIOENCODING'] = 'utf-8'
     
+    # Serialize Typer registration through the discovery lock so this path
+    # cannot race with ``_get_typer_commands`` mid-registration on another
+    # thread. ``register_commands()`` is idempotent on success; we hold the
+    # lock around it (and not just call it) so that a concurrent
+    # discoverer cannot observe a partially-registered command tree.
+    # Crucially we do NOT wrap this in try/except: registration errors
+    # (e.g. ``ImportError`` from a missing optional dep) must propagate
+    # from ``main()`` rather than be silently downgraded to an empty
+    # command set, otherwise the user just sees Typer's "no command" path
+    # instead of a real diagnostic.
     from praisonai.cli.app import app, register_commands
-    register_commands()  # idempotent
+    with _typer_commands_lock:
+        register_commands()
 
     original = sys.argv
     sys.argv = ["praisonai"] + list(argv)

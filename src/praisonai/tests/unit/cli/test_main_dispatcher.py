@@ -343,5 +343,41 @@ class TestRunTyperArgvRestoration(unittest.TestCase):
         self.assertNotEqual(sys.argv[0], "praisonai")
 
 
+class TestTyperRegistrationFailureFailsLoud(unittest.TestCase):
+    """``_run_typer`` must NOT swallow ``register_commands()`` exceptions.
+
+    A registration failure (e.g. ``ImportError`` from a missing optional
+    dependency) is a real misconfiguration: the user should see the
+    underlying error rather than a silent fallback to "no commands
+    registered". A future refactor that wraps ``register_commands()`` in a
+    defensive try/except inside ``_run_typer`` would silently downgrade
+    that to Typer's empty-app behaviour, so this test pins the invariant.
+    """
+
+    def setUp(self):
+        self._saved_argv = sys.argv
+
+    def tearDown(self):
+        sys.argv = self._saved_argv
+
+    def test_register_commands_importerror_propagates(self):
+        sys.argv = ["praisonai", "chat"]
+        with mock.patch(
+            "praisonai.cli.app.register_commands",
+            side_effect=ImportError("missing optional dep 'fakemod'"),
+        ), self.assertRaises(ImportError) as cm:
+            dispatcher._run_typer(["chat"])
+        self.assertIn("fakemod", str(cm.exception))
+
+    def test_register_commands_runtimeerror_propagates(self):
+        sys.argv = ["praisonai", "chat"]
+        with mock.patch(
+            "praisonai.cli.app.register_commands",
+            side_effect=RuntimeError("registration broke"),
+        ), self.assertRaises(RuntimeError) as cm:
+            dispatcher._run_typer(["chat"])
+        self.assertIn("registration broke", str(cm.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

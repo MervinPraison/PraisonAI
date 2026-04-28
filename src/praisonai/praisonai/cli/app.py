@@ -277,11 +277,16 @@ def get_output_controller() -> OutputController:
 _commands_registered = False
 
 def register_commands():
-    """Register all command groups (idempotent)."""
+    """Register all command groups (idempotent).
+
+    The ``_commands_registered`` sentinel is intentionally flipped only after
+    every import and ``app.add_typer`` call has succeeded. Setting it before
+    would poison the registry on partial failure: a later caller would
+    short-circuit and dispatch against an incomplete command tree.
+    """
     global _commands_registered
     if _commands_registered:
         return
-    _commands_registered = True
     # Import command modules - Core commands
     from .commands.config import app as config_app
     from .commands.traces import app as traces_app
@@ -666,6 +671,12 @@ def register_commands():
         app.add_typer(tui_app, name="tui", help="Interactive TUI and simulation")
     if queue_app:
         app.add_typer(queue_app, name="queue", help="Queue management")
+
+    # Mark registration complete only after every import + add_typer above
+    # has succeeded. If anything raised, this line is skipped and the next
+    # caller will retry from scratch instead of dispatching against a
+    # half-built command tree.
+    _commands_registered = True
 
 
 # Register commands on import
