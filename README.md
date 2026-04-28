@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/mervinpraison-praisonai-badge.png)](https://mseep.ai/app/mervinpraison-praisonai)
+
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/images/logo_dark.png" />
