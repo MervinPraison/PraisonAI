@@ -36,7 +36,7 @@ class DualLock:
     
     def __init__(self):
         """Initialize with unified thread-safe locking."""
-        self._thread_lock = threading.Lock()  # Single canonical lock for all contexts
+        self._thread_lock = threading.RLock()  # Re-entrant lock to handle nested acquisitions
     
     @contextmanager
     def sync(self):
