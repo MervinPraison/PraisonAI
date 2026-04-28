@@ -46,8 +46,13 @@ class DualLock:
             
     @asynccontextmanager
     async def async_lock(self):
-        """Acquire lock in asynchronous context using the thread lock directly."""
-        # Acquire and release on the same thread; RLock requires same-thread ownership
+        """Acquire lock in asynchronous context using the thread lock directly.
+
+        Note: This acquires the threading.RLock on the calling coroutine's thread
+        (event loop thread). Acquisition is brief (in-memory only) so the brief
+        event loop block is acceptable. Using asyncio.to_thread for acquire would
+        break same-thread ownership required by RLock.
+        """
         self._thread_lock.acquire()
         try:
             yield
