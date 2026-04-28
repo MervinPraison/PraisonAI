@@ -948,7 +948,7 @@ Write the complete compiled report:"""
         task_id = getattr(task, 'id', None)
         return await self.achat(prompt, task_name=task_name, task_description=task_description, task_id=task_id)
 
-    async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None) -> Any:
+    async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
         """Async version of execute_tool"""
         try:
             logging.info(f"Executing async tool: {function_name} with arguments: {arguments}")
@@ -964,9 +964,10 @@ Write the complete compiled report:"""
                 logging.error(error_msg)
                 return {"error": error_msg, "approval_error": True}
             
-            # Try to find the function in the agent's tools list first
+            # Try to find the function in the override tools list first, then agent's tools list
             func = None
-            for tool in self.tools:
+            tools_to_search = tools_override if tools_override is not None else self.tools
+            for tool in tools_to_search:
                 if (callable(tool) and getattr(tool, '__name__', '') == function_name):
                     func = tool
                     break
