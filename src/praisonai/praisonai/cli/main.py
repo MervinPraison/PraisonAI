@@ -1939,16 +1939,16 @@ class PraisonAI:
                     # Load from file
                     try:
                         import inspect
-                        import importlib.util
-                        spec = importlib.util.spec_from_file_location("rewrite_tools_module", rewrite_tools)
-                        if spec and spec.loader:
-                            module = importlib.util.module_from_spec(spec)
-                            spec.loader.exec_module(module)
+                        from .._safe_loader import load_user_module
+                        module = load_user_module(rewrite_tools, name="rewrite_tools_module")
+                        if module is not None:
                             for name, obj in inspect.getmembers(module):
                                 if inspect.isfunction(obj) and not name.startswith('_'):
                                     rewrite_tools_list.append(obj)
                             if rewrite_tools_list:
                                 print(f"[cyan]Loaded {len(rewrite_tools_list)} tools for query rewriter[/cyan]")
+                        else:
+                            print(f"[yellow]Warning: Rewrite tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.[/yellow]")
                     except Exception as e:
                         print(f"[yellow]Warning: Failed to load rewrite tools: {e}[/yellow]")
                 else:
@@ -2031,16 +2031,16 @@ class PraisonAI:
                     # Load from file
                     try:
                         import inspect
-                        import importlib.util
-                        spec = importlib.util.spec_from_file_location("expand_tools_module", expand_tools)
-                        if spec and spec.loader:
-                            module = importlib.util.module_from_spec(spec)
-                            spec.loader.exec_module(module)
+                        from .._safe_loader import load_user_module
+                        module = load_user_module(expand_tools, name="expand_tools_module")
+                        if module is not None:
                             for name, obj in inspect.getmembers(module):
                                 if inspect.isfunction(obj) and not name.startswith('_'):
                                     expand_tools_list.append(obj)
                             if expand_tools_list:
                                 print(f"[cyan]Loaded {len(expand_tools_list)} tools for prompt expander[/cyan]")
+                        else:
+                            print(f"[yellow]Warning: Expand tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.[/yellow]")
                     except Exception as e:
                         print(f"[yellow]Warning: Failed to load expand tools: {e}[/yellow]")
                 else:
@@ -2116,15 +2116,16 @@ class PraisonAI:
             # Load from file
             try:
                 import inspect
-                spec = importlib.util.spec_from_file_location("tools_module", tools_path)
-                if spec and spec.loader:
-                    module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(module)
+                from .._safe_loader import load_user_module
+                module = load_user_module(tools_path, name="tools_module")
+                if module is not None:
                     for name, obj in inspect.getmembers(module):
                         if inspect.isfunction(obj) and not name.startswith('_'):
                             tools_list.append(obj)
                     if tools_list:
                         print(f"[cyan]Loaded {len(tools_list)} tools from {tools_path}[/cyan]")
+                else:
+                    print(f"[yellow]Warning: Tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.[/yellow]")
             except Exception as e:
                 print(f"[yellow]Warning: Failed to load tools from {tools_path}: {e}[/yellow]")
         else:
@@ -2752,14 +2753,15 @@ class PraisonAI:
             
             if tools_file.exists():
                 try:
-                    spec = importlib.util.spec_from_file_location("recipe_tools", str(tools_file))
-                    tools_module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(tools_module)
-                    
-                    # Build registry from public callable functions
-                    for name, obj in vars(tools_module).items():
-                        if callable(obj) and not name.startswith('_'):
-                            tool_registry[name] = obj
+                    from .._safe_loader import load_user_module
+                    tools_module = load_user_module(str(tools_file), name="recipe_tools")
+                    if tools_module is not None:
+                        # Build registry from public callable functions
+                        for name, obj in vars(tools_module).items():
+                            if callable(obj) and not name.startswith('_'):
+                                tool_registry[name] = obj
+                    else:
+                        logger.warning("Recipe tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.")
                     
                     if tool_registry:
                         print(f"[cyan]Loaded {len(tool_registry)} tools from tools.py: {', '.join(tool_registry.keys())}[/cyan]")
@@ -5381,14 +5383,15 @@ Now, {final_instruction.lower()}:"""
                     # Load from file
                     try:
                         import inspect
-                        spec = importlib.util.spec_from_file_location("tools_module", tools_path)
-                        if spec and spec.loader:
-                            module = importlib.util.module_from_spec(spec)
-                            spec.loader.exec_module(module)
+                        from .._safe_loader import load_user_module
+                        module = load_user_module(tools_path, name="tools_module")
+                        if module is not None:
                             # Get all callable functions from the module
                             for name, obj in inspect.getmembers(module):
                                 if inspect.isfunction(obj) and not name.startswith('_'):
                                     tools_list.append(obj)
+                        else:
+                            print(f"[yellow]Warning: Tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.[/yellow]")
                             if tools_list:
                                 print(f"[cyan]Loaded {len(tools_list)} tools from {tools_path}[/cyan]")
                     except Exception as e:

@@ -116,7 +116,6 @@ class AsyncAgentScheduler:
         
         self.is_running = False
         self._task: Optional[asyncio.Task] = None
-        self._stop_event = asyncio.Event()
         self._executor = AsyncPraisonAgentExecutor(agent)
         self._execution_count = 0
         self._success_count = 0
@@ -124,6 +123,7 @@ class AsyncAgentScheduler:
         
         # Sync lock for async primitives creation and bound loop tracking
         self._primitives_lock = threading.Lock()
+        self._stop_event: Optional[asyncio.Event] = None
         self._cancel_event: Optional[asyncio.Event] = None
         self._stats_lock: Optional[asyncio.Lock] = None
         self._bound_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -138,6 +138,7 @@ class AsyncAgentScheduler:
         
         with self._primitives_lock:
             if self._bound_loop is not loop:
+                self._stop_event = asyncio.Event()
                 self._cancel_event = asyncio.Event()
                 self._stats_lock = asyncio.Lock()
                 self._bound_loop = loop
@@ -167,6 +168,7 @@ class AsyncAgentScheduler:
         try:
             interval = ScheduleParser.parse(schedule_expr)
             self.is_running = True
+            self._ensure_async_primitives()  # NEW — bind to the loop start() runs on
             self._stop_event.clear()
             
             logger.info(f"Starting async agent scheduler: {getattr(self.agent, 'name', 'Agent')}")
@@ -221,6 +223,7 @@ class AsyncAgentScheduler:
             pass
             
         logger.info("Stopping async agent scheduler...")
+        self._ensure_async_primitives()  # NEW — safe even if start() ran on a different loop
         self._stop_event.set()
         
         try:
@@ -266,6 +269,7 @@ class AsyncAgentScheduler:
     async def _run_schedule(self, interval: int, max_retries: int):
         """Internal method to run scheduled agent executions."""
         try:
+            self._ensure_async_primitives()
             while not self._stop_event.is_set():
                 logger.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Starting async scheduled agent execution")
                 

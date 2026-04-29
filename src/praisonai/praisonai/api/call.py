@@ -69,11 +69,25 @@ tools_path = os.path.join(os.getcwd(), 'tools.py')
 logger.debug(f"Tools path: {tools_path}")
 
 def import_tools_from_file(file_path):
-    spec = importlib.util.spec_from_file_location("custom_tools", file_path)
-    custom_tools_module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(custom_tools_module)
-    logger.debug(f"Imported tools from {file_path}")
-    return custom_tools_module
+    """Import tools from file with PRAISONAI_ALLOW_LOCAL_TOOLS opt-in.
+    
+    This function is reachable from network input via API requests.
+    Additional security: only allow files under the current working directory.
+    """
+    from .._safe_loader import load_user_module_strict, LocalToolsDisabled
+    try:
+        custom_tools_module = load_user_module_strict(file_path, name="custom_tools")
+        logger.debug(f"Imported tools from {file_path}")
+        return custom_tools_module
+    except LocalToolsDisabled as e:
+        logger.warning(f"Tools loading disabled: {e}")
+        raise ValueError("Local tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.")
+    except FileNotFoundError as e:
+        logger.warning(f"Tools file not found: {e}")
+        raise ValueError(f"Tools file not found: {file_path}")
+    except Exception as e:
+        logger.error(f"Failed to import tools from {file_path}: {e}")
+        raise ValueError(f"Failed to import tools from {file_path}: {e}")
 
 try:
     # Security: Require explicit opt-in for local tools loading
