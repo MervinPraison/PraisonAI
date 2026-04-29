@@ -356,15 +356,18 @@ class AgentsGenerator:
         Extract tool classes from a loaded module that inherit from BaseTool 
         or are part of langchain_community.tools package.
         """
-        try:
-            return {name: obj() for name, obj in inspect.getmembers(module, 
-                lambda x: inspect.isclass(x) and (
-                    x.__module__.startswith('langchain_community.tools') or 
-                    (PRAISONAI_TOOLS_AVAILABLE and BaseTool and issubclass(x, BaseTool))
-                ) and x is not BaseTool)}
-        except Exception as e:
-            self.logger.warning(f"Error extracting tool classes from module: {e}")
-            return {}
+        result = {}
+        for name, obj in inspect.getmembers(module, 
+            lambda x: inspect.isclass(x) and (
+                x.__module__.startswith('langchain_community.tools') or 
+                (PRAISONAI_TOOLS_AVAILABLE and BaseTool and issubclass(x, BaseTool))
+            ) and x is not BaseTool):
+            try:
+                result[name] = obj()
+            except Exception as e:
+                self.logger.warning(f"Error instantiating tool class {name}: {e}")
+                continue
+        return result
     
     def load_tools_from_module_class(self, module_path):
         """
@@ -551,9 +554,13 @@ class AgentsGenerator:
                 self.logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
         elif tools_dir_path.is_dir():
             from ._safe_loader import load_user_module
-            module = load_user_module(tools_dir_path, name="tools_module")
-            if module is not None:
-                tools_dict.update(self._extract_tool_classes(module))
+            for py_file in tools_dir_path.glob("*.py"):
+                if py_file.name.startswith("__"):
+                    continue
+                module = load_user_module(py_file, name=f"tools_{py_file.stem}")
+                if module is not None:
+                    tools_dict.update(self._extract_tool_classes(module))
+            if tools_dict:
                 self.logger.debug("tools folder exists in the root directory")
 
         framework = self.framework or config.get('framework', 'crewai')

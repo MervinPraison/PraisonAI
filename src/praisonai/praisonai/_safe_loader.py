@@ -46,7 +46,9 @@ def load_user_module(module_path: str | Path, *, name: str) -> ModuleType | None
     # Optional: enforce that the path is under CWD or an explicit allowlist
     # to prevent ../-style traversal from API/network inputs.
     cwd = Path.cwd().resolve()
-    if not str(path).startswith(str(cwd) + os.sep):
+    try:
+        path.relative_to(cwd)
+    except ValueError:
         logger.warning("Refusing to exec %s: outside working directory.", path)
         return None
 
@@ -84,7 +86,9 @@ def load_user_module_strict(module_path: str | Path, *, name: str) -> ModuleType
 
     # Security: enforce that the path is under CWD
     cwd = Path.cwd().resolve()
-    if not str(path).startswith(str(cwd) + os.sep):
+    try:
+        path.relative_to(cwd)
+    except ValueError:
         raise LocalToolsDisabled(f"Refusing to exec {path}: outside working directory.")
 
     spec = importlib.util.spec_from_file_location(name, str(path))

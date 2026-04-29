@@ -210,20 +210,22 @@ class AsyncAgentScheduler:
             logger.info("Async scheduler is not running")
             return True
         
-        # Ensure we're on the same loop that was bound during start()
-        try:
-            current_loop = asyncio.get_running_loop()
-            if self._bound_loop is not None and current_loop is not self._bound_loop:
-                raise RuntimeError(
-                    "stop() must be called from the same event loop as start(). "
-                    f"Expected: {self._bound_loop}, got: {current_loop}"
-                )
-        except RuntimeError:
-            # No running loop - this is fine if scheduler was never started
-            pass
-            
         logger.info("Stopping async agent scheduler...")
-        self._ensure_async_primitives()  # NEW — safe even if start() ran on a different loop
+        
+        # _stop_event is guaranteed non-None after a successful start()
+        if self._stop_event is None:
+            logger.warning("stop() called before start(); nothing to stop.")
+            self.is_running = False
+            return True
+            
+        # Ensure we're on the same loop that was bound during start()
+        current_loop = asyncio.get_running_loop()
+        if self._bound_loop is not None and current_loop is not self._bound_loop:
+            raise RuntimeError(
+                "stop() must be called from the same event loop as start(). "
+                f"Expected: {self._bound_loop}, got: {current_loop}"
+            )
+            
         self._stop_event.set()
         
         try:

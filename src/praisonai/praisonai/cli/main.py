@@ -2756,12 +2756,13 @@ class PraisonAI:
                     from .._safe_loader import load_user_module
                     tools_module = load_user_module(str(tools_file), name="recipe_tools")
                     if tools_module is not None:
-                        # Build registry from public callable functions
+                        import inspect
+                        # Build registry from public functions only
                         for name, obj in vars(tools_module).items():
-                            if callable(obj) and not name.startswith('_'):
+                            if inspect.isfunction(obj) and not name.startswith('_') and inspect.getmodule(obj) is tools_module:
                                 tool_registry[name] = obj
                     else:
-                        logger.warning("Recipe tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.")
+                        logging.getLogger(__name__).warning("Recipe tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.")
                     
                     if tool_registry:
                         print(f"[cyan]Loaded {len(tool_registry)} tools from tools.py: {', '.join(tool_registry.keys())}[/cyan]")
@@ -5390,10 +5391,10 @@ Now, {final_instruction.lower()}:"""
                             for name, obj in inspect.getmembers(module):
                                 if inspect.isfunction(obj) and not name.startswith('_'):
                                     tools_list.append(obj)
-                        else:
-                            print(f"[yellow]Warning: Tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.[/yellow]")
                             if tools_list:
                                 print(f"[cyan]Loaded {len(tools_list)} tools from {tools_path}[/cyan]")
+                        else:
+                            print(f"[yellow]Warning: Tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.[/yellow]")
                     except Exception as e:
                         print(f"[yellow]Warning: Failed to load tools from {tools_path}: {e}[/yellow]")
                 else:

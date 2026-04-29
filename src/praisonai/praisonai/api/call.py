@@ -86,8 +86,8 @@ def import_tools_from_file(file_path):
         logger.warning(f"Tools file not found: {e}")
         raise ValueError(f"Tools file not found: {file_path}")
     except Exception as e:
-        logger.error(f"Failed to import tools from {file_path}: {e}")
-        raise ValueError(f"Failed to import tools from {file_path}: {e}")
+        logger.error("Failed to import tools from %s", file_path, exc_info=True)
+        raise ValueError(f"Failed to import tools from {file_path}") from e
 
 try:
     # Security: Require explicit opt-in for local tools loading
