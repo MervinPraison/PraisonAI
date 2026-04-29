@@ -50,15 +50,17 @@ class TestAPICallProfiler:
     
     @pytest.mark.allow_sleep
     def test_api_call_context_manager(self):
-        """Should profile API call with context manager."""
+        """Should profile API call with context manager.
+
+        The ``@allow_sleep`` marker opts out of the conftest ``fast_sleep`` fixture which
+        otherwise clamps ``time.sleep`` to 1ms. This is needed here because the test
+        asserts a real wall-clock duration was measured.
+        """
         from praisonai.profiler import Profiler
         
         Profiler.enable()
         Profiler.clear()
         
-        # ``allow_sleep`` opts out of the conftest ``fast_sleep`` fixture which
-        # otherwise clamps ``time.sleep`` to 1ms — needed here because the test
-        # asserts a real wall-clock duration was measured.
         with Profiler.api_call("https://api.example.com/test", method="GET") as call:
             time.sleep(0.05)  # 50ms for reliable measurement on busy CI
         
@@ -125,14 +127,16 @@ class TestStreamingProfiler:
     
     @pytest.mark.allow_sleep
     def test_streaming_tracker(self):
-        """Should track streaming with context manager."""
+        """Should track streaming with context manager.
+
+        The ``@allow_sleep`` marker opts out of conftest ``fast_sleep`` clamping so the
+        TTFT measurement reflects real elapsed time.
+        """
         from praisonai.profiler import Profiler, StreamingTracker
         
         Profiler.enable()
         Profiler.clear()
         
-        # ``allow_sleep`` opts out of conftest ``fast_sleep`` clamping so the
-        # TTFT measurement reflects real elapsed time.
         tracker = StreamingTracker("test_stream")
         tracker.start()
         time.sleep(0.05)
