@@ -48,6 +48,7 @@ class TestAPICallProfiler:
         Profiler.disable()
         Profiler.clear()
     
+    @pytest.mark.allow_sleep
     def test_api_call_context_manager(self):
         """Should profile API call with context manager."""
         from praisonai.profiler import Profiler
@@ -55,13 +56,15 @@ class TestAPICallProfiler:
         Profiler.enable()
         Profiler.clear()
         
+        # ``allow_sleep`` opts out of the conftest ``fast_sleep`` fixture which
+        # otherwise clamps ``time.sleep`` to 1ms — needed here because the test
+        # asserts a real wall-clock duration was measured.
         with Profiler.api_call("https://api.example.com/test", method="GET") as call:
-            time.sleep(0.05)  # Simulate API latency (50ms for reliable measurement)
+            time.sleep(0.05)  # 50ms for reliable measurement on busy CI
         
         calls = Profiler.get_api_calls()
         assert len(calls) >= 1
-        # Use a loose lower bound: ``time.sleep`` can under-deliver by a few ms
-        # on busy CI runners, so we require at least 5ms to catch unit errors.
+        # Loose lower bound: ``time.sleep`` precision varies by ~5ms on CI.
         assert calls[-1].duration_ms >= 5
         
         Profiler.disable()
@@ -120,6 +123,7 @@ class TestStreamingProfiler:
         Profiler.disable()
         Profiler.clear()
     
+    @pytest.mark.allow_sleep
     def test_streaming_tracker(self):
         """Should track streaming with context manager."""
         from praisonai.profiler import Profiler, StreamingTracker
@@ -127,6 +131,8 @@ class TestStreamingProfiler:
         Profiler.enable()
         Profiler.clear()
         
+        # ``allow_sleep`` opts out of conftest ``fast_sleep`` clamping so the
+        # TTFT measurement reflects real elapsed time.
         tracker = StreamingTracker("test_stream")
         tracker.start()
         time.sleep(0.05)
