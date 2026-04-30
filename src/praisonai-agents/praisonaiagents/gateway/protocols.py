@@ -28,6 +28,7 @@ from typing import (
 )
 
 if TYPE_CHECKING:
+    from praisonai.gateway.pairing import PairedChannel
     from ..agent import Agent
 
 
@@ -799,13 +800,13 @@ class PairingProtocol(Protocol):
     def generate_code(
         self, 
         channel_type: str = "unknown", 
-        user_id: Optional[str] = None
+        channel_id: Optional[str] = None
     ) -> str:
         """Generate a new pairing code for a channel.
         
         Args:
             channel_type: Type of channel (e.g., "telegram", "slack", "ui")
-            user_id: Optional user identifier
+            channel_id: Optional channel identifier
             
         Returns:
             The generated pairing code
@@ -844,7 +845,7 @@ class PairingProtocol(Protocol):
         """
         ...
     
-    def list_paired(self) -> List[Dict[str, Any]]:
+    def list_paired(self) -> List["PairedChannel"]:
         """List all authorized channels.
         
         Returns:
@@ -852,15 +853,26 @@ class PairingProtocol(Protocol):
         """
         ...
     
-    def revoke(self, channel_type: str, channel_id: str) -> bool:
+    def revoke(self, channel_id: str, channel_type: str) -> bool:
         """Revoke authorization for a channel.
         
         Args:
-            channel_type: Type of channel
             channel_id: Channel identifier
+            channel_type: Type of channel
             
         Returns:
             True if revocation successful, False if not found
+        """
+        ...
+    
+    def list_pending(self, channel_type: Optional[str] = None) -> List[Dict[str, any]]:
+        """List pending pairing requests.
+        
+        Args:
+            channel_type: Optional filter by channel type
+            
+        Returns:
+            List of pending requests with channel, code, user info, and age
         """
         ...
 

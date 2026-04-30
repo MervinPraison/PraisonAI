@@ -120,8 +120,8 @@ class TestPairingAgentE2E:
         approval_dm = self.adapter.approval_dms[0]
         code = approval_dm["code"]
         
-        # Set callback secret for PairingUIBuilder before creating keyboard
-        PairingUIBuilder.set_callback_secret("test-secret-for-e2e")
+        # Set callback secret via environment variable for consistent signatures
+        os.environ["PRAISONAI_CALLBACK_SECRET"] = "test-secret-for-e2e"
         
         # Simulate owner approval using real signed callback
         keyboard = PairingUIBuilder.create_telegram_keyboard(
@@ -201,7 +201,7 @@ class TestPairingAgentE2E:
         """Test that agent is properly invoked after approval with mocked LLM."""
         
         # Set up the pairing (skip the approval flow, directly pair)
-        code = self.pairing_store.generate_code(channel_type="telegram", user_id="approved-user")
+        code = self.pairing_store.generate_code(channel_type="telegram", channel_id="approved-user")
         self.pairing_store.verify_and_pair(
             code=code,
             channel_id="approved-user", 
