@@ -223,6 +223,7 @@ class AgentResponse(BaseModel):
     instructions: Optional[str] = None
     status: str
     max_concurrent_tasks: int
+    owner_type: Optional[str] = None
     owner_id: Optional[str] = None
     created_at: datetime
 
