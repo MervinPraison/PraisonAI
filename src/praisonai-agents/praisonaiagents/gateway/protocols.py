@@ -796,18 +796,16 @@ class PairingProtocol(Protocol):
     to communicate with the gateway through signed codes.
     """
     
-    def add_pending(
+    def generate_code(
         self, 
-        channel_type: str, 
-        channel_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        channel_type: str = "unknown", 
+        user_id: Optional[str] = None
     ) -> str:
         """Generate a new pairing code for a channel.
         
         Args:
             channel_type: Type of channel (e.g., "telegram", "slack", "ui")
-            channel_id: Optional channel identifier
-            metadata: Optional metadata for the pairing request
+            user_id: Optional user identifier
             
         Returns:
             The generated pairing code
@@ -816,30 +814,30 @@ class PairingProtocol(Protocol):
     
     def approve(
         self, 
-        code: str, 
-        channel_id: str, 
-        channel_type: str, 
-        label: str = ""
+        channel_type: str,
+        code: str,
+        user_id: str = "",
+        user_name: str = ""
     ) -> bool:
         """Approve a pairing code, authorizing the channel.
         
         Args:
-            code: The pairing code to approve
-            channel_id: Channel identifier
             channel_type: Type of channel
-            label: Optional human-readable label
+            code: The pairing code to approve
+            user_id: User identifier (optional, defaults to empty string)
+            user_name: Human-readable username (optional, defaults to empty string)
             
         Returns:
             True if approval successful, False if code invalid/expired
         """
         ...
     
-    def is_paired(self, channel_type: str, channel_id: str) -> bool:
+    def is_paired(self, channel_id: str, channel_type: str) -> bool:
         """Check if a channel is authorized.
         
         Args:
-            channel_type: Type of channel
             channel_id: Channel identifier
+            channel_type: Type of channel
             
         Returns:
             True if channel is paired/authorized
