@@ -230,12 +230,15 @@ class AgentsGenerator:
         
         # Keep tool registry for backward compatibility with autogen adapters
         self.tool_registry = ToolRegistry()
-        self.tool_registry.register_builtin_autogen_adapters()
         
-        # Get framework adapter and validate availability
+        # Get framework adapter first
         self.framework_adapter = self._get_framework_adapter(framework)
         if not self.framework_adapter.is_available():
             raise ImportError(f"Framework '{framework}' is not available. Please install the required dependencies.")
+        
+        # Only autogen-family adapters need the autogen tool shim
+        if framework in {"autogen", "autogen_v4", "ag2"}:
+            self.tool_registry.register_builtin_autogen_adapters()
 
     def _get_framework_adapter(self, framework: str) -> FrameworkAdapter:
         """
@@ -564,24 +567,16 @@ class AgentsGenerator:
                 self.logger.debug("tools folder exists in the root directory")
 
         framework = self.framework or config.get('framework', 'crewai')
+        adapter = self._get_framework_adapter(framework)
 
-        # Determine AutoGen version if needed (keeping compatibility logic)
-        if framework == "autogen":
-            autogen_version = os.environ.get("AUTOGEN_VERSION", "auto").lower()
-            autogen_v4_adapter = self._get_framework_adapter("autogen_v4")
-            autogen_v2_adapter = self._get_framework_adapter("autogen")
-            
-            use_v4 = False
-            if autogen_version == "v0.4" and autogen_v4_adapter.is_available():
-                use_v4 = True
-            elif autogen_version == "v0.2" and autogen_v2_adapter.is_available():
-                use_v4 = False
-            elif autogen_version == "auto":
-                use_v4 = autogen_v4_adapter.is_available()
-            else:
-                use_v4 = autogen_v4_adapter.is_available() and not autogen_v2_adapter.is_available()
-            
-            framework = "autogen_v4" if use_v4 else "autogen"
+        # Handle framework version resolution via adapter
+        resolved = getattr(adapter, "resolve_alias", lambda: framework)()
+        if resolved != framework:
+            framework = resolved
+            adapter = self._get_framework_adapter(framework)
+        # Final availability check
+        if not adapter.is_available():
+            raise ImportError(f"Framework '{framework}' is not available. Please install the required dependencies.")
             
         # Initialize AgentOps if available
         try:
@@ -591,18 +586,11 @@ class AgentsGenerator:
                 agentops.init(agentops_api_key, default_tags=[framework])
         except ImportError:
             pass
-            
-        # Update framework adapter if framework changed (e.g., AutoGen version selection)
-        if framework != self.framework:
-            self.framework = framework
-            self.framework_adapter = self._get_framework_adapter(framework)
-            
-        # Final availability check
-        if not self.framework_adapter.is_available():
-            raise ImportError(f"Framework '{framework}' is not available. Please install the required dependencies.")
-            
+
+        # Update framework state
+        self.framework, self.framework_adapter = framework, adapter
         self.logger.info(f"Using framework: {framework}")
-        return self.framework_adapter.run(config, self.config_list, topic)
+        return adapter.run(config, self.config_list, topic)
 
     def _run_yaml_workflow(self, config):
         """

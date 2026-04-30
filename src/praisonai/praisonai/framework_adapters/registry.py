@@ -62,8 +62,9 @@ class FrameworkAdapterRegistry:
             pass
         
         try:
-            from .autogen_adapter import AutoGenAdapter, AutoGenV4Adapter, AG2Adapter
-            self._adapters["autogen"] = AutoGenAdapter
+            from .autogen_adapter import AutoGenAdapter, AutoGenV4Adapter, AG2Adapter, AutoGenFamilyAdapter
+            self._adapters["autogen"] = AutoGenFamilyAdapter  # Use family adapter for version resolution
+            self._adapters["autogen_v2"] = AutoGenAdapter     # Direct access to v2
             self._adapters["autogen_v4"] = AutoGenV4Adapter
             self._adapters["ag2"] = AG2Adapter
         except ImportError:

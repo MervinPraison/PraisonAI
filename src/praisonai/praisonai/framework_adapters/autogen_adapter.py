@@ -5,6 +5,7 @@ Provides lazy-loaded integration with AutoGen v0.2, AutoGen v0.4, and AG2 framew
 """
 
 import logging
+import os
 from typing import Dict, List, Any
 from .base import BaseFrameworkAdapter
 
@@ -107,9 +108,12 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
     """Adapter for AutoGen v0.4 framework."""
     
     name = "autogen_v4"
+    implemented: bool = False  # explicit marker
     
     def is_available(self) -> bool:
         """Check if AutoGen v0.4 is available for import."""
+        if not self.implemented:
+            return False  # treat unimplemented as unavailable for dispatch
         try:
             from autogen_agentchat.agents import AssistantAgent  # noqa: F401
             from autogen_ext.models.openai import OpenAIChatCompletionClient  # noqa: F401
@@ -129,23 +133,22 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
         Returns:
             Execution result as string
         """
-        if not self.is_available():
-            raise ImportError("AutoGen v0.4 is not available. Install with: pip install autogen-agentchat autogen-ext")
-            
-        logger.info("Starting AutoGen v0.4 execution...")
-        # For now, return a proper error message instead of delegating
-        # TODO: Implement full AutoGen v0.4 adapter logic
-        logger.warning("AutoGen v0.4 adapter is not yet fully implemented")
-        return "### AutoGen v0.4 Output ###\nAutoGen v0.4 adapter is not yet fully implemented. Please use 'autogen' framework for AutoGen v0.2 support."
+        raise NotImplementedError(
+            "AutoGen v0.4 adapter is not yet implemented. "
+            "Use framework='autogen' (v0.2) or pin AUTOGEN_VERSION=v0.2."
+        )
 
 
 class AG2Adapter(BaseFrameworkAdapter):
     """Adapter for AG2 framework."""
     
     name = "ag2"
+    implemented: bool = False  # explicit marker
     
     def is_available(self) -> bool:
         """Check if AG2 is available for import."""
+        if not self.implemented:
+            return False  # treat unimplemented as unavailable for dispatch
         try:
             import importlib.metadata as _importlib_metadata
             _importlib_metadata.distribution('ag2')
@@ -166,11 +169,44 @@ class AG2Adapter(BaseFrameworkAdapter):
         Returns:
             Execution result as string
         """
-        if not self.is_available():
-            raise ImportError("AG2 is not available. Install with: pip install ag2")
-            
-        logger.info("Starting AG2 execution...")
-        # For now, return a proper error message instead of delegating
-        # TODO: Implement full AG2 adapter logic
-        logger.warning("AG2 adapter is not yet fully implemented")
-        return "### AG2 Output ###\nAG2 adapter is not yet fully implemented. Please use 'autogen' framework for AutoGen/AG2 support."
+        raise NotImplementedError(
+            "AG2 adapter is not yet implemented. "
+            "Use framework='autogen' (v0.2) or pin AUTOGEN_VERSION=v0.2."
+        )
+
+
+class AutoGenFamilyAdapter(BaseFrameworkAdapter):
+    """Front door for the autogen family — picks the concrete version."""
+    
+    name = "autogen"
+
+    def is_available(self) -> bool:
+        """Check if any AutoGen variant is available."""
+        return (
+            AutoGenAdapter().is_available()
+            or AutoGenV4Adapter().is_available()
+            or AG2Adapter().is_available()
+        )
+
+    def resolve_alias(self) -> str:
+        """Select the concrete AutoGen version based on environment and availability."""
+        requested = os.environ.get("AUTOGEN_VERSION", "auto").lower()
+        v2_available = AutoGenAdapter().is_available()
+        v4_available = AutoGenV4Adapter().is_available()
+
+        if requested == "v0.2" and v2_available:
+            return "autogen_v2"
+        if requested == "v0.4" and v4_available:
+            return "autogen_v4"
+        
+        # auto: prefer v2 (v4 is currently unimplemented; see Issue 1)
+        if v2_available:
+            return "autogen_v2"
+        elif v4_available:
+            return "autogen_v4"
+        else:
+            return "autogen_v2"  # fallback to v2 for error handling
+
+    def run(self, config: Dict[str, Any], llm_config: List[Dict], topic: str) -> str:
+        """Should not be called - resolve_alias() should redirect."""
+        raise RuntimeError("Call resolve_alias() then dispatch to the concrete adapter.")
