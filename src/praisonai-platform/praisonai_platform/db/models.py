@@ -166,9 +166,13 @@ class Agent(Base):
     workspace_id: Mapped[str] = mapped_column(String, ForeignKey("workspaces.id"), nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    status: Mapped[str] = mapped_column(String, nullable=False, default="idle")
+    status: Mapped[str] = mapped_column(String, nullable=False, default="offline")
     owner_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     owner_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    runtime_mode: Mapped[str] = mapped_column(String, nullable=False, default="local")
+    runtime_config: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True, default=dict)
+    instructions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    max_concurrent_tasks: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     config: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
@@ -217,12 +221,12 @@ class IssueDependency(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     issue_id: Mapped[str] = mapped_column(String, ForeignKey("issues.id"), nullable=False)
-    depends_on_id: Mapped[str] = mapped_column(String, ForeignKey("issues.id"), nullable=False)
+    depends_on_issue_id: Mapped[str] = mapped_column(String, ForeignKey("issues.id"), nullable=False)
     dependency_type: Mapped[str] = mapped_column(String, nullable=False)  # blocks, blocked_by, related
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     __table_args__ = (
-        UniqueConstraint("issue_id", "depends_on_id", "dependency_type", name="uq_issue_dependency"),
+        UniqueConstraint("issue_id", "depends_on_issue_id", "dependency_type", name="uq_issue_dependency"),
     )
 
 
