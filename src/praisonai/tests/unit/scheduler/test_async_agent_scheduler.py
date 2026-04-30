@@ -90,6 +90,9 @@ class TestStopAlwaysClearsIsRunning:
         """Task exceptions from wait_for should be logged and stop should return True."""
         scheduler = _make_scheduler()
         scheduler.is_running = True
+        # Async primitives are now lazily created in start(); tests that bypass
+        # start() must initialize them explicitly.
+        scheduler._ensure_async_primitives()
 
         # Create a task that raises a non-cancellation exception
         async def _raise():
@@ -121,6 +124,7 @@ class TestStopTimeoutCancelPath:
         """When wait_for times out, task.cancel() must be called."""
         scheduler = _make_scheduler()
         scheduler.is_running = True
+        scheduler._ensure_async_primitives()
 
         # A task that sleeps forever so wait_for always times out
         async def _sleep_forever():
@@ -142,6 +146,7 @@ class TestStopTimeoutCancelPath:
         """CancelledError after cancel() must not propagate out of stop()."""
         scheduler = _make_scheduler()
         scheduler.is_running = True
+        scheduler._ensure_async_primitives()
 
         async def _cancellable():
             await asyncio.sleep(3600)
@@ -162,6 +167,7 @@ class TestStopTimeoutCancelPath:
         """Non-CancelledError from a cancelled task must be logged, not raised."""
         scheduler = _make_scheduler()
         scheduler.is_running = True
+        scheduler._ensure_async_primitives()
 
         # Simulate a task that raises a plain Exception when awaited after cancel
         future = asyncio.get_event_loop().create_future()
@@ -191,6 +197,7 @@ class TestRunScheduleFinally:
     async def test_run_schedule_clears_is_running_on_stop_event(self):
         scheduler = _make_scheduler()
         scheduler.is_running = True
+        scheduler._ensure_async_primitives()
 
         # Set the stop event immediately so the loop exits on first check
         scheduler._stop_event.set()
