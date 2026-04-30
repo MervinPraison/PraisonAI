@@ -93,7 +93,7 @@ class Project(Base):
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     icon: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    status: Mapped[str] = mapped_column(String, nullable=False, default="active")
+    status: Mapped[str] = mapped_column(String, nullable=False, default="planned")
     lead_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     lead_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     settings: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True, default=dict)
@@ -132,6 +132,11 @@ class Issue(Base):
     project: Mapped[Optional["Project"]] = relationship("Project", back_populates="issues")
     comments: Mapped[List["Comment"]] = relationship("Comment", back_populates="issue")
     labels: Mapped[List["IssueLabelLink"]] = relationship("IssueLabelLink", back_populates="issue")
+
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "number", name="uq_issue_workspace_number"),
+        UniqueConstraint("workspace_id", "identifier", name="uq_issue_workspace_identifier"),
+    )
 
 
 class Comment(Base):

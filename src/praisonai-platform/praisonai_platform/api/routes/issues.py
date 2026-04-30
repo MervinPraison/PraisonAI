@@ -49,7 +49,7 @@ async def create_issue(
     act_svc = ActivityService(session)
     await act_svc.log(
         workspace_id, "issue.created", "issue", issue.id,
-        actor_type="user" if user.is_user else "agent",
+        actor_type="member" if user.is_user else "agent",
         actor_id=user.id, issue_id=issue.id,
         details={"title": issue.title, "identifier": issue.identifier},
     )
@@ -117,7 +117,7 @@ async def update_issue(
     act_svc = ActivityService(session)
     await act_svc.log(
         workspace_id, "issue.updated", "issue", issue.id,
-        actor_type="user" if user.is_user else "agent",
+        actor_type="member" if user.is_user else "agent",
         actor_id=user.id, issue_id=issue.id,
         details={"fields": body.model_dump(exclude_none=True)},
     )

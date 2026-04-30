@@ -161,8 +161,8 @@ class IssueResponse(BaseModel):
     priority: str
     assignee_type: Optional[str] = None
     assignee_id: Optional[str] = None
-    creator_type: str
-    creator_id: str
+    creator_type: Optional[str] = None
+    creator_id: Optional[str] = None
     number: Optional[int] = None
     identifier: Optional[str] = None
     parent_issue_id: Optional[str] = None
@@ -183,8 +183,8 @@ class CommentCreate(BaseModel):
 class CommentResponse(BaseModel):
     id: str
     issue_id: str
-    author_type: str
-    author_id: str
+    author_type: Optional[str] = None
+    author_id: Optional[str] = None
     parent_id: Optional[str] = None
     content: str
     type: str
@@ -277,6 +277,8 @@ class DependencyResponse(BaseModel):
 class ActivityLogResponse(BaseModel):
     id: str
     workspace_id: str
+    entity_type: str
+    entity_id: str
     issue_id: Optional[str] = None
     actor_type: Optional[str] = None
     actor_id: Optional[str] = None

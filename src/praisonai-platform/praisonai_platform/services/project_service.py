@@ -26,7 +26,7 @@ class ProjectService:
         title: str,
         description: Optional[str] = None,
         icon: Optional[str] = None,
-        status: str = "active",
+        status: str = "planned",
         lead_type: Optional[str] = None,
         lead_id: Optional[str] = None,
     ) -> Project:
