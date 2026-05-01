@@ -9,21 +9,47 @@ adding vision-specific LoRA adapters, and training using TRL's SFTTrainer with U
 import os
 import sys
 import yaml
-import torch
 import shutil
 import subprocess
 import gc  # For garbage collection
 
-from datasets import load_dataset, concatenate_datasets, Dataset
-from unsloth import FastVisionModel, is_bf16_supported
-from unsloth.trainer import UnslothVisionDataCollator
-from transformers import TrainingArguments
-from trl import SFTTrainer
-from tqdm import tqdm  # Add progress bar
+# Lazy import vision training dependencies to avoid import-time overhead
+def _lazy_import_vision_deps():
+    """Import heavy vision training dependencies only when needed."""
+    try:
+        import torch
+        from datasets import load_dataset, concatenate_datasets, Dataset
+        from unsloth import FastVisionModel, is_bf16_supported
+        from unsloth.trainer import UnslothVisionDataCollator
+        from transformers import TrainingArguments
+        from trl import SFTTrainer
+        from tqdm import tqdm
+        # Make available in global scope for the rest of the module
+        globals().update({
+            'torch': torch,
+            'load_dataset': load_dataset,
+            'concatenate_datasets': concatenate_datasets,
+            'Dataset': Dataset,
+            'FastVisionModel': FastVisionModel,
+            'is_bf16_supported': is_bf16_supported,
+            'UnslothVisionDataCollator': UnslothVisionDataCollator,
+            'TrainingArguments': TrainingArguments,
+            'SFTTrainer': SFTTrainer,
+            'tqdm': tqdm,
+        })
+    except ImportError as e:
+        raise ImportError(f"Vision training dependencies not available. Install with: pip install torch datasets unsloth transformers trl. Error: {e}")
+
+# Load dependencies only if this module is executed directly or if classes are instantiated
+if __name__ == '__main__':
+    _lazy_import_vision_deps()
 
 
 class TrainVisionModel:
     def __init__(self, config_path="config.yaml"):
+        # Lazy load vision training dependencies when TrainVisionModel is instantiated
+        _lazy_import_vision_deps()
+        
         self.load_config(config_path)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = None

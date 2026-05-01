@@ -294,31 +294,50 @@ class JobWorkflowExecutor:
         return {"ok": True, "output": result.stdout.strip()}
 
     def _exec_inline_python(self, code: str, step: Dict, flags: Dict) -> Dict:
-        """Execute inline Python code in an isolated namespace."""
-        _safe_builtins = {
-            "True": True, "False": False, "None": None,
-            "int": int, "float": float, "str": str, "bool": bool,
-            "list": list, "dict": dict, "tuple": tuple, "set": set,
-            "len": len, "range": range, "enumerate": enumerate,
-            "zip": zip, "map": map, "filter": filter,
-            "sorted": sorted, "reversed": reversed,
-            "min": min, "max": max, "sum": sum, "abs": abs, "round": round,
-            "isinstance": isinstance, "type": type,
-            "print": print, "repr": repr,
-            "hasattr": hasattr, "getattr": getattr, "setattr": setattr,
+        """Execute limited Python expressions safely using AST validation."""
+        import ast
+        
+        # Allowed AST node types for safe expression evaluation
+        _ALLOWED_NODES = (
+            ast.Expression, ast.BoolOp, ast.BinOp, ast.UnaryOp, ast.Compare,
+            ast.IfExp, ast.Constant, ast.Name, ast.Load, ast.Subscript,
+            ast.List, ast.Tuple, ast.Dict, ast.Set,
+            ast.And, ast.Or, ast.Not, ast.Eq, ast.NotEq, ast.Lt, ast.LtE,
+            ast.Gt, ast.GtE, ast.In, ast.NotIn, ast.Add, ast.Sub, ast.Mult,
+            ast.Div, ast.Mod, ast.FloorDiv,
+        )
+        
+        # Safe namespace with whitelisted environment variables only
+        safe_env = {
+            k: v for k, v in os.environ.items()
+            if k.startswith(('PRAISON', 'HOME', 'USER', 'PATH')) and 
+            not k.upper().endswith(('KEY', 'SECRET', 'TOKEN', 'PASSWORD'))
         }
+        
         namespace = {
             "flags": flags,
             "vars": {k: self._resolve_var_value(v) for k, v in self._vars.items()},
-            "env": os.environ.copy(),
+            "env": safe_env,  # Whitelisted env vars only
             "cwd": self._cwd,
-            "__builtins__": _safe_builtins,
         }
+        
         try:
-            exec(code, namespace)
-            return {"ok": True, "output": namespace.get("result", "")}
+            # Parse as expression only (no statements like exec, import, etc.)
+            tree = ast.parse(code.strip(), mode="eval")
+            
+            # Validate all nodes are in allowlist
+            for node in ast.walk(tree):
+                if not isinstance(node, _ALLOWED_NODES):
+                    return {"ok": False, "error": f"Disallowed expression node: {type(node).__name__}. Only simple expressions are allowed."}
+            
+            # Evaluate with empty builtins (no access to getattr, type, etc.)
+            result = eval(compile(tree, "<workflow>", "eval"), {"__builtins__": {}}, namespace)
+            return {"ok": True, "output": str(result)}
+            
+        except SyntaxError as e:
+            return {"ok": False, "error": f"Syntax error: {e}"}
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": f"Evaluation error: {e}"}
 
     def _exec_action(self, action_name: str, step: Dict, flags: Dict) -> Dict:
         """

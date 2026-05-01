@@ -4,16 +4,24 @@ from pathlib import Path
 import difflib
 import platform
 from typing import Dict, Any
-from litellm import acompletion
 import json
 import dotenv
-from tavily import TavilyClient
-from crawl4ai import AsyncAsyncWebCrawler
 
 dotenv.load_dotenv()
 
 class AICoder:
     def __init__(self, cwd: str = None, tavily_api_key: str = None):
+        # Lazy load heavy dependencies only when AICoder is instantiated
+        try:
+            from litellm import acompletion
+            from tavily import TavilyClient
+            from crawl4ai import AsyncAsyncWebCrawler
+            self.acompletion = acompletion
+            self.TavilyClient = TavilyClient
+            self.AsyncAsyncWebCrawler = AsyncAsyncWebCrawler
+        except ImportError as e:
+            raise ImportError(f"AICoder dependencies not available. Install with: pip install litellm tavily crawl4ai. Error: {e}")
+            
         self.cwd = cwd or os.getcwd()
         self.tools = [
             {
@@ -75,7 +83,7 @@ class AICoder:
 
         self.tavily_api_key = tavily_api_key
         if self.tavily_api_key:
-            self.tavily_client = TavilyClient(api_key=self.tavily_api_key)
+            self.tavily_client = self.TavilyClient(api_key=self.tavily_api_key)
             self.tools.append({
                 "type": "function",
                 "function": {
@@ -161,7 +169,7 @@ class AICoder:
             })
         response = self.tavily_client.search(query)
         results = []
-        async with AsyncAsyncWebCrawler() as crawler:
+        async with self.AsyncAsyncWebCrawler() as crawler:
             for result in response.get('results', []):
                 url = result.get('url')
                 if url:
@@ -265,7 +273,7 @@ class AICoder:
         return True
 
     async def process_task(self, task: str):
-        llm_response = await acompletion(
+        llm_response = await self.acompletion(
             model="gpt-4",
             messages=[
                 {"role": "user", "content": task}

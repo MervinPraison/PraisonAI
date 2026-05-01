@@ -10,17 +10,41 @@ Extra debug logging is added to help trace the root cause of errors.
 import os
 import sys
 import yaml
-import torch
 import shutil
 import subprocess
-from transformers import TextStreamer
-from unsloth import FastLanguageModel, is_bfloat16_supported
-from trl import SFTTrainer
-from transformers import TrainingArguments
-from datasets import load_dataset, concatenate_datasets
-from psutil import virtual_memory
-from unsloth.chat_templates import standardize_sharegpt, get_chat_template
 from functools import partial
+
+# Lazy import training dependencies to avoid import-time overhead
+def _lazy_import_training_deps():
+    """Import heavy training dependencies only when needed."""
+    try:
+        import torch
+        from transformers import TextStreamer, TrainingArguments
+        from unsloth import FastLanguageModel, is_bfloat16_supported
+        from unsloth.chat_templates import standardize_sharegpt, get_chat_template
+        from trl import SFTTrainer
+        from datasets import load_dataset, concatenate_datasets
+        from psutil import virtual_memory
+        # Make available in global scope for the rest of the module
+        globals().update({
+            'torch': torch,
+            'TextStreamer': TextStreamer,
+            'FastLanguageModel': FastLanguageModel,
+            'is_bfloat16_supported': is_bfloat16_supported,
+            'SFTTrainer': SFTTrainer,
+            'TrainingArguments': TrainingArguments,
+            'load_dataset': load_dataset,
+            'concatenate_datasets': concatenate_datasets,
+            'virtual_memory': virtual_memory,
+            'standardize_sharegpt': standardize_sharegpt,
+            'get_chat_template': get_chat_template,
+        })
+    except ImportError as e:
+        raise ImportError(f"Training dependencies not available. Install with: pip install torch transformers unsloth datasets trl psutil. Error: {e}")
+
+# Load dependencies only if this module is executed directly or if classes are instantiated
+if __name__ == '__main__':
+    _lazy_import_training_deps()
 
 #####################################
 # Step 1: Formatting Raw Conversations
@@ -107,6 +131,9 @@ def tokenize_function(examples, hf_tokenizer, max_length):
 #####################################
 class TrainModel:
     def __init__(self, config_path="config.yaml"):
+        # Lazy load training dependencies when TrainModel is instantiated
+        _lazy_import_training_deps()
+        
         self.load_config(config_path)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = None

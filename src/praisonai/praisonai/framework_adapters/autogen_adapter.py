@@ -15,6 +15,8 @@ class AutoGenAdapter(BaseFrameworkAdapter):
     """Adapter for AutoGen v0.2 framework."""
     
     name = "autogen"
+    install_hint = 'pip install "praisonai[autogen]" for v0.2\n    pip install "praisonai[autogen-v4]" for v0.4'
+    requires_tools_extra = True
     
     def is_available(self) -> bool:
         """Check if AutoGen v0.2 is available for import."""
@@ -91,22 +93,14 @@ class AutoGenAdapter(BaseFrameworkAdapter):
         logger.info("AutoGen v0.2 execution completed")
         return result
     
-    def _format_template(self, template: str, **kwargs) -> str:
-        """Safely format template string with given kwargs."""
-        try:
-            return template.format(**kwargs)
-        except KeyError as e:
-            logger.warning(f"Template formatting failed for key {e}, returning original template")
-            return template
-        except Exception as e:
-            logger.warning(f"Template formatting error: {e}, returning original template")
-            return template
 
 
 class AutoGenV4Adapter(BaseFrameworkAdapter):
     """Adapter for AutoGen v0.4 framework."""
     
     name = "autogen_v4"
+    install_hint = 'pip install "praisonai[autogen-v4]"'
+    requires_tools_extra = True
     
     def is_available(self) -> bool:
         """Check if AutoGen v0.4 is available for import."""
@@ -143,6 +137,8 @@ class AG2Adapter(BaseFrameworkAdapter):
     """Adapter for AG2 framework."""
     
     name = "ag2"
+    install_hint = 'pip install "praisonai[ag2]"'
+    requires_tools_extra = False
     
     def is_available(self) -> bool:
         """Check if AG2 is available for import."""

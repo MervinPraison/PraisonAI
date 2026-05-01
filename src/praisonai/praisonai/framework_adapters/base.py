@@ -13,6 +13,8 @@ class FrameworkAdapter(Protocol):
     """Protocol for framework adapters."""
     
     name: str
+    install_hint: str
+    requires_tools_extra: bool
     
     def is_available(self) -> bool:
         """Check if the framework is available for import."""
@@ -54,6 +56,22 @@ class BaseFrameworkAdapter:
     def list_tools(self) -> List[str]:
         """List all registered tool names."""
         return list(self._tool_registry.keys())
+    
+    def _format_template(self, template: str, **kwargs) -> str:
+        """Safely format template string with given kwargs."""
+        try:
+            return template.format(**kwargs)
+        except KeyError as e:
+            # Import logger here to avoid circular imports
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning("Template formatting failed for key %s; returning original template", e)
+            return template
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning("Template formatting error: %s; returning original template", e)
+            return template
     
     def cleanup(self) -> None:
         """Clean up resources - default implementation does nothing."""
