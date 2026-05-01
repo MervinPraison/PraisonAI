@@ -309,25 +309,42 @@ class JobWorkflowExecutor:
             ast.And, ast.Or, ast.Not, ast.Eq, ast.NotEq, ast.Lt, ast.LtE,
             ast.Gt, ast.GtE, ast.In, ast.NotIn, ast.Add, ast.Sub, ast.Mult,
             ast.Div, ast.Mod, ast.FloorDiv, ast.USub, ast.UAdd,
+            # Calls and attribute access (security enforced via safe builtins whitelist)
+            ast.Call, ast.Attribute, ast.keyword, ast.Starred,
             # Limited statements for backward compatibility
             ast.Module, ast.Assign, ast.Import, ast.ImportFrom,
             ast.alias,
         )
-        
+
+        # Safe builtins whitelist — no __import__, exec, eval, open, compile
+        _SAFE_BUILTINS = {
+            "True": True, "False": False, "None": None,
+            "int": int, "float": float, "str": str, "bool": bool,
+            "list": list, "dict": dict, "tuple": tuple, "set": set,
+            "len": len, "range": range, "enumerate": enumerate,
+            "zip": zip, "map": map, "filter": filter,
+            "sorted": sorted, "reversed": reversed,
+            "min": min, "max": max, "sum": sum, "abs": abs, "round": round,
+            "isinstance": isinstance, "type": type,
+            "print": print, "repr": repr,
+            "hasattr": hasattr, "getattr": getattr,
+        }
+
         # Safe namespace with whitelisted environment variables only
         safe_env = {
             k: v for k, v in os.environ.items()
-            if k.startswith(('PRAISON', 'HOME', 'USER', 'PATH')) and 
+            if k.startswith(('PRAISON', 'HOME', 'USER', 'PATH')) and
             not k.upper().endswith(('KEY', 'SECRET', 'TOKEN', 'PASSWORD'))
         }
-        
+
         namespace = {
             "flags": flags,
             "vars": {k: self._resolve_var_value(v) for k, v in self._vars.items()},
             "env": safe_env,  # Whitelisted env vars only
             "cwd": self._cwd,
+            "__builtins__": _SAFE_BUILTINS,
         }
-        
+
         try:
             # First try parsing as expression
             try:
@@ -337,12 +354,12 @@ class JobWorkflowExecutor:
                 # Fall back to exec mode for statements
                 tree = ast.parse(code.strip(), mode="exec")
                 is_expression = False
-            
+
             # Validate all nodes are in allowlist
             for node in ast.walk(tree):
                 if not isinstance(node, _ALLOWED_NODES):
                     return {"ok": False, "error": f"Disallowed code node: {type(node).__name__}. Only safe expressions and limited statements are allowed."}
-                
+
                 # Additional safety checks for imports
                 if isinstance(node, (ast.Import, ast.ImportFrom)):
                     # Only allow standard library modules commonly used in workflows
@@ -353,13 +370,13 @@ class JobWorkflowExecutor:
                                 return {"ok": False, "error": f"Import of '{alias.name}' not allowed. Only standard library modules are permitted."}
                     elif node.module and node.module.split('.')[0] not in allowed_modules:
                         return {"ok": False, "error": f"Import of '{node.module}' not allowed. Only standard library modules are permitted."}
-            
-            # Execute with restricted builtins
+
+            # Execute within safe namespace
             if is_expression:
-                result = eval(compile(tree, "<workflow>", "eval"), {"__builtins__": {}}, namespace)
+                result = eval(compile(tree, "<workflow>", "eval"), namespace)
                 return {"ok": True, "output": str(result)}
             else:
-                exec(compile(tree, "<workflow>", "exec"), {"__builtins__": {}}, namespace)
+                exec(compile(tree, "<workflow>", "exec"), namespace)
                 # Return the 'result' variable if it was set (backward compatibility)
                 result = namespace.get("result", "")
                 return {"ok": True, "output": str(result)}
