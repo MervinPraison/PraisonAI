@@ -48,8 +48,8 @@ async def create_issue(
     )
     act_svc = ActivityService(session)
     await act_svc.log(
-        workspace_id, "issue.created",
-        actor_type="user" if user.is_user else "agent",
+        workspace_id, "issue.created", "issue", issue.id,
+        actor_type="member" if user.is_user else "agent",
         actor_id=user.id, issue_id=issue.id,
         details={"title": issue.title, "identifier": issue.identifier},
     )
@@ -116,8 +116,8 @@ async def update_issue(
         raise HTTPException(status_code=404, detail="Issue not found")
     act_svc = ActivityService(session)
     await act_svc.log(
-        workspace_id, "issue.updated",
-        actor_type="user" if user.is_user else "agent",
+        workspace_id, "issue.updated", "issue", issue.id,
+        actor_type="member" if user.is_user else "agent",
         actor_id=user.id, issue_id=issue.id,
         details={"fields": body.model_dump(exclude_none=True)},
     )

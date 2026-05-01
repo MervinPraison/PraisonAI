@@ -26,6 +26,7 @@ class ProjectService:
         title: str,
         description: Optional[str] = None,
         icon: Optional[str] = None,
+        status: str = "planned",
         lead_type: Optional[str] = None,
         lead_id: Optional[str] = None,
     ) -> Project:
@@ -35,6 +36,7 @@ class ProjectService:
             title=title,
             description=description,
             icon=icon,
+            status=status,
             lead_type=lead_type,
             lead_id=lead_id,
         )
