@@ -15,6 +15,8 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
     """Adapter for PraisonAI agents framework."""
     
     name = "praisonai"
+    install_hint = 'pip install praisonaiagents'
+    requires_tools_extra = False
     
     def is_available(self) -> bool:
         """Check if PraisonAI agents is available for import."""
@@ -45,13 +47,3 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         logger.warning("PraisonAI adapter is not yet fully implemented")
         return "### PraisonAI Output ###\nPraisonAI adapter is not yet fully implemented. Please use 'crewai' framework for similar functionality."
     
-    def _format_template(self, template: str, **kwargs) -> str:
-        """Safely format template string with given kwargs."""
-        try:
-            return template.format(**kwargs)
-        except KeyError as e:
-            logger.warning(f"Template formatting failed for key {e}, returning original template")
-            return template
-        except Exception as e:
-            logger.warning(f"Template formatting error: {e}, returning original template")
-            return template

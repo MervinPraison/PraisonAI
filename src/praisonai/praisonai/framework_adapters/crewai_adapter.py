@@ -15,6 +15,8 @@ class CrewAIAdapter(BaseFrameworkAdapter):
     """Adapter for CrewAI framework with scoped telemetry disabling."""
     
     name = "crewai"
+    install_hint = 'pip install "praisonai[crewai]"'
+    requires_tools_extra = True
     
     def is_available(self) -> bool:
         """Check if CrewAI is available for import."""
@@ -83,13 +85,3 @@ class CrewAIAdapter(BaseFrameworkAdapter):
             
             return str(result)
     
-    def _format_template(self, template: str, **kwargs) -> str:
-        """Safely format template string with given kwargs."""
-        try:
-            return template.format(**kwargs)
-        except KeyError as e:
-            logger.warning(f"Template formatting failed for key {e}, returning original template")
-            return template
-        except Exception as e:
-            logger.warning(f"Template formatting error: {e}, returning original template")
-            return template

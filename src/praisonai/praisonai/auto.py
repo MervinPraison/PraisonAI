@@ -649,42 +649,28 @@ class AutoGenerator(BaseAutoGenerator):
         # Initialize base class first (handles config_list and client)
         super().__init__(config_list=config_list)
         
-        # Validate framework availability and show framework-specific messages
-        if framework == "crewai" and not _check_crewai_available():
-            raise ImportError("""
-CrewAI is not installed. Please install with:
-    pip install "praisonai[crewai]"
-""")
-        elif framework == "autogen" and not (_check_autogen_available() or _check_autogen_v4_available()):
-            raise ImportError("""
-AutoGen is not installed. Please install with:
-    pip install "praisonai[autogen]" for v0.2
-    pip install "praisonai[autogen-v4]" for v0.4
-""")
-        elif framework == "praisonai" and not _check_praisonai_available():
-            raise ImportError("""
-Praisonai is not installed. Please install with:
-    pip install praisonaiagents
-""")
-        elif framework == "ag2" and not _check_ag2_available():
-            raise ImportError("""
-AG2 is not installed. Please install with:
-    pip install "praisonai[ag2]"
-""")
+        # Validate framework availability using adapter registry
+        from .framework_adapters.registry import FrameworkAdapterRegistry
+        
+        registry = FrameworkAdapterRegistry.get_instance()
+        try:
+            adapter = registry.create(framework)
+        except ValueError as e:
+            raise ImportError(
+                f"Unknown framework '{framework}'. Available frameworks: "
+                f"{', '.join(registry.list_registered())}"
+            ) from e
 
-        # Only show tools message if using a framework and tools are needed
-        if (framework in ["crewai", "autogen"]) and not _check_praisonai_tools_available():
-            if framework == "autogen":
-                logger.warning("""
-Tools are not available for autogen. To use tools, install:
-    pip install "praisonai[autogen]" for v0.2
-    pip install "praisonai[autogen-v4]" for v0.4
-""")
-            else:
-                logger.warning(f"""
-Tools are not available for {framework}. To use tools, install:
-    pip install "praisonai[{framework}]"
-""")
+        # Use safe fallbacks for new adapter attributes
+        install_hint = getattr(adapter, "install_hint", f"pip install {framework}")
+        requires_tools_extra = bool(getattr(adapter, "requires_tools_extra", False))
+        
+        if not adapter.is_available():
+            raise ImportError(f"{adapter.name} is not installed. Please install with:\n    {install_hint}")
+        
+        # Check tools availability if required by this framework
+        if requires_tools_extra and not _check_praisonai_tools_available():
+            logger.warning(f"Tools are not available for {framework}. To use tools, install:\n    {install_hint}")
 
         self.topic = topic
         self.agent_file = agent_file

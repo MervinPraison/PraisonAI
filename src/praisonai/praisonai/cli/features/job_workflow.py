@@ -294,8 +294,30 @@ class JobWorkflowExecutor:
         return {"ok": True, "output": result.stdout.strip()}
 
     def _exec_inline_python(self, code: str, step: Dict, flags: Dict) -> Dict:
-        """Execute inline Python code in an isolated namespace."""
-        _safe_builtins = {
+        """Execute Python code safely using AST validation.
+        
+        Supports both expressions and limited statements for backward compatibility.
+        """
+        import ast
+        
+        # Allowed AST node types for safe execution
+        _ALLOWED_NODES = (
+            # Expressions
+            ast.Expression, ast.BoolOp, ast.BinOp, ast.UnaryOp, ast.Compare,
+            ast.IfExp, ast.Constant, ast.Name, ast.Load, ast.Store, ast.Subscript,
+            ast.List, ast.Tuple, ast.Dict, ast.Set,
+            ast.And, ast.Or, ast.Not, ast.Eq, ast.NotEq, ast.Lt, ast.LtE,
+            ast.Gt, ast.GtE, ast.In, ast.NotIn, ast.Add, ast.Sub, ast.Mult,
+            ast.Div, ast.Mod, ast.FloorDiv, ast.USub, ast.UAdd,
+            # Calls and attribute access (security enforced via safe builtins whitelist)
+            ast.Call, ast.Attribute, ast.keyword, ast.Starred,
+            # Limited statements for backward compatibility
+            ast.Module, ast.Assign, ast.Import, ast.ImportFrom,
+            ast.alias,
+        )
+
+        # Safe builtins whitelist — no __import__, exec, eval, open, compile
+        _SAFE_BUILTINS = {
             "True": True, "False": False, "None": None,
             "int": int, "float": float, "str": str, "bool": bool,
             "list": list, "dict": dict, "tuple": tuple, "set": set,
@@ -305,20 +327,64 @@ class JobWorkflowExecutor:
             "min": min, "max": max, "sum": sum, "abs": abs, "round": round,
             "isinstance": isinstance, "type": type,
             "print": print, "repr": repr,
-            "hasattr": hasattr, "getattr": getattr, "setattr": setattr,
+            "hasattr": hasattr, "getattr": getattr,
         }
+
+        # Safe namespace with whitelisted environment variables only
+        safe_env = {
+            k: v for k, v in os.environ.items()
+            if k.startswith(('PRAISON', 'HOME', 'USER', 'PATH')) and
+            not k.upper().endswith(('KEY', 'SECRET', 'TOKEN', 'PASSWORD'))
+        }
+
         namespace = {
             "flags": flags,
             "vars": {k: self._resolve_var_value(v) for k, v in self._vars.items()},
-            "env": os.environ.copy(),
+            "env": safe_env,  # Whitelisted env vars only
             "cwd": self._cwd,
-            "__builtins__": _safe_builtins,
+            "__builtins__": _SAFE_BUILTINS,
         }
+
         try:
-            exec(code, namespace)
-            return {"ok": True, "output": namespace.get("result", "")}
+            # First try parsing as expression
+            try:
+                tree = ast.parse(code.strip(), mode="eval")
+                is_expression = True
+            except SyntaxError:
+                # Fall back to exec mode for statements
+                tree = ast.parse(code.strip(), mode="exec")
+                is_expression = False
+
+            # Validate all nodes are in allowlist
+            for node in ast.walk(tree):
+                if not isinstance(node, _ALLOWED_NODES):
+                    return {"ok": False, "error": f"Disallowed code node: {type(node).__name__}. Only safe expressions and limited statements are allowed."}
+
+                # Additional safety checks for imports
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    # Only allow standard library modules commonly used in workflows
+                    allowed_modules = {'os', 'datetime', 'time', 'json', 'math', 're', 'collections', 'itertools'}
+                    if isinstance(node, ast.Import):
+                        for alias in node.names:
+                            if alias.name.split('.')[0] not in allowed_modules:
+                                return {"ok": False, "error": f"Import of '{alias.name}' not allowed. Only standard library modules are permitted."}
+                    elif node.module and node.module.split('.')[0] not in allowed_modules:
+                        return {"ok": False, "error": f"Import of '{node.module}' not allowed. Only standard library modules are permitted."}
+
+            # Execute within safe namespace
+            if is_expression:
+                result = eval(compile(tree, "<workflow>", "eval"), namespace)
+                return {"ok": True, "output": str(result)}
+            else:
+                exec(compile(tree, "<workflow>", "exec"), namespace)
+                # Return the 'result' variable if it was set (backward compatibility)
+                result = namespace.get("result", "")
+                return {"ok": True, "output": str(result)}
+            
+        except SyntaxError as e:
+            return {"ok": False, "error": f"Syntax error: {e}"}
         except Exception as e:
-            return {"ok": False, "error": str(e)}
+            return {"ok": False, "error": f"Evaluation error: {e}"}
 
     def _exec_action(self, action_name: str, step: Dict, flags: Dict) -> Dict:
         """
