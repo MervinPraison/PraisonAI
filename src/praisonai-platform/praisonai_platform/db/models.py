@@ -222,11 +222,11 @@ class IssueDependency(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     issue_id: Mapped[str] = mapped_column(String, ForeignKey("issues.id"), nullable=False)
     depends_on_issue_id: Mapped[str] = mapped_column(String, ForeignKey("issues.id"), nullable=False)
-    dependency_type: Mapped[str] = mapped_column(String, nullable=False)  # blocks, blocked_by, related
+    type: Mapped[str] = mapped_column(String, nullable=False)  # blocks, blocked_by, related
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     __table_args__ = (
-        UniqueConstraint("issue_id", "depends_on_issue_id", "dependency_type", name="uq_issue_dependency"),
+        UniqueConstraint("issue_id", "depends_on_issue_id", "type", name="uq_issue_dependency"),
     )
 
 
