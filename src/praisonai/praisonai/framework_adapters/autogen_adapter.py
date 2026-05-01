@@ -15,7 +15,7 @@ class AutoGenAdapter(BaseFrameworkAdapter):
     """Adapter for AutoGen v0.2 framework."""
     
     name = "autogen"
-    install_hint = 'pip install "praisonai[autogen]" for v0.2\n    pip install "praisonai[autogen-v4]" for v0.4'
+    install_hint = 'pip install "praisonai[autogen]"'  # v0.2 only
     requires_tools_extra = True
     
     def is_available(self) -> bool:

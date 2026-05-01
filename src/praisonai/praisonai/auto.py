@@ -652,17 +652,25 @@ class AutoGenerator(BaseAutoGenerator):
         # Validate framework availability using adapter registry
         from .framework_adapters.registry import FrameworkAdapterRegistry
         
+        registry = FrameworkAdapterRegistry.get_instance()
         try:
-            adapter = FrameworkAdapterRegistry.get_instance().create(framework)
+            adapter = registry.create(framework)
         except ValueError as e:
-            raise ImportError(f"Unknown framework '{framework}'. Available frameworks: {', '.join(FrameworkAdapterRegistry.get_instance().list_available())}")
+            raise ImportError(
+                f"Unknown framework '{framework}'. Available frameworks: "
+                f"{', '.join(registry.list_registered())}"
+            ) from e
+
+        # Use safe fallbacks for new adapter attributes
+        install_hint = getattr(adapter, "install_hint", f"pip install {framework}")
+        requires_tools_extra = bool(getattr(adapter, "requires_tools_extra", False))
         
         if not adapter.is_available():
-            raise ImportError(f"{adapter.name} is not installed. Please install with:\n    {adapter.install_hint}")
+            raise ImportError(f"{adapter.name} is not installed. Please install with:\n    {install_hint}")
         
         # Check tools availability if required by this framework
-        if adapter.requires_tools_extra and not _check_praisonai_tools_available():
-            logger.warning(f"Tools are not available for {framework}. To use tools, install:\n    {adapter.install_hint}")
+        if requires_tools_extra and not _check_praisonai_tools_available():
+            logger.warning(f"Tools are not available for {framework}. To use tools, install:\n    {install_hint}")
 
         self.topic = topic
         self.agent_file = agent_file

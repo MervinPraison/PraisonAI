@@ -294,17 +294,24 @@ class JobWorkflowExecutor:
         return {"ok": True, "output": result.stdout.strip()}
 
     def _exec_inline_python(self, code: str, step: Dict, flags: Dict) -> Dict:
-        """Execute limited Python expressions safely using AST validation."""
+        """Execute Python code safely using AST validation.
+        
+        Supports both expressions and limited statements for backward compatibility.
+        """
         import ast
         
-        # Allowed AST node types for safe expression evaluation
+        # Allowed AST node types for safe execution
         _ALLOWED_NODES = (
+            # Expressions
             ast.Expression, ast.BoolOp, ast.BinOp, ast.UnaryOp, ast.Compare,
-            ast.IfExp, ast.Constant, ast.Name, ast.Load, ast.Subscript,
+            ast.IfExp, ast.Constant, ast.Name, ast.Load, ast.Store, ast.Subscript,
             ast.List, ast.Tuple, ast.Dict, ast.Set,
             ast.And, ast.Or, ast.Not, ast.Eq, ast.NotEq, ast.Lt, ast.LtE,
             ast.Gt, ast.GtE, ast.In, ast.NotIn, ast.Add, ast.Sub, ast.Mult,
-            ast.Div, ast.Mod, ast.FloorDiv,
+            ast.Div, ast.Mod, ast.FloorDiv, ast.USub, ast.UAdd,
+            # Limited statements for backward compatibility
+            ast.Module, ast.Assign, ast.Import, ast.ImportFrom,
+            ast.alias,
         )
         
         # Safe namespace with whitelisted environment variables only
@@ -322,17 +329,40 @@ class JobWorkflowExecutor:
         }
         
         try:
-            # Parse as expression only (no statements like exec, import, etc.)
-            tree = ast.parse(code.strip(), mode="eval")
+            # First try parsing as expression
+            try:
+                tree = ast.parse(code.strip(), mode="eval")
+                is_expression = True
+            except SyntaxError:
+                # Fall back to exec mode for statements
+                tree = ast.parse(code.strip(), mode="exec")
+                is_expression = False
             
             # Validate all nodes are in allowlist
             for node in ast.walk(tree):
                 if not isinstance(node, _ALLOWED_NODES):
-                    return {"ok": False, "error": f"Disallowed expression node: {type(node).__name__}. Only simple expressions are allowed."}
+                    return {"ok": False, "error": f"Disallowed code node: {type(node).__name__}. Only safe expressions and limited statements are allowed."}
+                
+                # Additional safety checks for imports
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    # Only allow standard library modules commonly used in workflows
+                    allowed_modules = {'os', 'datetime', 'time', 'json', 'math', 're', 'collections', 'itertools'}
+                    if isinstance(node, ast.Import):
+                        for alias in node.names:
+                            if alias.name.split('.')[0] not in allowed_modules:
+                                return {"ok": False, "error": f"Import of '{alias.name}' not allowed. Only standard library modules are permitted."}
+                    elif node.module and node.module.split('.')[0] not in allowed_modules:
+                        return {"ok": False, "error": f"Import of '{node.module}' not allowed. Only standard library modules are permitted."}
             
-            # Evaluate with empty builtins (no access to getattr, type, etc.)
-            result = eval(compile(tree, "<workflow>", "eval"), {"__builtins__": {}}, namespace)
-            return {"ok": True, "output": str(result)}
+            # Execute with restricted builtins
+            if is_expression:
+                result = eval(compile(tree, "<workflow>", "eval"), {"__builtins__": {}}, namespace)
+                return {"ok": True, "output": str(result)}
+            else:
+                exec(compile(tree, "<workflow>", "exec"), {"__builtins__": {}}, namespace)
+                # Return the 'result' variable if it was set (backward compatibility)
+                result = namespace.get("result", "")
+                return {"ok": True, "output": str(result)}
             
         except SyntaxError as e:
             return {"ok": False, "error": f"Syntax error: {e}"}
