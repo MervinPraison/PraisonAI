@@ -110,12 +110,34 @@ class AsyncMySQLConversationStore(ConversationStore):
         self._initialized = True
     
     async def _create_tables(self):
-        """Create required tables if they don't exist."""
+        """Create required tables if they don't exist and handle schema migrations."""
         sessions_table = f"{self.table_prefix}sessions"
         messages_table = f"{self.table_prefix}messages"
+        legacy_sessions_table = "praisonai_sessions"
+        legacy_messages_table = "praisonai_messages"
         
         async with self._pool.acquire() as conn:
             async with conn.cursor() as cur:
+                # Check for legacy tables and migrate if needed
+                if self.table_prefix != "praisonai_":
+                    await cur.execute(f"""
+                        SELECT COUNT(*) FROM information_schema.tables 
+                        WHERE table_name = '{legacy_sessions_table}'
+                    """)
+                    legacy_exists = (await cur.fetchone())[0] > 0
+                    
+                    await cur.execute(f"""
+                        SELECT COUNT(*) FROM information_schema.tables 
+                        WHERE table_name = '{sessions_table}'
+                    """)
+                    new_exists = (await cur.fetchone())[0] > 0
+                    
+                    if legacy_exists and not new_exists:
+                        # Rename legacy tables
+                        await cur.execute(f"ALTER TABLE {legacy_sessions_table} RENAME TO {sessions_table}")
+                        await cur.execute(f"ALTER TABLE {legacy_messages_table} RENAME TO {messages_table}")
+                
+                # Create tables with new schema
                 await cur.execute(f"""
                     CREATE TABLE IF NOT EXISTS {sessions_table} (
                         session_id VARCHAR(255) PRIMARY KEY,
@@ -145,6 +167,42 @@ class AsyncMySQLConversationStore(ConversationStore):
                         FOREIGN KEY (session_id) REFERENCES {sessions_table}(session_id) ON DELETE CASCADE
                     )
                 """)
+                
+                # Migrate existing tables to add missing columns if needed
+                await self._migrate_schema(cur, sessions_table, messages_table)
+    
+    async def _migrate_schema(self, cur, sessions_table: str, messages_table: str):
+        """Add missing columns to existing tables."""
+        try:
+            # Check and add state column to sessions if missing
+            await cur.execute(f"""
+                SELECT COUNT(*) FROM information_schema.columns 
+                WHERE table_name = '{sessions_table}' AND column_name = 'state'
+            """)
+            if (await cur.fetchone())[0] == 0:
+                await cur.execute(f"ALTER TABLE {sessions_table} ADD COLUMN state JSON")
+            
+            # Check and add tool_calls column to messages if missing
+            await cur.execute(f"""
+                SELECT COUNT(*) FROM information_schema.columns 
+                WHERE table_name = '{messages_table}' AND column_name = 'tool_calls'
+            """)
+            if (await cur.fetchone())[0] == 0:
+                await cur.execute(f"ALTER TABLE {messages_table} ADD COLUMN tool_calls JSON")
+            
+            # Check and add tool_call_id column to messages if missing  
+            await cur.execute(f"""
+                SELECT COUNT(*) FROM information_schema.columns 
+                WHERE table_name = '{messages_table}' AND column_name = 'tool_call_id'
+            """)
+            if (await cur.fetchone())[0] == 0:
+                await cur.execute(f"ALTER TABLE {messages_table} ADD COLUMN tool_call_id VARCHAR(255)")
+                
+        except Exception as e:
+            # Log the error but don't fail
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Schema migration warning: {e}")
     
     async def async_create_session(self, session: ConversationSession) -> ConversationSession:
         """Create a new session asynchronously."""
@@ -158,7 +216,7 @@ class AsyncMySQLConversationStore(ConversationStore):
                     INSERT INTO {table} (session_id, user_id, agent_id, name, state, metadata, created_at, updated_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """, (session.session_id, session.user_id, session.agent_id, session.name,
-                      json.dumps(session.state) if session.state else None,
+                      json.dumps(session.state) if session.state is not None else None,
                       json.dumps(session.metadata) if session.metadata else None,
                       session.created_at, session.updated_at))
         

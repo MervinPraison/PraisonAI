@@ -94,6 +94,18 @@ class LLMProviderRegistry:
                     f"Use override=True to replace it."
                 )
             
+            # Check if this canonical name conflicts with existing alias
+            if normalized_name in self._aliases and not override:
+                existing_target = self._aliases[normalized_name] 
+                raise ValueError(
+                    f"Cannot register provider '{name}' - it conflicts with existing alias "
+                    f"(currently points to '{existing_target}'). Use override=True to replace it."
+                )
+            
+            # If override=True, clean up any existing alias before registering canonical name
+            if override and normalized_name in self._aliases:
+                del self._aliases[normalized_name]
+            
             self._providers[normalized_name] = provider
             
             # Register aliases
