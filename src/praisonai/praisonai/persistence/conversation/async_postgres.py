@@ -186,6 +186,10 @@ class AsyncPostgresConversationStore(ConversationStore):
             )
         return None
     
+    def get_session(self, session_id: str) -> Optional[ConversationSession]:
+        """Sync wrapper for get_session."""
+        return run_sync(self.async_get_session(session_id))
+    
     async def async_update_session(self, session: ConversationSession) -> ConversationSession:
         """Update an existing session asynchronously."""
         if not self._initialized:
