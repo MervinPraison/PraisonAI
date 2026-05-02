@@ -41,7 +41,7 @@ class AsyncMySQLConversationStore(ConversationStore):
         database: str = "praisonai",
         user: str = "root",
         password: str = "",
-        table_prefix: str = "praisonai_",
+        table_prefix: str = "praison_",
         pool_size: int = 10,
     ):
         """
@@ -122,6 +122,7 @@ class AsyncMySQLConversationStore(ConversationStore):
                         user_id VARCHAR(255),
                         agent_id VARCHAR(255),
                         name VARCHAR(255),
+                        state JSON,
                         metadata JSON,
                         created_at DOUBLE,
                         updated_at DOUBLE,
@@ -136,6 +137,8 @@ class AsyncMySQLConversationStore(ConversationStore):
                         session_id VARCHAR(255),
                         role VARCHAR(50),
                         content TEXT,
+                        tool_calls JSON,
+                        tool_call_id VARCHAR(255),
                         metadata JSON,
                         created_at DOUBLE,
                         INDEX idx_session_id (session_id),
@@ -152,9 +155,10 @@ class AsyncMySQLConversationStore(ConversationStore):
         async with self._pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(f"""
-                    INSERT INTO {table} (session_id, user_id, agent_id, name, metadata, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO {table} (session_id, user_id, agent_id, name, state, metadata, created_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """, (session.session_id, session.user_id, session.agent_id, session.name,
+                      json.dumps(session.state) if session.state else None,
                       json.dumps(session.metadata) if session.metadata else None,
                       session.created_at, session.updated_at))
         
@@ -304,9 +308,11 @@ class AsyncMySQLConversationStore(ConversationStore):
         async with self._pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(f"""
-                    INSERT INTO {table} (id, session_id, role, content, metadata, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    INSERT INTO {table} (id, session_id, role, content, tool_calls, tool_call_id, metadata, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """, (message.id, session_id, message.role, message.content,
+                      json.dumps(message.tool_calls) if message.tool_calls else None,
+                      message.tool_call_id,
                       json.dumps(message.metadata) if message.metadata else None,
                       message.created_at))
         
