@@ -143,6 +143,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
                 user_id=row['user_id'],
                 agent_id=row['agent_id'],
                 name=row['name'],
+                state=json.loads(row['state']) if row['state'] else None,
                 metadata=json.loads(row['metadata']) if row['metadata'] else None,
                 created_at=row['created_at'],
                 updated_at=row['updated_at']
@@ -165,9 +166,10 @@ class AsyncSQLiteConversationStore(ConversationStore):
         
         await self._conn.execute(f"""
             UPDATE {table} 
-            SET name = ?, metadata = ?, updated_at = ?
+            SET name = ?, state = ?, metadata = ?, updated_at = ?
             WHERE session_id = ?
-        """, (session.name, json.dumps(session.metadata) if session.metadata else None,
+        """, (session.name, json.dumps(session.state) if session.state else None,
+              json.dumps(session.metadata) if session.metadata else None,
               session.updated_at, session.session_id))
         await self._conn.commit()
         
@@ -237,6 +239,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
                 user_id=row['user_id'],
                 agent_id=row['agent_id'],
                 name=row['name'],
+                state=json.loads(row['state']) if row['state'] else None,
                 metadata=json.loads(row['metadata']) if row['metadata'] else None,
                 created_at=row['created_at'],
                 updated_at=row['updated_at']
@@ -322,6 +325,8 @@ class AsyncSQLiteConversationStore(ConversationStore):
                 session_id=row['session_id'],
                 role=row['role'],
                 content=row['content'],
+                tool_calls=json.loads(row['tool_calls']) if row['tool_calls'] else None,
+                tool_call_id=row['tool_call_id'],
                 metadata=json.loads(row['metadata']) if row['metadata'] else None,
                 created_at=row['created_at']
             )

@@ -179,15 +179,12 @@ class AsyncPostgresConversationStore(ConversationStore):
                 user_id=row['user_id'],
                 agent_id=row['agent_id'],
                 name=row['name'],
+                state=json.loads(row['state']) if row['state'] else None,
                 metadata=json.loads(row['metadata']) if row['metadata'] else None,
                 created_at=row['created_at'],
                 updated_at=row['updated_at']
             )
         return None
-    
-    def get_session(self, session_id: str) -> Optional[ConversationSession]:
-        """Sync wrapper for get_session."""
-        return run_sync(self.async_get_session(session_id))
     
     async def async_update_session(self, session: ConversationSession) -> ConversationSession:
         """Update an existing session asynchronously."""
@@ -200,9 +197,10 @@ class AsyncPostgresConversationStore(ConversationStore):
         async with self._pool.acquire() as conn:
             await conn.execute(f"""
                 UPDATE {table} 
-                SET name = $2, metadata = $3, updated_at = $4
+                SET name = $2, state = $3, metadata = $4, updated_at = $5
                 WHERE session_id = $1
             """, session.session_id, session.name,
+                json.dumps(session.state) if session.state else None,
                 json.dumps(session.metadata) if session.metadata else None,
                 session.updated_at)
         
@@ -271,6 +269,7 @@ class AsyncPostgresConversationStore(ConversationStore):
                 user_id=row['user_id'],
                 agent_id=row['agent_id'],
                 name=row['name'],
+                state=json.loads(row['state']) if row['state'] else None,
                 metadata=json.loads(row['metadata']) if row['metadata'] else None,
                 created_at=row['created_at'],
                 updated_at=row['updated_at']
@@ -355,6 +354,8 @@ class AsyncPostgresConversationStore(ConversationStore):
                 session_id=row['session_id'],
                 role=row['role'],
                 content=row['content'],
+                tool_calls=json.loads(row['tool_calls']) if row['tool_calls'] else None,
+                tool_call_id=row['tool_call_id'],
                 metadata=json.loads(row['metadata']) if row['metadata'] else None,
                 created_at=row['created_at']
             )

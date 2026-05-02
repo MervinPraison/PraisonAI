@@ -177,7 +177,7 @@ class AsyncMySQLConversationStore(ConversationStore):
         async with self._pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(f"""
-                    SELECT session_id, user_id, agent_id, name, metadata, created_at, updated_at
+                    SELECT session_id, user_id, agent_id, name, state, metadata, created_at, updated_at
                     FROM {table} WHERE session_id = %s
                 """, (session_id,))
                 row = await cur.fetchone()
@@ -188,9 +188,10 @@ class AsyncMySQLConversationStore(ConversationStore):
                 user_id=row[1],
                 agent_id=row[2],
                 name=row[3],
-                metadata=json.loads(row[4]) if row[4] else None,
-                created_at=row[5],
-                updated_at=row[6]
+                state=json.loads(row[4]) if row[4] else None,
+                metadata=json.loads(row[5]) if row[5] else None,
+                created_at=row[6],
+                updated_at=row[7]
             )
         return None
     
@@ -210,9 +211,10 @@ class AsyncMySQLConversationStore(ConversationStore):
             async with conn.cursor() as cur:
                 await cur.execute(f"""
                     UPDATE {table} 
-                    SET name = %s, metadata = %s, updated_at = %s
+                    SET name = %s, state = %s, metadata = %s, updated_at = %s
                     WHERE session_id = %s
-                """, (session.name, json.dumps(session.metadata) if session.metadata else None,
+                """, (session.name, json.dumps(session.state) if session.state else None,
+                      json.dumps(session.metadata) if session.metadata else None,
                       session.updated_at, session.session_id))
         
         return session
@@ -267,7 +269,7 @@ class AsyncMySQLConversationStore(ConversationStore):
         async with self._pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(f"""
-                    SELECT session_id, user_id, agent_id, name, metadata, created_at, updated_at
+                    SELECT session_id, user_id, agent_id, name, state, metadata, created_at, updated_at
                     FROM {table} {where_clause}
                     ORDER BY updated_at DESC
                     LIMIT %s OFFSET %s
@@ -280,9 +282,10 @@ class AsyncMySQLConversationStore(ConversationStore):
                 user_id=row[1],
                 agent_id=row[2],
                 name=row[3],
-                metadata=json.loads(row[4]) if row[4] else None,
-                created_at=row[5],
-                updated_at=row[6]
+                state=json.loads(row[4]) if row[4] else None,
+                metadata=json.loads(row[5]) if row[5] else None,
+                created_at=row[6],
+                updated_at=row[7]
             )
             for row in rows
         ]
@@ -353,7 +356,7 @@ class AsyncMySQLConversationStore(ConversationStore):
         async with self._pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(f"""
-                    SELECT id, session_id, role, content, metadata, created_at
+                    SELECT id, session_id, role, content, tool_calls, tool_call_id, metadata, created_at
                     FROM {table} {where_clause}
                     ORDER BY created_at ASC {limit_clause}
                 """, params)
@@ -365,8 +368,10 @@ class AsyncMySQLConversationStore(ConversationStore):
                 session_id=row[1],
                 role=row[2],
                 content=row[3],
-                metadata=json.loads(row[4]) if row[4] else None,
-                created_at=row[5]
+                tool_calls=json.loads(row[4]) if row[4] else None,
+                tool_call_id=row[5],
+                metadata=json.loads(row[6]) if row[6] else None,
+                created_at=row[7]
             )
             for row in rows
         ]

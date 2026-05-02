@@ -400,5 +400,5 @@ def create_llm_provider(
 
 def _reset_default_registry() -> None:
     """Reset the default registry (mainly for testing)."""
-    global _default_registry
-    _default_registry = None
+    with LLMProviderRegistry._instance_lock:
+        LLMProviderRegistry._instance = None
