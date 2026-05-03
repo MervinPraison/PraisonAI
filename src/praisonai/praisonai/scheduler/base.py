@@ -16,7 +16,6 @@ from ._dispatch import adispatch_agent
 
 logger = logging.getLogger(__name__)
 
-
 class ExecutorInterface(ABC):
     """Abstract interface for executors."""
     

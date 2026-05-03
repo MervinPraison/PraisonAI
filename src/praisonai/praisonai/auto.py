@@ -53,6 +53,7 @@ def _yaml_safe_load(stream):
 
 
 
+# OpenAI client creation removed - create per-call instead of global cache
 
 
 # --- CrewAI lazy loading ---
