@@ -143,6 +143,10 @@ class FileIdentityResolver(InMemoryIdentityResolver):
     def __init__(self, path: Optional[Path | str] = None) -> None:
         super().__init__()
         self._path: Path = Path(path) if path else _DEFAULT_IDENTITY_PATH
+        # Serialises concurrent disk writes so that two simultaneous
+        # link()/unlink() calls cannot interleave their os.replace() and
+        # lose the second writer's data.
+        self._flush_lock = threading.Lock()
         self._load()
 
     @staticmethod
@@ -172,32 +176,36 @@ class FileIdentityResolver(InMemoryIdentityResolver):
     def _flush(self) -> None:
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            with self._lock:
-                payload = {
-                    "links": {
-                        self._encode_key(p, u): uid
-                        for (p, u), uid in self._links.items()
+            # Hold _flush_lock for the entire write (snapshot + disk I/O) so
+            # that concurrent calls always write the latest in-memory state and
+            # the last os.replace() wins rather than an older snapshot.
+            with self._flush_lock:
+                with self._lock:
+                    payload = {
+                        "links": {
+                            self._encode_key(p, u): uid
+                            for (p, u), uid in self._links.items()
+                        }
                     }
-                }
-            fd, tmp = tempfile.mkstemp(
-                dir=str(self._path.parent), prefix=".identity-", suffix=".tmp"
-            )
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    json.dump(payload, f, indent=2, ensure_ascii=False)
-                    f.flush()
-                    os.fsync(f.fileno())
-                os.replace(tmp, self._path)
+                fd, tmp = tempfile.mkstemp(
+                    dir=str(self._path.parent), prefix=".identity-", suffix=".tmp"
+                )
                 try:
-                    os.chmod(self._path, 0o600)
-                except OSError:
-                    pass
-            except BaseException:
-                try:
-                    os.unlink(tmp)
-                except OSError:
-                    pass
-                raise
+                    with os.fdopen(fd, "w", encoding="utf-8") as f:
+                        json.dump(payload, f, indent=2, ensure_ascii=False)
+                        f.flush()
+                        os.fsync(f.fileno())
+                    os.replace(tmp, self._path)
+                    try:
+                        os.chmod(self._path, 0o600)
+                    except OSError:
+                        pass
+                except BaseException:
+                    try:
+                        os.unlink(tmp)
+                    except OSError:
+                        pass
+                    raise
         except OSError as e:
             logger.warning("FileIdentityResolver: failed to flush %s: %s", self._path, e)
 

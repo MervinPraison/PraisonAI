@@ -11,8 +11,6 @@ import time
 import json
 import logging
 from praisonaiagents._logging import get_logger
-import asyncio
-import threading
 from ..errors import BudgetExceededError
 
 # Fallback helpers to avoid circular imports
@@ -45,9 +43,7 @@ logger = logging.getLogger(__name__)
 
 
 
-import traceback
-from typing import List, Optional, Any, Dict, Union, Callable, Generator, TYPE_CHECKING
-from collections import OrderedDict
+from typing import List, Optional, Any, Dict, Union, Generator, TYPE_CHECKING
 
 if TYPE_CHECKING:
     pass

@@ -57,7 +57,8 @@ def mirror_to_session(
         return False
 
     try:
-        # Touch storage key to ensure the user's bucket exists.
+        # Verify that session_mgr is a compatible BotSessionManager-shaped
+        # object by probing its _storage_key method (duck-typing check).
         session_mgr._storage_key(user_id)
     except Exception as e:
         logger.warning("mirror: storage_key failed: %s", e)
