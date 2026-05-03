@@ -33,9 +33,9 @@ async def main() -> int:
     from praisonai.bots import Bot, BotOS
 
     if os.getenv("ANTHROPIC_API_KEY"):
-        model = "anthropic/claude-haiku-4-5"
+        model = "claude-3-5-haiku-latest"
     elif os.getenv("GOOGLE_API_KEY"):
-        model = "gemini/gemini-2.5-flash"
+        model = "gemini-1.5-flash"
     else:
         model = "gpt-4o-mini"
     print(f"Using model: {model}")

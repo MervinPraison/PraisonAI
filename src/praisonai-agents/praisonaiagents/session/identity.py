@@ -187,25 +187,28 @@ class FileIdentityResolver(InMemoryIdentityResolver):
                             for (p, u), uid in self._links.items()
                         }
                     }
-                fd, tmp = tempfile.mkstemp(
-                    dir=str(self._path.parent), prefix=".identity-", suffix=".tmp"
-                )
-                try:
-                    with os.fdopen(fd, "w", encoding="utf-8") as f:
-                        json.dump(payload, f, indent=2, ensure_ascii=False)
-                        f.flush()
-                        os.fsync(f.fileno())
-                    os.replace(tmp, self._path)
+                    # Keep the _lock held across the entire write operation to prevent
+                    # TOCTOU race where a concurrent link() could modify _links between
+                    # payload snapshot and os.replace() completion.
+                    fd, tmp = tempfile.mkstemp(
+                        dir=str(self._path.parent), prefix=".identity-", suffix=".tmp"
+                    )
                     try:
-                        os.chmod(self._path, 0o600)
-                    except OSError:
-                        pass
-                except BaseException:
-                    try:
-                        os.unlink(tmp)
-                    except OSError:
-                        pass
-                    raise
+                        with os.fdopen(fd, "w", encoding="utf-8") as f:
+                            json.dump(payload, f, indent=2, ensure_ascii=False)
+                            f.flush()
+                            os.fsync(f.fileno())
+                        os.replace(tmp, self._path)
+                        try:
+                            os.chmod(self._path, 0o600)
+                        except OSError:
+                            pass
+                    except BaseException:
+                        try:
+                            os.unlink(tmp)
+                        except OSError:
+                            pass
+                        raise
         except OSError as e:
             logger.warning("FileIdentityResolver: failed to flush %s: %s", self._path, e)
 

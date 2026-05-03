@@ -181,6 +181,7 @@ class BotSessionManager:
         # invokes can read platform / chat / user metadata without
         # relying on os.environ globals.
         ctx_token = None
+        _clear_ctx = None
         try:
             from praisonaiagents.session.context import (
                 set_session_context as _set_ctx,
@@ -197,50 +198,51 @@ class BotSessionManager:
         except Exception:  # pragma: no cover — defensive
             _clear_ctx = None  # type: ignore[assignment]
 
-        async with user_lock:
-            # Load history (may hit disk via run_in_executor for async safety)
-            loop = asyncio.get_running_loop()
-            user_history = await loop.run_in_executor(
-                None, self._load_history, user_id
-            )
+        try:
+            async with user_lock:
+                # Load history (may hit disk via run_in_executor for async safety)
+                loop = asyncio.get_running_loop()
+                user_history = await loop.run_in_executor(
+                    None, self._load_history, user_id
+                )
 
-            # W1 robustness: hold ``agent_lock`` across the FULL LLM call
-            # (not only the history swap) so concurrent users on a shared
-            # Agent instance never observe each other's chat_history.
-            # Throughput on a shared agent is then bounded by the LLM's
-            # serial latency — this is correct: a single Agent's
-            # ``chat_history`` is mutable and cannot be safely interleaved.
-            async with agent_lock:
-                saved_history = agent.chat_history
-                agent.chat_history = user_history
-                try:
-                    # Copy current task's contextvars (incl. SessionContext)
-                    # into the worker thread so tools the agent invokes can
-                    # read platform/user metadata.
-                    import contextvars
-                    _ctx = contextvars.copy_context()
-                    response = await loop.run_in_executor(
-                        None, _ctx.run, agent.chat, prompt
-                    )
-                    # Capture updated history before restoring caller's.
-                    updated_history = agent.chat_history
-                finally:
-                    agent.chat_history = saved_history
+                # W1 robustness: hold ``agent_lock`` across the FULL LLM call
+                # (not only the history swap) so concurrent users on a shared
+                # Agent instance never observe each other's chat_history.
+                # Throughput on a shared agent is then bounded by the LLM's
+                # serial latency — this is correct: a single Agent's
+                # ``chat_history`` is mutable and cannot be safely interleaved.
+                async with agent_lock:
+                    saved_history = agent.chat_history
+                    agent.chat_history = user_history
+                    try:
+                        # Copy current task's contextvars (incl. SessionContext)
+                        # into the worker thread so tools the agent invokes can
+                        # read platform/user metadata.
+                        import contextvars
+                        _ctx = contextvars.copy_context()
+                        response = await loop.run_in_executor(
+                            None, _ctx.run, agent.chat, prompt
+                        )
+                        # Capture updated history before restoring caller's.
+                        updated_history = agent.chat_history
+                    finally:
+                        agent.chat_history = saved_history
 
-            # Persist outside the agent_lock — it's per-user and the agent
-            # is no longer touched.
-            await loop.run_in_executor(
-                None, self._save_history, user_id, updated_history
-            )
+                # Persist outside the agent_lock — it's per-user and the agent
+                # is no longer touched.
+                await loop.run_in_executor(
+                    None, self._save_history, user_id, updated_history
+                )
 
-            # Clear task-local session context.
+                return response
+        finally:
+            # Always clear task-local session context, even if an exception occurred.
             if ctx_token is not None and _clear_ctx is not None:
                 try:
                     _clear_ctx(ctx_token)
                 except Exception:
                     pass
-
-            return response
 
     def reap_stale(self, max_age_seconds: int) -> int:
         """Remove sessions older than *max_age_seconds*.  Returns count reaped.
@@ -271,20 +273,92 @@ class BotSessionManager:
 
     def reset(self, user_id: str) -> bool:
         """Clear a user's session history.  Returns True if it existed."""
-        key = self._storage_key(user_id)
-        existed = key in self._histories
-        self._histories.pop(key, None)
-        self._last_active.pop(key, None)
-        self._locks.pop(key, None)
+        storage_key = self._storage_key(user_id)
+        existed = storage_key in self._histories
+        self._histories.pop(storage_key, None)
+        self._last_active.pop(storage_key, None)
+        self._locks.pop(storage_key, None)
 
         if self._store is not None:
-            key = self._session_key(user_id)
+            persist_key = self._session_key(user_id)
             try:
-                self._store.clear_session(key)
+                self._store.clear_session(persist_key)
             except Exception as e:
                 logger.warning("Failed to clear session in store: %s", e)
 
         return existed
+
+    def _add_mirror_entry_sync(self, user_id: str, entry: dict) -> bool:
+        """Thread-safe method to add a mirror entry to user's history.
+        
+        This method coordinates with the asyncio locks used by chat() 
+        to prevent race conditions. Called by mirror_to_session().
+        
+        Args:
+            user_id: Raw platform user id
+            entry: Mirror entry dict to append to history
+            
+        Returns:
+            bool: True on success, False on failure
+        """
+        import asyncio
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+        
+        def _sync_add_entry():
+            # Get the event loop that owns the asyncio locks
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                # No event loop running - we can safely proceed
+                # This happens when called from sync contexts like cron jobs
+                storage_key = self._storage_key(user_id)
+                self._last_active[storage_key] = time.monotonic()
+                
+                # Direct manipulation is safe when no async operations are running
+                history = list(self._load_history(user_id))
+                history.append(entry)
+                self._save_history(user_id, history)
+                return True
+                
+            # There's an event loop - we need to coordinate with asyncio locks
+            # This is more complex but necessary for thread safety
+            future = asyncio.run_coroutine_threadsafe(
+                self._add_mirror_entry_async(user_id, entry), loop
+            )
+            return future.result(timeout=10.0)  # 10 second timeout
+        
+        try:
+            return _sync_add_entry()
+        except Exception as e:
+            logger.warning("_add_mirror_entry_sync failed: %s", e)
+            return False
+    
+    async def _add_mirror_entry_async(self, user_id: str, entry: dict) -> bool:
+        """Async helper for _add_mirror_entry_sync."""
+        try:
+            storage_key = self._storage_key(user_id) 
+            self._last_active[storage_key] = time.monotonic()
+            
+            # Use the same per-user lock that chat() uses
+            user_lock = self._get_lock(user_id)
+            async with user_lock:
+                # Load history (may hit disk via run_in_executor for async safety)
+                loop = asyncio.get_running_loop()
+                history = await loop.run_in_executor(
+                    None, self._load_history, user_id
+                )
+                history = list(history)  # Ensure it's mutable
+                history.append(entry)
+                
+                # Save updated history
+                await loop.run_in_executor(
+                    None, self._save_history, user_id, history
+                )
+            return True
+        except Exception as e:
+            logger.warning("_add_mirror_entry_async failed: %s", e)
+            return False
 
     def reset_all(self) -> int:
         """Clear all user sessions.  Returns the count cleared."""

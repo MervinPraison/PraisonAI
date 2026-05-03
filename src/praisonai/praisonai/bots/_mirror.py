@@ -14,10 +14,16 @@ delivery itself.
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+# Global lock to protect mirror operations from racing with chat() calls
+# This is a simple solution since mirror_to_session is designed for
+# relatively infrequent use (scheduled deliveries, cross-platform replies)
+_mirror_lock = threading.RLock()
 
 
 def mirror_to_session(
@@ -64,28 +70,55 @@ def mirror_to_session(
         logger.warning("mirror: storage_key failed: %s", e)
         return False
 
-    try:
-        history = list(session_mgr._load_history(user_id))
-    except Exception as e:
-        logger.warning("mirror: load_history failed: %s", e)
-        history = []
-
-    entry: dict = {
-        "role": "assistant",
-        "content": message_text,
-        "timestamp": datetime.now().isoformat(),
-        "mirror": True,
-        "mirror_source": source_label,
-    }
-    if metadata:
-        entry.update(metadata)
-    history.append(entry)
-
-    try:
-        session_mgr._save_history(user_id, history)
-    except Exception as e:
-        logger.warning("mirror: save_history failed: %s", e)
-        return False
+    # Check if the session manager has a thread-safe mirror method
+    # This allows the session manager to handle synchronization properly
+    # with its internal asyncio locks.
+    if hasattr(session_mgr, '_add_mirror_entry_sync'):
+        try:
+            entry: dict = {
+                "role": "assistant",
+                "content": message_text,
+                "timestamp": datetime.now().isoformat(),
+                "mirror": True,
+                "mirror_source": source_label,
+            }
+            if metadata:
+                entry.update(metadata)
+            
+            return session_mgr._add_mirror_entry_sync(user_id, entry)
+        except Exception as e:
+            logger.warning("mirror: _add_mirror_entry_sync failed: %s", e)
+            return False
+    
+    # Fallback: Use global lock to prevent race conditions between mirror operations
+    # and concurrent chat() calls. This provides basic protection but is not ideal.
+    logger.warning(
+        "mirror_to_session using fallback synchronization - "
+        "session manager should implement _add_mirror_entry_sync for better safety"
+    )
+    with _mirror_lock:
+        try:
+            # Load current history
+            history = list(session_mgr._load_history(user_id))
+            
+            # Create mirror entry
+            entry: dict = {
+                "role": "assistant",
+                "content": message_text,
+                "timestamp": datetime.now().isoformat(),
+                "mirror": True,
+                "mirror_source": source_label,
+            }
+            if metadata:
+                entry.update(metadata)
+            history.append(entry)
+            
+            # Save updated history atomically within the lock
+            session_mgr._save_history(user_id, history)
+            
+        except Exception as e:
+            logger.warning("mirror: save_history failed: %s", e)
+            return False
 
     return True
 
