@@ -29,7 +29,9 @@ def _pick_model() -> str:
         return "anthropic/claude-haiku-4-5"
     if os.getenv("GOOGLE_API_KEY"):
         return "gemini/gemini-2.5-flash"
-    return "gpt-4o-mini"
+    raise RuntimeError(
+        "No supported API key found. Set ANTHROPIC_API_KEY or GOOGLE_API_KEY to run smoke tests."
+    )
 
 
 async def main() -> int:

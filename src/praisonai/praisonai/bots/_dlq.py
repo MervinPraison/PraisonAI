@@ -115,7 +115,7 @@ class InboundDLQ:
 
     # ── Schema ──────────────────────────────────────────────────────
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.path), isolation_level=None)
+        conn = sqlite3.connect(str(self.path))
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         return conn
@@ -159,20 +159,26 @@ class InboundDLQ:
         background sweeper.
         """
         with self._lock, self._connect() as conn:
-            self._evict_expired_locked(conn)
-            cur = conn.execute(
-                """
-                INSERT INTO entries(ts, platform, user_id, prompt,
-                                    chat_id, thread_id, user_name, error)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    time.time(), platform, user_id, prompt,
-                    chat_id, thread_id, user_name, error,
-                ),
-            )
-            self._evict_overflow_locked(conn)
-            return int(cur.lastrowid)
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                self._evict_expired_locked(conn)
+                cur = conn.execute(
+                    """
+                    INSERT INTO entries(ts, platform, user_id, prompt,
+                                        chat_id, thread_id, user_name, error)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        time.time(), platform, user_id, prompt,
+                        chat_id, thread_id, user_name, error,
+                    ),
+                )
+                self._evict_overflow_locked(conn)
+                conn.commit()
+                return int(cur.lastrowid)
+            except Exception:
+                conn.rollback()
+                raise
 
     def purge(self) -> int:
         """Delete all entries. Returns count removed."""
@@ -223,6 +229,21 @@ class InboundDLQ:
             ).fetchall()
         return [DLQEntry(*r) for r in rows]
 
+    def _list_oldest_first(self, limit: int = 100) -> List[DLQEntry]:
+        """Return up to ``limit`` entries, oldest first for replay."""
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, ts, platform, user_id, prompt,
+                       chat_id, thread_id, user_name, error, attempts
+                FROM entries
+                ORDER BY ts ASC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+        return [DLQEntry(*r) for r in rows]
+
     # ── Replay ──────────────────────────────────────────────────────
     async def replay(
         self,
@@ -239,7 +260,8 @@ class InboundDLQ:
 
         Returns ``(succeeded, failed)`` counts.
         """
-        entries = self.list(limit=limit if limit is not None else self.max_size)
+        # Fetch entries oldest-first for correct replay order
+        entries = self._list_oldest_first(limit=limit if limit is not None else self.max_size)
         succeeded = failed = 0
         for entry in entries:
             try:

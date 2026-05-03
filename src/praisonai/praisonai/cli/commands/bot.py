@@ -547,7 +547,7 @@ def dlq_purge(
     if not yes:
         confirm = typer.confirm(f"Delete all {n} entries from {dlq.path}?")
         if not confirm:
-            raise typer.Exit(1)
+            raise typer.Exit(0)
 
     removed = dlq.purge()
     typer.echo(f"Purged {removed} entries.")
@@ -599,6 +599,10 @@ def dlq_replay(
     succeeded, failed = asyncio.run(dlq.replay(replayer, limit=limit))
     typer.echo(f"Replay done: succeeded={succeeded}, failed={failed}, "
                f"remaining={dlq.size()}")
+    
+    # Return non-zero exit code if any failures occurred and entries remain
+    if failed > 0 and dlq.size() > 0:
+        raise typer.Exit(1)
 
 
 @app.callback(invoke_without_command=True)

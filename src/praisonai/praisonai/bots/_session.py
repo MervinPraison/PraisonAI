@@ -176,14 +176,18 @@ class BotSessionManager:
                 # N4: persist the failed inbound message before bubbling.
                 if self._dlq is not None:
                     try:
-                        self._dlq.enqueue(
-                            platform=self._platform,
-                            user_id=user_id,
-                            prompt=prompt,
-                            error=f"{type(exc).__name__}: {exc}",
-                            chat_id=chat_id,
-                            thread_id=thread_id,
-                            user_name=user_name,
+                        # Use run_in_executor to avoid blocking the event loop
+                        await loop.run_in_executor(
+                            None,
+                            lambda: self._dlq.enqueue(
+                                platform=self._platform,
+                                user_id=user_id,
+                                prompt=prompt,
+                                error=f"{type(exc).__name__}: {exc}",
+                                chat_id=chat_id,
+                                thread_id=thread_id,
+                                user_name=user_name,
+                            )
                         )
                     except Exception as dlq_exc:  # pragma: no cover — defensive
                         logger.error(
