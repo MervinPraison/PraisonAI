@@ -39,7 +39,7 @@ class AsyncPostgresConversationStore(ConversationStore):
         database: str = "praisonai",
         user: str = "postgres",
         password: str = "",
-        table_prefix: str = "praisonai_",
+        table_prefix: str = "praison_",
         pool_size: int = 10,
     ):
         """
@@ -116,6 +116,7 @@ class AsyncPostgresConversationStore(ConversationStore):
                     user_id VARCHAR(255),
                     agent_id VARCHAR(255),
                     name VARCHAR(255),
+                    state JSONB,
                     metadata JSONB,
                     created_at DOUBLE PRECISION,
                     updated_at DOUBLE PRECISION
@@ -128,6 +129,8 @@ class AsyncPostgresConversationStore(ConversationStore):
                     session_id VARCHAR(255) REFERENCES {sessions_table}(session_id) ON DELETE CASCADE,
                     role VARCHAR(50),
                     content TEXT,
+                    tool_calls JSONB,
+                    tool_call_id VARCHAR(255),
                     metadata JSONB,
                     created_at DOUBLE PRECISION
                 )
@@ -146,9 +149,10 @@ class AsyncPostgresConversationStore(ConversationStore):
         table = f"{self.table_prefix}sessions"
         async with self._pool.acquire() as conn:
             await conn.execute(f"""
-                INSERT INTO {table} (session_id, user_id, agent_id, name, metadata, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                INSERT INTO {table} (session_id, user_id, agent_id, name, state, metadata, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             """, session.session_id, session.user_id, session.agent_id, session.name,
+                json.dumps(session.state) if session.state else None,
                 json.dumps(session.metadata) if session.metadata else None,
                 session.created_at, session.updated_at)
         
@@ -175,6 +179,7 @@ class AsyncPostgresConversationStore(ConversationStore):
                 user_id=row['user_id'],
                 agent_id=row['agent_id'],
                 name=row['name'],
+                state=json.loads(row['state']) if row['state'] else None,
                 metadata=json.loads(row['metadata']) if row['metadata'] else None,
                 created_at=row['created_at'],
                 updated_at=row['updated_at']
@@ -196,9 +201,10 @@ class AsyncPostgresConversationStore(ConversationStore):
         async with self._pool.acquire() as conn:
             await conn.execute(f"""
                 UPDATE {table} 
-                SET name = $2, metadata = $3, updated_at = $4
+                SET name = $2, state = $3, metadata = $4, updated_at = $5
                 WHERE session_id = $1
             """, session.session_id, session.name,
+                json.dumps(session.state) if session.state else None,
                 json.dumps(session.metadata) if session.metadata else None,
                 session.updated_at)
         
@@ -267,6 +273,7 @@ class AsyncPostgresConversationStore(ConversationStore):
                 user_id=row['user_id'],
                 agent_id=row['agent_id'],
                 name=row['name'],
+                state=json.loads(row['state']) if row['state'] else None,
                 metadata=json.loads(row['metadata']) if row['metadata'] else None,
                 created_at=row['created_at'],
                 updated_at=row['updated_at']
@@ -294,9 +301,11 @@ class AsyncPostgresConversationStore(ConversationStore):
         
         async with self._pool.acquire() as conn:
             await conn.execute(f"""
-                INSERT INTO {table} (id, session_id, role, content, metadata, created_at)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                INSERT INTO {table} (id, session_id, role, content, tool_calls, tool_call_id, metadata, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             """, message.id, session_id, message.role, message.content,
+                json.dumps(message.tool_calls) if message.tool_calls else None,
+                message.tool_call_id,
                 json.dumps(message.metadata) if message.metadata else None,
                 message.created_at)
         
@@ -349,6 +358,8 @@ class AsyncPostgresConversationStore(ConversationStore):
                 session_id=row['session_id'],
                 role=row['role'],
                 content=row['content'],
+                tool_calls=json.loads(row['tool_calls']) if row['tool_calls'] else None,
+                tool_call_id=row['tool_call_id'],
                 metadata=json.loads(row['metadata']) if row['metadata'] else None,
                 created_at=row['created_at']
             )

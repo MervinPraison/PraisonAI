@@ -21,6 +21,7 @@ Example:
 """
 
 from typing import Any, Callable, Dict, List, Optional, Type, Union
+import threading
 
 
 # Type aliases
@@ -35,12 +36,33 @@ class LLMProviderRegistry:
     
     Manages registration and resolution of LLM providers by name.
     Supports lazy loading, aliases, and isolated instances.
+    Thread-safe for concurrent operations.
     """
+    
+    _instance: Optional["LLMProviderRegistry"] = None
+    _instance_lock = threading.Lock()
     
     def __init__(self):
         """Initialize an empty registry."""
         self._providers: Dict[str, ProviderType] = {}
         self._aliases: Dict[str, str] = {}  # alias -> canonical name
+        self._lock = threading.RLock()  # RLock for re-entrant calls
+        # Register built-in providers during initialization
+        _register_builtin_providers(self)
+    
+    @classmethod
+    def get_instance(cls) -> "LLMProviderRegistry":
+        """
+        Get the singleton registry instance.
+        
+        Returns:
+            LLMProviderRegistry: The singleton registry instance
+        """
+        if cls._instance is None:
+            with cls._instance_lock:
+                if cls._instance is None:
+                    cls._instance = cls()
+        return cls._instance
     
     def register(
         self,
@@ -62,35 +84,48 @@ class LLMProviderRegistry:
         Raises:
             ValueError: If name is already registered (unless override=True)
         """
-        normalized_name = name.lower()
-        
-        # Check for existing registration
-        if normalized_name in self._providers and not override:
-            raise ValueError(
-                f"Provider '{name}' is already registered. "
-                f"Use override=True to replace it."
-            )
-        
-        self._providers[normalized_name] = provider
-        
-        # Register aliases
-        if aliases:
-            for alias in aliases:
-                normalized_alias = alias.lower()
-                # Check collision with existing provider name
-                if normalized_alias in self._providers and not override:
-                    raise ValueError(
-                        f"Alias '{alias}' conflicts with existing provider name. "
-                        f"Use override=True to replace it."
-                    )
-                # Check collision with existing alias
-                if normalized_alias in self._aliases and not override:
-                    existing_target = self._aliases[normalized_alias]
-                    raise ValueError(
-                        f"Alias '{alias}' is already registered (points to '{existing_target}'). "
-                        f"Use override=True to replace it."
-                    )
-                self._aliases[normalized_alias] = normalized_name
+        with self._lock:
+            normalized_name = name.lower()
+            
+            # Check for existing registration
+            if normalized_name in self._providers and not override:
+                raise ValueError(
+                    f"Provider '{name}' is already registered. "
+                    f"Use override=True to replace it."
+                )
+            
+            # Check if this canonical name conflicts with existing alias
+            if normalized_name in self._aliases and not override:
+                existing_target = self._aliases[normalized_name] 
+                raise ValueError(
+                    f"Cannot register provider '{name}' - it conflicts with existing alias "
+                    f"(currently points to '{existing_target}'). Use override=True to replace it."
+                )
+            
+            # If override=True, clean up any existing alias before registering canonical name
+            if override and normalized_name in self._aliases:
+                del self._aliases[normalized_name]
+            
+            self._providers[normalized_name] = provider
+            
+            # Register aliases
+            if aliases:
+                for alias in aliases:
+                    normalized_alias = alias.lower()
+                    # Check collision with existing provider name
+                    if normalized_alias in self._providers and not override:
+                        raise ValueError(
+                            f"Alias '{alias}' conflicts with existing provider name. "
+                            f"Use override=True to replace it."
+                        )
+                    # Check collision with existing alias
+                    if normalized_alias in self._aliases and not override:
+                        existing_target = self._aliases[normalized_alias]
+                        raise ValueError(
+                            f"Alias '{alias}' is already registered (points to '{existing_target}'). "
+                            f"Use override=True to replace it."
+                        )
+                    self._aliases[normalized_alias] = normalized_name
     
     def unregister(self, name: str) -> bool:
         """
@@ -102,27 +137,28 @@ class LLMProviderRegistry:
         Returns:
             True if provider was unregistered, False if not found
         """
-        normalized_name = name.lower()
-        
-        # Check if it's an alias
-        if normalized_name in self._aliases:
-            del self._aliases[normalized_name]
-            return True
-        
-        # Check if it's a canonical name
-        if normalized_name in self._providers:
-            # Remove all aliases pointing to this provider
-            aliases_to_remove = [
-                alias for alias, canonical in self._aliases.items()
-                if canonical == normalized_name
-            ]
-            for alias in aliases_to_remove:
-                del self._aliases[alias]
+        with self._lock:
+            normalized_name = name.lower()
             
-            del self._providers[normalized_name]
-            return True
-        
-        return False
+            # Check if it's an alias
+            if normalized_name in self._aliases:
+                del self._aliases[normalized_name]
+                return True
+            
+            # Check if it's a canonical name
+            if normalized_name in self._providers:
+                # Remove all aliases pointing to this provider
+                aliases_to_remove = [
+                    alias for alias, canonical in self._aliases.items()
+                    if canonical == normalized_name
+                ]
+                for alias in aliases_to_remove:
+                    del self._aliases[alias]
+                
+                del self._providers[normalized_name]
+                return True
+            
+            return False
     
     def has(self, name: str) -> bool:
         """
@@ -134,8 +170,9 @@ class LLMProviderRegistry:
         Returns:
             True if provider is registered
         """
-        normalized_name = name.lower()
-        return normalized_name in self._providers or normalized_name in self._aliases
+        with self._lock:
+            normalized_name = name.lower()
+            return normalized_name in self._providers or normalized_name in self._aliases
     
     def list(self) -> List[str]:
         """
@@ -144,7 +181,8 @@ class LLMProviderRegistry:
         Returns:
             List of provider names
         """
-        return list(self._providers.keys())
+        with self._lock:
+            return list(self._providers.keys())
     
     def list_all(self) -> List[str]:
         """
@@ -153,7 +191,8 @@ class LLMProviderRegistry:
         Returns:
             List of all registered names and aliases
         """
-        return list(self._providers.keys()) + list(self._aliases.keys())
+        with self._lock:
+            return list(self._providers.keys()) + list(self._aliases.keys())
     
     def resolve(
         self,
@@ -175,21 +214,22 @@ class LLMProviderRegistry:
         Raises:
             ValueError: If provider not found
         """
-        normalized_name = name.lower()
+        with self._lock:
+            normalized_name = name.lower()
+            
+            # Resolve alias to canonical name
+            canonical_name = self._aliases.get(normalized_name, normalized_name)
+            
+            provider = self._providers.get(canonical_name)
+            if provider is None:
+                available = list(self._providers.keys())  # Don't call self.list() to avoid double-locking
+                raise ValueError(
+                    f"Unknown provider: '{name}'. "
+                    f"Available providers: {', '.join(available) if available else 'none'}. "
+                    f"Register a custom provider with register_llm_provider('{name}', YourProviderClass)."
+                )
         
-        # Resolve alias to canonical name
-        canonical_name = self._aliases.get(normalized_name, normalized_name)
-        
-        provider = self._providers.get(canonical_name)
-        if provider is None:
-            available = self.list()
-            raise ValueError(
-                f"Unknown provider: '{name}'. "
-                f"Available providers: {', '.join(available) if available else 'none'}. "
-                f"Register a custom provider with register_llm_provider('{name}', YourProviderClass)."
-            )
-        
-        # Create instance
+        # Create instance outside the lock
         return provider(model_id, config)
     
     def get(self, name: str) -> Optional[ProviderType]:
@@ -202,30 +242,24 @@ class LLMProviderRegistry:
         Returns:
             Provider class/factory or None
         """
-        normalized_name = name.lower()
-        canonical_name = self._aliases.get(normalized_name, normalized_name)
-        return self._providers.get(canonical_name)
+        with self._lock:
+            normalized_name = name.lower()
+            canonical_name = self._aliases.get(normalized_name, normalized_name)
+            return self._providers.get(canonical_name)
 
 
 # ============================================================================
 # Default Registry Singleton
 # ============================================================================
 
-_default_registry: Optional[LLMProviderRegistry] = None
-
-
 def get_default_llm_registry() -> LLMProviderRegistry:
     """
     Get the default global LLM provider registry.
     
     This is the registry used by create_llm_provider() when no custom registry
-    is specified.
+    is specified. Uses the thread-safe singleton pattern.
     """
-    global _default_registry
-    if _default_registry is None:
-        _default_registry = LLMProviderRegistry()
-        _register_builtin_providers(_default_registry)
-    return _default_registry
+    return LLMProviderRegistry.get_instance()
 
 
 def _register_builtin_providers(registry: LLMProviderRegistry) -> None:
@@ -378,5 +412,5 @@ def create_llm_provider(
 
 def _reset_default_registry() -> None:
     """Reset the default registry (mainly for testing)."""
-    global _default_registry
-    _default_registry = None
+    with LLMProviderRegistry._instance_lock:
+        LLMProviderRegistry._instance = None

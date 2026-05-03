@@ -463,7 +463,7 @@ class TestLiteLLMIsolation:
         assert len(litellm_modules) == 0, f"Registry imported litellm modules: {litellm_modules}"
     
     def test_registry_only_imports_typing(self):
-        """Registry should only import from typing module."""
+        """Registry should only import stdlib modules (typing, threading) at top level."""
         import ast
         import inspect
         from praisonai.llm import registry
@@ -480,5 +480,7 @@ class TestLiteLLMIsolation:
                 if node.module:
                     imports.append(node.module)
         
-        # Only typing should be imported
-        assert imports == ['typing'], f"Unexpected imports: {imports}"
+        # Only stdlib modules should be imported at the top level (no heavy deps like litellm)
+        allowed_stdlib_imports = {'typing', 'threading'}
+        unexpected = set(imports) - allowed_stdlib_imports
+        assert not unexpected, f"Unexpected top-level imports: {unexpected}"

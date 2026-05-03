@@ -31,7 +31,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
     def __init__(
         self,
         path: str = "praisonai_conversations.db",
-        table_prefix: str = "praisonai_",
+        table_prefix: str = "praison_",
     ):
         """
         Initialize async SQLite store.
@@ -76,6 +76,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
                 user_id TEXT,
                 agent_id TEXT,
                 name TEXT,
+                state TEXT,
                 metadata TEXT,
                 created_at REAL,
                 updated_at REAL
@@ -88,6 +89,8 @@ class AsyncSQLiteConversationStore(ConversationStore):
                 session_id TEXT REFERENCES {sessions_table}(session_id) ON DELETE CASCADE,
                 role TEXT,
                 content TEXT,
+                tool_calls TEXT,
+                tool_call_id TEXT,
                 metadata TEXT,
                 created_at REAL
             )
@@ -107,9 +110,10 @@ class AsyncSQLiteConversationStore(ConversationStore):
         
         table = f"{self.table_prefix}sessions"
         await self._conn.execute(f"""
-            INSERT INTO {table} (session_id, user_id, agent_id, name, metadata, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO {table} (session_id, user_id, agent_id, name, state, metadata, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (session.session_id, session.user_id, session.agent_id, session.name,
+              json.dumps(session.state) if session.state else None,
               json.dumps(session.metadata) if session.metadata else None,
               session.created_at, session.updated_at))
         await self._conn.commit()
@@ -139,6 +143,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
                 user_id=row['user_id'],
                 agent_id=row['agent_id'],
                 name=row['name'],
+                state=json.loads(row['state']) if row['state'] else None,
                 metadata=json.loads(row['metadata']) if row['metadata'] else None,
                 created_at=row['created_at'],
                 updated_at=row['updated_at']
@@ -161,9 +166,11 @@ class AsyncSQLiteConversationStore(ConversationStore):
         
         await self._conn.execute(f"""
             UPDATE {table} 
-            SET name = ?, metadata = ?, updated_at = ?
+            SET name = ?, state = ?, metadata = ?, updated_at = ?
             WHERE session_id = ?
-        """, (session.name, json.dumps(session.metadata) if session.metadata else None,
+        """, (session.name,
+              json.dumps(session.state) if session.state else None,
+              json.dumps(session.metadata) if session.metadata else None,
               session.updated_at, session.session_id))
         await self._conn.commit()
         
@@ -233,6 +240,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
                 user_id=row['user_id'],
                 agent_id=row['agent_id'],
                 name=row['name'],
+                state=json.loads(row['state']) if row['state'] else None,
                 metadata=json.loads(row['metadata']) if row['metadata'] else None,
                 created_at=row['created_at'],
                 updated_at=row['updated_at']
@@ -261,9 +269,11 @@ class AsyncSQLiteConversationStore(ConversationStore):
         table = f"{self.table_prefix}messages"
         
         await self._conn.execute(f"""
-            INSERT INTO {table} (id, session_id, role, content, metadata, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO {table} (id, session_id, role, content, tool_calls, tool_call_id, metadata, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (message.id, session_id, message.role, message.content,
+              json.dumps(message.tool_calls) if message.tool_calls else None,
+              message.tool_call_id,
               json.dumps(message.metadata) if message.metadata else None,
               message.created_at))
         await self._conn.commit()
@@ -316,6 +326,8 @@ class AsyncSQLiteConversationStore(ConversationStore):
                 session_id=row['session_id'],
                 role=row['role'],
                 content=row['content'],
+                tool_calls=json.loads(row['tool_calls']) if row['tool_calls'] else None,
+                tool_call_id=row['tool_call_id'],
                 metadata=json.loads(row['metadata']) if row['metadata'] else None,
                 created_at=row['created_at']
             )
