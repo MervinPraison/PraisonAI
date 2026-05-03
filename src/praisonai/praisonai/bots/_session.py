@@ -204,37 +204,41 @@ class BotSessionManager:
                 None, self._load_history, user_id
             )
 
+            # W1 robustness: hold ``agent_lock`` across the FULL LLM call
+            # (not only the history swap) so concurrent users on a shared
+            # Agent instance never observe each other's chat_history.
+            # Throughput on a shared agent is then bounded by the LLM's
+            # serial latency — this is correct: a single Agent's
+            # ``chat_history`` is mutable and cannot be safely interleaved.
             async with agent_lock:
-                # Swap histories
                 saved_history = agent.chat_history
                 agent.chat_history = user_history
-
-            try:
-                # W1: copy current task's contextvars (incl. SessionContext)
-                # into the worker thread so tools the agent invokes can read
-                # platform/user metadata.
-                import contextvars
-                _ctx = contextvars.copy_context()
-                response = await loop.run_in_executor(
-                    None, _ctx.run, agent.chat, prompt
-                )
-            finally:
-                async with agent_lock:
-                    # Capture updated history and restore agent's original
+                try:
+                    # Copy current task's contextvars (incl. SessionContext)
+                    # into the worker thread so tools the agent invokes can
+                    # read platform/user metadata.
+                    import contextvars
+                    _ctx = contextvars.copy_context()
+                    response = await loop.run_in_executor(
+                        None, _ctx.run, agent.chat, prompt
+                    )
+                    # Capture updated history before restoring caller's.
                     updated_history = agent.chat_history
+                finally:
                     agent.chat_history = saved_history
 
-                # Persist (may hit disk via run_in_executor)
-                await loop.run_in_executor(
-                    None, self._save_history, user_id, updated_history
-                )
+            # Persist outside the agent_lock — it's per-user and the agent
+            # is no longer touched.
+            await loop.run_in_executor(
+                None, self._save_history, user_id, updated_history
+            )
 
-                # Clear task-local session context.
-                if ctx_token is not None and _clear_ctx is not None:
-                    try:
-                        _clear_ctx(ctx_token)
-                    except Exception:
-                        pass
+            # Clear task-local session context.
+            if ctx_token is not None and _clear_ctx is not None:
+                try:
+                    _clear_ctx(ctx_token)
+                except Exception:
+                    pass
 
             return response
 
