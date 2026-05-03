@@ -131,6 +131,14 @@ def start_api_server(
     if config is None:
         config = APIConfig()
     
+    # For background mode: if auth is enabled and no token is configured,
+    # generate one in the parent process and pass it to the child so the
+    # caller can access it immediately.
+    generated_token = None
+    if background and config.auth_enabled and not config.auth_token and not os.environ.get("PRAISONAI_API_TOKEN"):
+        import secrets
+        generated_token = secrets.token_urlsafe(32)
+    
     try:
         # Generate server code
         server_code = generate_api_server_code(agents_file, config)
@@ -153,8 +161,14 @@ def start_api_server(
         
         # Start server
         if background:
+            # Pass generated token via environment to child process
+            env = dict(os.environ)
+            if generated_token:
+                env["PRAISONAI_API_TOKEN"] = generated_token
+            
             process = subprocess.Popen(
                 ['python', server_file],
+                env=env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 start_new_session=True
@@ -165,11 +179,20 @@ def start_api_server(
             
             if process.poll() is None:
                 url = f"http://{config.host}:{config.port}"
+                metadata = {"pid": process.pid, "server_file": server_file}
+                
+                # Include the generated token in metadata so caller can authenticate
+                if generated_token:
+                    metadata["auth_token"] = generated_token
+                    message = f"API server started in background (PID: {process.pid})\nBearer token: {generated_token}"
+                else:
+                    message = f"API server started in background (PID: {process.pid})"
+                
                 return DeployResult(
                     success=True,
-                    message=f"API server started in background (PID: {process.pid})",
+                    message=message,
                     url=url,
-                    metadata={"pid": process.pid, "server_file": server_file}
+                    metadata=metadata
                 )
             else:
                 stderr = process.stderr.read().decode() if process.stderr else "Unknown error"

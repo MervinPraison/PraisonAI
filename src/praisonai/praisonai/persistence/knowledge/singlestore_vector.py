@@ -54,7 +54,10 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
         # ``table_prefix`` is interpolated directly into DDL/DML because
         # SQL identifiers cannot be parameterized. Restrict it to the same
         # safe identifier alphabet as collection names.
-        validate_identifier(table_prefix.rstrip("_") or "_", name="table_prefix")
+        if table_prefix.strip("_"):  # If not all underscores
+            validate_identifier(table_prefix, name="table_prefix")
+        elif not table_prefix:  # Empty string not allowed
+            raise ValueError("table_prefix cannot be empty")
         self.url = url
         self.host = host
         self.port = port

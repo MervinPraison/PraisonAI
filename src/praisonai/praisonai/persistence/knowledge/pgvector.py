@@ -142,8 +142,7 @@ class PGVectorKnowledgeStore(KnowledgeStore):
     
     def collection_exists(self, name: str) -> bool:
         """Check if a collection exists."""
-        validate_identifier(name, name="collection name")
-        table = self._table_name(name)
+        table = self._table_name(name)  # _table_name handles validation
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:

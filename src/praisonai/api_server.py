@@ -106,8 +106,16 @@ if __name__ == '__main__':
     # Bind to localhost by default. Operators that need to expose the
     # server externally must opt in via ``PRAISONAI_API_HOST=0.0.0.0`` and
     # should always pair that with authentication or a fronting proxy.
-    app.run(
-        host=os.environ.get("PRAISONAI_API_HOST", "127.0.0.1"),
-        port=int(os.environ.get("PRAISONAI_API_PORT", "8080")),
-        debug=False,
-    )
+    
+    # Parse host with empty string fallback
+    host = os.environ.get("PRAISONAI_API_HOST") or "127.0.0.1"
+    
+    # Parse port with error handling
+    raw_port = os.environ.get("PRAISONAI_API_PORT") or "8080"
+    try:
+        port = int(raw_port)
+    except (TypeError, ValueError):
+        port = 8080
+        print(f"[praisonai-api] invalid PRAISONAI_API_PORT={raw_port!r}; using 8080", file=sys.stderr)
+    
+    app.run(host=host, port=port, debug=False)
