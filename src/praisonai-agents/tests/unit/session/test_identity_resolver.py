@@ -105,3 +105,60 @@ class TestThreadSafety:
 
         for i in range(50):
             assert r.resolve("telegram", f"u{i}") == f"unified-{i}"
+
+
+class TestFileIdentityResolver:
+    def test_persists_across_instances(self, tmp_path):
+        from praisonaiagents.session.identity import FileIdentityResolver
+
+        path = tmp_path / "identity.json"
+        r1 = FileIdentityResolver(path=path)
+        r1.link("telegram", "12345", "alice")
+        r1.link("discord", "snowflake-1", "alice")
+
+        # New instance, same file
+        r2 = FileIdentityResolver(path=path)
+        assert r2.resolve("telegram", "12345") == "alice"
+        assert r2.resolve("discord", "snowflake-1") == "alice"
+
+    def test_unlink_persists(self, tmp_path):
+        from praisonaiagents.session.identity import FileIdentityResolver
+
+        path = tmp_path / "identity.json"
+        r1 = FileIdentityResolver(path=path)
+        r1.link("telegram", "12345", "alice")
+        r1.unlink("telegram", "12345")
+
+        r2 = FileIdentityResolver(path=path)
+        assert r2.resolve("telegram", "12345") == "telegram:12345"
+
+    def test_corrupt_file_does_not_crash(self, tmp_path):
+        from praisonaiagents.session.identity import FileIdentityResolver
+
+        path = tmp_path / "identity.json"
+        path.write_text("{not valid json", encoding="utf-8")
+        r = FileIdentityResolver(path=path)
+        # Falls back to empty state
+        assert r.resolve("telegram", "12345") == "telegram:12345"
+
+    def test_satisfies_protocol(self, tmp_path):
+        from praisonaiagents.session.identity import (
+            FileIdentityResolver,
+            IdentityResolverProtocol,
+        )
+        r = FileIdentityResolver(path=tmp_path / "identity.json")
+        assert isinstance(r, IdentityResolverProtocol)
+
+    def test_file_permissions_restricted(self, tmp_path):
+        import sys
+        if sys.platform.startswith("win"):
+            pytest.skip("chmod semantics differ on Windows")
+
+        from praisonaiagents.session.identity import FileIdentityResolver
+
+        path = tmp_path / "identity.json"
+        r = FileIdentityResolver(path=path)
+        r.link("telegram", "12345", "alice")
+        # 0o600 = owner-only read/write
+        mode = path.stat().st_mode & 0o777
+        assert mode == 0o600

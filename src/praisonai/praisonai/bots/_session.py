@@ -161,6 +161,9 @@ class BotSessionManager:
         agent: "Agent",
         user_id: str,
         prompt: str,
+        chat_id: str = "",
+        thread_id: str = "",
+        user_name: str = "",
     ) -> str:
         """Run ``agent.chat(prompt)`` with *user_id*-scoped history.
 
@@ -173,6 +176,27 @@ class BotSessionManager:
         self._last_active[self._storage_key(user_id)] = time.monotonic()
         user_lock = self._get_lock(user_id)
         agent_lock = self._get_agent_lock(agent)
+
+        # W1: set task-local session context so any tool the agent
+        # invokes can read platform / chat / user metadata without
+        # relying on os.environ globals.
+        ctx_token = None
+        try:
+            from praisonaiagents.session.context import (
+                set_session_context as _set_ctx,
+                clear_session_context as _clear_ctx,
+            )
+            ctx_token = _set_ctx(
+                platform=self._platform,
+                chat_id=chat_id,
+                thread_id=thread_id,
+                user_id=user_id,
+                user_name=user_name,
+                unified_user_id=self._storage_key(user_id),
+            )
+        except Exception:  # pragma: no cover — defensive
+            _clear_ctx = None  # type: ignore[assignment]
+
         async with user_lock:
             # Load history (may hit disk via run_in_executor for async safety)
             loop = asyncio.get_running_loop()
@@ -186,7 +210,14 @@ class BotSessionManager:
                 agent.chat_history = user_history
 
             try:
-                response = await loop.run_in_executor(None, agent.chat, prompt)
+                # W1: copy current task's contextvars (incl. SessionContext)
+                # into the worker thread so tools the agent invokes can read
+                # platform/user metadata.
+                import contextvars
+                _ctx = contextvars.copy_context()
+                response = await loop.run_in_executor(
+                    None, _ctx.run, agent.chat, prompt
+                )
             finally:
                 async with agent_lock:
                     # Capture updated history and restore agent's original
@@ -197,6 +228,13 @@ class BotSessionManager:
                 await loop.run_in_executor(
                     None, self._save_history, user_id, updated_history
                 )
+
+                # Clear task-local session context.
+                if ctx_token is not None and _clear_ctx is not None:
+                    try:
+                        _clear_ctx(ctx_token)
+                    except Exception:
+                        pass
 
             return response
 

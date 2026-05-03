@@ -85,12 +85,18 @@ class Bot:
         agent: Optional[Any] = None,
         token: Optional[str] = None,
         config: Optional[Any] = None,
+        identity_resolver: Optional[Any] = None,
         **kwargs: Any,
     ):
         self._platform = platform.lower().strip()
         self._agent = agent
         self._explicit_token = token
         self._config = config
+        # W1: optional cross-platform identity resolver. Applied to the
+        # adapter's ``_session`` after construction (duck-typed; works
+        # with any adapter that exposes a BotSessionManager-compatible
+        # ``_session`` attribute).
+        self._identity_resolver = identity_resolver
         self._kwargs = kwargs
 
         self._adapter: Optional[Any] = None
@@ -178,7 +184,24 @@ class Bot:
         # Merge user kwargs (override defaults)
         init_kwargs.update(self._kwargs)
 
-        return adapter_cls(**init_kwargs)
+        adapter = adapter_cls(**init_kwargs)
+
+        # W1: post-construction wire-up for the identity resolver.
+        # Adapters create their own BotSessionManager during __init__;
+        # we splice the resolver in here so existing adapters need no
+        # signature change.
+        if self._identity_resolver is not None:
+            session = getattr(adapter, "_session", None)
+            if session is not None and hasattr(session, "_identity_resolver"):
+                session._identity_resolver = self._identity_resolver
+            else:
+                logger.warning(
+                    "Bot(%s): adapter has no BotSessionManager-compatible "
+                    "_session; identity_resolver ignored.",
+                    self._platform,
+                )
+
+        return adapter
 
     async def start(self) -> None:
         """Build the adapter and start the bot."""

@@ -22,9 +22,16 @@ Usage::
 
 from __future__ import annotations
 
+import json
+import logging
+import os
+import tempfile
 import threading
 from dataclasses import dataclass
-from typing import List, Protocol, runtime_checkable
+from pathlib import Path
+from typing import List, Optional, Protocol, runtime_checkable
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -107,8 +114,107 @@ class InMemoryIdentityResolver:
             ]
 
 
+_DEFAULT_IDENTITY_PATH = Path(
+    os.environ.get(
+        "PRAISONAI_IDENTITY_PATH",
+        os.path.expanduser("~/.praisonai/identity.json"),
+    )
+)
+
+
+class FileIdentityResolver(InMemoryIdentityResolver):
+    """JSON-file-backed ``IdentityResolverProtocol`` implementation.
+
+    Loads links from disk on construction; persists on every mutation
+    via atomic temp-file + ``os.replace``. Thread-safe.
+
+    Default path: ``$PRAISONAI_IDENTITY_PATH`` or ``~/.praisonai/identity.json``.
+
+    Storage format::
+
+        {
+          "links": {
+            "telegram::12345": "alice",
+            "discord::snowflake-1": "alice"
+          }
+        }
+    """
+
+    def __init__(self, path: Optional[Path | str] = None) -> None:
+        super().__init__()
+        self._path: Path = Path(path) if path else _DEFAULT_IDENTITY_PATH
+        self._load()
+
+    @staticmethod
+    def _encode_key(platform: str, platform_user_id: str) -> str:
+        return f"{platform}::{platform_user_id}"
+
+    @staticmethod
+    def _decode_key(encoded: str) -> tuple[str, str]:
+        platform, _, user = encoded.partition("::")
+        return platform, user
+
+    def _load(self) -> None:
+        try:
+            if not self._path.exists():
+                return
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+            links = data.get("links", {}) if isinstance(data, dict) else {}
+            with self._lock:
+                self._links = {
+                    self._decode_key(k): v
+                    for k, v in links.items()
+                    if isinstance(v, str)
+                }
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning("FileIdentityResolver: failed to load %s: %s", self._path, e)
+
+    def _flush(self) -> None:
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            with self._lock:
+                payload = {
+                    "links": {
+                        self._encode_key(p, u): uid
+                        for (p, u), uid in self._links.items()
+                    }
+                }
+            fd, tmp = tempfile.mkstemp(
+                dir=str(self._path.parent), prefix=".identity-", suffix=".tmp"
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, indent=2, ensure_ascii=False)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, self._path)
+                try:
+                    os.chmod(self._path, 0o600)
+                except OSError:
+                    pass
+            except BaseException:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
+        except OSError as e:
+            logger.warning("FileIdentityResolver: failed to flush %s: %s", self._path, e)
+
+    def link(
+        self, platform: str, platform_user_id: str, unified_user_id: str
+    ) -> None:
+        super().link(platform, platform_user_id, unified_user_id)
+        self._flush()
+
+    def unlink(self, platform: str, platform_user_id: str) -> None:
+        super().unlink(platform, platform_user_id)
+        self._flush()
+
+
 __all__ = [
     "IdentityLink",
     "IdentityResolverProtocol",
     "InMemoryIdentityResolver",
+    "FileIdentityResolver",
 ]

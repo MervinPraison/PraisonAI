@@ -104,6 +104,10 @@ def __getattr__(name: str):
         from .identity import InMemoryIdentityResolver
         _module_cache[name] = InMemoryIdentityResolver
         return InMemoryIdentityResolver
+    if name == "FileIdentityResolver":
+        from .identity import FileIdentityResolver
+        _module_cache[name] = FileIdentityResolver
+        return FileIdentityResolver
 
     # W1 — Task-local session context
     if name == "SessionContext":
@@ -141,6 +145,7 @@ __all__ = [
     "IdentityResolverProtocol",
     "IdentityLink",
     "InMemoryIdentityResolver",
+    "FileIdentityResolver",
     "SessionContext",
     "set_session_context",
     "get_session_context",
