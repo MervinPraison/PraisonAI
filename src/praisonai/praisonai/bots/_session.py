@@ -62,6 +62,7 @@ class BotSessionManager:
         max_history: int = 100,
         store: Optional[Any] = None,
         platform: str = "",
+        identity_resolver: Optional[Any] = None,
     ) -> None:
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
         self._locks: Dict[str, asyncio.Lock] = {}
@@ -70,17 +71,46 @@ class BotSessionManager:
         self._store = store
         self._platform = platform
         self._last_active: Dict[str, float] = {}
+        # W1: optional cross-platform identity resolver. When set, the
+        # session key is the resolver-returned unified user id, so the
+        # same human pinging from multiple platforms shares one history.
+        self._identity_resolver = identity_resolver
+
+    def _storage_key(self, user_id: str) -> str:
+        """Resolve a raw platform user id to the in-memory/store key.
+
+        With an identity resolver this is the unified user id; without
+        one, behaviour is unchanged (raw ``user_id``).
+        """
+        if self._identity_resolver is not None and self._platform:
+            try:
+                return self._identity_resolver.resolve(self._platform, user_id)
+            except Exception as e:  # pragma: no cover — defensive
+                logger.warning("identity resolver failed: %s", e)
+        return user_id
+
+    def _persist_key(self, storage_key: str) -> str:
+        """Derive the persistent-store key from an in-memory storage key.
+
+        With a resolver, ``storage_key`` is already the unified user id
+        and is used directly. Without a resolver, the legacy
+        ``bot_{platform}_{user_id}`` prefix is preserved for back-compat.
+        """
+        if self._identity_resolver is not None and self._platform:
+            return storage_key
+        prefix = f"bot_{self._platform}" if self._platform else "bot"
+        return f"{prefix}_{storage_key}"
 
     def _session_key(self, user_id: str) -> str:
-        """Generate a deterministic session key for persistent storage."""
-        prefix = f"bot_{self._platform}" if self._platform else "bot"
-        return f"{prefix}_{user_id}"
+        """Persistent-store key for a raw platform user id (back-compat API)."""
+        return self._persist_key(self._storage_key(user_id))
 
     def _get_lock(self, user_id: str) -> asyncio.Lock:
-        """Get or create an asyncio.Lock for *user_id*."""
-        if user_id not in self._locks:
-            self._locks[user_id] = asyncio.Lock()
-        return self._locks[user_id]
+        """Get or create an asyncio.Lock for *user_id* (storage-keyed)."""
+        key = self._storage_key(user_id)
+        if key not in self._locks:
+            self._locks[key] = asyncio.Lock()
+        return self._locks[key]
 
     def _get_agent_lock(self, agent: "Agent") -> asyncio.Lock:
         """Get or create a lock for the *agent* instance (by id)."""
@@ -99,7 +129,7 @@ class BotSessionManager:
                     return list(history)
             except Exception as e:
                 logger.warning("Failed to load session from store: %s", e)
-        return list(self._histories.get(user_id, []))
+        return list(self._histories.get(self._storage_key(user_id), []))
 
     def _save_history(
         self, user_id: str, history: List[Dict[str, Any]]
@@ -108,8 +138,8 @@ class BotSessionManager:
         if self._max_history > 0 and len(history) > self._max_history:
             history = history[-self._max_history:]
 
-        # Always update in-memory cache
-        self._histories[user_id] = history
+        # Always update in-memory cache (keyed by storage key)
+        self._histories[self._storage_key(user_id)] = history
 
         if self._store is not None:
             key = self._session_key(user_id)
@@ -140,7 +170,7 @@ class BotSessionManager:
         Uses both a per-user lock (serialise same user) and a per-agent
         lock (prevent concurrent history swaps on a shared Agent).
         """
-        self._last_active[user_id] = time.monotonic()
+        self._last_active[self._storage_key(user_id)] = time.monotonic()
         user_lock = self._get_lock(user_id)
         agent_lock = self._get_agent_lock(agent)
         async with user_lock:
@@ -183,12 +213,12 @@ class BotSessionManager:
             uid for uid, ts in self._last_active.items()
             if (now - ts) > max_age_seconds
         ]
-        for uid in stale:
-            self._histories.pop(uid, None)
-            self._last_active.pop(uid, None)
-            self._locks.pop(uid, None)
+        for storage_key in stale:
+            self._histories.pop(storage_key, None)
+            self._last_active.pop(storage_key, None)
+            self._locks.pop(storage_key, None)
             if self._store is not None:
-                key = self._session_key(uid)
+                key = self._persist_key(storage_key)
                 try:
                     self._store.clear_session(key)
                 except Exception as e:
@@ -199,9 +229,11 @@ class BotSessionManager:
 
     def reset(self, user_id: str) -> bool:
         """Clear a user's session history.  Returns True if it existed."""
-        existed = user_id in self._histories
-        self._histories.pop(user_id, None)
-        self._last_active.pop(user_id, None)
+        key = self._storage_key(user_id)
+        existed = key in self._histories
+        self._histories.pop(key, None)
+        self._last_active.pop(key, None)
+        self._locks.pop(key, None)
 
         if self._store is not None:
             key = self._session_key(user_id)
@@ -217,8 +249,8 @@ class BotSessionManager:
         count = len(self._histories)
 
         if self._store is not None:
-            for user_id in list(self._histories.keys()):
-                key = self._session_key(user_id)
+            for storage_key in list(self._histories.keys()):
+                key = self._persist_key(storage_key)
                 try:
                     self._store.clear_session(key)
                 except Exception as e:
