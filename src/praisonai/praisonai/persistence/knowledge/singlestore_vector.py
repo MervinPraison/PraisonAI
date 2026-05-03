@@ -10,7 +10,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from .base import KnowledgeStore, KnowledgeDocument
+from .base import KnowledgeStore, KnowledgeDocument, validate_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,10 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
             table_prefix: Prefix for table names
             embedding_dim: Embedding dimension
         """
+        # ``table_prefix`` is interpolated directly into DDL/DML because
+        # SQL identifiers cannot be parameterized. Restrict it to the same
+        # safe identifier alphabet as collection names.
+        validate_identifier(table_prefix.rstrip("_") or "_", name="table_prefix")
         self.url = url
         self.host = host
         self.port = port
@@ -97,6 +101,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
         metadata: Optional[Dict[str, Any]] = None
     ) -> None:
         """Create a vector table."""
+        validate_identifier(name, name="collection name")
         self._init_client()
         
         table_name = f"{self.table_prefix}{name}"
@@ -115,6 +120,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
     
     def delete_collection(self, name: str) -> bool:
         """Delete a vector table."""
+        validate_identifier(name, name="collection name")
         self._init_client()
         
         table_name = f"{self.table_prefix}{name}"
@@ -128,6 +134,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
     
     def collection_exists(self, name: str) -> bool:
         """Check if table exists."""
+        validate_identifier(name, name="collection name")
         self._init_client()
         
         table_name = f"{self.table_prefix}{name}"
@@ -155,6 +162,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
         documents: List[KnowledgeDocument]
     ) -> List[str]:
         """Insert documents."""
+        validate_identifier(collection, name="collection name")
         self._init_client()
         
         table_name = f"{self.table_prefix}{collection}"
@@ -179,6 +187,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
         documents: List[KnowledgeDocument]
     ) -> List[str]:
         """Upsert documents."""
+        validate_identifier(collection, name="collection name")
         self._init_client()
         
         table_name = f"{self.table_prefix}{collection}"
@@ -206,6 +215,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
         score_threshold: Optional[float] = None
     ) -> List[KnowledgeDocument]:
         """Search for similar documents using vector search."""
+        validate_identifier(collection, name="collection name")
         self._init_client()
         
         table_name = f"{self.table_prefix}{collection}"
@@ -242,6 +252,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
         ids: List[str]
     ) -> List[KnowledgeDocument]:
         """Get documents by IDs."""
+        validate_identifier(collection, name="collection name")
         self._init_client()
         
         table_name = f"{self.table_prefix}{collection}"
@@ -312,6 +323,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
         filters: Optional[Dict[str, Any]] = None
     ) -> int:
         """Delete documents."""
+        validate_identifier(collection, name="collection name")
         self._init_client()
         
         table_name = f"{self.table_prefix}{collection}"
@@ -326,6 +338,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
     
     def count(self, collection: str) -> int:
         """Count documents."""
+        validate_identifier(collection, name="collection name")
         self._init_client()
         
         table_name = f"{self.table_prefix}{collection}"
