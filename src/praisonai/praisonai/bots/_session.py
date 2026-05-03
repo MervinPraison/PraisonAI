@@ -62,6 +62,7 @@ class BotSessionManager:
         max_history: int = 100,
         store: Optional[Any] = None,
         platform: str = "",
+        dlq: Optional[Any] = None,
     ) -> None:
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
         self._locks: Dict[str, asyncio.Lock] = {}
@@ -70,6 +71,10 @@ class BotSessionManager:
         self._store = store
         self._platform = platform
         self._last_active: Dict[str, float] = {}
+        # N4: optional inbound DLQ — when set, failed agent.chat() calls
+        # are persisted for later replay. Default ``None`` preserves
+        # legacy behaviour (exception bubbles up untouched).
+        self._dlq = dlq
 
     def _session_key(self, user_id: str) -> str:
         """Generate a deterministic session key for persistent storage."""
@@ -131,6 +136,9 @@ class BotSessionManager:
         agent: "Agent",
         user_id: str,
         prompt: str,
+        chat_id: str = "",
+        thread_id: str = "",
+        user_name: str = "",
     ) -> str:
         """Run ``agent.chat(prompt)`` with *user_id*-scoped history.
 
@@ -139,6 +147,13 @@ class BotSessionManager:
 
         Uses both a per-user lock (serialise same user) and a per-agent
         lock (prevent concurrent history swaps on a shared Agent).
+
+        N4 — Inbound DLQ: if a ``dlq`` was passed to ``__init__`` and
+        ``agent.chat()`` raises, the failing message is persisted to
+        the dead-letter queue **before** the exception is re-raised.
+        This makes the error visible to the caller (so the bot adapter
+        can log / show the user a friendly message) while preserving
+        the message for later replay.
         """
         self._last_active[user_id] = time.monotonic()
         user_lock = self._get_lock(user_id)
@@ -157,7 +172,27 @@ class BotSessionManager:
 
             try:
                 response = await loop.run_in_executor(None, agent.chat, prompt)
-            finally:
+            except Exception as exc:
+                # N4: persist the failed inbound message before bubbling.
+                if self._dlq is not None:
+                    try:
+                        self._dlq.enqueue(
+                            platform=self._platform,
+                            user_id=user_id,
+                            prompt=prompt,
+                            error=f"{type(exc).__name__}: {exc}",
+                            chat_id=chat_id,
+                            thread_id=thread_id,
+                            user_name=user_name,
+                        )
+                    except Exception as dlq_exc:  # pragma: no cover — defensive
+                        logger.error(
+                            "Failed to enqueue inbound DLQ entry: %s", dlq_exc
+                        )
+                async with agent_lock:
+                    agent.chat_history = saved_history
+                raise
+            else:
                 async with agent_lock:
                     # Capture updated history and restore agent's original
                     updated_history = agent.chat_history
@@ -168,7 +203,7 @@ class BotSessionManager:
                     None, self._save_history, user_id, updated_history
                 )
 
-            return response
+                return response
 
     def reap_stale(self, max_age_seconds: int) -> int:
         """Remove sessions older than *max_age_seconds*.  Returns count reaped.
