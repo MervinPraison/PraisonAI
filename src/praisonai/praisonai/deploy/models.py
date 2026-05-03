@@ -26,7 +26,7 @@ class APIConfig(BaseModel):
     port: int = Field(default=8005, description="Server port")
     workers: int = Field(default=1, description="Number of worker processes")
     cors_enabled: bool = Field(default=True, description="Enable CORS")
-    auth_enabled: bool = Field(default=False, description="Enable authentication")
+    auth_enabled: bool = Field(default=True, description="Enable authentication")
     auth_token: Optional[str] = Field(default=None, description="Authentication token")
     reload: bool = Field(default=False, description="Enable auto-reload for development")
 

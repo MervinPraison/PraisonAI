@@ -66,32 +66,10 @@ class AsyncSQLiteConversationStore(ConversationStore):
         self._initialized = True
     
     async def _create_tables(self):
-        """Create required tables if they don't exist and handle schema migrations."""
+        """Create required tables if they don't exist."""
         sessions_table = f"{self.table_prefix}sessions"
         messages_table = f"{self.table_prefix}messages"
-        legacy_sessions_table = "praisonai_sessions"
-        legacy_messages_table = "praisonai_messages"
         
-        # Check for legacy tables and migrate if needed
-        if self.table_prefix != "praisonai_":
-            cursor = await self._conn.execute("""
-                SELECT name FROM sqlite_master WHERE type='table' AND name=?
-            """, (legacy_sessions_table,))
-            legacy_exists = await cursor.fetchone() is not None
-            await cursor.close()
-            
-            cursor = await self._conn.execute("""
-                SELECT name FROM sqlite_master WHERE type='table' AND name=?
-            """, (sessions_table,))
-            new_exists = await cursor.fetchone() is not None
-            await cursor.close()
-            
-            if legacy_exists and not new_exists:
-                # Rename legacy tables
-                await self._conn.execute(f"ALTER TABLE {legacy_sessions_table} RENAME TO {sessions_table}")
-                await self._conn.execute(f"ALTER TABLE {legacy_messages_table} RENAME TO {messages_table}")
-        
-        # Create tables with new schema
         await self._conn.execute(f"""
             CREATE TABLE IF NOT EXISTS {sessions_table} (
                 session_id TEXT PRIMARY KEY,
@@ -118,47 +96,12 @@ class AsyncSQLiteConversationStore(ConversationStore):
             )
         """)
         
-        # Migrate existing tables to add missing columns if needed
-        await self._migrate_schema(sessions_table, messages_table)
-        
         await self._conn.execute(f"""
             CREATE INDEX IF NOT EXISTS idx_{messages_table}_session 
             ON {messages_table}(session_id)
         """)
         
         await self._conn.commit()
-    
-    async def _migrate_schema(self, sessions_table: str, messages_table: str):
-        """Add missing columns to existing tables."""
-        try:
-            # Check if state column exists in sessions table
-            cursor = await self._conn.execute(f"PRAGMA table_info({sessions_table})")
-            columns = await cursor.fetchall()
-            await cursor.close()
-            
-            has_state = any(col[1] == 'state' for col in columns)
-            if not has_state:
-                await self._conn.execute(f"ALTER TABLE {sessions_table} ADD COLUMN state TEXT")
-            
-            # Check if tool_calls and tool_call_id columns exist in messages table
-            cursor = await self._conn.execute(f"PRAGMA table_info({messages_table})")
-            columns = await cursor.fetchall()
-            await cursor.close()
-            
-            has_tool_calls = any(col[1] == 'tool_calls' for col in columns)
-            has_tool_call_id = any(col[1] == 'tool_call_id' for col in columns)
-            
-            if not has_tool_calls:
-                await self._conn.execute(f"ALTER TABLE {messages_table} ADD COLUMN tool_calls TEXT")
-            
-            if not has_tool_call_id:
-                await self._conn.execute(f"ALTER TABLE {messages_table} ADD COLUMN tool_call_id TEXT")
-                
-        except Exception as e:
-            # Log the error but don't fail
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Schema migration warning: {e}")
     
     async def async_create_session(self, session: ConversationSession) -> ConversationSession:
         """Create a new session asynchronously."""
@@ -225,7 +168,8 @@ class AsyncSQLiteConversationStore(ConversationStore):
             UPDATE {table} 
             SET name = ?, state = ?, metadata = ?, updated_at = ?
             WHERE session_id = ?
-        """, (session.name, json.dumps(session.state) if session.state else None,
+        """, (session.name,
+              json.dumps(session.state) if session.state else None,
               json.dumps(session.metadata) if session.metadata else None,
               session.updated_at, session.session_id))
         await self._conn.commit()

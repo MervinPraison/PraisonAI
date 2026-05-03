@@ -7,9 +7,32 @@ KnowledgeStore handles vector embeddings and semantic search for RAG.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+import re
 import time
 import uuid
 import hashlib
+
+
+_IDENTIFIER_RE = re.compile(r'^[a-zA-Z0-9_]+$')
+
+
+def validate_identifier(value: str, name: str = "identifier") -> str:
+    """Validate that ``value`` is safe for use as a SQL/CQL identifier.
+
+    Knowledge-store backends interpolate collection names directly into
+    DDL/DML (``CREATE TABLE``, ``DROP TABLE``, ``SELECT ... FROM`` etc.)
+    because identifiers cannot be parameterized. We therefore restrict
+    such values to ``[A-Za-z0-9_]+`` so attacker-controlled input cannot
+    smuggle additional statements (CWE-89/CWE-943).
+
+    Mirrors :func:`praisonai.persistence.conversation.base.validate_identifier`
+    so both stacks share the same allowlist.
+    """
+    if not isinstance(value, str) or not _IDENTIFIER_RE.match(value):
+        raise ValueError(
+            f"{name} must be non-empty and contain only alphanumerics and underscores"
+        )
+    return value
 
 
 @dataclass

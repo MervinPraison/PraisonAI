@@ -109,11 +109,11 @@ agents:
         deploy_yaml = """deploy:
   type: api
   api:
-    host: 0.0.0.0
+    host: 127.0.0.1
     port: 8005
     workers: 1
     cors_enabled: true
-    auth_enabled: false
+    auth_enabled: true
 """
     
     elif deploy_type == DeployType.DOCKER:

@@ -86,6 +86,41 @@ def register_cli_tools() -> None:
             return f"Error: {e}"
     
     # Rules tools
+    def _resolve_rule_path(rule_name: str):
+        """Resolve a rule_name to a path strictly inside ``~/.praison/rules``.
+
+        ``rule_name`` is treated as a single filename (no separators, no
+        traversal, no leading dot). The fully-resolved path must remain
+        within the rules directory; otherwise the input is rejected. This
+        prevents arbitrary file write/read/delete (e.g. dropping a
+        ``.pth`` file in user site-packages) when an untrusted MCP caller
+        invokes ``praisonai.rules.*``.
+        """
+        import os
+        from pathlib import Path
+        if not isinstance(rule_name, str) or not rule_name:
+            raise ValueError("rule_name must be a non-empty string")
+        # Reject any directory separator, traversal token, NUL byte, or
+        # leading dot (which would target hidden files / parent dirs).
+        if (
+            "/" in rule_name
+            or "\\" in rule_name
+            or "\x00" in rule_name
+            or rule_name.startswith(".")
+            or rule_name in ("..", ".")
+            or os.path.sep in rule_name
+            or (os.path.altsep and os.path.altsep in rule_name)
+        ):
+            raise ValueError(f"invalid rule_name: {rule_name!r}")
+        rules_dir = Path(os.path.expanduser("~/.praison/rules")).resolve()
+        candidate = (rules_dir / rule_name).resolve()
+        # Ensure no symlink-or-traversal escape from rules_dir.
+        try:
+            candidate.relative_to(rules_dir)
+        except ValueError as exc:
+            raise ValueError(f"invalid rule_name: {rule_name!r}") from exc
+        return rules_dir, candidate
+
     @register_tool("praisonai.rules.list")
     def rules_list() -> str:
         """List active rules."""
@@ -103,13 +138,12 @@ def register_cli_tools() -> None:
     def rules_show(rule_name: str) -> str:
         """Show a specific rule."""
         try:
-            import os
-            rule_path = os.path.expanduser(f"~/.praison/rules/{rule_name}")
-            if not os.path.exists(rule_path):
+            _, rule_path = _resolve_rule_path(rule_name)
+            if not rule_path.exists():
                 return f"Rule not found: {rule_name}"
-            with open(rule_path, 'r') as f:
-                content = f.read()
-            return content
+            return rule_path.read_text()
+        except ValueError as e:
+            return f"Error: {e}"
         except Exception as e:
             return f"Error: {e}"
     
@@ -117,13 +151,12 @@ def register_cli_tools() -> None:
     def rules_create(rule_name: str, content: str) -> str:
         """Create a new rule."""
         try:
-            import os
-            rules_dir = os.path.expanduser("~/.praison/rules")
-            os.makedirs(rules_dir, exist_ok=True)
-            rule_path = os.path.join(rules_dir, rule_name)
-            with open(rule_path, 'w') as f:
-                f.write(content)
+            rules_dir, rule_path = _resolve_rule_path(rule_name)
+            rules_dir.mkdir(parents=True, exist_ok=True)
+            rule_path.write_text(content)
             return f"Rule created: {rule_name}"
+        except ValueError as e:
+            return f"Error: {e}"
         except Exception as e:
             return f"Error: {e}"
     
@@ -131,12 +164,13 @@ def register_cli_tools() -> None:
     def rules_delete(rule_name: str) -> str:
         """Delete a rule."""
         try:
-            import os
-            rule_path = os.path.expanduser(f"~/.praison/rules/{rule_name}")
-            if not os.path.exists(rule_path):
+            _, rule_path = _resolve_rule_path(rule_name)
+            if not rule_path.exists():
                 return f"Rule not found: {rule_name}"
-            os.remove(rule_path)
+            rule_path.unlink()
             return f"Rule deleted: {rule_name}"
+        except ValueError as e:
+            return f"Error: {e}"
         except Exception as e:
             return f"Error: {e}"
     

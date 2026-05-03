@@ -8,7 +8,7 @@ Install: pip install cassandra-driver
 import logging
 from typing import Any, Dict, List, Optional
 
-from .base import KnowledgeStore, KnowledgeDocument
+from .base import KnowledgeStore, KnowledgeDocument, validate_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,10 @@ class CassandraKnowledgeStore(KnowledgeStore):
                 "Install with: pip install cassandra-driver"
             )
         
+        # ``keyspace`` is interpolated directly into CQL DDL; CQL
+        # identifiers cannot be parameterized. Restrict it to the safe
+        # identifier alphabet to prevent injection.
+        validate_identifier(keyspace, name="keyspace")
         self._Cluster = Cluster
         self.keyspace = keyspace
         
@@ -78,6 +82,7 @@ class CassandraKnowledgeStore(KnowledgeStore):
         metadata: Optional[Dict[str, Any]] = None
     ) -> None:
         """Create a new table with vector column."""
+        validate_identifier(name, name="collection name")
         similarity_map = {"cosine": "COSINE", "euclidean": "EUCLIDEAN", "dot": "DOT_PRODUCT"}
         
         self._session.execute(f"""
@@ -100,6 +105,7 @@ class CassandraKnowledgeStore(KnowledgeStore):
     
     def delete_collection(self, name: str) -> bool:
         """Delete a table."""
+        validate_identifier(name, name="collection name")
         try:
             self._session.execute(f"DROP TABLE IF EXISTS {name}")
             return True
@@ -109,6 +115,7 @@ class CassandraKnowledgeStore(KnowledgeStore):
     
     def collection_exists(self, name: str) -> bool:
         """Check if a table exists."""
+        validate_identifier(name, name="collection name")
         result = self._session.execute("""
             SELECT table_name FROM system_schema.tables 
             WHERE keyspace_name = %s AND table_name = %s
@@ -128,6 +135,7 @@ class CassandraKnowledgeStore(KnowledgeStore):
         documents: List[KnowledgeDocument]
     ) -> List[str]:
         """Insert documents."""
+        validate_identifier(collection, name="collection name")
         ids = []
         for doc in documents:
             if doc.embedding is None:
@@ -158,6 +166,7 @@ class CassandraKnowledgeStore(KnowledgeStore):
         score_threshold: Optional[float] = None
     ) -> List[KnowledgeDocument]:
         """Search for similar documents using ANN."""
+        validate_identifier(collection, name="collection name")
         result = self._session.execute(f"""
             SELECT id, content, content_hash, created_at, similarity_cosine(embedding, %s) as score
             FROM {collection}
@@ -188,6 +197,7 @@ class CassandraKnowledgeStore(KnowledgeStore):
         ids: List[str]
     ) -> List[KnowledgeDocument]:
         """Get documents by IDs."""
+        validate_identifier(collection, name="collection name")
         documents = []
         for doc_id in ids:
             result = self._session.execute(f"""
@@ -215,6 +225,7 @@ class CassandraKnowledgeStore(KnowledgeStore):
         filters: Optional[Dict[str, Any]] = None
     ) -> int:
         """Delete documents."""
+        validate_identifier(collection, name="collection name")
         if ids:
             for doc_id in ids:
                 self._session.execute(f"DELETE FROM {collection} WHERE id = %s", (doc_id,))
@@ -223,6 +234,7 @@ class CassandraKnowledgeStore(KnowledgeStore):
     
     def count(self, collection: str) -> int:
         """Count documents."""
+        validate_identifier(collection, name="collection name")
         result = self._session.execute(f"SELECT COUNT(*) FROM {collection}")
         return result.one()[0]
     

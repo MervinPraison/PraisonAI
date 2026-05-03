@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from .base import KnowledgeStore, KnowledgeDocument
+from .base import KnowledgeStore, KnowledgeDocument, validate_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,10 @@ class PGVectorKnowledgeStore(KnowledgeStore):
                 "Install with: pip install psycopg2-binary"
             )
         
+        # ``schema`` and the per-collection table name are interpolated
+        # directly into DDL/DML; SQL identifiers cannot be parameterized.
+        # Restrict ``schema`` to the safe identifier alphabet.
+        validate_identifier(schema, name="schema")
         self._psycopg2 = psycopg2
         self._RealDictCursor = RealDictCursor
         self.schema = schema
@@ -80,6 +84,9 @@ class PGVectorKnowledgeStore(KnowledgeStore):
             self._put_conn(conn)
     
     def _table_name(self, collection: str) -> str:
+        # All public methods route through ``_table_name``; validating here
+        # blocks SQL injection via attacker-controlled collection names.
+        validate_identifier(collection, name="collection name")
         return f"{self.schema}.praison_vec_{collection}"
     
     def create_collection(
@@ -135,6 +142,7 @@ class PGVectorKnowledgeStore(KnowledgeStore):
     
     def collection_exists(self, name: str) -> bool:
         """Check if a collection exists."""
+        validate_identifier(name, name="collection name")
         table = self._table_name(name)
         conn = self._get_conn()
         try:

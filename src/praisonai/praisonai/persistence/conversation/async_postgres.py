@@ -105,34 +105,11 @@ class AsyncPostgresConversationStore(ConversationStore):
             self._initialized = True
     
     async def _create_tables(self):
-        """Create required tables if they don't exist and handle schema migrations."""
+        """Create required tables if they don't exist."""
         sessions_table = f"{self.table_prefix}sessions"
         messages_table = f"{self.table_prefix}messages"
-        legacy_sessions_table = f"praisonai_sessions"
-        legacy_messages_table = f"praisonai_messages"
         
         async with self._pool.acquire() as conn:
-            # Check if legacy tables exist and no new tables exist - migrate
-            legacy_check = await conn.fetchval(f"""
-                SELECT EXISTS (
-                    SELECT 1 FROM information_schema.tables 
-                    WHERE table_name = '{legacy_sessions_table}'
-                )
-            """)
-            
-            new_check = await conn.fetchval(f"""
-                SELECT EXISTS (
-                    SELECT 1 FROM information_schema.tables 
-                    WHERE table_name = '{sessions_table.split(".", 1)[-1]}'
-                )
-            """)
-            
-            if legacy_check and not new_check and self.table_prefix != "praisonai_":
-                # Rename legacy tables to new prefix
-                await conn.execute(f"ALTER TABLE {legacy_sessions_table} RENAME TO {sessions_table}")
-                await conn.execute(f"ALTER TABLE {legacy_messages_table} RENAME TO {messages_table}")
-            
-            # Create tables with new schema
             await conn.execute(f"""
                 CREATE TABLE IF NOT EXISTS {sessions_table} (
                     session_id VARCHAR(255) PRIMARY KEY,
@@ -159,38 +136,10 @@ class AsyncPostgresConversationStore(ConversationStore):
                 )
             """)
             
-            # Migrate existing tables to add missing columns if needed
-            await self._migrate_schema(conn, sessions_table, messages_table)
-            
             await conn.execute(f"""
                 CREATE INDEX IF NOT EXISTS idx_{messages_table}_session 
                 ON {messages_table}(session_id)
             """)
-    
-    async def _migrate_schema(self, conn, sessions_table: str, messages_table: str):
-        """Add missing columns to existing tables."""
-        try:
-            # Add state column to sessions if missing
-            await conn.execute(f"""
-                ALTER TABLE {sessions_table} 
-                ADD COLUMN IF NOT EXISTS state JSONB
-            """)
-            
-            # Add tool_calls and tool_call_id columns to messages if missing
-            await conn.execute(f"""
-                ALTER TABLE {messages_table} 
-                ADD COLUMN IF NOT EXISTS tool_calls JSONB
-            """)
-            
-            await conn.execute(f"""
-                ALTER TABLE {messages_table} 
-                ADD COLUMN IF NOT EXISTS tool_call_id VARCHAR(255)
-            """)
-        except Exception as e:
-            # Log the error but don't fail - the columns might already exist
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Schema migration warning: {e}")
     
     async def async_create_session(self, session: ConversationSession) -> ConversationSession:
         """Create a new session asynchronously."""
@@ -203,7 +152,7 @@ class AsyncPostgresConversationStore(ConversationStore):
                 INSERT INTO {table} (session_id, user_id, agent_id, name, state, metadata, created_at, updated_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             """, session.session_id, session.user_id, session.agent_id, session.name,
-                json.dumps(session.state) if session.state is not None else None,
+                json.dumps(session.state) if session.state else None,
                 json.dumps(session.metadata) if session.metadata else None,
                 session.created_at, session.updated_at)
         
@@ -255,7 +204,7 @@ class AsyncPostgresConversationStore(ConversationStore):
                 SET name = $2, state = $3, metadata = $4, updated_at = $5
                 WHERE session_id = $1
             """, session.session_id, session.name,
-                json.dumps(session.state) if session.state is not None else None,
+                json.dumps(session.state) if session.state else None,
                 json.dumps(session.metadata) if session.metadata else None,
                 session.updated_at)
         
@@ -355,7 +304,7 @@ class AsyncPostgresConversationStore(ConversationStore):
                 INSERT INTO {table} (id, session_id, role, content, tool_calls, tool_call_id, metadata, created_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             """, message.id, session_id, message.role, message.content,
-                json.dumps(message.tool_calls) if message.tool_calls is not None else None,
+                json.dumps(message.tool_calls) if message.tool_calls else None,
                 message.tool_call_id,
                 json.dumps(message.metadata) if message.metadata else None,
                 message.created_at)
