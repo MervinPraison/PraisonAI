@@ -11,7 +11,8 @@ Components:
 - DeploymentScheduler: Schedule deployment operations
 """
 
-from .base import ScheduleParser, ExecutorInterface, PraisonAgentExecutor
+from .base import ExecutorInterface, PraisonAgentExecutor
+from .shared import ScheduleParser
 
 __all__ = [
     'ScheduleParser',

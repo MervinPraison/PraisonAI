@@ -59,10 +59,7 @@ def _load_optional(key: str, loader):
         return _optional_cache[key]
 
 
-# Bounded LRU cache for OpenAI clients (one per (api_key, base_url) tuple)
-_OPENAI_CLIENT_CACHE_MAX = 8
-_openai_clients: "OrderedDict[tuple, object]" = OrderedDict()
-_openai_clients_lock = threading.Lock()
+# OpenAI client creation removed - create per-call instead of global cache
 
 
 # --- CrewAI lazy loading ---
@@ -199,38 +196,26 @@ def _check_openai_available() -> bool:
     return result is not None
 
 
-def _get_openai_client(api_key: str = None, base_url: str = None):
-    """Lazy load OpenAI client with bounded LRU cache (thread-safe, multi-tenant).
-
-    Multi-tenant safe: each (api_key, base_url) tuple gets its own cached client.
-    Bounded by _OPENAI_CLIENT_CACHE_MAX with proper LRU eviction.
+def _create_openai_client(api_key: str = None, base_url: str = None):
+    """Create a new OpenAI client for each request (no global state).
+    
+    Args:
+        api_key: OpenAI API key, defaults to OPENAI_API_KEY env var
+        base_url: OpenAI base URL for custom endpoints
+        
+    Returns:
+        OpenAI client instance
+        
+    Raises:
+        ImportError: If openai package is not installed
     """
-    key = (api_key or os.environ.get("OPENAI_API_KEY"), base_url)
-
-    with _openai_clients_lock:
-        # Check if client exists and update LRU position
-        client = _openai_clients.get(key)
-        if client is not None:
-            _openai_clients.move_to_end(key)
-            return client
-
-        # Create new client
-        try:
-            from openai import OpenAI
-        except ImportError as e:
-            raise ImportError("Install with: pip install openai") from e
-        client = OpenAI(api_key=key[0], base_url=key[1])
-        _openai_clients[key] = client
-
-        # Bound the cache; close the LRU victim
-        if len(_openai_clients) > _OPENAI_CLIENT_CACHE_MAX:
-            _, victim = _openai_clients.popitem(last=False)
-            try:
-                victim.close()
-            except Exception:
-                pass  # Best-effort cleanup
-
-        return client
+    try:
+        from openai import OpenAI
+    except ImportError as e:
+        raise ImportError("Install with: pip install openai") from e
+        
+    resolved_api_key = api_key or os.environ.get("OPENAI_API_KEY")
+    return OpenAI(api_key=resolved_api_key, base_url=base_url)
 
 
 # Use namespaced logger; root logger is configured only by the CLI
@@ -518,7 +503,7 @@ class BaseAutoGenerator:
         
         # Fallback to OpenAI SDK (uses beta.chat.completions.parse)
         if _check_openai_available():
-            client = _get_openai_client(
+            client = _create_openai_client(
                 api_key=self.config_list[0].get('api_key'),
                 base_url=self.config_list[0].get('base_url')
             )
