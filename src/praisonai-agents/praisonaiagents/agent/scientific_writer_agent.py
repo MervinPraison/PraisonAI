@@ -363,7 +363,7 @@ class ScientificWriterAgent:
     
     def _extract_section(self, text: str, section_name: str) -> Optional[str]:
         """Extract a specific section from the generated text."""
-        pattern = rf"##?\s+{re.escape(section_name)}[^\n]*\n(.*?)(?=\n##?\s|\Z)"
+        pattern = rf"##?\s+{re.escape(section_name)}[^\n]*\n(.*?)(?=\n\s*##?\s|\Z)"
         match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
         return match.group(1).strip() if match else None
     
