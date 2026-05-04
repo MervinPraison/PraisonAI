@@ -353,31 +353,22 @@ class LinearBot(ChatCommandMixin, MessageHookMixin):
         if not self._agent:
             logger.warning("No agent configured")
             return
-            
+
         try:
-            # Get or create session
             user_id = message.sender.user_id if message.sender else "unknown"
             session_id = message.metadata.get("session_id") if message.metadata else None
-            
-            async with self._session_mgr.get_session(
-                user_id=user_id,
-                agent=self._agent,
-                session_id=session_id
-            ) as agent:
-                
-                # Process with agent
-                import asyncio
-                loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(None, agent.chat, message.text)
-                
-                # Send response back to Linear
-                if response and message.metadata:
-                    await self._send_comment(
-                        issue_id=message.metadata.get("issue", {}).get("id", ""),
-                        comment=response,
-                        session_id=session_id
-                    )
-                    
+
+            # Use BotSessionManager.chat() which handles history isolation and run_in_executor
+            response = await self._session_mgr.chat(self._agent, user_id, message.text)
+
+            # Send response back to Linear
+            if response and message.metadata:
+                await self._send_comment(
+                    issue_id=message.metadata.get("issue", {}).get("id", ""),
+                    comment=response,
+                    session_id=session_id,
+                )
+
         except Exception as e:
             logger.error(f"Error processing agent message: {e}")
 
@@ -472,11 +463,12 @@ class LinearBot(ChatCommandMixin, MessageHookMixin):
             "variables": variables or {}
         }
         
+        import aiohttp
         async with self._http_session.post(
             LINEAR_API_BASE,
             headers=headers,
             data=json.dumps(payload),
-            timeout=30
+            timeout=aiohttp.ClientTimeout(total=30),
         ) as response:
             data = await response.json()
             
