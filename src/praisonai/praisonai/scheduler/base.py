@@ -10,11 +10,9 @@ This module provides shared functionality for all schedulers:
 import logging
 from abc import ABC, abstractmethod
 from typing import Any
+from .shared import ScheduleParser as ScheduleParser  # canonical definition lives in shared.py
 
 logger = logging.getLogger(__name__)
-
-
-from .shared import ScheduleParser  # noqa: F401 — canonical definition lives in shared.py
 
 
 class ExecutorInterface(ABC):

@@ -1,7 +1,7 @@
 """Shared primitives for sync & async schedulers."""
 
 class ScheduleParser:
-    """Shared schedule expression parser for both sync and async schedulers."""
+    """Parse schedule expressions into intervals in seconds."""
     
     @staticmethod
     def parse(schedule_expr: str) -> int:
@@ -12,8 +12,9 @@ class ScheduleParser:
         - "daily" -> 86400 seconds
         - "hourly" -> 3600 seconds
         - "*/30m" -> 1800 seconds (every 30 minutes)
-        - "*/1h" -> 3600 seconds (every 1 hour)
-        - "60" -> 60 seconds (plain number)
+        - "*/6h" -> 21600 seconds (every 6 hours)
+        - "*/30s" -> 30 seconds (every 30 seconds)
+        - "3600" -> 3600 seconds (plain number)
         
         Args:
             schedule_expr: Schedule expression string
@@ -23,6 +24,14 @@ class ScheduleParser:
             
         Raises:
             ValueError: If schedule format is not supported
+            
+        Examples:
+            >>> ScheduleParser.parse("hourly")
+            3600
+            >>> ScheduleParser.parse("*/30m")
+            1800
+            >>> ScheduleParser.parse("daily")
+            86400
         """
         expr = schedule_expr.strip().lower()
         
