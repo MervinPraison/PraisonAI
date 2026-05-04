@@ -296,7 +296,6 @@ class SSHSandbox:
         
         try:
             # Convert command to string safely based on shell parameter
-            from ._shell import build_argv
             if isinstance(command, list):
                 if shell:
                     # Shell mode: join with proper quoting
@@ -524,13 +523,8 @@ class SSHSandbox:
         shell: bool = False
     ):
         """Run command with resource limits."""
-        # Change to working directory
-        if shell:
-            # Shell mode: only quote the working directory, command is already properly handled
-            full_command = f"cd {shlex.quote(working_dir)} && {command}"
-        else:
-            # Non-shell mode: quote the command for safety (command is already escaped from caller)
-            full_command = f"cd {shlex.quote(working_dir)} && {command}"
+        # Change to working directory; command is already safely escaped by the caller
+        full_command = f"cd {shlex.quote(working_dir)} && {command}"
         
         # Set timeout
         timeout = None

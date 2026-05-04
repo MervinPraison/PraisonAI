@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import shlex
 import tempfile
 import time
 import uuid
@@ -243,9 +244,6 @@ class DockerSandbox:
         limits = limits or self.config.resource_limits
         execution_id = str(uuid.uuid4())
         
-        # Import here to avoid circular import
-        import shlex
-        
         if isinstance(command, list):
             # Always quote list elements to prevent shell injection
             cmd_str = " ".join(shlex.quote(arg) for arg in command)
@@ -254,7 +252,7 @@ class DockerSandbox:
                 # Caller explicitly requested shell evaluation
                 cmd_str = command
             else:
-                # Parse string safely then quote each part
+                # Parse string safely then re-quote each part
                 cmd_parts = shlex.split(command)
                 cmd_str = " ".join(shlex.quote(part) for part in cmd_parts)
         

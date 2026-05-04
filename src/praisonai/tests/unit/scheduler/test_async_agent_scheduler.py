@@ -273,7 +273,7 @@ class TestAsyncAgentSchedulerLifecycle:
     @pytest.mark.asyncio
     async def test_get_stats_initial_state(self):
         scheduler = _make_scheduler()
-        stats = scheduler.get_stats()
+        stats = await scheduler.get_stats()
         assert stats["is_running"] is False
         assert stats["total_executions"] == 0
         assert stats["successful_executions"] == 0
