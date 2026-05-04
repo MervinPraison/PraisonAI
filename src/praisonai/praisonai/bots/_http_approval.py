@@ -15,7 +15,7 @@ Usage::
     agent = Agent(
         name="assistant",
         tools=[execute_command],
-        approval=HTTPApproval(host="0.0.0.0", port=8899),
+        approval=HTTPApproval(port=8899),
     )
 """
 
