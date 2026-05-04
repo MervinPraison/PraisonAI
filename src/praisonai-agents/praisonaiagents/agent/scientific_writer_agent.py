@@ -381,4 +381,6 @@ class ScientificWriterAgent:
     # Delegate other methods to the underlying agent
     def __getattr__(self, name):
         """Delegate unknown attributes to the underlying agent."""
+        if name == 'agent':
+            raise AttributeError("'ScientificWriterAgent' object has no attribute 'agent'")
         return getattr(self.agent, name)
