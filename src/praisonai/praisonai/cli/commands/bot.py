@@ -363,6 +363,74 @@ def bot_whatsapp(
     )
 
 
+@app.command("linear")
+def bot_linear(
+    token: Optional[str] = typer.Option(None, "--token", "-t", help="Linear OAuth token", envvar="LINEAR_OAUTH_TOKEN"),
+    signing_secret: Optional[str] = typer.Option(None, "--signing-secret", help="Linear webhook signing secret", envvar="LINEAR_WEBHOOK_SECRET"),
+    port: int = typer.Option(8080, "--port", "-p", help="Webhook server port"),
+    agent: Optional[str] = typer.Option(None, "--agent", "-a", help="Agent YAML configuration file"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model to use"),
+    browser: bool = typer.Option(False, "--browser", help="Enable browser control"),
+    browser_profile: str = typer.Option("default", "--browser-profile", help="Browser profile name"),
+    browser_headless: bool = typer.Option(False, "--browser-headless", help="Run browser headless"),
+    tools: Optional[List[str]] = typer.Option(None, "--tools", help="Tools to enable"),
+    skills: Optional[List[str]] = typer.Option(None, "--skills", help="Skills to enable"),
+    skills_dir: Optional[str] = typer.Option(None, "--skills-dir", help="Custom skills directory"),
+    memory: bool = typer.Option(False, "--memory", help="Enable memory"),
+    memory_provider: str = typer.Option("default", "--memory-provider", help="Memory provider"),
+    knowledge: bool = typer.Option(False, "--knowledge", help="Enable knowledge/RAG"),
+    knowledge_sources: Optional[List[str]] = typer.Option(None, "--knowledge-sources", help="Knowledge sources"),
+    web_search: bool = typer.Option(False, "--web", "--web-search", help="Enable web search"),
+    web_provider: str = typer.Option("duckduckgo", "--web-provider", help="Web search provider"),
+    sandbox: bool = typer.Option(False, "--sandbox", help="Enable sandbox mode"),
+    exec_enabled: bool = typer.Option(False, "--exec", help="Enable exec tool"),
+    auto_approve: bool = typer.Option(False, "--auto-approve", help="Auto-approve all tool executions"),
+    session_id: Optional[str] = typer.Option(None, "--session-id", help="Session ID"),
+    user_id: Optional[str] = typer.Option(None, "--user-id", help="User ID for memory isolation"),
+    thinking: Optional[str] = typer.Option(None, "--thinking", help="Thinking mode (off, minimal, low, medium, high)"),
+):
+    """Start a Linear bot with full agent capabilities.
+    
+    Handles Linear AgentSession webhooks for issue mentions and assignments.
+    
+    Examples:
+        praisonai bot linear --token $LINEAR_OAUTH_TOKEN --signing-secret $LINEAR_WEBHOOK_SECRET
+        praisonai bot linear --agent agents.yaml --memory --web --tools linear_tools
+    """
+    from ..features.bots_cli import BotHandler, BotCapabilities
+    
+    capabilities = BotCapabilities(
+        model=model,
+        browser=browser,
+        browser_profile=browser_profile,
+        browser_headless=browser_headless,
+        tools=tools,
+        skills=skills,
+        skills_dir=skills_dir,
+        memory=memory,
+        memory_provider=memory_provider,
+        knowledge=knowledge,
+        knowledge_sources=knowledge_sources,
+        web_search=web_search,
+        web_provider=web_provider,
+        sandbox=sandbox,
+        exec_enabled=exec_enabled,
+        auto_approve=auto_approve,
+        session_id=session_id,
+        user_id=user_id,
+        thinking=thinking,
+    )
+    
+    handler = BotHandler()
+    handler.start_linear(
+        token=token,
+        signing_secret=signing_secret,
+        webhook_port=port,
+        agent_file=agent,
+        capabilities=capabilities,
+    )
+
+
 @app.command("email")
 def bot_email(
     token: Optional[str] = typer.Option(None, "--token", "-t", help="Email app password", envvar="EMAIL_APP_PASSWORD"),
@@ -502,6 +570,7 @@ Start a bot on any platform with: praisonai bot <platform>
   [green]discord[/green]     Discord Bot API  
   [green]slack[/green]       Slack Socket Mode
   [green]whatsapp[/green]    WhatsApp Cloud API or Web mode (QR scan)
+  [green]linear[/green]      Linear AgentSession webhooks
   [green]email[/green]       Email via IMAP/SMTP
   [green]agentmail[/green]   AgentMail API (API-first email for AI agents)
 
@@ -531,6 +600,7 @@ Start a bot on any platform with: praisonai bot <platform>
   praisonai bot discord --tools DuckDuckGoTool --memory --model gpt-4o
   praisonai bot whatsapp --token $WHATSAPP_ACCESS_TOKEN --phone-id $WHATSAPP_PHONE_NUMBER_ID
   praisonai bot whatsapp --mode web
+  praisonai bot linear --token $LINEAR_OAUTH_TOKEN --signing-secret $LINEAR_WEBHOOK_SECRET
 """
         try:
             from rich import print as rprint

@@ -1694,6 +1694,16 @@ class WebSocketGateway:
                 mode=wa_mode,
                 creds_dir=ch_cfg.get("creds_dir"),
             )
+        elif channel_type == "linear":
+            from praisonai.bots import LinearBot
+            linear_token = token or os.environ.get("LINEAR_OAUTH_TOKEN", "") or os.environ.get("LINEAR_API_KEY", "")
+            return LinearBot(
+                token=linear_token,
+                agent=agent,
+                config=config,
+                signing_secret=ch_cfg.get("signing_secret", "") or os.environ.get("LINEAR_WEBHOOK_SECRET", ""),
+                webhook_port=int(ch_cfg.get("webhook_port", 8080)),
+            )
         elif channel_type == "email":
             from praisonai.bots import EmailBot
             email_token = token or os.environ.get("EMAIL_APP_PASSWORD", "")
@@ -1736,8 +1746,8 @@ class WebSocketGateway:
                 # Use the lower-level API instead.
                 if self._is_telegram_bot(bot):
                     await self._start_telegram_bot_polling(name, bot)
-                elif type(bot).__name__ == "WhatsAppBot":
-                    # WhatsApp runs its own aiohttp webhook server
+                elif type(bot).__name__ in ("WhatsAppBot", "LinearBot"):
+                    # WhatsApp/Linear run their own aiohttp webhook servers
                     self._inject_routing_handler(name, bot)
                     await bot.start()
                 else:

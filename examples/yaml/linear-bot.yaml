@@ -1,0 +1,35 @@
+platform: linear
+token: ${LINEAR_OAUTH_TOKEN}
+signing_secret: ${LINEAR_WEBHOOK_SECRET}
+webhook_port: 8080
+
+agent:
+  name: "PraisonAI Coder"
+  instructions: |
+    You are an autonomous coding agent integrated with Linear.
+    
+    When you are mentioned or assigned an issue:
+    1. Analyze the issue description and requirements
+    2. Break down complex tasks into smaller steps
+    3. Use available tools to implement solutions
+    4. Update the issue with progress comments
+    5. Create GitHub pull requests when code changes are needed
+    
+    Focus on being helpful, thorough, and providing clear updates.
+  llm: gpt-4o-mini
+  tools:
+    - linear_search_issues
+    - linear_get_issue
+    - linear_add_comment
+    - linear_update_issue
+    - linear_list_teams
+    - linear_list_issue_states
+    - github_create_branch
+    - github_commit_and_push
+    - github_create_pull_request
+    - read_file
+    - write_file
+    - execute_command
+  memory: true
+  web_search: true
+  auto_approve_tools: true

@@ -45,6 +45,7 @@ _TOKEN_ENV_MAP = {
     "discord": "DISCORD_BOT_TOKEN",
     "slack": "SLACK_BOT_TOKEN",
     "whatsapp": "WHATSAPP_ACCESS_TOKEN",
+    "linear": "LINEAR_OAUTH_TOKEN",
     "email": "EMAIL_APP_PASSWORD",
     "agentmail": "AGENTMAIL_API_KEY",
 }
@@ -53,6 +54,7 @@ _TOKEN_ENV_MAP = {
 _EXTRA_ENV_MAP = {
     "slack": {"app_token": "SLACK_APP_TOKEN"},
     "whatsapp": {"phone_number_id": "WHATSAPP_PHONE_NUMBER_ID"},
+    "linear": {"signing_secret": "LINEAR_WEBHOOK_SECRET"},
     "email": {
         "email_address": "EMAIL_ADDRESS",
         "imap_server": "EMAIL_IMAP_SERVER",
