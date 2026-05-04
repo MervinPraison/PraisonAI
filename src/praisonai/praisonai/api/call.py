@@ -361,13 +361,13 @@ def run_server(port: int, host: str = "127.0.0.1", use_public: bool = False):
         host = "0.0.0.0"  # ngrok requires binding to all interfaces
 
     if host == "0.0.0.0" and not use_public:
-        import logging
-        logging.getLogger(__name__).warning(
+        logger.warning(
             "Binding to 0.0.0.0 exposes the server on all network interfaces. "
             "Use --public for ngrok tunnelling, or bind to 127.0.0.1 for local-only access."
         )
 
-    print(f"Starting Praison AI Call Server on http://{host}:{port}")
+    if not use_public:
+        print(f"Starting Praison AI Call Server on http://{host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 def main(args=None):
