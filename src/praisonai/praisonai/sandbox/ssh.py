@@ -523,7 +523,8 @@ class SSHSandbox:
         shell: bool = False
     ):
         """Run command with resource limits."""
-        # Change to working directory; command is already safely escaped by the caller
+        # Change to working directory and execute command
+        # Note: The command has already been processed for shell safety by the caller
         full_command = f"cd {shlex.quote(working_dir)} && {command}"
         
         # Set timeout

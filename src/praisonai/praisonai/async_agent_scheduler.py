@@ -253,9 +253,28 @@ class AsyncAgentScheduler:
         logger.info(f"Execution stats - Total: {self._execution_count}, Success: {self._success_count}, Failed: {self._failure_count}")
         return True
     
-    async def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> Dict[str, Any]:
         """
-        Get current execution statistics with atomic snapshot.
+        Get current execution statistics (synchronous, best-effort).
+        
+        Warning: This method provides a best-effort view of stats without
+        guaranteeing atomicity. For consistent snapshots in async context,
+        use get_stats_async() instead.
+        
+        Returns:
+            Dictionary with execution stats
+        """
+        return {
+            "is_running": self.is_running,
+            "total_executions": self._execution_count,
+            "successful_executions": self._success_count,
+            "failed_executions": self._failure_count,
+            "success_rate": (self._success_count / self._execution_count * 100) if self._execution_count > 0 else 0
+        }
+    
+    async def get_stats_async(self) -> Dict[str, Any]:
+        """
+        Get current execution statistics with atomic snapshot (async).
         
         Returns:
             Dictionary with execution stats
@@ -280,21 +299,12 @@ class AsyncAgentScheduler:
     
     def get_stats_sync(self) -> Dict[str, Any]:
         """
-        Get current execution statistics (synchronous, best-effort).
-        
-        Warning: This method provides a best-effort view of stats without
-        guaranteeing atomicity. For consistent snapshots, use get_stats() async.
+        Alias for get_stats() for clarity.
         
         Returns:
             Dictionary with execution stats
         """
-        return {
-            "is_running": self.is_running,
-            "total_executions": self._execution_count,
-            "successful_executions": self._success_count,
-            "failed_executions": self._failure_count,
-            "success_rate": (self._success_count / self._execution_count * 100) if self._execution_count > 0 else 0
-        }
+        return self.get_stats()
     
     async def _run_schedule(self, interval: int, max_retries: int):
         """Internal method to run scheduled agent executions."""
