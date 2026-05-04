@@ -127,6 +127,11 @@ _LAZY_IMPORTS = {
     'get_tool': ('praisonaiagents.tools.registry', 'get_tool'),
     'ToolRegistry': ('praisonaiagents.tools.registry', 'ToolRegistry'),
     
+    # Specialized agents
+    'ScientificWriterAgent': ('praisonaiagents.agent', 'ScientificWriterAgent'),
+    'PaperSection': ('praisonaiagents.agent', 'PaperSection'),
+    'ScientificPaper': ('praisonaiagents.agent', 'ScientificPaper'),
+    
     # Main display utilities (imports rich)
     'TaskOutput': ('praisonaiagents.main', 'TaskOutput'),
     'ReflectionOutput': ('praisonaiagents.main', 'ReflectionOutput'),
