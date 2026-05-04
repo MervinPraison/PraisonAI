@@ -226,18 +226,37 @@ class DockerSandbox:
         limits: Optional[ResourceLimits] = None,
         env: Optional[Dict[str, str]] = None,
         working_dir: Optional[str] = None,
+        shell: bool = False,
     ) -> SandboxResult:
-        """Run a shell command in the sandbox."""
+        """Run a command in the sandbox.
+        
+        Args:
+            command: String command or list of arguments
+            limits: Resource limits to apply
+            env: Environment variables
+            working_dir: Working directory
+            shell: If True, explicitly use shell. If False (default), execute safely without shell.
+        """
         if not self._is_running:
             await self.start()
         
         limits = limits or self.config.resource_limits
         execution_id = str(uuid.uuid4())
         
+        # Import here to avoid circular import
+        import shlex
+        
         if isinstance(command, list):
-            cmd_str = " ".join(command)
+            # Always quote list elements to prevent shell injection
+            cmd_str = " ".join(shlex.quote(arg) for arg in command)
         else:
-            cmd_str = command
+            if shell:
+                # Caller explicitly requested shell evaluation
+                cmd_str = command
+            else:
+                # Parse string safely then quote each part
+                cmd_parts = shlex.split(command)
+                cmd_str = " ".join(shlex.quote(part) for part in cmd_parts)
         
         docker_cmd = [
             "docker", "run", "--rm",

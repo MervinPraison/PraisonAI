@@ -277,8 +277,17 @@ class SSHSandbox:
         limits: Optional[ResourceLimits] = None,
         env: Optional[Dict[str, str]] = None,
         working_dir: Optional[str] = None,
+        shell: bool = False,
     ) -> SandboxResult:
-        """Run a shell command on the remote server."""
+        """Run a command on the remote server.
+        
+        Args:
+            command: String command or list of arguments
+            limits: Resource limits to apply
+            env: Environment variables
+            working_dir: Working directory
+            shell: If True, explicitly use shell. If False (default), execute safely without shell.
+        """
         if not self._is_running:
             await self.start()
         
@@ -286,15 +295,35 @@ class SSHSandbox:
         started_at = time.time()
         
         try:
-            # Convert command to string if needed
+            # Convert command to string safely based on shell parameter
+            from ._shell import build_argv
             if isinstance(command, list):
-                command = shlex.join(command)
+                if shell:
+                    # Shell mode: join with proper quoting
+                    command_str = " ".join(shlex.quote(arg) for arg in command)
+                else:
+                    # Non-shell mode: use shlex.join for proper escaping
+                    command_str = shlex.join(command)
+            else:
+                # String command
+                if not shell:
+                    # Parse then re-join to ensure safe execution
+                    try:
+                        parts = shlex.split(command)
+                        command_str = shlex.join(parts)
+                    except ValueError:
+                        # If parsing fails, quote the whole thing
+                        command_str = shlex.quote(command)
+                else:
+                    # Shell mode: use as-is (caller explicitly opted in)
+                    command_str = command
             
             # Execute command
             result = await self._run_command_with_limits(
-                command, 
+                command_str, 
                 limits, 
-                working_dir or self.working_dir
+                working_dir or self.working_dir,
+                shell
             )
             
             completed_at = time.time()
@@ -491,11 +520,17 @@ class SSHSandbox:
         self,
         command: str,
         limits: Optional[ResourceLimits],
-        working_dir: str
+        working_dir: str,
+        shell: bool = False
     ):
         """Run command with resource limits."""
         # Change to working directory
-        full_command = f"cd {shlex.quote(working_dir)} && {command}"
+        if shell:
+            # Shell mode: only quote the working directory, command is already properly handled
+            full_command = f"cd {shlex.quote(working_dir)} && {command}"
+        else:
+            # Non-shell mode: quote the command for safety (command is already escaped from caller)
+            full_command = f"cd {shlex.quote(working_dir)} && {command}"
         
         # Set timeout
         timeout = None

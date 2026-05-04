@@ -253,9 +253,37 @@ class AsyncAgentScheduler:
         logger.info(f"Execution stats - Total: {self._execution_count}, Success: {self._success_count}, Failed: {self._failure_count}")
         return True
     
-    def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> Dict[str, Any]:
         """
-        Get execution statistics.
+        Get current execution statistics with atomic snapshot.
+        
+        Returns:
+            Dictionary with execution stats
+        """
+        if self._stats_lock is None:
+            # Not yet started: stats are all zero, no lock needed
+            execs, success, failed = 0, 0, 0
+        else:
+            # Take atomic snapshot of all counters
+            async with self._stats_lock:
+                execs = self._execution_count
+                success = self._success_count
+                failed = self._failure_count
+        
+        return {
+            "is_running": self.is_running,
+            "total_executions": execs,
+            "successful_executions": success,
+            "failed_executions": failed,
+            "success_rate": (success / execs * 100) if execs > 0 else 0
+        }
+    
+    def get_stats_sync(self) -> Dict[str, Any]:
+        """
+        Get current execution statistics (synchronous, best-effort).
+        
+        Warning: This method provides a best-effort view of stats without
+        guaranteeing atomicity. For consistent snapshots, use get_stats() async.
         
         Returns:
             Dictionary with execution stats
@@ -289,7 +317,13 @@ class AsyncAgentScheduler:
     
     async def _execute_with_retry(self, max_retries: int):
         """Execute agent with retry logic."""
-        self._execution_count += 1
+        # Ensure async primitives are available
+        if self._stats_lock is None:
+            self._ensure_async_primitives()
+        
+        # Atomically increment execution count
+        async with self._stats_lock:
+            self._execution_count += 1
         
         last_exc: Optional[Exception] = None
         for attempt in range(max_retries):
@@ -300,7 +334,9 @@ class AsyncAgentScheduler:
                 logger.info(f"Async agent execution successful on attempt {attempt + 1}")
                 logger.info(f"Result: {result}")
                 
-                self._success_count += 1
+                # Atomically increment success count
+                async with self._stats_lock:
+                    self._success_count += 1
                 safe_call(self.on_success, result)
                 return
                 
@@ -313,7 +349,9 @@ class AsyncAgentScheduler:
                     logger.info(f"Waiting {wait_time}s before async retry...")
                     await asyncio.sleep(wait_time)
         
-        self._failure_count += 1
+        # Atomically increment failure count
+        async with self._stats_lock:
+            self._failure_count += 1
         logger.error(f"Async agent execution failed after {max_retries} attempts")
         safe_call(
             self.on_failure,
