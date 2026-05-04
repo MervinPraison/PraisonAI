@@ -56,10 +56,12 @@ Example:
 """
 
 import os
+import re
 import logging
 from praisonaiagents._logging import get_logger
 from typing import List, Optional, Any, Dict, Union
 from dataclasses import dataclass, field
+from .agent import Agent
 
 logger = get_logger(__name__)
 
@@ -121,9 +123,6 @@ class ScientificWriterAgent:
             backstory: Agent backstory (defaults to scientific writing backstory)
             **kwargs: Additional arguments passed to base Agent
         """
-        # Import Agent here to avoid circular imports
-        from .agent import Agent
-        
         # Set defaults for scientific writing
         name = name or "Scientific Writer"
         role = role or "Scientific Paper Writer"
@@ -167,17 +166,12 @@ class ScientificWriterAgent:
     
     def _get_cajal_model(self) -> str:
         """
-        Get the appropriate CAJAL model or fallback.
-        
+        Return the default CAJAL model identifier.
+
         Returns:
             Model name to use for scientific writing
         """
-        # Try to detect if CAJAL model is available
-        # This would typically check for the model in HuggingFace or local installation
-        cajal_models = ["cajal-4b", "Agnuxo/CAJAL-4B-P2PCLAW"]
-        
-        # For now, return the HuggingFace model path
-        # In a full implementation, this would check model availability
+        # Return the HuggingFace model path for CAJAL
         return "Agnuxo/CAJAL-4B-P2PCLAW"
     
     def write_paper(
@@ -369,11 +363,9 @@ class ScientificWriterAgent:
     
     def _extract_section(self, text: str, section_name: str) -> Optional[str]:
         """Extract a specific section from the generated text."""
-        # Basic implementation - could be improved with better parsing
-        import re
-        pattern = rf"#{{{section_name}}}.*?(?=##|\Z)"
+        pattern = rf"##?\s+{re.escape(section_name)}[^\n]*\n(.*?)(?=\n##?\s|\Z)"
         match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
-        return match.group(0) if match else None
+        return match.group(1).strip() if match else None
     
     def _extract_latex(self, text: str) -> str:
         """Extract LaTeX formatting from text."""
@@ -382,8 +374,6 @@ class ScientificWriterAgent:
     
     def _extract_references(self, text: str) -> List[str]:
         """Extract references from the generated text."""
-        # Basic implementation - could be improved with better parsing
-        import re
         ref_pattern = r"\\cite\{[^}]+\}|\[[0-9]+\]"
         references = re.findall(ref_pattern, text)
         return references
