@@ -758,11 +758,9 @@ class ToolExecutionMixin:
                 pass
         
         if func is None:
-            # If not found in tools or registry, try globals and main
-            func = globals().get(function_name)
-            if not func:
-                import __main__
-                func = getattr(__main__, function_name, None)
+            # Tool not found in declared tools or registry — do not fall back to
+            # globals() or __main__ as that allows undeclared callables to execute.
+            pass
 
         if func:
             try:
