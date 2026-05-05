@@ -133,8 +133,16 @@ class SandboxToComputeAdapter:
                     stderr = ""
                     exit_code = 0
 
+                _TIMEOUT_EXIT_CODE = 124
+                if exit_code == 0:
+                    status = SandboxStatus.COMPLETED
+                elif exit_code == _TIMEOUT_EXIT_CODE:
+                    status = SandboxStatus.TIMEOUT
+                else:
+                    status = SandboxStatus.FAILED
+
                 return SandboxResult(
-                    status=SandboxStatus.COMPLETED if exit_code == 0 else SandboxStatus.FAILED,
+                    status=status,
                     stdout=stdout,
                     stderr=stderr,
                     exit_code=exit_code,
