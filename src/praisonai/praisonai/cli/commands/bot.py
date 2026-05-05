@@ -488,6 +488,123 @@ def bot_install_daemon(
         raise typer.Exit(1)
 
 
+# ── N4: Inbound DLQ subcommand group ─────────────────────────────────
+dlq_app = typer.Typer(
+    help="Inspect / replay / purge the inbound dead-letter queue.",
+    no_args_is_help=True,
+)
+app.add_typer(dlq_app, name="dlq")
+
+
+def _resolve_dlq_path(path: Optional[str]) -> str:
+    import os
+    if path:
+        return os.path.expanduser(path)
+    return os.path.expanduser(
+        os.environ.get("PRAISONAI_DLQ_PATH", "~/.praisonai/dlq.sqlite")
+    )
+
+
+@dlq_app.command("list")
+def dlq_list(
+    path: Optional[str] = typer.Option(
+        None, "--path", "-p", help="Path to DLQ sqlite file."
+    ),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max entries to show."),
+):
+    """List entries in the inbound DLQ (newest first)."""
+    from praisonai.bots import InboundDLQ
+
+    dlq = InboundDLQ(path=_resolve_dlq_path(path))
+    entries = dlq.list(limit=limit)
+    if not entries:
+        typer.echo(f"DLQ empty (path={dlq.path})")
+        raise typer.Exit(0)
+
+    typer.echo(f"DLQ {dlq.path} — {dlq.size()} entries (showing {len(entries)}):")
+    for e in entries:
+        prompt_preview = (e.prompt[:60] + "…") if len(e.prompt) > 60 else e.prompt
+        typer.echo(
+            f"  [{e.id:>5}] {e.platform:<10} user={e.user_id:<16} "
+            f"attempts={e.attempts}  err={e.error[:50]}  prompt={prompt_preview!r}"
+        )
+
+
+@dlq_app.command("purge")
+def dlq_purge(
+    path: Optional[str] = typer.Option(None, "--path", "-p"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+):
+    """Delete all entries from the DLQ."""
+    from praisonai.bots import InboundDLQ
+
+    dlq = InboundDLQ(path=_resolve_dlq_path(path))
+    n = dlq.size()
+    if n == 0:
+        typer.echo("DLQ already empty.")
+        raise typer.Exit(0)
+
+    if not yes:
+        confirm = typer.confirm(f"Delete all {n} entries from {dlq.path}?")
+        if not confirm:
+            raise typer.Exit(0)
+
+    removed = dlq.purge()
+    typer.echo(f"Purged {removed} entries.")
+
+
+@dlq_app.command("replay")
+def dlq_replay(
+    config: str = typer.Option(
+        ..., "--config", "-c",
+        help="Path to bot YAML config (provides agent + platform).",
+    ),
+    path: Optional[str] = typer.Option(None, "--path", "-p"),
+    limit: int = typer.Option(50, "--limit", "-n"),
+):
+    """Replay DLQ entries through the configured agent.
+
+    Loads the bot YAML, instantiates the agent, and re-runs each entry
+    through ``BotSessionManager.chat()``. Successful entries are removed;
+    failed entries are kept for the next attempt.
+    """
+    import asyncio
+    from praisonai.bots import InboundDLQ, BotSessionManager
+    from praisonai.cli.features.bots_cli import _load_bot_config, _build_agent
+
+    cfg = _load_bot_config(config)
+    agent = _build_agent(cfg)
+    platform = cfg.get("platform", "")
+
+    dlq = InboundDLQ(path=_resolve_dlq_path(path))
+    if dlq.size() == 0:
+        typer.echo("DLQ empty — nothing to replay.")
+        raise typer.Exit(0)
+
+    mgr = BotSessionManager(platform=platform)
+
+    async def replayer(entry):
+        try:
+            await mgr.chat(
+                agent, entry.user_id, entry.prompt,
+                chat_id=entry.chat_id,
+                thread_id=entry.thread_id,
+                user_name=entry.user_name,
+            )
+            return True
+        except Exception as e:
+            typer.echo(f"  entry {entry.id} failed: {e}")
+            return False
+
+    succeeded, failed = asyncio.run(dlq.replay(replayer, limit=limit))
+    typer.echo(f"Replay done: succeeded={succeeded}, failed={failed}, "
+               f"remaining={dlq.size()}")
+    
+    # Return non-zero exit code if any failures occurred and entries remain
+    if failed > 0 and dlq.size() > 0:
+        raise typer.Exit(1)
+
+
 @app.callback(invoke_without_command=True)
 def bot_callback(ctx: typer.Context):
     """Show bot help if no subcommand provided."""
