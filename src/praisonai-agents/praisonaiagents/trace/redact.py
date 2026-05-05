@@ -5,7 +5,7 @@ Provides deterministic redaction of sensitive data in tool arguments
 and results. Uses only stdlib for zero dependencies.
 """
 
-from typing import Any, Dict, Set
+from typing import Any, Dict, Optional, Set
 import re
 
 # Keys that should always be redacted (case-insensitive matching)
@@ -117,6 +117,102 @@ def _redact_key_value(key: str, value: Any) -> Any:
     
     # Recursively process nested structures
     return _redact_value(value)
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# C7 — PII redaction for LLM egress (opt-in BEFORE_LLM middleware)
+# ────────────────────────────────────────────────────────────────────────────
+
+# Additional value-pattern rules for strings that look like secrets
+# even when no key=value pair surrounds them.
+_VALUE_PATTERNS = (
+    # OpenAI-style API keys
+    (re.compile(r"\bsk-[A-Za-z0-9]{12,}\b"), "[REDACTED]"),
+    # US SSN
+    (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "[REDACTED-SSN]"),
+    # Credit card (13-19 digits, loose)
+    (re.compile(r"\b(?:\d[ -]?){13,19}\b"), "[REDACTED-CC]"),
+    # Email (optional — often safe, but default-scrub for compliance)
+    (re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), "[REDACTED-EMAIL]"),
+)
+
+
+def scrub_pii_text(text: str) -> str:
+    """Redact API keys, passwords, SSNs, credit cards, and emails from free text.
+
+    Reuses REDACT_KEYS for ``key=value`` pairs and adds value-pattern rules
+    for naked secrets. Zero dependency (stdlib re only).
+
+    Args:
+        text: Input string — returned unchanged if empty or None.
+
+    Returns:
+        Scrubbed string with literal secrets replaced by ``[REDACTED*]``.
+    """
+    if not text:
+        return text
+    result = redact_string(text, enabled=True)
+    for pat, repl in _VALUE_PATTERNS:
+        result = pat.sub(repl, result)
+    return result
+
+
+# Module-level state for idempotent enable/disable
+_PII_HOOK_ID: Optional[str] = None
+
+
+def _pii_before_llm_hook(event_data):
+    """BEFORE_LLM hook that scrubs every message's content in-place."""
+    try:
+        messages = getattr(event_data, "messages", None) or []
+        modified = []
+        for m in messages:
+            if isinstance(m, dict) and isinstance(m.get("content"), str):
+                m = {**m, "content": scrub_pii_text(m["content"])}
+            modified.append(m)
+        # Import locally to avoid module-level hooks dep (keeps redact.py lightweight)
+        from ..hooks.types import HookResult
+        return HookResult(decision="allow", modified_input={"messages": modified})
+    except Exception:
+        # Never block the LLM call on a scrubber bug
+        from ..hooks.types import HookResult
+        return HookResult(decision="allow")
+
+
+def enable_pii_redaction() -> str:
+    """Register a BEFORE_LLM hook that scrubs secrets from every message.
+
+    Idempotent — calling twice leaves exactly one hook registered.
+
+    Returns:
+        The hook id (useful for :func:`disable_pii_redaction`).
+    """
+    global _PII_HOOK_ID
+    if _PII_HOOK_ID is not None:
+        return _PII_HOOK_ID
+    from ..hooks.registry import get_default_registry
+    from ..hooks.types import HookEvent
+    reg = get_default_registry()
+    _PII_HOOK_ID = reg.register_function(
+        event=HookEvent.BEFORE_LLM,
+        func=_pii_before_llm_hook,
+        name="praisonaiagents.pii_redactor",
+    )
+    return _PII_HOOK_ID
+
+
+def disable_pii_redaction() -> bool:
+    """Unregister the PII-redaction hook. No-op if never enabled."""
+    global _PII_HOOK_ID
+    if _PII_HOOK_ID is None:
+        return False
+    from ..hooks.registry import get_default_registry
+    reg = get_default_registry()
+    try:
+        reg.unregister(_PII_HOOK_ID)
+    finally:
+        _PII_HOOK_ID = None
+    return True
 
 
 def redact_string(text: str, enabled: bool = True) -> str:

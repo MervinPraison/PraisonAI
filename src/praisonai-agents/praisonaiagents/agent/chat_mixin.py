@@ -560,7 +560,11 @@ Your Goal: {self.goal}"""
             temperature=temperature
         )
         self._hook_runner.execute_sync(HookEvent.BEFORE_LLM, before_llm_input)
-        
+        # C7 — honour any BEFORE_LLM hook that mutated the message stream
+        # (e.g. PII redactor). The runner applies modified_input in-place on
+        # before_llm_input.messages; adopt that value for the actual LLM call.
+        messages = before_llm_input.messages
+
         logging.debug(f"{self.name} sending messages to LLM: {messages}")
         
         # Emit LLM request trace event (zero overhead when not set)
@@ -1149,7 +1153,7 @@ Your Goal: {self.goal}"""
             )
         return rendered
 
-    def chat(self, prompt: str, temperature: float = 1.0, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None) -> Optional[str]:
+    def chat(self, prompt: str, temperature: float = 1.0, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None) -> Optional[str]:
         """
         Chat with the agent.
         
@@ -1192,12 +1196,18 @@ Your Goal: {self.goal}"""
         _trace_emitter = get_context_emitter()
         _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
         
+        # C2 — cooperative cancellation: abort early if a pre-set token is given
+        _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
+        if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
+            reason = getattr(_cancel, "reason", None) or "cancelled before LLM call"
+            raise InterruptedError(f"Agent chat cancelled: {reason}")
+
         try:
-            return self._chat_impl(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice)
+            return self._chat_impl(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice, seed=seed, cancel_token=_cancel)
         finally:
             _trace_emitter.agent_end(self.name)
 
-    def _chat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None):
+    def _chat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None, seed=None, cancel_token=None):
         """Internal chat implementation (extracted for trace wrapping)."""
         # Apply rate limiter if configured (before any LLM call)
         if self._rate_limiter is not None:
@@ -1418,7 +1428,16 @@ Your Goal: {self.goal}"""
                     effective_tool_choice = tool_choice or getattr(self, '_yaml_tool_choice', None)
                     if effective_tool_choice:
                         llm_kwargs['tool_choice'] = effective_tool_choice
-                    
+
+                    # C1 — per-call seed overrides llm_instance.seed for determinism
+                    if seed is not None:
+                        llm_kwargs['seed'] = seed
+
+                    # C2 — last-chance cancel check before handing to the LLM
+                    if cancel_token is not None and getattr(cancel_token, 'is_set', lambda: False)():
+                        reason = getattr(cancel_token, 'reason', None) or 'cancelled'
+                        raise InterruptedError(f"Agent chat cancelled: {reason}")
+
                     response_text = self.llm_instance.get_response(**llm_kwargs)
 
                     self._add_to_chat_history("assistant", response_text)
