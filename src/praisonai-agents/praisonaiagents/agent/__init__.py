@@ -111,6 +111,18 @@ def __getattr__(name):
         from .code_agent import CodeConfig
         _lazy_cache[name] = CodeConfig
         return CodeConfig
+    elif name == 'ScientificWriterAgent':
+        from .scientific_writer_agent import ScientificWriterAgent
+        _lazy_cache[name] = ScientificWriterAgent
+        return ScientificWriterAgent
+    elif name == 'PaperSection':
+        from .scientific_writer_agent import PaperSection
+        _lazy_cache[name] = PaperSection
+        return PaperSection
+    elif name == 'ScientificPaper':
+        from .scientific_writer_agent import ScientificPaper
+        _lazy_cache[name] = ScientificPaper
+        return ScientificPaper
     
     # Handoff - lightweight
     _handoff_names = {
@@ -214,6 +226,9 @@ __all__ = [
     'RealtimeConfig',
     'CodeAgent',
     'CodeConfig',
+    'ScientificWriterAgent',
+    'PaperSection',
+    'ScientificPaper',
     'ContextAgent',
     'create_context_agent',
     'Handoff',
