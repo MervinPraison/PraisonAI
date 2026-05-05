@@ -7,6 +7,7 @@ and results. Uses only stdlib for zero dependencies.
 
 from typing import Any, Dict, Optional, Set
 import re
+import threading
 
 # Keys that should always be redacted (case-insensitive matching)
 REDACT_KEYS: Set[str] = {
@@ -130,8 +131,8 @@ _VALUE_PATTERNS = (
     (re.compile(r"\bsk-[A-Za-z0-9]{12,}\b"), "[REDACTED]"),
     # US SSN
     (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "[REDACTED-SSN]"),
-    # Credit card (13-19 digits, loose)
-    (re.compile(r"\b(?:\d[ -]?){13,19}\b"), "[REDACTED-CC]"),
+    # Credit card — canonical 4-group or unspaced 16-digit only
+    (re.compile(r"\b(?:\d{4}[ -]){3}\d{4}\b|\b\d{16}\b"), "[REDACTED-CC]"),
     # Email (optional — often safe, but default-scrub for compliance)
     (re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), "[REDACTED-EMAIL]"),
 )
@@ -159,6 +160,7 @@ def scrub_pii_text(text: str) -> str:
 
 # Module-level state for idempotent enable/disable
 _PII_HOOK_ID: Optional[str] = None
+_PII_HOOK_LOCK = threading.Lock()
 
 
 def _pii_before_llm_hook(event_data):
@@ -188,17 +190,18 @@ def enable_pii_redaction() -> str:
         The hook id (useful for :func:`disable_pii_redaction`).
     """
     global _PII_HOOK_ID
-    if _PII_HOOK_ID is not None:
+    with _PII_HOOK_LOCK:
+        if _PII_HOOK_ID is not None:
+            return _PII_HOOK_ID
+        from ..hooks.registry import get_default_registry
+        from ..hooks.types import HookEvent
+        reg = get_default_registry()
+        _PII_HOOK_ID = reg.register_function(
+            event=HookEvent.BEFORE_LLM,
+            func=_pii_before_llm_hook,
+            name="praisonaiagents.pii_redactor",
+        )
         return _PII_HOOK_ID
-    from ..hooks.registry import get_default_registry
-    from ..hooks.types import HookEvent
-    reg = get_default_registry()
-    _PII_HOOK_ID = reg.register_function(
-        event=HookEvent.BEFORE_LLM,
-        func=_pii_before_llm_hook,
-        name="praisonaiagents.pii_redactor",
-    )
-    return _PII_HOOK_ID
 
 
 def disable_pii_redaction() -> bool:

@@ -1196,13 +1196,13 @@ Your Goal: {self.goal}"""
         _trace_emitter = get_context_emitter()
         _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
         
-        # C2 — cooperative cancellation: abort early if a pre-set token is given
-        _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
-        if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
-            reason = getattr(_cancel, "reason", None) or "cancelled before LLM call"
-            raise InterruptedError(f"Agent chat cancelled: {reason}")
-
         try:
+            # C2 — cooperative cancellation: abort early if a pre-set token is given
+            _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
+            if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
+                reason = getattr(_cancel, "reason", None) or "cancelled before LLM call"
+                raise InterruptedError(f"Agent chat cancelled: {reason}")
+
             return self._chat_impl(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice, seed=seed, cancel_token=_cancel)
         finally:
             _trace_emitter.agent_end(self.name)
@@ -1733,7 +1733,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             cleaned = cleaned[:-3].strip()
         return cleaned  
 
-    async def achat(self, prompt: str, temperature: float = 1.0, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None):
+    async def achat(self, prompt: str, temperature: float = 1.0, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None):
         """Async version of chat method with self-reflection support.
         
         Args:
@@ -1756,13 +1756,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 reasoning_steps=reasoning_steps, stream=stream,
                 task_name=task_name, task_description=task_description, task_id=task_id,
                 config=config, force_retrieval=force_retrieval, skip_retrieval=skip_retrieval,
-                attachments=attachments, _trace_emitter=_trace_emitter, tool_choice=tool_choice
+                attachments=attachments, _trace_emitter=_trace_emitter, tool_choice=tool_choice,
+                seed=seed, cancel_token=cancel_token
             )
         finally:
             _trace_emitter.agent_end(self.name)
 
-    async def _achat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None):
+    async def _achat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None, seed=None, cancel_token=None):
         """Internal async chat implementation (extracted for trace wrapping)."""
+        # C2 — cooperative cancellation: abort early if a pre-set token is given
+        _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
+        if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
+            reason = getattr(_cancel, "reason", None) or "cancelled before LLM call"
+            raise InterruptedError(f"Agent chat cancelled: {reason}")
+        
         # Use agent's stream setting if not explicitly provided
         if stream is None:
             stream = self.stream
@@ -1885,31 +1892,43 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
 
                 try:
-                    response_text = await self.llm_instance.get_response_async(
-                        prompt=prompt,
-                        system_prompt=self._build_system_prompt(tools),
-                        chat_history=self.chat_history,
-                        temperature=temperature,
-                        tools=tools,
-                        output_json=output_json,
-                        output_pydantic=output_pydantic,
-                        verbose=self.verbose,
-                        markdown=self.markdown,
-                        reflection=self.self_reflect,
-                        max_reflect=self.max_reflect,
-                        min_reflect=self.min_reflect,
-                        console=self.console,
-                        agent_name=self.name,
-                        agent_role=self.role,
-                        agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools if tools is not None else self.tools)],
-                        task_name=task_name,
-                        task_description=task_description,
-                        task_id=task_id,
-                        execute_tool_fn=self.execute_tool_async,
-                        parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
-                        reasoning_steps=reasoning_steps,
-                        stream=stream
-                    )
+                    # C1 — per-call seed forwarding (async path)  
+                    llm_kwargs = {
+                        'prompt': prompt,
+                        'system_prompt': self._build_system_prompt(tools),
+                        'chat_history': self.chat_history,
+                        'temperature': temperature,
+                        'tools': tools,
+                        'output_json': output_json,
+                        'output_pydantic': output_pydantic,
+                        'verbose': self.verbose,
+                        'markdown': self.markdown,
+                        'reflection': self.self_reflect,
+                        'max_reflect': self.max_reflect,
+                        'min_reflect': self.min_reflect,
+                        'console': self.console,
+                        'agent_name': self.name,
+                        'agent_role': self.role,
+                        'agent_tools': [t.__name__ if hasattr(t, '__name__') else str(t) for t in (tools if tools is not None else self.tools)],
+                        'task_name': task_name,
+                        'task_description': task_description,
+                        'task_id': task_id,
+                        'execute_tool_fn': self.execute_tool_async,
+                        'parallel_tool_calls': getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
+                        'reasoning_steps': reasoning_steps,
+                        'stream': stream
+                    }
+                    
+                    # C1 — per-call seed overrides llm_instance.seed for determinism  
+                    if seed is not None:
+                        llm_kwargs['seed'] = seed
+                    
+                    # C2 — last-chance cancel check before handing to the LLM
+                    if _cancel is not None and getattr(_cancel, 'is_set', lambda: False)():
+                        reason = getattr(_cancel, 'reason', None) or 'cancelled'
+                        raise InterruptedError(f"Agent chat cancelled: {reason}")
+                    
+                    response_text = await self.llm_instance.get_response_async(**llm_kwargs)
 
                     self._append_to_chat_history({"role": "assistant", "content": response_text})
 
