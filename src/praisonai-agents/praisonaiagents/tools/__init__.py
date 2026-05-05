@@ -171,17 +171,6 @@ TOOL_MAPPINGS = {
     'github_create_pull_request': ('.github_tools', None),
     'github_tools': ('.github_tools', None),
     
-    # Linear Tools (requires LINEAR_API_KEY or LINEAR_OAUTH_TOKEN)
-    'linear_search_issues': ('.linear_tools', None),
-    'linear_get_issue': ('.linear_tools', None),
-    'linear_create_issue': ('.linear_tools', None),
-    'linear_update_issue': ('.linear_tools', None),
-    'linear_add_comment': ('.linear_tools', None),
-    'linear_list_cycles': ('.linear_tools', None),
-    'linear_list_teams': ('.linear_tools', None),
-    'linear_list_issue_states': ('.linear_tools', None),
-    'linear_tools': ('.linear_tools', None),
-    
     # Schedule Tools (agent-centric scheduling)
     'schedule_add': ('.schedule_tools', None),
     'schedule_list': ('.schedule_tools', None),
@@ -349,8 +338,6 @@ def __getattr__(name: str) -> Any:
             'web_crawl', 'crawl_web', 'get_available_crawl_providers',
             'run_skill_script', 'read_skill_file', 'list_skill_scripts', 'create_skill_tools',
             'github_create_branch', 'github_commit_and_push', 'github_create_pull_request',
-            'linear_search_issues', 'linear_get_issue', 'linear_create_issue', 'linear_update_issue',
-            'linear_add_comment', 'linear_list_cycles', 'linear_list_teams', 'linear_list_issue_states',
             'schedule_add', 'schedule_list', 'schedule_remove',
             'ast_grep_search', 'ast_grep_rewrite', 'ast_grep_scan', 'is_ast_grep_available', 'get_ast_grep_tools',
             'store_memory', 'search_memory',
@@ -361,7 +348,7 @@ def __getattr__(name: str) -> Any:
             'clarify'
         ]:
             return getattr(module, name)
-        if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools', 'github_tools', 'linear_tools', 'schedule_tools', 'ast_grep_tools', 'email_tools']:
+        if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools', 'github_tools', 'schedule_tools', 'ast_grep_tools', 'email_tools']:
             return module  # Returns the callable module
         return getattr(module, name)
     else:
