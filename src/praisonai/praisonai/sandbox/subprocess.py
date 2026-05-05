@@ -190,18 +190,26 @@ class SubprocessSandbox:
         limits: Optional[ResourceLimits] = None,
         env: Optional[Dict[str, str]] = None,
         working_dir: Optional[str] = None,
+        shell: bool = False,
     ) -> SandboxResult:
-        """Run a shell command in the sandbox."""
+        """Run a command in the sandbox.
+        
+        Args:
+            command: String command or list of arguments
+            limits: Resource limits to apply
+            env: Environment variables
+            working_dir: Working directory
+            shell: If True, explicitly use shell. If False (default), execute safely without shell.
+        """
         if not self._is_running:
             await self.start()
         
         limits = limits or self.config.resource_limits
         execution_id = str(uuid.uuid4())
         
-        if isinstance(command, str):
-            cmd = ["sh", "-c", command]
-        else:
-            cmd = command
+        # Import here to avoid circular import
+        from ._shell import build_argv
+        cmd = build_argv(command, shell=shell)
         
         process_env = os.environ.copy()
         if env:
