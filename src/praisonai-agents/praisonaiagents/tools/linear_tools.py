@@ -12,12 +12,20 @@ _LINEAR_ENDPOINT = "https://api.linear.app/graphql"
 
 def _auth_header() -> Dict[str, str]:
     """Get authorization header from environment."""
-    key = os.environ.get("LINEAR_API_KEY") or os.environ.get("LINEAR_OAUTH_TOKEN")
-    if not key:
+    api_key = os.environ.get("LINEAR_API_KEY")
+    oauth_token = os.environ.get("LINEAR_OAUTH_TOKEN")
+    
+    if api_key:
+        # Personal API keys (lin_api_*) are sent raw
+        auth = api_key
+    elif oauth_token:
+        # OAuth tokens require Bearer prefix
+        auth = f"Bearer {oauth_token}"
+    else:
         raise RuntimeError(
             "Set LINEAR_API_KEY (personal) or LINEAR_OAUTH_TOKEN (OAuth)"
         )
-    return {"Authorization": key, "Content-Type": "application/json"}
+    return {"Authorization": auth, "Content-Type": "application/json"}
 
 
 async def _gql(query: str, variables: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

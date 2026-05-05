@@ -76,7 +76,11 @@ class LinearBot(ChatCommandMixin, MessageHookMixin):
         # Store extra kwargs for forward compatibility
         self._extra_kwargs = kwargs
         
-        self._token = token or os.environ.get("LINEAR_OAUTH_TOKEN", "") or os.environ.get("LINEAR_API_KEY", "")
+        # Determine token source for proper authorization format
+        self._oauth_token = token or os.environ.get("LINEAR_OAUTH_TOKEN", "")
+        self._api_key = os.environ.get("LINEAR_API_KEY", "") if not self._oauth_token else ""
+        self._token = self._oauth_token or self._api_key
+        self._is_oauth = bool(self._oauth_token)
         self._agent = agent
         self.config = config or BotConfig(token=self._token, mode="webhook")
         self._signing_secret = signing_secret or os.environ.get("LINEAR_WEBHOOK_SECRET", "")
@@ -326,8 +330,8 @@ class LinearBot(ChatCommandMixin, MessageHookMixin):
                 message_text += f"\n\n{issue_description}"
                 
             bot_message = BotMessage(
-                id=session_id,
-                text=message_text,
+                message_id=session_id,
+                content=message_text,
                 message_type=MessageType.TEXT,
                 channel=BotChannel(channel_id=issue_id, name=f"Issue {issue_data.get('identifier', '')}"),
                 sender=BotUser(user_id="linear-system", display_name="Linear"),
@@ -359,7 +363,7 @@ class LinearBot(ChatCommandMixin, MessageHookMixin):
             session_id = message.metadata.get("session_id") if message.metadata else None
 
             # Use BotSessionManager.chat() which handles history isolation and run_in_executor
-            response = await self._session_mgr.chat(self._agent, user_id, message.text)
+            response = await self._session_mgr.chat(self._agent, user_id, message.content)
 
             # Send response back to Linear
             if response and message.metadata:
@@ -453,8 +457,10 @@ class LinearBot(ChatCommandMixin, MessageHookMixin):
         if not self._http_session:
             raise RuntimeError("HTTP session not initialized")
             
+        # OAuth tokens require Bearer prefix, API keys are sent raw
+        auth_header = f"Bearer {self._token}" if self._is_oauth else self._token
         headers = {
-            "Authorization": self._token,
+            "Authorization": auth_header,
             "Content-Type": "application/json"
         }
         
@@ -491,14 +497,38 @@ class LinearBot(ChatCommandMixin, MessageHookMixin):
 
     async def send_message(
         self,
-        text: str,
         channel_id: str,
+        content: Union[str, Dict[str, Any]],
+        reply_to: Optional[str] = None,
+        thread_id: Optional[str] = None,
         **kwargs
-    ) -> bool:
+    ) -> BotMessage:
         """Send a message (comment) to a Linear issue."""
+        text = content if isinstance(content, str) else str(content)
         try:
             await self._send_comment(channel_id, text)
-            return True
+            return BotMessage(
+                message_id=f"linear-{channel_id}-{int(time.time())}",
+                content=text,
+                message_type=MessageType.TEXT,
+                channel=BotChannel(channel_id=channel_id, name="Linear Issue"),
+                sender=self._bot_user or BotUser(user_id="linear-bot", display_name="Linear Bot"),
+                timestamp=time.time(),
+                reply_to=reply_to,
+                thread_id=thread_id,
+                metadata={"linear_channel": channel_id}
+            )
         except Exception as e:
             logger.error(f"Failed to send message: {e}")
-            return False
+            # Return a failed message rather than None to maintain protocol
+            return BotMessage(
+                message_id=f"linear-failed-{int(time.time())}",
+                content=text,
+                message_type=MessageType.TEXT,
+                channel=BotChannel(channel_id=channel_id, name="Linear Issue"),
+                sender=self._bot_user or BotUser(user_id="linear-bot", display_name="Linear Bot"),
+                timestamp=time.time(),
+                reply_to=reply_to,
+                thread_id=thread_id,
+                metadata={"error": str(e), "linear_channel": channel_id}
+            )
