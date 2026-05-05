@@ -7,10 +7,11 @@ from typing import Dict, Any
 import json
 import dotenv
 
-dotenv.load_dotenv()
-
 class AICoder:
     def __init__(self, cwd: str = None, tavily_api_key: str = None):
+        # Load environment variables from .env file
+        dotenv.load_dotenv()
+        
         # Load only the dependency needed on the common path here.
         try:
             from litellm import acompletion

@@ -97,5 +97,4 @@ def __getattr__(name: str):
     _register_builtin_backends()
     raise AttributeError(f"No attribute {name}")
 
-# Trigger registration on import
-_register_builtin_backends()
+# Registration happens lazily via __getattr__ on first attribute access

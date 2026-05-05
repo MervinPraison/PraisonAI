@@ -602,7 +602,15 @@ class AgentsGenerator:
             raise ImportError(f"Framework '{framework}' is not available. Please install the required dependencies.")
             
         self.logger.info(f"Using framework: {framework}")
-        return self.framework_adapter.run(config, self.config_list, topic)
+        return self.framework_adapter.run(
+            config,
+            self.config_list,
+            topic,
+            tools_dict=tools_dict,
+            agent_callback=getattr(self, 'agent_callback', None),
+            task_callback=getattr(self, 'task_callback', None),
+            cli_config=getattr(self, 'cli_config', None),
+        )
 
     def _run_yaml_workflow(self, config):
         """

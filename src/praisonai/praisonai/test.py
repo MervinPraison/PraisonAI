@@ -3,6 +3,7 @@ import os
 from rich import print
 from dotenv import load_dotenv
 load_dotenv()
+
 config_list = [
     {
         'model': os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini"),

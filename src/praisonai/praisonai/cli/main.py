@@ -70,7 +70,6 @@ import yaml
 import time
 from rich import print
 from dotenv import load_dotenv
-load_dotenv()
 import shutil
 import subprocess
 import logging
@@ -108,6 +107,11 @@ _BLOCKED_ENV_KEYS = frozenset({
 
 # Pre-compute uppercase lookup set once at module load (avoids rebuilding per call)
 _BLOCKED_ENV_KEYS_UPPER = frozenset(k.upper() for k in _BLOCKED_ENV_KEYS)
+
+
+def _load_env_once():
+    """Load environment variables from .env file once at CLI startup."""
+    load_dotenv()
 
 
 def _validate_env_key(key) -> None:
@@ -348,6 +352,9 @@ class PraisonAI:
         initializes the necessary attributes, and then calls the appropriate methods based on the
         provided arguments.
         """
+        # Load environment variables from .env file
+        _load_env_once()
+        
         # Warning filters now installed via Typer callback for CLI-only usage
         
         # Telemetry defaults now handled in PraisonAI.__init__ with Langfuse awareness
