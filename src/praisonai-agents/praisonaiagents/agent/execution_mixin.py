@@ -5,12 +5,10 @@ Contains all methods for run/start/launch lifecycle, planning,
 and server endpoints. Extracted from agent.py for maintainability.
 """
 
-import os
 import time
 import json
 import logging
 import inspect
-from praisonaiagents._logging import get_logger
 
 import asyncio
 import threading
@@ -126,7 +124,7 @@ class ExecutionMixin:
             config=HandoffConfig(context_policy=ContextPolicy.NONE),
         )
 
-    async def arun(self, prompt: str, **kwargs):
+    async def arun(self, prompt: str, **kwargs) -> Optional[str]:
         """Async version of run() - silent, non-streaming, returns structured result.
         
         Production-friendly async execution. Does not stream or display output.

@@ -63,6 +63,13 @@ def __getattr__(name: str):
     if name == "HTTPApproval":
         from ._http_approval import HTTPApproval
         return HTTPApproval
+    # W1 — cross-platform mirror + identity
+    if name == "mirror_to_session":
+        from ._mirror import mirror_to_session
+        return mirror_to_session
+    if name == "BotSessionManager":
+        from ._session import BotSessionManager
+        return BotSessionManager
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
@@ -70,4 +77,6 @@ __all__ = [
     "Bot", "BotOS",
     "SlackApproval", "TelegramApproval", "DiscordApproval",
     "WebhookApproval", "HTTPApproval",
+    # W1
+    "mirror_to_session", "BotSessionManager",
 ]

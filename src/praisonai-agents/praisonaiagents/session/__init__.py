@@ -90,7 +90,43 @@ def __getattr__(name: str):
         from .hierarchy import ExtendedSessionData
         _module_cache[name] = ExtendedSessionData
         return ExtendedSessionData
-    
+
+    # W1 — Identity resolver
+    if name == "IdentityResolverProtocol":
+        from .identity import IdentityResolverProtocol
+        _module_cache[name] = IdentityResolverProtocol
+        return IdentityResolverProtocol
+    if name == "IdentityLink":
+        from .identity import IdentityLink
+        _module_cache[name] = IdentityLink
+        return IdentityLink
+    if name == "InMemoryIdentityResolver":
+        from .identity import InMemoryIdentityResolver
+        _module_cache[name] = InMemoryIdentityResolver
+        return InMemoryIdentityResolver
+    if name == "FileIdentityResolver":
+        from .identity import FileIdentityResolver
+        _module_cache[name] = FileIdentityResolver
+        return FileIdentityResolver
+
+    # W1 — Task-local session context
+    if name == "SessionContext":
+        from .context import SessionContext
+        _module_cache[name] = SessionContext
+        return SessionContext
+    if name == "set_session_context":
+        from .context import set_session_context
+        _module_cache[name] = set_session_context
+        return set_session_context
+    if name == "get_session_context":
+        from .context import get_session_context
+        _module_cache[name] = get_session_context
+        return get_session_context
+    if name == "clear_session_context":
+        from .context import clear_session_context
+        _module_cache[name] = clear_session_context
+        return clear_session_context
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -105,4 +141,13 @@ __all__ = [
     "get_hierarchical_session_store",
     "SessionSnapshot",
     "ExtendedSessionData",
+    # W1
+    "IdentityResolverProtocol",
+    "IdentityLink",
+    "InMemoryIdentityResolver",
+    "FileIdentityResolver",
+    "SessionContext",
+    "set_session_context",
+    "get_session_context",
+    "clear_session_context",
 ]
