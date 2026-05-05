@@ -786,15 +786,13 @@ Respond with ONLY a valid JSON tool call in this format:
                 error_str = str(e)
 
                 # Check for auth errors and try refreshing subscription credentials
-                if category == "auth" and self._auth_provider_id and attempt == 1:
+                if category == "auth" and self._auth_provider_id and attempt == 0:
                     try:
                         logging.info("Authentication error detected - attempting credential refresh")
                         refreshed_creds = self._refresh_subscription_creds()
                         if refreshed_creds:
-                            # Clear cached credentials to force re-resolution
-                            self._cached_subscription_creds = None
-                            # Update parameters with refreshed credentials
-                            kwargs = self._build_completion_params(*args, **kwargs)[1]
+                            # Update parameters with refreshed credentials (don't clear cache)
+                            kwargs = self._build_completion_params(**kwargs)
                             # Retry immediately with refreshed credentials
                             can_retry = True
                             retry_delay = 0.0
@@ -892,15 +890,13 @@ Respond with ONLY a valid JSON tool call in this format:
                 error_str = str(e)
 
                 # Check for auth errors and try refreshing subscription credentials
-                if category == "auth" and self._auth_provider_id and attempt == 1:
+                if category == "auth" and self._auth_provider_id and attempt == 0:
                     try:
                         logging.info("Authentication error detected - attempting credential refresh")
                         refreshed_creds = self._refresh_subscription_creds()
                         if refreshed_creds:
-                            # Clear cached credentials to force re-resolution
-                            self._cached_subscription_creds = None
-                            # Update parameters with refreshed credentials
-                            kwargs = self._build_completion_params(*args, **kwargs)[1]
+                            # Update parameters with refreshed credentials (don't clear cache)
+                            kwargs = self._build_completion_params(**kwargs)
                             # Retry immediately with refreshed credentials
                             can_retry = True
                             retry_delay = 0.0
@@ -4664,11 +4660,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Inject subscription credentials if auth provider is set
         creds = self._resolve_subscription_creds()
         if creds:
-            params["api_key"] = creds.api_key
+            # Handle Bearer auth (OAuth tokens) vs API key auth differently
+            if creds.auth_scheme == "bearer":
+                # For OAuth tokens like Claude Code, use Authorization header
+                extra_headers = dict(params.get("extra_headers") or {})
+                extra_headers["Authorization"] = f"Bearer {creds.api_key}"
+                if creds.headers:
+                    extra_headers.update(creds.headers)
+                params["extra_headers"] = extra_headers
+            else:
+                # For regular API keys, use litellm's api_key parameter
+                params["api_key"] = creds.api_key
+            
             if creds.base_url:
                 params["base_url"] = creds.base_url
-            # litellm respects extra_headers
-            if creds.headers:
+            
+            # Always merge additional headers from provider
+            if creds.headers and creds.auth_scheme != "bearer":
                 extra_headers = dict(params.get("extra_headers") or {})
                 extra_headers.update(creds.headers)
                 params["extra_headers"] = extra_headers
