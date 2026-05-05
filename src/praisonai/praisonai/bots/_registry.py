@@ -15,6 +15,7 @@ _BUILTIN_PLATFORMS: Dict[str, tuple] = {
     "discord": ("praisonai.bots.discord", "DiscordBot"),
     "slack": ("praisonai.bots.slack", "SlackBot"),
     "whatsapp": ("praisonai.bots.whatsapp", "WhatsAppBot"),
+    "linear": ("praisonai.bots.linear", "LinearBot"),
     "email": ("praisonai.bots.email", "EmailBot"),
     "agentmail": ("praisonai.bots.agentmail", "AgentMailBot"),
 }
