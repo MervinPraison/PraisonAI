@@ -22,9 +22,6 @@ class CrewAIAdapter(BaseFrameworkAdapter):
         """Check if CrewAI is available for import."""
         try:
             import crewai  # noqa: F401
-            # Suppress crewai.cli.config logger only when using CrewAI
-            import logging
-            logging.getLogger('crewai.cli.config').setLevel(logging.ERROR)
             return True
         except ImportError:
             return False
@@ -61,6 +58,9 @@ class CrewAIAdapter(BaseFrameworkAdapter):
         # Import CrewAI only when needed
         from crewai import Agent, Task, Crew
         from crewai.telemetry import Telemetry
+        
+        # Suppress crewai.cli.config logger (scoped to when CrewAI is actually used)
+        logging.getLogger('crewai.cli.config').setLevel(logging.ERROR)
         
         # Use scoped telemetry disabling instead of global patching
         with scoped_telemetry_disable(Telemetry):

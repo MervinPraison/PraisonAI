@@ -2,12 +2,7 @@ import yaml
 import os
 from rich import print
 from dotenv import load_dotenv
-
-def _load_env_once():
-    """Load environment variables from .env file once."""
-    load_dotenv()
-
-_load_env_once()
+load_dotenv()
 
 config_list = [
     {

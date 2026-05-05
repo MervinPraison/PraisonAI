@@ -5,12 +5,10 @@ Provides SandboxToComputeAdapter to expose ComputeProvider as legacy SandboxConf
 This eliminates code duplication between the two parallel hierarchies.
 """
 
-import asyncio
 import logging
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional
 
 from praisonaiagents.sandbox import (
-    SandboxConfig,
     SandboxResult,
     SandboxStatus,
 )
@@ -109,51 +107,55 @@ class SandboxToComputeAdapter:
         try:
             # Execute on compute provider
             if hasattr(self._compute, 'execute'):
-                result = await self._compute.execute(
-                    self._instance_id, 
-                    code,
-                    env=env,
-                    working_dir=working_dir
-                )
-                
-                # Convert compute result to SandboxResult
-                if hasattr(result, 'stdout'):
-                    # Structured result object
-                    return SandboxResult(
-                        status=SandboxStatus.SUCCESS if result.exit_code == 0 else SandboxStatus.ERROR,
-                        stdout=result.stdout,
-                        stderr=result.stderr or "",
-                        exit_code=getattr(result, 'exit_code', 0),
-                        execution_time=getattr(result, 'execution_time', 0.0),
-                    )
+                # Convert code to a shell command (compute providers expect commands, not raw code)
+                if language == "python":
+                    import shlex
+                    command = f"python -c {shlex.quote(code)}"
+                elif language in ("bash", "shell"):
+                    command = code
                 else:
-                    # Plain string result
-                    return SandboxResult(
-                        status=SandboxStatus.SUCCESS,
-                        stdout=str(result),
-                        stderr="",
-                        exit_code=0,
-                        execution_time=0.0,
-                    )
+                    import shlex
+                    command = f"python -c {shlex.quote(code)}"
+
+                raw = await self._compute.execute(self._instance_id, command)
+
+                # Convert compute result to SandboxResult (dict or object)
+                if isinstance(raw, dict):
+                    stdout = raw.get("stdout", "")
+                    stderr = raw.get("stderr", "")
+                    exit_code = raw.get("exit_code", 0)
+                elif hasattr(raw, 'stdout'):
+                    stdout = raw.stdout
+                    stderr = getattr(raw, 'stderr', "") or ""
+                    exit_code = getattr(raw, 'exit_code', 0)
+                else:
+                    stdout = str(raw)
+                    stderr = ""
+                    exit_code = 0
+
+                return SandboxResult(
+                    status=SandboxStatus.COMPLETED if exit_code == 0 else SandboxStatus.FAILED,
+                    stdout=stdout,
+                    stderr=stderr,
+                    exit_code=exit_code,
+                )
             else:
                 # Fallback for simple compute providers
                 result = str(await self._compute.run(code))
                 return SandboxResult(
-                    status=SandboxStatus.SUCCESS,
+                    status=SandboxStatus.COMPLETED,
                     stdout=result,
                     stderr="",
                     exit_code=0,
-                    execution_time=0.0,
                 )
-                
+
         except Exception as e:
             logger.error(f"Execution failed: {e}")
             return SandboxResult(
-                status=SandboxStatus.ERROR,
+                status=SandboxStatus.FAILED,
                 stdout="",
                 stderr=str(e),
                 exit_code=1,
-                execution_time=0.0,
             )
     
     async def stop(self) -> None:
