@@ -735,13 +735,10 @@ Respond with ONLY a valid JSON tool call in this format:
         """Force refresh of subscription credentials."""
         if not self._auth_provider_id:
             return None
-        import threading
-        from ..auth.subscription.registry import _REGISTRY, _LOCK
-        with _LOCK:
-            factory = _REGISTRY.get(self._auth_provider_id)
-        if factory is None:
+        from ..auth.subscription.registry import get_subscription_provider
+        provider = get_subscription_provider(self._auth_provider_id)
+        if provider is None:
             return None
-        provider = factory()
         self._cached_subscription_creds = provider.refresh()
         return self._cached_subscription_creds
 

@@ -41,6 +41,7 @@ __all__ = [
     "register_subscription_provider",
     "list_subscription_providers",
     "resolve_subscription_credentials",
+    "get_subscription_provider",
 ]
 
 
@@ -51,7 +52,8 @@ def __getattr__(name):
         "SubscriptionCredentials",
         "register_subscription_provider",
         "list_subscription_providers", 
-        "resolve_subscription_credentials"
+        "resolve_subscription_credentials",
+        "get_subscription_provider",
     ):
         from .subscription import (
             SubscriptionAuthProtocol,
@@ -59,6 +61,7 @@ def __getattr__(name):
             register_subscription_provider,
             list_subscription_providers,
             resolve_subscription_credentials,
+            get_subscription_provider,
         )
         return locals()[name]
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

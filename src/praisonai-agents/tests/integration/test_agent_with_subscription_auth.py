@@ -1,5 +1,10 @@
 """Integration tests for Agent with subscription auth."""
 import pytest
+
+# Skip entire module when LLM dependencies (e.g. pydantic) are not installed.
+# CI runs without the [llm] extra, so these are skipped there.
+pytest.importorskip("pydantic", reason="requires praisonaiagents[llm]")
+
 from unittest.mock import patch, MagicMock
 
 from praisonaiagents import Agent

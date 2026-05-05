@@ -1,6 +1,7 @@
 """Tests for subscription auth registry."""
 import pytest
 from praisonaiagents.auth.subscription.protocols import SubscriptionCredentials, AuthError
+from praisonaiagents.auth.subscription import registry as _reg
 from praisonaiagents.auth.subscription.registry import (
     register_subscription_provider,
     list_subscription_providers, 
@@ -11,12 +12,20 @@ from praisonaiagents.auth.subscription.registry import (
 
 @pytest.fixture(autouse=True)
 def clean_registry():
-    """Clean the registry before and after each test."""
+    """Clean the registry before and after each test, resetting the builtin flag.
+
+    Direct access to _REGISTRY and _BUILTIN_REGISTERED is intentional here:
+    we are testing the registry implementation itself and need full state control
+    for test isolation.
+    """
     original_registry = _REGISTRY.copy()
+    original_builtin_flag = _reg._BUILTIN_REGISTERED
     _REGISTRY.clear()
+    _reg._BUILTIN_REGISTERED = False
     yield
     _REGISTRY.clear()
     _REGISTRY.update(original_registry)
+    _reg._BUILTIN_REGISTERED = original_builtin_flag
 
 
 def test_register_and_resolve():

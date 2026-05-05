@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import threading
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Optional
 
 from .protocols import AuthError, SubscriptionAuthProtocol, SubscriptionCredentials
 
@@ -42,6 +42,14 @@ def resolve_subscription_credentials(provider_id: str) -> SubscriptionCredential
             f"Registered: {list_subscription_providers()}"
         )
     return factory().resolve_credentials()
+
+
+def get_subscription_provider(provider_id: str) -> Optional[SubscriptionAuthProtocol]:
+    """Return a new provider instance for *provider_id*, or None if not registered."""
+    _ensure_builtins()
+    with _LOCK:
+        factory = _REGISTRY.get(provider_id)
+    return factory() if factory is not None else None
 
 
 def _ensure_builtins() -> None:

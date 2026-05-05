@@ -11,6 +11,7 @@ __all__ = [
     "register_subscription_provider",
     "list_subscription_providers",
     "resolve_subscription_credentials",
+    "get_subscription_provider",
 ]
 
 
@@ -18,11 +19,17 @@ def __getattr__(name):
     if name in ("SubscriptionAuthProtocol", "SubscriptionCredentials"):
         from .protocols import SubscriptionAuthProtocol, SubscriptionCredentials
         return locals()[name]
-    if name in ("register_subscription_provider", "list_subscription_providers", "resolve_subscription_credentials"):
+    if name in (
+        "register_subscription_provider",
+        "list_subscription_providers",
+        "resolve_subscription_credentials",
+        "get_subscription_provider",
+    ):
         from .registry import (
             register_subscription_provider,
             list_subscription_providers,
             resolve_subscription_credentials,
+            get_subscription_provider,
         )
         return locals()[name]
     raise AttributeError(name)

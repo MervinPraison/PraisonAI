@@ -70,7 +70,7 @@ def _read_file_credentials() -> Optional[Dict[str, Any]]:
     }
 
 
-def _is_expiring(expires_at_ms: int, skew_ms: int = 60_000) -> bool:
+def _is_expiring(expires_at_ms: Optional[int], skew_ms: int = 60_000) -> bool:
     if not expires_at_ms:
         return False
     return int(time.time() * 1000) >= (expires_at_ms - skew_ms)
