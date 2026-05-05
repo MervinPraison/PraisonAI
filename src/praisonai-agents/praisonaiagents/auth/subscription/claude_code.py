@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import subprocess
 import sys
 import time
 import urllib.parse
@@ -18,7 +20,32 @@ _TOKEN_ENDPOINTS = (
     "https://platform.claude.com/v1/oauth/token",
     "https://console.anthropic.com/v1/oauth/token",
 )
-_CLI_USER_AGENT_FALLBACK = "claude-cli/2.1.0 (external, cli)"
+_CLAUDE_CODE_VERSION_FALLBACK = "2.1.74"
+
+
+def _detect_claude_code_version() -> str:
+    """Detect the installed Claude Code version, fall back to a static constant.
+    
+    Anthropic's OAuth infrastructure validates the user-agent version and may
+    reject requests with a version that's too old. Detecting dynamically means
+    users who keep Claude Code updated never hit stale-version 400s.
+    """
+    cached = getattr(_detect_claude_code_version, "_cache", None)
+    if cached:
+        return cached
+    try:
+        out = subprocess.run(
+            ["claude", "--version"], capture_output=True, text=True, timeout=2, check=False
+        )
+        match = re.match(r"(\d+\.\d+\.\d+)", out.stdout.strip())
+        version = match.group(1) if match else _CLAUDE_CODE_VERSION_FALLBACK
+    except Exception:
+        version = _CLAUDE_CODE_VERSION_FALLBACK
+    _detect_claude_code_version._cache = version
+    return version
+
+
+_CLI_USER_AGENT_FALLBACK = f"claude-cli/{_CLAUDE_CODE_VERSION_FALLBACK} (external, cli)"
 
 
 def _read_keychain_credentials() -> Optional[Dict[str, Any]]:
@@ -91,7 +118,7 @@ def _refresh(refresh_token: str) -> Dict[str, Any]:
             endpoint, data=body, method="POST",
             headers={
                 "Content-Type": "application/x-www-form-urlencoded",
-                "User-Agent":   _CLI_USER_AGENT_FALLBACK,
+                "User-Agent":   f"claude-cli/{_detect_claude_code_version()} (external, cli)",
             },
         )
         try:
@@ -159,10 +186,15 @@ class ClaudeCodeAuth:
 
     def headers_for(self, base_url: str, model: str) -> Dict[str, str]:
         # CRITICAL: without these headers Anthropic returns 500s on OAuth tokens.
-        # Only send interleaved-thinking since litellm auto-adds oauth-2025-04-20
+        # Match Hermes' OAuth header set exactly. litellm auto-adds oauth-2025-04-20.
         return {
-            "anthropic-beta": "interleaved-thinking-2025-05-14",
-            "user-agent":     _CLI_USER_AGENT_FALLBACK,
+            "anthropic-beta": ",".join([
+                "interleaved-thinking-2025-05-14",
+                "fine-grained-tool-streaming-2025-05-14", 
+                "context-1m-2025-08-07",
+                "claude-code-20250219",
+            ]),
+            "user-agent":     f"claude-cli/{_detect_claude_code_version()} (external, cli)",
             "x-app":          "cli",
         }
 
