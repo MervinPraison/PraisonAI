@@ -721,9 +721,16 @@ Respond with ONLY a valid JSON tool call in this format:
             self.model = profile.model
 
     def _resolve_subscription_creds(self):
-        """Lazy resolve + cache subscription credentials for the lifetime of one get_response() call."""
+        """Lazy resolve + cache subscription credentials, checking expiration."""
         if not self._auth_provider_id:
             return None
+        
+        # Check if cached credentials are expired
+        if (self._cached_subscription_creds and 
+            self._cached_subscription_creds.expires_at_ms and
+            self._cached_subscription_creds.expires_at_ms <= int(__import__('time').time() * 1000)):
+            self._cached_subscription_creds = None
+            
         if self._cached_subscription_creds is None:
             from ..auth import resolve_subscription_credentials
             self._cached_subscription_creds = resolve_subscription_credentials(
@@ -777,6 +784,23 @@ Respond with ONLY a valid JSON tool call in this format:
                 
                 last_error = e
                 error_str = str(e)
+
+                # Check for auth errors and try refreshing subscription credentials
+                if category == "auth" and self._auth_provider_id and attempt == 1:
+                    try:
+                        logging.info("Authentication error detected - attempting credential refresh")
+                        refreshed_creds = self._refresh_subscription_creds()
+                        if refreshed_creds:
+                            # Clear cached credentials to force re-resolution
+                            self._cached_subscription_creds = None
+                            # Update parameters with refreshed credentials
+                            kwargs = self._build_completion_params(*args, **kwargs)[1]
+                            # Retry immediately with refreshed credentials
+                            can_retry = True
+                            retry_delay = 0.0
+                            logging.info("Subscription credentials refreshed, retrying...")
+                    except Exception as refresh_error:
+                        logging.warning(f"Failed to refresh subscription credentials: {refresh_error}")
 
                 # Failover: mark failure and try next profile (do this before early exit)
                 if self._failover_manager and self._current_profile:
@@ -866,6 +890,23 @@ Respond with ONLY a valid JSON tool call in this format:
                 
                 last_error = e
                 error_str = str(e)
+
+                # Check for auth errors and try refreshing subscription credentials
+                if category == "auth" and self._auth_provider_id and attempt == 1:
+                    try:
+                        logging.info("Authentication error detected - attempting credential refresh")
+                        refreshed_creds = self._refresh_subscription_creds()
+                        if refreshed_creds:
+                            # Clear cached credentials to force re-resolution
+                            self._cached_subscription_creds = None
+                            # Update parameters with refreshed credentials
+                            kwargs = self._build_completion_params(*args, **kwargs)[1]
+                            # Retry immediately with refreshed credentials
+                            can_retry = True
+                            retry_delay = 0.0
+                            logging.info("Subscription credentials refreshed, retrying...")
+                    except Exception as refresh_error:
+                        logging.warning(f"Failed to refresh subscription credentials: {refresh_error}")
 
                 # Failover: mark failure and try next profile (do this before early exit)
                 if self._failover_manager and self._current_profile:

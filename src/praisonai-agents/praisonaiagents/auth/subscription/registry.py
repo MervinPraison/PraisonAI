@@ -58,7 +58,7 @@ def _ensure_builtins() -> None:
     with _LOCK:
         if _BUILTIN_REGISTERED:
             return
+        # Import modules inside the lock to prevent race conditions
+        from . import claude_code, codex, gemini_cli, qwen_cli   # noqa: F401
+        # Each module registers itself at import time.
         _BUILTIN_REGISTERED = True
-
-    from . import claude_code, codex, gemini_cli, qwen_cli   # noqa: F401
-    # Each module registers itself at import time.
