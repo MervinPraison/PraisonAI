@@ -728,7 +728,7 @@ Respond with ONLY a valid JSON tool call in this format:
         # Check if cached credentials are expired
         if (self._cached_subscription_creds and 
             self._cached_subscription_creds.expires_at_ms and
-            self._cached_subscription_creds.expires_at_ms <= int(__import__('time').time() * 1000)):
+            self._cached_subscription_creds.expires_at_ms <= int(time.time() * 1000)):
             self._cached_subscription_creds = None
             
         if self._cached_subscription_creds is None:
@@ -4660,23 +4660,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Inject subscription credentials if auth provider is set
         creds = self._resolve_subscription_creds()
         if creds:
-            # Handle Bearer auth (OAuth tokens) vs API key auth differently
-            if creds.auth_scheme == "bearer":
-                # For OAuth tokens like Claude Code, use Authorization header
-                extra_headers = dict(params.get("extra_headers") or {})
-                extra_headers["Authorization"] = f"Bearer {creds.api_key}"
-                if creds.headers:
-                    extra_headers.update(creds.headers)
-                params["extra_headers"] = extra_headers
-            else:
-                # For regular API keys, use litellm's api_key parameter
-                params["api_key"] = creds.api_key
-            
+            # Use litellm's native OAuth detection (auto-detects sk-ant-oat-* and switches to Bearer)
+            params["api_key"] = creds.api_key
             if creds.base_url:
                 params["base_url"] = creds.base_url
-            
-            # Always merge additional headers from provider
-            if creds.headers and creds.auth_scheme != "bearer":
+            if creds.headers:
                 extra_headers = dict(params.get("extra_headers") or {})
                 extra_headers.update(creds.headers)
                 params["extra_headers"] = extra_headers

@@ -30,7 +30,7 @@ mcp = [
 
 memory = [
     "chromadb>=1.0.0",
-    "litellm>=1.81.0,<=1.82.6",
+    "litellm>=1.83.14",
 ]
 
 knowledge = [
@@ -48,7 +48,7 @@ graph = [
 
 # Add LLM dependencies
 llm = [
-    "litellm>=1.81.0,<=1.82.6",
+    "litellm>=1.83.14",
     "pydantic>=2.10.0"
 ]
 

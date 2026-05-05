@@ -159,9 +159,9 @@ class ClaudeCodeAuth:
 
     def headers_for(self, base_url: str, model: str) -> Dict[str, str]:
         # CRITICAL: without these headers Anthropic returns 500s on OAuth tokens.
-        # Mirrors hermes-agent/agent/anthropic_adapter.py:578-588.
+        # Only send interleaved-thinking since litellm auto-adds oauth-2025-04-20
         return {
-            "anthropic-beta": "oauth-2025-04-20,interleaved-thinking-2025-05-14",
+            "anthropic-beta": "interleaved-thinking-2025-05-14",
             "user-agent":     _CLI_USER_AGENT_FALLBACK,
             "x-app":          "cli",
         }

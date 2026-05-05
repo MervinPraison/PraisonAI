@@ -46,20 +46,11 @@ class CodexAuth:
     name = "codex"
 
     def resolve_credentials(self) -> SubscriptionCredentials:
-        tokens = _read_codex_tokens()
-        if not tokens:
-            raise AuthError(
-                "No Codex credentials at ~/.codex/auth.json. "
-                "Install OpenAI Codex CLI and run 'codex login'."
-            )
-        access = tokens["access_token"]
-        # Lazy refresh: on actual 401 the LLM caller will call self.refresh().
-        return SubscriptionCredentials(
-            api_key=access,
-            base_url=os.environ.get("PRAISONAI_CODEX_BASE_URL", "").strip() or _CODEX_BASE_URL,
-            headers=self.headers_for(_CODEX_BASE_URL, ""),
-            auth_scheme="bearer",
-            source="codex-cli-file",
+        # EXPERIMENTAL: Codex uses Responses API, not Chat Completions
+        # OpenAI chat-completions requests will 404 against this endpoint
+        raise AuthError(
+            "Codex auth is experimental and requires custom Responses API transport. "
+            "Use a standard OpenAI API key or wait for proper Codex support in a future release."
         )
 
     def refresh(self) -> SubscriptionCredentials:
