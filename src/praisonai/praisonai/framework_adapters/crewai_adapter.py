@@ -5,7 +5,7 @@ Provides lazy-loaded, scoped integration with CrewAI framework.
 """
 
 import logging
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from .base import BaseFrameworkAdapter, scoped_telemetry_disable
 
 logger = logging.getLogger(__name__)
@@ -32,10 +32,10 @@ class CrewAIAdapter(BaseFrameworkAdapter):
         llm_config: List[Dict],
         topic: str,
         *,
-        tools_dict: Dict[str, Any] = None,
+        tools_dict: Optional[Dict[str, Any]] = None,
         agent_callback = None,
         task_callback = None,
-        cli_config: Dict[str, Any] = None,
+        cli_config: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Run CrewAI with given configuration.
@@ -70,13 +70,22 @@ class CrewAIAdapter(BaseFrameworkAdapter):
             
             # Create agents
             for agent_name, agent_details in config.get('roles', {}).items():
+                # Resolve tools for this agent from tools_dict
+                agent_tool_list = []
+                if tools_dict:
+                    agent_tools = agent_details.get('tools', [])
+                    agent_tool_list = [tools_dict[t] for t in agent_tools if t in tools_dict]
+                
                 agent = Agent(
                     role=agent_details.get('role', agent_name),
                     goal=self._format_template(agent_details.get('goal', ''), topic=topic),
                     backstory=self._format_template(agent_details.get('backstory', ''), topic=topic),
+                    tools=agent_tool_list,
                     verbose=True,
                     allow_delegation=agent_details.get('allow_delegation', False)
                 )
+                if agent_callback:
+                    agent.step_callback = agent_callback
                 agents[agent_name] = agent
             
             # Create tasks
@@ -87,6 +96,8 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                         expected_output=self._format_template(task_details['expected_output'], topic=topic),
                         agent=agents[agent_name]
                     )
+                    if task_callback:
+                        task.callback = task_callback
                     tasks.append(task)
             
             # Create and run crew

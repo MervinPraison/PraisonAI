@@ -5,7 +5,7 @@ Provides lazy-loaded integration with the PraisonAI agents framework.
 """
 
 import logging
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from .base import BaseFrameworkAdapter
 
 logger = logging.getLogger(__name__)
@@ -32,10 +32,10 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         llm_config: List[Dict],
         topic: str,
         *,
-        tools_dict: Dict[str, Any] = None,
+        tools_dict: Optional[Dict[str, Any]] = None,
         agent_callback = None,
         task_callback = None,
-        cli_config: Dict[str, Any] = None,
+        cli_config: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Run PraisonAI agents with given configuration.
@@ -75,6 +75,12 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             goal_filled = self._format_template(details.get('goal', ''), topic=topic)
             backstory_filled = self._format_template(details.get('backstory', ''), topic=topic)
             
+            # Resolve tools for this agent from tools_dict
+            agent_tool_list = []
+            if tools_dict:
+                agent_tools = details.get('tools', [])
+                agent_tool_list = [tools_dict[t] for t in agent_tools if t in tools_dict]
+            
             # Create basic agent
             agent = PraisonAgent(
                 name=role_filled,
@@ -84,6 +90,7 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 instructions=details.get('instructions'),
                 llm=model_name,
                 allow_delegation=details.get('allow_delegation', False),
+                tools=agent_tool_list,
             )
             
             if agent_callback:
@@ -101,6 +108,8 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                     expected_output="Complete the assigned task successfully.",
                     agent=agent,
                 )
+                if task_callback:
+                    task.callback = task_callback
                 tasks.append(task)
             else:
                 for task_name, task_details in agent_tasks.items():
