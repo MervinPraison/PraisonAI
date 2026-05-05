@@ -22,11 +22,24 @@ class CrewAIAdapter(BaseFrameworkAdapter):
         """Check if CrewAI is available for import."""
         try:
             import crewai  # noqa: F401
+            # Suppress crewai.cli.config logger only when using CrewAI
+            import logging
+            logging.getLogger('crewai.cli.config').setLevel(logging.ERROR)
             return True
         except ImportError:
             return False
     
-    def run(self, config: Dict[str, Any], llm_config: List[Dict], topic: str) -> str:
+    def run(
+        self,
+        config: Dict[str, Any],
+        llm_config: List[Dict],
+        topic: str,
+        *,
+        tools_dict: Dict[str, Any] = None,
+        agent_callback = None,
+        task_callback = None,
+        cli_config: Dict[str, Any] = None,
+    ) -> str:
         """
         Run CrewAI with given configuration.
         
@@ -34,6 +47,10 @@ class CrewAIAdapter(BaseFrameworkAdapter):
             config: CrewAI configuration with agents and tasks
             llm_config: LLM configuration list
             topic: Topic for the tasks
+            tools_dict: Available tools dictionary
+            agent_callback: Callback for agent events
+            task_callback: Callback for task events
+            cli_config: CLI configuration
             
         Returns:
             Execution result as string

@@ -2,7 +2,13 @@ import yaml
 import os
 from rich import print
 from dotenv import load_dotenv
-load_dotenv()
+
+def _load_env_once():
+    """Load environment variables from .env file once."""
+    load_dotenv()
+
+_load_env_once()
+
 config_list = [
     {
         'model': os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini"),

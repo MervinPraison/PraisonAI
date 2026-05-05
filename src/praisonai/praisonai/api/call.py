@@ -17,7 +17,12 @@ import importlib.util
 import time
 from collections import defaultdict
 
-load_dotenv()
+def _load_env_once():
+    """Load environment variables from .env file once."""
+    load_dotenv()
+
+# Load env vars on module import for this specific API file
+_load_env_once()
 
 # Configuration
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')  # requires OpenAI Realtime API Access
