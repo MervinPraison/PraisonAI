@@ -194,6 +194,21 @@ class ToolExecutionMixin:
                 if res.output and res.output.modified_data:
                     arguments.update(res.output.modified_data)
 
+            # C4 — optional tool-argument validation via ToolValidatorProtocol.
+            # Zero overhead when not set. Users wire via `agent._tool_validator = MyValidator()`.
+            _validator = getattr(self, '_tool_validator', None)
+            if _validator is not None:
+                try:
+                    _vres = _validator.validate_args(function_name, arguments)
+                    if _vres is not None and not getattr(_vres, 'valid', True):
+                        _errs = "; ".join(getattr(_vres, 'errors', []) or ["validation failed"])
+                        logging.warning(
+                            f"Tool {function_name} args rejected by validator: {_errs}"
+                        )
+                        return f"Tool arguments rejected: {_errs}"
+                except Exception as _ve:  # noqa: BLE001 — never break tool exec on validator bug
+                    logging.debug(f"Tool validator raised; skipping validation: {_ve}")
+
             # P8/G11: Apply tool timeout if configured
             tool_timeout = getattr(self, '_tool_timeout', None)
             if tool_timeout and tool_timeout > 0:
