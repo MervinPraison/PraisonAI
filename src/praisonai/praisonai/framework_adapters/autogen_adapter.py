@@ -38,9 +38,8 @@ class AutoGenAdapter(BaseFrameworkAdapter):
         Returns:
             Execution result as string
         """
-        if not self.is_available():
-            raise ImportError("AutoGen v0.2 is not available. Install with: pip install autogen")
-            
+        # Availability already validated at CLI entry
+        
         # Import AutoGen only when needed
         import autogen
         
@@ -123,9 +122,8 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
         Returns:
             Execution result as string
         """
-        if not self.is_available():
-            raise ImportError("AutoGen v0.4 is not available. Install with: pip install autogen-agentchat autogen-ext")
-            
+        # Availability already validated at CLI entry
+        
         logger.info("Starting AutoGen v0.4 execution...")
         # For now, return a proper error message instead of delegating
         # TODO: Implement full AutoGen v0.4 adapter logic
@@ -162,8 +160,7 @@ class AG2Adapter(BaseFrameworkAdapter):
         Returns:
             Execution result as string
         """
-        if not self.is_available():
-            raise ImportError("AG2 is not available. Install with: pip install ag2")
+        # Availability already validated at CLI entry
             
         logger.info("Starting AG2 execution...")
         # For now, return a proper error message instead of delegating

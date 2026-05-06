@@ -62,7 +62,13 @@ def realtime_connect(
     session_id = f"realtime-{uuid.uuid4().hex[:12]}"
     
     # Build WebSocket URL
-    base = api_base or os.environ.get("OPENAI_API_BASE", "wss://api.openai.com")
+    if api_base:
+        base = api_base
+    else:
+        from praisonai.llm.env import resolve_llm_endpoint
+        ep = resolve_llm_endpoint(default_base="wss://api.openai.com")
+        base = ep.base_url
+    
     if base.startswith("http"):
         base = base.replace("https://", "wss://").replace("http://", "ws://")
     

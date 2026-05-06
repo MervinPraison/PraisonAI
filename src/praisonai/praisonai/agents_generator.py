@@ -232,10 +232,8 @@ class AgentsGenerator:
         self.tool_registry = ToolRegistry()
         self.tool_registry.register_builtin_autogen_adapters()
         
-        # Get framework adapter and validate availability
+        # Get framework adapter (availability already validated at CLI entry)
         self.framework_adapter = self._get_framework_adapter(framework)
-        if not self.framework_adapter.is_available():
-            raise ImportError(f"Framework '{framework}' is not available. Please install the required dependencies.")
 
     def _get_framework_adapter(self, framework: str) -> FrameworkAdapter:
         """
@@ -597,10 +595,7 @@ class AgentsGenerator:
             self.framework = framework
             self.framework_adapter = self._get_framework_adapter(framework)
             
-        # Final availability check
-        if not self.framework_adapter.is_available():
-            raise ImportError(f"Framework '{framework}' is not available. Please install the required dependencies.")
-            
+        # Framework availability already validated at CLI entry
         self.logger.info(f"Using framework: {framework}")
         return self.framework_adapter.run(
             config,
@@ -892,10 +887,13 @@ class AgentsGenerator:
         api_type = _resolve("api_type", default="openai").lower()
         model_name = _resolve("model", default="gpt-4o-mini")
         api_key = _resolve("api_key", env_var="OPENAI_API_KEY")
+        # Use resolver for consistent env-var precedence as fallback
+        from praisonai.llm.env import resolve_llm_endpoint
+        ep = resolve_llm_endpoint()
+        
         base_url = (model_config.get("base_url")
                     or yaml_llm.get("base_url")
-                    or os.environ.get("OPENAI_BASE_URL")
-                    or os.environ.get("OPENAI_API_BASE"))
+                    or ep.base_url)
 
         # Build LLMConfig — Bedrock needs no api_key
         if api_type == "bedrock":
