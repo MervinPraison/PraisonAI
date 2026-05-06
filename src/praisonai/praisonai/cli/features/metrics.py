@@ -5,8 +5,11 @@ Provides token usage and cost tracking for agent executions.
 Usage: praisonai "prompt" --metrics
 """
 
+import logging
 from typing import Any, Dict, Tuple
 from .base import FlagHandler
+
+logger = logging.getLogger(__name__)
 
 
 class MetricsHandler(FlagHandler):
@@ -133,33 +136,29 @@ class MetricsHandler(FlagHandler):
                 ctx = litellm._thread_context
                 if hasattr(ctx, 'usage'):
                     usage = ctx.usage
-                    if hasattr(usage, 'prompt_tokens'):
-                        metrics['prompt_tokens'] = usage.prompt_tokens
-                    if hasattr(usage, 'completion_tokens'):
-                        metrics['completion_tokens'] = usage.completion_tokens
-                    if hasattr(usage, 'total_tokens'):
-                        metrics['total_tokens'] = usage.total_tokens
-        except:
-            pass
+                    metrics['prompt_tokens']     = getattr(usage, 'prompt_tokens', None)
+                    metrics['completion_tokens'] = getattr(usage, 'completion_tokens', None)
+                    metrics['total_tokens']      = getattr(usage, 'total_tokens', None)
+        except ImportError:
+            logger.debug("litellm not installed; skipping token metrics")
+        except AttributeError as e:
+            logger.debug("litellm internals changed (%s); skipping token metrics", e)
         
         # Try to get cost from litellm cost tracking
         try:
-            import litellm
             from litellm import completion_cost
-            # If we have token counts, estimate cost
-            if 'prompt_tokens' in metrics and 'completion_tokens' in metrics:
+            if metrics.get('prompt_tokens') and metrics.get('completion_tokens'):
                 model = metrics.get('model', 'gpt-4o-mini')
                 try:
-                    cost = completion_cost(
+                    metrics['cost'] = completion_cost(
                         model=model,
                         prompt_tokens=metrics['prompt_tokens'],
-                        completion_tokens=metrics['completion_tokens']
+                        completion_tokens=metrics['completion_tokens'],
                     )
-                    metrics['cost'] = cost
-                except:
-                    pass
-        except:
-            pass
+                except Exception as e:
+                    logger.debug("cost calc failed for model=%s: %s", model, e)
+        except ImportError:
+            logger.debug("litellm.completion_cost unavailable; skipping cost metrics")
         
         return metrics
     

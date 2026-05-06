@@ -52,10 +52,7 @@ class CrewAIAdapter(BaseFrameworkAdapter):
         Returns:
             Execution result as string
         """
-        if not self.is_available():
-            raise ImportError("CrewAI is not available. Install with: pip install crewai")
-            
-        # Import CrewAI only when needed
+        # Import CrewAI only when needed (availability already validated at CLI entry)
         from crewai import Agent, Task, Crew
         from crewai.telemetry import Telemetry
         

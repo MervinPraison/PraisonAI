@@ -434,8 +434,8 @@ class AgentSchedulerHandler:
                 hours = int(uptime_delta.total_seconds() // 3600)
                 minutes = int((uptime_delta.total_seconds() % 3600) // 60)
                 uptime = f"{hours}h {minutes}m"
-            except:
-                pass
+            except (ValueError, TypeError) as e:
+                logger.debug("Failed to parse started_at timestamp '%s': %s", started_at, e)
         
         # Display detailed info
         print(f"\n{'='*60}")
