@@ -595,7 +595,10 @@ class AgentsGenerator:
             self.framework = framework
             self.framework_adapter = self._get_framework_adapter(framework)
             
-        # Framework availability already validated at CLI entry
+        # Validate framework availability for non-CLI callers
+        from .framework_adapters.validators import assert_framework_available
+        assert_framework_available(framework)
+        
         self.logger.info(f"Using framework: {framework}")
         return self.framework_adapter.run(
             config,

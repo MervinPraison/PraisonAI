@@ -142,6 +142,9 @@ class AICoder:
         except UnicodeDecodeError as e:
             logger.warning("aicoder: encoding error reading %s: %s", file_path, e)
             return None
+        except OSError as e:
+            logger.warning("aicoder: OS error reading %s: %s", file_path, e)
+            return None
 
     def get_shell_command(self, command: str) -> list:
         """
