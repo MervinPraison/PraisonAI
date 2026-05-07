@@ -297,6 +297,16 @@ class LangfuseSink:
                 try:
                     # Close any remaining spans
                     with self._lock:
+                        # End any in-flight tool spans
+                        for stack in self._tool_stacks.values():
+                            while stack:
+                                try:
+                                    stack.pop().end()
+                                except Exception:
+                                    pass
+                        self._tool_stacks.clear()
+                        
+                        # End root spans
                         for span in self._spans.values():
                             try:
                                 span.end()

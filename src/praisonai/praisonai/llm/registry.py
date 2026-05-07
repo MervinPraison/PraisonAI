@@ -279,16 +279,19 @@ def _register_builtin_providers(registry: LLMProviderRegistry) -> None:
         def generate(self, prompt: str, **kwargs):
             try:
                 import litellm  # lazy
-            except ImportError:
+            except ImportError as err:
                 raise ImportError(
                     "LiteLLM is required for built-in providers. "
                     "Install with: pip install litellm"
-                )
-            full_model = f"{self.config.get('provider', '')}/{self.model_id}".strip("/")
+                ) from err
+            provider_prefix = self.config.get("provider", "")
+            full_model = f"{provider_prefix}/{self.model_id}".strip("/") if provider_prefix else self.model_id
+            # Exclude internal 'provider' key from litellm.completion kwargs
+            passthrough_config = {k: v for k, v in self.config.items() if k != "provider"}
             return litellm.completion(
-                model=full_model or self.model_id,
+                model=full_model,
                 messages=[{"role": "user", "content": prompt}],
-                **{**self.config, **kwargs},
+                **{**passthrough_config, **kwargs},
             )
 
     def _make_litellm_factory(provider_prefix: str):

@@ -290,10 +290,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when a new run (turn) starts."""
-        if not self._conversation_store:
-            return
-        
-        # Store run start in state if available
+        # Store run start in state if available (even without conversation store)
         if self._state_store:
             run_key = f"run:{session_id}:{run_id}"
             self._state_store.set(run_key, {
@@ -304,6 +301,10 @@ class PraisonAIDB:
                 "status": "running",
                 "metadata": metadata or {}
             })
+        
+        # Early return only applies to conversation store operations
+        if not self._conversation_store:
+            return
     
     def on_run_end(
         self,
@@ -347,12 +348,16 @@ class PraisonAIDB:
         
         runs = []
         for k in keys:
-            run_data = self._state_store.get(k)
-            if run_data:
+            try:
+                run_data = self._state_store.get(k)
+            except Exception as exc:
+                logger.warning("Failed to load run key '%s': %s", k, exc)
+                continue
+            if isinstance(run_data, dict):
                 runs.append(run_data)
         
         runs.sort(key=lambda r: r.get("started_at", 0), reverse=True)
-        return runs[:limit] if limit else runs
+        return runs[:limit] if limit is not None else runs
     
     def export_session(
         self,
@@ -530,8 +535,12 @@ class PraisonAIDB:
         
         traces = []
         for k in keys:
-            trace_data = self._state_store.get(k)
-            if trace_data:
+            try:
+                trace_data = self._state_store.get(k)
+            except Exception as exc:
+                logger.warning("Failed to load trace key '%s': %s", k, exc)
+                continue
+            if isinstance(trace_data, dict):
                 traces.append(trace_data)
         
         if session_id is not None:
@@ -539,7 +548,7 @@ class PraisonAIDB:
         if user_id is not None:
             traces = [t for t in traces if t.get("user_id") == user_id]
         traces.sort(key=lambda t: t.get("started_at", 0), reverse=True)
-        return traces[:limit] if limit else traces
+        return traces[:limit] if limit is not None else traces
     
     def close(self) -> None:
         """Close all database connections."""
