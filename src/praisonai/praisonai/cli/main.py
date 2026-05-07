@@ -4092,16 +4092,9 @@ Do NOT add any explanations or formatting."""
                 is_budget_error = 'BudgetExceededError' in str(type(e).__name__)
             
             if is_budget_error:
-                from rich import print
-                print(f"[red]Error: Budget limit exceeded[/red]")
-                used = getattr(e, "used", None)
-                limit = getattr(e, "limit", None)
-                if isinstance(used, (int, float)) and isinstance(limit, (int, float)):
-                    print(f"[red]Spent ${used:.2f} (limit: ${limit:.2f})[/red]")
-                else:
-                    print(f"[red]{str(e)}[/red]")
-                print("[yellow]To adjust the budget, set max_budget in ExecutionConfig:[/yellow]")
-                print("[yellow]  Agent(execution=ExecutionConfig(max_budget=1.00))[/yellow]")
+                from rich import print as rich_print
+                # Single-line error message with actionable guidance
+                rich_print(f"[red]Budget limit exceeded: {e!s} - Set max_budget parameter (e.g., Agent(max_budget=1.00))[/red]")
                 sys.exit(1)
             else:
                 # Re-raise other exceptions
