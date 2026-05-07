@@ -329,32 +329,38 @@ class AgentsGenerator:
         Args:
             config (dict): The parsed YAML configuration
         """
-        # Known valid field names for agents
-        KNOWN_FIELDS = {'role', 'goal', 'instructions', 'backstory', 'tools', 'llm'}
-        
-        # Check agents section
-        agents_section = config.get('agents', {})
-        for agent_name, agent_config in agents_section.items():
-            if not isinstance(agent_config, dict):
+        known_fields = {
+            'role', 'goal', 'instructions', 'backstory', 'tools', 'tasks', 'llm',
+            'function_calling_llm', 'allow_delegation', 'max_iter', 'max_rpm',
+            'max_execution_time', 'verbose', 'cache', 'system_template',
+            'prompt_template', 'response_template', 'tool_timeout', 'planning_tools',
+            'planning', 'autonomy', 'guardrails', 'streaming', 'stream',
+            'approval', 'skills', 'cli_backend', 'reflection'
+        }
+
+        for section_name in ('agents', 'roles'):
+            section = config.get(section_name, {})
+            if not isinstance(section, dict):
                 continue
-                
-            for field_name in agent_config.keys():
-                if field_name not in KNOWN_FIELDS:
-                    # Find close matches for typos
+
+            entity_name = 'agent' if section_name == 'agents' else 'role'
+            for name, section_config in section.items():
+                if not isinstance(section_config, dict):
+                    continue
+
+                for field_name in section_config:
+                    if field_name in known_fields:
+                        continue
+
                     close_matches = difflib.get_close_matches(
-                        field_name, 
-                        KNOWN_FIELDS, 
-                        n=1, 
+                        field_name,
+                        known_fields,
+                        n=1,
                         cutoff=0.6
                     )
-                    
-                    if close_matches:
-                        suggestion = f" Did you mean '{close_matches[0]}'?"
-                    else:
-                        suggestion = ""
-                    
+                    suggestion = f" Did you mean '{close_matches[0]}'?" if close_matches else ""
                     self.logger.warning(
-                        f"Unknown field '{field_name}' in agent '{agent_name}'.{suggestion}"
+                        f"Unknown field '{field_name}' in {entity_name} '{name}'.{suggestion}"
                     )
 
     def is_function_or_decorated(self, obj):

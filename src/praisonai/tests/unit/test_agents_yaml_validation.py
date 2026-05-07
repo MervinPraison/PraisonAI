@@ -17,7 +17,7 @@ def test_agents_yaml_typo_validation(caplog):
     """Test that unknown field names in agents.yaml produce warnings with suggestions."""
     # Import here to avoid import issues if dependencies are missing
     try:
-        from praisonai.praisonai.agents_generator import AgentsGenerator
+        from praisonai.agents_generator import AgentsGenerator
     except ImportError:
         pytest.skip("AgentsGenerator not available - skipping validation test")
     
@@ -41,11 +41,11 @@ def test_agents_yaml_typo_validation(caplog):
     
     try:
         # Create AgentsGenerator with mocked dependencies to avoid import issues
-        with patch('praisonai.praisonai.agents_generator.PRAISONAI_TOOLS_AVAILABLE', False), \
-             patch('praisonai.praisonai.agents_generator.CREWAI_AVAILABLE', False), \
-             patch('praisonai.praisonai.agents_generator.AUTOGEN_AVAILABLE', False), \
-             patch('praisonai.praisonai.agents_generator.PRAISONAI_AVAILABLE', True), \
-             patch('praisonai.praisonai.agents_generator.AG2_AVAILABLE', False):
+        with patch('praisonai.agents_generator.PRAISONAI_TOOLS_AVAILABLE', False), \
+             patch('praisonai.agents_generator.CREWAI_AVAILABLE', False), \
+             patch('praisonai.agents_generator.AUTOGEN_AVAILABLE', False), \
+             patch('praisonai.agents_generator.PRAISONAI_AVAILABLE', True), \
+             patch('praisonai.agents_generator.AG2_AVAILABLE', False):
             
             # Mock the framework adapter to avoid dependency issues
             with patch.object(AgentsGenerator, '_get_framework_adapter') as mock_adapter:
@@ -84,7 +84,7 @@ def test_agents_yaml_typo_validation(caplog):
 def test_agents_yaml_valid_fields_no_warnings(caplog):
     """Test that valid field names don't produce warnings."""
     try:
-        from praisonai.praisonai.agents_generator import AgentsGenerator
+        from praisonai.agents_generator import AgentsGenerator
     except ImportError:
         pytest.skip("AgentsGenerator not available - skipping validation test")
     
@@ -99,7 +99,8 @@ def test_agents_yaml_valid_fields_no_warnings(caplog):
                 'instructions': 'Focus ONLY on years 1989–2000.',  # correct field name
                 'backstory': 'Expert researcher.',
                 'tools': ['web_search'],
-                'llm': 'gpt-4'
+                'llm': 'gpt-4',
+                'tool_timeout': 30
             }
         }
     }
@@ -109,11 +110,11 @@ def test_agents_yaml_valid_fields_no_warnings(caplog):
         yaml_file_path = f.name
     
     try:
-        with patch('praisonai.praisonai.agents_generator.PRAISONAI_TOOLS_AVAILABLE', False), \
-             patch('praisonai.praisonai.agents_generator.CREWAI_AVAILABLE', False), \
-             patch('praisonai.praisonai.agents_generator.AUTOGEN_AVAILABLE', False), \
-             patch('praisonai.praisonai.agents_generator.PRAISONAI_AVAILABLE', True), \
-             patch('praisonai.praisonai.agents_generator.AG2_AVAILABLE', False):
+        with patch('praisonai.agents_generator.PRAISONAI_TOOLS_AVAILABLE', False), \
+             patch('praisonai.agents_generator.CREWAI_AVAILABLE', False), \
+             patch('praisonai.agents_generator.AUTOGEN_AVAILABLE', False), \
+             patch('praisonai.agents_generator.PRAISONAI_AVAILABLE', True), \
+             patch('praisonai.agents_generator.AG2_AVAILABLE', False):
             
             with patch.object(AgentsGenerator, '_get_framework_adapter') as mock_adapter:
                 mock_framework = MagicMock()
@@ -145,7 +146,7 @@ def test_agents_yaml_valid_fields_no_warnings(caplog):
 def test_agents_yaml_unknown_field_no_close_match(caplog):
     """Test behavior when unknown field has no close matches."""
     try:
-        from praisonai.praisonai.agents_generator import AgentsGenerator
+        from praisonai.agents_generator import AgentsGenerator
     except ImportError:
         pytest.skip("AgentsGenerator not available - skipping validation test")
     
@@ -166,11 +167,11 @@ def test_agents_yaml_unknown_field_no_close_match(caplog):
         yaml_file_path = f.name
     
     try:
-        with patch('praisonai.praisonai.agents_generator.PRAISONAI_TOOLS_AVAILABLE', False), \
-             patch('praisonai.praisonai.agents_generator.CREWAI_AVAILABLE', False), \
-             patch('praisonai.praisonai.agents_generator.AUTOGEN_AVAILABLE', False), \
-             patch('praisonai.praisonai.agents_generator.PRAISONAI_AVAILABLE', True), \
-             patch('praisonai.praisonai.agents_generator.AG2_AVAILABLE', False):
+        with patch('praisonai.agents_generator.PRAISONAI_TOOLS_AVAILABLE', False), \
+             patch('praisonai.agents_generator.CREWAI_AVAILABLE', False), \
+             patch('praisonai.agents_generator.AUTOGEN_AVAILABLE', False), \
+             patch('praisonai.agents_generator.PRAISONAI_AVAILABLE', True), \
+             patch('praisonai.agents_generator.AG2_AVAILABLE', False):
             
             with patch.object(AgentsGenerator, '_get_framework_adapter') as mock_adapter:
                 mock_framework = MagicMock()
@@ -200,6 +201,62 @@ def test_agents_yaml_unknown_field_no_close_match(caplog):
         suggestion_warnings = [w for w in unknown_field_warnings if "Did you mean" in w]
         assert not suggestion_warnings, f"Unexpected suggestion for field with no close match: {suggestion_warnings}"
     
+    finally:
+        os.unlink(yaml_file_path)
+
+
+def test_roles_yaml_typo_validation(caplog):
+    """Test that unknown field names in roles config produce warnings."""
+    try:
+        from praisonai.agents_generator import AgentsGenerator
+    except ImportError:
+        pytest.skip("AgentsGenerator not available - skipping validation test")
+
+    yaml_content = {
+        'framework': 'praisonai',
+        'input': 'Test',
+        'roles': {
+            'researcher': {
+                'role': 'Research Analyst',
+                'goal': 'Provide a historical summary',
+                'instrutions': 'Focus ONLY on years 1989–2000.'
+            }
+        }
+    }
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        yaml.dump(yaml_content, f)
+        yaml_file_path = f.name
+
+    try:
+        with patch('praisonai.agents_generator.PRAISONAI_TOOLS_AVAILABLE', False), \
+             patch('praisonai.agents_generator.CREWAI_AVAILABLE', False), \
+             patch('praisonai.agents_generator.AUTOGEN_AVAILABLE', False), \
+             patch('praisonai.agents_generator.PRAISONAI_AVAILABLE', True), \
+             patch('praisonai.agents_generator.AG2_AVAILABLE', False):
+
+            with patch.object(AgentsGenerator, '_get_framework_adapter') as mock_adapter:
+                mock_framework = MagicMock()
+                mock_framework.is_available.return_value = True
+                mock_adapter.return_value = mock_framework
+
+                generator = AgentsGenerator(
+                    agent_file=yaml_file_path,
+                    framework='praisonai',
+                    config_list=[],
+                    log_level=logging.DEBUG
+                )
+
+                with caplog.at_level(logging.WARNING):
+                    with open(yaml_file_path, 'r') as f:
+                        config = yaml.safe_load(f)
+
+                    generator._validate_agents_config(config)
+
+        assert any("Unknown field 'instrutions' in role 'researcher'" in record.message
+                  for record in caplog.records), "Expected warning about typo in roles was not logged"
+        assert any("Did you mean 'instructions'?" in record.message
+                  for record in caplog.records), "Expected suggestion for roles typo was not logged"
     finally:
         os.unlink(yaml_file_path)
 
