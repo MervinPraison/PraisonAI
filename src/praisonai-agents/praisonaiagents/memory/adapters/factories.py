@@ -364,7 +364,7 @@ class MongoDBMemoryAdapter:
     
     def store_short_term(self, text: str, metadata: Optional[Dict[str, Any]] = None, **kwargs) -> str:
         """Store in MongoDB short-term collection."""
-        from datetime import datetime
+        from datetime import datetime, timezone
         import time
         
         doc_id = str(time.time_ns())
@@ -372,7 +372,7 @@ class MongoDBMemoryAdapter:
             "_id": doc_id,
             "content": text,
             "metadata": metadata or {},
-            "created_at": datetime.now(datetime.timezone.utc),
+            "created_at": datetime.now(timezone.utc),
             "memory_type": "short_term"
         }
         
@@ -396,7 +396,7 @@ class MongoDBMemoryAdapter:
     
     def store_long_term(self, text: str, metadata: Optional[Dict[str, Any]] = None, **kwargs) -> str:
         """Store in MongoDB long-term collection."""
-        from datetime import datetime
+        from datetime import datetime, timezone
         import time
         
         doc_id = str(time.time_ns())
@@ -404,7 +404,7 @@ class MongoDBMemoryAdapter:
             "_id": doc_id,
             "content": text,
             "metadata": metadata or {},
-            "created_at": datetime.now(datetime.timezone.utc),
+            "created_at": datetime.now(timezone.utc),
             "memory_type": "long_term"
         }
         
