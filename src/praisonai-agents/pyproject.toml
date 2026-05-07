@@ -113,7 +113,9 @@ all = [
     "praisonaiagents[mongodb]",
     "praisonaiagents[auth]",
     "praisonaiagents[search]",
-    "praisonaiagents[crawl]"
+    "praisonaiagents[crawl]",
+    "praisonaiagents[autonomy]",
+    "praisonaiagents[os]"
 ]
 
 [tool.setuptools.packages.find]
