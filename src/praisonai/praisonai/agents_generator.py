@@ -15,6 +15,7 @@ import os
 import logging
 import re
 import keyword
+import difflib
 
 # Import new architecture components
 from .framework_adapters.base import FrameworkAdapter
@@ -321,6 +322,41 @@ class AgentsGenerator:
                     agent_config[field] = value
                     self.logger.debug(f"CLI override for agent {agent_name}: {field} = {value}")
 
+    def _validate_agents_config(self, config):
+        """
+        Validate agent configuration for typos in field names and provide suggestions.
+        
+        Args:
+            config (dict): The parsed YAML configuration
+        """
+        # Known valid field names for agents
+        KNOWN_FIELDS = {'role', 'goal', 'instructions', 'backstory', 'tools', 'llm'}
+        
+        # Check agents section
+        agents_section = config.get('agents', {})
+        for agent_name, agent_config in agents_section.items():
+            if not isinstance(agent_config, dict):
+                continue
+                
+            for field_name in agent_config.keys():
+                if field_name not in KNOWN_FIELDS:
+                    # Find close matches for typos
+                    close_matches = difflib.get_close_matches(
+                        field_name, 
+                        KNOWN_FIELDS, 
+                        n=1, 
+                        cutoff=0.6
+                    )
+                    
+                    if close_matches:
+                        suggestion = f" Did you mean '{close_matches[0]}'?"
+                    else:
+                        suggestion = ""
+                    
+                    self.logger.warning(
+                        f"Unknown field '{field_name}' in agent '{agent_name}'.{suggestion}"
+                    )
+
     def is_function_or_decorated(self, obj):
         """
         Checks if the given object is a function or has a __call__ method.
@@ -506,6 +542,10 @@ class AgentsGenerator:
 
         # Get workflow input: 'input' is canonical, 'topic' is alias for backward compatibility
         topic = config.get('input', config.get('topic', ''))
+        
+        # Validate agents configuration for typos in field names
+        self._validate_agents_config(config)
+        
         tools_dict = {}
         
         # Use ToolResolver to get available tools (consistent tool resolution)
