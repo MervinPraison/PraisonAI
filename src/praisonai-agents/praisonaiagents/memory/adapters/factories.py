@@ -40,7 +40,8 @@ def create_mem0_memory_adapter(**kwargs) -> MemoryProtocol:
         import mem0
     except ImportError:
         raise ImportError(
-            "mem0 is required for mem0 adapter. Install with: pip install mem0ai"
+            "mem0ai is not installed. "
+            "Run: pip install 'praisonaiagents[memory]'"
         )
     
     return Mem0MemoryAdapter(mem0_config=kwargs)
