@@ -13,8 +13,9 @@ Architecture:
 import json
 import threading
 import time
+from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from praisonaiagents.trace.protocol import ActionEvent, ActionEventType, TraceSinkProtocol
 from praisonaiagents.trace.context_events import ContextEvent, ContextEventType, ContextTraceSinkProtocol
@@ -66,14 +67,16 @@ class LangfuseSink:
     Thread-safe: langfuse.Langfuse handles its own batching and thread safety.
     """
     
-    __slots__ = ("_config", "_client", "_traces", "_spans", "_lock", "_closed", "_metadata")
+    __slots__ = ("_config", "_client", "_traces", "_spans", "_tool_stacks", "_lock", "_closed", "_metadata")
     
     def __init__(self, config: Optional[LangfuseSinkConfig] = None, metadata: Optional[Dict[str, Any]] = None):
         self._config = config or LangfuseSinkConfig()
         self._client: Optional[Any] = None  # Lazy-loaded langfuse.Langfuse
         self._traces: Dict[str, Any] = {}  # agent_name -> trace observation
         self._metadata = metadata or {}  # Additional metadata for traces
-        self._spans: Dict[str, Any] = {}   # span_key -> span observation
+        self._spans: Dict[str, Any] = {}   # agent_key -> root span
+        # (agent_key, tool_name) -> stack of in-flight tool spans
+        self._tool_stacks: Dict[Tuple[str, str], List[Any]] = defaultdict(list)
         self._lock = threading.Lock()
         self._closed = False
         
@@ -115,7 +118,9 @@ class LangfuseSink:
                 self._handle_event(event)
         except Exception as e:
             # Don't let observability errors break agent execution
-            print(f"LangfuseSink error: {e}")
+            import logging
+            logger = logging.getLogger("observability.langfuse")
+            logger.exception("LangfuseSink error")
     
     def _handle_event(self, event: ActionEvent) -> None:
         """Handle a single ActionEvent (called under lock)."""
@@ -187,16 +192,10 @@ class LangfuseSink:
         
         tool_name = event.tool_name or "unknown-tool"
         
-        # Generate unique tool invocation key with UUID for collision safety
-        import uuid
-        tool_invocation_id = str(uuid.uuid4())[:8]  # Short UUID
-        tool_key = f"{agent_key}:{tool_name}:{tool_invocation_id}"
-        
         # Merge flow correlation metadata with tool metadata
         tool_metadata = {
             "tool_name": tool_name,
             "agent_name": agent_name,
-            "tool_invocation_id": tool_invocation_id,
             **(event.metadata if event.metadata else {}),
             **self._metadata  # Include flow correlation metadata
         }
@@ -208,25 +207,20 @@ class LangfuseSink:
             metadata=tool_metadata,
         )
         
-        # Store with unique tool key
-        self._spans[tool_key] = tool_span
+        # Push to stack for LIFO correlation
+        self._tool_stacks[(agent_key, tool_name)].append(tool_span)
     
     def _handle_tool_end(self, event: ActionEvent, agent_name: str) -> None:
         """Handle TOOL_END -> end tool span observation."""
         agent_key = f"{event.agent_id or agent_name}-{agent_name}"
         tool_name = event.tool_name or "unknown-tool"
-        
-        # Find the most recent matching tool span
-        tool_key = None
-        for key in self._spans:
-            if key.startswith(f"{agent_key}:{tool_name}:") and key != agent_key:
-                tool_key = key
-        
-        if not tool_key:
+        stack = self._tool_stacks.get((agent_key, tool_name))
+        if not stack:
             return
-        
-        tool_span = self._spans.pop(tool_key, None)
-        if tool_span:
+        tool_span = stack.pop()
+        if not stack:
+            self._tool_stacks.pop((agent_key, tool_name), None)
+        try:
             tool_span.update(
                 output=event.tool_result_summary,
                 status_message=event.status or "completed",
@@ -237,6 +231,11 @@ class LangfuseSink:
                 }
             )
             tool_span.end()
+        except Exception as e:
+            # Use logging instead of print
+            import logging
+            logger = logging.getLogger("observability.langfuse")
+            logger.exception("LangfuseSink: failed to finalize tool span %r", tool_name)
     
     def _handle_error(self, event: ActionEvent, agent_name: str) -> None:
         """Handle ERROR -> create error event observation."""
@@ -284,7 +283,9 @@ class LangfuseSink:
             try:
                 self._client.flush()
             except Exception as e:
-                print(f"LangfuseSink flush error: {e}")
+                import logging
+                logger = logging.getLogger("observability.langfuse")
+                logger.exception("LangfuseSink flush error")
     
     def close(self) -> None:
         """Close the sink and release resources."""

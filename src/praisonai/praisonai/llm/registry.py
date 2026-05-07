@@ -268,10 +268,43 @@ def _register_builtin_providers(registry: LLMProviderRegistry) -> None:
     
     Uses lazy loading to avoid importing heavy dependencies at module load time.
     """
-    # Note: In Python, the actual LLM providers are in praisonaiagents.llm
-    # which uses LiteLLM. This registry is for custom provider extensions.
-    # Built-in providers are handled by LiteLLM automatically.
-    pass
+    # Built-in adapter that wraps LiteLLM so create_llm_provider works out of the box.
+    class _LiteLLMProvider:
+        """Generic LiteLLM-backed provider used for openai/anthropic/google/etc."""
+        def __init__(self, model_id: str, config: Optional[Dict[str, Any]] = None):
+            self.provider_id = "litellm"
+            self.model_id = model_id
+            self.config = config or {}
+
+        def generate(self, prompt: str, **kwargs):
+            try:
+                import litellm  # lazy
+            except ImportError:
+                raise ImportError(
+                    "LiteLLM is required for built-in providers. "
+                    "Install with: pip install litellm"
+                )
+            full_model = f"{self.config.get('provider', '')}/{self.model_id}".strip("/")
+            return litellm.completion(
+                model=full_model or self.model_id,
+                messages=[{"role": "user", "content": prompt}],
+                **{**self.config, **kwargs},
+            )
+
+    def _make_litellm_factory(provider_prefix: str):
+        def factory(model_id, config=None):
+            cfg = dict(config or {})
+            cfg.setdefault("provider", provider_prefix)
+            return _LiteLLMProvider(model_id, cfg)
+        return factory
+
+    # Cover the providers parse_model_string() already special-cases.
+    for name, aliases in [
+        ("openai",    ("oai",)),
+        ("anthropic", ("claude",)),
+        ("google",    ("gemini", "google_genai")),
+    ]:
+        registry.register(name, _make_litellm_factory(name), aliases=list(aliases))
 
 
 def register_llm_provider(
