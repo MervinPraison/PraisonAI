@@ -357,7 +357,9 @@ class PraisonAIDB:
                 runs.append(run_data)
         
         runs.sort(key=lambda r: r.get("started_at", 0), reverse=True)
-        return runs[:limit] if limit is not None else runs
+        if limit is not None:
+            return runs[: max(limit, 0)]
+        return runs
     
     def export_session(
         self,
@@ -548,7 +550,9 @@ class PraisonAIDB:
         if user_id is not None:
             traces = [t for t in traces if t.get("user_id") == user_id]
         traces.sort(key=lambda t: t.get("started_at", 0), reverse=True)
-        return traces[:limit] if limit is not None else traces
+        if limit is not None:
+            return traces[: max(limit, 0)]
+        return traces
     
     def close(self) -> None:
         """Close all database connections."""

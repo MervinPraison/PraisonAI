@@ -286,12 +286,13 @@ def _register_builtin_providers(registry: LLMProviderRegistry) -> None:
                 ) from err
             provider_prefix = self.config.get("provider", "")
             full_model = f"{provider_prefix}/{self.model_id}".strip("/") if provider_prefix else self.model_id
-            # Exclude internal 'provider' key from litellm.completion kwargs
-            passthrough_config = {k: v for k, v in self.config.items() if k != "provider"}
+            completion_kwargs = {
+                k: v for k, v in {**self.config, **kwargs}.items() if k != "provider"
+            }
             return litellm.completion(
                 model=full_model,
                 messages=[{"role": "user", "content": prompt}],
-                **{**passthrough_config, **kwargs},
+                **completion_kwargs,
             )
 
     def _make_litellm_factory(provider_prefix: str):

@@ -171,6 +171,16 @@ class LangfuseSink:
     def _handle_agent_end(self, event: ActionEvent, agent_name: str) -> None:
         """Handle AGENT_END -> end root span observation."""
         agent_key = f"{event.agent_id or agent_name}-{agent_name}"
+        # End and clear any dangling tool spans for this agent
+        for stack_key, stack in list(self._tool_stacks.items()):
+            if stack_key[0] != agent_key:
+                continue
+            while stack:
+                try:
+                    stack.pop().end()
+                except Exception:
+                    pass
+            self._tool_stacks.pop(stack_key, None)
         span = self._spans.get(agent_key)
         if span:
             span.update(
@@ -312,7 +322,14 @@ class LangfuseSink:
                                 span.end()
                             except Exception:
                                 pass
+                        for stack in self._tool_stacks.values():
+                            while stack:
+                                try:
+                                    stack.pop().end()
+                                except Exception:
+                                    pass
                         self._spans.clear()
+                        self._tool_stacks.clear()
                         self._traces.clear()
                 except Exception:
                     pass
