@@ -294,8 +294,35 @@ def search(query: str) -> str:
 
 @tool
 def calculate(expression: str) -> float:
-    """Evaluate a math expression."""
-    return eval(expression)
+    """Safely evaluate a numeric arithmetic expression."""
+    import ast
+    import operator
+    
+    # Define allowed operations
+    _OPS = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.Pow: operator.pow,
+        ast.USub: operator.neg,
+        ast.UAdd: operator.pos,
+    }
+    
+    def _safe_eval(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        elif isinstance(node, ast.BinOp) and type(node.op) in _OPS:
+            return _OPS[type(node.op)](_safe_eval(node.left), _safe_eval(node.right))
+        elif isinstance(node, ast.UnaryOp) and type(node.op) in _OPS:
+            return _OPS[type(node.op)](_safe_eval(node.operand))
+        else:
+            raise ValueError("Unsupported expression")
+    
+    try:
+        return _safe_eval(ast.parse(expression, mode="eval").body)
+    except (ValueError, SyntaxError, TypeError):
+        raise ValueError("Invalid arithmetic expression")
 
 agent = Agent(
     instructions="You are a helpful assistant",
@@ -303,6 +330,8 @@ agent = Agent(
 )
 agent.start("Search for AI news and calculate 15*4")
 ```
+
+> ⚠️ **Security Note:** Never use `eval()`, `exec()`, or `subprocess` in tool functions that process LLM-generated or user-supplied input. Always validate and sanitize inputs to prevent code injection attacks.
 
 > 📖 [Full tools docs](https://docs.praison.ai/docs/tools/tools) — BaseTool, tool packages, 100+ built-in tools
 
