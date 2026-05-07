@@ -126,7 +126,20 @@ class _AgentServerRegistry:
         
         thread = threading.Thread(target=run_server, daemon=True)
         thread.start()
-        ready_event.wait(timeout=5.0)  # Deterministic wait instead of sleep(0.5)
+        
+        # Check for configurable timeout via environment variable
+        timeout = float(os.environ.get("PRAISONAI_SERVER_READY_TIMEOUT", "5.0"))
+        became_ready = ready_event.wait(timeout=timeout)
+        
+        if not became_ready:
+            logger.warning(
+                "Agent server on port %s did not become ready within %.1fs. "
+                "Proceeding, but some features may not work correctly. "
+                "Check server logs for startup errors.",
+                port,
+                timeout,
+            )
+        
         return True
 
 
