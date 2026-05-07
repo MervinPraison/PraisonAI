@@ -623,7 +623,8 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
                 - ExecutionConfig: Custom configuration
                 Controls: max_iter, max_rpm, max_execution_time, max_retry_limit
             max_budget: Budget limit in USD (convenience alias). Creates ExecutionConfig(max_budget=value).
-                Use execution=ExecutionConfig(max_budget=...) for more control.
+                If both execution.max_budget and max_budget are provided, max_budget takes precedence.
+                Use execution=ExecutionConfig(...) for full execution control.
             templates: Template configuration. Accepts:
                 - Dict[str, Any]: Template fields (e.g. {"system": "...", "prompt": "..."})
                 - TemplateConfig: Custom configuration
@@ -747,8 +748,22 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
                 if resolved_exec is None:
                     execution = ExecutionConfig(max_budget=max_budget)
                 else:
-                    # Update existing config with max_budget if not already set
-                    if hasattr(resolved_exec, 'max_budget') and resolved_exec.max_budget is None:
+                    # Update existing config with max_budget
+                    if hasattr(resolved_exec, 'max_budget'):
+                        if (
+                            resolved_exec.max_budget is not None
+                            and resolved_exec.max_budget != max_budget
+                        ):
+                            import warnings
+                            warnings.warn(
+                                (
+                                    f"Both execution.max_budget={resolved_exec.max_budget} and "
+                                    f"max_budget={max_budget} were provided; "
+                                    "using max_budget."
+                                ),
+                                UserWarning,
+                                stacklevel=3,
+                            )
                         resolved_exec.max_budget = max_budget
                         execution = resolved_exec
                     elif not hasattr(resolved_exec, 'max_budget'):

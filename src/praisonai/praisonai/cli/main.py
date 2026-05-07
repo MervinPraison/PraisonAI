@@ -4094,7 +4094,12 @@ Do NOT add any explanations or formatting."""
             if is_budget_error:
                 from rich import print
                 print(f"[red]Error: Budget limit exceeded[/red]")
-                print(f"[red]{str(e)}[/red]")
+                used = getattr(e, "used", None)
+                limit = getattr(e, "limit", None)
+                if isinstance(used, (int, float)) and isinstance(limit, (int, float)):
+                    print(f"[red]Spent ${used:.2f} (limit: ${limit:.2f})[/red]")
+                else:
+                    print(f"[red]{str(e)}[/red]")
                 print("[yellow]To adjust the budget, set max_budget in ExecutionConfig:[/yellow]")
                 print("[yellow]  Agent(execution=ExecutionConfig(max_budget=1.00))[/yellow]")
                 sys.exit(1)
@@ -4211,7 +4216,6 @@ Do NOT add any explanations or formatting."""
         
         if PRAISONAI_AVAILABLE:
             from praisonaiagents import Agent as PraisonAgent
-            from praisonaiagents.errors import BudgetExceededError
             
             agent_config = {
                 "name": "DirectAgent",
