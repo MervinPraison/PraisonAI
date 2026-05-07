@@ -321,7 +321,7 @@ def calculate(expression: str) -> float:
     
     try:
         return _safe_eval(ast.parse(expression, mode="eval").body)
-    except (ValueError, SyntaxError, TypeError):
+    except (ValueError, SyntaxError, TypeError, ZeroDivisionError, OverflowError):
         raise ValueError("Invalid arithmetic expression")
 
 agent = Agent(
@@ -332,7 +332,6 @@ agent.start("Search for AI news and calculate 15*4")
 ```
 
 > ⚠️ **Security Note:** Never use `eval()`, `exec()`, or `subprocess` in tool functions that process LLM-generated or user-supplied input. Always validate and sanitize inputs to prevent code injection attacks.
-
 > 📖 [Full tools docs](https://docs.praison.ai/docs/tools/tools) — BaseTool, tool packages, 100+ built-in tools
 
 ### 5. Persistence (Databases)
