@@ -37,7 +37,7 @@ class TestPraisonAIDBRunsAndTraces(unittest.TestCase):
         db = self._make_db({"run:s1:r1": {"run_id": "r1", "started_at": 10}})
         self.assertEqual(db.get_runs("s1", limit=0), [])
 
-    def test_get_traces_filters_and_sorts(self):
+    def test_get_traces_filters_by_session_and_user_then_sorts(self):
         db = self._make_db(
             {
                 "trace:t1": {"trace_id": "t1", "session_id": "s1", "user_id": "u1", "started_at": 10},
@@ -52,4 +52,3 @@ class TestPraisonAIDBRunsAndTraces(unittest.TestCase):
     def test_get_traces_limit_zero_returns_empty_list(self):
         db = self._make_db({"trace:t1": {"trace_id": "t1", "started_at": 10}})
         self.assertEqual(db.get_traces(limit=0), [])
-

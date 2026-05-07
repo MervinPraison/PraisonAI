@@ -11,6 +11,7 @@ Architecture:
 """
 
 import json
+import logging
 import threading
 import time
 from collections import defaultdict
@@ -19,6 +20,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from praisonaiagents.trace.protocol import ActionEvent, ActionEventType, TraceSinkProtocol
 from praisonaiagents.trace.context_events import ContextEvent, ContextEventType, ContextTraceSinkProtocol
+
+logger = logging.getLogger("observability.langfuse")
 
 
 @dataclass
@@ -118,8 +121,6 @@ class LangfuseSink:
                 self._handle_event(event)
         except Exception as e:
             # Don't let observability errors break agent execution
-            import logging
-            logger = logging.getLogger("observability.langfuse")
             logger.exception("LangfuseSink error")
     
     def _handle_event(self, event: ActionEvent) -> None:
@@ -179,7 +180,7 @@ class LangfuseSink:
                 try:
                     stack.pop().end()
                 except Exception:
-                    pass
+                    logger.exception("LangfuseSink: failed to close dangling tool span for %s", stack_key[1])
             self._tool_stacks.pop(stack_key, None)
         span = self._spans.get(agent_key)
         if span:
@@ -243,8 +244,6 @@ class LangfuseSink:
             tool_span.end()
         except Exception as e:
             # Use logging instead of print
-            import logging
-            logger = logging.getLogger("observability.langfuse")
             logger.exception("LangfuseSink: failed to finalize tool span %r", tool_name)
     
     def _handle_error(self, event: ActionEvent, agent_name: str) -> None:
@@ -293,8 +292,6 @@ class LangfuseSink:
             try:
                 self._client.flush()
             except Exception as e:
-                import logging
-                logger = logging.getLogger("observability.langfuse")
                 logger.exception("LangfuseSink flush error")
     
     def close(self) -> None:
@@ -332,7 +329,7 @@ class LangfuseSink:
                         self._tool_stacks.clear()
                         self._traces.clear()
                 except Exception:
-                    pass
+                    logger.exception("LangfuseSink close cleanup failed")
     
     def context_sink(self) -> "ContextTraceSinkProtocol":
         """Return a ContextTraceSinkProtocol that forwards to this sink."""
