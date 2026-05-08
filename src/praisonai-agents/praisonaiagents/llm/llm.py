@@ -361,6 +361,7 @@ Respond with ONLY a valid JSON tool call in this format:
         prompt_caching: Optional[bool] = None,
         claude_memory: Optional[Union[bool, Any]] = None,
         failover_manager: Optional[FailoverManagerProtocol] = None,
+        auth: Optional[str] = None,           # NEW: "claude-code", "codex", "gemini-cli", "qwen-cli"
         **extra_settings
     ):
         # Configure logging only once at the class level
@@ -436,6 +437,10 @@ Respond with ONLY a valid JSON tool call in this format:
         self._rate_limiter = extra_settings.get('rate_limiter', None)
         self._max_retries = extra_settings.get('max_retries', 3)
         self._retry_delay = extra_settings.get('retry_delay', 60)  # Default 60 seconds
+        
+        # Subscription auth
+        self._auth_provider_id = auth
+        self._cached_subscription_creds = None  # SubscriptionCredentials | None
         
         # Failover management
         self._failover_manager = failover_manager
@@ -715,6 +720,35 @@ Respond with ONLY a valid JSON tool call in this format:
             logging.info(f"Failover: switching from {self.model} to {profile.model}")
             self.model = profile.model
 
+    def _resolve_subscription_creds(self):
+        """Lazy resolve + cache subscription credentials, checking expiration."""
+        if not self._auth_provider_id:
+            return None
+        
+        # Check if cached credentials are expired
+        if (self._cached_subscription_creds and 
+            self._cached_subscription_creds.expires_at_ms and
+            self._cached_subscription_creds.expires_at_ms <= int(time.time() * 1000)):
+            self._cached_subscription_creds = None
+            
+        if self._cached_subscription_creds is None:
+            from ..auth import resolve_subscription_credentials
+            self._cached_subscription_creds = resolve_subscription_credentials(
+                self._auth_provider_id,
+            )
+        return self._cached_subscription_creds
+
+    def _refresh_subscription_creds(self):
+        """Force refresh of subscription credentials."""
+        if not self._auth_provider_id:
+            return None
+        from ..auth.subscription.registry import get_subscription_provider
+        provider = get_subscription_provider(self._auth_provider_id)
+        if provider is None:
+            return None
+        self._cached_subscription_creds = provider.refresh()
+        return self._cached_subscription_creds
+
     def _call_with_retry(self, func, *args, **kwargs):
         """Call a function with automatic retry on rate limit errors and failover support.
 
@@ -750,6 +784,21 @@ Respond with ONLY a valid JSON tool call in this format:
                 
                 last_error = e
                 error_str = str(e)
+
+                # Check for auth errors and try refreshing subscription credentials
+                if category == "auth" and self._auth_provider_id and attempt == 0:
+                    try:
+                        logging.info("Authentication error detected - attempting credential refresh")
+                        refreshed_creds = self._refresh_subscription_creds()
+                        if refreshed_creds:
+                            # Update parameters with refreshed credentials (don't clear cache)
+                            kwargs = self._build_completion_params(**kwargs)
+                            # Retry immediately with refreshed credentials
+                            can_retry = True
+                            retry_delay = 0.0
+                            logging.info("Subscription credentials refreshed, retrying...")
+                    except Exception as refresh_error:
+                        logging.warning(f"Failed to refresh subscription credentials: {refresh_error}")
 
                 # Failover: mark failure and try next profile (do this before early exit)
                 if self._failover_manager and self._current_profile:
@@ -839,6 +888,21 @@ Respond with ONLY a valid JSON tool call in this format:
                 
                 last_error = e
                 error_str = str(e)
+
+                # Check for auth errors and try refreshing subscription credentials
+                if category == "auth" and self._auth_provider_id and attempt == 0:
+                    try:
+                        logging.info("Authentication error detected - attempting credential refresh")
+                        refreshed_creds = self._refresh_subscription_creds()
+                        if refreshed_creds:
+                            # Update parameters with refreshed credentials (don't clear cache)
+                            kwargs = self._build_completion_params(**kwargs)
+                            # Retry immediately with refreshed credentials
+                            can_retry = True
+                            retry_delay = 0.0
+                            logging.info("Subscription credentials refreshed, retrying...")
+                    except Exception as refresh_error:
+                        logging.warning(f"Failed to refresh subscription credentials: {refresh_error}")
 
                 # Failover: mark failure and try next profile (do this before early exit)
                 if self._failover_manager and self._current_profile:
@@ -4592,6 +4656,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Filter out internal parameters that shouldn't be passed to the API
             filtered_extra_settings = {k: v for k, v in self.extra_settings.items() if k != 'metrics'}
             params.update(filtered_extra_settings)
+        
+        # Inject subscription credentials if auth provider is set
+        creds = self._resolve_subscription_creds()
+        if creds:
+            # Use litellm's native OAuth detection (auto-detects sk-ant-oat-* and switches to Bearer)
+            params["api_key"] = creds.api_key
+            if creds.base_url:
+                params["base_url"] = creds.base_url
+            if creds.headers:
+                extra_headers = dict(params.get("extra_headers") or {})
+                extra_headers.update(creds.headers)
+                params["extra_headers"] = extra_headers
         
         # Override with any provided parameters
         params.update(override_params)

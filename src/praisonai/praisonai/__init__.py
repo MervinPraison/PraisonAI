@@ -1,7 +1,4 @@
-# Suppress crewai.cli.config logger BEFORE any imports to prevent INFO log
-import logging
 import threading
-logging.getLogger('crewai.cli.config').setLevel(logging.ERROR)
 
 # Version is lightweight, import directly
 from .version import __version__

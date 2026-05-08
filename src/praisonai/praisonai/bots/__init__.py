@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from .discord import DiscordBot
     from .slack import SlackBot
     from .whatsapp import WhatsAppBot
+    from .linear import LinearBot
     from .email import EmailBot
     from .agentmail import AgentMailBot
     from .bot import Bot
@@ -38,6 +39,9 @@ def __getattr__(name: str):
     if name == "WhatsAppBot":
         from .whatsapp import WhatsAppBot
         return WhatsAppBot
+    if name == "LinearBot":
+        from .linear import LinearBot
+        return LinearBot
     if name == "EmailBot":
         from .email import EmailBot
         return EmailBot
@@ -65,9 +69,14 @@ def __getattr__(name: str):
     if name == "HTTPApproval":
         from ._http_approval import HTTPApproval
         return HTTPApproval
+    # W1 — cross-platform mirror + identity
+    if name == "mirror_to_session":
+        from ._mirror import mirror_to_session
+        return mirror_to_session
     if name == "BotSessionManager":
         from ._session import BotSessionManager
         return BotSessionManager
+    # N4 — inbound dead-letter queue
     if name == "InboundDLQ":
         from ._dlq import InboundDLQ
         return InboundDLQ
@@ -77,10 +86,12 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
-    "TelegramBot", "DiscordBot", "SlackBot", "WhatsAppBot", "EmailBot", "AgentMailBot",
+    "TelegramBot", "DiscordBot", "SlackBot", "WhatsAppBot", "LinearBot", "EmailBot", "AgentMailBot",
     "Bot", "BotOS",
     "BotSessionManager",
     "InboundDLQ", "DLQEntry",
     "SlackApproval", "TelegramApproval", "DiscordApproval",
     "WebhookApproval", "HTTPApproval",
+    # W1
+    "mirror_to_session", "BotSessionManager",
 ]

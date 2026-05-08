@@ -94,12 +94,15 @@ async def classify_with_llm(
     )
 
     try:
+        from praisonai.llm.env import resolve_llm_endpoint
+        ep = resolve_llm_endpoint()
+        
         client = OpenAI(
-            api_key=_os.environ.get("OPENAI_API_KEY", ""),
-            base_url=_os.environ.get("OPENAI_BASE_URL"),
+            api_key=ep.api_key or "",
+            base_url=ep.base_url,
         )
         response = client.chat.completions.create(
-            model=_os.environ.get("APPROVAL_LLM_MODEL", "gpt-4o-mini"),
+            model=_os.environ.get("APPROVAL_LLM_MODEL", ep.model),
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},

@@ -179,16 +179,13 @@ class TestLangfuseSinkEmit:
         sink._client.start_observation.assert_called_once()
         call_kwargs = sink._client.start_observation.call_args.kwargs
         assert call_kwargs.get("name") == "search_tool"
-        
-        tool_keys = [k for k in sink._spans if k.startswith("agent1-agent1:search_tool:")]
-        assert len(tool_keys) == 1
+        assert sink._tool_stacks[("agent1-agent1", "search_tool")] == [mock_tool_span]
 
     def test_emit_tool_end_closes_tool_span(self):
         """TOOL_END ends the matching tool span."""
         sink = _make_sink_with_mock_client()
         mock_tool_span = MagicMock()
-        ts = str(time.time())
-        sink._spans[f"agent1-agent1:search_tool:{ts}"] = mock_tool_span
+        sink._tool_stacks[("agent1-agent1", "search_tool")] = [mock_tool_span]
 
         event = _make_event(
             ActionEventType.TOOL_END.value,
@@ -404,8 +401,7 @@ class TestContextToActionBridge:
         
         # Create tool span that should be ended
         mock_tool_span = MagicMock()
-        tool_key = "test-agent-test-agent:search:12345678"
-        sink._spans[tool_key] = mock_tool_span
+        sink._tool_stacks[("test-agent-test-agent", "search")] = [mock_tool_span]
         
         context_event = ContextEvent(
             event_type=ContextEventType.TOOL_CALL_END,
@@ -417,9 +413,7 @@ class TestContextToActionBridge:
         
         bridge.emit(context_event)
         
-        # Tool span should be ended (note: matching logic may vary)
-        # This tests the bridge forwards the event properly
-        assert len(sink._spans) >= 0  # Test that bridge processes event without error
+        mock_tool_span.end.assert_called_once()
     
     def test_bridge_maps_llm_request_event(self):
         """_ContextToActionBridge maps LLM_REQUEST correctly."""

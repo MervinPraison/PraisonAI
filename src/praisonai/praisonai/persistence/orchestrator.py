@@ -7,7 +7,9 @@ knowledge retrieval, and state management.
 
 import logging
 import time
+import threading
 import uuid
+from copy import deepcopy
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from .conversation.base import ConversationStore, ConversationSession, ConversationMessage
@@ -78,6 +80,7 @@ class PersistenceOrchestrator:
         
         self._current_session: Optional[ConversationSession] = None
         self._session_cache: Dict[str, ConversationSession] = {}
+        self._cache_lock = threading.RLock()  # RLock allows re-entrant access
     
     @classmethod
     def from_config(cls, config: PersistenceConfig) -> "PersistenceOrchestrator":
@@ -89,6 +92,31 @@ class PersistenceOrchestrator:
         """Create orchestrator from environment variables."""
         config = PersistenceConfig.from_env()
         return cls(config=config)
+    
+    # =========================================================================
+    # Thread-Safe Cache Operations
+    # =========================================================================
+    
+    def _cache_put(self, session: ConversationSession) -> None:
+        """Store session in cache with thread safety."""
+        with self._cache_lock:
+            self._session_cache[session.session_id] = session
+    
+    def _cache_get(self, session_id: str) -> Optional[ConversationSession]:
+        """Get session from cache with thread safety and defensive copying."""
+        with self._cache_lock:
+            cached = self._session_cache.get(session_id)
+            return deepcopy(cached) if cached is not None else None
+    
+    def _cache_delete(self, session_id: str) -> Optional[ConversationSession]:
+        """Remove session from cache with thread safety."""
+        with self._cache_lock:
+            return self._session_cache.pop(session_id, None)
+    
+    def _cache_clear(self) -> None:
+        """Clear all sessions from cache with thread safety."""
+        with self._cache_lock:
+            self._session_cache.clear()
     
     # =========================================================================
     # Agent Lifecycle Hooks
@@ -128,7 +156,7 @@ class PersistenceOrchestrator:
         if session:
             logger.info(f"Resuming session: {session_id}")
             self._current_session = session
-            self._session_cache[session_id] = session
+            self._cache_put(session)
             
             # Load previous messages
             messages = self.conversation.get_messages(session_id)
@@ -146,7 +174,7 @@ class PersistenceOrchestrator:
             self.conversation.create_session(session)
             logger.info(f"Created new session: {session_id}")
             self._current_session = session
-            self._session_cache[session_id] = session
+            self._cache_put(session)
             return []
     
     def on_message(
@@ -206,12 +234,14 @@ class PersistenceOrchestrator:
         if not self.conversation:
             return
         
-        session = self._session_cache.get(session_id) or self.conversation.get_session(session_id)
+        session = self._cache_get(session_id) or self.conversation.get_session(session_id)
         if session:
             session.updated_at = time.time()
             if metadata:
                 session.metadata = {**(session.metadata or {}), **metadata}
             self.conversation.update_session(session)
+            # Update cache with the modified session
+            self._cache_put(session)
             logger.debug(f"Updated session metadata: {session_id}")
     
     # =========================================================================
@@ -315,8 +345,8 @@ class PersistenceOrchestrator:
         if not self.conversation:
             return False
         
-        if session_id in self._session_cache:
-            del self._session_cache[session_id]
+        # Remove from cache using thread-safe method
+        self._cache_delete(session_id)
         
         return self.conversation.delete_session(session_id)
     
@@ -395,7 +425,8 @@ class PersistenceOrchestrator:
         if self.state:
             self.state.close()
         
-        self._session_cache.clear()
+        # Clear cache using thread-safe method
+        self._cache_clear()
         logger.info("Persistence orchestrator closed")
     
     def __enter__(self):

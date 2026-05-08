@@ -250,9 +250,16 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     ack_ctx = await self._ack.ack(react_fn=_tg_react)
                 
                 user_id = str(update.message.from_user.id) if update.message.from_user else "unknown"
+                user_name = (
+                    update.message.from_user.username or update.message.from_user.first_name or ""
+                ) if update.message.from_user else ""
                 try:
                     message_text = await self._debouncer.debounce(user_id, message_text)
-                    response = await self._session.chat(self._agent, user_id, message_text)
+                    response = await self._session.chat(
+                        self._agent, user_id, message_text,
+                        chat_id=str(update.message.chat_id) if update.message.chat_id else "",
+                        user_name=user_name,
+                    )
                     send_result = self.fire_message_sending(
                         str(update.message.chat_id), str(response),
                         reply_to=str(update.message.message_id),

@@ -519,6 +519,7 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
         model: Optional[Union[str, Any]] = None,  # Alias for llm=
         base_url: Optional[str] = None,  # Kept separate (connection/auth)
         api_key: Optional[str] = None,  # Kept separate (connection/auth)
+        auth: Optional[str] = None,  # Subscription auth provider: "claude-code", "codex", etc.
         # Tools
         tools: Optional[List[Any]] = None,
         allow_delegation: bool = False,  # Deprecated: use handoffs= instead
@@ -1521,6 +1522,8 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
                     llm_config['base_url'] = base_url
                     if api_key:
                         llm_config['api_key'] = api_key
+                    if auth:
+                        llm_config['auth'] = auth
                     llm_config['metrics'] = metrics
                     self.llm_instance = LLM(**llm_config)
                     self.llm = llm.get('model', Agent._get_default_model())
@@ -1531,6 +1534,7 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
                         model=model_name,
                         base_url=base_url,
                         api_key=api_key,
+                        auth=auth,
                         metrics=metrics,
                         web_search=web_search,
                         web_fetch=web_fetch,
@@ -1552,6 +1556,10 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
                 if api_key and 'api_key' not in llm:
                     llm = llm.copy()
                     llm['api_key'] = api_key
+                # Add auth if provided and not in dict
+                if auth and 'auth' not in llm:
+                    llm = llm.copy()
+                    llm['auth'] = auth
                 # Add metrics parameter
                 llm = llm.copy()
                 llm['metrics'] = metrics
@@ -1571,6 +1579,8 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
                 llm_params = {'model': llm}
                 if api_key:
                     llm_params['api_key'] = api_key
+                if auth:
+                    llm_params['auth'] = auth
                 llm_params['metrics'] = metrics
                 llm_params['web_search'] = web_search
                 llm_params['web_fetch'] = web_fetch

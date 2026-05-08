@@ -15,6 +15,7 @@ import os
 import logging
 import re
 import keyword
+import difflib
 
 # Import new architecture components
 from .framework_adapters.base import FrameworkAdapter
@@ -232,10 +233,8 @@ class AgentsGenerator:
         self.tool_registry = ToolRegistry()
         self.tool_registry.register_builtin_autogen_adapters()
         
-        # Get framework adapter and validate availability
+        # Get framework adapter (availability already validated at CLI entry)
         self.framework_adapter = self._get_framework_adapter(framework)
-        if not self.framework_adapter.is_available():
-            raise ImportError(f"Framework '{framework}' is not available. Please install the required dependencies.")
 
     def _get_framework_adapter(self, framework: str) -> FrameworkAdapter:
         """
@@ -320,6 +319,47 @@ class AgentsGenerator:
                 for field, value in agent_overrides.items():
                     agent_config[field] = value
                     self.logger.debug(f"CLI override for agent {agent_name}: {field} = {value}")
+
+    def _validate_agents_config(self, config):
+        """
+        Validate agent configuration for typos in field names and provide suggestions.
+        
+        Args:
+            config (dict): The parsed YAML configuration
+        """
+        known_fields = {
+            'role', 'goal', 'instructions', 'backstory', 'tools', 'tasks', 'llm',
+            'function_calling_llm', 'allow_delegation', 'max_iter', 'max_rpm',
+            'max_execution_time', 'verbose', 'cache', 'system_template',
+            'prompt_template', 'response_template', 'tool_timeout', 'planning_tools',
+            'planning', 'autonomy', 'guardrails', 'streaming', 'stream',
+            'approval', 'skills', 'cli_backend', 'reflection'
+        }
+
+        for section_name in ('agents', 'roles'):
+            section = config.get(section_name, {})
+            if not isinstance(section, dict):
+                continue
+
+            entity_name = 'agent' if section_name == 'agents' else 'role'
+            for name, section_config in section.items():
+                if not isinstance(section_config, dict):
+                    continue
+
+                for field_name in section_config:
+                    if field_name in known_fields:
+                        continue
+
+                    close_matches = difflib.get_close_matches(
+                        field_name,
+                        known_fields,
+                        n=1,
+                        cutoff=0.6
+                    )
+                    suggestion = f" Did you mean '{close_matches[0]}'?" if close_matches else ""
+                    self.logger.warning(
+                        f"Unknown field '{field_name}' in {entity_name} '{name}'.{suggestion}"
+                    )
 
     def is_function_or_decorated(self, obj):
         """
@@ -506,6 +546,10 @@ class AgentsGenerator:
 
         # Get workflow input: 'input' is canonical, 'topic' is alias for backward compatibility
         topic = config.get('input', config.get('topic', ''))
+        
+        # Validate agents configuration for typos in field names
+        self._validate_agents_config(config)
+        
         tools_dict = {}
         
         # Use ToolResolver to get available tools (consistent tool resolution)
@@ -597,12 +641,20 @@ class AgentsGenerator:
             self.framework = framework
             self.framework_adapter = self._get_framework_adapter(framework)
             
-        # Final availability check
-        if not self.framework_adapter.is_available():
-            raise ImportError(f"Framework '{framework}' is not available. Please install the required dependencies.")
-            
+        # Validate framework availability for non-CLI callers
+        from .framework_adapters.validators import assert_framework_available
+        assert_framework_available(framework)
+        
         self.logger.info(f"Using framework: {framework}")
-        return self.framework_adapter.run(config, self.config_list, topic)
+        return self.framework_adapter.run(
+            config,
+            self.config_list,
+            topic,
+            tools_dict=tools_dict,
+            agent_callback=getattr(self, 'agent_callback', None),
+            task_callback=getattr(self, 'task_callback', None),
+            cli_config=getattr(self, 'cli_config', None),
+        )
 
     def _run_yaml_workflow(self, config):
         """
@@ -884,10 +936,13 @@ class AgentsGenerator:
         api_type = _resolve("api_type", default="openai").lower()
         model_name = _resolve("model", default="gpt-4o-mini")
         api_key = _resolve("api_key", env_var="OPENAI_API_KEY")
+        # Use resolver for consistent env-var precedence as fallback
+        from praisonai.llm.env import resolve_llm_endpoint
+        ep = resolve_llm_endpoint()
+        
         base_url = (model_config.get("base_url")
                     or yaml_llm.get("base_url")
-                    or os.environ.get("OPENAI_BASE_URL")
-                    or os.environ.get("OPENAI_API_BASE"))
+                    or ep.base_url)
 
         # Build LLMConfig — Bedrock needs no api_key
         if api_type == "bedrock":

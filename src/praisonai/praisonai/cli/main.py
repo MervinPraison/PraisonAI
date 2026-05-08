@@ -70,7 +70,6 @@ import yaml
 import time
 from rich import print
 from dotenv import load_dotenv
-load_dotenv()
 import shutil
 import subprocess
 import logging
@@ -108,6 +107,11 @@ _BLOCKED_ENV_KEYS = frozenset({
 
 # Pre-compute uppercase lookup set once at module load (avoids rebuilding per call)
 _BLOCKED_ENV_KEYS_UPPER = frozenset(k.upper() for k in _BLOCKED_ENV_KEYS)
+
+
+def _load_env_once():
+    """Load environment variables from .env file once at CLI startup."""
+    load_dotenv()
 
 
 def _validate_env_key(key) -> None:
@@ -268,29 +272,26 @@ class PraisonAI:
         self.agent_yaml = agent_yaml
         self._interactive_mode = False  # Flag for interactive TUI mode
         # Create config_list with AutoGen compatibility
-        # Support multiple environment variable patterns for better compatibility
-        # Priority order: MODEL_NAME > OPENAI_MODEL_NAME for model selection
-        model_name = os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini")
+        # Resolve LLM endpoint configuration from environment variables
+        from praisonai.llm.env import resolve_llm_endpoint
+        ep = resolve_llm_endpoint()
         
-        # Priority order for base_url: OPENAI_BASE_URL > OPENAI_API_BASE > OLLAMA_API_BASE
-        # OPENAI_BASE_URL is the standard OpenAI SDK environment variable
-        base_url = (
-            os.environ.get("OPENAI_BASE_URL") or 
-            os.environ.get("OPENAI_API_BASE") or
-            os.environ.get("OLLAMA_API_BASE", "https://api.openai.com/v1")
-        )
-        
-        api_key = os.environ.get("OPENAI_API_KEY")
         self.config_list = [
             {
-                'model': model_name,
-                'base_url': base_url,
-                'api_key': api_key,
+                'model': ep.model,
+                'base_url': ep.base_url,
+                'api_key': ep.api_key,
                 'api_type': 'openai'        # AutoGen expects this field
             }
         ]
         self.agent_file = agent_file
         self.framework = framework
+        
+        # Validate framework availability early to fail fast
+        if self.framework:
+            from praisonai.framework_adapters.validators import assert_framework_available
+            assert_framework_available(self.framework)
+        
         self.auto = auto
         self.init = init
         self.tools = tools or []  # Store tool class names as a list
@@ -348,6 +349,9 @@ class PraisonAI:
         initializes the necessary attributes, and then calls the appropriate methods based on the
         provided arguments.
         """
+        # Load environment variables from .env file
+        _load_env_once()
+        
         # Warning filters now installed via Typer callback for CLI-only usage
         
         # Telemetry defaults now handled in PraisonAI.__init__ with Langfuse awareness
@@ -375,6 +379,11 @@ class PraisonAI:
             args.command = None
 
         self.framework = args.framework or self.framework
+        
+        # Validate framework availability early to fail fast
+        if self.framework:
+            from praisonai.framework_adapters.validators import assert_framework_available
+            assert_framework_available(self.framework)
         
         # Update config_list model if --model flag is provided
         if getattr(args, 'model', None):

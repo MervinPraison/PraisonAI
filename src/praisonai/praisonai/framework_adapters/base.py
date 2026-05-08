@@ -5,7 +5,7 @@ This module defines the protocol that all framework adapters must implement,
 enabling lazy-loaded, protocol-driven framework support.
 """
 
-from typing import Protocol, Dict, List, Any, Optional
+from typing import Protocol, Dict, List, Any, Optional, Callable
 from contextlib import contextmanager
 
 
@@ -20,7 +20,17 @@ class FrameworkAdapter(Protocol):
         """Check if the framework is available for import."""
         ...
     
-    def run(self, config: Dict[str, Any], llm_config: List[Dict], topic: str) -> str:
+    def run(
+        self,
+        config: Dict[str, Any],
+        llm_config: List[Dict],
+        topic: str,
+        *,
+        tools_dict: Optional[Dict[str, Any]] = None,
+        agent_callback: Optional[Callable] = None,
+        task_callback: Optional[Callable] = None,
+        cli_config: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """
         Run the framework with given configuration.
         
@@ -28,6 +38,10 @@ class FrameworkAdapter(Protocol):
             config: Framework configuration
             llm_config: LLM configuration list
             topic: Topic for the tasks
+            tools_dict: Available tools dictionary
+            agent_callback: Callback for agent events
+            task_callback: Callback for task events
+            cli_config: CLI configuration
             
         Returns:
             Execution result as string

@@ -9,7 +9,6 @@ for maintainability.
 import os
 import logging
 from typing import Optional
-from praisonaiagents._logging import get_logger
 
 # Fallback helpers to avoid circular imports
 def _get_console():
@@ -42,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 import contextlib
-from typing import List, Optional, Any, Dict, Generator, TYPE_CHECKING
+from typing import Optional, Dict, Generator, TYPE_CHECKING
 from collections import OrderedDict
 
 if TYPE_CHECKING:
@@ -82,7 +81,7 @@ class MemoryMixin:
         with self._history_lock:
             self.chat_history.append({"role": role, "content": content})
 
-    def _add_to_chat_history_if_not_duplicate(self, role, content):
+    def _add_to_chat_history_if_not_duplicate(self, role, content) -> bool:
         """Thread-safe method to add messages to chat history only if not duplicate.
         
         Atomically checks for duplicate and adds message under the same lock to prevent TOCTOU races.

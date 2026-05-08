@@ -2707,9 +2707,10 @@ def launch_browser(
                                                                 if debug:
                                                                     console.print("[dim]   [DEBUG] Page loaded, content script should be active[/dim]")
                                                                 break
-                                                except:
+                                                except (asyncio.TimeoutError, Exception) as e:
                                                     if debug:
-                                                        console.print("[dim]   [DEBUG] Page load event timeout, continuing anyway[/dim]")
+                                                        console.print(f"[dim]   [DEBUG] Page load event timeout/error ({type(e).__name__}), continuing anyway[/dim]")
+                                                    logging.debug("Page load event timeout/error: %s", e)
                                                 
                                                 # Wait for content script to inject
                                                 await asyncio.sleep(2)

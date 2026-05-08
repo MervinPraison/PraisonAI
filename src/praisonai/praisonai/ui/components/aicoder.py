@@ -5,12 +5,16 @@ import difflib
 import platform
 from typing import Dict, Any
 import json
+import logging
 import dotenv
 
-dotenv.load_dotenv()
+logger = logging.getLogger(__name__)
 
 class AICoder:
     def __init__(self, cwd: str = None, tavily_api_key: str = None):
+        # Load environment variables from .env file
+        dotenv.load_dotenv()
+        
         # Load only the dependency needed on the common path here.
         try:
             from litellm import acompletion
@@ -129,7 +133,17 @@ class AICoder:
         try:
             with open(file_path, 'r') as file:
                 return file.read()
-        except:
+        except FileNotFoundError:
+            logger.debug("aicoder: file not found: %s", file_path)
+            return None
+        except PermissionError:
+            logger.warning("aicoder: permission denied reading %s", file_path)
+            return None
+        except UnicodeDecodeError as e:
+            logger.warning("aicoder: encoding error reading %s: %s", file_path, e)
+            return None
+        except OSError as e:
+            logger.warning("aicoder: OS error reading %s: %s", file_path, e)
             return None
 
     def get_shell_command(self, command: str) -> list:

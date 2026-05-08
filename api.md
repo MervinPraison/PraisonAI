@@ -786,6 +786,7 @@ Methods:
 * <code title="cli">praisonai bot discord <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
 * <code title="cli">praisonai bot email <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
 * <code title="cli">praisonai bot install-daemon <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
+* <code title="cli">praisonai bot linear <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
 * <code title="cli">praisonai bot slack <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
 * <code title="cli">praisonai bot start <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
 * <code title="cli">praisonai bot telegram <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>

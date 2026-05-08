@@ -45,6 +45,10 @@ __all__ = [
     # Redaction
     "redact_dict",
     "REDACT_KEYS",
+    # C7 — PII redaction for LLM egress
+    "scrub_pii_text",
+    "enable_pii_redaction",
+    "disable_pii_redaction",
     # Context events (for replay)
     "ContextEvent",
     "ContextEventType",
@@ -78,6 +82,10 @@ def __getattr__(name: str):
     
     if name in ("redact_dict", "REDACT_KEYS"):
         from .redact import redact_dict, REDACT_KEYS
+        return locals()[name]
+
+    if name in ("scrub_pii_text", "enable_pii_redaction", "disable_pii_redaction"):
+        from .redact import scrub_pii_text, enable_pii_redaction, disable_pii_redaction
         return locals()[name]
     
     # Context events (for replay)

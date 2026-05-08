@@ -71,7 +71,8 @@ class Mem0Adapter:
             from mem0 import Memory
         except ImportError:
             raise ImportError(
-                "mem0 is not installed. Install with: pip install mem0ai"
+                "mem0ai is not installed. "
+                "Run: pip install 'praisonaiagents[memory]'"
             )
         
         if self._config:
