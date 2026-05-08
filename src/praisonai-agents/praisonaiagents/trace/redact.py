@@ -131,8 +131,13 @@ _VALUE_PATTERNS = (
     (re.compile(r"\bsk-[A-Za-z0-9]{12,}\b"), "[REDACTED]"),
     # US SSN
     (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "[REDACTED-SSN]"),
-    # Credit card — canonical 4-group or unspaced 16-digit only
-    (re.compile(r"\b(?:\d{4}[ -]){3}\d{4}\b|\b\d{16}\b"), "[REDACTED-CC]"),
+    # Credit card — canonical 4-group format only (e.g. "4111 1111 1111 1111").
+    # @claude: The bare \b\d{16}\b branch was removed — it matches ANY 16-digit sequence:
+    # UNIX microsecond timestamps, distributed trace IDs, order/invoice numbers, phone
+    # numbers — causing false-positive redactions in LLM tool outputs and RAG results.
+    # Unformatted 16-digit strings are indistinguishable from non-card IDs at regex level.
+    # The 4-group pattern covers real-world formatted card numbers with near-zero FP rate.
+    (re.compile(r"\b(?:\d{4}[ -]){3}\d{4}\b"), "[REDACTED-CC]"),
     # Email (optional — often safe, but default-scrub for compliance)
     (re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), "[REDACTED-EMAIL]"),
 )
