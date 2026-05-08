@@ -252,7 +252,12 @@ class AsyncAgentScheduler:
         logger.info("Async agent scheduler stopped")
         
         # Log final stats with consistent snapshot
-        async with self._stats_lock:
+        if self._stats_lock is not None:
+            async with self._stats_lock:
+                total = self._execution_count
+                ok = self._success_count
+                fail = self._failure_count
+        else:
             total = self._execution_count
             ok = self._success_count
             fail = self._failure_count
@@ -266,20 +271,22 @@ class AsyncAgentScheduler:
         Returns:
             Dictionary with execution stats
         """
-        # Only use the lock if we're in a running event loop and have created it
+        # Primitives are created lazily in _ensure_async_primitives(); if not yet
+        # initialized there are no concurrent writers, so a direct read is safe.
         if self._stats_lock is not None:
             async with self._stats_lock:
                 total = self._execution_count
                 ok = self._success_count
                 fail = self._failure_count
+                running = self.is_running
         else:
-            # If no lock yet, read values directly (we're not async yet)
             total = self._execution_count
             ok = self._success_count
             fail = self._failure_count
+            running = self.is_running
             
         return {
-            "is_running": self.is_running,
+            "is_running": running,
             "total_executions": total,
             "successful_executions": ok,
             "failed_executions": fail,

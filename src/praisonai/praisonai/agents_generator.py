@@ -344,9 +344,7 @@ class AgentsGenerator:
 
         Returns:
             dict: A dictionary containing the names of the tools as keys and the corresponding functions or objects as values.
-
-        Raises:
-            FileNotFoundError: If the specified module path does not exist.
+                  Returns an empty dict if the module cannot be loaded (path missing, loading blocked by PRAISONAI_ALLOW_LOCAL_TOOLS, or any other load error).
         """
         from ._safe_loader import load_user_module
         module = load_user_module(module_path, name="tools_module")
@@ -738,7 +736,7 @@ class AgentsGenerator:
             import agentops
             try:
                 agentops.end_session("Success")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- agentops errors must not crash the caller
                 self.logger.warning(f"agentops.end_session failed: {e}")
             
         return result
@@ -1126,7 +1124,7 @@ class AgentsGenerator:
             import agentops
             try:
                 agentops.end_session("Success")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- agentops errors must not crash the caller
                 self.logger.warning(f"agentops.end_session failed: {e}")
             
         return result
@@ -1438,7 +1436,7 @@ class AgentsGenerator:
             import agentops
             try:
                 agentops.end_session("Success")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 -- agentops errors must not crash the caller
                 self.logger.warning(f"agentops.end_session failed: {e}")
             
         return result
