@@ -764,19 +764,13 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
                                 UserWarning,
                                 stacklevel=3,
                             )
-                        resolved_exec.max_budget = max_budget
-                        execution = resolved_exec
+                        # Use dataclasses.replace to avoid mutating shared state
+                        import dataclasses
+                        execution = dataclasses.replace(resolved_exec, max_budget=max_budget)
                     elif not hasattr(resolved_exec, 'max_budget'):
-                        # Fallback for older config objects
-                        execution = ExecutionConfig(
-                            max_iter=getattr(resolved_exec, 'max_iter', 20),
-                            max_rpm=getattr(resolved_exec, 'max_rpm', None),
-                            max_execution_time=getattr(resolved_exec, 'max_execution_time', None),
-                            max_retry_limit=getattr(resolved_exec, 'max_retry_limit', 2),
-                            code_execution=getattr(resolved_exec, 'code_execution', False),
-                            code_mode=getattr(resolved_exec, 'code_mode', "safe"),
-                            max_budget=max_budget
-                        )
+                        # Fallback for older config objects  
+                        import dataclasses
+                        execution = dataclasses.replace(resolved_exec, max_budget=max_budget)
         
         if execution is None:
             execution = apply_config_defaults("execution", execution, ExecutionConfig)

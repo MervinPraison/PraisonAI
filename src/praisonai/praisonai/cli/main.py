@@ -4084,14 +4084,9 @@ Do NOT add any explanations or formatting."""
             return method(*args, **kwargs)
         except Exception as e:
             # Handle BudgetExceededError gracefully
-            try:
-                from praisonaiagents.errors import BudgetExceededError
-                is_budget_error = isinstance(e, BudgetExceededError)
-            except ImportError:
-                # Fallback to string check if import fails
-                is_budget_error = 'BudgetExceededError' in str(type(e).__name__)
+            from praisonaiagents.errors import BudgetExceededError
             
-            if is_budget_error:
+            if isinstance(e, BudgetExceededError):
                 from rich import print as rich_print
                 # Single-line error message with actionable guidance
                 rich_print(f"[red]Budget limit exceeded: {e!s} - Set max_budget parameter (e.g., Agent(max_budget=1.00))[/red]")
