@@ -269,7 +269,11 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                     user_id = event.get("user", "unknown")
                     logger.info(f"Message received: {text[:100]}...")
                     text = await self._debouncer.debounce(user_id, text)
-                    response = await self._session.chat(self._agent, user_id, text)
+                    response = await self._session.chat(
+                        self._agent, user_id, text,
+                        chat_id=str(channel_id) if channel_id else "",
+                        thread_id=event.get("thread_ts", "") or "",
+                    )
                     logger.info(f"Response sent: {response[:100]}...")
                     
                     send_result = self.fire_message_sending(channel_id, str(response))
@@ -312,7 +316,11 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                 try:
                     user_id = event.get("user", "unknown")
                     logger.info(f"@mention received: {text[:100]}...")
-                    response = await self._session.chat(self._agent, user_id, text)
+                    response = await self._session.chat(
+                        self._agent, user_id, text,
+                        chat_id=str(event.get("channel", "")),
+                        thread_id=event.get("thread_ts", "") or "",
+                    )
                     logger.info(f"Response sent: {response[:100]}...")
                     
                     # Determine if we should reply in thread

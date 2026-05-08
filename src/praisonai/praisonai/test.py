@@ -4,11 +4,14 @@ from rich import print
 from dotenv import load_dotenv
 load_dotenv()
 
+from praisonai.llm.env import resolve_llm_endpoint
+
+ep = resolve_llm_endpoint()
 config_list = [
     {
-        'model': os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini"),
-        'base_url': os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1"),
-        'api_key': os.environ.get("OPENAI_API_KEY")
+        'model': ep.model,
+        'base_url': ep.base_url,
+        'api_key': ep.api_key
     }
 ]
 

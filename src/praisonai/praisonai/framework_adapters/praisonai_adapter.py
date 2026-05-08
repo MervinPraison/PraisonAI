@@ -52,9 +52,8 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         Returns:
             Execution result as string
         """
-        if not self.is_available():
-            raise ImportError("PraisonAI agents is not available. Install with: pip install praisonaiagents")
-            
+        # Availability already validated at CLI entry
+        
         # Import PraisonAI components only when needed
         from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, AgentTeam
         

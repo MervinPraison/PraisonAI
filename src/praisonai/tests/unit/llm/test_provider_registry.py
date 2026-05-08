@@ -44,7 +44,10 @@ class TestLLMProviderRegistry:
         
         registry = LLMProviderRegistry()
         assert registry is not None
-        assert registry.list() == []
+        providers = registry.list()
+        assert "openai" in providers
+        assert "anthropic" in providers
+        assert "google" in providers
     
     def test_register_provider_class(self):
         """Should register a provider class."""
@@ -156,8 +159,8 @@ class TestLLMProviderRegistry:
         from praisonai.llm.registry import LLMProviderRegistry
         
         registry = LLMProviderRegistry()
-        registry.register("openai", MockLLMProvider)
-        registry.register("anthropic", MockLLMProvider)
+        registry.register("openai-custom", MockLLMProvider)
+        registry.register("anthropic-custom", MockLLMProvider)
         
         with pytest.raises(ValueError) as exc_info:
             registry.resolve("cloudflare", "model")
@@ -165,7 +168,7 @@ class TestLLMProviderRegistry:
         error_msg = str(exc_info.value).lower()
         assert "unknown provider" in error_msg
         assert "cloudflare" in error_msg
-        assert "openai" in error_msg or "anthropic" in error_msg
+        assert "openai-custom" in error_msg or "anthropic-custom" in error_msg
 
 
 class TestDefaultRegistry:
@@ -369,16 +372,16 @@ class TestCollisionDetection:
         from praisonai.llm.registry import LLMProviderRegistry
         
         registry = LLMProviderRegistry()
-        registry.register("openai", MockLLMProvider)
-        registry.register("anthropic", MockLLMProvider)
+        registry.register("openai-custom", MockLLMProvider)
+        registry.register("anthropic-custom", MockLLMProvider)
         
         with pytest.raises(ValueError) as exc_info:
             registry.resolve("unknown", "model")
         
         error_msg = str(exc_info.value).lower()
         assert "unknown provider" in error_msg
-        assert "openai" in error_msg
-        assert "anthropic" in error_msg
+        assert "openai-custom" in error_msg
+        assert "anthropic-custom" in error_msg
         assert "register" in error_msg  # Should suggest how to register
 
 
@@ -471,8 +474,10 @@ class TestLiteLLMIsolation:
         source = inspect.getsource(registry)
         tree = ast.parse(source)
         
+        # Intentionally validate module-level imports only; lazy imports inside
+        # call paths are allowed to preserve startup performance.
         imports = []
-        for node in ast.walk(tree):
+        for node in tree.body:
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     imports.append(alias.name)

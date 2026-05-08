@@ -290,10 +290,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when a new run (turn) starts."""
-        if not self._conversation_store:
-            return
-        
-        # Store run start in state if available
+        # Store run start in state if available (even without conversation store)
         if self._state_store:
             run_key = f"run:{session_id}:{run_id}"
             self._state_store.set(run_key, {
@@ -304,6 +301,10 @@ class PraisonAIDB:
                 "status": "running",
                 "metadata": metadata or {}
             })
+        
+        # Early return only applies to conversation store operations
+        if not self._conversation_store:
+            return
     
     def on_run_end(
         self,
@@ -332,10 +333,33 @@ class PraisonAIDB:
         session_id: str,
         limit: Optional[int] = None,
     ) -> List:
-        """Get runs for a session."""
-        # For now, runs are stored in state store
-        # Full implementation would query from conversation store
-        return []
+        """Return persisted runs for a session, newest first."""
+        self._init_stores()
+        if not self._state_store:
+            logger.warning("get_runs() called but no state_url configured; returning []")
+            return []
+
+        prefix = f"run:{session_id}:"
+        # State stores expose scan_prefix() per the protocol; fall back to keys() for legacy.
+        if hasattr(self._state_store, "scan_prefix"):
+            keys = self._state_store.scan_prefix(prefix)
+        else:
+            keys = [k for k in self._state_store.keys() if k.startswith(prefix)]
+        
+        runs = []
+        for k in keys:
+            try:
+                run_data = self._state_store.get(k)
+            except Exception as exc:
+                logger.warning("Failed to load run key '%s': %s", k, exc)
+                continue
+            if isinstance(run_data, dict):
+                runs.append(run_data)
+        
+        runs.sort(key=lambda r: r.get("started_at", 0), reverse=True)
+        if limit is not None:
+            return runs[: max(limit, 0)]
+        return runs
     
     def export_session(
         self,
@@ -499,9 +523,36 @@ class PraisonAIDB:
         user_id: Optional[str] = None,
         limit: Optional[int] = None,
     ) -> List:
-        """Get traces with optional filters."""
-        # For now, return empty list - full implementation would scan state store
-        return []
+        """Return persisted traces, optionally filtered by session/user."""
+        self._init_stores()
+        if not self._state_store:
+            logger.warning("get_traces() called but no state_url configured; returning []")
+            return []
+
+        prefix = "trace:"
+        if hasattr(self._state_store, "scan_prefix"):
+            keys = self._state_store.scan_prefix(prefix)
+        else:
+            keys = [k for k in self._state_store.keys() if k.startswith(prefix)]
+        
+        traces = []
+        for k in keys:
+            try:
+                trace_data = self._state_store.get(k)
+            except Exception as exc:
+                logger.warning("Failed to load trace key '%s': %s", k, exc)
+                continue
+            if isinstance(trace_data, dict):
+                traces.append(trace_data)
+        
+        if session_id is not None:
+            traces = [t for t in traces if t.get("session_id") == session_id]
+        if user_id is not None:
+            traces = [t for t in traces if t.get("user_id") == user_id]
+        traces.sort(key=lambda t: t.get("started_at", 0), reverse=True)
+        if limit is not None:
+            return traces[: max(limit, 0)]
+        return traces
     
     def close(self) -> None:
         """Close all database connections."""

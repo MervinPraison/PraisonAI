@@ -266,7 +266,11 @@ class AsyncAgentScheduler:
     
     async def get_stats(self) -> Dict[str, Any]:
         """
-        Get execution statistics.
+        Get current execution statistics (synchronous, best-effort).
+        
+        Warning: This method provides a best-effort view of stats without
+        guaranteeing atomicity. For consistent snapshots in async context,
+        use get_stats_async() instead.
         
         Returns:
             Dictionary with execution stats
@@ -292,6 +296,40 @@ class AsyncAgentScheduler:
             "failed_executions": fail,
             "success_rate": (ok / total * 100) if total > 0 else 0
         }
+    
+    async def get_stats_async(self) -> Dict[str, Any]:
+        """
+        Get current execution statistics with atomic snapshot (async).
+        
+        Returns:
+            Dictionary with execution stats
+        """
+        if self._stats_lock is None:
+            # Not yet started: stats are all zero, no lock needed
+            execs, success, failed = 0, 0, 0
+        else:
+            # Take atomic snapshot of all counters
+            async with self._stats_lock:
+                execs = self._execution_count
+                success = self._success_count
+                failed = self._failure_count
+        
+        return {
+            "is_running": self.is_running,
+            "total_executions": execs,
+            "successful_executions": success,
+            "failed_executions": failed,
+            "success_rate": (success / execs * 100) if execs > 0 else 0
+        }
+    
+    def get_stats_sync(self) -> Dict[str, Any]:
+        """
+        Alias for get_stats() for clarity.
+        
+        Returns:
+            Dictionary with execution stats
+        """
+        return self.get_stats()
     
     async def _run_schedule(self, interval: int, max_retries: int):
         """Internal method to run scheduled agent executions."""

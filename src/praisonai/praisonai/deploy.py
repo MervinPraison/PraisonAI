@@ -92,9 +92,12 @@ class CloudDeployer:
     
     def set_environment_variables(self):
         """Sets environment variables with fallback to .env values or defaults."""
-        os.environ["OPENAI_MODEL_NAME"] = os.getenv("OPENAI_MODEL_NAME", "gpt-4o-mini")
-        os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY", "Enter your API key")
-        os.environ["OPENAI_API_BASE"] = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
+        from praisonai.llm.env import resolve_llm_endpoint
+        ep = resolve_llm_endpoint()
+        
+        os.environ["OPENAI_MODEL_NAME"] = ep.model
+        os.environ["OPENAI_API_KEY"] = ep.api_key or "Enter your API key"
+        os.environ["OPENAI_API_BASE"] = ep.base_url
 
     def run_commands(self):
         """
@@ -129,9 +132,11 @@ class CloudDeployer:
             return
         
         # Get environment variables
-        openai_model = os.environ.get('OPENAI_MODEL_NAME', 'gpt-5-nano')
-        openai_key = os.environ.get('OPENAI_API_KEY', 'Enter your API key')
-        openai_base = os.environ.get('OPENAI_API_BASE', 'https://api.openai.com/v1')
+        from praisonai.llm.env import resolve_llm_endpoint
+        ep = resolve_llm_endpoint()
+        openai_model = ep.model
+        openai_key = ep.api_key or 'Enter your API key'
+        openai_base = ep.base_url
         
         # Build commands with actual values
         commands = [

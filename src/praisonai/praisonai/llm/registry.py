@@ -268,10 +268,69 @@ def _register_builtin_providers(registry: LLMProviderRegistry) -> None:
     
     Uses lazy loading to avoid importing heavy dependencies at module load time.
     """
-    # Note: In Python, the actual LLM providers are in praisonaiagents.llm
-    # which uses LiteLLM. This registry is for custom provider extensions.
-    # Built-in providers are handled by LiteLLM automatically.
-    pass
+    # Built-in adapter that wraps LiteLLM so create_llm_provider works out of the box.
+    class _LiteLLMProvider:
+        """Generic LiteLLM-backed provider used for openai/anthropic/google/etc."""
+        def __init__(self, model_id: str, config: Optional[Dict[str, Any]] = None):
+            self.provider_id = "litellm"
+            self.model_id = model_id
+            self.config = config or {}
+
+        def _resolve_model_and_kwargs(self, prompt: str, **kwargs):
+            """Helper to resolve model and kwargs for both sync and async methods."""
+            try:
+                import litellm  # lazy
+            except ImportError as err:
+                raise ImportError(
+                    "LiteLLM is required for built-in providers. "
+                    "Install with: pip install litellm"
+                ) from err
+            
+            provider_prefix = self.config.get("provider", "")
+            full_model = f"{provider_prefix}/{self.model_id}".strip("/") if provider_prefix else self.model_id
+            completion_kwargs = {
+                k: v for k, v in {**self.config, **kwargs}.items() if k != "provider"
+            }
+            messages = [{"role": "user", "content": prompt}]
+            return litellm, full_model, messages, completion_kwargs
+
+        def generate(self, prompt: str, **kwargs):
+            """Sync variant — uses litellm.completion()."""
+            litellm, full_model, messages, completion_kwargs = self._resolve_model_and_kwargs(prompt, **kwargs)
+            return litellm.completion(
+                model=full_model,
+                messages=messages,
+                **completion_kwargs,
+            )
+
+        async def generate_async(self, prompt: str, **kwargs):
+            """Async variant — uses litellm.acompletion() to avoid blocking the event loop.
+            
+            generate() calls litellm.completion() which is a blocking network call.
+            Calling it from an async context would stall the entire event loop.
+            generate_async() uses litellm.acompletion() — the native async variant.
+            """
+            litellm, full_model, messages, completion_kwargs = self._resolve_model_and_kwargs(prompt, **kwargs)
+            return await litellm.acompletion(
+                model=full_model,
+                messages=messages,
+                **completion_kwargs,
+            )
+
+    def _make_litellm_factory(provider_prefix: str):
+        def factory(model_id, config=None):
+            cfg = dict(config or {})
+            cfg.setdefault("provider", provider_prefix)
+            return _LiteLLMProvider(model_id, cfg)
+        return factory
+
+    # Cover the providers parse_model_string() already special-cases.
+    for name, aliases in [
+        ("openai",    ("oai",)),
+        ("anthropic", ("claude",)),
+        ("google",    ("gemini", "google_genai")),
+    ]:
+        registry.register(name, _make_litellm_factory(name), aliases=list(aliases))
 
 
 def register_llm_provider(
