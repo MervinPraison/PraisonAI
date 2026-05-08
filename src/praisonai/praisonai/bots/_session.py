@@ -241,8 +241,8 @@ class BotSessionManager:
             if ctx_token is not None and _clear_ctx is not None:
                 try:
                     _clear_ctx(ctx_token)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("Failed to clear task-local session context for ctx_token=%r: %s", ctx_token, e)
 
     def reap_stale(self, max_age_seconds: int) -> int:
         """Remove sessions older than *max_age_seconds*.  Returns count reaped.
@@ -302,23 +302,32 @@ class BotSessionManager:
             bool: True on success, False on failure
         """
         import asyncio
-        import threading
-        from concurrent.futures import ThreadPoolExecutor
         
         def _sync_add_entry():
             # Get the event loop that owns the asyncio locks
             try:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
-                # No event loop running - we can safely proceed
+                # No event loop running - we need to use threading synchronization
                 # This happens when called from sync contexts like cron jobs
                 storage_key = self._storage_key(user_id)
                 self._last_active[storage_key] = time.monotonic()
                 
-                # Direct manipulation is safe when no async operations are running
-                history = list(self._load_history(user_id))
-                history.append(entry)
-                self._save_history(user_id, history)
+                # Create a temporary threading lock for this user to prevent concurrent
+                # access to the same user's history from multiple sync threads
+                import threading
+                user_sync_lock = getattr(self, '_user_sync_locks', None)
+                if user_sync_lock is None:
+                    self._user_sync_locks = {}
+                    user_sync_lock = self._user_sync_locks
+                
+                if storage_key not in user_sync_lock:
+                    user_sync_lock[storage_key] = threading.Lock()
+                
+                with user_sync_lock[storage_key]:
+                    history = list(self._load_history(user_id))
+                    history.append(entry)
+                    self._save_history(user_id, history)
                 return True
                 
             # There's an event loop - we need to coordinate with asyncio locks

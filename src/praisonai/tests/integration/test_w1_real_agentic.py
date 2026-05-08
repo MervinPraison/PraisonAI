@@ -24,9 +24,8 @@ import pytest
 
 pytestmark = [
     pytest.mark.skipif(
-        os.getenv("PRAISONAI_ALLOW_NETWORK", "") != "1"
-        and os.getenv("RUN_REAL_AGENTIC", "") != "1",
-        reason="Set PRAISONAI_ALLOW_NETWORK=1 to run real LLM tests",
+        os.getenv("RUN_REAL_AGENTIC", "") != "1",
+        reason="Set RUN_REAL_AGENTIC=1 to run real LLM tests",
     ),
     pytest.mark.network,
 ]
@@ -86,7 +85,7 @@ async def test_cross_platform_continuity_real_llm(tmp_path):
         agent, "dc-67890",
         "What did I just tell you my favourite colour was?",
     )
-    print(f"[Discord in] What did I just tell you my favourite colour was?")
+    print("[Discord in] What did I just tell you my favourite colour was?")
     print(f"[Discord out] {recall_response}\n")
 
     # The agent must mention "octarine" — proof the cross-platform mirror works

@@ -12,7 +12,7 @@ wire-up from ``BotOS(identity_resolver=...)`` → ``Bot._identity_resolver``
 
 Run::
 
-    cd /Users/praison/worktrees/hermes-parity
+    # From the repository root:
     PYTHONPATH=src/praisonai-agents:src/praisonai python scripts/smoke_w1_botos_real.py
 """
 

@@ -55,14 +55,14 @@ async def main() -> int:
             agent, "tg-12345",
             "Remember this: my favourite colour is octarine.",
         )
-        print(f"\n[Telegram] in:  Remember this: my favourite colour is octarine.")
+        print("\n[Telegram] in:  Remember this: my favourite colour is octarine.")
         print(f"[Telegram] out: {out_t}\n")
 
         out_d = await mgr_d.chat(
             agent, "dc-67890",
             "What did I just tell you my favourite colour was?",
         )
-        print(f"[Discord]  in:  What did I just tell you my favourite colour was?")
+        print("[Discord]  in:  What did I just tell you my favourite colour was?")
         print(f"[Discord]  out: {out_d}\n")
 
         if out_d and "octarine" in out_d.lower():

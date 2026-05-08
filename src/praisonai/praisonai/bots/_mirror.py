@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -78,12 +78,14 @@ def mirror_to_session(
             entry: dict = {
                 "role": "assistant",
                 "content": message_text,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "mirror": True,
                 "mirror_source": source_label,
             }
             if metadata:
-                entry.update(metadata)
+                # Filter out reserved fields to preserve entry invariants
+                _reserved = {"role", "content", "timestamp", "mirror", "mirror_source"}
+                entry.update({k: v for k, v in metadata.items() if k not in _reserved})
             
             return session_mgr._add_mirror_entry_sync(user_id, entry)
         except Exception as e:
@@ -105,12 +107,14 @@ def mirror_to_session(
             entry: dict = {
                 "role": "assistant",
                 "content": message_text,
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "mirror": True,
                 "mirror_source": source_label,
             }
             if metadata:
-                entry.update(metadata)
+                # Filter out reserved fields to preserve entry invariants
+                _reserved = {"role", "content", "timestamp", "mirror", "mirror_source"}
+                entry.update({k: v for k, v in metadata.items() if k not in _reserved})
             history.append(entry)
             
             # Save updated history atomically within the lock
