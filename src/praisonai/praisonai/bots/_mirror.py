@@ -20,10 +20,12 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-# Global lock to protect mirror operations from racing with chat() calls
-# This is a simple solution since mirror_to_session is designed for
-# relatively infrequent use (scheduled deliveries, cross-platform replies)
-_mirror_lock = threading.RLock()
+# @claude: No module-level lock here by design.
+# A process-wide _mirror_lock = threading.RLock() would serialise mirror_to_session()
+# calls across ALL BotSessionManager instances — slow disk I/O for one bot would
+# block mirrors for every other bot in the process.
+# Lock ownership belongs to the caller (passed via the optional ``lock`` param),
+# or a fresh per-call RLock is created as fallback — scoped to one call only.
 
 
 def mirror_to_session(
@@ -32,6 +34,7 @@ def mirror_to_session(
     message_text: str,
     source_label: str = "delivery",
     metadata: Optional[dict] = None,
+    lock: Optional[threading.RLock] = None,
 ) -> bool:
     """Append a mirror entry to ``user_id``'s session history.
 
@@ -92,13 +95,14 @@ def mirror_to_session(
             logger.warning("mirror: _add_mirror_entry_sync failed: %s", e)
             return False
     
-    # Fallback: Use global lock to prevent race conditions between mirror operations
-    # and concurrent chat() calls. This provides basic protection but is not ideal.
+    # Fallback: session manager has no _add_mirror_entry_sync.
+    # Use the caller-supplied lock, or a fresh per-call RLock — never a global.
     logger.warning(
         "mirror_to_session using fallback synchronization - "
         "session manager should implement _add_mirror_entry_sync for better safety"
     )
-    with _mirror_lock:
+    _call_lock = lock if lock is not None else threading.RLock()
+    with _call_lock:
         try:
             # Load current history
             history = list(session_mgr._load_history(user_id))
