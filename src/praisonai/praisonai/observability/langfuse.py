@@ -319,14 +319,7 @@ class LangfuseSink:
                                 span.end()
                             except Exception:
                                 pass
-                        for stack in self._tool_stacks.values():
-                            while stack:
-                                try:
-                                    stack.pop().end()
-                                except Exception:
-                                    pass
                         self._spans.clear()
-                        self._tool_stacks.clear()
                         self._traces.clear()
                 except Exception:
                     logger.exception("LangfuseSink close cleanup failed")

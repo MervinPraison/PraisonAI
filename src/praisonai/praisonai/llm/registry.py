@@ -276,7 +276,8 @@ def _register_builtin_providers(registry: LLMProviderRegistry) -> None:
             self.model_id = model_id
             self.config = config or {}
 
-        def generate(self, prompt: str, **kwargs):
+        def _resolve_model_and_kwargs(self, prompt: str, **kwargs):
+            """Helper to resolve model and kwargs for both sync and async methods."""
             try:
                 import litellm  # lazy
             except ImportError as err:
@@ -284,14 +285,35 @@ def _register_builtin_providers(registry: LLMProviderRegistry) -> None:
                     "LiteLLM is required for built-in providers. "
                     "Install with: pip install litellm"
                 ) from err
+            
             provider_prefix = self.config.get("provider", "")
             full_model = f"{provider_prefix}/{self.model_id}".strip("/") if provider_prefix else self.model_id
             completion_kwargs = {
                 k: v for k, v in {**self.config, **kwargs}.items() if k != "provider"
             }
+            messages = [{"role": "user", "content": prompt}]
+            return litellm, full_model, messages, completion_kwargs
+
+        def generate(self, prompt: str, **kwargs):
+            """Sync variant — uses litellm.completion()."""
+            litellm, full_model, messages, completion_kwargs = self._resolve_model_and_kwargs(prompt, **kwargs)
             return litellm.completion(
                 model=full_model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
+                **completion_kwargs,
+            )
+
+        async def generate_async(self, prompt: str, **kwargs):
+            """Async variant — uses litellm.acompletion() to avoid blocking the event loop.
+            
+            generate() calls litellm.completion() which is a blocking network call.
+            Calling it from an async context would stall the entire event loop.
+            generate_async() uses litellm.acompletion() — the native async variant.
+            """
+            litellm, full_model, messages, completion_kwargs = self._resolve_model_and_kwargs(prompt, **kwargs)
+            return await litellm.acompletion(
+                model=full_model,
+                messages=messages,
                 **completion_kwargs,
             )
 
