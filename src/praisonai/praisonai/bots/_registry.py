@@ -7,34 +7,98 @@ Extensible: third-party platforms can register via ``register_platform()``.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Type
+import threading
+from typing import Any, Dict, List, Type, Optional
 
-# Lazy references: (module_path, class_name)
-_BUILTIN_PLATFORMS: Dict[str, tuple] = {
-    "telegram": ("praisonai.bots.telegram", "TelegramBot"),
-    "discord": ("praisonai.bots.discord", "DiscordBot"),
-    "slack": ("praisonai.bots.slack", "SlackBot"),
-    "whatsapp": ("praisonai.bots.whatsapp", "WhatsAppBot"),
-    "linear": ("praisonai.bots.linear", "LinearBot"),
-    "email": ("praisonai.bots.email", "EmailBot"),
-    "agentmail": ("praisonai.bots.agentmail", "AgentMailBot"),
+from .._registry import PluginRegistry
+
+
+def _telegram_loader():
+    import importlib
+    mod = importlib.import_module("praisonai.bots.telegram")
+    return getattr(mod, "TelegramBot")
+
+def _discord_loader():
+    import importlib
+    mod = importlib.import_module("praisonai.bots.discord")
+    return getattr(mod, "DiscordBot")
+
+def _slack_loader():
+    import importlib
+    mod = importlib.import_module("praisonai.bots.slack")
+    return getattr(mod, "SlackBot")
+
+def _whatsapp_loader():
+    import importlib
+    mod = importlib.import_module("praisonai.bots.whatsapp")
+    return getattr(mod, "WhatsAppBot")
+
+def _linear_loader():
+    import importlib
+    mod = importlib.import_module("praisonai.bots.linear")
+    return getattr(mod, "LinearBot")
+
+def _email_loader():
+    import importlib
+    mod = importlib.import_module("praisonai.bots.email")
+    return getattr(mod, "EmailBot")
+
+def _agentmail_loader():
+    import importlib
+    mod = importlib.import_module("praisonai.bots.agentmail")
+    return getattr(mod, "AgentMailBot")
+
+# Built-in bot platforms with lazy loading
+_BUILTIN_PLATFORMS = {
+    "telegram": _telegram_loader,
+    "discord": _discord_loader,
+    "slack": _slack_loader,
+    "whatsapp": _whatsapp_loader,
+    "linear": _linear_loader,
+    "email": _email_loader,
+    "agentmail": _agentmail_loader,
 }
 
-# Custom platforms registered at runtime
-_custom_platforms: Dict[str, Any] = {}
+
+class BotPlatformRegistry(PluginRegistry):
+    """Registry for bot platform adapters."""
+    
+    def __init__(self):
+        super().__init__(
+            entry_point_group="praisonai.bots",
+            builtins=_BUILTIN_PLATFORMS
+        )
+
+
+# Default registry (lazy, module-private)
+_default_registry: Optional[BotPlatformRegistry] = None
+_default_lock = threading.Lock()
+
+
+def get_default_bot_registry() -> BotPlatformRegistry:
+    """Return the process-default bot registry. Prefer DI; use this only at the edge.""" 
+    global _default_registry
+    if _default_registry is None:
+        with _default_lock:
+            if _default_registry is None:
+                _default_registry = BotPlatformRegistry()
+    return _default_registry
+
+
+# Backward compatibility API
+_bot_registry = get_default_bot_registry()
 
 
 def get_platform_registry() -> Dict[str, Any]:
     """Return the combined registry of all known platforms.
-
-    Keys are platform names, values are either:
-    - A class (custom platforms, already resolved)
-    - A (module, classname) tuple (builtins, lazy-resolved on use)
+    
+    Backward compatibility function that returns a dict-like view.
     """
-    combined: Dict[str, Any] = {}
-    combined.update(_BUILTIN_PLATFORMS)
-    combined.update(_custom_platforms)
-    return combined
+    # Return a simplified view for backward compatibility
+    result = {}
+    for name in _bot_registry.list_names():
+        result[name] = name  # Simplified representation
+    return result
 
 
 def register_platform(name: str, adapter_class: Type) -> None:
@@ -44,12 +108,12 @@ def register_platform(name: str, adapter_class: Type) -> None:
         name: Platform identifier (lowercase).
         adapter_class: The bot adapter class.
     """
-    _custom_platforms[name.lower()] = adapter_class
+    _bot_registry.register(name.lower(), adapter_class)
 
 
 def list_platforms() -> List[str]:
     """List all registered platform names."""
-    return sorted(set(list(_BUILTIN_PLATFORMS.keys()) + list(_custom_platforms.keys())))
+    return _bot_registry.list_names()
 
 
 def resolve_adapter(name: str) -> Type:
@@ -64,24 +128,4 @@ def resolve_adapter(name: str) -> Type:
     Raises:
         ValueError: If the platform is not registered.
     """
-    key = name.lower()
-
-    # Custom platforms are already classes
-    if key in _custom_platforms:
-        cls = _custom_platforms[key]
-        if isinstance(cls, type):
-            return cls
-
-    # Builtins are lazy (module, classname) tuples
-    if key in _BUILTIN_PLATFORMS:
-        ref = _BUILTIN_PLATFORMS[key]
-        if isinstance(ref, tuple):
-            module_path, class_name = ref
-            import importlib
-            mod = importlib.import_module(module_path)
-            return getattr(mod, class_name)
-
-    raise ValueError(
-        f"Unknown platform: {name!r}. "
-        f"Available: {', '.join(list_platforms())}"
-    )
+    return _bot_registry.resolve(name.lower())

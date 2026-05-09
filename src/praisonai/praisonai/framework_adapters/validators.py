@@ -5,7 +5,7 @@ Provides early validation of framework availability to fail fast at CLI entry
 rather than inside run() methods after expensive setup work.
 """
 
-from .registry import FrameworkAdapterRegistry
+from .registry import get_default_registry
 
 
 # Install hints for common frameworks
@@ -26,7 +26,7 @@ def assert_framework_available(name: str) -> None:
     Raises:
         ImportError: If framework is not available with actionable install hint
     """
-    registry = FrameworkAdapterRegistry.get_instance()
+    registry = get_default_registry()
     
     if not registry.is_available(name):
         hint = _INSTALL_HINTS.get(name, f"pip install {name}")

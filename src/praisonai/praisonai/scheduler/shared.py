@@ -64,7 +64,8 @@ def safe_call(cb, *args) -> None:
 
     Supports both sync and async callables. When called from a running event
     loop with a coroutine-returning callback, schedules it on the loop; when
-    called from sync code, runs it to completion via asyncio.run.
+    called from sync code, runs it via the shared persistent loop instead
+    of creating + tearing down a fresh one per call.
     """
     if cb is None:
         return
@@ -78,9 +79,11 @@ def safe_call(cb, *args) -> None:
             try:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
-                # No running loop, use asyncio.run
+                # No loop here: dispatch to the shared persistent loop instead
+                # of creating + tearing down a fresh one.
                 try:
-                    asyncio.run(result)
+                    from .._async_bridge import run_sync
+                    run_sync(result)
                 except Exception as e:
                     log.error("Scheduler async callback raised: %s", e)
             else:

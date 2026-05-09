@@ -19,7 +19,7 @@ import difflib
 
 # Import new architecture components
 from .framework_adapters.base import FrameworkAdapter
-from .framework_adapters.registry import FrameworkAdapterRegistry
+from .framework_adapters.registry import FrameworkAdapterRegistry, get_default_registry
 from .tool_registry import ToolRegistry
 
 # Import availability flags
@@ -179,7 +179,7 @@ def _resolve_yaml_cli_backend(cli_backend_config, logger):
 
 
 class AgentsGenerator:
-    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None, tools=None, cli_config=None):
+    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None, tools=None, cli_config=None, adapter_registry=None):
         """
         Initialize the AgentsGenerator object.
 
@@ -193,6 +193,7 @@ class AgentsGenerator:
             agent_yaml (str, optional): The content of the YAML file. Defaults to None.
             tools (dict, optional): A dictionary containing the tools to be used for the agents. Defaults to None.
             cli_config (dict, optional): CLI configuration to override YAML settings. Defaults to None.
+            adapter_registry (FrameworkAdapterRegistry, optional): Registry for framework adapters. Defaults to process default.
 
         Attributes:
             agent_file (str): The path to the agent file.
@@ -233,6 +234,10 @@ class AgentsGenerator:
         self.tool_registry = ToolRegistry()
         self.tool_registry.register_builtin_autogen_adapters()
         
+        # DI-friendly: tests/multi-tenant runtimes pass their own registry;
+        # CLI users get the process default.
+        self._adapter_registry = adapter_registry or get_default_registry()
+        
         # Get framework adapter (availability already validated at CLI entry)
         self.framework_adapter = self._get_framework_adapter(framework)
 
@@ -249,8 +254,7 @@ class AgentsGenerator:
         Raises:
             ValueError: If framework is not supported
         """
-        adapter_registry = FrameworkAdapterRegistry.get_instance()
-        return adapter_registry.create(framework)
+        return self._adapter_registry.create(framework)
 
     def _merge_cli_config(self, config, cli_config):
         """

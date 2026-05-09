@@ -628,7 +628,8 @@ class AutoGenerator(BaseAutoGenerator):
     
     def __init__(self, topic="Movie Story writing about AI", agent_file="test.yaml", 
                  framework="crewai", config_list: Optional[List[Dict]] = None,
-                 pattern: str = "sequential", single_agent: bool = False):
+                 pattern: str = "sequential", single_agent: bool = False, 
+                 adapter_registry=None):
         """
         Initialize the AutoGenerator class with the specified topic, agent file, and framework.
         
@@ -646,15 +647,15 @@ class AutoGenerator(BaseAutoGenerator):
         super().__init__(config_list=config_list)
         
         # Validate framework availability using adapter registry
-        from .framework_adapters.registry import FrameworkAdapterRegistry
+        from .framework_adapters.registry import get_default_registry
         
-        registry = FrameworkAdapterRegistry.get_instance()
+        self._adapter_registry = adapter_registry or get_default_registry()
         try:
-            adapter = registry.create(framework)
+            adapter = self._adapter_registry.create(framework)
         except ValueError as e:
             raise ImportError(
                 f"Unknown framework '{framework}'. Available frameworks: "
-                f"{', '.join(registry.list_registered())}"
+                f"{', '.join(self._adapter_registry.list_registered())}"
             ) from e
 
         # Use safe fallbacks for new adapter attributes
