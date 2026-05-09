@@ -4065,6 +4065,31 @@ Do NOT add any explanations or formatting."""
         
         return results[-1].get("output", "") if results else ""
 
+    def _execute_agent_with_budget_handling(self, agent, method_name, *args, **kwargs):
+        """Run ``agent.<method_name>(*args, **kwargs)`` with a graceful
+        BudgetExceededError handler.
+
+        Wrapper-only fix (no core SDK changes). Users configure budgets via
+        ``execution=ExecutionConfig(max_budget=...)`` on the Agent — per
+        AGENTS.md §5.3 there is NO top-level ``max_budget=`` parameter on
+        Agent.__init__ (avoids parameter bloat).
+
+        When the budget is hit this prints a single-line actionable error
+        message and exits with code 1 instead of leaking a raw traceback.
+        Any other exception is re-raised unchanged.
+        """
+        from praisonaiagents.errors import BudgetExceededError
+        try:
+            return getattr(agent, method_name)(*args, **kwargs)
+        except BudgetExceededError as e:
+            from rich import print as rich_print
+            rich_print(
+                f"[red]Budget limit exceeded: {e!s}. "
+                "Hint: set budget via "
+                "execution=ExecutionConfig(max_budget=1.00) on your Agent.[/red]"
+            )
+            sys.exit(1)
+
     def _extract_cli_config_for_yaml(self):
         """
         Extract CLI configuration that should be passed to YAML processing.
@@ -4611,9 +4636,9 @@ Do NOT add any explanations or formatting."""
                     from rich.panel import Panel
                     
                     with Live(Panel(Spinner("dots", text="Generating..."), border_style="cyan"), refresh_per_second=10, transient=True):
-                        result = auto_rag.chat(prompt)
+                        result = self._execute_agent_with_budget_handling(auto_rag, 'chat', prompt)
                 else:
-                    result = auto_rag.chat(prompt)
+                    result = self._execute_agent_with_budget_handling(auto_rag, 'chat', prompt)
             else:
                 # Resolve display mode from CLI flags
                 display_mode = self._resolve_display_mode()
@@ -4621,16 +4646,16 @@ Do NOT add any explanations or formatting."""
                 if display_mode == 'silent':
                     # -qq: No output at all, exit code only
                     if hasattr(agent, 'start'):
-                        result = agent.start(prompt)
+                        result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                     else:
-                        result = agent.chat(prompt)
+                        result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                 
                 elif display_mode == 'quiet':
                     # -q: Result only, no spinners or status
                     if hasattr(agent, 'start'):
-                        result = agent.start(prompt)
+                        result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                     else:
-                        result = agent.chat(prompt)
+                        result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                     if result is not None:
                         output = getattr(result, 'output', None) or (str(result) if result else None)
                         if output:
@@ -4642,15 +4667,15 @@ Do NOT add any explanations or formatting."""
                         from praisonaiagents.output.status import enable_status_output, disable_status_output
                         enable_status_output(show_timestamps=True, show_metrics=True)
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                         disable_status_output()
                     except ImportError:
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                 
                 elif display_mode == 'debug':
                     # -vv: SDK TraceOutput with markdown rendering
@@ -4658,15 +4683,15 @@ Do NOT add any explanations or formatting."""
                         from praisonaiagents.output.trace import enable_trace_output, disable_trace_output
                         enable_trace_output(use_markdown=True)
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                         disable_trace_output()
                     except ImportError:
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                 
                 elif display_mode == 'jsonl':
                     # --output jsonl: JSONL structured output for CI/CD
@@ -4688,9 +4713,9 @@ Do NOT add any explanations or formatting."""
                     
                     start_time = time.time()
                     if hasattr(agent, 'start'):
-                        result = agent.start(prompt)
+                        result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                     else:
-                        result = agent.chat(prompt)
+                        result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                     
                     # Emit final result
                     reason = getattr(result, 'completion_reason', None) if hasattr(result, 'completion_reason') else 'complete'
@@ -4709,9 +4734,9 @@ Do NOT add any explanations or formatting."""
                     import json as json_mod
                     start_time = time.time()
                     if hasattr(agent, 'start'):
-                        result = agent.start(prompt)
+                        result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                     else:
-                        result = agent.chat(prompt)
+                        result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                     
                     output = result.output if hasattr(result, 'output') else str(result)
                     envelope = {
@@ -4732,15 +4757,15 @@ Do NOT add any explanations or formatting."""
                         flow = track_workflow()
                         flow.start()
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                         flow.stop()
                     except ImportError:
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                 
                 elif display_mode == 'editor':
                     # --output editor: User-friendly step-by-step format
@@ -4750,9 +4775,9 @@ Do NOT add any explanations or formatting."""
                     
                     # Run agent
                     if hasattr(agent, 'start'):
-                        result = agent.start(prompt)
+                        result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                     else:
-                        result = agent.chat(prompt)
+                        result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                     
                     # SDK callbacks (interaction, llm_content) handle display —
                     # no explicit editor.output() needed here.
@@ -4774,15 +4799,15 @@ Do NOT add any explanations or formatting."""
                         from praisonaiagents.output.status import enable_status_output, disable_status_output
                         enable_status_output(show_timestamps=False, show_metrics=False)
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                         disable_status_output()
                     except ImportError:
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
             
             # ===== POST-PROCESSING WITH NEW FEATURES =====
             
