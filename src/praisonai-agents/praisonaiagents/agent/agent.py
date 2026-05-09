@@ -740,7 +740,12 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
         
         # Handle max_budget convenience parameter
         if max_budget is not None:
-            from ..config.feature_configs import ExecutionConfig, resolve_execution
+            # NOTE: ExecutionConfig is imported at module level (see top of file).
+            # Do NOT re-import it locally here — a local import statement would
+            # make Python treat ExecutionConfig as a local name throughout this
+            # entire __init__ function and break the branch below that uses it
+            # when max_budget is None (UnboundLocalError).
+            from ..config.feature_configs import resolve_execution
             if execution is None:
                 execution = ExecutionConfig(max_budget=max_budget)
             else:
