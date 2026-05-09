@@ -3843,7 +3843,26 @@ Provide ONLY the raw commit message text.
 Do NOT wrap it in markdown code fences or backticks.
 Do NOT add any explanations or formatting."""
 
-            response = agent.chat(prompt)
+            def _execute_agent_with_budget_handling(agent, method_name, *args, **kwargs):
+                """Execute agent method with graceful BudgetExceededError handling."""
+                try:
+                    method = getattr(agent, method_name)
+                    return method(*args, **kwargs)
+                except Exception as e:
+                    # Import BudgetExceededError locally to avoid import-time dependencies
+                    from praisonaiagents.errors import BudgetExceededError
+                    if isinstance(e, BudgetExceededError):
+                        # Display clean error message instead of full traceback
+                        print(f"[red]Budget exceeded:[/red] {e.message}")
+                        print(f"[yellow]Agent:[/yellow] {e.agent_id}")
+                        if hasattr(e, 'limit') and hasattr(e, 'used') and e.limit and e.used:
+                            print(f"[yellow]Used:[/yellow] ${e.used:.4f} / ${e.limit:.4f}")
+                        sys.exit(1)
+                    else:
+                        # Re-raise non-budget errors as normal
+                        raise
+            
+            response = _execute_agent_with_budget_handling(agent, 'chat', prompt)
             commit_message = self._clean_commit_message(response)
             
             print("\n[bold green]Suggested commit message:[/bold green]")
@@ -4026,8 +4045,27 @@ Do NOT add any explanations or formatting."""
                 verbose=1 if workflow_verbose else 0
             )
             
+            def _execute_agent_with_budget_handling(agent, method_name, *args, **kwargs):
+                """Execute agent method with graceful BudgetExceededError handling."""
+                try:
+                    method = getattr(agent, method_name)
+                    return method(*args, **kwargs)
+                except Exception as e:
+                    # Import BudgetExceededError locally to avoid import-time dependencies
+                    from praisonaiagents.errors import BudgetExceededError
+                    if isinstance(e, BudgetExceededError):
+                        # Display clean error message instead of full traceback
+                        print(f"[red]Budget exceeded:[/red] {e.message}")
+                        print(f"[yellow]Agent:[/yellow] {e.agent_id}")
+                        if hasattr(e, 'limit') and hasattr(e, 'used') and e.limit and e.used:
+                            print(f"[yellow]Used:[/yellow] ${e.used:.4f} / ${e.limit:.4f}")
+                        sys.exit(1)
+                    else:
+                        # Re-raise non-budget errors as normal
+                        raise
+            
             try:
-                output = agent.chat(full_prompt)
+                output = _execute_agent_with_budget_handling(agent, 'chat', full_prompt)
                 results.append({"step": step_name, "status": "success", "output": output})
                 context = output  # Pass output to next step
                 print(f"[green]  ✓ Completed: {step_name}[/green]")
@@ -4589,6 +4627,25 @@ Do NOT add any explanations or formatting."""
             
             agent = PraisonAgent(**agent_config)
             
+            def _execute_agent_with_budget_handling(agent, method_name, *args, **kwargs):
+                """Execute agent method with graceful BudgetExceededError handling."""
+                try:
+                    method = getattr(agent, method_name)
+                    return method(*args, **kwargs)
+                except Exception as e:
+                    # Import BudgetExceededError locally to avoid import-time dependencies
+                    from praisonaiagents.errors import BudgetExceededError
+                    if isinstance(e, BudgetExceededError):
+                        # Display clean error message instead of full traceback
+                        print(f"[red]Budget exceeded:[/red] {e.message}")
+                        print(f"[yellow]Agent:[/yellow] {e.agent_id}")
+                        if hasattr(e, 'limit') and hasattr(e, 'used') and e.limit and e.used:
+                            print(f"[yellow]Used:[/yellow] ${e.used:.4f} / ${e.limit:.4f}")
+                        sys.exit(1)
+                    else:
+                        # Re-raise non-budget errors as normal
+                        raise
+            
             # AutoRag - Automatic RAG retrieval decision
             if hasattr(self, 'args') and getattr(self.args, 'auto_rag', False):
                 from praisonaiagents import AutoRagAgent
@@ -4611,9 +4668,9 @@ Do NOT add any explanations or formatting."""
                     from rich.panel import Panel
                     
                     with Live(Panel(Spinner("dots", text="Generating..."), border_style="cyan"), refresh_per_second=10, transient=True):
-                        result = auto_rag.chat(prompt)
+                        result = _execute_agent_with_budget_handling(auto_rag, 'chat', prompt)
                 else:
-                    result = auto_rag.chat(prompt)
+                    result = _execute_agent_with_budget_handling(auto_rag, 'chat', prompt)
             else:
                 # Resolve display mode from CLI flags
                 display_mode = self._resolve_display_mode()
@@ -4621,16 +4678,16 @@ Do NOT add any explanations or formatting."""
                 if display_mode == 'silent':
                     # -qq: No output at all, exit code only
                     if hasattr(agent, 'start'):
-                        result = agent.start(prompt)
+                        result = _execute_agent_with_budget_handling(agent, 'start', prompt)
                     else:
-                        result = agent.chat(prompt)
+                        result = _execute_agent_with_budget_handling(agent, 'chat', prompt)
                 
                 elif display_mode == 'quiet':
                     # -q: Result only, no spinners or status
                     if hasattr(agent, 'start'):
-                        result = agent.start(prompt)
+                        result = _execute_agent_with_budget_handling(agent, 'start', prompt)
                     else:
-                        result = agent.chat(prompt)
+                        result = _execute_agent_with_budget_handling(agent, 'chat', prompt)
                     if result is not None:
                         output = getattr(result, 'output', None) or (str(result) if result else None)
                         if output:
@@ -4642,15 +4699,15 @@ Do NOT add any explanations or formatting."""
                         from praisonaiagents.output.status import enable_status_output, disable_status_output
                         enable_status_output(show_timestamps=True, show_metrics=True)
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = _execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = _execute_agent_with_budget_handling(agent, 'chat', prompt)
                         disable_status_output()
                     except ImportError:
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = _execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = _execute_agent_with_budget_handling(agent, 'chat', prompt)
                 
                 elif display_mode == 'debug':
                     # -vv: SDK TraceOutput with markdown rendering
@@ -4658,15 +4715,15 @@ Do NOT add any explanations or formatting."""
                         from praisonaiagents.output.trace import enable_trace_output, disable_trace_output
                         enable_trace_output(use_markdown=True)
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = _execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = _execute_agent_with_budget_handling(agent, 'chat', prompt)
                         disable_trace_output()
                     except ImportError:
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = _execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = _execute_agent_with_budget_handling(agent, 'chat', prompt)
                 
                 elif display_mode == 'jsonl':
                     # --output jsonl: JSONL structured output for CI/CD
@@ -4688,9 +4745,9 @@ Do NOT add any explanations or formatting."""
                     
                     start_time = time.time()
                     if hasattr(agent, 'start'):
-                        result = agent.start(prompt)
+                        result = _execute_agent_with_budget_handling(agent, 'start', prompt)
                     else:
-                        result = agent.chat(prompt)
+                        result = _execute_agent_with_budget_handling(agent, 'chat', prompt)
                     
                     # Emit final result
                     reason = getattr(result, 'completion_reason', None) if hasattr(result, 'completion_reason') else 'complete'
@@ -4709,9 +4766,9 @@ Do NOT add any explanations or formatting."""
                     import json as json_mod
                     start_time = time.time()
                     if hasattr(agent, 'start'):
-                        result = agent.start(prompt)
+                        result = _execute_agent_with_budget_handling(agent, 'start', prompt)
                     else:
-                        result = agent.chat(prompt)
+                        result = _execute_agent_with_budget_handling(agent, 'chat', prompt)
                     
                     output = result.output if hasattr(result, 'output') else str(result)
                     envelope = {
@@ -4732,15 +4789,15 @@ Do NOT add any explanations or formatting."""
                         flow = track_workflow()
                         flow.start()
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = _execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = _execute_agent_with_budget_handling(agent, 'chat', prompt)
                         flow.stop()
                     except ImportError:
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = _execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = _execute_agent_with_budget_handling(agent, 'chat', prompt)
                 
                 elif display_mode == 'editor':
                     # --output editor: User-friendly step-by-step format
@@ -4750,9 +4807,9 @@ Do NOT add any explanations or formatting."""
                     
                     # Run agent
                     if hasattr(agent, 'start'):
-                        result = agent.start(prompt)
+                        result = _execute_agent_with_budget_handling(agent, 'start', prompt)
                     else:
-                        result = agent.chat(prompt)
+                        result = _execute_agent_with_budget_handling(agent, 'chat', prompt)
                     
                     # SDK callbacks (interaction, llm_content) handle display —
                     # no explicit editor.output() needed here.
@@ -4774,15 +4831,15 @@ Do NOT add any explanations or formatting."""
                         from praisonaiagents.output.status import enable_status_output, disable_status_output
                         enable_status_output(show_timestamps=False, show_metrics=False)
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = _execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = _execute_agent_with_budget_handling(agent, 'chat', prompt)
                         disable_status_output()
                     except ImportError:
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = _execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = _execute_agent_with_budget_handling(agent, 'chat', prompt)
             
             # ===== POST-PROCESSING WITH NEW FEATURES =====
             
@@ -4860,7 +4917,7 @@ Do NOT add any explanations or formatting."""
 Now, {final_instruction.lower()}:"""
                 
                 final_agent = PraisonAgent(**final_agent_config)
-                result = final_agent.start(final_prompt)
+                result = _execute_agent_with_budget_handling(final_agent, 'start', final_prompt)
                 print(f"\n[bold green]✅ Final agent processing complete[/bold green]\n")
             
             # Save output if --save is enabled
@@ -5331,8 +5388,27 @@ Now, {final_instruction.lower()}:"""
             # Format input as expected by the start method: "url goal"
             input_text = f"{url} {goal}"
             
+            def _execute_agent_with_budget_handling(agent, method_name, *args, **kwargs):
+                """Execute agent method with graceful BudgetExceededError handling."""
+                try:
+                    method = getattr(agent, method_name)
+                    return method(*args, **kwargs)
+                except Exception as e:
+                    # Import BudgetExceededError locally to avoid import-time dependencies
+                    from praisonaiagents.errors import BudgetExceededError
+                    if isinstance(e, BudgetExceededError):
+                        # Display clean error message instead of full traceback
+                        print(f"[red]Budget exceeded:[/red] {e.message}")
+                        print(f"[yellow]Agent:[/yellow] {e.agent_id}")
+                        if hasattr(e, 'limit') and hasattr(e, 'used') and e.limit and e.used:
+                            print(f"[yellow]Used:[/yellow] ${e.used:.4f} / ${e.limit:.4f}")
+                        sys.exit(1)
+                    else:
+                        # Re-raise non-budget errors as normal
+                        raise
+            
             # Execute the context engineering
-            result = agent.start(input_text)
+            result = _execute_agent_with_budget_handling(agent, 'start', input_text)
             
             print("\n[bold green]Context Engineering Complete![/bold green]")
             print(result)
@@ -6589,7 +6665,26 @@ Provide a concise summary (max 200 words):"""
                             
                             live_status.update_status(f"Task #{task_id}: Calling LLM...")
                             
-                            response = agent.chat(prompt, stream=False)
+                            def _execute_agent_with_budget_handling(agent, method_name, *args, **kwargs):
+                                """Execute agent method with graceful BudgetExceededError handling."""
+                                try:
+                                    method = getattr(agent, method_name)
+                                    return method(*args, **kwargs)
+                                except Exception as e:
+                                    # Import BudgetExceededError locally to avoid import-time dependencies
+                                    from praisonaiagents.errors import BudgetExceededError
+                                    if isinstance(e, BudgetExceededError):
+                                        # Display clean error message instead of full traceback
+                                        print(f"[red]Budget exceeded:[/red] {e.message}")
+                                        print(f"[yellow]Agent:[/yellow] {e.agent_id}")
+                                        if hasattr(e, 'limit') and hasattr(e, 'used') and e.limit and e.used:
+                                            print(f"[yellow]Used:[/yellow] ${e.used:.4f} / ${e.limit:.4f}")
+                                        sys.exit(1)
+                                    else:
+                                        # Re-raise non-budget errors as normal
+                                        raise
+                            
+                            response = _execute_agent_with_budget_handling(agent, 'chat', prompt, stream=False)
                             response_str = str(response) if response else ""
                             
                             # Calculate elapsed time
@@ -6736,8 +6831,27 @@ Provide a concise summary (max 200 words):"""
             
             timings['llm_start'] = time.time()
             
+            def _execute_agent_with_budget_handling(agent, method_name, *args, **kwargs):
+                """Execute agent method with graceful BudgetExceededError handling."""
+                try:
+                    method = getattr(agent, method_name)
+                    return method(*args, **kwargs)
+                except Exception as e:
+                    # Import BudgetExceededError locally to avoid import-time dependencies
+                    from praisonaiagents.errors import BudgetExceededError
+                    if isinstance(e, BudgetExceededError):
+                        # Display clean error message instead of full traceback
+                        print(f"[red]Budget exceeded:[/red] {e.message}")
+                        print(f"[yellow]Agent:[/yellow] {e.agent_id}")
+                        if hasattr(e, 'limit') and hasattr(e, 'used') and e.limit and e.used:
+                            print(f"[yellow]Used:[/yellow] ${e.used:.4f} / ${e.limit:.4f}")
+                        sys.exit(1)
+                    else:
+                        # Re-raise non-budget errors as normal
+                        raise
+            
             # Use chat method (streaming is handled internally by verbose mode)
-            response = agent.chat(prompt, stream=False)
+            response = _execute_agent_with_budget_handling(agent, 'chat', prompt, stream=False)
             
             timings['llm_end'] = time.time()
             

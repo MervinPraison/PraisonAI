@@ -555,6 +555,7 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
         backend: Optional[Any] = None,  # External managed agent backend (e.g., ManagedAgentIntegration)
         cli_backend: Optional[Union[str, Any]] = None,  # CLI backend for delegating turns (e.g., "claude-code")
         interrupt_controller: Optional['InterruptController'] = None,  # G2: Cooperative cancellation
+        max_budget: Optional[float] = None,  # Deprecated: use execution=ExecutionConfig(max_budget=...)
     ):
         """Initialize an Agent instance.
 
@@ -576,6 +577,8 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
             handoffs: List of Agent or Handoff objects for agent-to-agent collaboration.
             auto_save: **Deprecated** — use ``memory=MemoryConfig(auto_save="name")``.
             rate_limiter: **Deprecated** — use ``execution=ExecutionConfig(rate_limiter=obj)``.
+            max_budget: **Deprecated** — use ``execution=ExecutionConfig(max_budget=...)``.
+                Convenient alias for setting budget limits directly.
             memory: Memory system configuration. Accepts:
                 - bool: True enables defaults, False disables
                 - MemoryConfig: Custom configuration
@@ -787,6 +790,14 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
                 alternative="use 'execution=ExecutionConfig(rate_limiter=obj)' instead",
                 stacklevel=3
             )
+        if max_budget is not None:
+            warn_deprecated_param(
+                "max_budget",
+                since="1.0.0",
+                removal="2.0.0",
+                alternative="use 'execution=ExecutionConfig(max_budget=...)' instead",
+                stacklevel=3
+            )
         # Note: parallel_tool_calls is NOT deprecated - it's a new Gap 2 feature
         # Both direct parameter and ExecutionConfig.parallel_tool_calls are supported
         if verification_hooks is not None:
@@ -969,10 +980,27 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
             # Budget guard extraction
             _max_budget = getattr(_exec_config, 'max_budget', None)
             _on_budget_exceeded = getattr(_exec_config, 'on_budget_exceeded', 'stop') or 'stop'
+            
+            # Override with deprecated max_budget parameter if provided (backward compatibility)
+            if max_budget is not None:
+                if _max_budget is not None:
+                    import warnings
+                    warnings.warn(
+                        f"Both 'max_budget' parameter and 'execution.max_budget' are set. "
+                        f"Using max_budget parameter (${max_budget}) over execution.max_budget (${_max_budget}). "
+                        f"Consider using only 'execution=ExecutionConfig(max_budget={max_budget})' instead.",
+                        DeprecationWarning,
+                        stacklevel=3
+                    )
+                _max_budget = max_budget
         else:
             max_iter, max_rpm, max_execution_time, max_retry_limit = 20, None, None, 2
             _max_budget = None
             _on_budget_exceeded = 'stop'
+            
+            # Apply deprecated max_budget parameter if provided (backward compatibility)
+            if max_budget is not None:
+                _max_budget = max_budget
             # Keep parallel_tool_calls parameter value when no ExecutionConfig provided
             # (already set from parameter, no need to override)
         
