@@ -1,0 +1,40 @@
+# Scientific paper workflow — YAML equivalent of multi_agent_paper.py
+# Run with:
+#   praisonai agents run --file examples/scientific_writing/agents.yaml
+framework: praisonai
+topic: "Climate change effects on coral reef biodiversity"
+
+roles:
+  literature_reviewer:
+    role: "Literature Reviewer"
+    goal: "Survey recent academic work on {topic} and produce an APA review."
+    backstory: "Expert in academic literature surveying and citation hygiene."
+    llm: "gpt-4o-mini"
+    tasks:
+      review_literature:
+        description: "Produce a concise literature review with 5-8 APA citations."
+        expected_output: "APA-formatted literature review."
+
+  methodology_designer:
+    role: "Methodology Designer"
+    goal: "Design a reproducible research methodology for {topic}."
+    backstory: "Specialises in rigorous experimental design."
+    llm: "gpt-4o-mini"
+    tasks:
+      design_methodology:
+        description: "Write a reproducible methods section in LaTeX."
+        expected_output: "LaTeX methods section."
+
+  scientific_writer:
+    role: "Scientific Writer"
+    goal: "Assemble the final LaTeX paper on {topic}."
+    backstory: >-
+      Specialised in LaTeX-formatted academic papers, fine-tuned on
+      scientific literature (CAJAL-4B checkpoint).
+    llm: "huggingface/Agnuxo/CAJAL-4B-P2PCLAW"
+    tasks:
+      write_paper:
+        description: >-
+          Combine the literature review and methodology into a full
+          scientific paper on {topic}. Use LaTeX formatting.
+        expected_output: "Complete LaTeX paper."
