@@ -42,7 +42,7 @@ def format_citation(authors: str, year: int, title: str, venue: str) -> str:
     Returns:
         One APA-formatted citation string.
     """
-    return f"{authors} ({year}). {title}. *{venue}*."
+    return f"{authors} ({year}). {title}. \\textit{{{venue}}}."
 
 
 SCIENTIFIC_INSTRUCTIONS = """You are a specialised scientific paper writer.

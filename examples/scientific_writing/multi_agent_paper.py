@@ -10,7 +10,7 @@ Usage:
 """
 from praisonaiagents import Agent, AgentTeam, Task
 
-from scientific_writer import (  # noqa: E402 — example imports a sibling file
+from scientific_writer import (  # sibling-file import; works when run from this directory
     build_scientific_writer,
     format_citation,
     format_latex_section,

@@ -1,6 +1,6 @@
 # Scientific paper workflow — YAML equivalent of multi_agent_paper.py
 # Run with:
-#   praisonai agents run --file examples/scientific_writing/agents.yaml
+#   praisonai run examples/scientific_writing/agents.yaml
 framework: praisonai
 topic: "Climate change effects on coral reef biodiversity"
 
