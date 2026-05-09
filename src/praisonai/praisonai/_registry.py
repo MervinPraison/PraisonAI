@@ -112,12 +112,14 @@ class PluginRegistry(Generic[T]):
         """
         with self._lock:
             cls = self._items.get(name.lower())
+            # Capture available plugins snapshot while holding lock
+            # to avoid race condition between check and error message
+            available_snapshot = sorted(self._items.keys()) if cls is None else None
         
         if cls is None:
-            available = sorted(self._items.keys())
             raise ValueError(
                 f"Unknown {self._entry_point_group} plugin: {name!r}. "
-                f"Available: {available}"
+                f"Available: {available_snapshot}"
             )
         return cls
 

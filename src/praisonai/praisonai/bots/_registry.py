@@ -85,19 +85,32 @@ def get_default_bot_registry() -> BotPlatformRegistry:
     return _default_registry
 
 
-# Backward compatibility API
-_bot_registry = get_default_bot_registry()
+# Backward compatibility API - lazy loading to preserve original behavior
+_bot_registry = None
+
+def _get_lazy_registry():
+    """Get registry lazily to avoid eager loading at module import."""
+    global _bot_registry
+    if _bot_registry is None:
+        _bot_registry = get_default_bot_registry()
+    return _bot_registry
 
 
 def get_platform_registry() -> Dict[str, Any]:
     """Return the combined registry of all known platforms.
     
-    Backward compatibility function that returns a dict-like view.
+    Backward compatibility function that returns original format:
+    {name: class_or_tuple} to preserve external caller contracts.
     """
-    # Return a simplified view for backward compatibility
+    registry = _get_lazy_registry()
     result = {}
-    for name in _bot_registry.list_names():
-        result[name] = name  # Simplified representation
+    for name in registry.list_names():
+        try:
+            # Return the resolved class to maintain original API contract
+            result[name] = registry.resolve(name)
+        except ValueError:
+            # Skip broken registrations
+            pass
     return result
 
 
@@ -108,12 +121,12 @@ def register_platform(name: str, adapter_class: Type) -> None:
         name: Platform identifier (lowercase).
         adapter_class: The bot adapter class.
     """
-    _bot_registry.register(name.lower(), adapter_class)
+    _get_lazy_registry().register(name.lower(), adapter_class)
 
 
 def list_platforms() -> List[str]:
     """List all registered platform names."""
-    return _bot_registry.list_names()
+    return _get_lazy_registry().list_names()
 
 
 def resolve_adapter(name: str) -> Type:
@@ -128,4 +141,4 @@ def resolve_adapter(name: str) -> Type:
     Raises:
         ValueError: If the platform is not registered.
     """
-    return _bot_registry.resolve(name.lower())
+    return _get_lazy_registry().resolve(name.lower())

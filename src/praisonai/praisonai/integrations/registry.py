@@ -11,10 +11,10 @@ Features:
 - Backward compatibility with existing get_available_integrations()
 
 Usage:
-    from praisonai.integrations.registry import ExternalAgentRegistry
+    from praisonai.integrations.registry import get_default_registry
     
-    # Get singleton registry
-    registry = ExternalAgentRegistry.get_instance()
+    # Get default registry (or inject custom for multi-tenant)
+    registry = get_default_registry()
     
     # Register custom integration
     registry.register('my-agent', MyCustomIntegration)
