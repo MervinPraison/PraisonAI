@@ -544,7 +544,6 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
         verification_hooks: Optional[List[Any]] = None,  # Deprecated: use autonomy=AutonomyConfig(verification_hooks=[...])
         output: Optional[Union[bool, str, Dict[str, Any], 'OutputConfig']] = None,
         execution: Optional[Union[bool, str, Dict[str, Any], 'ExecutionConfig']] = None,
-        max_budget: Optional[float] = None,  # Budget limit in USD - convenience alias for ExecutionConfig(max_budget=...)
         templates: Optional[Union[Dict[str, Any], 'TemplateConfig']] = None,
         caching: Optional[Union[bool, str, Dict[str, Any], 'CachingConfig']] = None,
         hooks: Optional[Union[List[Any], Dict[str, Any], 'HooksConfig']] = None,
@@ -623,9 +622,6 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
                 - Dict[str, Any]: Config overrides (e.g. {"max_iter": 10, "max_rpm": 60})
                 - ExecutionConfig: Custom configuration
                 Controls: max_iter, max_rpm, max_execution_time, max_retry_limit
-            max_budget: Budget limit in USD (convenience alias). Creates ExecutionConfig(max_budget=value).
-                If both execution.max_budget and max_budget are provided, max_budget takes precedence.
-                Use execution=ExecutionConfig(...) for full execution control.
             templates: Template configuration. Accepts:
                 - Dict[str, Any]: Template fields (e.g. {"system": "...", "prompt": "..."})
                 - TemplateConfig: Custom configuration
@@ -737,42 +733,6 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
             web = apply_config_defaults("web", web, WebConfig)
         if output is None:
             output = apply_config_defaults("output", output, OutputConfig)
-        
-        # Handle max_budget convenience parameter
-        if max_budget is not None:
-            from ..config.feature_configs import ExecutionConfig, resolve_execution
-            if execution is None:
-                execution = ExecutionConfig(max_budget=max_budget)
-            else:
-                # If execution config is already provided, merge max_budget into it
-                resolved_exec = resolve_execution(execution)
-                if resolved_exec is None:
-                    execution = ExecutionConfig(max_budget=max_budget)
-                else:
-                    # Update existing config with max_budget
-                    if hasattr(resolved_exec, 'max_budget'):
-                        if (
-                            resolved_exec.max_budget is not None
-                            and resolved_exec.max_budget != max_budget
-                        ):
-                            import warnings
-                            warnings.warn(
-                                (
-                                    f"Both execution.max_budget={resolved_exec.max_budget} and "
-                                    f"max_budget={max_budget} were provided; "
-                                    "using max_budget."
-                                ),
-                                UserWarning,
-                                stacklevel=3,
-                            )
-                        # Use dataclasses.replace to avoid mutating shared state
-                        import dataclasses
-                        execution = dataclasses.replace(resolved_exec, max_budget=max_budget)
-                    elif not hasattr(resolved_exec, 'max_budget'):
-                        # Fallback for older config objects  
-                        import dataclasses
-                        execution = dataclasses.replace(resolved_exec, max_budget=max_budget)
-        
         if execution is None:
             execution = apply_config_defaults("execution", execution, ExecutionConfig)
         if caching is None:
