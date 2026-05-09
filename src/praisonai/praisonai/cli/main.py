@@ -4027,7 +4027,7 @@ Do NOT add any explanations or formatting."""
             )
             
             try:
-                output = agent.chat(full_prompt)
+                output = self._execute_agent_with_budget_handling(agent, "chat", full_prompt)
                 results.append({"step": step_name, "status": "success", "output": output})
                 context = output  # Pass output to next step
                 print(f"[green]  ✓ Completed: {step_name}[/green]")
@@ -4083,10 +4083,14 @@ Do NOT add any explanations or formatting."""
             return getattr(agent, method_name)(*args, **kwargs)
         except BudgetExceededError as e:
             from rich import print as rich_print
+            from rich.markup import escape
+            import sys
+            # Use stderr to avoid corrupting JSON/JSONL output in structured modes
             rich_print(
-                f"[red]Budget limit exceeded: {e!s}. "
+                f"[red]Budget limit exceeded: {escape(str(e))}. "
                 "Hint: set budget via "
-                "execution=ExecutionConfig(max_budget=1.00) on your Agent.[/red]"
+                "execution=ExecutionConfig(max_budget=1.00) on your Agent.[/red]",
+                file=sys.stderr
             )
             sys.exit(1)
 
