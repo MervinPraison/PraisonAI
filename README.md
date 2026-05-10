@@ -358,6 +358,15 @@ pip install "praisonai[claw]"
 praisonai claw
 ```
 
+#### Required Environment Variables
+
+Copy `.env.example` to `.env` and configure the following variables:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `OPENAI_API_KEY` | Yes | OpenAI API key for all LLM calls |
+| `TAVILY_API_KEY` | Yes (Claw) | Tavily key for the built-in web-search tool. Get one free at https://app.tavily.com |
+
 Open **http://localhost:8082** — the dashboard comes with 13 built-in pages: Chat, Agents, Memory, Knowledge, Channels, Guardrails, Cron, and more. Add messaging channels directly from the UI.
 
 > 📖 [Full Claw docs](https://docs.praison.ai/docs/concepts/claw) — platform tokens, CLI options, Docker, and YAML agent mode
