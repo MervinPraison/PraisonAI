@@ -222,7 +222,7 @@ class ToolResolver:
         
         return None
     
-    def resolve(self, name: str) -> Optional[Callable]:
+    def resolve(self, name: str, instantiate: bool = False) -> Optional[Callable]:
         """Resolve a tool name to a callable.
         
         Resolution order:
@@ -233,6 +233,7 @@ class ToolResolver:
         
         Args:
             name: Tool name to resolve
+            instantiate: If True, instantiate class tools automatically
             
         Returns:
             Callable if found, None if not found
@@ -248,25 +249,39 @@ class ToolResolver:
         local_tools = self._load_local_tools()
         if name in local_tools:
             logger.debug(f"Resolved '{name}' from local tools.py")
-            return local_tools[name]
+            tool = local_tools[name]
+            if instantiate and self._is_class(tool):
+                return tool()
+            return tool
         
         # 2. Check praisonaiagents.tools
         tool = self._resolve_from_praisonaiagents(name)
         if tool is not None:
+            if instantiate and self._is_class(tool):
+                return tool()
             return tool
         
         # 3. Check praisonai-tools package
         tool = self._resolve_from_praisonai_tools(name)
         if tool is not None:
+            if instantiate and self._is_class(tool):
+                return tool()
             return tool
         
         # 4. Check tool registry
         tool = self._resolve_from_registry(name)
         if tool is not None:
+            if instantiate and self._is_class(tool):
+                return tool()
             return tool
         
         logger.warning(f"Tool '{name}' not found in any source")
         return None
+    
+    def _is_class(self, obj) -> bool:
+        """Check if object is a class (not an instance)."""
+        import inspect
+        return inspect.isclass(obj)
     
     def resolve_many(self, names: List[str]) -> List[Callable]:
         """Resolve multiple tool names to callables.

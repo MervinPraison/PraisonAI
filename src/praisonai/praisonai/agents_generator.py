@@ -137,47 +137,15 @@ def sanitize_agent_name_for_autogen_v4(name):
 
 def _resolve_yaml_cli_backend(cli_backend_config, logger):
     """Resolve a YAML ``cli_backend`` field to a CliBackendProtocol instance.
-
-    Accepts ``None`` (no backend), a string id (e.g. ``"claude-code"``), or a
-    dict of shape ``{"id": "claude-code", "overrides": {...}}``. Returns
-    ``None`` on any error after logging a warning, so YAML parsing never raises.
-
-    Kept at module scope so it is unit-testable without constructing a full
-    ``AgentsGenerator`` instance.
+    Deprecated wrapper. Use praisonai.cli_backends.resolve_cli_backend_config directly.
     """
-    if not cli_backend_config:
-        return None
-
-    # Pre-seed label from config before import so we can show it in error logs
-    if isinstance(cli_backend_config, str):
-        label = cli_backend_config
-    elif isinstance(cli_backend_config, dict):
-        label = cli_backend_config.get('id') or "<missing>"
-    else:
-        label = type(cli_backend_config).__name__
-
     try:
-        from praisonai.cli_backends import resolve_cli_backend
-        if isinstance(cli_backend_config, str):
-            return resolve_cli_backend(cli_backend_config)
-        if isinstance(cli_backend_config, dict):
-            backend_id = cli_backend_config.get('id')
-            if not backend_id:
-                raise ValueError("cli_backend dict must contain an 'id' field")
-            overrides = cli_backend_config.get('overrides') or {}
-            return resolve_cli_backend(backend_id, overrides=overrides)
-        raise ValueError(
-            f"cli_backend must be string or dict, got: {type(cli_backend_config).__name__}"
-        )
-    except ImportError:
-        logger.warning(
-            "CLI backend '%s' requested but not available", label
-        )
+        from praisonai.cli_backends import resolve_cli_backend_config
+        return resolve_cli_backend_config(cli_backend_config, logger)
     except Exception as e:
-        logger.warning(
-            "Failed to resolve CLI backend '%s': %s", label, e
-        )
-    return None
+        if logger:
+            logger.warning(f"Failed to resolve CLI backend: {e}")
+        return None
 
 
 class AgentsGenerator:
@@ -325,6 +293,22 @@ class AgentsGenerator:
                 for field, value in agent_overrides.items():
                     agent_config[field] = value
                     self.logger.debug(f"CLI override for agent {agent_name}: {field} = {value}")
+
+    def _validate_cli_backend_compatibility(self, config, framework):
+        """Validate that cli_backend is only used with compatible frameworks."""
+        # Check if any agent defines cli_backend
+        has_cli_backend = any(
+            details.get('cli_backend') for details in config.get('roles', {}).values()
+        )
+        
+        if has_cli_backend and framework != 'praisonai':
+            self.logger.error(
+                f"cli_backend is not supported for framework='{framework}'. "
+                f"Remove cli_backend from your YAML or switch to framework='praisonai'."
+            )
+            raise ValueError(
+                f"cli_backend requires framework='praisonai', but framework='{framework}' was specified"
+            )
 
     def _validate_agents_config(self, config):
         """
@@ -556,21 +540,11 @@ class AgentsGenerator:
                 available_tools = self.tool_resolver.list_available()
                 tools_dict = {}
                 
-                # Standard praisonai-tools tool names
-                standard_tools = [
-                    'CodeDocsSearchTool', 'CSVSearchTool', 'DirectorySearchTool', 'DOCXSearchTool',
-                    'DirectoryReadTool', 'FileReadTool', 'TXTSearchTool', 'JSONSearchTool',
-                    'MDXSearchTool', 'PDFSearchTool', 'RagTool', 'ScrapeElementFromWebsiteTool',
-                    'ScrapeWebsiteTool', 'WebsiteSearchTool', 'XMLSearchTool',
-                    'YoutubeChannelSearchTool', 'YoutubeVideoSearchTool',
-                ]
-                
-                # Resolve only tools that are actually available
-                for tool_name in standard_tools:
-                    if tool_name in available_tools:
-                        resolved_tool = self.tool_resolver.resolve(tool_name)
-                        if resolved_tool is not None:
-                            tools_dict[tool_name] = resolved_tool() if inspect.isclass(resolved_tool) else resolved_tool
+                # Resolve all available tools through ToolResolver with instantiation
+                for tool_name in available_tools:
+                    resolved_tool = self.tool_resolver.resolve(tool_name, instantiate=True)
+                    if resolved_tool is not None:
+                        tools_dict[tool_name] = resolved_tool
                             
             except Exception as e:
                 self.logger.debug(f"Error resolving praisonai_tools: {e}")
@@ -641,6 +615,9 @@ class AgentsGenerator:
         # Validate framework availability for non-CLI callers
         from .framework_adapters.validators import assert_framework_available
         assert_framework_available(framework)
+        
+        # Validate cli_backend compatibility
+        self._validate_cli_backend_compatibility(config, framework)
         
         self.logger.info(f"Using framework: {framework}")
         return self.framework_adapter.run(
@@ -1224,20 +1201,23 @@ class AgentsGenerator:
                 
                 # Create a scoped event loop instead of modifying process globals
                 interactive_loop = asyncio.new_event_loop()
+                
                 try:
                     interactive_loop.run_until_complete(interactive_runtime.start())
-                    
-                    centric_tools = create_agent_centric_tools(interactive_runtime)
-                    self.logger.info(f"Loaded {len(centric_tools)} InteractiveRuntime tools")
-                    tools_list.extend(centric_tools)
-                    
-                finally:
+                except Exception:
+                    # Only on START failure: tear down what we created and re-raise/clear refs
                     try:
                         interactive_loop.run_until_complete(interactive_runtime.stop())
-                    except Exception as stop_error:
-                        self.logger.warning(f"Error stopping InteractiveRuntime: {stop_error}")
-                    finally:
-                        interactive_loop.close()
+                    except Exception:
+                        pass
+                    interactive_loop.close()
+                    interactive_runtime = None
+                    interactive_loop = None
+                    raise
+
+                centric_tools = create_agent_centric_tools(interactive_runtime)
+                self.logger.info(f"Loaded {len(centric_tools)} InteractiveRuntime tools")
+                tools_list.extend(centric_tools)
                 
             except ImportError as e:
                 self.logger.warning(f"Failed to load InteractiveRuntime components: {e}")
@@ -1476,12 +1456,15 @@ class AgentsGenerator:
             self.logger.debug(f"Result: {response}")
             result = response if response else ""
         finally:
-            if interactive_runtime and interactive_loop:
+            if interactive_runtime is not None and interactive_loop is not None:
                 try:
                     self.logger.info("Stopping InteractiveRuntime...")
                     interactive_loop.run_until_complete(interactive_runtime.stop())
                 except Exception as e:
                     self.logger.error(f"Error stopping InteractiveRuntime: {e}")
+                finally:
+                    if not interactive_loop.is_closed():
+                        interactive_loop.close()
         
         if AGENTOPS_AVAILABLE:
             import agentops

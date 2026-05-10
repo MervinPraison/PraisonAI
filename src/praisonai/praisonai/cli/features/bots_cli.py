@@ -1019,25 +1019,13 @@ class BotHandler:
         return tools
     
     def _resolve_tool_by_name(self, name: str):
-        """Resolve a tool by name."""
-        try:
-            import praisonai_tools
-            tool_class = getattr(praisonai_tools, name, None)
-            if tool_class:
-                return tool_class()
-        except ImportError:
-            pass
-        
-        try:
-            from praisonaiagents import tools as agent_tools
-            tool_func = getattr(agent_tools, name, None)
-            if tool_func:
-                return tool_func
-        except ImportError:
-            pass
-        
-        logger.warning(f"Tool not found: {name}")
-        return None
+        """Resolve a tool by name using the canonical ToolResolver."""
+        from praisonai.tool_resolver import ToolResolver
+        resolver = ToolResolver()
+        tool = resolver.resolve(name, instantiate=True)
+        if tool is None:
+            logger.warning(f"Tool not found: {name}")
+        return tool
     
     def _resolve_tools(self, tool_names: List[str]) -> List:
         """Resolve a list of tool names to tool instances."""
