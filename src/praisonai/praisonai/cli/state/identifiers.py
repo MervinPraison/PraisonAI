@@ -9,7 +9,7 @@ import os
 import secrets
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional
 
 
@@ -20,7 +20,7 @@ def generate_run_id() -> str:
     Format: run_YYYYMMDD_HHMMSS_<random>
     Example: run_20241231_143022_a1b2c3
     """
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     random_suffix = secrets.token_hex(3)  # 6 characters
     return f"run_{timestamp}_{random_suffix}"
 
@@ -68,7 +68,7 @@ class RunContext:
     """
     run_id: str = field(default_factory=generate_run_id)
     trace_id: str = field(default_factory=generate_trace_id)
-    start_time: datetime = field(default_factory=datetime.utcnow)
+    start_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     
     # Agent tracking
     agents: Dict[str, str] = field(default_factory=dict)  # name -> agent_id
