@@ -5,7 +5,7 @@ Provides lazy-loaded integration with the PraisonAI agents framework.
 """
 
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Callable
 from .base import BaseFrameworkAdapter
 
 logger = logging.getLogger(__name__)
@@ -33,8 +33,8 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         topic: str,
         *,
         tools_dict: Optional[Dict[str, Any]] = None,
-        agent_callback = None,
-        task_callback = None,
+        agent_callback: Optional[Callable] = None,
+        task_callback: Optional[Callable] = None,
         cli_config: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
@@ -59,6 +59,55 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         
         logger.info("Starting PraisonAI execution...")
         
+        # Load tools from tools.py if available
+        tools_list = []
+        if tools_dict:
+            tools_list = list(tools_dict.values())
+            
+        # Check for InteractiveRuntime (ACP/LSP) configuration
+        global_config = config.get('config', {})
+        acp_enabled = global_config.get('acp', False)
+        lsp_enabled = global_config.get('lsp', False)
+        
+        if acp_enabled or lsp_enabled:
+            try:
+                import asyncio
+                import os
+                from praisonai.cli.features.interactive_runtime import InteractiveRuntime, RuntimeConfig
+                from praisonai.cli.features.agent_tools import create_agent_centric_tools
+                
+                # Use scoped event loop instead of process-global mutations
+                runtime_config = RuntimeConfig(
+                    workspace=os.getcwd(),
+                    acp_enabled=acp_enabled,
+                    lsp_enabled=lsp_enabled,
+                    approval_mode=os.environ.get("PRAISONAI_APPROVAL_MODE", "prompt")
+                )
+                interactive_runtime = InteractiveRuntime(runtime_config)
+                logger.info(f"Starting InteractiveRuntime (ACP: {acp_enabled}, LSP: {lsp_enabled})")
+                
+                # Create a scoped event loop instead of modifying process globals
+                interactive_loop = asyncio.new_event_loop()
+                try:
+                    interactive_loop.run_until_complete(interactive_runtime.start())
+                    
+                    centric_tools = create_agent_centric_tools(interactive_runtime)
+                    logger.info(f"Loaded {len(centric_tools)} InteractiveRuntime tools")
+                    tools_list.extend(centric_tools)
+                    
+                finally:
+                    try:
+                        interactive_loop.run_until_complete(interactive_runtime.stop())
+                    except Exception as stop_error:
+                        logger.warning(f"Error stopping InteractiveRuntime: {stop_error}")
+                    finally:
+                        interactive_loop.close()
+                        
+            except ImportError as e:
+                logger.warning(f"Failed to load InteractiveRuntime components: {e}")
+            except Exception as e:
+                logger.error(f"Error starting InteractiveRuntime: {e}")
+        
         # Basic implementation - create agents and tasks from config
         agents = {}
         tasks = []
@@ -74,11 +123,14 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             goal_filled = self._format_template(details.get('goal', ''), topic=topic)
             backstory_filled = self._format_template(details.get('backstory', ''), topic=topic)
             
-            # Resolve tools for this agent from tools_dict
+            # Resolve tools for this agent from tools_dict and tools_list
             agent_tool_list = []
             if tools_dict:
                 agent_tools = details.get('tools', [])
                 agent_tool_list = [tools_dict[t] for t in agent_tools if t in tools_dict]
+            
+            # Also add from global tools_list
+            agent_tool_list.extend(tools_list)
             
             # Create basic agent
             agent = PraisonAgent(

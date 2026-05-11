@@ -5,7 +5,7 @@ Provides lazy-loaded, scoped integration with CrewAI framework.
 """
 
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Callable
 from .base import BaseFrameworkAdapter, scoped_telemetry_disable
 
 logger = logging.getLogger(__name__)
@@ -33,8 +33,8 @@ class CrewAIAdapter(BaseFrameworkAdapter):
         topic: str,
         *,
         tools_dict: Optional[Dict[str, Any]] = None,
-        agent_callback = None,
-        task_callback = None,
+        agent_callback: Optional[Callable] = None,
+        task_callback: Optional[Callable] = None,
         cli_config: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
@@ -73,17 +73,37 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                     agent_tools = agent_details.get('tools', [])
                     agent_tool_list = [tools_dict[t] for t in agent_tools if t in tools_dict]
                 
+                # Extract LLM config for this agent
+                agent_llm = None
+                function_calling_llm = None
+                if llm_config:
+                    # Use first config as default
+                    agent_llm = llm_config[0]
+                    function_calling_llm = llm_config[0] if len(llm_config) == 1 else llm_config[1] if len(llm_config) > 1 else llm_config[0]
+                
                 agent = Agent(
                     role=agent_details.get('role', agent_name),
                     goal=self._format_template(agent_details.get('goal', ''), topic=topic),
                     backstory=self._format_template(agent_details.get('backstory', ''), topic=topic),
                     tools=agent_tool_list,
-                    verbose=True,
-                    allow_delegation=agent_details.get('allow_delegation', False)
+                    allow_delegation=agent_details.get('allow_delegation', False),
+                    llm=agent_llm,
+                    function_calling_llm=function_calling_llm,
+                    max_iter=agent_details.get('max_iter', 15),
+                    max_rpm=agent_details.get('max_rpm'),
+                    max_execution_time=agent_details.get('max_execution_time'),
+                    verbose=agent_details.get('verbose', True),
+                    cache=agent_details.get('cache', True),
+                    system_template=agent_details.get('system_template'),
+                    prompt_template=agent_details.get('prompt_template'),
+                    response_template=agent_details.get('response_template'),
                 )
                 if agent_callback:
                     agent.step_callback = agent_callback
                 agents[agent_name] = agent
+            
+            # Store tasks by name for context linking
+            tasks_dict = {}
             
             # Create tasks
             for agent_name, agent_details in config.get('roles', {}).items():
@@ -91,11 +111,30 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                     task = Task(
                         description=self._format_template(task_details['description'], topic=topic),
                         expected_output=self._format_template(task_details['expected_output'], topic=topic),
-                        agent=agents[agent_name]
+                        agent=agents[agent_name],
+                        tools=task_details.get('tools', []),
+                        async_execution=task_details.get('async_execution', False),
+                        config=task_details.get('config', {}),
+                        output_json=task_details.get('output_json'),
+                        output_pydantic=task_details.get('output_pydantic'),
+                        output_file=task_details.get('output_file', ''),
+                        callback=task_details.get('callback'),
+                        human_input=task_details.get('human_input', False),
+                        create_directory=task_details.get('create_directory', False)
                     )
                     if task_callback:
                         task.callback = task_callback
                     tasks.append(task)
+                    tasks_dict[task_name] = task
+            
+            # Set up task contexts - second pass to link dependencies
+            for agent_name, agent_details in config.get('roles', {}).items():
+                for task_name, task_details in agent_details.get('tasks', {}).items():
+                    if 'context' in task_details:
+                        task = tasks_dict[task_name]
+                        context_tasks = [tasks_dict[ctx] for ctx in task_details['context'] 
+                                       if ctx in tasks_dict]
+                        task.context = context_tasks
             
             # Create and run crew
             crew = Crew(
