@@ -128,7 +128,11 @@ class _AgentServerRegistry:
         thread.start()
         
         # Check for configurable timeout via environment variable
-        timeout = float(os.environ.get("PRAISONAI_SERVER_READY_TIMEOUT", "5.0"))
+        try:
+            timeout = float(os.environ.get("PRAISONAI_SERVER_READY_TIMEOUT", "5.0"))
+        except ValueError:
+            logger.warning("Invalid PRAISONAI_SERVER_READY_TIMEOUT value. Using default 5.0s.")
+            timeout = 5.0
         became_ready = ready_event.wait(timeout=timeout)
         
         if not became_ready:
