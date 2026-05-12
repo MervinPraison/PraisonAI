@@ -1,5 +1,6 @@
 """Test for agent server readiness timeout warning functionality."""
 
+import time
 import threading
 import logging
 import pytest
@@ -44,7 +45,6 @@ def test_server_readiness_timeout_configurable_via_env():
                 with patch("threading.Thread.start"):  # Prevent real server spawning
                     # Test with custom timeout
                     with patch.dict("os.environ", {"PRAISONAI_SERVER_READY_TIMEOUT": "0.05"}):
-                        import time
                         start_time = time.time()
                         result = registry.start_server_if_needed(8001, host="127.0.0.1")
                         duration = time.time() - start_time
@@ -78,7 +78,7 @@ def test_server_readiness_success_no_warning(caplog):
                     assert "did not become ready" not in caplog.text.lower()
 
 
-def test_default_timeout_value():
+def test_default_timeout_value(monkeypatch):
     """Test that the default timeout is 5.0 seconds when env var is not set."""
     registry = _AgentServerRegistry()
     
@@ -91,11 +91,11 @@ def test_default_timeout_value():
         with patch.dict(registry._ready_events, {8003: ready_event}):
             with patch.dict(registry._started, {8003: False}):
                 with patch("threading.Thread.start"):  # Prevent real server spawning
-                    # Ensure no custom timeout is set (but preserve other env vars)
-                    with patch.dict("os.environ", {"PRAISONAI_SERVER_READY_TIMEOUT": ""}, clear=False):
-                        with patch("threading.Event.wait") as mock_wait:
-                            mock_wait.return_value = False
-                            result = registry.start_server_if_needed(8003, host="127.0.0.1")
+                    # Remove only the specific env var so other env vars (PATH etc.) remain intact
+                    monkeypatch.delenv("PRAISONAI_SERVER_READY_TIMEOUT", raising=False)
+                    with patch("threading.Event.wait") as mock_wait:
+                        mock_wait.return_value = False
+                        result = registry.start_server_if_needed(8003, host="127.0.0.1")
                     
                     # Should have called wait with default timeout of 5.0
                     mock_wait.assert_called_once_with(timeout=5.0)
