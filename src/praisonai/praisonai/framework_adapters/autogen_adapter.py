@@ -26,7 +26,8 @@ class AutoGenAdapter(BaseFrameworkAdapter):
         except ImportError:
             return False
     
-    def run(self, config: Dict[str, Any], llm_config: List[Dict], topic: str) -> str:
+    def run(self, config: Dict[str, Any], llm_config: List[Dict], topic: str, *,
+            tools_dict=None, agent_callback=None, task_callback=None, cli_config=None) -> str:
         """
         Run AutoGen v0.2 with given configuration.
         
@@ -34,6 +35,10 @@ class AutoGenAdapter(BaseFrameworkAdapter):
             config: AutoGen configuration with agents
             llm_config: LLM configuration list
             topic: Topic for the tasks
+            tools_dict: Available tools dictionary
+            agent_callback: Callback for agent events
+            task_callback: Callback for task events
+            cli_config: CLI configuration
             
         Returns:
             Execution result as string
@@ -110,7 +115,8 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
         except ImportError:
             return False
     
-    def run(self, config: Dict[str, Any], llm_config: List[Dict], topic: str) -> str:
+    def run(self, config: Dict[str, Any], llm_config: List[Dict], topic: str, *,
+            tools_dict=None, agent_callback=None, task_callback=None, cli_config=None) -> str:
         """
         Run AutoGen v0.4 with given configuration.
         
@@ -118,17 +124,145 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
             config: AutoGen v0.4 configuration with agents
             llm_config: LLM configuration list
             topic: Topic for the tasks
+            tools_dict: Available tools dictionary
+            agent_callback: Callback for agent events
+            task_callback: Callback for task events
+            cli_config: CLI configuration
             
         Returns:
             Execution result as string
         """
-        # Availability already validated at CLI entry
+        # Import AutoGen v0.4 components
+        try:
+            from autogen_agentchat.agents import AssistantAgent as AutoGenV4AssistantAgent
+            from autogen_agentchat.conditions import TextMentionTermination, MaxMessageTermination
+            from autogen_agentchat.teams import RoundRobinGroupChat
+            from autogen_ext.models.openai import OpenAIChatCompletionClient
+        except ImportError as e:
+            logger.error(f"AutoGen v0.4 components not available: {e}")
+            return f"### AutoGen v0.4 Error ###\nRequired components not available: {e}"
+
+        from .._async_bridge import run_sync
+        import os
+
+        # Helper functions
+        def safe_format(template: str, **kwargs) -> str:
+            """Safely format a string template, preserving JSON-like curly braces."""
+            import re
+            if not template or not kwargs:
+                return template
+            try:
+                # Create a safe substitution that won't break on JSON-like content
+                result = template
+                for key, value in kwargs.items():
+                    pattern = f'{{{key}}}'
+                    result = result.replace(pattern, str(value))
+                return result
+            except Exception:
+                return template
+
+        def sanitize_agent_name_for_autogen_v4(name):
+            """Sanitize agent name to be a valid Python identifier for AutoGen v0.4."""
+            import re
+            sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', str(name))
+            sanitized = re.sub(r'_{5,}', '_', sanitized)
+            if not sanitized or sanitized[0].isdigit():
+                sanitized = 'agent_' + sanitized
+            return sanitized[:50]
+
+        async def run_autogen_v4_async():
+            # Create model client for v0.4
+            model_config = llm_config[0] if llm_config else {}
+            model_client = OpenAIChatCompletionClient(
+                model=model_config.get('model', 'gpt-4o-mini'),
+                api_key=model_config.get('api_key', os.environ.get("OPENAI_API_KEY")),
+                base_url=model_config.get('base_url', "https://api.openai.com/v1")
+            )
+            
+            agents = []
+            combined_tasks = []
+            
+            try:
+                # Create agents from config
+                for role, details in config.get('roles', {}).items():
+                    # For AutoGen v0.4, ensure agent name is a valid Python identifier
+                    agent_name = safe_format(details['role'], topic=topic).replace("{topic}", topic)
+                    agent_name = sanitize_agent_name_for_autogen_v4(agent_name)
+                    backstory = safe_format(details['backstory'], topic=topic)
+                    
+                    # Convert tools for v0.4 - simplified tool passing
+                    agent_tools = []
+                    for tool_name in details.get('tools', []):
+                        if tools_dict and tool_name in tools_dict:
+                            tool_instance = tools_dict[tool_name]
+                            # For v0.4, we can pass the tool's run method directly if it's callable
+                            if hasattr(tool_instance, 'run') and callable(tool_instance.run):
+                                agent_tools.append(tool_instance.run)
+                    
+                    # Create v0.4 AssistantAgent
+                    assistant = AutoGenV4AssistantAgent(
+                        name=agent_name,
+                        system_message=backstory + ". Must reply with 'TERMINATE' when the task is complete.",
+                        model_client=model_client,
+                        tools=agent_tools,
+                        reflect_on_tool_use=True
+                    )
+                    
+                    agents.append(assistant)
+                    
+                    # Collect all task descriptions for sequential execution
+                    for task_name, task_details in details.get('tasks', {}).items():
+                        description_filled = safe_format(task_details['description'], topic=topic)
+                        combined_tasks.append(description_filled)
+                
+                if not agents:
+                    return "### AutoGen v0.4 Output ###\nNo agents created from configuration"
+                
+                # Create termination conditions
+                text_termination = TextMentionTermination("TERMINATE")
+                max_messages_termination = MaxMessageTermination(max_messages=20)
+                termination_condition = text_termination | max_messages_termination
+                
+                # Create RoundRobinGroupChat for parallel/sequential execution
+                group_chat = RoundRobinGroupChat(
+                    agents,
+                    termination_condition=termination_condition,
+                    max_turns=len(agents) * 3  # Allow multiple rounds
+                )
+                
+                # Combine all tasks into a single task description
+                task_description = f"Topic: {topic}\n\nTasks to complete:\n" + "\n".join(
+                    f"{i+1}. {task}" for i, task in enumerate(combined_tasks)
+                )
+                
+                # Run the group chat
+                result = await group_chat.run(task=task_description)
+                
+                # Extract the final message content
+                if result.messages:
+                    final_message = result.messages[-1]
+                    if hasattr(final_message, 'content'):
+                        return f"### AutoGen v0.4 Output ###\n{final_message.content}"
+                    else:
+                        return f"### AutoGen v0.4 Output ###\n{str(final_message)}"
+                else:
+                    return "### AutoGen v0.4 Output ###\nNo messages generated"
+                    
+            except Exception as e:
+                logger.error(f"Error in AutoGen v0.4 execution: {str(e)}")
+                return f"### AutoGen v0.4 Error ###\n{str(e)}"
+            
+            finally:
+                # Close the model client
+                await model_client.close()
         
+        # Run the async function using safe bridge
         logger.info("Starting AutoGen v0.4 execution...")
-        # For now, return a proper error message instead of delegating
-        # TODO: Implement full AutoGen v0.4 adapter logic
-        logger.warning("AutoGen v0.4 adapter is not yet fully implemented")
-        return "### AutoGen v0.4 Output ###\nAutoGen v0.4 adapter is not yet fully implemented. Please use 'autogen' framework for AutoGen v0.2 support."
+        try:
+            return run_sync(run_autogen_v4_async())
+        except Exception as e:
+            logger.error(f"Error running AutoGen v0.4: {str(e)}")
+            return f"### AutoGen v0.4 Error ###\n{str(e)}"
 
 
 class AG2Adapter(BaseFrameworkAdapter):
@@ -148,7 +282,8 @@ class AG2Adapter(BaseFrameworkAdapter):
         except Exception:
             return False
     
-    def run(self, config: Dict[str, Any], llm_config: List[Dict], topic: str) -> str:
+    def run(self, config: Dict[str, Any], llm_config: List[Dict], topic: str, *,
+            tools_dict=None, agent_callback=None, task_callback=None, cli_config=None) -> str:
         """
         Run AG2 with given configuration.
         
@@ -156,14 +291,148 @@ class AG2Adapter(BaseFrameworkAdapter):
             config: AG2 configuration with agents
             llm_config: LLM configuration list  
             topic: Topic for the tasks
+            tools_dict: Available tools dictionary
+            agent_callback: Callback for agent events
+            task_callback: Callback for task events
+            cli_config: CLI configuration
             
         Returns:
             Execution result as string
         """
-        # Availability already validated at CLI entry
-            
+        # Import AG2 components (AG2 installs under the 'autogen' namespace)
+        try:
+            from autogen import (
+                AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager, LLMConfig
+            )
+        except ImportError as e:
+            logger.error(f"AG2 components not available: {e}")
+            return f"### AG2 Error ###\nRequired components not available: {e}"
+
+        import re as _re
+        import os
+
         logger.info("Starting AG2 execution...")
-        # For now, return a proper error message instead of delegating
-        # TODO: Implement full AG2 adapter logic
-        logger.warning("AG2 adapter is not yet fully implemented")
-        return "### AG2 Output ###\nAG2 adapter is not yet fully implemented. Please use 'autogen' framework for AutoGen/AG2 support."
+        
+        model_config = llm_config[0] if llm_config else {}
+
+        # Allow YAML top-level llm block to override config_list values
+        yaml_llm = config.get("llm", {}) or {}
+        # Also check first role's llm block as a fallback
+        first_role_llm = {}
+        for role_details in config.get("roles", {}).values():
+            first_role_llm = role_details.get("llm", {}) or {}
+            break
+
+        # Priority: YAML top-level llm > first role llm > config_list > env vars
+        def _resolve(key, env_var=None, default=None):
+            return (yaml_llm.get(key) or first_role_llm.get(key)
+                    or model_config.get(key)
+                    or (os.environ.get(env_var) if env_var else None)
+                    or default)
+
+        api_type = _resolve("api_type", default="openai").lower()
+        model_name = _resolve("model", default="gpt-4o-mini")
+        api_key = _resolve("api_key", env_var="OPENAI_API_KEY")
+        
+        # Simple fallback for base_url
+        base_url = (model_config.get("base_url")
+                    or yaml_llm.get("base_url")
+                    or "https://api.openai.com/v1")
+
+        # Build LLMConfig — Bedrock needs no api_key
+        if api_type == "bedrock":
+            llm_config_entry = {"api_type": "bedrock", "model": model_name}
+        else:
+            llm_config_entry = {"model": model_name}
+            if api_key:
+                llm_config_entry["api_key"] = api_key
+            if base_url and base_url not in ("https://api.openai.com/v1", "https://api.openai.com/v1/"):
+                llm_config_entry["base_url"] = base_url
+        llm_config_obj = LLMConfig(llm_config_entry)
+
+        user_proxy = UserProxyAgent(
+            name="User",
+            human_input_mode="NEVER",
+            is_termination_msg=lambda x: "TERMINATE" in (x.get("content") or ""),
+            code_execution_config=False,
+        )
+
+        # Create one AssistantAgent per role
+        ag2_agent_entries = []
+        for role, details in config.get("roles", {}).items():
+            agent_name = details.get("role", role).replace("{topic}", topic)
+            backstory = details.get("backstory", "").replace("{topic}", topic)
+            agent_name_safe = _re.sub(r"[^a-zA-Z0-9_\-]", "_", agent_name)
+            assistant = AssistantAgent(
+                name=agent_name_safe,
+                system_message=backstory + "\nWhen the task is done, reply 'TERMINATE'.",
+                llm_config=llm_config_obj,
+            )
+            ag2_agent_entries.append((role, details, assistant))
+
+        # Register tools via AG2 decorator pattern
+        if tools_dict:
+            for role, details, assistant in ag2_agent_entries:
+                for tool_name in details.get("tools", []):
+                    tool = tools_dict.get(tool_name)
+                    if tool is None:
+                        continue
+                    func = tool if callable(tool) else getattr(tool, "run", None)
+                    if func is None:
+                        continue
+
+                    def make_tool_fn(f, name):
+                        def tool_fn(**kwargs):
+                            return f(**kwargs) if callable(f) else str(f)
+                        tool_fn.__name__ = name
+                        return tool_fn
+
+                    wrapped = make_tool_fn(func, tool_name)
+                    assistant.register_for_llm(description=f"Tool: {tool_name}")(wrapped)
+                    user_proxy.register_for_execution()(wrapped)
+
+        all_assistants = [a for _, _, a in ag2_agent_entries]
+        if not all_assistants:
+            return "### AG2 Output ###\nNo agents created from configuration."
+
+        # Build initial message from all task descriptions
+        task_lines = []
+        for role, details, _ in ag2_agent_entries:
+            for task_name, task_details in details.get("tasks", {}).items():
+                desc = task_details.get("description", "").replace("{topic}", topic)
+                if desc:
+                    task_lines.append(desc)
+        initial_message = "\n".join(task_lines) if task_lines else topic
+
+        groupchat = GroupChat(
+            agents=[user_proxy] + all_assistants,
+            messages=[],
+            max_round=12,
+        )
+        manager = GroupChatManager(groupchat=groupchat, llm_config=llm_config_obj)
+
+        try:
+            chat_result = user_proxy.initiate_chat(manager, message=initial_message)
+        except Exception as e:
+            return f"### AG2 Error ###\n{str(e)}"
+
+        # Prefer ChatResult.summary if available, otherwise scan messages
+        result_content = ""
+        summary = getattr(chat_result, "summary", None)
+        if summary and isinstance(summary, str) and summary.strip():
+            result_content = _re.sub(r'[\s\.\,]*TERMINATE[\s\.\,]*$', '', summary, flags=_re.IGNORECASE).strip().rstrip('.')
+
+        if not result_content:
+            for msg in reversed(groupchat.messages):
+                if msg.get("name") == "User":
+                    continue
+                content = (msg.get("content") or "").strip()
+                if content:
+                    result_content = _re.sub(r'[\s\.\,]*TERMINATE[\s\.\,]*$', '', content, flags=_re.IGNORECASE).strip().rstrip('.')
+                    if result_content:
+                        break
+
+        if not result_content:
+            result_content = "Task completed."
+
+        return f"### AG2 Output ###\n{result_content}"

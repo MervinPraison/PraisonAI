@@ -78,7 +78,11 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             agent_tool_list = []
             if tools_dict:
                 agent_tools = details.get('tools', [])
-                agent_tool_list = [tools_dict[t] for t in agent_tools if t in tools_dict]
+                for t in agent_tools:
+                    if t in tools_dict:
+                        agent_tool_list.append(tools_dict[t])
+                    else:
+                        logger.warning("Tool %r requested by agent %r but not in tools_dict", t, role)
             
             # Create basic agent
             agent = PraisonAgent(

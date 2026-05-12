@@ -549,39 +549,40 @@ class AgentsGenerator:
         
         tools_dict = {}
         
-        # Use ToolResolver to get available tools (consistent tool resolution)
-        if PRAISONAI_TOOLS_AVAILABLE and (CREWAI_AVAILABLE or AUTOGEN_AVAILABLE or PRAISONAI_AVAILABLE or AG2_AVAILABLE):
+        # Use ToolResolver to resolve tools referenced in YAML (consistent tool resolution)
+        def _collect_yaml_tool_names(cfg: dict) -> set[str]:
+            """All tool names referenced anywhere in this YAML."""
+            names: set[str] = set()
+            for section in ('roles', 'agents'):
+                for _role, details in (cfg.get(section) or {}).items():
+                    if not isinstance(details, dict):
+                        continue
+                    for t in details.get('tools', []) or []:
+                        if isinstance(t, str) and t.strip():
+                            names.add(t.strip())
+            return names
+
+        requested = _collect_yaml_tool_names(config)
+        for tool_name in requested:
             try:
-                # Get available tools from the resolver
-                available_tools = self.tool_resolver.list_available()
-                tools_dict = {}
-                
-                # Standard praisonai-tools tool names
-                standard_tools = [
-                    'CodeDocsSearchTool', 'CSVSearchTool', 'DirectorySearchTool', 'DOCXSearchTool',
-                    'DirectoryReadTool', 'FileReadTool', 'TXTSearchTool', 'JSONSearchTool',
-                    'MDXSearchTool', 'PDFSearchTool', 'RagTool', 'ScrapeElementFromWebsiteTool',
-                    'ScrapeWebsiteTool', 'WebsiteSearchTool', 'XMLSearchTool',
-                    'YoutubeChannelSearchTool', 'YoutubeVideoSearchTool',
-                ]
-                
-                # Resolve only tools that are actually available
-                for tool_name in standard_tools:
-                    if tool_name in available_tools:
-                        resolved_tool = self.tool_resolver.resolve(tool_name)
-                        if resolved_tool is not None:
-                            tools_dict[tool_name] = resolved_tool() if inspect.isclass(resolved_tool) else resolved_tool
-                            
+                resolved = self.tool_resolver.resolve(tool_name)
             except Exception as e:
-                self.logger.debug(f"Error resolving praisonai_tools: {e}")
-                tools_dict = {}
+                self.logger.warning(f"Tool {tool_name!r} failed to resolve: {e}")
+                continue
+            if resolved is None:
+                self.logger.warning(
+                    f"Tool {tool_name!r} referenced in YAML but not resolvable "
+                    f"(local tools.py / praisonaiagents.tools / praisonai-tools / registry)."
+                )
+                continue
+            tools_dict[tool_name] = resolved() if inspect.isclass(resolved) else resolved
             
-            # Add tools from class names
-            for tool_class in self.tools:
-                if isinstance(tool_class, type) and BaseTool and issubclass(tool_class, BaseTool):
-                    tool_name = tool_class.__name__
-                    tools_dict[tool_name] = tool_class()
-                    self.logger.debug(f"Added tool: {tool_name}")
+        # Add tools from class names
+        for tool_class in self.tools:
+            if isinstance(tool_class, type) and BaseTool and issubclass(tool_class, BaseTool):
+                tool_name = tool_class.__name__
+                tools_dict[tool_name] = tool_class()
+                self.logger.debug(f"Added tool: {tool_name}")
 
         root_directory = os.getcwd()
         tools_py_path = os.path.join(root_directory, 'tools.py')
@@ -789,258 +790,6 @@ class AgentsGenerator:
             
         return result
 
-    def _run_autogen_v4(self, config, topic, tools_dict):
-        """
-        Run agents using the AutoGen v0.4 framework with async, event-driven architecture.
-        
-        Args:
-            config (dict): Configuration dictionary
-            topic (str): The topic to process
-            tools_dict (dict): Dictionary of available tools
-            
-        Returns:
-            str: Result of the agent interactions
-        """
-        import asyncio
-        
-        async def run_autogen_v4_async():
-            # Create model client for v0.4
-            model_config = self.config_list[0] if self.config_list else {}
-            model_client = OpenAIChatCompletionClient(
-                model=model_config.get('model', 'gpt-5-nano'),
-                api_key=model_config.get('api_key', os.environ.get("OPENAI_API_KEY")),
-                base_url=model_config.get('base_url', "https://api.openai.com/v1")
-            )
-            
-            agents = []
-            combined_tasks = []
-            
-            # Create agents from config
-            for role, details in config['roles'].items():
-                # For AutoGen v0.4, ensure agent name is a valid Python identifier
-                agent_name = safe_format(details['role'], topic=topic).replace("{topic}", topic)
-                agent_name = sanitize_agent_name_for_autogen_v4(agent_name)
-                backstory = safe_format(details['backstory'], topic=topic)
-                
-                # Convert tools for v0.4 - simplified tool passing
-                agent_tools = []
-                for tool_name in details.get('tools', []):
-                    if tool_name in tools_dict:
-                        tool_instance = tools_dict[tool_name]
-                        # For v0.4, we can pass the tool's run method directly if it's callable
-                        if hasattr(tool_instance, 'run') and callable(tool_instance.run):
-                            agent_tools.append(tool_instance.run)
-                
-                # Create v0.4 AssistantAgent
-                assistant = AutoGenV4AssistantAgent(
-                    name=agent_name,
-                    system_message=backstory + ". Must reply with 'TERMINATE' when the task is complete.",
-                    model_client=model_client,
-                    tools=agent_tools,
-                    reflect_on_tool_use=True
-                )
-                
-                agents.append(assistant)
-                
-                # Collect all task descriptions for sequential execution
-                for task_name, task_details in details.get('tasks', {}).items():
-                    description_filled = safe_format(task_details['description'], topic=topic)
-                    combined_tasks.append(description_filled)
-            
-            if not agents:
-                return "No agents created from configuration"
-            
-            # Create termination conditions
-            text_termination = TextMentionTermination("TERMINATE")
-            max_messages_termination = MaxMessageTermination(max_messages=20)
-            termination_condition = text_termination | max_messages_termination
-            
-            # Create RoundRobinGroupChat for parallel/sequential execution
-            group_chat = RoundRobinGroupChat(
-                agents,
-                termination_condition=termination_condition,
-                max_turns=len(agents) * 3  # Allow multiple rounds
-            )
-            
-            # Combine all tasks into a single task description
-            task_description = f"Topic: {topic}\n\nTasks to complete:\n" + "\n".join(
-                f"{i+1}. {task}" for i, task in enumerate(combined_tasks)
-            )
-            
-            # Run the group chat
-            try:
-                result = await group_chat.run(task=task_description)
-                
-                # Extract the final message content
-                if result.messages:
-                    final_message = result.messages[-1]
-                    if hasattr(final_message, 'content'):
-                        return f"### AutoGen v0.4 Output ###\n{final_message.content}"
-                    else:
-                        return f"### AutoGen v0.4 Output ###\n{str(final_message)}"
-                else:
-                    return "### AutoGen v0.4 Output ###\nNo messages generated"
-                    
-            except Exception as e:
-                self.logger.error(f"Error in AutoGen v0.4 execution: {str(e)}")
-                return f"### AutoGen v0.4 Error ###\n{str(e)}"
-            
-            finally:
-                # Close the model client
-                await model_client.close()
-        
-        # Run the async function using safe bridge
-        from ._async_bridge import run_sync
-        try:
-            return run_sync(run_autogen_v4_async())
-        except Exception as e:
-            self.logger.error(f"Error running AutoGen v0.4: {str(e)}")
-            return f"### AutoGen v0.4 Error ###\n{str(e)}"
-
-    def _run_ag2(self, config, topic, tools_dict):
-        """
-        Run agents using the AG2 framework (community fork of AutoGen, PyPI: ag2).
-
-        AG2 installs under the 'autogen' namespace — there is no 'import ag2'.
-        Uses LLMConfig context manager + AssistantAgent + GroupChat pattern.
-
-        Args:
-            config (dict): Configuration dictionary parsed from YAML
-            topic (str): The topic/task to process
-            tools_dict (dict): Dictionary of available tools
-
-        Returns:
-            str: Result prefixed with '### AG2 Output ###'
-        """
-        import re as _re
-        from autogen import (
-            AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager, LLMConfig
-        )
-
-        model_config = self.config_list[0] if self.config_list else {}
-
-        # Allow YAML top-level llm block to override config_list values
-        yaml_llm = config.get("llm", {}) or {}
-        # Also check first role's llm block as a fallback
-        first_role_llm = {}
-        for role_details in config.get("roles", {}).values():
-            first_role_llm = role_details.get("llm", {}) or {}
-            break
-
-        # Priority: YAML top-level llm > first role llm > config_list > env vars
-        def _resolve(key, env_var=None, default=None):
-            return (yaml_llm.get(key) or first_role_llm.get(key)
-                    or model_config.get(key)
-                    or (os.environ.get(env_var) if env_var else None)
-                    or default)
-
-        api_type = _resolve("api_type", default="openai").lower()
-        model_name = _resolve("model", default="gpt-4o-mini")
-        api_key = _resolve("api_key", env_var="OPENAI_API_KEY")
-        # Use resolver for consistent env-var precedence as fallback
-        from praisonai.llm.env import resolve_llm_endpoint
-        ep = resolve_llm_endpoint()
-        
-        base_url = (model_config.get("base_url")
-                    or yaml_llm.get("base_url")
-                    or ep.base_url)
-
-        # Build LLMConfig — Bedrock needs no api_key
-        if api_type == "bedrock":
-            llm_config_entry = {"api_type": "bedrock", "model": model_name}
-        else:
-            llm_config_entry = {"model": model_name}
-            if api_key:
-                llm_config_entry["api_key"] = api_key
-            if base_url and base_url not in ("https://api.openai.com/v1", "https://api.openai.com/v1/"):
-                llm_config_entry["base_url"] = base_url
-        llm_config = LLMConfig(llm_config_entry)
-
-        user_proxy = UserProxyAgent(
-            name="User",
-            human_input_mode="NEVER",
-            is_termination_msg=lambda x: "TERMINATE" in (x.get("content") or ""),
-            code_execution_config=False,
-        )
-
-        # Create one AssistantAgent per role
-        ag2_agent_entries = []
-        for role, details in config["roles"].items():
-            agent_name = details.get("role", role).replace("{topic}", topic)
-            backstory = details.get("backstory", "").replace("{topic}", topic)
-            agent_name_safe = _re.sub(r"[^a-zA-Z0-9_\-]", "_", agent_name)
-            assistant = AssistantAgent(
-                name=agent_name_safe,
-                system_message=backstory + "\nWhen the task is done, reply 'TERMINATE'.",
-                llm_config=llm_config,
-            )
-            ag2_agent_entries.append((role, details, assistant))
-
-        # Register tools via AG2 decorator pattern
-        for role, details, assistant in ag2_agent_entries:
-            for tool_name in details.get("tools", []):
-                tool = tools_dict.get(tool_name)
-                if tool is None:
-                    continue
-                func = tool if callable(tool) else getattr(tool, "run", None)
-                if func is None:
-                    continue
-
-                def make_tool_fn(f):
-                    def tool_fn(**kwargs):
-                        return f(**kwargs) if callable(f) else str(f)
-                    tool_fn.__name__ = tool_name
-                    return tool_fn
-
-                wrapped = make_tool_fn(func)
-                assistant.register_for_llm(description=f"Tool: {tool_name}")(wrapped)
-                user_proxy.register_for_execution()(wrapped)
-
-        all_assistants = [a for _, _, a in ag2_agent_entries]
-        if not all_assistants:
-            return "### AG2 Output ###\nNo agents created from configuration."
-
-        # Build initial message from all task descriptions
-        task_lines = []
-        for role, details, _ in ag2_agent_entries:
-            for task_name, task_details in details.get("tasks", {}).items():
-                desc = task_details.get("description", "").replace("{topic}", topic)
-                if desc:
-                    task_lines.append(desc)
-        initial_message = "\n".join(task_lines) if task_lines else topic
-
-        groupchat = GroupChat(
-            agents=[user_proxy] + all_assistants,
-            messages=[],
-            max_round=12,
-        )
-        manager = GroupChatManager(groupchat=groupchat, llm_config=llm_config)
-
-        try:
-            chat_result = user_proxy.initiate_chat(manager, message=initial_message)
-        except Exception as e:
-            return f"### AG2 Error ###\n{str(e)}"
-
-        # Prefer ChatResult.summary if available, otherwise scan messages
-        result_content = ""
-        summary = getattr(chat_result, "summary", None)
-        if summary and isinstance(summary, str) and summary.strip():
-            result_content = _re.sub(r'[\s\.\,]*TERMINATE[\s\.\,]*$', '', summary, flags=_re.IGNORECASE).strip().rstrip('.')
-
-        if not result_content:
-            for msg in reversed(groupchat.messages):
-                if msg.get("name") == "User":
-                    continue
-                content = (msg.get("content") or "").strip()
-                if content:
-                    result_content = _re.sub(r'[\s\.\,]*TERMINATE[\s\.\,]*$', '', content, flags=_re.IGNORECASE).strip().rstrip('.')
-                    if result_content:
-                        break
-
-        if not result_content:
-            result_content = "Task completed."
-
-        return f"### AG2 Output ###\n{result_content}"
 
     def _run_crewai(self, config, topic, tools_dict):
         """
@@ -1208,11 +957,10 @@ class AgentsGenerator:
         
         if acp_enabled or lsp_enabled:
             try:
-                import asyncio
                 from praisonai.cli.features.interactive_runtime import InteractiveRuntime, RuntimeConfig
                 from praisonai.cli.features.agent_tools import create_agent_centric_tools
+                from ._async_bridge import run_sync
                 
-                # Use scoped event loop instead of process-global mutations
                 runtime_config = RuntimeConfig(
                     workspace=os.getcwd(),
                     acp_enabled=acp_enabled,
@@ -1220,25 +968,16 @@ class AgentsGenerator:
                     approval_mode=os.environ.get("PRAISONAI_APPROVAL_MODE", "prompt")
                 )
                 interactive_runtime = InteractiveRuntime(runtime_config)
-                self.logger.info(f"Starting InteractiveRuntime (ACP: {acp_enabled}, LSP: {lsp_enabled})")
                 
-                # Create a scoped event loop instead of modifying process globals
-                interactive_loop = asyncio.new_event_loop()
-                try:
-                    interactive_loop.run_until_complete(interactive_runtime.start())
-                    
-                    centric_tools = create_agent_centric_tools(interactive_runtime)
-                    self.logger.info(f"Loaded {len(centric_tools)} InteractiveRuntime tools")
-                    tools_list.extend(centric_tools)
-                    
-                finally:
-                    try:
-                        interactive_loop.run_until_complete(interactive_runtime.stop())
-                    except Exception as stop_error:
-                        self.logger.warning(f"Error stopping InteractiveRuntime: {stop_error}")
-                    finally:
-                        interactive_loop.close()
-                
+                # start() runs on the shared background loop; subprocesses stay alive
+                # for the entire AgentsGenerator run.
+                run_sync(interactive_runtime.start())
+                self._interactive_runtime = interactive_runtime  # for later cleanup
+
+                centric_tools = create_agent_centric_tools(interactive_runtime)
+                self.logger.info(f"Loaded {len(centric_tools)} InteractiveRuntime tools")
+                tools_list.extend(centric_tools)
+
             except ImportError as e:
                 self.logger.warning(f"Failed to load InteractiveRuntime components: {e}")
             except Exception as e:

@@ -110,21 +110,8 @@ def create_agent_centric_tools(
     if orchestrator is None:
         orchestrator = ActionOrchestrator(runtime)
     
-    # Helper to run async functions synchronously
-    def run_async(coro):
-        """Run async coroutine synchronously."""
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # Create a new loop in a thread
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, coro)
-                    return future.result(timeout=60)
-            else:
-                return loop.run_until_complete(coro)
-        except RuntimeError:
-            return asyncio.run(coro)
+    # Helper to run async functions synchronously - use the documented bridge
+    from praisonai._async_bridge import run_sync as run_async
     
     # =========================================================================
     # ACP-Powered File Tools
