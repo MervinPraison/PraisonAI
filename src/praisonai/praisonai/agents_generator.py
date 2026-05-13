@@ -448,36 +448,6 @@ class AgentsGenerator:
                     tools_dict[name] = obj
         return tools_dict
 
-    def load_tools_from_tools_py(self):
-        """
-        Imports and returns all contents from tools.py file.
-        Uses the tool registry instead of global namespace pollution.
-
-        Returns:
-            list: A list of callable functions with proper formatting
-        """
-        tools_list = []
-        try:
-            # Try to import tools.py from current directory using safe loading
-            from ._safe_loader import load_user_module
-            module = load_user_module("tools.py", name="tools")
-            if module is None:
-                self.logger.debug("tools.py not found or local tools loading disabled")
-                return tools_list
-
-            # Register functions in the tool registry instead of globals()
-            registered_tools = self.tool_registry.register_from_module(module)
-            tools_list = [self.tool_registry.get_function(name) for name in registered_tools]
-
-            self.logger.debug(f"Loaded {len(tools_list)} tool functions from tools.py")
-            self.logger.debug(f"Registered tools: {registered_tools}")
-            
-        except FileNotFoundError:
-            self.logger.debug("tools.py not found in current directory")
-        except Exception as e:
-            self.logger.warning(f"Error loading tools from tools.py: {e}")
-            
-        return tools_list
 
     def generate_crew_and_kickoff(self):
         """
@@ -587,12 +557,10 @@ class AgentsGenerator:
         tools_py_path = os.path.join(root_directory, 'tools.py')
         tools_dir_path = Path(root_directory) / 'tools'
         
+        # Use consolidated ToolResolver for tools.py loading
+        tools_dict.update(self.tool_resolver.get_local_tool_classes())
         if os.path.isfile(tools_py_path):
-            from ._safe_loader import load_user_module
-            module = load_user_module(tools_py_path, name="tools_module")
-            if module is not None:
-                tools_dict.update(self._extract_tool_classes(module))
-                self.logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
+            self.logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
         elif tools_dir_path.is_dir():
             from ._safe_loader import load_user_module
             for py_file in tools_dir_path.glob("*.py"):
@@ -1195,8 +1163,8 @@ class AgentsGenerator:
 
         # Use existing tool resolver instance
         
-        # Load tools from local tools.py (backward compat)
-        tools_list = self.load_tools_from_tools_py()
+        # Load tools from local tools.py (backward compat) - use consolidated ToolResolver
+        tools_list = self.tool_resolver.get_local_callables()
         self.logger.debug(f"Loaded tools from tools.py: {tools_list}")
 
         # Initialize InteractiveRuntime for ACP/LSP if enabled globally
@@ -1224,25 +1192,22 @@ class AgentsGenerator:
                 
                 # Create a scoped event loop instead of modifying process globals
                 interactive_loop = asyncio.new_event_loop()
-                try:
-                    interactive_loop.run_until_complete(interactive_runtime.start())
-                    
-                    centric_tools = create_agent_centric_tools(interactive_runtime)
-                    self.logger.info(f"Loaded {len(centric_tools)} InteractiveRuntime tools")
-                    tools_list.extend(centric_tools)
-                    
-                finally:
-                    try:
-                        interactive_loop.run_until_complete(interactive_runtime.stop())
-                    except Exception as stop_error:
-                        self.logger.warning(f"Error stopping InteractiveRuntime: {stop_error}")
-                    finally:
-                        interactive_loop.close()
+                
+                # Start the runtime but keep it alive for agent execution
+                interactive_loop.run_until_complete(interactive_runtime.start())
+                
+                centric_tools = create_agent_centric_tools(interactive_runtime)
+                self.logger.info(f"Loaded {len(centric_tools)} InteractiveRuntime tools")
+                tools_list.extend(centric_tools)
                 
             except ImportError as e:
                 self.logger.warning(f"Failed to load InteractiveRuntime components: {e}")
+                interactive_runtime = None
+                interactive_loop = None
             except Exception as e:
                 self.logger.error(f"Error starting InteractiveRuntime: {e}")
+                interactive_runtime = None
+                interactive_loop = None
 
         # Create agents from config
         for role, details in config['roles'].items():
@@ -1482,6 +1447,8 @@ class AgentsGenerator:
                     interactive_loop.run_until_complete(interactive_runtime.stop())
                 except Exception as e:
                     self.logger.error(f"Error stopping InteractiveRuntime: {e}")
+                finally:
+                    interactive_loop.close()
         
         if AGENTOPS_AVAILABLE:
             import agentops

@@ -30,6 +30,7 @@ import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional
 from types import MappingProxyType
+from ._safe_loader import load_user_module
 
 logger = logging.getLogger(__name__)
 
@@ -74,30 +75,14 @@ class ToolResolver:
             if self._local_tools_loaded:  # Double-check inside lock
                 return self._local_tools_cache
             
-            # Security: Require explicit opt-in for local tools loading
-            if os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS", "").lower() != "true":
-                logger.debug("Local tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.")
-                self._local_tools_cache = MappingProxyType({})
-                self._local_tools_loaded = True
-                return self._local_tools_cache
-            
-            tools_path = Path(self._tools_py_path)
-            if not tools_path.exists():
-                logger.debug(f"No local tools.py found at {tools_path}")
-                self._local_tools_cache = MappingProxyType({})
-                self._local_tools_loaded = True
-                return self._local_tools_cache
-            
             try:
-                spec = importlib.util.spec_from_file_location("tools", str(tools_path))
-                if spec is None or spec.loader is None:
-                    logger.warning(f"Could not load spec for {tools_path}")
+                # Use the same safe loader as other tools.py loading paths
+                module = load_user_module(self._tools_py_path, name="tools")
+                if module is None:
+                    logger.debug(f"Local tools loading disabled or tools.py not found at {self._tools_py_path}")
                     self._local_tools_cache = MappingProxyType({})
                     self._local_tools_loaded = True
                     return self._local_tools_cache
-                
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
                 
                 # Build cache locally, then freeze
                 cache: Dict[str, Callable] = {}
@@ -381,6 +366,58 @@ class ToolResolver:
         with self._local_tools_lock:
             self._local_tools_cache = MappingProxyType({})
             self._local_tools_loaded = False
+    
+    def get_local_callables(self) -> List[Callable]:
+        """Get functions exposed by tools.py (path A semantics).
+        
+        Returns:
+            List of callable functions from tools.py
+        """
+        local_tools = self._load_local_tools()
+        return list(local_tools.values())
+    
+    def get_local_tool_classes(self) -> Dict[str, Any]:
+        """Get BaseTool/langchain class instances from tools.py (path B semantics).
+        
+        Returns:
+            Dictionary mapping class names to instantiated tool objects
+        """
+        try:
+            # Use the same safe loader to get the module
+            module = load_user_module(self._tools_py_path, name="tools_module")
+            if module is None:
+                return {}
+            
+            # Import the necessary classes (matching agents_generator.py logic)
+            BaseTool = None
+            PRAISONAI_TOOLS_AVAILABLE = False
+            try:
+                from praisonai_tools import BaseTool
+                PRAISONAI_TOOLS_AVAILABLE = True
+            except ImportError:
+                try:
+                    from praisonai.tools import BaseTool
+                    PRAISONAI_TOOLS_AVAILABLE = True
+                except ImportError:
+                    pass
+            
+            result = {}
+            for name, obj in inspect.getmembers(module, 
+                lambda x: inspect.isclass(x) and (
+                    x.__module__.startswith('langchain_community.tools') or 
+                    (PRAISONAI_TOOLS_AVAILABLE and BaseTool and issubclass(x, BaseTool))
+                ) and x is not BaseTool):
+                try:
+                    result[name] = obj()
+                    logger.debug(f"Loaded local tool class: {name}")
+                except Exception as e:
+                    logger.warning(f"Error instantiating tool class {name}: {e}")
+                    continue
+            
+            return result
+        except Exception as e:
+            logger.warning(f"Error loading tool classes from {self._tools_py_path}: {e}")
+            return {}
 
 
 # Convenience functions that construct resolver explicitly (no global singleton)
