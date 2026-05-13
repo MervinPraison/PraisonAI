@@ -12,8 +12,8 @@ Exercises every robustness dimension of W1 with REAL LLM calls:
 
 Run::
 
-    cd /Users/praison/worktrees/hermes-parity
-    PYTHONPATH=src/praisonai-agents:src/praisonai python scripts/smoke_w1_robust.py
+    cd /path/to/PraisonAI
+    PYTHONPATH=src/praisonai-agents:src/praisonai python src/praisonai/tests/integration/smoke_w1_robust.py
 """
 
 from __future__ import annotations

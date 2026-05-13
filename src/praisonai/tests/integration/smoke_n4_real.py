@@ -11,8 +11,8 @@ Scenario:
 
 Run::
 
-    cd /Users/praison/worktrees/n4-dlq
-    PYTHONPATH=src/praisonai-agents:src/praisonai python scripts/smoke_n4_real.py
+    cd /path/to/PraisonAI
+    PYTHONPATH=src/praisonai-agents:src/praisonai python src/praisonai/tests/integration/smoke_n4_real.py
 """
 
 from __future__ import annotations

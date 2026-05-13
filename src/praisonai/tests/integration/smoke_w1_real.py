@@ -3,8 +3,8 @@
 
 Runs::
 
-    cd src/praisonai
-    python ../../scripts/smoke_w1_real.py
+    cd /path/to/PraisonAI
+    PYTHONPATH=src/praisonai-agents:src/praisonai python src/praisonai/tests/integration/smoke_w1_real.py
 """
 
 from __future__ import annotations

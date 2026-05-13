@@ -13,7 +13,7 @@ wire-up from ``BotOS(identity_resolver=...)`` → ``Bot._identity_resolver``
 Run::
 
     # From the repository root:
-    PYTHONPATH=src/praisonai-agents:src/praisonai python scripts/smoke_w1_botos_real.py
+    PYTHONPATH=src/praisonai-agents:src/praisonai python src/praisonai/tests/integration/smoke_w1_botos_real.py
 """
 
 from __future__ import annotations
