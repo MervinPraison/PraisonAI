@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 """N4 — Real agentic smoke test for inbound DLQ.
+
+This is not a pytest test file - it's an integration smoke test.
 
 Scenario:
   1. Real Agent (anthropic/claude-haiku-4-5 or gemini/2.5-flash).
@@ -15,7 +19,8 @@ Run::
     PYTHONPATH=src/praisonai-agents:src/praisonai python src/praisonai/tests/integration/smoke_n4_real.py
 """
 
-from __future__ import annotations
+# Prevent pytest from treating this as a test file
+__test__ = False
 
 import asyncio
 import os

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 """W1 real agentic smoke test (high-level BotOS API, no manual mgr).
+
+This is not a pytest test file - it's an integration smoke test.
 
 Uses the user-facing API only — ``Bot``, ``BotOS``, ``InMemoryIdentityResolver`` —
 and exercises the same cross-platform-continuity scenario as
@@ -16,7 +20,8 @@ Run::
     PYTHONPATH=src/praisonai-agents:src/praisonai python src/praisonai/tests/integration/smoke_w1_botos_real.py
 """
 
-from __future__ import annotations
+# Prevent pytest from treating this as a test file
+__test__ = False
 
 import asyncio
 import os

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 """W1 deep-validation smoke test.
+
+This is not a pytest test file - it's an integration smoke test.
 
 Exercises every robustness dimension of W1 with REAL LLM calls:
 
@@ -16,7 +20,8 @@ Run::
     PYTHONPATH=src/praisonai-agents:src/praisonai python src/praisonai/tests/integration/smoke_w1_robust.py
 """
 
-from __future__ import annotations
+# Prevent pytest from treating this as a test file
+__test__ = False
 
 import asyncio
 import os
