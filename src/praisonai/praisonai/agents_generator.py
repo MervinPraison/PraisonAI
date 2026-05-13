@@ -1206,6 +1206,8 @@ class AgentsGenerator:
                 interactive_loop = None
             except Exception as e:
                 self.logger.error(f"Error starting InteractiveRuntime: {e}")
+                if 'interactive_loop' in locals() and interactive_loop is not None:
+                    interactive_loop.close()
                 interactive_runtime = None
                 interactive_loop = None
 

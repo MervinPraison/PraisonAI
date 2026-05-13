@@ -156,7 +156,7 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
         # For now, return a proper error message instead of delegating
         # TODO: Implement full AutoGen v0.4 adapter logic
         logger.warning("AutoGen v0.4 adapter is not yet fully implemented")
-        return "### AutoGen v0.4 Output ###\nAutoGen v0.4 adapter is not yet fully implemented. Please use 'autogen' framework for AutoGen v0.2 support."
+        raise NotImplementedError("AutoGen v0.4 adapter is not yet fully implemented. Please use 'autogen' framework for AutoGen v0.2 support.")
 
 
 class AG2Adapter(BaseFrameworkAdapter):
@@ -208,4 +208,4 @@ class AG2Adapter(BaseFrameworkAdapter):
         # For now, return a proper error message instead of delegating
         # TODO: Implement full AG2 adapter logic
         logger.warning("AG2 adapter is not yet fully implemented")
-        return "### AG2 Output ###\nAG2 adapter is not yet fully implemented. Please use 'autogen' framework for AutoGen/AG2 support."
+        raise NotImplementedError("AG2 adapter is not yet fully implemented. Please use 'autogen' framework for AutoGen/AG2 support.")

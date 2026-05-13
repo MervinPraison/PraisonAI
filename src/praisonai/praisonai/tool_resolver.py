@@ -94,13 +94,13 @@ class ToolResolver:
                         cache[name] = obj
                         logger.debug(f"Loaded local tool: {name}")
                 
-                logger.info(f"Loaded {len(cache)} tools from {tools_path}")
+                logger.info(f"Loaded {len(cache)} tools from {self._tools_py_path}")
                 
                 # Create immutable view to prevent concurrent modification
                 self._local_tools_cache = MappingProxyType(cache)
                 
             except Exception as e:
-                logger.warning(f"Error loading tools from {tools_path}: {e}")
+                logger.warning(f"Error loading tools from {self._tools_py_path}: {e}")
                 self._local_tools_cache = MappingProxyType({})
             
             self._local_tools_loaded = True
