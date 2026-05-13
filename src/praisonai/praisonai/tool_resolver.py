@@ -75,6 +75,7 @@ class ToolResolver:
             if self._local_tools_loaded:  # Double-check inside lock
                 return self._local_tools_cache
             
+            tools_path = Path(self._tools_py_path)
             try:
                 # Use the same safe loader as other tools.py loading paths
                 module = load_user_module(self._tools_py_path, name="tools")
