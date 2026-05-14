@@ -173,6 +173,7 @@ def setup_test_environment(request):
 
         for key, value in test_keys.items():
             original_values[key] = os.environ.get(key)
+            # Only set placeholder when the key is absent (preserves explicit empty strings)
             if key not in os.environ:
                 os.environ[key] = value
     
