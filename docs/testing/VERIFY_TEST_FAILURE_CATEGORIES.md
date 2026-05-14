@@ -1,11 +1,11 @@
 # Verification notes for known pytest failure categories (May 2026)
 
-These checks confirm whether failures are **real product bugs** or **stale tests / mocks**. Run from the monorepo root (`praisonai-package`).
+These checks confirm whether failures are **real product bugs** or **stale tests / mocks**. Run from the repository root (`PraisonAI`).
 
 ## 1. Stale framework registry mock (`get_instance`)
 
 ```bash
-python3 -c "
+PYTHONPATH=src/praisonai python3 -c "
 from praisonai.framework_adapters.registry import FrameworkAdapterRegistry
 print('FrameworkAdapterRegistry.get_instance exists:', hasattr(FrameworkAdapterRegistry, 'get_instance'))
 from praisonai.framework_adapters.registry import get_default_registry
