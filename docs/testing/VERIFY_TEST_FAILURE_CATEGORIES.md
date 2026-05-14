@@ -40,8 +40,30 @@ print(type(v).__name__, 'callable:', callable(v))
 
 ## 4. aiui datastore default store patch target
 
-`PraisonAISessionDataStore` calls `get_hierarchical_session_store` from **`praisonaiagents.session`** inside `_build_impl_cls()`. There is no `get_hierarchical_session_store` symbol at `praisonai.ui._aiui_datastore` module level, so patching that path fails. Tests should patch `praisonaiagents.session.get_hierarchical_session_store` and reset `praisonai.ui._aiui_datastore._impl_cls` before constructing the adapter when the impl class was already cached.
+```bash
+PYTHONPATH=src/praisonai python3 -c "
+import praisonai.ui._aiui_datastore as aiui_mod
+import praisonaiagents.session as session_mod
+print('get_hierarchical_session_store at aiui module level:', hasattr(aiui_mod, 'get_hierarchical_session_store'))
+print('get_hierarchical_session_store in session module:', hasattr(session_mod, 'get_hierarchical_session_store'))
+"
+```
+
+**Expected:** `False` at aiui level, `True` in session module. `PraisonAISessionDataStore` calls `get_hierarchical_session_store` from **`praisonaiagents.session`** inside `_build_impl_cls()`. Tests should patch `praisonaiagents.session.get_hierarchical_session_store` and reset `praisonai.ui._aiui_datastore._impl_cls` before constructing the adapter when the impl class was already cached.
 
 ## 5. Wrapper test env keys
 
-If `conftest.py` always overwrites `OPENAI_API_KEY` with `test-key`, local runs with a real key in the shell profile will still see placeholder behaviour. The autouse fixture should only set placeholders when the variable is **unset or empty** (integration/live paths unchanged).
+```bash
+PYTHONPATH=src/praisonai python3 -c "
+import os
+os.environ['OPENAI_API_KEY'] = 'my-real-key'
+print('Before import, OPENAI_API_KEY:', os.environ.get('OPENAI_API_KEY'))
+# Simulating conftest behavior for non-real tests
+test_keys = {'OPENAI_API_KEY': 'test-key'}
+for key, value in test_keys.items():
+    os.environ[key] = value  # Current implementation: unconditional overwrite
+print('After conftest logic, OPENAI_API_KEY:', os.environ.get('OPENAI_API_KEY'))
+"
+```
+
+**Current behavior:** Always `test-key` (unconditional overwrite). **Expected behavior:** The autouse fixture should only set placeholders when the variable is **unset or empty**, preserving real keys for mixed testing approaches (integration/live paths unchanged).

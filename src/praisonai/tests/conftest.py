@@ -167,7 +167,9 @@ def setup_test_environment(request):
         
         for key, value in test_keys.items():
             original_values[key] = os.environ.get(key)
-            os.environ[key] = value
+            # Only set placeholder if the variable is unset or empty
+            if not os.environ.get(key):
+                os.environ[key] = value
     
     yield
     
