@@ -112,7 +112,23 @@ def run_sync(coro: Awaitable[T], *, timeout: float | None = _DEFAULT_TIMEOUT) ->
     with _BG._lock:
         loop = _BG.get_unlocked()
         fut: Future = asyncio.run_coroutine_threadsafe(coro, loop)
-    return fut.result(timeout=timeout)
+    
+    try:
+        return fut.result(timeout=timeout)
+    except TimeoutError:
+        # Propagate cancellation into the background loop so the underlying
+        # awaitable (DB query, HTTP call, subprocess wait) actually unwinds.
+        fut.cancel()
+        try:
+            # Give cancellation a short grace period to release resources.
+            fut.exception(timeout=1.0)
+        except (TimeoutError, asyncio.CancelledError):
+            pass
+        raise
+    except BaseException:
+        # Ctrl-C / GeneratorExit / SystemExit must also cancel the bg task.
+        fut.cancel()
+        raise
 
 
 def shutdown() -> None:

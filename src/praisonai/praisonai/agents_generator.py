@@ -98,6 +98,49 @@ def safe_format(template: str, **kwargs) -> str:
     return re.sub(pattern, replace_var, template)
 
 
+def _wrap_with_timeout(tool, timeout_seconds: float):
+    """Enforce per-call timeout on a tool, sync or async, without
+    leaking the worker thread/task on timeout.
+    """
+    if timeout_seconds is None or timeout_seconds <= 0 or not callable(tool):
+        return tool
+    
+    import asyncio
+    import concurrent.futures
+    import functools
+    import inspect
+    
+    if inspect.iscoroutinefunction(tool):
+        @functools.wraps(tool)
+        async def _async_wrapped(*args, **kwargs):
+            try:
+                return await asyncio.wait_for(tool(*args, **kwargs), timeout=timeout_seconds)
+            except asyncio.TimeoutError:
+                return {
+                    "error": "tool_timeout",
+                    "tool": getattr(tool, "__name__", repr(tool)),
+                    "timeout_seconds": timeout_seconds,
+                }
+        return _async_wrapped
+
+    @functools.wraps(tool)
+    def _sync_wrapped(*args, **kwargs):
+        # Single-shot executor; daemon thread so we don't block process exit
+        # if the underlying call refuses to return.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            fut = ex.submit(tool, *args, **kwargs)
+            try:
+                return fut.result(timeout=timeout_seconds)
+            except concurrent.futures.TimeoutError:
+                fut.cancel()  # best-effort; thread cannot be force-killed
+                return {
+                    "error": "tool_timeout",
+                    "tool": getattr(tool, "__name__", repr(tool)),
+                    "timeout_seconds": timeout_seconds,
+                }
+    return _sync_wrapped
+
+
 def noop(*args, **kwargs):
     pass
 
@@ -1172,15 +1215,13 @@ class AgentsGenerator:
         acp_enabled = global_config.get('acp', False)
         lsp_enabled = global_config.get('lsp', False)
         interactive_runtime = None
-        interactive_loop = None
         
         if acp_enabled or lsp_enabled:
             try:
-                import asyncio
                 from praisonai.cli.features.interactive_runtime import InteractiveRuntime, RuntimeConfig
                 from praisonai.cli.features.agent_tools import create_agent_centric_tools
+                from ._async_bridge import run_sync
                 
-                # Use scoped event loop instead of process-global mutations
                 runtime_config = RuntimeConfig(
                     workspace=os.getcwd(),
                     acp_enabled=acp_enabled,
@@ -1190,11 +1231,10 @@ class AgentsGenerator:
                 interactive_runtime = InteractiveRuntime(runtime_config)
                 self.logger.info(f"Starting InteractiveRuntime (ACP: {acp_enabled}, LSP: {lsp_enabled})")
                 
-                # Create a scoped event loop instead of modifying process globals
-                interactive_loop = asyncio.new_event_loop()
-                
-                # Start the runtime but keep it alive for agent execution
-                interactive_loop.run_until_complete(interactive_runtime.start())
+                # Construct & start on the shared, *long-lived* background loop so that
+                # every asyncio primitive owned by the runtime is bound to a loop that
+                # is still running when tools re-enter.
+                run_sync(interactive_runtime.start())
                 
                 centric_tools = create_agent_centric_tools(interactive_runtime)
                 self.logger.info(f"Loaded {len(centric_tools)} InteractiveRuntime tools")
@@ -1203,13 +1243,9 @@ class AgentsGenerator:
             except ImportError as e:
                 self.logger.warning(f"Failed to load InteractiveRuntime components: {e}")
                 interactive_runtime = None
-                interactive_loop = None
             except Exception as e:
                 self.logger.error(f"Error starting InteractiveRuntime: {e}")
-                if 'interactive_loop' in locals() and interactive_loop is not None:
-                    interactive_loop.close()
                 interactive_runtime = None
-                interactive_loop = None
 
         # Create agents from config
         for role, details in config['roles'].items():
@@ -1337,6 +1373,10 @@ class AgentsGenerator:
                 details.get('cli_backend'), self.logger
             )
 
+            # Apply timeout wrapper at the wrapper boundary for defense-in-depth
+            if agent_tool_timeout:
+                agent_tools = [_wrap_with_timeout(t, agent_tool_timeout) for t in agent_tools]
+
             agent = PraisonAgent(
                 name=role_filled,
                 role=role_filled,
@@ -1443,14 +1483,13 @@ class AgentsGenerator:
             self.logger.debug(f"Result: {response}")
             result = response if response else ""
         finally:
-            if interactive_runtime and interactive_loop:
+            if interactive_runtime is not None:
                 try:
                     self.logger.info("Stopping InteractiveRuntime...")
-                    interactive_loop.run_until_complete(interactive_runtime.stop())
+                    from ._async_bridge import run_sync
+                    run_sync(interactive_runtime.stop())
                 except Exception as e:
                     self.logger.error(f"Error stopping InteractiveRuntime: {e}")
-                finally:
-                    interactive_loop.close()
         
         if AGENTOPS_AVAILABLE:
             import agentops
