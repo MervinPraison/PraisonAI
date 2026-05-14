@@ -6,6 +6,7 @@ Databases tested (all via local Docker):
   2. PostgreSQL     — ConversationStore + ManagedAgent roundtrip
   3. MySQL          — ConversationStore + ManagedAgent roundtrip
   4. Redis          — StateStore + metadata persistence
+  4a. Valkey        — StateStore + metadata persistence
   5. MongoDB        — StateStore + metadata persistence
   6. ClickHouse     — Raw connectivity + data write/read
   7. JSON file      — DefaultSessionStore + ManagedAgent roundtrip
@@ -26,7 +27,6 @@ import uuid
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -562,6 +562,108 @@ class TestRedisStateStore:
             r.close()
 
 
+
+# ===========================================================================
+# 4a. Valkey — StateStore operations + metadata persistence
+# ===========================================================================
+class TestValkeyStateStore:
+    """Valkey StateStore: real operations against a live Valkey instance."""
+
+    @pytest.fixture(autouse=True)
+    def check_valkey(self):
+        """Skip if Valkey not available."""
+        try:
+            from glide_sync import GlideClient, GlideClientConfiguration, NodeAddress
+            config = GlideClientConfiguration(addresses=[NodeAddress("localhost", 6379)])
+            client = GlideClient.create(config)
+            client.ping()
+            client.close()
+        except Exception:
+            pytest.skip("Valkey not available on localhost:6379")
+
+    def test_valkey_state_operations(self):
+        """StateStore get/set/delete/exists/hash with real Valkey."""
+        from praisonai.persistence.state.valkey import ValkeyStateStore
+        prefix = f"test_{uuid.uuid4().hex[:6]}:"
+        store = ValkeyStateStore(host="localhost", port=6379, prefix=prefix)
+
+        try:
+            # Basic set/get
+            store.set("agent_id", "agent_valkey_001")
+            assert store.get("agent_id") == "agent_valkey_001"
+
+            # JSON roundtrip
+            state = {
+                "agent_id": "agent_valkey_001",
+                "agent_version": 3,
+                "total_input_tokens": 500,
+                "total_output_tokens": 200,
+                "compute_instance_id": "docker_valkey_test",
+                "session_history": [{"id": "s1", "status": "idle"}],
+            }
+            store.set_json("managed_state", state)
+            recovered = store.get_json("managed_state")
+            assert recovered["agent_id"] == "agent_valkey_001"
+            assert recovered["total_input_tokens"] == 500
+            assert recovered["compute_instance_id"] == "docker_valkey_test"
+            assert len(recovered["session_history"]) == 1
+
+            # Hash operations
+            store.hset("agent_meta", "version", "5")
+            store.hset("agent_meta", "env_id", "env_abc")
+            assert str(store.hget("agent_meta", "version")) == "5"
+            all_meta = store.hgetall("agent_meta")
+            assert str(all_meta["env_id"]) == "env_abc"
+
+            # Exists and delete
+            assert store.exists("agent_id")
+            store.delete("agent_id")
+            assert not store.exists("agent_id")
+
+        finally:
+            for k in store.keys():
+                store.delete(k)
+            store.close()
+
+    def test_valkey_managed_state_persist_restore(self):
+        """Simulate managed agent state persist/restore across store instances."""
+        from praisonai.persistence.state.valkey import ValkeyStateStore
+        prefix = f"mgd_{uuid.uuid4().hex[:6]}:"
+        store = ValkeyStateStore(host="localhost", port=6379, prefix=prefix)
+
+        try:
+            session_id = f"valkey_session_{uuid.uuid4().hex[:8]}"
+            state = {
+                "agent_id": "agent_valkey_mgd",
+                "agent_version": 2,
+                "environment_id": "env_valkey_001",
+                "total_input_tokens": 1000,
+                "total_output_tokens": 500,
+                "compute_instance_id": "modal_valkey_xyz",
+                "session_history": [
+                    {"id": session_id, "status": "idle", "title": "Valkey test"},
+                ],
+            }
+            store.set_json(f"managed:{session_id}", state)
+
+            # Simulate restart — new store instance, same prefix
+            store2 = ValkeyStateStore(host="localhost", port=6379, prefix=prefix)
+            recovered = store2.get_json(f"managed:{session_id}")
+            assert recovered is not None
+            assert recovered["agent_id"] == "agent_valkey_mgd"
+            assert recovered["total_input_tokens"] == 1000
+            assert recovered["compute_instance_id"] == "modal_valkey_xyz"
+            assert len(recovered["session_history"]) == 1
+
+            store.close()
+            store2.close()
+        finally:
+            store3 = ValkeyStateStore(host="localhost", port=6379, prefix=prefix)
+            for k in store3.keys():
+                store3.delete(k)
+            store3.close()
+
+
 # ===========================================================================
 # 5. MongoDB — StateStore operations + metadata persistence
 # ===========================================================================
@@ -673,7 +775,6 @@ class TestClickHouseConnectivity:
     def test_clickhouse_write_read(self):
         """Write and read data from ClickHouse."""
         import clickhouse_connect
-
         table = f"praison_test_{uuid.uuid4().hex[:8]}"
         c = clickhouse_connect.get_client(
             host="localhost", port=8123, username="clickhouse", password="clickhouse",

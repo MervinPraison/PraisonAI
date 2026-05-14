@@ -207,7 +207,13 @@ def _register_builtin_knowledge_stores():
     def _redis_vector(url=None, **kwargs):
         from .knowledge.redis_vector import RedisVectorKnowledgeStore
         return RedisVectorKnowledgeStore(url=url, **kwargs)
-    
+
+    def _valkey_vector(url=None, **kwargs):
+        from .knowledge.valkey_vector import ValkeyVectorKnowledgeStore
+        # url not used; host/port come from kwargs
+        kwargs.pop("url", None)
+        return ValkeyVectorKnowledgeStore(**kwargs)
+
     def _cassandra(url=None, **kwargs):
         kwargs.pop("url", None)  # Cassandra doesn't use url parameter
         from .knowledge.cassandra import CassandraKnowledgeStore
@@ -267,6 +273,7 @@ def _register_builtin_knowledge_stores():
     KNOWLEDGE_STORES.register("milvus", _milvus)
     KNOWLEDGE_STORES.register("pgvector", _pgvector)
     KNOWLEDGE_STORES.register("redis", _redis_vector)
+    KNOWLEDGE_STORES.register("valkey", _valkey_vector)
     KNOWLEDGE_STORES.register("cassandra", _cassandra)
     KNOWLEDGE_STORES.register("clickhouse", _clickhouse)
     KNOWLEDGE_STORES.register("mongodb_vector", _mongodb_vector, 
@@ -295,7 +302,12 @@ def _register_builtin_state_stores():
     def _redis(url=None, **kwargs):
         from .state.redis import RedisStateStore
         return RedisStateStore(url=url, **kwargs)
-    
+
+    def _valkey(url=None, **kwargs):
+        from .state.valkey import ValkeyStateStore
+        kwargs.pop("url", None)
+        return ValkeyStateStore(**kwargs)
+
     def _dynamodb(url=None, **kwargs):
         kwargs.pop("url", None)  # DynamoDB doesn't use url parameter
         from .state.dynamodb import DynamoDBStateStore
@@ -331,6 +343,7 @@ def _register_builtin_state_stores():
         return GCSStateStore(bucket_name=bucket, **kwargs)
     
     STATE_STORES.register("redis", _redis)
+    STATE_STORES.register("valkey", _valkey)
     STATE_STORES.register("dynamodb", _dynamodb)
     STATE_STORES.register("firestore", _firestore)
     STATE_STORES.register("mongodb", _mongodb)

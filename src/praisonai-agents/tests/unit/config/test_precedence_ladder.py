@@ -48,6 +48,12 @@ class TestResolveMemory:
         result = resolve_memory("redis")
         assert isinstance(result, MemoryConfig)
         assert result.backend == MemoryBackend.REDIS
+
+    def test_string_valkey_backend(self):
+        """'valkey' string returns MemoryConfig with VALKEY backend."""
+        result = resolve_memory("valkey")
+        assert isinstance(result, MemoryConfig)
+        assert result.backend == MemoryBackend.VALKEY
     
     def test_string_custom_backend(self):
         """Custom string backend is preserved."""
