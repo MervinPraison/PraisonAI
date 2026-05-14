@@ -173,7 +173,7 @@ def setup_test_environment(request):
 
         for key, value in test_keys.items():
             original_values[key] = os.environ.get(key)
-            if not os.environ.get(key):
+            if key not in os.environ:
                 os.environ[key] = value
     
     yield
