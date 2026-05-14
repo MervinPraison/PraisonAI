@@ -76,11 +76,11 @@ TOOL_MAPPINGS = {
 
     # Python Tools
     'execute_code': ('.python_tools', None),
-    'analyze_code': ('.python_tools', 'PythonTools'),
-    'format_code': ('.python_tools', 'PythonTools'),
-    'lint_code': ('.python_tools', 'PythonTools'),
-    'disassemble_code': ('.python_tools', 'PythonTools'),
-    'python_tools': ('.python_tools', 'PythonTools'),
+    'analyze_code': ('.python_tools', None),
+    'format_code': ('.python_tools', None),
+    'lint_code': ('.python_tools', None),
+    'disassemble_code': ('.python_tools', None),
+    'python_tools': ('.python_tools', None),
 
 
     # Chain of Thought Training Tools
@@ -326,7 +326,7 @@ def __getattr__(name: str) -> Any:
         if name in [
             'duckduckgo', 'internet_search', 'searxng_search', 'searxng',
             'scrape_page', 'extract_links', 'crawl', 'extract_text',
-            'execute_command', 'execute_code', 'list_processes', 'kill_process', 'get_system_info',
+            'execute_command', 'execute_code', 'analyze_code', 'format_code', 'lint_code', 'disassemble_code', 'list_processes', 'kill_process', 'get_system_info',
             'tavily', 'tavily_search', 'tavily_extract', 'tavily_crawl', 'tavily_map',
             'tavily_search_async', 'tavily_extract_async',
             'ydc', 'ydc_search', 'ydc_contents', 'ydc_news', 'ydc_images',
