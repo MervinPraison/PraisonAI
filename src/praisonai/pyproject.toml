@@ -180,6 +180,9 @@ postgresql = [
 dynamodb = [
     "boto3>=1.35.0",
 ]
+valkey = [
+    "valkey-glide-sync>=2.3.1",
+]
 # Cloud-native serverless databases
 neon = [
     "psycopg2-binary>=2.9.0",
