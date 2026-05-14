@@ -22,7 +22,9 @@ class TestAgentMailPlatformRegistry:
         from praisonai.bots._registry import _BUILTIN_PLATFORMS
         
         assert "agentmail" in _BUILTIN_PLATFORMS
-        assert _BUILTIN_PLATFORMS["agentmail"] == ("praisonai.bots.agentmail", "AgentMailBot")
+        loader = _BUILTIN_PLATFORMS["agentmail"]
+        assert callable(loader)
+        assert loader().__name__ == "AgentMailBot"
     
     def test_resolve_adapter_returns_agentmail_bot(self):
         """resolve_adapter('agentmail') should return AgentMailBot class."""
