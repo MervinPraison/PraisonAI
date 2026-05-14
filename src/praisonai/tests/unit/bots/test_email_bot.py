@@ -22,19 +22,19 @@ class TestEmailPlatformRegistry:
     def test_email_in_builtin_platforms(self):
         """Verify email is registered in _BUILTIN_PLATFORMS."""
         from praisonai.bots._registry import _BUILTIN_PLATFORMS
-        from praisonai.bots import EmailBot
         
         assert "email" in _BUILTIN_PLATFORMS
         loader = _BUILTIN_PLATFORMS["email"]
         assert callable(loader)
-        assert loader() is EmailBot
+        assert loader.__name__ == "_email_loader"
     
     def test_resolve_adapter_returns_email_bot(self):
         """Verify resolve_adapter('email') returns EmailBot class."""
+        from praisonai.bots import EmailBot
         from praisonai.bots._registry import resolve_adapter
         
-        EmailBot = resolve_adapter("email")
-        assert EmailBot.__name__ == "EmailBot"
+        cls = resolve_adapter("email")
+        assert cls is EmailBot
     
     def test_list_platforms_includes_email(self):
         """Verify list_platforms() includes email."""
