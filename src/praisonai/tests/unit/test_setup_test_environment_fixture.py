@@ -6,8 +6,18 @@ import pytest
 from tests import conftest as test_conftest
 
 
+PROVIDER_API_KEYS = (
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GOOGLE_API_KEY",
+    "XAI_API_KEY",
+    "GROQ_API_KEY",
+    "COHERE_API_KEY",
+)
+
+
 class _Request:
-    def __init__(self, markers=None, fspath="tests/unit/test_dummy.py"):
+    def __init__(self, markers=None, fspath="tests/unit/test_setup_test_environment_fixture.py"):
         markers = markers or []
         self.node = SimpleNamespace(iter_markers=lambda: markers)
         self.fspath = fspath
@@ -43,38 +53,17 @@ def test_setup_environment_preserves_existing_provider_key_and_restores_missing_
 
 def test_setup_environment_fills_placeholders_only_when_keys_are_missing():
     with pytest.MonkeyPatch.context() as mp:
-        for key in (
-            "OPENAI_API_KEY",
-            "ANTHROPIC_API_KEY",
-            "GOOGLE_API_KEY",
-            "XAI_API_KEY",
-            "GROQ_API_KEY",
-            "COHERE_API_KEY",
-        ):
+        for key in PROVIDER_API_KEYS:
             mp.delenv(key, raising=False)
 
         fixture_gen = _run_fixture(_Request())
 
-        for key in (
-            "OPENAI_API_KEY",
-            "ANTHROPIC_API_KEY",
-            "GOOGLE_API_KEY",
-            "XAI_API_KEY",
-            "GROQ_API_KEY",
-            "COHERE_API_KEY",
-        ):
+        for key in PROVIDER_API_KEYS:
             assert os.environ[key] == "test-key"
 
         _teardown_fixture(fixture_gen)
 
-        for key in (
-            "OPENAI_API_KEY",
-            "ANTHROPIC_API_KEY",
-            "GOOGLE_API_KEY",
-            "XAI_API_KEY",
-            "GROQ_API_KEY",
-            "COHERE_API_KEY",
-        ):
+        for key in PROVIDER_API_KEYS:
             assert key not in os.environ
 
 
