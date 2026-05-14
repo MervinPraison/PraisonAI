@@ -25,7 +25,10 @@ def _unregister_bot_platform(name: str) -> None:
     """Remove a runtime-registered bot platform (tests only)."""
     from praisonai.bots._registry import get_default_bot_registry
 
-    get_default_bot_registry().unregister(name.lower())
+    try:
+        get_default_bot_registry().unregister(name.lower())
+    except (KeyError, ValueError):
+        pass
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
