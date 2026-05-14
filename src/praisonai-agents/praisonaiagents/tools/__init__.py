@@ -75,7 +75,7 @@ TOOL_MAPPINGS = {
 
 
     # Python Tools
-    'execute_code': ('.python_tools', 'PythonTools'),
+    'execute_code': ('.python_tools', None),
     'analyze_code': ('.python_tools', 'PythonTools'),
     'format_code': ('.python_tools', 'PythonTools'),
     'lint_code': ('.python_tools', 'PythonTools'),
@@ -326,7 +326,7 @@ def __getattr__(name: str) -> Any:
         if name in [
             'duckduckgo', 'internet_search', 'searxng_search', 'searxng',
             'scrape_page', 'extract_links', 'crawl', 'extract_text',
-            'execute_command', 'list_processes', 'kill_process', 'get_system_info',
+            'execute_command', 'execute_code', 'list_processes', 'kill_process', 'get_system_info',
             'tavily', 'tavily_search', 'tavily_extract', 'tavily_crawl', 'tavily_map',
             'tavily_search_async', 'tavily_extract_async',
             'ydc', 'ydc_search', 'ydc_contents', 'ydc_news', 'ydc_images',
