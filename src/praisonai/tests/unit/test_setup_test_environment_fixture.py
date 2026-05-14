@@ -16,7 +16,7 @@ PROVIDER_API_KEYS = (
 )
 
 
-class _Request:
+class MockRequest:
     def __init__(self, markers=None, fspath=__file__):
         markers = markers or []
         self.node = SimpleNamespace(iter_markers=lambda: markers)
@@ -24,6 +24,7 @@ class _Request:
 
 
 def _run_fixture(request):
+    """Execute the fixture generator directly with a synthetic request object."""
     fixture_impl = test_conftest.setup_test_environment.__wrapped__
     fixture_gen = fixture_impl(request)
     next(fixture_gen)
@@ -40,7 +41,7 @@ def test_setup_environment_preserves_existing_provider_key_and_restores_missing_
         mp.setenv("OPENAI_API_KEY", "real-openai-key")
         mp.delenv("ANTHROPIC_API_KEY", raising=False)
 
-        fixture_gen = _run_fixture(_Request())
+        fixture_gen = _run_fixture(MockRequest())
 
         assert os.environ["OPENAI_API_KEY"] == "real-openai-key"
         assert os.environ["ANTHROPIC_API_KEY"] == "test-key"
@@ -56,7 +57,7 @@ def test_setup_environment_fills_placeholders_only_when_keys_are_missing():
         for key in PROVIDER_API_KEYS:
             mp.delenv(key, raising=False)
 
-        fixture_gen = _run_fixture(_Request())
+        fixture_gen = _run_fixture(MockRequest())
 
         for key in PROVIDER_API_KEYS:
             assert os.environ[key] == "test-key"
@@ -73,7 +74,7 @@ def test_setup_environment_skips_placeholder_keys_for_provider_marked_tests():
     with pytest.MonkeyPatch.context() as mp:
         mp.delenv("OPENAI_API_KEY", raising=False)
 
-        fixture_gen = _run_fixture(_Request(markers=[marker]))
+        fixture_gen = _run_fixture(MockRequest(markers=[marker]))
 
         assert "OPENAI_API_KEY" not in os.environ
 
