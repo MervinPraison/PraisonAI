@@ -17,7 +17,7 @@ PROVIDER_API_KEYS = (
 
 
 class _Request:
-    def __init__(self, markers=None, fspath="tests/unit/test_setup_test_environment_fixture.py"):
+    def __init__(self, markers=None, fspath=__file__):
         markers = markers or []
         self.node = SimpleNamespace(iter_markers=lambda: markers)
         self.fspath = fspath
