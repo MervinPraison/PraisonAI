@@ -217,17 +217,19 @@ class E2BSandbox:
         try:
             # Set environment variables
             if env:
+                import shlex
                 for key, value in env.items():
                     await asyncio.get_event_loop().run_in_executor(
                         None,
-                        lambda k=key, v=value: self._sandbox.commands.run(f"export {k}={v}", timeout=5)
+                        lambda k=key, v=value: self._sandbox.commands.run(f"export {shlex.quote(k)}={shlex.quote(v)}", timeout=5)
                     )
             
             # Change directory if needed
             if working_dir:
+                import shlex
                 await asyncio.get_event_loop().run_in_executor(
                     None,
-                    lambda: self._sandbox.commands.run(f"cd {working_dir}", timeout=5)
+                    lambda: self._sandbox.commands.run(f"cd {shlex.quote(working_dir)}", timeout=5)
                 )
             
             # Execute the command

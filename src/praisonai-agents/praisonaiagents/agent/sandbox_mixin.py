@@ -109,23 +109,8 @@ class SandboxMixin:
         Returns:
             SandboxResult with execution details
         """
-        import asyncio
-        
-        # Handle event loop properly
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # No running loop, create new one
-            return asyncio.run(self.execute_code(code, language, check_security, **kwargs))
-        else:
-            # Already in async context, need to handle carefully
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(
-                    asyncio.run,
-                    self.execute_code(code, language, check_security, **kwargs)
-                )
-                return future.result()
+        from ..approval.utils import run_coroutine_safely
+        return run_coroutine_safely(self.execute_code(code, language, check_security, **kwargs))
     
     async def run_shell_command(
         self,
@@ -236,8 +221,8 @@ class SandboxMixin:
             Returns:
                 Command output
             """
-            import asyncio
-            result = asyncio.run(self.run_shell_command(command))
+            from ..approval.utils import run_coroutine_safely
+            result = run_coroutine_safely(self.run_shell_command(command))
             if result.success:
                 return result.stdout or result.output
             else:
