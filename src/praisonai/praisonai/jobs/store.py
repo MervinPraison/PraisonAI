@@ -87,13 +87,7 @@ class InMemoryJobStore(JobStore):
         where asyncio.Lock() calls get_event_loop() at creation time.
         """
         if self.__lock is None:
-            # Use try-except to handle Python >= 3.10 where no event loop is required
-            try:
-                self.__lock = asyncio.Lock()
-            except RuntimeError:
-                # Python < 3.10 case - get event loop explicitly
-                loop = asyncio.get_event_loop()
-                self.__lock = asyncio.Lock()
+            self.__lock = asyncio.Lock()
         return self.__lock
     
     async def save(self, job: Job) -> None:
@@ -211,13 +205,16 @@ class InMemoryJobStore(JobStore):
     
     def get_stats(self) -> Dict[str, Any]:
         """Get store statistics."""
+        # Take a snapshot to avoid RuntimeError if the dict is mutated concurrently
+        jobs_snapshot = list(self._jobs.values())
+        idempotency_count = len(self._idempotency_keys)
         status_counts = {}
-        for job in self._jobs.values():
+        for job in jobs_snapshot:
             status_counts[job.status.value] = status_counts.get(job.status.value, 0) + 1
         
         return {
-            "total_jobs": len(self._jobs),
-            "idempotency_keys": len(self._idempotency_keys),
+            "total_jobs": len(jobs_snapshot),
+            "idempotency_keys": idempotency_count,
             "max_jobs": self._max_jobs,
             "status_counts": status_counts
         }
