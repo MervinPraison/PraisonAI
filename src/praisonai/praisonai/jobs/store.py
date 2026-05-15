@@ -87,7 +87,13 @@ class InMemoryJobStore(JobStore):
         where asyncio.Lock() calls get_event_loop() at creation time.
         """
         if self.__lock is None:
-            self.__lock = asyncio.Lock()
+            # Use try-except to handle Python >= 3.10 where no event loop is required
+            try:
+                self.__lock = asyncio.Lock()
+            except RuntimeError:
+                # Python < 3.10 case - get event loop explicitly
+                loop = asyncio.get_event_loop()
+                self.__lock = asyncio.Lock()
         return self.__lock
     
     async def save(self, job: Job) -> None:
@@ -125,14 +131,14 @@ class InMemoryJobStore(JobStore):
     
     async def get(self, job_id: str) -> Optional[Job]:
         """Get a job by ID."""
-        return self._jobs.get(job_id)
+        async with self._get_lock():
+            return self._jobs.get(job_id)
     
     async def get_by_idempotency_key(self, key: str) -> Optional[Job]:
         """Get a job by idempotency key."""
-        job_id = self._idempotency_keys.get(key)
-        if job_id:
-            return self._jobs.get(job_id)
-        return None
+        async with self._get_lock():
+            job_id = self._idempotency_keys.get(key)
+            return self._jobs.get(job_id) if job_id else None
     
     async def list_jobs(
         self,
@@ -142,9 +148,10 @@ class InMemoryJobStore(JobStore):
         offset: int = 0
     ) -> List[Job]:
         """List jobs with optional filters."""
-        jobs = list(self._jobs.values())
+        async with self._get_lock():
+            jobs = list(self._jobs.values())
         
-        # Apply filters
+        # Apply filters outside the lock - values() snapshot is already taken
         if status:
             jobs = [j for j in jobs if j.status == status]
         if session_id:
@@ -162,7 +169,8 @@ class InMemoryJobStore(JobStore):
         session_id: Optional[str] = None
     ) -> int:
         """Count jobs matching filters."""
-        jobs = list(self._jobs.values())
+        async with self._get_lock():
+            jobs = list(self._jobs.values())
         
         if status:
             jobs = [j for j in jobs if j.status == status]

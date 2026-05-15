@@ -7,6 +7,7 @@ for both builtin and user tools.
 """
 
 import logging
+import threading
 from typing import Dict, Callable, List, Optional, Any
 import inspect
 
@@ -19,45 +20,54 @@ class ToolRegistry:
     def __init__(self):
         self._functions: Dict[str, Callable] = {}
         self._autogen_adapters: Dict[str, Callable] = {}
+        self._lock = threading.Lock()
         
     def register_function(self, name: str, func: Callable) -> None:
         """Register a function tool."""
         if not callable(func):
             raise ValueError(f"Tool {name} must be callable")
-        self._functions[name] = func
+        with self._lock:
+            self._functions[name] = func
         logger.debug(f"Registered function tool: {name}")
     
     def register_autogen_adapter(self, tool_type_name: str, adapter: Callable) -> None:
         """Register an AutoGen-specific tool adapter."""
         if not callable(adapter):
             raise ValueError(f"AutoGen adapter for {tool_type_name} must be callable")
-        self._autogen_adapters[tool_type_name] = adapter
+        with self._lock:
+            self._autogen_adapters[tool_type_name] = adapter
         logger.debug(f"Registered AutoGen adapter: {tool_type_name}")
     
     def get_function(self, name: str) -> Optional[Callable]:
         """Get a function tool by name."""
-        return self._functions.get(name)
+        with self._lock:
+            return self._functions.get(name)
     
     def get_autogen_adapter(self, tool_type_name: str) -> Optional[Callable]:
         """Get an AutoGen adapter by tool type name."""
-        return self._autogen_adapters.get(tool_type_name)
+        with self._lock:
+            return self._autogen_adapters.get(tool_type_name)
     
     def list_functions(self) -> List[str]:
         """List all registered function tool names."""
-        return list(self._functions.keys())
+        with self._lock:
+            return list(self._functions.keys())
     
     def list_autogen_adapters(self) -> List[str]:
         """List all registered AutoGen adapter names."""
-        return list(self._autogen_adapters.keys())
+        with self._lock:
+            return list(self._autogen_adapters.keys())
     
     def get_functions_dict(self) -> Dict[str, Callable]:
         """Get a copy of all registered functions."""
-        return dict(self._functions)
+        with self._lock:
+            return dict(self._functions)
     
     def clear(self) -> None:
         """Clear all registered tools."""
-        self._functions.clear()
-        self._autogen_adapters.clear()
+        with self._lock:
+            self._functions.clear()
+            self._autogen_adapters.clear()
         logger.debug("Cleared tool registry")
     
     def register_from_module(self, module: Any) -> List[str]:
@@ -75,7 +85,7 @@ class ToolRegistry:
             if (not name.startswith('_') and 
                 callable(obj) and 
                 not inspect.isclass(obj)):
-                self.register_function(name, obj)
+                self.register_function(name, obj)  # This already acquires the lock
                 registered.append(name)
         
         logger.debug(f"Registered {len(registered)} functions from module: {registered}")
@@ -107,8 +117,10 @@ class ToolRegistry:
     
     def __len__(self) -> int:
         """Return total number of registered tools."""
-        return len(self._functions) + len(self._autogen_adapters)
+        with self._lock:
+            return len(self._functions) + len(self._autogen_adapters)
     
     def __contains__(self, name: str) -> bool:
         """Check if a tool function is registered."""
-        return name in self._functions
+        with self._lock:
+            return name in self._functions
