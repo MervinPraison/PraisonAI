@@ -21,6 +21,7 @@ from .chat_handler import ChatHandlerMixin
 from .session_manager import SessionManagerMixin
 from .async_safety import AsyncSafeState
 from .unified_execution_mixin import UnifiedExecutionMixin
+from .sandbox_mixin import SandboxMixin
 
 # Module-level logger for thread safety errors and debugging
 logger = get_logger(__name__)
@@ -255,7 +256,7 @@ if TYPE_CHECKING:
 # Import structured error from central errors module
 from ..errors import BudgetExceededError
 
-class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin, AsyncMemoryMixin):
+class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin, AsyncMemoryMixin):
     # Class-level counter for generating unique display names for nameless agents
     _agent_counter = 0
     _agent_counter_lock = threading.Lock()
@@ -555,6 +556,7 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
         backend: Optional[Any] = None,  # External managed agent backend (e.g., ManagedAgentIntegration)
         cli_backend: Optional[Union[str, Any]] = None,  # CLI backend for delegating turns (e.g., "claude-code")
         interrupt_controller: Optional['InterruptController'] = None,  # G2: Cooperative cancellation
+        sandbox: Optional[Union[bool, 'SandboxConfig']] = None,  # Sandbox for safe code execution
     ):
         """Initialize an Agent instance.
 
@@ -1946,6 +1948,9 @@ Your Goal: {self.goal}
         # Telemetry - lazy initialized via property for performance
         self.__telemetry = None
         self.__telemetry_initialized = False
+        
+        # Sandbox configuration - initialize SandboxMixin
+        super().__init__(sandbox=sandbox)
 
     @property
     def _telemetry(self):
