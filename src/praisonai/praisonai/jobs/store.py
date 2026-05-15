@@ -83,8 +83,9 @@ class InMemoryJobStore(JobStore):
     def _get_lock(self) -> asyncio.Lock:
         """Get the asyncio lock, creating it lazily if needed.
         
-        This deferred creation is required for Python 3.9 compatibility
-        where asyncio.Lock() calls get_event_loop() at creation time.
+        Deferred creation avoids touching the event loop at __init__ time,
+        which keeps the store safe to instantiate from sync contexts on
+        Python 3.9 (where asyncio.Lock() implicitly calls get_event_loop()).
         """
         if self.__lock is None:
             self.__lock = asyncio.Lock()
@@ -203,11 +204,13 @@ class InMemoryJobStore(JobStore):
             
             return len(to_remove)
     
-    def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> Dict[str, Any]:
         """Get store statistics."""
-        # Take a snapshot to avoid RuntimeError if the dict is mutated concurrently
-        jobs_snapshot = list(self._jobs.values())
-        idempotency_count = len(self._idempotency_keys)
+        async with self._get_lock():
+            # Take a snapshot to avoid RuntimeError if the dict is mutated concurrently
+            jobs_snapshot = list(self._jobs.values())
+            idempotency_count = len(self._idempotency_keys)
+        
         status_counts = {}
         for job in jobs_snapshot:
             status_counts[job.status.value] = status_counts.get(job.status.value, 0) + 1
