@@ -30,13 +30,17 @@ jobs:
     steps:
       - name: Determine checkout ref
         id: dest
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          PR_NUMBER_INPUT: ${{ inputs.pr_number }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           if [ "${{ github.event_name }}" = "issue_comment" ]; then
-            echo "ref=refs/pull/${{ github.event.issue.number }}/head" >> "$GITHUB_OUTPUT"
+            echo "ref=refs/pull/$ISSUE_NUMBER/head" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "ref=refs/pull/${{ inputs.pr_number }}/head" >> "$GITHUB_OUTPUT"
+            echo "ref=refs/pull/$PR_NUMBER_INPUT/head" >> "$GITHUB_OUTPUT"
           else
-            echo "ref=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+            echo "ref=$PR_HEAD_SHA" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout Repository

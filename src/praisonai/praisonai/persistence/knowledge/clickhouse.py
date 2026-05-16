@@ -8,7 +8,7 @@ Install: pip install clickhouse-connect
 import logging
 from typing import Any, Dict, List, Optional
 
-from .base import KnowledgeStore, KnowledgeDocument
+from .base import KnowledgeStore, KnowledgeDocument, validate_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,8 @@ class ClickHouseKnowledgeStore(KnowledgeStore):
         logger.info(f"Connected to ClickHouse database: {database}")
     
     def _table_name(self, collection: str) -> str:
+        # Validate collection name to prevent SQL injection
+        validate_identifier(collection, "collection")
         return f"{self.database}.praison_vec_{collection}"
     
     def create_collection(

@@ -73,17 +73,16 @@ def _get_process_using_port(port: int) -> Optional[Dict]:
         elif sys.platform == "win32":
             # Use netstat on Windows
             result = subprocess.run(
-                ["netstat", "-ano", "|", "findstr", f":{port}"],
+                ["netstat", "-ano"],
                 capture_output=True,
                 text=True,
-                shell=True,
-                timeout=5
+                timeout=10
             )
             
             if result.returncode != 0 or not result.stdout:
                 return None
             
-            # Parse netstat output
+            # Parse netstat output and filter by port
             lines = result.stdout.strip().split("\n")
             for line in lines:
                 if f":{port}" in line and "LISTENING" in line:
@@ -166,7 +165,6 @@ def _get_all_ports() -> List[Dict]:
                 ["netstat", "-ano"],
                 capture_output=True,
                 text=True,
-                shell=True,
                 timeout=10
             )
             

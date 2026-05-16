@@ -63,10 +63,12 @@ jobs:
           GH_TOKEN: ${{ steps.generate_token.outputs.token }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           PRAISONAI_AUTO_APPROVE: "true"
+          ISSUE_NUMBER_INPUT: ${{ inputs.issue_number }}
+          ISSUE_NUMBER_EVENT: ${{ github.event.issue.number }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            export ISSUE_NUMBER="${{ inputs.issue_number }}"
+            export ISSUE_NUMBER="$ISSUE_NUMBER_INPUT"
           else
-            export ISSUE_NUMBER="${{ github.event.issue.number }}"
+            export ISSUE_NUMBER="$ISSUE_NUMBER_EVENT"
           fi
           praisonai github triage --issue $ISSUE_NUMBER --agent-file .github/praisonai-issue-triage.yaml
