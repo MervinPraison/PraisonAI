@@ -14,11 +14,12 @@ except ImportError:
     from importlib_metadata import entry_points
 
 import logging
+from .._registry import PluginRegistry
 
 logger = logging.getLogger(__name__)
 
 
-class StoreRegistry:
+class StoreRegistry(PluginRegistry[Callable[..., Any]]):
     """Registry for persistence store factories."""
     
     def __init__(self, kind: str, entry_point_group: str):
@@ -30,12 +31,14 @@ class StoreRegistry:
             entry_point_group: The entry point group for external registrations
         """
         self._kind = kind
-        self._factories: Dict[str, Callable[..., Any]] = {}
-        self._aliases: Dict[str, str] = {}
-        self._lock = threading.Lock()
-        self._register_entry_points(entry_point_group)
+        
+        # Initialize parent with entry points
+        super().__init__(entry_point_group=entry_point_group)
+        
+        # Load built-in stores based on kind
+        self._register_builtin_stores()
 
-    def register(self, name: str, factory: Callable, *, aliases=()) -> None:
+    def register_store(self, name: str, factory: Callable, *, aliases=()) -> None:
         """
         Register a store factory.
         
@@ -44,12 +47,16 @@ class StoreRegistry:
             factory: Factory function that creates store instances
             aliases: Optional list of alias names for this backend
         """
-        with self._lock:
-            normalized_name = name.lower()
-            self._factories[normalized_name] = factory
-            for alias in aliases:
-                normalized_alias = alias.lower()
-                self._aliases[normalized_alias] = normalized_name
+        # Wrap the factory in a loader function for PluginRegistry
+        def factory_loader():
+            return factory
+        
+        # Use parent's register method with aliases
+        super().register(name, factory_loader, aliases=list(aliases))
+        
+    def register(self, name: str, factory: Callable, *, aliases=()) -> None:
+        """Backwards compatibility alias for register_store."""
+        self.register_store(name, factory, aliases=aliases)
 
     def create(self, name: str, **kwargs) -> Any:
         """
@@ -65,15 +72,11 @@ class StoreRegistry:
         Raises:
             ValueError: If backend is not registered
         """
-        normalized_name = name.lower()
-        with self._lock:
-            canonical = self._aliases.get(normalized_name, normalized_name)
-            factory = self._factories.get(canonical)
-            if factory is None:
-                # Get available backends for error message inside lock
-                available_backends = sorted(self._factories.keys())
-        
-        if factory is None:
+        try:
+            factory_loader = self.resolve(name)
+            factory = factory_loader()
+        except ValueError:
+            available_backends = self.list_names()
             raise ValueError(
                 f"Unknown {self._kind} backend: {name}. "
                 f"Registered: {available_backends}"
@@ -82,32 +85,20 @@ class StoreRegistry:
         return factory(**kwargs)
 
     def list_registered(self) -> list[str]:
-        """List all registered backend names."""
-        with self._lock:
-            return sorted(self._factories.keys())
+        """List all registered backend names (alias for list_names)."""
+        return self.list_names()
 
-    def list_aliases(self) -> Dict[str, str]:
-        """List all aliases and their target backends."""
-        with self._lock:
-            return dict(self._aliases)
-
-    def _register_entry_points(self, group: str) -> None:
-        """Register backends from entry points."""
-        try:
-            for ep in entry_points(group=group):
-                try:
-                    self.register(ep.name, ep.load())
-                except Exception:
-                    logger.warning(
-                        "Failed to load %s backend %r from entry point", 
-                        self._kind, ep.name, exc_info=True
-                    )
-        except Exception:
-            # entry_points() may fail in some environments
-            pass
+    def _register_builtin_stores(self) -> None:
+        """Register built-in stores based on kind."""
+        if self._kind == "conversation":
+            _register_builtin_conversation_stores(self)
+        elif self._kind == "knowledge":
+            _register_builtin_knowledge_stores(self) 
+        elif self._kind == "state":
+            _register_builtin_state_stores(self)
 
 
-def _register_builtin_conversation_stores():
+def _register_builtin_conversation_stores(registry: StoreRegistry):
     """Register built-in conversation stores with lazy imports."""
     
     def _postgres(url=None, **kwargs):
@@ -155,24 +146,24 @@ def _register_builtin_conversation_stores():
         return TursoConversationStore(url=url, **kwargs)
     
     # Register all backends with aliases
-    CONVERSATION_STORES.register("postgres", _postgres, 
+    registry.register("postgres", _postgres, 
         aliases=("neon", "cockroachdb", "crdb", "cockroach", "xata"))
-    CONVERSATION_STORES.register("async_postgres", _async_postgres,
+    registry.register("async_postgres", _async_postgres,
         aliases=("asyncpg", "postgres_async"))
-    CONVERSATION_STORES.register("mysql", _mysql)
-    CONVERSATION_STORES.register("async_mysql", _async_mysql,
+    registry.register("mysql", _mysql)
+    registry.register("async_mysql", _async_mysql,
         aliases=("aiomysql", "mysql_async"))
-    CONVERSATION_STORES.register("sqlite", _sqlite)
-    CONVERSATION_STORES.register("async_sqlite", _async_sqlite,
+    registry.register("sqlite", _sqlite)
+    registry.register("async_sqlite", _async_sqlite,
         aliases=("aiosqlite", "sqlite_async"))
-    CONVERSATION_STORES.register("json", _json)
-    CONVERSATION_STORES.register("singlestore", _singlestore)
-    CONVERSATION_STORES.register("supabase", _supabase)
-    CONVERSATION_STORES.register("surrealdb", _surrealdb)
-    CONVERSATION_STORES.register("turso", _turso, aliases=("libsql",))
+    registry.register("json", _json)
+    registry.register("singlestore", _singlestore)
+    registry.register("supabase", _supabase)
+    registry.register("surrealdb", _surrealdb)
+    registry.register("turso", _turso, aliases=("libsql",))
 
 
-def _register_builtin_knowledge_stores():
+def _register_builtin_knowledge_stores(registry: StoreRegistry):
     """Register built-in knowledge stores with lazy imports."""
     
     def _chroma(url=None, path=None, **kwargs):
@@ -259,37 +250,37 @@ def _register_builtin_knowledge_stores():
         from .knowledge.cosmosdb_vector import CosmosDBVectorKnowledgeStore
         return CosmosDBVectorKnowledgeStore(url=url, **kwargs)
     
-    KNOWLEDGE_STORES.register("chroma", _chroma, aliases=("chromadb",))
-    KNOWLEDGE_STORES.register("qdrant", _qdrant)
-    KNOWLEDGE_STORES.register("pinecone", _pinecone)
-    KNOWLEDGE_STORES.register("weaviate", _weaviate)
-    KNOWLEDGE_STORES.register("lancedb", _lancedb)
-    KNOWLEDGE_STORES.register("milvus", _milvus)
-    KNOWLEDGE_STORES.register("pgvector", _pgvector)
-    KNOWLEDGE_STORES.register("redis", _redis_vector)
-    KNOWLEDGE_STORES.register("cassandra", _cassandra)
-    KNOWLEDGE_STORES.register("clickhouse", _clickhouse)
-    KNOWLEDGE_STORES.register("mongodb_vector", _mongodb_vector, 
+    registry.register("chroma", _chroma, aliases=("chromadb",))
+    registry.register("qdrant", _qdrant)
+    registry.register("pinecone", _pinecone)
+    registry.register("weaviate", _weaviate)
+    registry.register("lancedb", _lancedb)
+    registry.register("milvus", _milvus)
+    registry.register("pgvector", _pgvector)
+    registry.register("redis", _redis_vector)
+    registry.register("cassandra", _cassandra)
+    registry.register("clickhouse", _clickhouse)
+    registry.register("mongodb_vector", _mongodb_vector, 
         aliases=("mongodb_atlas", "mongo_vector"))
     
     # Register missing backends that were supported in old factory
-    KNOWLEDGE_STORES.register("couchbase", _couchbase)
-    KNOWLEDGE_STORES.register("singlestore_vector", _singlestore_vector,
+    registry.register("couchbase", _couchbase)
+    registry.register("singlestore_vector", _singlestore_vector,
         aliases=("singlestore_v",))
-    KNOWLEDGE_STORES.register("surrealdb_vector", _surrealdb_vector,
+    registry.register("surrealdb_vector", _surrealdb_vector,
         aliases=("surrealdb_v",))
-    KNOWLEDGE_STORES.register("upstash_vector", _upstash_vector,
+    registry.register("upstash_vector", _upstash_vector,
         aliases=("upstash_v",))
-    KNOWLEDGE_STORES.register("lightrag", _lightrag)
-    KNOWLEDGE_STORES.register("langchain", _langchain_adapter,
+    registry.register("lightrag", _lightrag)
+    registry.register("langchain", _langchain_adapter,
         aliases=("langchain_adapter",))
-    KNOWLEDGE_STORES.register("llamaindex", _llamaindex_adapter,
+    registry.register("llamaindex", _llamaindex_adapter,
         aliases=("llama_index", "llamaindex_adapter"))
-    KNOWLEDGE_STORES.register("cosmosdb", _cosmosdb_vector,
+    registry.register("cosmosdb", _cosmosdb_vector,
         aliases=("cosmos", "azure_cosmos", "cosmosdb_vector"))
 
 
-def _register_builtin_state_stores():
+def _register_builtin_state_stores(registry: StoreRegistry):
     """Register built-in state stores with lazy imports."""
     
     def _redis(url=None, **kwargs):
@@ -330,23 +321,18 @@ def _register_builtin_state_stores():
             raise ValueError("GCS state store requires 'bucket_name' option")
         return GCSStateStore(bucket_name=bucket, **kwargs)
     
-    STATE_STORES.register("redis", _redis)
-    STATE_STORES.register("dynamodb", _dynamodb)
-    STATE_STORES.register("firestore", _firestore)
-    STATE_STORES.register("mongodb", _mongodb)
-    STATE_STORES.register("async_mongodb", _async_mongodb, 
+    registry.register("redis", _redis)
+    registry.register("dynamodb", _dynamodb)
+    registry.register("firestore", _firestore)
+    registry.register("mongodb", _mongodb)
+    registry.register("async_mongodb", _async_mongodb, 
         aliases=("motor", "mongodb_async"))
-    STATE_STORES.register("upstash", _upstash)
-    STATE_STORES.register("memory", _memory)
-    STATE_STORES.register("gcs", _gcs)
+    registry.register("upstash", _upstash)
+    registry.register("memory", _memory)
+    registry.register("gcs", _gcs)
 
 
-# Create global registry instances
+# Create global registry instances - built-in stores are registered automatically via __init__
 CONVERSATION_STORES = StoreRegistry("conversation", "praisonai.conversation_stores")
 KNOWLEDGE_STORES = StoreRegistry("knowledge", "praisonai.knowledge_stores") 
 STATE_STORES = StoreRegistry("state", "praisonai.state_stores")
-
-# Register built-in stores
-_register_builtin_conversation_stores()
-_register_builtin_knowledge_stores()
-_register_builtin_state_stores()

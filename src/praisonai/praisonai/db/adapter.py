@@ -554,6 +554,162 @@ class PraisonAIDB:
             return traces[: max(limit, 0)]
         return traces
     
+    # ========================================================================
+    # Async Surface for async-safe agents
+    # ========================================================================
+    
+    async def aon_agent_start(
+        self, 
+        session_id: str, 
+        name: str, 
+        agent_id: str = "", 
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Async version of on_agent_start."""
+        self._init_stores()
+        
+        if self._state_store:
+            if hasattr(self._state_store, "async_set_agent_state"):
+                await self._state_store.async_set_agent_state(
+                    session_id, 
+                    agent_id or name,
+                    {"status": "started", "metadata": metadata or {}}
+                )
+            else:
+                import asyncio
+                await asyncio.to_thread(
+                    self._state_store.set_agent_state,
+                    session_id, 
+                    agent_id or name,
+                    {"status": "started", "metadata": metadata or {}}
+                )
+
+    async def aon_user_message(
+        self,
+        session_id: str,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Async version of on_user_message."""
+        self._init_stores()
+        
+        if self._conversation_store:
+            from ..persistence.conversation.models import ConversationMessage
+            msg = ConversationMessage(
+                role="user",
+                content=content,
+                metadata=metadata or {}
+            )
+            
+            if hasattr(self._conversation_store, "async_add_message"):
+                await self._conversation_store.async_add_message(session_id, msg)
+            else:
+                import asyncio
+                await asyncio.to_thread(self._conversation_store.add_message, session_id, msg)
+
+    async def aon_agent_message(
+        self,
+        session_id: str,
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Async version of on_agent_message."""
+        self._init_stores()
+        
+        if self._conversation_store:
+            from ..persistence.conversation.models import ConversationMessage
+            msg = ConversationMessage(
+                role="assistant", 
+                content=content,
+                metadata=metadata or {}
+            )
+            
+            if hasattr(self._conversation_store, "async_add_message"):
+                await self._conversation_store.async_add_message(session_id, msg)
+            else:
+                import asyncio
+                await asyncio.to_thread(self._conversation_store.add_message, session_id, msg)
+
+    async def aon_tool_call(
+        self,
+        session_id: str,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        result: Any = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Async version of on_tool_call."""
+        self._init_stores()
+        
+        if self._conversation_store:
+            if hasattr(self._conversation_store, "async_add_tool_call"):
+                await self._conversation_store.async_add_tool_call(
+                    session_id, tool_name, arguments, result, metadata
+                )
+            elif hasattr(self._conversation_store, "add_tool_call"):
+                import asyncio
+                await asyncio.to_thread(
+                    self._conversation_store.add_tool_call,
+                    session_id, tool_name, arguments, result, metadata
+                )
+
+    async def aon_agent_end(
+        self,
+        session_id: str,
+        name: str,
+        agent_id: str = "",
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Async version of on_agent_end."""
+        self._init_stores()
+        
+        if self._state_store:
+            if hasattr(self._state_store, "async_set_agent_state"):
+                await self._state_store.async_set_agent_state(
+                    session_id,
+                    agent_id or name,
+                    {"status": "ended", "metadata": metadata or {}}
+                )
+            else:
+                import asyncio
+                await asyncio.to_thread(
+                    self._state_store.set_agent_state,
+                    session_id,
+                    agent_id or name,
+                    {"status": "ended", "metadata": metadata or {}}
+                )
+
+    async def aclose(self) -> None:
+        """Async version of close."""
+        stores = [self._conversation_store, self._state_store, self._knowledge_store]
+        
+        for store in stores:
+            if store is None:
+                continue
+            if hasattr(store, "async_close"):
+                await store.async_close()
+            else:
+                import asyncio
+                await asyncio.to_thread(store.close)
+
+    async def __aenter__(self):
+        """Async context manager entry."""
+        self._init_stores()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.aclose()
+
+    def __enter__(self):
+        """Sync context manager entry."""
+        self._init_stores()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Sync context manager exit."""
+        self.close()
+    
     def close(self) -> None:
         """Close all database connections."""
         if self._conversation_store:

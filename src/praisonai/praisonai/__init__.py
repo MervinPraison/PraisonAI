@@ -36,10 +36,34 @@ __all__ = [
 _telemetry_lock = threading.Lock()
 _telemetry_initialized = False
 
+def _get_telemetry_defaults() -> dict[str, str]:
+    """Get telemetry environment defaults without mutating os.environ.
+    
+    Returns:
+        Dict of environment variable defaults for telemetry
+    """
+    import os
+    defaults = {}
+    
+    # Respect any value the user already set
+    if "OTEL_SDK_DISABLED" not in os.environ:
+        langfuse_configured = bool(
+            os.getenv("LANGFUSE_PUBLIC_KEY")
+            or os.path.exists(os.path.expanduser("~/.praisonai/langfuse.env"))
+        )
+        defaults["OTEL_SDK_DISABLED"] = "false" if langfuse_configured else "true"
+    
+    if "EC_TELEMETRY" not in os.environ:
+        defaults["EC_TELEMETRY"] = "false"
+    
+    return defaults
+
+
 def _ensure_telemetry_defaults() -> None:
     """Apply telemetry env defaults exactly once, on first observability use.
     
     Thread-safe implementation using double-checked locking pattern.
+    DEPRECATED: Use _apply_telemetry_defaults() with explicit config instead.
     """
     global _telemetry_initialized
     if _telemetry_initialized:  # fast path, OK without lock
@@ -47,16 +71,19 @@ def _ensure_telemetry_defaults() -> None:
     with _telemetry_lock:
         if _telemetry_initialized:
             return
-        import os
-        # Respect any value the user already set
-        if "OTEL_SDK_DISABLED" not in os.environ:
-            langfuse_configured = bool(
-                os.getenv("LANGFUSE_PUBLIC_KEY")
-                or os.path.exists(os.path.expanduser("~/.praisonai/langfuse.env"))
-            )
-            os.environ["OTEL_SDK_DISABLED"] = "false" if langfuse_configured else "true"
-        os.environ.setdefault("EC_TELEMETRY", "false")  # respect user overrides
+        _apply_telemetry_defaults(_get_telemetry_defaults())
         _telemetry_initialized = True
+
+
+def _apply_telemetry_defaults(env_vars: dict[str, str]) -> None:
+    """Apply telemetry defaults to os.environ.
+    
+    Args:
+        env_vars: Dict of environment variables to set
+    """
+    import os
+    for key, value in env_vars.items():
+        os.environ.setdefault(key, value)
 
 
 # Lazy loading for heavy imports

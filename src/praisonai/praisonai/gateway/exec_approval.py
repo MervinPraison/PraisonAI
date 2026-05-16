@@ -256,17 +256,42 @@ class ExecApprovalManager:
             logger.debug("Expired approval request: %s", rid)
 
 
-# ── Module-level singleton accessor ──────────────────────────────────
+# ── Manager accessor (non-singleton) ─────────────────────────────────
 
-_global_manager: Optional[ExecApprovalManager] = None
+# Default manager for CLI/backward compatibility
+_default_manager: Optional[ExecApprovalManager] = None
 _manager_lock = threading.Lock()
 
 
-def get_exec_approval_manager(ttl: float = 300.0) -> ExecApprovalManager:
-    """Get or create the global :class:`ExecApprovalManager` singleton."""
-    global _global_manager
-    if _global_manager is None:
+def get_default_exec_approval_manager(ttl: float = 300.0) -> ExecApprovalManager:
+    """Get the default exec approval manager (for CLI and backward compatibility).
+    
+    Args:
+        ttl: Seconds before approval requests auto-expire (default 5 min).
+        
+    Returns:
+        The default ExecApprovalManager instance.
+    """
+    global _default_manager
+    if _default_manager is None:
         with _manager_lock:
-            if _global_manager is None:
-                _global_manager = ExecApprovalManager(ttl=ttl)
-    return _global_manager
+            if _default_manager is None:
+                _default_manager = ExecApprovalManager(ttl=ttl)
+    return _default_manager
+
+
+def get_exec_approval_manager(ttl: float = 300.0) -> ExecApprovalManager:
+    """Backward compatibility alias for get_default_exec_approval_manager."""
+    return get_default_exec_approval_manager(ttl)
+
+
+def create_exec_approval_manager(ttl: float = 300.0) -> ExecApprovalManager:
+    """Create a new exec approval manager instance (for per-agent use).
+    
+    Args:
+        ttl: Seconds before approval requests auto-expire (default 5 min).
+        
+    Returns:
+        A new ExecApprovalManager instance.
+    """
+    return ExecApprovalManager(ttl=ttl)

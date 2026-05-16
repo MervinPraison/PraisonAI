@@ -64,6 +64,7 @@ import pstats
 import io
 import statistics
 from collections import deque
+from contextvars import ContextVar
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Callable, Any
 from contextlib import contextmanager, asynccontextmanager
@@ -232,9 +233,9 @@ class StreamingTracker:
 
 class Profiler:
     """
-    Centralized profiler for performance monitoring with bounded buffers.
+    Performance monitoring with bounded buffers.
     
-    Thread-safe singleton pattern for global access.
+    Per-instance profiler for isolated multi-agent use.
     
     Features:
     - Function/block timing
@@ -248,68 +249,62 @@ class Profiler:
     - Bounded per-instance buffers (default 10k records each)
     """
     
-    _instance: Optional['Profiler'] = None
-    _lock = threading.Lock()
+    def __init__(self, *, max_records: int = None):
+        """Initialize profiler with per-instance storage.
+        
+        Args:
+            max_records: Maximum records per buffer (defaults to _PROFILER_MAX)
+        """
+        max_records = max_records or _PROFILER_MAX
+        
+        # Instance-level storage with bounded deque buffers
+        self._timings = deque(maxlen=max_records)
+        self._imports = deque(maxlen=max_records) 
+        self._flow = deque(maxlen=max_records)
+        self._api_calls = deque(maxlen=max_records)
+        self._streaming = deque(maxlen=max_records)
+        self._memory = deque(maxlen=max_records)
+        self._enabled: bool = False
+        self._flow_step: int = 0
+        self._files_accessed: Dict[str, int] = {}
+        self._line_profile_data: Dict[str, Any] = {}
+        self._cprofile_stats = deque(maxlen=max_records)
+        self._lock = threading.Lock()
     
-    def __new__(cls):
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-        return cls._instance
-    
-    # Class-level storage with bounded deque buffers
-    _timings = deque(maxlen=_PROFILER_MAX)
-    _imports = deque(maxlen=_PROFILER_MAX) 
-    _flow = deque(maxlen=_PROFILER_MAX)
-    _api_calls = deque(maxlen=_PROFILER_MAX)
-    _streaming = deque(maxlen=_PROFILER_MAX)
-    _memory = deque(maxlen=_PROFILER_MAX)
-    _enabled: bool = False
-    _flow_step: int = 0
-    _files_accessed: Dict[str, int] = {}
-    _line_profile_data: Dict[str, Any] = {}
-    _cprofile_stats = deque(maxlen=_PROFILER_MAX)
-    
-    @classmethod
-    def enable(cls) -> None:
+    def enable(self) -> None:
         """Enable profiling."""
-        cls._enabled = True
+        self._enabled = True
     
-    @classmethod
-    def disable(cls) -> None:
+    def disable(self) -> None:
         """Disable profiling."""
-        cls._enabled = False
+        self._enabled = False
     
-    @classmethod
-    def is_enabled(cls) -> bool:
+    def is_enabled(self) -> bool:
         """Check if profiling is enabled."""
-        return cls._enabled or os.environ.get('PRAISONAI_PROFILE', '').lower() in ('1', 'true', 'yes')
+        return self._enabled or os.environ.get('PRAISONAI_PROFILE', '').lower() in ('1', 'true', 'yes')
     
-    @classmethod
-    def clear(cls) -> None:
+    def clear(self) -> None:
         """Clear all profiling data."""
-        with cls._lock:
-            cls._timings.clear()
-            cls._imports.clear()
-            cls._flow.clear()
-            cls._api_calls.clear()
-            cls._streaming.clear()
-            cls._memory.clear()
-            cls._flow_step = 0
-            cls._files_accessed.clear()
-            cls._line_profile_data.clear()
-            cls._cprofile_stats.clear()
+        with self._lock:
+            self._timings.clear()
+            self._imports.clear()
+            self._flow.clear()
+            self._api_calls.clear()
+            self._streaming.clear()
+            self._memory.clear()
+            self._flow_step = 0
+            self._files_accessed.clear()
+            self._line_profile_data.clear()
+            self._cprofile_stats.clear()
     
-    @classmethod
-    def record_timing(cls, name: str, duration_ms: float, category: str = "function", 
+    def record_timing(self, name: str, duration_ms: float, category: str = "function", 
                       file: str = "", line: int = 0) -> None:
         """Record a timing measurement."""
-        if not cls.is_enabled():
+        if not self.is_enabled():
             return
         
-        with cls._lock:
-            cls._timings.append(TimingRecord(
+        with self._lock:
+            self._timings.append(TimingRecord(
                 name=name,
                 duration_ms=duration_ms,
                 category=category,
@@ -319,16 +314,15 @@ class Profiler:
             
             # Track file access
             if file:
-                cls._files_accessed[file] = cls._files_accessed.get(file, 0) + 1
+                self._files_accessed[file] = self._files_accessed.get(file, 0) + 1
     
-    @classmethod
-    def record_import(cls, module: str, duration_ms: float, parent: str = "") -> None:
+    def record_import(self, module: str, duration_ms: float, parent: str = "") -> None:
         """Record an import timing."""
-        if not cls.is_enabled():
+        if not self.is_enabled():
             return
         
-        with cls._lock:
-            cls._imports.append(ImportRecord(
+        with self._lock:
+            self._imports.append(ImportRecord(
                 module=module,
                 duration_ms=duration_ms,
                 parent=parent
@@ -1202,11 +1196,118 @@ def check_module_available(module_name: str) -> bool:
 
 
 # ============================================================================
-# Default Profiler Instance
+# Context-Aware Default Profiler
 # ============================================================================
 
-# Module-level default for backward compatibility
-default_profiler = Profiler()
+# Context variable for current profiler (enables per-agent isolation)
+_current_profiler: ContextVar[Optional[Profiler]] = ContextVar("current_profiler", default=None)
+
+# Module-level default for CLI and backward compatibility
+_default_profiler = None
+_default_lock = threading.Lock()
+
+def get_profiler() -> Profiler:
+    """Get the current profiler (context-aware or default)."""
+    # Check context variable first (for per-agent use)
+    profiler = _current_profiler.get()
+    if profiler is not None:
+        return profiler
+    
+    # Fall back to module-level default
+    global _default_profiler
+    if _default_profiler is None:
+        with _default_lock:
+            if _default_profiler is None:
+                _default_profiler = Profiler()
+    return _default_profiler
+
+def set_profiler(profiler: Profiler) -> None:
+    """Set the current profiler in context."""
+    _current_profiler.set(profiler)
+
+class ProfilerCompat:
+    """
+    Compatibility wrapper for old classmethod-based Profiler usage.
+    
+    Delegates all calls to the current profiler instance via get_profiler().
+    This maintains backward compatibility while enabling per-agent isolation.
+    """
+    
+    @staticmethod
+    def enable() -> None:
+        """Enable profiling."""
+        get_profiler().enable()
+    
+    @staticmethod
+    def disable() -> None:
+        """Disable profiling."""
+        get_profiler().disable()
+    
+    @staticmethod
+    def is_enabled() -> bool:
+        """Check if profiling is enabled."""
+        return get_profiler().is_enabled()
+    
+    @staticmethod
+    def clear() -> None:
+        """Clear all profiling data."""
+        get_profiler().clear()
+    
+    @staticmethod
+    def record_timing(name: str, duration_ms: float, category: str = "function", 
+                      file: str = "", line: int = 0) -> None:
+        """Record a timing measurement."""
+        get_profiler().record_timing(name, duration_ms, category, file, line)
+    
+    @staticmethod
+    def record_import(module: str, duration_ms: float, parent: str = "") -> None:
+        """Record an import timing."""
+        get_profiler().record_import(module, duration_ms, parent)
+    
+    @staticmethod
+    def record_flow(name: str, duration_ms: float, file: str = "", line: int = 0) -> None:
+        """Record a flow step."""
+        get_profiler().record_flow(name, duration_ms, file, line)
+    
+    @staticmethod
+    def block(name: str, category: str = "block"):
+        """Context manager for profiling a block of code."""
+        return get_profiler().block(name, category)
+    
+    @staticmethod
+    def get_timings(category: Optional[str] = None):
+        """Get timing records."""
+        return get_profiler().get_timings(category)
+    
+    @staticmethod
+    def get_imports(min_duration_ms: float = 0):
+        """Get import records."""
+        return get_profiler().get_imports(min_duration_ms)
+    
+    @staticmethod
+    def get_flow():
+        """Get flow records."""
+        return get_profiler().get_flow()
+    
+    @staticmethod
+    def get_files_accessed():
+        """Get files accessed."""
+        return get_profiler().get_files_accessed()
+    
+    @staticmethod
+    def get_summary():
+        """Get profiling summary."""
+        return get_profiler().get_summary()
+    
+    @staticmethod
+    def report(output: str = "console") -> str:
+        """Generate and output profiling report."""
+        return get_profiler().report(output)
+
+# Create compatibility instance that acts like old singleton
+# This allows existing code to work: Profiler.enable(), etc.
+# But it actually delegates to the context-aware profiler
+ProfilerSingleton = ProfilerCompat()
 
 
 # ============================================================================
