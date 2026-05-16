@@ -268,6 +268,9 @@ class SurrealDBVectorKnowledgeStore(KnowledgeStore):
         ids: List[str]
     ) -> List[KnowledgeDocument]:
         """Get documents by IDs."""
+        # Validate collection name to prevent SQL injection
+        validate_identifier(collection, "collection")
+
         self._init_client()
         
         documents = []

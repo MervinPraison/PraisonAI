@@ -40,6 +40,7 @@ class ClickHouseKnowledgeStore(KnowledgeStore):
                 "clickhouse-connect is required for ClickHouse support. "
                 "Install with: pip install clickhouse-connect"
             )
+        validate_identifier(database, "database")
         
         self._client = clickhouse_connect.get_client(
             host=host,
