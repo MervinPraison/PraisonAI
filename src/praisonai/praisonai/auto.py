@@ -126,13 +126,6 @@ def _get_autogen_v4():
     return _load_optional("autogen_v4_classes", autogen_v4_loader)
 
 
-# --- PraisonAI Agents lazy loading ---
-def _check_praisonai_available() -> bool:
-    """Check if praisonaiagents is available (cached, thread-safe)."""
-    result = _load_optional("praisonai_check", lambda: __import__("praisonaiagents"))
-    return result is not None
-
-
 def _get_praisonai():
     """Lazy load praisonaiagents classes (thread-safe)."""
     def praisonai_loader():
@@ -174,13 +167,6 @@ def _get_praisonai_tools():
         }
     
     return _load_optional("praisonai_tools_dict", tools_loader)
-
-
-# --- LiteLLM lazy loading ---
-def _check_litellm_available() -> bool:
-    """Check if litellm is available (cached)."""
-    result = _load_optional("litellm_check", lambda: __import__("litellm"))
-    return result is not None
 
 
 def _get_litellm():

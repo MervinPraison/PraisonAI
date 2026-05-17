@@ -181,7 +181,7 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
                     # Convert tools for v0.4 - simplified tool passing
                     agent_tools = []
                     for tool_name in details.get('tools', []):
-                        if tool_name in tools_dict:
+                        if tools_dict and tool_name in tools_dict:
                             tool_instance = tools_dict[tool_name]
                             # For v0.4, we can pass the tool's run method directly if it's callable
                             if hasattr(tool_instance, 'run') and callable(tool_instance.run):

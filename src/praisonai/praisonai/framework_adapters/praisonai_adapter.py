@@ -60,17 +60,6 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         
         agents = {}
         tasks = []
-        tasks_dict = {}
-        
-        # Use tool resolver instance for local tools.py integration if available
-        tools_list = []
-        try:
-            # Access the tool_resolver if it exists (from the dead code pattern)
-            if hasattr(cli_config, 'tool_resolver') and cli_config.tool_resolver:
-                tools_list = cli_config.tool_resolver.get_local_callables()
-                logger.debug(f"Loaded tools from tools.py: {tools_list}")
-        except Exception as e:
-            logger.debug(f"No tool_resolver available: {e}")
         
         # Get model from llm_config or environment
         model_name = "gpt-4o-mini"
@@ -119,108 +108,108 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 logger.warning(f"InteractiveRuntime not available: {e}")
             except Exception as e:
                 logger.error(f"Error setting up InteractiveRuntime: {e}")
-        
-        # Create agents from roles
-        for role, details in config.get('roles', {}).items():
-            role_filled = self._format_template(details.get('role', role), topic=topic)
-            goal_filled = self._format_template(details.get('goal', ''), topic=topic)
-            backstory_filled = self._format_template(details.get('backstory', ''), topic=topic)
-            
-            # Resolve tools for this agent from tools_dict
-            agent_tool_list = []
-            if tools_dict:
-                agent_tools = details.get('tools', [])
-                agent_tool_list = [tools_dict[t] for t in agent_tools if t in tools_dict]
-            
-            # Create basic agent
-            agent = PraisonAgent(
-                name=role_filled,
-                role=role_filled,
-                goal=goal_filled,
-                backstory=backstory_filled,
-                instructions=details.get('instructions'),
-                llm=model_name,
-                allow_delegation=details.get('allow_delegation', False),
-                tools=agent_tool_list,
-            )
-            
-            if agent_callback:
-                agent.step_callback = agent_callback
+        try:
+            # Create agents from roles
+            for role, details in config.get('roles', {}).items():
+                role_filled = self._format_template(details.get('role', role), topic=topic)
+                goal_filled = self._format_template(details.get('goal', ''), topic=topic)
+                backstory_filled = self._format_template(details.get('backstory', ''), topic=topic)
                 
-            agents[role] = agent
-            
-            # Create tasks for the agent
-            agent_tasks = details.get('tasks', {})
-            if not agent_tasks:
-                # Auto-generate a task
-                task_description = details.get('instructions') or backstory_filled
-                task = PraisonTask(
-                    description=task_description,
-                    expected_output="Complete the assigned task successfully.",
-                    agent=agent,
+                # Resolve tools for this agent from tools_dict
+                agent_tool_list = []
+                if tools_dict:
+                    agent_tools = details.get('tools', [])
+                    agent_tool_list = [tools_dict[t] for t in agent_tools if t in tools_dict]
+                
+                # Create basic agent
+                agent = PraisonAgent(
+                    name=role_filled,
+                    role=role_filled,
+                    goal=goal_filled,
+                    backstory=backstory_filled,
+                    instructions=details.get('instructions'),
+                    llm=model_name,
+                    allow_delegation=details.get('allow_delegation', False),
+                    tools=agent_tool_list,
                 )
-                if task_callback:
-                    task.callback = task_callback
-                tasks.append(task)
-            else:
-                for task_name, task_details in agent_tasks.items():
-                    description_filled = self._format_template(
-                        task_details['description'], topic=topic
-                    )
-                    expected_output_filled = self._format_template(
-                        task_details['expected_output'], topic=topic
-                    )
+                
+                if agent_callback:
+                    agent.step_callback = agent_callback
                     
+                agents[role] = agent
+                
+                # Create tasks for the agent
+                agent_tasks = details.get('tasks', {})
+                if not agent_tasks:
+                    # Auto-generate a task
+                    task_description = details.get('instructions') or backstory_filled
                     task = PraisonTask(
-                        description=description_filled,
-                        expected_output=expected_output_filled,
+                        description=task_description,
+                        expected_output="Complete the assigned task successfully.",
                         agent=agent,
                     )
-                    
                     if task_callback:
                         task.callback = task_callback
-                    
                     tasks.append(task)
-        
-        # Create and run the team
-        memory = config.get('memory', False)
-        
-        if config.get('process') == 'hierarchical':
-            team = AgentTeam(
-                agents=list(agents.values()),
-                tasks=tasks,
-                process="hierarchical",
-                manager_llm=config.get('manager_llm') or model_name,
-                memory=memory
-            )
-        else:
-            team = AgentTeam(
-                agents=list(agents.values()),
-                tasks=tasks,
-                memory=memory
-            )
-        
-        response = team.start()
-        result = f"### PraisonAI Output ###\n{response}" if response else "### PraisonAI Output ###\nTask completed."
-        
-        # Cleanup InteractiveRuntime if it was started
-        if interactive_runtime and interactive_loop:
-            try:
-                logger.info("Stopping InteractiveRuntime")
-                interactive_loop.run_until_complete(interactive_runtime.stop())
-            except Exception as e:
-                logger.error(f"Error stopping InteractiveRuntime: {e}")
-            finally:
-                interactive_loop.close()
-        
-        # AgentOps integration if available
-        if is_available("agentops"):
-            import agentops
-            try:
-                agentops.end_session("Success")
-            except Exception as e:  # noqa: BLE001 -- agentops errors must not crash the caller
-                logger.warning(f"agentops.end_session failed: {e}")
-        
-        logger.info("PraisonAI execution completed")
-        return result
+                else:
+                    for task_name, task_details in agent_tasks.items():
+                        description_filled = self._format_template(
+                            task_details['description'], topic=topic
+                        )
+                        expected_output_filled = self._format_template(
+                            task_details['expected_output'], topic=topic
+                        )
+                        
+                        task = PraisonTask(
+                            description=description_filled,
+                            expected_output=expected_output_filled,
+                            agent=agent,
+                        )
+                        
+                        if task_callback:
+                            task.callback = task_callback
+                        
+                        tasks.append(task)
+            
+            # Create and run the team
+            memory = config.get('memory', False)
+            
+            if config.get('process') == 'hierarchical':
+                team = AgentTeam(
+                    agents=list(agents.values()),
+                    tasks=tasks,
+                    process="hierarchical",
+                    manager_llm=config.get('manager_llm') or model_name,
+                    memory=memory
+                )
+            else:
+                team = AgentTeam(
+                    agents=list(agents.values()),
+                    tasks=tasks,
+                    memory=memory
+                )
+            
+            response = team.start()
+            result = f"### PraisonAI Output ###\n{response}" if response else "### PraisonAI Output ###\nTask completed."
+            
+            # AgentOps integration if available
+            if is_available("agentops"):
+                import agentops
+                try:
+                    agentops.end_session("Success")
+                except Exception as e:  # noqa: BLE001 -- agentops errors must not crash the caller
+                    logger.warning(f"agentops.end_session failed: {e}")
+            
+            logger.info("PraisonAI execution completed")
+            return result
+        finally:
+            # Cleanup InteractiveRuntime if it was started
+            if interactive_runtime and interactive_loop:
+                try:
+                    logger.info("Stopping InteractiveRuntime")
+                    interactive_loop.run_until_complete(interactive_runtime.stop())
+                except Exception as e:
+                    logger.error(f"Error stopping InteractiveRuntime: {e}")
+                finally:
+                    interactive_loop.close()
     
