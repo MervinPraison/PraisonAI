@@ -133,11 +133,20 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                     description_filled = self._format_template(task_details['description'], topic=topic)
                     expected_output_filled = self._format_template(task_details['expected_output'], topic=topic)
 
+                    # Resolve task tools from tools_dict
+                    task_tools = []
+                    for tool_name in task_details.get('tools', []):
+                        if isinstance(tool_name, str) and tools_dict and tool_name in tools_dict:
+                            task_tools.append(tools_dict[tool_name])
+                        elif callable(tool_name):
+                            # Already a callable tool object
+                            task_tools.append(tool_name)
+
                     task = Task(
                         description=description_filled,
                         expected_output=expected_output_filled,
                         agent=agent,
-                        tools=task_details.get('tools', []),
+                        tools=task_tools,
                         async_execution=task_details.get('async_execution', False),
                         context=[],
                         config=task_details.get('config', {}),
@@ -157,7 +166,7 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                     tasks_dict[task_name] = task
 
             # Set up task contexts
-            for role, details in config['roles'].items():
+            for details in config['roles'].values():
                 for task_name, task_details in details.get('tasks', {}).items():
                     task = tasks_dict[task_name]
                     context_tasks = [tasks_dict[ctx] for ctx in task_details.get('context', []) 

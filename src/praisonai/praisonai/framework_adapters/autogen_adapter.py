@@ -411,13 +411,13 @@ class AG2Adapter(BaseFrameworkAdapter):
                 if func is None:
                     continue
 
-                def make_tool_fn(f):
+                def make_tool_fn(f, name):
                     def tool_fn(**kwargs):
                         return f(**kwargs) if callable(f) else str(f)
-                    tool_fn.__name__ = tool_name
+                    tool_fn.__name__ = name
                     return tool_fn
 
-                wrapped = make_tool_fn(func)
+                wrapped = make_tool_fn(func, tool_name)
                 assistant.register_for_llm(description=f"Tool: {tool_name}")(wrapped)
                 user_proxy.register_for_execution()(wrapped)
 
