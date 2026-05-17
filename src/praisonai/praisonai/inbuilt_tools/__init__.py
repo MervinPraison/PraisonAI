@@ -2,8 +2,9 @@
 # This avoids the ~3200ms crewai import at CLI startup
 import importlib.util
 
-CREWAI_AVAILABLE = importlib.util.find_spec("crewai") is not None
-AUTOGEN_AVAILABLE = importlib.util.find_spec("autogen") is not None
+from .._framework_availability import is_available
+CREWAI_AVAILABLE = is_available("crewai")
+AUTOGEN_AVAILABLE = is_available("autogen")
 PRAISONAI_TOOLS_AVAILABLE = False
 
 # Guard against recursive imports

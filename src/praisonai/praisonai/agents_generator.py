@@ -23,12 +23,8 @@ from .framework_adapters.registry import FrameworkAdapterRegistry, get_default_r
 from .tool_registry import ToolRegistry
 
 # Import availability flags
-try:
-    from .inbuilt_tools import PRAISONAI_TOOLS_AVAILABLE, CREWAI_AVAILABLE, AUTOGEN_AVAILABLE
-except ImportError:
-    PRAISONAI_TOOLS_AVAILABLE = False
-    CREWAI_AVAILABLE = False
-    AUTOGEN_AVAILABLE = False
+# Compatibility imports - now handled by centralized detection
+# (inbuilt_tools still defines these but they're read-only compatibility)
 
 # Import BaseTool for tools handling
 BaseTool = None
@@ -40,17 +36,14 @@ except ImportError:
     except ImportError:
         pass
 
-# Check for additional framework availability
-AG2_AVAILABLE = False
-PRAISONAI_AVAILABLE = False
-AGENTOPS_AVAILABLE = False
-try:
-    import importlib.util
-    AG2_AVAILABLE = importlib.util.find_spec("ag2") is not None
-    PRAISONAI_AVAILABLE = importlib.util.find_spec("praisonaiagents") is not None
-    AGENTOPS_AVAILABLE = importlib.util.find_spec("agentops") is not None
-except ImportError:
-    pass
+# Check for additional framework availability using centralized detection
+from ._framework_availability import is_available
+PRAISONAI_TOOLS_AVAILABLE = is_available("praisonai_tools")
+CREWAI_AVAILABLE          = is_available("crewai")
+AUTOGEN_AVAILABLE         = is_available("autogen")
+AG2_AVAILABLE             = is_available("ag2")
+PRAISONAI_AVAILABLE       = is_available("praisonaiagents")
+AGENTOPS_AVAILABLE        = is_available("agentops")
 
 # Framework adapter registry - now uses proper registry pattern
 # This replaces the hardcoded FRAMEWORK_ADAPTERS dict

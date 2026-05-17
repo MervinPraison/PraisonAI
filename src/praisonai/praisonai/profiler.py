@@ -63,6 +63,7 @@ import cProfile
 import pstats
 import io
 import statistics
+from collections import OrderedDict
 from collections import deque
 from contextvars import ContextVar
 from dataclasses import dataclass, field, asdict
@@ -266,7 +267,8 @@ class _ProfilerImpl:
         self._memory = deque(maxlen=max_records)
         self._enabled: bool = False
         self._flow_step: int = 0
-        self._files_accessed: Dict[str, int] = {}
+        self._files_accessed: "OrderedDict[str, int]" = OrderedDict()
+        self._files_accessed_max = max_records   # reuse the existing bound
         self._line_profile_data: Dict[str, Any] = {}
         self._cprofile_stats = deque(maxlen=max_records)
         self._lock = threading.Lock()
@@ -312,9 +314,15 @@ class _ProfilerImpl:
                 line=line
             ))
             
-            # Track file access
+            # Track file access with LRU eviction
             if file:
-                self._files_accessed[file] = self._files_accessed.get(file, 0) + 1
+                if file in self._files_accessed:
+                    self._files_accessed[file] += 1
+                    self._files_accessed.move_to_end(file)
+                else:
+                    self._files_accessed[file] = 1
+                    if len(self._files_accessed) > self._files_accessed_max:
+                        self._files_accessed.popitem(last=False)
     
     def record_import(self, module: str, duration_ms: float, parent: str = "") -> None:
         """Record an import timing."""

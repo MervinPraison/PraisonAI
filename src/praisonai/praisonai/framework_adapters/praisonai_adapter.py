@@ -20,11 +20,8 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
     
     def is_available(self) -> bool:
         """Check if PraisonAI agents is available for import."""
-        try:
-            from praisonaiagents import Agent, Task, AgentTeam  # noqa: F401
-            return True
-        except ImportError:
-            return False
+        from .._framework_availability import is_available
+        return is_available("praisonaiagents")
     
     def run(
         self,
@@ -56,17 +53,72 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         
         # Import PraisonAI components only when needed
         from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, AgentTeam
+        from .._framework_availability import is_available
+        import os
         
         logger.info("Starting PraisonAI execution...")
         
-        # Basic implementation - create agents and tasks from config
         agents = {}
         tasks = []
+        tasks_dict = {}
+        
+        # Use tool resolver instance for local tools.py integration if available
+        tools_list = []
+        try:
+            # Access the tool_resolver if it exists (from the dead code pattern)
+            if hasattr(cli_config, 'tool_resolver') and cli_config.tool_resolver:
+                tools_list = cli_config.tool_resolver.get_local_callables()
+                logger.debug(f"Loaded tools from tools.py: {tools_list}")
+        except Exception as e:
+            logger.debug(f"No tool_resolver available: {e}")
         
         # Get model from llm_config or environment
         model_name = "gpt-4o-mini"
         if llm_config and llm_config[0].get('model'):
             model_name = llm_config[0]['model']
+        
+        # Initialize InteractiveRuntime for ACP/LSP if enabled globally
+        global_config = config.get('config', {})
+        acp_enabled = global_config.get('acp', False)
+        lsp_enabled = global_config.get('lsp', False)
+        interactive_runtime = None
+        interactive_loop = None
+        
+        if acp_enabled or lsp_enabled:
+            try:
+                import asyncio
+                from praisonai.cli.features.interactive_runtime import InteractiveRuntime, RuntimeConfig
+                from praisonai.cli.features.agent_tools import create_agent_centric_tools
+                
+                # Use scoped event loop instead of process-global mutations
+                runtime_config = RuntimeConfig(
+                    workspace=os.getcwd(),
+                    acp_enabled=acp_enabled,
+                    lsp_enabled=lsp_enabled,
+                    approval_mode=os.environ.get("PRAISONAI_APPROVAL_MODE", "prompt")
+                )
+                interactive_runtime = InteractiveRuntime(runtime_config)
+                logger.info(f"Starting InteractiveRuntime (ACP: {acp_enabled}, LSP: {lsp_enabled})")
+                
+                # Create a scoped event loop instead of modifying process globals
+                interactive_loop = asyncio.new_event_loop()
+                
+                # Start the runtime but keep it alive for agent execution
+                interactive_loop.run_until_complete(interactive_runtime.start())
+                
+                centric_tools = create_agent_centric_tools(interactive_runtime)
+                logger.info(f"Loaded {len(centric_tools)} InteractiveRuntime tools")
+                
+                # Merge with tools_dict
+                if tools_dict:
+                    tools_dict.update(centric_tools)
+                else:
+                    tools_dict = centric_tools
+                
+            except ImportError as e:
+                logger.warning(f"InteractiveRuntime not available: {e}")
+            except Exception as e:
+                logger.error(f"Error setting up InteractiveRuntime: {e}")
         
         # Create agents from roles
         for role, details in config.get('roles', {}).items():
@@ -150,6 +202,24 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         
         response = team.start()
         result = f"### PraisonAI Output ###\n{response}" if response else "### PraisonAI Output ###\nTask completed."
+        
+        # Cleanup InteractiveRuntime if it was started
+        if interactive_runtime and interactive_loop:
+            try:
+                logger.info("Stopping InteractiveRuntime")
+                interactive_loop.run_until_complete(interactive_runtime.stop())
+            except Exception as e:
+                logger.error(f"Error stopping InteractiveRuntime: {e}")
+            finally:
+                interactive_loop.close()
+        
+        # AgentOps integration if available
+        if is_available("agentops"):
+            import agentops
+            try:
+                agentops.end_session("Success")
+            except Exception as e:  # noqa: BLE001 -- agentops errors must not crash the caller
+                logger.warning(f"agentops.end_session failed: {e}")
         
         logger.info("PraisonAI execution completed")
         return result

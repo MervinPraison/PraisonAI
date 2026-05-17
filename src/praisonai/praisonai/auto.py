@@ -66,10 +66,40 @@ _openai_clients_lock = threading.Lock()
 
 
 # --- CrewAI lazy loading ---
+# Availability checks now delegated to centralized module
+from ._framework_availability import is_available
+
 def _check_crewai_available() -> bool:
     """Check if crewai is available (cached, thread-safe)."""
-    result = _load_optional("crewai_check", lambda: __import__("crewai"))
-    return result is not None
+    return is_available("crewai")
+
+def _check_autogen_available() -> bool:
+    """Check if autogen v0.2 is available (cached, thread-safe)."""
+    return is_available("autogen")
+
+def _check_autogen_v4_available() -> bool:
+    """Check if autogen v0.4 is available (cached, thread-safe)."""
+    return is_available("autogen_v4")
+
+def _check_ag2_available() -> bool:
+    """Check if AG2 (community fork of AutoGen) is available (cached, thread-safe)."""
+    return is_available("ag2")
+
+def _check_praisonai_available() -> bool:
+    """Check if praisonaiagents is available (cached, thread-safe)."""
+    return is_available("praisonaiagents")
+
+def _check_praisonai_tools_available() -> bool:
+    """Check if praisonai_tools is available (cached, thread-safe)."""
+    return is_available("praisonai_tools")
+
+def _check_litellm_available() -> bool:
+    """Check if litellm is available (cached, thread-safe)."""
+    return is_available("litellm")
+
+def _check_openai_available() -> bool:
+    """Check if openai is available (cached, thread-safe)."""
+    return is_available("openai")
 
 
 def _get_crewai():
@@ -79,31 +109,6 @@ def _get_crewai():
         __import__("crewai", fromlist=["Agent", "Task", "Crew"]).Task,
         __import__("crewai", fromlist=["Agent", "Task", "Crew"]).Crew,
     ))
-
-
-# --- AutoGen lazy loading ---
-def _check_autogen_available() -> bool:
-    """Check if autogen v0.2 is available (cached, thread-safe)."""
-    result = _load_optional("autogen_check", lambda: __import__("autogen"))
-    return result is not None
-
-
-def _check_autogen_v4_available() -> bool:
-    """Check if autogen v0.4 is available (cached, thread-safe)."""
-    result = _load_optional("autogen_v4_check", lambda: __import__("autogen_agentchat.agents", fromlist=["AssistantAgent"]))
-    return result is not None
-
-
-def _check_ag2_available() -> bool:
-    """Check if AG2 (community fork of AutoGen) is available (cached, thread-safe)."""
-    def ag2_loader():
-        import importlib.metadata
-        importlib.metadata.distribution('ag2')
-        from autogen import LLMConfig  # AG2-exclusive class
-        return True
-    
-    result = _load_optional("ag2_check", ag2_loader)
-    return result is not None
 
 
 def _get_autogen():
@@ -138,12 +143,6 @@ def _get_praisonai():
 
 
 # --- PraisonAI Tools lazy loading ---
-def _check_praisonai_tools_available() -> bool:
-    """Check if praisonai_tools is available (cached, thread-safe)."""
-    result = _load_optional("praisonai_tools_check", lambda: __import__("praisonai_tools"))
-    return result is not None
-
-
 def _get_praisonai_tools():
     """Lazy load praisonai_tools classes (thread-safe)."""
     def tools_loader():
@@ -193,10 +192,6 @@ def _get_litellm():
 
 
 # --- OpenAI lazy loading ---
-def _check_openai_available() -> bool:
-    """Check if openai is available (cached)."""
-    result = _load_optional("openai_check", lambda: __import__("openai"))
-    return result is not None
 
 
 def _get_openai_client(api_key: str = None, base_url: str = None):
