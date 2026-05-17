@@ -29,9 +29,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-        with:
-          persist-credentials: false
-        with:
           fetch-depth: 0
           
       - name: Generate GitHub App Token

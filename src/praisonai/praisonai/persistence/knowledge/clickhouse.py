@@ -198,7 +198,8 @@ class ClickHouseKnowledgeStore(KnowledgeStore):
         """Get documents by IDs."""
         table = self._table_name(collection)
         
-        id_list = ", ".join([f"'{i}'" for i in ids])
+        # Escape single quotes to prevent SQL injection
+        id_list = ", ".join([f"'{i.replace(chr(39), chr(39)+chr(39))}'" for i in ids])
         result = self._client.query(f"""
             SELECT id, content, content_hash, created_at, embedding
             FROM {table} WHERE id IN ({id_list})
@@ -228,7 +229,8 @@ class ClickHouseKnowledgeStore(KnowledgeStore):
         table = self._table_name(collection)
         
         if ids:
-            id_list = ", ".join([f"'{i}'" for i in ids])
+            # Escape single quotes to prevent SQL injection
+            id_list = ", ".join([f"'{i.replace(chr(39), chr(39)+chr(39))}'" for i in ids])
             self._client.command(f"ALTER TABLE {table} DELETE WHERE id IN ({id_list})")
             return len(ids)
         return 0

@@ -180,7 +180,7 @@ install_python_macos() {
                 /bin/bash "$HOMEBREW_INSTALLER"
                 rm -f "$HOMEBREW_INSTALLER"
             else
-                error "Failed to download Homebrew installer"
+                log_error "Failed to download Homebrew installer"
                 exit 1
             fi
             

@@ -47,9 +47,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-        with:
-          persist-credentials: false
-        with:
           ref: ${{ steps.dest.outputs.ref }}
           fetch-depth: 0
           
