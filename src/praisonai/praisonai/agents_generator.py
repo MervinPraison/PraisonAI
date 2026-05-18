@@ -1190,11 +1190,11 @@ class AgentsGenerator:
                 interactive_runtime = InteractiveRuntime(runtime_config)
                 self.logger.info(f"Starting InteractiveRuntime (ACP: {acp_enabled}, LSP: {lsp_enabled})")
                 
-                # Create a scoped event loop instead of modifying process globals
-                interactive_loop = asyncio.new_event_loop()
-                
-                # Start the runtime but keep it alive for agent execution
-                interactive_loop.run_until_complete(interactive_runtime.start())
+                # Runs on the persistent background loop; safe from sync and async callers.
+                # run_sync raises RuntimeError early if called from inside a running loop
+                # so the bug is loud instead of a deadlock.
+                from ._async_bridge import run_sync
+                run_sync(interactive_runtime.start())
                 
                 centric_tools = create_agent_centric_tools(interactive_runtime)
                 self.logger.info(f"Loaded {len(centric_tools)} InteractiveRuntime tools")
@@ -1203,13 +1203,9 @@ class AgentsGenerator:
             except ImportError as e:
                 self.logger.warning(f"Failed to load InteractiveRuntime components: {e}")
                 interactive_runtime = None
-                interactive_loop = None
             except Exception as e:
                 self.logger.error(f"Error starting InteractiveRuntime: {e}")
-                if 'interactive_loop' in locals() and interactive_loop is not None:
-                    interactive_loop.close()
                 interactive_runtime = None
-                interactive_loop = None
 
         # Create agents from config
         for role, details in config['roles'].items():
@@ -1443,14 +1439,13 @@ class AgentsGenerator:
             self.logger.debug(f"Result: {response}")
             result = response if response else ""
         finally:
-            if interactive_runtime and interactive_loop:
+            if interactive_runtime:
                 try:
                     self.logger.info("Stopping InteractiveRuntime...")
-                    interactive_loop.run_until_complete(interactive_runtime.stop())
+                    from ._async_bridge import run_sync
+                    run_sync(interactive_runtime.stop())
                 except Exception as e:
                     self.logger.error(f"Error stopping InteractiveRuntime: {e}")
-                finally:
-                    interactive_loop.close()
         
         if AGENTOPS_AVAILABLE:
             import agentops
