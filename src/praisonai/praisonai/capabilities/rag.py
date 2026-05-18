@@ -103,7 +103,7 @@ def rag_query(
         **kwargs
     )
     
-    answer = response.choices[0].message.content if response.choices and response.choices[0].message is not None else ""
+    answer = (response.choices[0].message.content if response.choices and response.choices[0].message is not None and response.choices[0].message.content is not None else "") or ""
     
     usage = None
     if hasattr(response, 'usage') and response.usage:
@@ -188,7 +188,7 @@ async def arag_query(
         **kwargs
     )
     
-    answer = response.choices[0].message.content if response.choices and response.choices[0].message is not None else ""
+    answer = (response.choices[0].message.content if response.choices and response.choices[0].message is not None and response.choices[0].message.content is not None else "") or ""
     
     usage = None
     if hasattr(response, 'usage') and response.usage:

@@ -86,8 +86,16 @@ Only respond with the JSON, no other text."""
         )
         
         import json
-        if not response.choices or response.choices[0].message is None:
-            raise ValueError("LLM returned empty or filtered response")
+        if not response.choices or response.choices[0].message is None or response.choices[0].message.content is None:
+            # Empty/filtered response should fail the guardrail, not raise
+            return GuardrailResult(
+                passed=False,
+                violations=["LLM returned empty or filtered response"],
+                modified_content=None,
+                original_content=content,
+                guardrail_name=guardrail_name,
+                metadata=metadata or {},
+            )
         result_text = response.choices[0].message.content
         result_data = json.loads(result_text)
         
@@ -162,8 +170,16 @@ Only respond with the JSON, no other text."""
         )
         
         import json
-        if not response.choices or response.choices[0].message is None:
-            raise ValueError("LLM returned empty or filtered response")
+        if not response.choices or response.choices[0].message is None or response.choices[0].message.content is None:
+            # Empty/filtered response should fail the guardrail, not raise
+            return GuardrailResult(
+                passed=False,
+                violations=["LLM returned empty or filtered response"],
+                modified_content=None,
+                original_content=content,
+                guardrail_name=guardrail_name,
+                metadata=metadata or {},
+            )
         result_text = response.choices[0].message.content
         result_data = json.loads(result_text)
         

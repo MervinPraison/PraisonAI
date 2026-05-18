@@ -164,7 +164,7 @@ Follow best practices and coding standards."""
             messages=messages,
             **{k: v for k, v in kwargs.items() if k != "model"}
         )
-        if not response.choices or response.choices[0].message is None:
+        if not response.choices or response.choices[0].message is None or response.choices[0].message.content is None:
             raise ValueError("LLM returned empty or filtered response")
         code = response.choices[0].message.content
         self._log("Code generated successfully", "green")
@@ -205,7 +205,7 @@ Follow best practices and coding standards."""
             messages=messages,
             **{k: v for k, v in kwargs.items() if k != "model"}
         )
-        if not response.choices or response.choices[0].message is None:
+        if not response.choices or response.choices[0].message is None or response.choices[0].message.content is None:
             raise ValueError("LLM returned empty or filtered response")
         code = response.choices[0].message.content
         self._log("Code generated successfully", "green")
@@ -367,7 +367,7 @@ Provide clear, actionable feedback."""
             **{k: v for k, v in kwargs.items() if k != "model"}
         )
         
-        if not response.choices or response.choices[0].message is None:
+        if not response.choices or response.choices[0].message is None or response.choices[0].message.content is None:
             raise ValueError("LLM returned empty or filtered response")
         review = response.choices[0].message.content
         self._log("Review completed", "green")
@@ -409,7 +409,7 @@ Include:
             **{k: v for k, v in kwargs.items() if k != "model"}
         )
         
-        if not response.choices or response.choices[0].message is None:
+        if not response.choices or response.choices[0].message is None or response.choices[0].message.content is None:
             raise ValueError("LLM returned empty or filtered response")
         explanation = response.choices[0].message.content
         self._log("Explanation completed", "green")
@@ -457,7 +457,7 @@ Only output the refactored code."""
             **{k: v for k, v in kwargs.items() if k != "model"}
         )
         
-        if not response.choices or response.choices[0].message is None:
+        if not response.choices or response.choices[0].message is None or response.choices[0].message.content is None:
             raise ValueError("LLM returned empty or filtered response")
         refactored = response.choices[0].message.content
         self._log("Refactoring completed", "green")
@@ -503,7 +503,7 @@ Ensure the fix:
             **{k: v for k, v in kwargs.items() if k != "model"}
         )
         
-        if not response.choices or response.choices[0].message is None:
+        if not response.choices or response.choices[0].message is None or response.choices[0].message.content is None:
             raise ValueError("LLM returned empty or filtered response")
         fixed = response.choices[0].message.content
         self._log("Fix completed", "green")

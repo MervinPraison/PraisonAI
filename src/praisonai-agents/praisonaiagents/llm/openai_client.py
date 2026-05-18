@@ -907,9 +907,9 @@ class OpenAIClient:
                     final_response = self._responses_to_chat_completion(raw)
                     
                     # Display the response text if display_fn provided
-                    if not final_response.choices or final_response.choices[0].message is None:
+                    if not final_response.choices or final_response.choices[0].message is None or final_response.choices[0].message.content is None:
                         raise ValueError("LLM returned empty or filtered response")
-                    response_text = final_response.choices[0].message.content or ""
+                    response_text = final_response.choices[0].message.content
                     if display_fn and response_text:
                         from rich.markdown import Markdown
                         console.print(Markdown(response_text))
@@ -933,6 +933,9 @@ class OpenAIClient:
                     
                     return final_response
                 except Exception as e:
+                    # Don't fall back for empty/filtered response errors - they should propagate
+                    if "LLM returned empty or filtered response" in str(e):
+                        raise e
                     self.logger.warning(f"Responses API streaming failed, falling back: {e}")
                     # Fall through to Chat Completions streaming
             
@@ -1169,9 +1172,9 @@ class OpenAIClient:
                     final_response = self._responses_to_chat_completion(raw)
                     
                     # Display the response text if display_fn provided
-                    if not final_response.choices or final_response.choices[0].message is None:
+                    if not final_response.choices or final_response.choices[0].message is None or final_response.choices[0].message.content is None:
                         raise ValueError("LLM returned empty or filtered response")
-                    response_text = final_response.choices[0].message.content or ""
+                    response_text = final_response.choices[0].message.content
                     if display_fn and response_text:
                         from rich.markdown import Markdown
                         console.print(Markdown(response_text))
@@ -1200,6 +1203,9 @@ class OpenAIClient:
                     
                     return final_response
                 except Exception as e:
+                    # Don't fall back for empty/filtered response errors - they should propagate
+                    if "LLM returned empty or filtered response" in str(e):
+                        raise e
                     self.logger.warning(f"Responses API async streaming failed, falling back: {e}")
                     # Fall through to Chat Completions streaming
             
