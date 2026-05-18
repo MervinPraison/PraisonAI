@@ -462,11 +462,13 @@ class BaseAutoGenerator:
 
     def close(self):
         """Close the OpenAI client if it exists."""
-        if self._openai_client is not None:
-            try:
-                self._openai_client.close()
-            finally:
-                self._openai_client = None
+        if not hasattr(self, '_openai_client_lock'):
+            return  # Object was never fully initialized
+        with self._openai_client_lock:
+            client = getattr(self, '_openai_client', None)
+            self._openai_client = None
+        if client is not None:
+            client.close()
 
     def __del__(self):
         """Best-effort cleanup, but the canonical path is explicit close()."""

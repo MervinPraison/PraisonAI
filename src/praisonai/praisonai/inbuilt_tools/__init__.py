@@ -4,12 +4,11 @@ from praisonai.auto import _load_optional
 
 CREWAI_AVAILABLE = importlib.util.find_spec("crewai") is not None
 AUTOGEN_AVAILABLE = importlib.util.find_spec("autogen") is not None
+PRAISONAI_TOOLS_PACKAGE_AVAILABLE = importlib.util.find_spec("praisonai_tools") is not None
 
 
 def _load_autogen_tools():
-    if not (CREWAI_AVAILABLE or AUTOGEN_AVAILABLE):
-        return None
-    # importlib.import_module avoids the `from . import` recursion footgun.
+    # Load the autogen_tools module unconditionally since it can work with just praisonai_tools
     import importlib
     return importlib.import_module(__name__ + ".autogen_tools")
 
@@ -21,7 +20,7 @@ def _get_autogen_tools():
 
 def _praisonai_tools_available() -> bool:
     """Read-only accessor — never mutate this from inside a function."""
-    return _get_autogen_tools() is not None
+    return PRAISONAI_TOOLS_PACKAGE_AVAILABLE or _get_autogen_tools() is not None
 
 
 # Backward-compat: keep the constant, computed lazily on attribute access.
