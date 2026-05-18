@@ -15,9 +15,8 @@ from typing import Any, Dict, List, Optional, Type, TypeVar
 import os
 import json
 import yaml
-from rich import print
 import threading
-from collections import OrderedDict
+from rich import print
 from praisonai._logging import get_logger
 
 # Type variable for Pydantic models
@@ -59,10 +58,6 @@ def _load_optional(key: str, loader):
         return _optional_cache[key]
 
 
-# Bounded LRU cache for OpenAI clients (one per (api_key, base_url) tuple)
-_OPENAI_CLIENT_CACHE_MAX = 8
-_openai_clients: "OrderedDict[tuple, object]" = OrderedDict()
-_openai_clients_lock = threading.Lock()
 
 
 # --- CrewAI lazy loading ---
@@ -199,38 +194,6 @@ def _check_openai_available() -> bool:
     return result is not None
 
 
-def _get_openai_client(api_key: str = None, base_url: str = None):
-    """Lazy load OpenAI client with bounded LRU cache (thread-safe, multi-tenant).
-
-    Multi-tenant safe: each (api_key, base_url) tuple gets its own cached client.
-    Bounded by _OPENAI_CLIENT_CACHE_MAX with proper LRU eviction.
-    """
-    key = (api_key or os.environ.get("OPENAI_API_KEY"), base_url)
-
-    with _openai_clients_lock:
-        # Check if client exists and update LRU position
-        client = _openai_clients.get(key)
-        if client is not None:
-            _openai_clients.move_to_end(key)
-            return client
-
-        # Create new client
-        try:
-            from openai import OpenAI
-        except ImportError as e:
-            raise ImportError("Install with: pip install openai") from e
-        client = OpenAI(api_key=key[0], base_url=key[1])
-        _openai_clients[key] = client
-
-        # Bound the cache; close the LRU victim
-        if len(_openai_clients) > _OPENAI_CLIENT_CACHE_MAX:
-            _, victim = _openai_clients.popitem(last=False)
-            try:
-                victim.close()
-            except Exception:
-                pass  # Best-effort cleanup
-
-        return client
 
 
 # Use namespaced logger; root logger is configured only by the CLI
@@ -478,6 +441,38 @@ class BaseAutoGenerator:
                 'api_key': ep.api_key
             }
         ]
+        self._openai_client = None  # lazy, per-instance
+        self._openai_client_lock = threading.Lock()
+        
+    def _get_openai_client(self):
+        """Get or create the OpenAI client for this instance."""
+        if self._openai_client is None:
+            with self._openai_client_lock:
+                if self._openai_client is None:
+                    try:
+                        from openai import OpenAI
+                    except ImportError as e:
+                        raise ImportError("Install with: pip install openai") from e
+                    cfg = self.config_list[0]
+                    self._openai_client = OpenAI(
+                        api_key=cfg.get("api_key") or os.environ.get("OPENAI_API_KEY"),
+                        base_url=cfg.get("base_url"),
+                    )
+        return self._openai_client
+
+    def close(self):
+        """Close the OpenAI client if it exists."""
+        if not hasattr(self, '_openai_client_lock'):
+            return  # Object was never fully initialized
+        with self._openai_client_lock:
+            client = getattr(self, '_openai_client', None)
+            self._openai_client = None
+        if client is not None:
+            client.close()
+
+    def __del__(self):
+        """Best-effort cleanup, but the canonical path is explicit close()."""
+        self.close()
     
     def _structured_completion(self, response_model: Type[T], messages: List[Dict], **kwargs) -> T:
         """
@@ -514,10 +509,7 @@ class BaseAutoGenerator:
         
         # Fallback to OpenAI SDK (uses beta.chat.completions.parse)
         if _check_openai_available():
-            client = _get_openai_client(
-                api_key=self.config_list[0].get('api_key'),
-                base_url=self.config_list[0].get('base_url')
-            )
+            client = self._get_openai_client()
             response = client.beta.chat.completions.parse(
                 model=model_name,
                 messages=messages,

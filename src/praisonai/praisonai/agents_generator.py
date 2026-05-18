@@ -1172,9 +1172,9 @@ class AgentsGenerator:
         acp_enabled = global_config.get('acp', False)
         lsp_enabled = global_config.get('lsp', False)
         interactive_runtime = None
-        interactive_loop = None
         
         if acp_enabled or lsp_enabled:
+            runtime_started = False
             try:
                 import asyncio
                 from praisonai.cli.features.interactive_runtime import InteractiveRuntime, RuntimeConfig
@@ -1190,11 +1190,12 @@ class AgentsGenerator:
                 interactive_runtime = InteractiveRuntime(runtime_config)
                 self.logger.info(f"Starting InteractiveRuntime (ACP: {acp_enabled}, LSP: {lsp_enabled})")
                 
-                # Create a scoped event loop instead of modifying process globals
-                interactive_loop = asyncio.new_event_loop()
-                
-                # Start the runtime but keep it alive for agent execution
-                interactive_loop.run_until_complete(interactive_runtime.start())
+                # Runs on the persistent background loop; safe from sync and async callers.
+                # run_sync raises RuntimeError early if called from inside a running loop
+                # so the bug is loud instead of a deadlock.
+                from ._async_bridge import run_sync
+                run_sync(interactive_runtime.start())
+                runtime_started = True
                 
                 centric_tools = create_agent_centric_tools(interactive_runtime)
                 self.logger.info(f"Loaded {len(centric_tools)} InteractiveRuntime tools")
@@ -1203,13 +1204,20 @@ class AgentsGenerator:
             except ImportError as e:
                 self.logger.warning(f"Failed to load InteractiveRuntime components: {e}")
                 interactive_runtime = None
-                interactive_loop = None
+            except RuntimeError:
+                # Don't swallow RuntimeError from run_sync - preserve fail-fast semantics
+                raise
             except Exception as e:
+                if runtime_started and interactive_runtime is not None:
+                    try:
+                        from ._async_bridge import run_sync
+                        run_sync(interactive_runtime.stop())
+                    except Exception as stop_error:
+                        self.logger.error(
+                            f"Error stopping partially started InteractiveRuntime: {stop_error}"
+                        )
                 self.logger.error(f"Error starting InteractiveRuntime: {e}")
-                if 'interactive_loop' in locals() and interactive_loop is not None:
-                    interactive_loop.close()
                 interactive_runtime = None
-                interactive_loop = None
 
         # Create agents from config
         for role, details in config['roles'].items():
@@ -1443,14 +1451,13 @@ class AgentsGenerator:
             self.logger.debug(f"Result: {response}")
             result = response if response else ""
         finally:
-            if interactive_runtime and interactive_loop:
+            if interactive_runtime:
                 try:
                     self.logger.info("Stopping InteractiveRuntime...")
-                    interactive_loop.run_until_complete(interactive_runtime.stop())
+                    from ._async_bridge import run_sync
+                    run_sync(interactive_runtime.stop())
                 except Exception as e:
                     self.logger.error(f"Error stopping InteractiveRuntime: {e}")
-                finally:
-                    interactive_loop.close()
         
         if AGENTOPS_AVAILABLE:
             import agentops

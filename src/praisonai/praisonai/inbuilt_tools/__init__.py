@@ -1,49 +1,33 @@
-# Lazy availability checks using find_spec (no actual import)
-# This avoids the ~3200ms crewai import at CLI startup
+"""Lazy access to autogen_tools, with `find_spec` startup probes for crewai/autogen."""
 import importlib.util
+from praisonai.auto import _load_optional
 
 CREWAI_AVAILABLE = importlib.util.find_spec("crewai") is not None
 AUTOGEN_AVAILABLE = importlib.util.find_spec("autogen") is not None
-PRAISONAI_TOOLS_AVAILABLE = False
+PRAISONAI_TOOLS_PACKAGE_AVAILABLE = importlib.util.find_spec("praisonai_tools") is not None
 
-# Guard against recursive imports
-_importing_autogen_tools = False
-_autogen_tools_module = None
 
-# Lazy import helper - only imports when actually needed
+def _load_autogen_tools():
+    # Load the autogen_tools module unconditionally since it can work with just praisonai_tools
+    import importlib
+    return importlib.import_module(__name__ + ".autogen_tools")
+
+
 def _get_autogen_tools():
-    """Lazy import autogen_tools only when needed."""
-    global PRAISONAI_TOOLS_AVAILABLE, _importing_autogen_tools, _autogen_tools_module
-    
-    # Return cached module if already imported
-    if _autogen_tools_module is not None:
-        return _autogen_tools_module
-    
-    # Prevent recursive import
-    if _importing_autogen_tools:
-        return None
-    
-    if CREWAI_AVAILABLE or AUTOGEN_AVAILABLE:
-        try:
-            _importing_autogen_tools = True
-            from . import autogen_tools
-            _autogen_tools_module = autogen_tools
-            PRAISONAI_TOOLS_AVAILABLE = True
-            return autogen_tools
-        except ImportError:
-            pass
-        finally:
-            _importing_autogen_tools = False
-    return None
+    """Thread-safe, single-shot lazy import. Negative result is cached too."""
+    return _load_optional("inbuilt_autogen_tools", _load_autogen_tools)
 
-# For backward compatibility, provide __getattr__ for lazy access
+
+def _praisonai_tools_available() -> bool:
+    """Read-only accessor — never mutate this from inside a function."""
+    return PRAISONAI_TOOLS_PACKAGE_AVAILABLE or _get_autogen_tools() is not None
+
+
+# Backward-compat: keep the constant, computed lazily on attribute access.
 def __getattr__(name):
-    """Lazy load autogen_tools exports on demand."""
-    # Avoid recursion during import
-    if _importing_autogen_tools:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    
+    if name == "PRAISONAI_TOOLS_AVAILABLE":
+        return _praisonai_tools_available()
     tools_module = _get_autogen_tools()
-    if tools_module and hasattr(tools_module, name):
+    if tools_module is not None and hasattr(tools_module, name):
         return getattr(tools_module, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
