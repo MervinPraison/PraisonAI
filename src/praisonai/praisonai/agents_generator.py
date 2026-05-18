@@ -1172,7 +1172,6 @@ class AgentsGenerator:
         acp_enabled = global_config.get('acp', False)
         lsp_enabled = global_config.get('lsp', False)
         interactive_runtime = None
-        interactive_loop = None
         
         if acp_enabled or lsp_enabled:
             try:

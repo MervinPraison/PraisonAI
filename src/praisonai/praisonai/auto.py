@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Type, TypeVar
 import os
 import json
 import yaml
+import threading
 from rich import print
 from praisonai._logging import get_logger
 
@@ -441,19 +442,22 @@ class BaseAutoGenerator:
             }
         ]
         self._openai_client = None  # lazy, per-instance
+        self._openai_client_lock = threading.Lock()
         
     def _get_openai_client(self):
         """Get or create the OpenAI client for this instance."""
         if self._openai_client is None:
-            try:
-                from openai import OpenAI
-            except ImportError as e:
-                raise ImportError("Install with: pip install openai") from e
-            cfg = self.config_list[0]
-            self._openai_client = OpenAI(
-                api_key=cfg.get("api_key") or os.environ.get("OPENAI_API_KEY"),
-                base_url=cfg.get("base_url"),
-            )
+            with self._openai_client_lock:
+                if self._openai_client is None:
+                    try:
+                        from openai import OpenAI
+                    except ImportError as e:
+                        raise ImportError("Install with: pip install openai") from e
+                    cfg = self.config_list[0]
+                    self._openai_client = OpenAI(
+                        api_key=cfg.get("api_key") or os.environ.get("OPENAI_API_KEY"),
+                        base_url=cfg.get("base_url"),
+                    )
         return self._openai_client
 
     def close(self):
