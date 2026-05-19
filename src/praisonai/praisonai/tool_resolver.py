@@ -421,6 +421,20 @@ class ToolResolver:
             return {}
 
 
+# Process-level lazy singleton for performance (matches profiler.py pattern)
+_default_resolver: Optional[ToolResolver] = None
+_default_resolver_lock = threading.Lock()
+
+def _get_default_resolver() -> ToolResolver:
+    """Process-default ToolResolver (double-checked lazy init)."""
+    global _default_resolver
+    if _default_resolver is None:
+        with _default_resolver_lock:
+            if _default_resolver is None:
+                _default_resolver = ToolResolver()
+    return _default_resolver
+
+
 # Convenience functions that construct resolver explicitly (no global singleton)
 def resolve_tool(name: str, resolver: Optional[ToolResolver] = None) -> Optional[Callable]:
     """Resolve a tool name to a callable.
@@ -432,7 +446,7 @@ def resolve_tool(name: str, resolver: Optional[ToolResolver] = None) -> Optional
     Returns:
         Callable if found, None otherwise
     """
-    return (resolver or ToolResolver()).resolve(name)
+    return (resolver or _get_default_resolver()).resolve(name)
 
 
 def resolve_tools(names: List[str], resolver: Optional[ToolResolver] = None) -> List[Callable]:
@@ -445,7 +459,7 @@ def resolve_tools(names: List[str], resolver: Optional[ToolResolver] = None) -> 
     Returns:
         List of resolved callables
     """
-    return (resolver or ToolResolver()).resolve_many(names)
+    return (resolver or _get_default_resolver()).resolve_many(names)
 
 
 def list_available_tools(resolver: Optional[ToolResolver] = None) -> Dict[str, str]:
@@ -457,7 +471,7 @@ def list_available_tools(resolver: Optional[ToolResolver] = None) -> Dict[str, s
     Returns:
         Dict mapping tool names to descriptions
     """
-    return (resolver or ToolResolver()).list_available()
+    return (resolver or _get_default_resolver()).list_available()
 
 
 def has_tool(name: str, resolver: Optional[ToolResolver] = None) -> bool:
@@ -470,7 +484,7 @@ def has_tool(name: str, resolver: Optional[ToolResolver] = None) -> bool:
     Returns:
         True if tool exists, False otherwise
     """
-    return (resolver or ToolResolver()).has_tool(name)
+    return (resolver or _get_default_resolver()).has_tool(name)
 
 
 def validate_yaml_tools(yaml_config: Dict[str, Any], resolver: Optional[ToolResolver] = None) -> List[str]:
@@ -483,4 +497,4 @@ def validate_yaml_tools(yaml_config: Dict[str, Any], resolver: Optional[ToolReso
     Returns:
         List of missing tool names
     """
-    return (resolver or ToolResolver()).validate_yaml_tools(yaml_config)
+    return (resolver or _get_default_resolver()).validate_yaml_tools(yaml_config)
