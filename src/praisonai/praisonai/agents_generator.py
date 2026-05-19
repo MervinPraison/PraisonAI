@@ -108,6 +108,7 @@ def _wrap_with_timeout(tool, timeout_seconds: float):
     import asyncio
     import functools
     import inspect
+    import json
     
     if inspect.iscoroutinefunction(tool):
         @functools.wraps(tool)
@@ -115,7 +116,6 @@ def _wrap_with_timeout(tool, timeout_seconds: float):
             try:
                 return await asyncio.wait_for(tool(*args, **kwargs), timeout=timeout_seconds)
             except asyncio.TimeoutError:
-                import json
                 return json.dumps({
                     "error": "tool_timeout",
                     "tool": getattr(tool, "__name__", repr(tool)),
@@ -128,7 +128,7 @@ def _wrap_with_timeout(tool, timeout_seconds: float):
         import queue
         import threading
 
-        result_queue: "queue.Queue[tuple[bool, object]]" = queue.Queue(maxsize=1)
+        result_queue: queue.Queue[tuple[bool, object]] = queue.Queue(maxsize=1)
 
         def _runner():
             try:
@@ -142,14 +142,23 @@ def _wrap_with_timeout(tool, timeout_seconds: float):
         worker.join(timeout_seconds)
 
         if worker.is_alive():
-            import json
             return json.dumps({
                 "error": "tool_timeout",
                 "tool": getattr(tool, "__name__", repr(tool)),
                 "timeout_seconds": timeout_seconds,
             })
 
-        success, payload = result_queue.get()
+        try:
+            success, payload = result_queue.get_nowait()
+        except queue.Empty:
+            # Defensive fallback: if the worker exits without publishing a result,
+            # avoid blocking indefinitely and surface an execution failure.
+            return json.dumps({
+                "error": "tool_execution_error",
+                "tool": getattr(tool, "__name__", repr(tool)),
+                "detail": "worker_exited_without_result",
+            })
+
         if success:
             return payload
         raise payload
