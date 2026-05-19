@@ -103,11 +103,11 @@ async def add_member(
     session: AsyncSession = Depends(get_db),
 ):
     member_svc = MemberService(session)
-    if body.role == "owner":
+    if body.role in ("owner", "admin"):
         if not await member_svc.has_role(workspace_id, user.id, "owner"):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only owners can add another owner",
+                detail="Only owners can add admin or owner roles",
             )
     member = await member_svc.add(workspace_id, body.user_id, body.role)
     return MemberResponse.model_validate(member)
@@ -141,12 +141,12 @@ async def update_member_role(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Cannot change your own role",
         )
-    if body.role == "owner" and not await member_svc.has_role(
+    if body.role in ("owner", "admin") and not await member_svc.has_role(
         workspace_id, user.id, "owner"
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only owners can assign the owner role",
+            detail="Only owners can assign admin or owner roles",
         )
     if target.role == "owner" and not await member_svc.has_role(
         workspace_id, user.id, "owner"

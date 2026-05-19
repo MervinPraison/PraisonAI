@@ -87,10 +87,9 @@ async def get_issue(
     session: AsyncSession = Depends(get_db),
 ):
     svc = IssueService(session)
-    issue = await svc.get(issue_id)
+    issue = await svc.get(issue_id, workspace_id=workspace_id)
     if issue is None:
         raise HTTPException(status_code=404, detail="Issue not found")
-    ensure_resource_in_workspace(issue.workspace_id, workspace_id, label="Issue")
     return IssueResponse.model_validate(issue)
 
 
@@ -105,6 +104,7 @@ async def update_issue(
     svc = IssueService(session)
     issue = await svc.update(
         issue_id,
+        workspace_id=workspace_id,
         title=body.title,
         description=body.description,
         status=body.status,
@@ -115,7 +115,6 @@ async def update_issue(
     )
     if issue is None:
         raise HTTPException(status_code=404, detail="Issue not found")
-    ensure_resource_in_workspace(issue.workspace_id, workspace_id, label="Issue")
     act_svc = ActivityService(session)
     await act_svc.log(
         workspace_id, "issue.updated", "issue", issue.id,
@@ -134,11 +133,7 @@ async def delete_issue(
     session: AsyncSession = Depends(get_db),
 ):
     svc = IssueService(session)
-    issue = await svc.get(issue_id)
-    if issue is None:
-        raise HTTPException(status_code=404, detail="Issue not found")
-    ensure_resource_in_workspace(issue.workspace_id, workspace_id, label="Issue")
-    deleted = await svc.delete(issue_id)
+    deleted = await svc.delete(issue_id, workspace_id=workspace_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Issue not found")
 
