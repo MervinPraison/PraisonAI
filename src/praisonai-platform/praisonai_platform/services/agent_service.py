@@ -50,9 +50,16 @@ class AgentService:
         await self._session.flush()
         return agent
 
-    async def get(self, agent_id: str) -> Optional[Agent]:
-        """Get agent by ID."""
-        return await self._session.get(Agent, agent_id)
+    async def get(
+        self, agent_id: str, *, workspace_id: Optional[str] = None
+    ) -> Optional[Agent]:
+        """Get agent by ID, optionally scoped to a workspace."""
+        agent = await self._session.get(Agent, agent_id)
+        if agent is None:
+            return None
+        if workspace_id is not None and agent.workspace_id != workspace_id:
+            return None
+        return agent
 
     async def list_for_workspace(
         self,
@@ -72,6 +79,8 @@ class AgentService:
     async def update(
         self,
         agent_id: str,
+        *,
+        workspace_id: Optional[str] = None,
         name: Optional[str] = None,
         status: Optional[str] = None,
         instructions: Optional[str] = None,
@@ -80,7 +89,7 @@ class AgentService:
         max_concurrent_tasks: Optional[int] = None,
     ) -> Optional[Agent]:
         """Update agent fields."""
-        agent = await self.get(agent_id)
+        agent = await self.get(agent_id, workspace_id=workspace_id)
         if agent is None:
             return None
         if name is not None:
@@ -102,9 +111,11 @@ class AgentService:
         await self._session.flush()
         return agent
 
-    async def delete(self, agent_id: str) -> bool:
+    async def delete(
+        self, agent_id: str, *, workspace_id: Optional[str] = None
+    ) -> bool:
         """Delete an agent."""
-        agent = await self.get(agent_id)
+        agent = await self.get(agent_id, workspace_id=workspace_id)
         if agent is None:
             return False
         await self._session.delete(agent)

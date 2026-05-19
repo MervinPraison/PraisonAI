@@ -907,6 +907,8 @@ class OpenAIClient:
                     final_response = self._responses_to_chat_completion(raw)
                     
                     # Display the response text if display_fn provided
+                    if not final_response.choices or final_response.choices[0].message is None:
+                        raise ValueError("LLM returned empty or filtered response")
                     response_text = final_response.choices[0].message.content or ""
                     if display_fn and response_text:
                         from rich.markdown import Markdown
@@ -1167,6 +1169,8 @@ class OpenAIClient:
                     final_response = self._responses_to_chat_completion(raw)
                     
                     # Display the response text if display_fn provided
+                    if not final_response.choices or final_response.choices[0].message is None:
+                        raise ValueError("LLM returned empty or filtered response")
                     response_text = final_response.choices[0].message.content or ""
                     if display_fn and response_text:
                         from rich.markdown import Markdown
@@ -1638,8 +1642,10 @@ class OpenAIClient:
             )
             
             # Check for tool calls
+            if not final_response.choices or final_response.choices[0].message is None:
+                raise ValueError("LLM returned empty or filtered response")
             tool_calls = getattr(final_response.choices[0].message, 'tool_calls', None)
-            
+
             # Emit llm_content for intermediate narrative display
             # (gpt-4.1+ models produce text alongside tool calls)
             response_content = getattr(final_response.choices[0].message, 'content', None)
@@ -1835,10 +1841,12 @@ class OpenAIClient:
             
             if not final_response:
                 return None
-            
+
             # Check for tool calls
+            if not final_response.choices or final_response.choices[0].message is None:
+                raise ValueError("LLM returned empty or filtered response")
             tool_calls = getattr(final_response.choices[0].message, 'tool_calls', None)
-            
+
             # Emit llm_content for intermediate narrative display
             # (gpt-4.1+ models produce text alongside tool calls)
             response_content = getattr(final_response.choices[0].message, 'content', None)
@@ -2037,6 +2045,8 @@ class OpenAIClient:
                     return
                 
                 # Check for tool calls
+                if not final_response.choices or final_response.choices[0].message is None:
+                    raise ValueError("LLM returned empty or filtered response")
                 tool_calls = getattr(final_response.choices[0].message, 'tool_calls', None)
                 
                 if tool_calls and execute_tool_fn:

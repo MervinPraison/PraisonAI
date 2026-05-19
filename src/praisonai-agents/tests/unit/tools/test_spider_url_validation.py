@@ -38,6 +38,16 @@ def test_still_blocks_loopback():
     assert spider._validate_url("http://localhost/") is False
 
 
+def test_blocks_alternate_loopback_encodings():
+    """GHSA-5c6w-wwfq-7qqm: non-canonical loopback host forms."""
+    spider = SpiderTools()
+    assert spider._validate_url("http://localhost.:8765/") is False
+    assert spider._validate_url("http://127.1:8765/") is False
+    assert spider._validate_url("http://0177.0.0.1:8765/") is False
+    assert spider._validate_url("http://0x7f000001:8765/") is False
+    assert spider._validate_url("http://2130706433:8765/") is False
+
+
 def test_rejects_non_string_input():
     spider = SpiderTools()
     assert spider._validate_url(None) is False  # type: ignore[arg-type]

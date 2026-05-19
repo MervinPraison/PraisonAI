@@ -86,6 +86,8 @@ Only respond with the JSON, no other text."""
         )
         
         import json
+        if not response.choices or response.choices[0].message is None:
+            raise ValueError("LLM returned empty or filtered response")
         result_text = response.choices[0].message.content
         result_data = json.loads(result_text)
         
@@ -160,6 +162,8 @@ Only respond with the JSON, no other text."""
         )
         
         import json
+        if not response.choices or response.choices[0].message is None:
+            raise ValueError("LLM returned empty or filtered response")
         result_text = response.choices[0].message.content
         result_data = json.loads(result_text)
         

@@ -56,7 +56,7 @@ async def get_project(
     session: AsyncSession = Depends(get_db),
 ):
     svc = ProjectService(session)
-    project = await svc.get(project_id)
+    project = await svc.get(project_id, workspace_id=workspace_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
     return ProjectResponse.model_validate(project)
@@ -73,6 +73,7 @@ async def update_project(
     svc = ProjectService(session)
     project = await svc.update(
         project_id,
+        workspace_id=workspace_id,
         title=body.title,
         description=body.description,
         status=body.status,
@@ -92,7 +93,7 @@ async def delete_project(
     session: AsyncSession = Depends(get_db),
 ):
     svc = ProjectService(session)
-    deleted = await svc.delete(project_id)
+    deleted = await svc.delete(project_id, workspace_id=workspace_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Project not found")
 
@@ -105,4 +106,7 @@ async def project_stats(
     session: AsyncSession = Depends(get_db),
 ):
     svc = ProjectService(session)
+    project = await svc.get(project_id, workspace_id=workspace_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
     return await svc.get_stats(project_id)
