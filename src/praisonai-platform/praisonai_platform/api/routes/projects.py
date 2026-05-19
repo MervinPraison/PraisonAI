@@ -72,6 +72,13 @@ async def update_project(
     session: AsyncSession = Depends(get_db),
 ):
     svc = ProjectService(session)
+    # Check ownership before mutation
+    existing_project = await svc.get(project_id)
+    if existing_project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    ensure_resource_in_workspace(existing_project.workspace_id, workspace_id, label="Project")
+    
+    # Now safe to update
     project = await svc.update(
         project_id,
         title=body.title,
@@ -82,7 +89,6 @@ async def update_project(
     )
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
-    ensure_resource_in_workspace(project.workspace_id, workspace_id, label="Project")
     return ProjectResponse.model_validate(project)
 
 
