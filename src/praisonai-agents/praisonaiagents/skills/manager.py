@@ -271,8 +271,8 @@ class SkillManager:
                 return {"success": False, "error": "Skill content exceeds maximum size (100KB)"}
             
             # Create skill directory
-            from .discovery import get_default_skill_directories
-            skill_dirs = get_default_skill_directories()
+            from .discovery import get_default_skill_dirs
+            skill_dirs = get_default_skill_dirs()
             base_dir = skill_dirs[0] if skill_dirs else "~/.praisonai/skills"
             
             import os
