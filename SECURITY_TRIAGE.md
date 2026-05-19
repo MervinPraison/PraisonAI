@@ -16,7 +16,12 @@
 | GHSA-6xj3-927j-6pqw | fixed batch 2 | deploy.py bleach sanitize |
 | GHSA-8444-4fhq-fxpq | already-fixed | APIConfig.auth_enabled default True |
 | GHSA-78r8-wwqv-r299 | already-fixed | load_user_module gate |
-| GHSA-gv23, h8q5, 6h6v, h37g | partial/defer | broader platform audit |
+| GHSA-gv23, h8q5, 6h6v, h37g, 6h6v-7vxx | fixed batch 3 | service-layer workspace_id on get/update/delete |
+| GHSA-h37g-4h4p-9x97, c2m8, 8g2p | fixed batch 3 | only owner assigns admin/owner |
+| GHSA-h8q5-cp56-rr65 | fixed batch 3 | bind default 127.0.0.1 (+ PLATFORM_HOST) |
+| GHSA-6xj3-927j-6pqw | not-applicable | Open WebUI path; not in this repo |
 | GHSA-gmjg, 9q28 | published | prior release |
+
+**Code fixed on main; GHSA state still triage until PyPI publish + advisory publish.**
 
 Resources: https://github.com/MervinPraison/PraisonAI · https://docs.praison.ai · https://praison.ai

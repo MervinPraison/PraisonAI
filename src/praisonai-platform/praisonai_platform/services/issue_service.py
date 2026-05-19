@@ -69,9 +69,16 @@ class IssueService:
         await self._session.flush()
         return issue
 
-    async def get(self, issue_id: str) -> Optional[Issue]:
-        """Get issue by ID."""
-        return await self._session.get(Issue, issue_id)
+    async def get(
+        self, issue_id: str, *, workspace_id: Optional[str] = None
+    ) -> Optional[Issue]:
+        """Get issue by ID, optionally scoped to a workspace."""
+        issue = await self._session.get(Issue, issue_id)
+        if issue is None:
+            return None
+        if workspace_id is not None and issue.workspace_id != workspace_id:
+            return None
+        return issue
 
     async def list_for_workspace(
         self,
@@ -97,6 +104,8 @@ class IssueService:
     async def update(
         self,
         issue_id: str,
+        *,
+        workspace_id: Optional[str] = None,
         title: Optional[str] = None,
         description: Optional[str] = None,
         status: Optional[str] = None,
@@ -106,7 +115,7 @@ class IssueService:
         project_id: Optional[str] = None,
     ) -> Optional[Issue]:
         """Update issue fields."""
-        issue = await self.get(issue_id)
+        issue = await self.get(issue_id, workspace_id=workspace_id)
         if issue is None:
             return None
         if title is not None:
@@ -147,9 +156,11 @@ class IssueService:
         """Transition an issue to a new status."""
         return await self.update(issue_id, status=new_status)
 
-    async def delete(self, issue_id: str) -> bool:
+    async def delete(
+        self, issue_id: str, *, workspace_id: Optional[str] = None
+    ) -> bool:
         """Delete an issue."""
-        issue = await self.get(issue_id)
+        issue = await self.get(issue_id, workspace_id=workspace_id)
         if issue is None:
             return False
         await self._session.delete(issue)

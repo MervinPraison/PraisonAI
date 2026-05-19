@@ -62,6 +62,8 @@ async def delete_dependency(
     dep = await svc.get(dep_id)
     if dep is None:
         raise HTTPException(status_code=404, detail="Dependency not found")
+    if dep.issue_id != issue_id and dep.depends_on_issue_id != issue_id:
+        raise HTTPException(status_code=404, detail="Dependency not found")
     deleted = await svc.delete(dep_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Dependency not found")
