@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from .ssh import SSHSandbox
     from .modal import ModalSandbox
     from .daytona import DaytonaSandbox
+    from .e2b import E2BSandbox
 
 def __getattr__(name: str):
     """Lazy loading of sandbox components."""
@@ -34,6 +35,9 @@ def __getattr__(name: str):
     if name == "DaytonaSandbox":
         from .daytona import DaytonaSandbox
         return DaytonaSandbox
+    if name == "E2BSandbox":
+        from .e2b import E2BSandbox
+        return E2BSandbox
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
@@ -42,5 +46,6 @@ __all__ = [
     "SandlockSandbox",
     "SSHSandbox",
     "ModalSandbox", 
-    "DaytonaSandbox"
+    "DaytonaSandbox",
+    "E2BSandbox",
 ]
