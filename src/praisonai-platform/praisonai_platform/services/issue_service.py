@@ -144,17 +144,21 @@ class IssueService:
         issue_id: str,
         assignee_type: str,
         assignee_id: str,
+        *,
+        workspace_id: Optional[str] = None,
     ) -> Optional[Issue]:
         """Assign an issue to a member or agent."""
         if assignee_type not in VALID_ASSIGNEE_TYPES:
             raise ValueError(f"Invalid assignee_type: {assignee_type}")
         return await self.update(
-            issue_id, assignee_type=assignee_type, assignee_id=assignee_id
+            issue_id, workspace_id=workspace_id, assignee_type=assignee_type, assignee_id=assignee_id
         )
 
-    async def transition(self, issue_id: str, new_status: str) -> Optional[Issue]:
+    async def transition(
+        self, issue_id: str, new_status: str, *, workspace_id: Optional[str] = None
+    ) -> Optional[Issue]:
         """Transition an issue to a new status."""
-        return await self.update(issue_id, status=new_status)
+        return await self.update(issue_id, workspace_id=workspace_id, status=new_status)
 
     async def delete(
         self, issue_id: str, *, workspace_id: Optional[str] = None

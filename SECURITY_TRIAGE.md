@@ -10,14 +10,13 @@
 | GHSA-5cxw-77wg-jrf3 | fixed batch 1 | @url mentions |
 | GHSA-xp85-6wwf-r67c | fixed batch 1 | GHA branch quote |
 | GHSA-3qg8-5g3r-79v5 | fixed batch 1+2 | JWT + issue guard |
-| GHSA-xwq8, 7p8g, c2m8, 8g2p, w388, g8rr | fixed batch 1 | platform RBAC/IDOR partial |
+| GHSA-xwq8, 7p8g, w388, g8rr | fixed batch 1 | platform RBAC/IDOR partial |
 | GHSA-943m, 5jx9, 4x6r, 27p4, cp4f | fixed batch 2 | platform IDOR completion |
 | GHSA-vg22-4gmj-prxw | fixed batch 2 | example eval hardening |
-| GHSA-6xj3-927j-6pqw | fixed batch 2 | deploy.py bleach sanitize |
 | GHSA-8444-4fhq-fxpq | already-fixed | APIConfig.auth_enabled default True |
 | GHSA-78r8-wwqv-r299 | already-fixed | load_user_module gate |
-| GHSA-gv23, h8q5, 6h6v, h37g, 6h6v-7vxx | fixed batch 3 | service-layer workspace_id on get/update/delete |
-| GHSA-h37g-4h4p-9x97, c2m8, 8g2p | fixed batch 3 | only owner assigns admin/owner |
+| GHSA-gv23-xxxx-xxxx, GHSA-h8q5-cp56-rr65, GHSA-6h6v-xxxx-xxxx, GHSA-h37g-4h4p-9x97 | fixed batch 3 | service-layer workspace_id on get/update/delete |
+| GHSA-c2m8-xxxx-xxxx, GHSA-8g2p-xxxx-xxxx | fixed batch 3 | only owner assigns admin/owner |
 | GHSA-h8q5-cp56-rr65 | fixed batch 3 | bind default 127.0.0.1 (+ PLATFORM_HOST) |
 | GHSA-6xj3-927j-6pqw | not-applicable | Open WebUI path; not in this repo |
 | GHSA-gmjg, 9q28 | published | prior release |
