@@ -116,28 +116,34 @@ def _wrap_with_timeout(tool, timeout_seconds: float):
             try:
                 return await asyncio.wait_for(tool(*args, **kwargs), timeout=timeout_seconds)
             except asyncio.TimeoutError:
-                return {
+                import json
+                return json.dumps({
                     "error": "tool_timeout",
                     "tool": getattr(tool, "__name__", repr(tool)),
                     "timeout_seconds": timeout_seconds,
-                }
+                })
         return _async_wrapped
 
     @functools.wraps(tool)
     def _sync_wrapped(*args, **kwargs):
-        # Single-shot executor; daemon thread so we don't block process exit
-        # if the underlying call refuses to return.
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-            fut = ex.submit(tool, *args, **kwargs)
-            try:
-                return fut.result(timeout=timeout_seconds)
-            except concurrent.futures.TimeoutError:
-                fut.cancel()  # best-effort; thread cannot be force-killed
-                return {
-                    "error": "tool_timeout",
-                    "tool": getattr(tool, "__name__", repr(tool)),
-                    "timeout_seconds": timeout_seconds,
-                }
+        # Single-shot executor; create without context manager to avoid blocking on timeout
+        ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        fut = ex.submit(tool, *args, **kwargs)
+        try:
+            return fut.result(timeout=timeout_seconds)
+        except concurrent.futures.TimeoutError:
+            fut.cancel()  # best-effort; thread cannot be force-killed
+            ex.shutdown(wait=False)  # Don't wait for running task to complete
+            import json
+            return json.dumps({
+                "error": "tool_timeout", 
+                "tool": getattr(tool, "__name__", repr(tool)),
+                "timeout_seconds": timeout_seconds,
+            })
+        finally:
+            # Clean shutdown in success case
+            if fut.done():
+                ex.shutdown(wait=False)
     return _sync_wrapped
 
 

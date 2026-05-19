@@ -8,6 +8,7 @@ on every call (which is expensive and breaks multi-agent workflows).
 import asyncio
 import os
 import threading
+import concurrent.futures
 from concurrent.futures import Future
 from typing import Awaitable, TypeVar
 
@@ -115,14 +116,14 @@ def run_sync(coro: Awaitable[T], *, timeout: float | None = _DEFAULT_TIMEOUT) ->
     
     try:
         return fut.result(timeout=timeout)
-    except TimeoutError:
+    except (TimeoutError, concurrent.futures.TimeoutError):
         # Propagate cancellation into the background loop so the underlying
         # awaitable (DB query, HTTP call, subprocess wait) actually unwinds.
         fut.cancel()
         try:
             # Give cancellation a short grace period to release resources.
             fut.exception(timeout=1.0)
-        except (TimeoutError, asyncio.CancelledError):
+        except (TimeoutError, concurrent.futures.TimeoutError, asyncio.CancelledError):
             pass
         raise
     except BaseException:
