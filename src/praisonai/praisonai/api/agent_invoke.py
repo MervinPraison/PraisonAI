@@ -29,14 +29,26 @@ logger = logging.getLogger(__name__)
 # Authentication
 import os
 CALL_SERVER_TOKEN = os.getenv('CALL_SERVER_TOKEN')
+_CALL_AUTH_DISABLED = os.getenv('PRAISONAI_CALL_AUTH', '').lower() == 'disabled'
+
 
 async def verify_token(
     request: Request, 
     authorization: Optional[str] = Header(None)
 ) -> None:
     """Verify API token for authentication."""
-    if not FASTAPI_AVAILABLE or not CALL_SERVER_TOKEN:
-        return  # No authentication if FastAPI unavailable or no token set
+    if not FASTAPI_AVAILABLE:
+        return
+    if _CALL_AUTH_DISABLED:
+        return
+    if not CALL_SERVER_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "CALL_SERVER_TOKEN is not configured. Set CALL_SERVER_TOKEN or "
+                "PRAISONAI_CALL_AUTH=disabled to run without authentication."
+            ),
+        )
         
     token = None
     
