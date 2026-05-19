@@ -9,7 +9,7 @@ import asyncio
 import os
 import threading
 import concurrent.futures
-from concurrent.futures import Future
+from concurrent.futures import CancelledError as FutureCancelledError, Future
 from typing import Awaitable, TypeVar
 
 T = TypeVar("T")
@@ -123,7 +123,12 @@ def run_sync(coro: Awaitable[T], *, timeout: float | None = _DEFAULT_TIMEOUT) ->
         try:
             # Give cancellation a short grace period to release resources.
             fut.exception(timeout=1.0)
-        except (TimeoutError, concurrent.futures.TimeoutError, asyncio.CancelledError):
+        except (
+            TimeoutError,
+            concurrent.futures.TimeoutError,
+            asyncio.CancelledError,
+            FutureCancelledError,
+        ):
             pass
         raise
     except BaseException:

@@ -106,7 +106,6 @@ def _wrap_with_timeout(tool, timeout_seconds: float):
         return tool
     
     import asyncio
-    import concurrent.futures
     import functools
     import inspect
     
@@ -126,24 +125,34 @@ def _wrap_with_timeout(tool, timeout_seconds: float):
 
     @functools.wraps(tool)
     def _sync_wrapped(*args, **kwargs):
-        # Single-shot executor; create without context manager to avoid blocking on timeout
-        ex = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        fut = ex.submit(tool, *args, **kwargs)
-        try:
-            return fut.result(timeout=timeout_seconds)
-        except concurrent.futures.TimeoutError:
-            fut.cancel()  # best-effort; thread cannot be force-killed
-            ex.shutdown(wait=False)  # Don't wait for running task to complete
+        import queue
+        import threading
+
+        result_queue: "queue.Queue[tuple[bool, object]]" = queue.Queue(maxsize=1)
+
+        def _runner():
+            try:
+                result_queue.put((True, tool(*args, **kwargs)))
+            except BaseException as exc:
+                result_queue.put((False, exc))
+
+        # Daemon thread avoids blocking process shutdown if the tool call hangs.
+        worker = threading.Thread(target=_runner, daemon=True)
+        worker.start()
+        worker.join(timeout_seconds)
+
+        if worker.is_alive():
             import json
             return json.dumps({
-                "error": "tool_timeout", 
+                "error": "tool_timeout",
                 "tool": getattr(tool, "__name__", repr(tool)),
                 "timeout_seconds": timeout_seconds,
             })
-        finally:
-            # Clean shutdown in success case
-            if fut.done():
-                ex.shutdown(wait=False)
+
+        success, payload = result_queue.get()
+        if success:
+            return payload
+        raise payload
     return _sync_wrapped
 
 
