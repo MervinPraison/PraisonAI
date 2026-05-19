@@ -6,7 +6,7 @@ from typing import List, Optional, Dict
 logger = logging.getLogger(__name__)
 
 from .models import SkillMetadata
-from .discovery import discover_skills
+from .discovery import discover_skills, get_default_skill_dirs
 from .loader import SkillLoader, LoadedSkill
 from .prompt import generate_skills_xml
 from .substitution import render_skill_body
@@ -271,7 +271,6 @@ class SkillManager:
                 return {"success": False, "error": "Skill content exceeds maximum size (100KB)"}
             
             # Create skill directory
-            from .discovery import get_default_skill_dirs
             skill_dirs = get_default_skill_dirs()
             base_dir = skill_dirs[0] if skill_dirs else "~/.praisonai/skills"
             
