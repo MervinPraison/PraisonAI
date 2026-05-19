@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from praisonaiagents.auth import AuthIdentity
 
-from ..deps import get_db, require_workspace_member
+from ..deps import ensure_resource_in_workspace, get_db, require_workspace_member
 from ..schemas import ProjectCreate, ProjectResponse, ProjectUpdate
 from ...services.project_service import ProjectService
 
@@ -59,6 +59,7 @@ async def get_project(
     project = await svc.get(project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
+    ensure_resource_in_workspace(project.workspace_id, workspace_id, label="Project")
     return ProjectResponse.model_validate(project)
 
 
@@ -81,6 +82,7 @@ async def update_project(
     )
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
+    ensure_resource_in_workspace(project.workspace_id, workspace_id, label="Project")
     return ProjectResponse.model_validate(project)
 
 
@@ -92,6 +94,10 @@ async def delete_project(
     session: AsyncSession = Depends(get_db),
 ):
     svc = ProjectService(session)
+    project = await svc.get(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    ensure_resource_in_workspace(project.workspace_id, workspace_id, label="Project")
     deleted = await svc.delete(project_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -105,4 +111,8 @@ async def project_stats(
     session: AsyncSession = Depends(get_db),
 ):
     svc = ProjectService(session)
+    project = await svc.get(project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    ensure_resource_in_workspace(project.workspace_id, workspace_id, label="Project")
     return await svc.get_stats(project_id)
