@@ -123,6 +123,8 @@ class MultiAgentHandler:
     def _load_tools(self, tool_names: List[str]) -> List:
         """Load tool functions by name.
         
+        Applies HERMES_ONLY_TOOLS filter if enabled to prevent tool name collisions.
+        
         Args:
             tool_names: List of tool names to load
             
@@ -147,6 +149,22 @@ class MultiAgentHandler:
                 'write_csv': write_csv,
                 'analyze_csv': analyze_csv,
             }
+            
+            # Apply HERMES_ONLY_TOOLS filter if enabled
+            try:
+                from praisonaiagents.hermes_filter import filter_tools_with_hermes
+                available_tools = set(tool_map.keys())
+                filtered_tools = filter_tools_with_hermes(available_tools, log_diagnostics=False)
+                
+                # Filter tool_map to only include whitelisted tools
+                tool_map = {name: func for name, func in tool_map.items() if name in filtered_tools}
+                
+            except ImportError:
+                # HERMES_ONLY_TOOLS filter not available, proceed normally
+                pass
+            except Exception as e:
+                if self.verbose:
+                    print(f"⚠ HERMES_ONLY_TOOLS filter error: {e}")
             
             for name in tool_names:
                 if name in tool_map:

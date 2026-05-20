@@ -1,0 +1,240 @@
+"""
+HERMES_ONLY_TOOLS filter module with diagnostics.
+
+This module provides a canonical implementation of the HERMES_ONLY_TOOLS filter
+that prevents tool name collisions in multi-environment agent systems by 
+whitelisting only specified tools.
+
+The filter is designed to solve the "tool shadowing" problem where multiple
+modules register tools with overlapping or ambiguous names, causing agents
+to invoke the wrong implementation.
+
+Usage:
+    from praisonaiagents.hermes_filter import HermesToolFilter
+    
+    # Create filter from environment variable
+    filter = HermesToolFilter()
+    
+    # Filter tools
+    available_tools = {"search", "send_message", "extract_pdf"}
+    filtered_tools = filter.filter_tools(available_tools)
+    
+    # Get diagnostics
+    filter.log_diagnostics()
+"""
+
+import os
+import logging
+from typing import Set, List, Dict, Optional, Union
+from collections import OrderedDict
+
+logger = logging.getLogger(__name__)
+
+
+class HermesToolFilter:
+    """
+    Canonical HERMES_ONLY_TOOLS filter with diagnostics.
+    
+    This filter implements the semantics specified in the issue:
+    - HERMES_ONLY_TOOLS unset: all tools visible (with warning about collisions)
+    - HERMES_ONLY_TOOLS empty string: error - must specify tools or unset
+    - HERMES_ONLY_TOOLS with values: only whitelisted tools visible
+    - Unknown tools in list: warn and strip in dev, strict fail in CI
+    """
+    
+    def __init__(self, env_var_name: str = "HERMES_ONLY_TOOLS"):
+        """
+        Initialize the filter.
+        
+        Args:
+            env_var_name: Environment variable name (default: "HERMES_ONLY_TOOLS")
+        """
+        self.env_var_name = env_var_name
+        self.env_value = os.environ.get(env_var_name)
+        self.is_ci = os.environ.get("CI", "").lower() in ("true", "1", "yes")
+        self._whitelist: Optional[Set[str]] = self._parse_whitelist()
+        self._diagnostics: Dict[str, any] = {}
+        
+    def _parse_whitelist(self) -> Optional[Set[str]]:
+        """
+        Parse the environment variable value into a whitelist set.
+        
+        Returns:
+            None if unset, Set of tool names if set, raises ValueError for empty string
+        """
+        if self.env_value is None:
+            return None
+        
+        # Empty string is an error - must be explicit
+        if self.env_value.strip() == "":
+            raise ValueError(
+                f"{self.env_var_name} cannot be empty. Either unset it for all tools "
+                "or provide a comma-separated list of tool names."
+            )
+        
+        # Parse comma-separated values, strip whitespace
+        tools = {name.strip() for name in self.env_value.split(",") if name.strip()}
+        
+        if not tools:
+            raise ValueError(
+                f"{self.env_var_name} contains no valid tool names. "
+                "Provide comma-separated tool names or unset the variable."
+            )
+        
+        return tools
+    
+    def filter_tools(self, available_tools: Union[Set[str], List[str], Dict[str, any]]) -> Set[str]:
+        """
+        Filter tools based on HERMES_ONLY_TOOLS whitelist.
+        
+        Args:
+            available_tools: Available tools as set, list, or dict with tool names as keys
+            
+        Returns:
+            Filtered set of tool names
+            
+        Raises:
+            ValueError: If unknown tools in CI mode or configuration errors
+        """
+        # Convert input to set of tool names
+        if isinstance(available_tools, dict):
+            tool_names = set(available_tools.keys())
+        else:
+            tool_names = set(available_tools)
+        
+        # Store for diagnostics
+        self._diagnostics["registered_before_filter"] = sorted(tool_names)
+        
+        # If no whitelist, return all tools (with warning)
+        if self._whitelist is None:
+            logger.warning(
+                "HERMES_ONLY_TOOLS is unset. All %d tools are visible. "
+                "Consider using HERMES_ONLY_TOOLS to prevent tool name collisions.",
+                len(tool_names)
+            )
+            self._diagnostics["registered_after_filter"] = sorted(tool_names)
+            self._diagnostics["dropped_tools"] = []
+            self._diagnostics["unknown_tools"] = []
+            return tool_names
+        
+        # Find intersection and unknown tools
+        available_whitelisted = tool_names.intersection(self._whitelist)
+        unknown_tools = self._whitelist.difference(tool_names)
+        dropped_tools = tool_names.difference(self._whitelist)
+        
+        # Store for diagnostics
+        self._diagnostics["registered_after_filter"] = sorted(available_whitelisted)
+        self._diagnostics["dropped_tools"] = sorted(dropped_tools)
+        self._diagnostics["unknown_tools"] = sorted(unknown_tools)
+        
+        # Handle unknown tools based on environment
+        if unknown_tools:
+            unknown_list = sorted(unknown_tools)
+            if self.is_ci:
+                raise ValueError(
+                    f"Unknown tools in {self.env_var_name}: {unknown_list}. "
+                    "All specified tools must be available in CI mode."
+                )
+            else:
+                logger.warning(
+                    "Unknown tools in %s will be ignored: %s",
+                    self.env_var_name,
+                    unknown_list
+                )
+        
+        if dropped_tools:
+            logger.info(
+                "Dropped %d tools not in %s whitelist: %s",
+                len(dropped_tools),
+                self.env_var_name,
+                sorted(dropped_tools)
+            )
+        
+        logger.info(
+            "%s filtered tools: %d available, %d after filter",
+            self.env_var_name,
+            len(tool_names),
+            len(available_whitelisted)
+        )
+        
+        return available_whitelisted
+    
+    def log_diagnostics(self) -> None:
+        """Log startup diagnostics section as specified in the issue."""
+        if not self._diagnostics:
+            logger.warning("No diagnostics available. Call filter_tools() first.")
+            return
+        
+        logger.info("=" * 50)
+        logger.info("HERMES_ONLY_TOOLS DIAGNOSTICS")
+        logger.info("=" * 50)
+        logger.info("%s=%s", self.env_var_name, self.env_value or "<unset>")
+        logger.info("RegisteredBeforeFilter=%s", self._diagnostics.get("registered_before_filter", []))
+        logger.info("RegisteredAfterFilter=%s", self._diagnostics.get("registered_after_filter", []))
+        logger.info("DroppedTools=%s", self._diagnostics.get("dropped_tools", []))
+        logger.info("UnknownTools=%s", self._diagnostics.get("unknown_tools", []))
+        logger.info("IsCI=%s", self.is_ci)
+        logger.info("=" * 50)
+    
+    def get_diagnostics(self) -> Dict[str, any]:
+        """
+        Get diagnostics data as a dictionary.
+        
+        Returns:
+            Dictionary with diagnostics information
+        """
+        return {
+            "env_var_name": self.env_var_name,
+            "env_value": self.env_value,
+            "is_ci": self.is_ci,
+            "whitelist": list(self._whitelist) if self._whitelist else None,
+            **self._diagnostics
+        }
+    
+    def is_enabled(self) -> bool:
+        """
+        Check if filtering is enabled.
+        
+        Returns:
+            True if HERMES_ONLY_TOOLS is set and filtering is active
+        """
+        return self._whitelist is not None
+    
+    def get_whitelist(self) -> Optional[Set[str]]:
+        """
+        Get the current whitelist.
+        
+        Returns:
+            Set of whitelisted tool names, or None if not set
+        """
+        return self._whitelist.copy() if self._whitelist else None
+
+
+def filter_tools_with_hermes(
+    available_tools: Union[Set[str], List[str], Dict[str, any]],
+    env_var_name: str = "HERMES_ONLY_TOOLS",
+    log_diagnostics: bool = True
+) -> Set[str]:
+    """
+    Convenience function to filter tools with HERMES_ONLY_TOOLS.
+    
+    Args:
+        available_tools: Available tools to filter
+        env_var_name: Environment variable name (default: "HERMES_ONLY_TOOLS")
+        log_diagnostics: Whether to log diagnostics (default: True)
+        
+    Returns:
+        Filtered set of tool names
+    """
+    filter_instance = HermesToolFilter(env_var_name)
+    filtered = filter_instance.filter_tools(available_tools)
+    
+    if log_diagnostics:
+        filter_instance.log_diagnostics()
+    
+    return filtered
+
+
+# Compatibility exports for different naming conventions
+hermes_filter = filter_tools_with_hermes
+apply_hermes_filter = filter_tools_with_hermes

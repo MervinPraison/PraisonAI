@@ -184,6 +184,38 @@ class ToolRegistry:
             
             return available
     
+    def list_tools_with_hermes_filter(self, context: Optional[Dict[str, Any]] = None) -> List[str]:
+        """List tool names filtered by HERMES_ONLY_TOOLS environment variable.
+        
+        This applies the canonical HERMES_ONLY_TOOLS filter to prevent tool
+        name collisions in multi-environment agent systems.
+        
+        Args:
+            context: Optional context for availability checks
+            
+        Returns:
+            List of filtered tool names
+        """
+        try:
+            # Lazy import to avoid circular dependencies
+            from ..hermes_filter import filter_tools_with_hermes
+            
+            # Get all available tool names
+            all_tools = self.list_tools()
+            
+            # Apply HERMES_ONLY_TOOLS filter with diagnostics
+            filtered_tools = filter_tools_with_hermes(all_tools, log_diagnostics=True)
+            
+            return sorted(filtered_tools)
+            
+        except ImportError:
+            logging.warning("HERMES_ONLY_TOOLS filter not available, returning all tools")
+            return self.list_tools()
+        except Exception as e:
+            logging.error(f"Error applying HERMES_ONLY_TOOLS filter: {e}")
+            # Fallback to all tools on error
+            return self.list_tools()
+    
     def get_all(self) -> Dict[str, Union[BaseTool, Callable]]:
         """Get all registered tools as a dict. Thread-safe."""
         with self._lock:
@@ -381,3 +413,18 @@ def list_available_tools(context: Optional[Dict[str, Any]] = None) -> List[Union
         List of available tools
     """
     return get_registry().list_available_tools(context)
+
+
+def list_tools_with_hermes_filter(context: Optional[Dict[str, Any]] = None) -> List[str]:
+    """List tool names filtered by HERMES_ONLY_TOOLS from the global registry.
+    
+    This is the canonical entry point for applying HERMES_ONLY_TOOLS filtering
+    across the PraisonAI ecosystem.
+    
+    Args:
+        context: Optional context for availability checks
+        
+    Returns:
+        List of filtered tool names
+    """
+    return get_registry().list_tools_with_hermes_filter(context)

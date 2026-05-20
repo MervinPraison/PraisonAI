@@ -10,7 +10,7 @@ _tools_lazy_cache = {}
 # Export core tool items for organized imports (lightweight)
 from .base import BaseTool, ToolResult, ToolValidationError, validate_tool
 from .decorator import tool, FunctionTool
-from .registry import get_registry, register_tool, get_tool, add_tool, has_tool, remove_tool, list_tools, list_available_tools, ToolRegistry
+from .registry import get_registry, register_tool, get_tool, add_tool, has_tool, remove_tool, list_tools, list_available_tools, list_tools_with_hermes_filter, ToolRegistry
 from .tools import Tools
 
 # Export Injected type directly for easy access
