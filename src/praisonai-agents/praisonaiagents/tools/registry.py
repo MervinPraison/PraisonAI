@@ -184,10 +184,10 @@ class ToolRegistry:
             
             return available
     
-    def list_tools_with_hermes_filter(self, context: Optional[Dict[str, Any]] = None) -> List[str]:
-        """List tool names filtered by HERMES_ONLY_TOOLS environment variable.
+    def list_tools_with_allowed_filter(self, context: Optional[Dict[str, Any]] = None) -> List[str]:
+        """List tool names filtered by ALLOWED_TOOLS environment variable.
         
-        This applies the canonical HERMES_ONLY_TOOLS filter to prevent tool
+        This applies the canonical ALLOWED_TOOLS filter to prevent tool
         name collisions in multi-environment agent systems.
         
         Args:
@@ -198,24 +198,24 @@ class ToolRegistry:
         """
         try:
             # Lazy import to avoid circular dependencies
-            from ..hermes_filter import filter_tools_with_hermes
+            from ..allowed_tools_filter import filter_tools_with_allowed_tools
             
             # Get all available tool names
             all_tools = self.list_tools()
             
-            # Apply HERMES_ONLY_TOOLS filter with diagnostics
-            filtered_tools = filter_tools_with_hermes(all_tools, log_diagnostics=True)
+            # Apply ALLOWED_TOOLS filter with diagnostics
+            filtered_tools = filter_tools_with_allowed_tools(all_tools, log_diagnostics=True)
             
             return sorted(filtered_tools)
             
         except ImportError:
-            logging.warning("HERMES_ONLY_TOOLS filter not available, returning all tools")
+            logging.warning("ALLOWED_TOOLS filter not available, returning all tools")
             return self.list_tools()
         except ValueError:
-            # Preserve strict HERMES_ONLY_TOOLS semantics (e.g., CI unknown tools, empty value)
+            # Preserve strict ALLOWED_TOOLS semantics (e.g., CI unknown tools, empty value)
             raise
         except Exception as e:
-            logging.error("Error applying HERMES_ONLY_TOOLS filter: %s", e)
+            logging.error("Error applying ALLOWED_TOOLS filter: %s", e)
             # Fallback to all tools on error
             return self.list_tools()
     
@@ -418,10 +418,10 @@ def list_available_tools(context: Optional[Dict[str, Any]] = None) -> List[Union
     return get_registry().list_available_tools(context)
 
 
-def list_tools_with_hermes_filter(context: Optional[Dict[str, Any]] = None) -> List[str]:
-    """List tool names filtered by HERMES_ONLY_TOOLS from the global registry.
+def list_tools_with_allowed_filter(context: Optional[Dict[str, Any]] = None) -> List[str]:
+    """List tool names filtered by ALLOWED_TOOLS from the global registry.
     
-    This is the canonical entry point for applying HERMES_ONLY_TOOLS filtering
+    This is the canonical entry point for applying ALLOWED_TOOLS filtering
     across the PraisonAI ecosystem.
     
     Args:
@@ -430,4 +430,10 @@ def list_tools_with_hermes_filter(context: Optional[Dict[str, Any]] = None) -> L
     Returns:
         List of filtered tool names
     """
-    return get_registry().list_tools_with_hermes_filter(context)
+    return get_registry().list_tools_with_allowed_filter(context)
+
+
+# Backward compatibility alias
+def list_tools_with_hermes_filter(context: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Backward compatibility alias for list_tools_with_allowed_filter."""
+    return list_tools_with_allowed_filter(context)

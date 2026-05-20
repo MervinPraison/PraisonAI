@@ -14,7 +14,7 @@ Environment Variables:
     HERMES_ONLY_TOOLS: Backward compatibility alias for ALLOWED_TOOLS
 
 Usage:
-    from praisonaiagents.hermes_filter import AllowedToolsFilter
+    from praisonaiagents.allowed_tools_filter import AllowedToolsFilter
     
     # Create filter from environment variable  
     filter = AllowedToolsFilter()
@@ -98,7 +98,7 @@ class AllowedToolsFilter:
     
     def filter_tools(self, available_tools: Union[Set[str], List[str], Dict[str, Any]]) -> Set[str]:
         """
-        Filter tools based on HERMES_ONLY_TOOLS whitelist.
+        Filter tools based on ALLOWED_TOOLS whitelist.
         
         Args:
             available_tools: Available tools as set, list, or dict with tool names as keys
