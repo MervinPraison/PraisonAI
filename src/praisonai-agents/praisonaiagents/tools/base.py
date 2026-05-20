@@ -15,7 +15,7 @@ Usage:
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, Type, get_type_hints
+from typing import Any, Dict, List, Optional, Type, get_type_hints
 import inspect
 import logging
 
@@ -234,17 +234,82 @@ class BaseTool(ABC):
         if getattr(self.run, '__isabstractmethod__', False):
             errors.append("Tool must implement the 'run()' method")
         
-        # Check parameters schema is valid
+        # Check parameters schema is valid and OpenAI-compatible
         if self.parameters:
             if not isinstance(self.parameters, dict):
                 errors.append("'parameters' must be a dictionary")
             elif "type" not in self.parameters:
                 errors.append("'parameters' must have a 'type' field")
+            elif "properties" not in self.parameters:
+                errors.append("'parameters' must have a 'properties' field for OpenAI compatibility")
+            
+            # Validate schema structure for OpenAI compatibility
+            try:
+                schema = self.get_schema()
+                if not isinstance(schema, dict):
+                    errors.append("get_schema() must return a dictionary")
+                elif schema.get("type") != "function":
+                    errors.append("get_schema() must return schema with type='function'")
+                elif "function" not in schema:
+                    errors.append("get_schema() must have 'function' key")
+                else:
+                    func = schema["function"]
+                    if not isinstance(func.get("parameters"), dict):
+                        errors.append("Schema function.parameters must be a dictionary")
+                    elif "properties" not in func["parameters"]:
+                        errors.append("Schema function.parameters must have 'properties' for OpenAI compatibility")
+            except Exception as e:
+                errors.append(f"Schema generation failed: {e}")
         
         if errors:
             raise ToolValidationError(f"Tool '{self.name}' validation failed: {'; '.join(errors)}")
         
         return True
+    
+    def validate_schema_roundtrip(self) -> bool:
+        """Validate that schema can round-trip through OpenAI-style serialization.
+        
+        This ensures the tool schema is compatible with LLM providers that expect
+        OpenAI function calling format and that parameters can be properly parsed.
+        
+        Raises:
+            ToolValidationError: If round-trip fails
+            
+        Returns:
+            True if round-trip validation passes
+        """
+        try:
+            import json
+            
+            # Get the schema
+            schema = self.get_schema()
+            
+            # Serialize to JSON (what gets sent to LLM)
+            serialized = json.dumps(schema)
+            
+            # Deserialize back
+            deserialized = json.loads(serialized)
+            
+            # Validate structure matches expectations
+            if deserialized != schema:
+                raise ToolValidationError(f"Schema serialization round-trip failed for tool '{self.name}'")
+            
+            # Validate OpenAI format requirements
+            func_schema = deserialized.get("function", {})
+            parameters = func_schema.get("parameters", {})
+            
+            if not isinstance(parameters.get("properties"), dict):
+                raise ToolValidationError(f"Tool '{self.name}' parameters.properties must be a dict for OpenAI compatibility")
+            
+            if not isinstance(parameters.get("required"), list):
+                # required can be missing but if present must be a list
+                if "required" in parameters:
+                    raise ToolValidationError(f"Tool '{self.name}' parameters.required must be a list")
+            
+            return True
+            
+        except Exception as e:
+            raise ToolValidationError(f"Schema round-trip validation failed for tool '{self.name}': {e}")
     
     @classmethod
     def validate_class(cls) -> bool:
@@ -282,7 +347,9 @@ def validate_tool(tool: Any) -> bool:
         ToolValidationError: If validation fails
     """
     if isinstance(tool, BaseTool):
-        return tool.validate()
+        tool.validate()
+        tool.validate_schema_roundtrip()
+        return True
     
     if callable(tool):
         # For plain functions, check they have a name
@@ -292,6 +359,68 @@ def validate_tool(tool: Any) -> bool:
         return True
     
     raise ToolValidationError(f"Invalid tool type: {type(tool)}")
+
+
+def validate_tool_schema_consistency(tools: List[Any]) -> bool:
+    """Validate a list of tools for schema consistency with OpenAI format.
+    
+    This function ensures all tools in a list can be properly serialized
+    and have consistent schema structures for use with LLM providers.
+    
+    Args:
+        tools: List of tool objects to validate
+        
+    Returns:
+        True if all tools are valid and consistent
+        
+    Raises:
+        ToolValidationError: If validation fails
+    """
+    if not tools:
+        return True
+        
+    import json
+    schemas = []
+    
+    for i, tool in enumerate(tools):
+        try:
+            # Validate individual tool
+            validate_tool(tool)
+            
+            # Get schema from different tool types
+            if isinstance(tool, BaseTool):
+                schema = tool.get_schema()
+            elif hasattr(tool, 'get_schema') and callable(getattr(tool, 'get_schema')):
+                schema = tool.get_schema()
+            elif callable(tool):
+                from .decorator import get_tool_schema
+                schema = get_tool_schema(tool)
+            else:
+                raise ToolValidationError(f"Cannot extract schema from tool at index {i}: {type(tool)}")
+            
+            if not schema:
+                raise ToolValidationError(f"Tool at index {i} returned empty schema")
+                
+            # Validate JSON serialization
+            try:
+                json.dumps(schema)
+            except (TypeError, ValueError) as e:
+                raise ToolValidationError(f"Tool schema at index {i} is not JSON serializable: {e}")
+            
+            schemas.append(schema)
+            
+        except Exception as e:
+            raise ToolValidationError(f"Tool validation failed at index {i}: {e}")
+    
+    # Check for duplicate tool names
+    names = []
+    for schema in schemas:
+        name = schema.get("function", {}).get("name")
+        if name in names:
+            raise ToolValidationError(f"Duplicate tool name '{name}' found in tool list")
+        names.append(name)
+    
+    return True
 
 
 # For backward compatibility - tools can also just be functions
