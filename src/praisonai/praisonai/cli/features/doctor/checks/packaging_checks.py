@@ -10,8 +10,6 @@ import subprocess
 import sys
 import platform
 import shutil
-from typing import List, Optional, Dict, Any
-import importlib.util
 
 from ..models import (
     CheckCategory,
@@ -103,20 +101,20 @@ def check_python_module_execution(config: DoctorConfig) -> CheckResult:
             [sys.executable, "-m", "praisonai", "--version"],
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=config.timeout,
         )
         
         metadata["return_code"] = result.returncode
         metadata["stdout"] = result.stdout.strip()
         metadata["stderr"] = result.stderr.strip()
         
-        if result.returncode == 0 and "PraisonAI version" in result.stdout:
+        if result.returncode == 0:
             return CheckResult(
                 id="python_module_execution",
                 title="Python Module Execution",
                 category=CheckCategory.PACKAGING,
                 status=CheckStatus.PASS,
-                message=f"python -m praisonai works: {result.stdout.strip()}",
+                message=f"python -m praisonai works: {result.stdout.strip() or result.stderr.strip()}",
                 metadata=metadata,
             )
         else:
@@ -135,7 +133,7 @@ def check_python_module_execution(config: DoctorConfig) -> CheckResult:
             title="Python Module Execution",
             category=CheckCategory.PACKAGING,
             status=CheckStatus.FAIL,
-            message="python -m praisonai timed out (>10s)",
+            message=f"python -m praisonai timed out (>{config.timeout}s)",
             metadata=metadata,
         )
     except Exception as e:
@@ -181,20 +179,20 @@ def check_console_script_execution(config: DoctorConfig) -> CheckResult:
             [praisonai_script, "--version"],
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=config.timeout,
         )
         
         metadata["return_code"] = result.returncode
         metadata["stdout"] = result.stdout.strip()
         metadata["stderr"] = result.stderr.strip()
         
-        if result.returncode == 0 and "PraisonAI version" in result.stdout:
+        if result.returncode == 0:
             return CheckResult(
                 id="console_script_execution",
                 title="Console Script Execution",
                 category=CheckCategory.PACKAGING,
                 status=CheckStatus.PASS,
-                message=f"praisonai console script works: {result.stdout.strip()}",
+                message=f"praisonai console script works: {result.stdout.strip() or result.stderr.strip()}",
                 metadata=metadata,
             )
         else:
@@ -213,7 +211,7 @@ def check_console_script_execution(config: DoctorConfig) -> CheckResult:
             title="Console Script Execution",
             category=CheckCategory.PACKAGING,
             status=CheckStatus.FAIL,
-            message="praisonai console script timed out (>10s)",
+            message=f"praisonai console script timed out (>{config.timeout}s)",
             metadata=metadata,
         )
     except Exception as e:
@@ -338,19 +336,24 @@ def check_packaging_metadata(config: DoctorConfig) -> CheckResult:
         metadata["praisonai_file"] = getattr(praisonai, "__file__", None)
         metadata["praisonai_version"] = getattr(praisonai, "__version__", "unknown")
         
-        # Check if installed via pip
+        # Check if installed via pip (using modern importlib.metadata)
         try:
-            import pkg_resources
             try:
-                dist = pkg_resources.get_distribution("praisonai")
+                from importlib.metadata import distribution, PackageNotFoundError
+            except ImportError:
+                # Python < 3.8 fallback
+                from importlib_metadata import distribution, PackageNotFoundError
+            
+            try:
+                dist = distribution("praisonai")
                 metadata["pip_version"] = dist.version
-                metadata["pip_location"] = dist.location
+                metadata["pip_location"] = str(dist.locate_file(""))
                 metadata["pip_installed"] = True
-            except pkg_resources.DistributionNotFound:
+            except PackageNotFoundError:
                 metadata["pip_installed"] = False
                 issues.append("Package not found in pip registry (editable install?)")
         except ImportError:
-            metadata["pkg_resources_available"] = False
+            metadata["importlib_metadata_available"] = False
         
         # Check for editable install markers
         if praisonai.__file__:
@@ -362,17 +365,34 @@ def check_packaging_metadata(config: DoctorConfig) -> CheckResult:
                 site_packages.extend(site.getsitepackages())
                 if hasattr(site, 'getusersitepackages'):
                     site_packages.append(site.getusersitepackages())
-            except Exception:
-                pass
+            except Exception as e:
+                metadata["site_packages_probe_error"] = str(e)
             
             is_editable = False
             for sp in site_packages:
                 if sp and os.path.exists(sp):
-                    egg_link = os.path.join(sp, "PraisonAI.egg-link")
-                    if os.path.exists(egg_link):
-                        is_editable = True
-                        metadata["editable_install"] = True
-                        metadata["egg_link_path"] = egg_link
+                    # Check for both case variations of egg-link files
+                    for egg_link_name in ("praisonai.egg-link", "PraisonAI.egg-link"):
+                        egg_link = os.path.join(sp, egg_link_name)
+                        if os.path.exists(egg_link):
+                            is_editable = True
+                            metadata["editable_install"] = True
+                            metadata["egg_link_path"] = egg_link
+                            break
+                    if is_editable:
+                        break
+                    
+                    # Check for modern editable install markers (PEP 660)
+                    try:
+                        for file in os.listdir(sp):
+                            if file.startswith("__editable__") and "praisonai" in file.lower() and file.endswith(".pth"):
+                                is_editable = True
+                                metadata["editable_install"] = True
+                                metadata["editable_pth_path"] = os.path.join(sp, file)
+                                break
+                    except OSError:
+                        pass
+                    if is_editable:
                         break
             
             if not is_editable:

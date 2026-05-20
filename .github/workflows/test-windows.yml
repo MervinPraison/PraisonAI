@@ -187,7 +187,6 @@ jobs:
       run: |
         echo "Testing doctor packaging diagnostics..."
         praisonai doctor packaging --json
-      continue-on-error: true
 
     # ==================== REAL API TESTS ====================
     - name: Real API test - Agent run
