@@ -71,15 +71,14 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         acp_enabled = global_config.get('acp', False)
         lsp_enabled = global_config.get('lsp', False)
         interactive_runtime = None
-        interactive_loop = None
         
         if acp_enabled or lsp_enabled:
             try:
-                import asyncio
+                from praisonai._async_bridge import run_sync
                 from praisonai.cli.features.interactive_runtime import InteractiveRuntime, RuntimeConfig
                 from praisonai.cli.features.agent_tools import create_agent_centric_tools
                 
-                # Use scoped event loop instead of process-global mutations
+                # Use scoped configuration instead of process-global mutations
                 runtime_config = RuntimeConfig(
                     workspace=os.getcwd(),
                     acp_enabled=acp_enabled,
@@ -89,11 +88,9 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 interactive_runtime = InteractiveRuntime(runtime_config)
                 logger.info(f"Starting InteractiveRuntime (ACP: {acp_enabled}, LSP: {lsp_enabled})")
                 
-                # Create a scoped event loop instead of modifying process globals
-                interactive_loop = asyncio.new_event_loop()
-                
-                # Start the runtime but keep it alive for agent execution
-                interactive_loop.run_until_complete(interactive_runtime.start())
+                # Start the runtime on the shared background loop where it stays alive
+                # and its asyncio primitives remain valid for the duration of this call
+                run_sync(interactive_runtime.start())
                 
                 centric_tools = create_agent_centric_tools(interactive_runtime)
                 logger.info(f"Loaded {len(centric_tools)} InteractiveRuntime tools")
@@ -204,12 +201,11 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             return result
         finally:
             # Cleanup InteractiveRuntime if it was started
-            if interactive_runtime and interactive_loop:
+            if interactive_runtime is not None:
                 try:
                     logger.info("Stopping InteractiveRuntime")
-                    interactive_loop.run_until_complete(interactive_runtime.stop())
+                    from praisonai._async_bridge import run_sync
+                    run_sync(interactive_runtime.stop())
                 except Exception as e:
                     logger.error(f"Error stopping InteractiveRuntime: {e}")
-                finally:
-                    interactive_loop.close()
     

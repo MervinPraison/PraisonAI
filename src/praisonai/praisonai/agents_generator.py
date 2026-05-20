@@ -221,13 +221,13 @@ class AgentsGenerator:
         elif os.environ.get('LOGLEVEL'):
             self.logger.setLevel(getattr(logging, os.environ.get('LOGLEVEL', 'INFO').upper(), logging.INFO))
         
-        # Initialize tool resolver (single source of truth for tool resolution)
-        from .tool_resolver import ToolResolver
-        self.tool_resolver = ToolResolver()
-        
         # Keep tool registry for backward compatibility with autogen adapters
         self.tool_registry = ToolRegistry()
         self.tool_registry.register_builtin_autogen_adapters()
+        
+        # Initialize tool resolver with the registry wired in (single source of truth for tool resolution)
+        from .tool_resolver import ToolResolver
+        self.tool_resolver = ToolResolver(registry=self.tool_registry)
         
         # DI-friendly: tests/multi-tenant runtimes pass their own registry;
         # CLI users get the process default.

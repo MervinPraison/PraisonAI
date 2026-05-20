@@ -45,19 +45,26 @@ class ToolResolver:
     Attributes:
         _local_tools_cache: Cached tools from local tools.py
         _local_tools_loaded: Whether local tools have been loaded
+        _registry: Optional ToolRegistry for wrapper-level tool registration
     """
     
-    def __init__(self, tools_py_path: Optional[str] = None):
+    def __init__(
+        self,
+        tools_py_path: Optional[str] = None,
+        registry: Optional["ToolRegistry"] = None,
+    ):
         """Initialize the resolver.
         
         Args:
             tools_py_path: Optional path to tools.py. If None, uses ./tools.py
+            registry: Optional ToolRegistry to include in resolution chain
         """
         self._tools_py_path = tools_py_path or "tools.py"
         self._local_tools_cache: Mapping[str, Callable] = MappingProxyType({})
         self._local_tools_loaded: bool = False
         self._praisonai_tools_available: Optional[bool] = None
         self._local_tools_lock = threading.Lock()
+        self._registry = registry
     
     def _load_local_tools(self) -> Mapping[str, Callable]:
         """Load tools from local tools.py file.
@@ -186,6 +193,25 @@ class ToolResolver:
         
         return None
     
+    def _resolve_from_wrapper_registry(self, name: str) -> Optional[Callable]:
+        """Resolve tool from the wrapper ToolRegistry.
+        
+        Args:
+            name: Tool name to resolve
+            
+        Returns:
+            Callable if found, None otherwise
+        """
+        if self._registry is None:
+            return None
+        
+        tool = self._registry.get_function(name)
+        if tool is not None:
+            logger.debug(f"Resolved '{name}' from wrapper ToolRegistry")
+            return tool
+        
+        return None
+    
     def _resolve_from_registry(self, name: str) -> Optional[Callable]:
         """Resolve tool from the global tool registry.
         
@@ -213,9 +239,10 @@ class ToolResolver:
         
         Resolution order:
         1. Local tools.py (backward compat, custom tools)
-        2. praisonaiagents.tools.TOOL_MAPPINGS (built-in)
-        3. praisonai-tools package (external, optional)
-        4. Tool registry (plugins)
+        2. Wrapper ToolRegistry (register_function API)
+        3. praisonaiagents.tools.TOOL_MAPPINGS (built-in)
+        4. praisonai-tools package (external, optional)
+        5. Core SDK tool registry (plugins)
         
         Args:
             name: Tool name to resolve
@@ -236,17 +263,22 @@ class ToolResolver:
             logger.debug(f"Resolved '{name}' from local tools.py")
             return local_tools[name]
         
-        # 2. Check praisonaiagents.tools
+        # 2. Check wrapper ToolRegistry (NEW - ahead of SDK paths)
+        tool = self._resolve_from_wrapper_registry(name)
+        if tool is not None:
+            return tool
+        
+        # 3. Check praisonaiagents.tools
         tool = self._resolve_from_praisonaiagents(name)
         if tool is not None:
             return tool
         
-        # 3. Check praisonai-tools package
+        # 4. Check praisonai-tools package
         tool = self._resolve_from_praisonai_tools(name)
         if tool is not None:
             return tool
         
-        # 4. Check tool registry
+        # 5. Check core SDK tool registry
         tool = self._resolve_from_registry(name)
         if tool is not None:
             return tool
