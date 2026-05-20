@@ -2107,8 +2107,148 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     self._truncate_chat_history(chat_history_length)
                                     return None
                         
-                        # If self-reflection is enabled, continue with reflection loop below
-                        # (fall through to existing self-reflection logic)
+                        # If self-reflection is enabled, implement reflection logic
+                        if self.self_reflect:
+                            # Implement async self-reflection similar to sync path
+                            reflection_prompt = f"""
+Reflect on your previous response: '{response_text}'.
+{self.reflect_prompt if self.reflect_prompt else "Identify any flaws, improvements, or actions."}
+Provide a "satisfactory" status ('yes' or 'no').
+Output MUST be JSON with 'reflection' and 'satisfactory'.
+                            """
+                            
+                            # Add reflection prompt to messages
+                            reflection_messages = messages + [
+                                {"role": "assistant", "content": response_text},
+                                {"role": "user", "content": reflection_prompt}
+                            ]
+                            
+                            reflection_count = 0
+                            
+                            while True:
+                                try:
+                                    # Check if OpenAI client is available for self-reflection
+                                    if self._openai_client is None:
+                                        # For custom LLMs, self-reflection with structured output is not supported
+                                        if self.verbose:
+                                            _get_display_functions()['display_self_reflection'](f"Agent {self.name}: Self-reflection with structured output is not supported for custom LLM providers. Skipping reflection.", console=self.console)
+                                        # Return the original response without reflection
+                                        self._append_to_chat_history({"role": "assistant", "content": response_text})
+                                        # Persist assistant message to DB
+                                        self._persist_message("assistant", response_text)
+                                        try:
+                                            validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
+                                            # Execute callback after validation
+                                            self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
+                                            return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
+                                        except Exception as e:
+                                            logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
+                                            # Rollback chat history on guardrail failure
+                                            self._truncate_chat_history(chat_history_length)
+                                            return None
+                                    
+                                    reflection_response = await self._openai_client.async_client.beta.chat.completions.parse(
+                                        model=self.reflect_llm if self.reflect_llm else self.llm,
+                                        messages=reflection_messages,
+                                        temperature=temperature,
+                                        response_format=_get_display_functions()['ReflectionOutput']
+                                    )
+                                    
+                                    reflection_output = reflection_response.choices[0].message.parsed
+                                    
+                                    if self.verbose:
+                                        _get_display_functions()['display_self_reflection'](f"Agent {self.name} self reflection (using {self.reflect_llm if self.reflect_llm else self.llm}): reflection='{reflection_output.reflection}' satisfactory='{reflection_output.satisfactory}'", console=self.console)
+                                    
+                                    # Only consider satisfactory after minimum reflections
+                                    if reflection_output.satisfactory == "yes" and reflection_count >= self.min_reflect - 1:
+                                        if self.verbose:
+                                            _get_display_functions()['display_self_reflection']("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
+                                        # Add to chat history and return
+                                        self._append_to_chat_history({"role": "assistant", "content": response_text})
+                                        # Persist assistant message to DB
+                                        self._persist_message("assistant", response_text)
+                                        try:
+                                            validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
+                                            # Execute callback after validation
+                                            self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
+                                            return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
+                                        except Exception as e:
+                                            logging.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
+                                            # Rollback chat history on guardrail failure
+                                            self._truncate_chat_history(chat_history_length)
+                                            return None
+                                    
+                                    # Check if we've hit max reflections
+                                    if reflection_count >= self.max_reflect - 1:
+                                        if self.verbose:
+                                            _get_display_functions()['display_self_reflection']("Maximum reflection count reached, returning current response", console=self.console)
+                                        # Add to chat history and return
+                                        self._append_to_chat_history({"role": "assistant", "content": response_text})
+                                        # Persist assistant message to DB
+                                        self._persist_message("assistant", response_text)
+                                        try:
+                                            validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
+                                            # Execute callback after validation
+                                            self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
+                                            return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
+                                        except Exception as e:
+                                            logging.error(f"Agent {self.name}: Guardrail validation failed after max reflections: {e}")
+                                            # Rollback chat history on guardrail failure
+                                            self._truncate_chat_history(chat_history_length)
+                                            return None
+                                    
+                                    # Regenerate response based on reflection
+                                    regenerate_messages = reflection_messages + [
+                                        {"role": "assistant", "content": f"Self Reflection: {reflection_output.reflection} Satisfactory?: {reflection_output.satisfactory}"},
+                                        {"role": "user", "content": "Now regenerate your response using the reflection you made"}
+                                    ]
+                                    
+                                    new_response = await self._execute_unified_achat_completion(
+                                        messages=regenerate_messages,
+                                        temperature=temperature,
+                                        tools=formatted_tools,
+                                        stream=stream,
+                                        reasoning_steps=reasoning_steps,
+                                        task_name=task_name,
+                                        task_description=task_description,
+                                        task_id=task_id,
+                                        response_format=response_format
+                                    )
+                                    
+                                    if new_response:
+                                        new_response_text = self._extract_llm_response_content(new_response)
+                                        if isinstance(new_response_text, str):
+                                            response_text = new_response_text.strip()
+                                        reflection_messages = regenerate_messages
+                                    
+                                    reflection_count += 1
+                                    
+                                except Exception as e:
+                                    if self.verbose:
+                                        _get_display_functions()['display_error'](f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
+                                    logging.error("Reflection parsing failed.", exc_info=True)
+                                    reflection_count += 1
+                                    if reflection_count >= self.max_reflect:
+                                        # Return original response after max reflection attempts
+                                        self._append_to_chat_history({"role": "assistant", "content": response_text})
+                                        # Persist assistant message to DB
+                                        self._persist_message("assistant", response_text)
+                                        try:
+                                            validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
+                                            # Execute callback after validation
+                                            self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
+                                            return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
+                                        except Exception as guard_e:
+                                            logging.error(f"Agent {self.name}: Guardrail validation failed after reflection error: {guard_e}")
+                                            # Rollback chat history on guardrail failure
+                                            self._truncate_chat_history(chat_history_length)
+                                            return None
+                                    continue
+                        
+                        # This should never be reached due to the returns above
+                        # But adding as safety fallback
+                        logging.warning(f"Agent {self.name}: Unexpected code path reached in unified dispatch")
+                        return None
                     else:
                         # LEGACY: Check if OpenAI client is available
                         if self._openai_client is None:
