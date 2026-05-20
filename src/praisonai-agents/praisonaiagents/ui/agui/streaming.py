@@ -256,6 +256,48 @@ async def async_stream_response(
         yield create_run_error_event(str(e))
 
 
+def stream_event_to_agui_events(
+    event: Any,
+    message_id: str,
+    buffer: EventBuffer,
+) -> List[BaseEvent]:
+    """Convert a PraisonAI StreamEvent into zero or more AG-UI events."""
+    import json
+    from praisonaiagents.streaming.events import StreamEventType
+
+    if event.type == StreamEventType.DELTA_TEXT and event.content:
+        if not buffer.current_text_message_id:
+            buffer.start_text_message()
+            return [
+                TextMessageStartEvent(message_id=buffer.current_text_message_id, role="assistant"),
+                TextMessageContentEvent(
+                    message_id=buffer.current_text_message_id, delta=event.content
+                ),
+            ]
+        return [
+            TextMessageContentEvent(
+                message_id=buffer.current_text_message_id, delta=event.content
+            )
+        ]
+
+    if event.type == StreamEventType.TOOL_CALL_START and event.tool_call:
+        tool_call_id = event.tool_call.get("id") or str(uuid.uuid4())
+        tool_name = event.tool_call.get("name", "tool")
+        arguments = event.tool_call.get("arguments", {})
+        args_str = json.dumps(arguments) if isinstance(arguments, dict) else str(arguments)
+        parent_id = buffer.get_parent_message_id_for_tool_call() or message_id
+        buffer.start_tool_call(tool_call_id)
+        return list(create_tool_call_events(tool_call_id, tool_name, args_str, parent_id))
+
+    if event.type == StreamEventType.TOOL_CALL_RESULT and event.tool_call:
+        tool_call_id = event.tool_call.get("id") or str(uuid.uuid4())
+        content = event.content if event.content is not None else str(event.tool_call.get("result", ""))
+        buffer.end_tool_call(tool_call_id)
+        return [create_tool_result_event(tool_call_id, str(content), message_id)]
+
+    return []
+
+
 async def async_stream_agent_response(
     agent,
     user_input: str,
@@ -279,36 +321,64 @@ async def async_stream_agent_response(
         AG-UI events
     """
     import asyncio
-    
-    # Emit run started
+
     yield create_run_started_event(thread_id, run_id)
-    
+
+    loop = asyncio.get_event_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+    buffer = EventBuffer()
     message_id = str(uuid.uuid4())
-    
-    try:
-        # Check if agent has async chat method
-        if hasattr(agent, 'achat'):
-            response = await agent.achat(user_input)
-        elif hasattr(agent, 'chat'):
-            # Run sync chat in executor
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(None, agent.chat, user_input)
-        else:
+    text_started = False
+    text_ended = False
+    original_emitter = getattr(agent, "stream_emitter", None)
+
+    def on_stream_event(event: Any) -> None:
+        loop.call_soon_threadsafe(queue.put_nowait, ("stream", event))
+
+    if original_emitter is not None:
+        original_emitter.add_callback(on_stream_event)
+
+    async def run_chat() -> Any:
+        try:
+            if hasattr(agent, "achat"):
+                return await agent.achat(user_input, stream=True)
+            if hasattr(agent, "chat"):
+                return await loop.run_in_executor(
+                    None, lambda: agent.chat(user_input, stream=True)
+                )
             raise ValueError("Agent must have 'chat' or 'achat' method")
-        
-        # Emit text message events
-        yield TextMessageStartEvent(message_id=message_id, role="assistant")
-        
-        if response:
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, ("done", None))
+
+    chat_task = asyncio.create_task(run_chat())
+
+    try:
+        while True:
+            kind, payload = await queue.get()
+            if kind == "done":
+                break
+            for agui_event in stream_event_to_agui_events(payload, message_id, buffer):
+                if isinstance(agui_event, TextMessageStartEvent):
+                    text_started = True
+                yield agui_event
+
+        response = await chat_task
+
+        if text_started and buffer.current_text_message_id and not text_ended:
+            yield TextMessageEndEvent(message_id=buffer.current_text_message_id)
+            text_ended = True
+        elif not text_started and response:
+            yield TextMessageStartEvent(message_id=message_id, role="assistant")
             yield TextMessageContentEvent(message_id=message_id, delta=str(response))
-        
-        yield TextMessageEndEvent(message_id=message_id)
-        
-        # Emit run finished
+            yield TextMessageEndEvent(message_id=message_id)
+
         yield create_run_finished_event(thread_id, run_id)
-        
+
     except Exception as e:
         yield create_run_error_event(str(e))
+    finally:
+        if original_emitter is not None:
+            original_emitter.remove_callback(on_stream_event)
 
 
 async def async_stream_agents_response(
