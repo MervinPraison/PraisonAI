@@ -183,6 +183,7 @@ Methods:
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_available_tools</a>(context: Optional[Dict[str, Any]] = None) -> List[Union[BaseTool, Callable]]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_base_tools</a>() -> List[BaseTool]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_tools</a>() -> List[str]</code>
+* <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_tools_with_allowed_filter</a>(context: Optional[Dict[str, Any]] = None) -> List[str]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">register</a>(tool: Union[BaseTool, Callable], name: Optional[str] = None, overwrite: bool = False) -> None</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">unregister</a>(name: str) -> bool</code>
 * <code title="class Tools">Tools.<a href="./src/praisonai-agents/praisonaiagents/tools/tools.py">internet_search</a>(*args, **kwargs)</code>
