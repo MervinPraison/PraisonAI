@@ -223,6 +223,23 @@ def doctor_cleanup(
     raise typer.Exit(0 if removed == len(stale_dirs) else 1)
 
 
+@app.command("skills")
+def doctor_skills(
+    deep: bool = typer.Option(False, "--deep", help="Enable deeper probes"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+    show_requirements: bool = typer.Option(False, "--requirements", help="Show detailed requirements"),
+):
+    """Check skills capabilities and requirements."""
+    args = ["skills"]
+    if deep:
+        args.append("--deep")
+    if json_output:
+        args.append("--json")
+    if show_requirements:
+        args.append("--requirements")
+    raise typer.Exit(_run_doctor(args))
+
+
 @app.command("troubleshoot")
 def doctor_troubleshoot():
     """
