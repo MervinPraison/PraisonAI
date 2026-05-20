@@ -421,18 +421,45 @@ class ToolResolver:
             return {}
 
 
-# Convenience functions that construct resolver explicitly (no global singleton)
+# Process-level lazy singleton for performance (matches profiler.py pattern)
+_default_resolver: Optional[ToolResolver] = None
+_default_resolver_lock = threading.Lock()
+
+def _get_default_resolver() -> ToolResolver:
+    """Process-default ToolResolver (double-checked lazy init).
+    
+    Returns cached ToolResolver that is anchored to the working directory
+    at first call. Local tools.py resolution is CWD-dependent and cached
+    for the lifetime of the process.
+    
+    For test isolation or multi-project CLIs, create explicit resolver
+    instances instead of using this cached default.
+    """
+    global _default_resolver
+    if _default_resolver is None:
+        with _default_resolver_lock:
+            if _default_resolver is None:
+                _default_resolver = ToolResolver()
+    return _default_resolver
+
+
+# Convenience functions that use cached default resolver for performance
 def resolve_tool(name: str, resolver: Optional[ToolResolver] = None) -> Optional[Callable]:
     """Resolve a tool name to a callable.
     
     Args:
         name: Tool name to resolve
-        resolver: Optional resolver instance. If None, creates a new one.
+        resolver: Optional resolver instance. If None, uses cached default resolver.
         
     Returns:
         Callable if found, None otherwise
+        
+    Note:
+        When resolver=None, uses a process-level cached resolver that is anchored
+        to the working directory at first call. For test isolation or multi-project
+        CLIs, pass an explicit resolver instance.
     """
-    return (resolver or ToolResolver()).resolve(name)
+    return (resolver or _get_default_resolver()).resolve(name)
 
 
 def resolve_tools(names: List[str], resolver: Optional[ToolResolver] = None) -> List[Callable]:
@@ -440,24 +467,24 @@ def resolve_tools(names: List[str], resolver: Optional[ToolResolver] = None) -> 
     
     Args:
         names: List of tool names
-        resolver: Optional resolver instance. If None, creates a new one.
+        resolver: Optional resolver instance. If None, uses cached default resolver.
         
     Returns:
         List of resolved callables
     """
-    return (resolver or ToolResolver()).resolve_many(names)
+    return (resolver or _get_default_resolver()).resolve_many(names)
 
 
 def list_available_tools(resolver: Optional[ToolResolver] = None) -> Dict[str, str]:
     """List all available tools with descriptions.
     
     Args:
-        resolver: Optional resolver instance. If None, creates a new one.
+        resolver: Optional resolver instance. If None, uses cached default resolver.
     
     Returns:
         Dict mapping tool names to descriptions
     """
-    return (resolver or ToolResolver()).list_available()
+    return (resolver or _get_default_resolver()).list_available()
 
 
 def has_tool(name: str, resolver: Optional[ToolResolver] = None) -> bool:
@@ -465,12 +492,12 @@ def has_tool(name: str, resolver: Optional[ToolResolver] = None) -> bool:
     
     Args:
         name: Tool name to check
-        resolver: Optional resolver instance. If None, creates a new one.
+        resolver: Optional resolver instance. If None, uses cached default resolver.
         
     Returns:
         True if tool exists, False otherwise
     """
-    return (resolver or ToolResolver()).has_tool(name)
+    return (resolver or _get_default_resolver()).has_tool(name)
 
 
 def validate_yaml_tools(yaml_config: Dict[str, Any], resolver: Optional[ToolResolver] = None) -> List[str]:
@@ -478,9 +505,9 @@ def validate_yaml_tools(yaml_config: Dict[str, Any], resolver: Optional[ToolReso
     
     Args:
         yaml_config: Parsed YAML configuration
-        resolver: Optional resolver instance. If None, creates a new one.
+        resolver: Optional resolver instance. If None, uses cached default resolver.
         
     Returns:
         List of missing tool names
     """
-    return (resolver or ToolResolver()).validate_yaml_tools(yaml_config)
+    return (resolver or _get_default_resolver()).validate_yaml_tools(yaml_config)
