@@ -21,11 +21,14 @@ from praisonaiagents.tools.base import BaseTool
 
 class MockTool(BaseTool):
     """Mock tool for testing."""
+
+    name = "mock_tool"
+    description = "Mock tool"
     
     def __init__(self, name: str):
+        super().__init__()
         self.name = name
         self.description = f"Mock tool {name}"
-        super().__init__()
     
     def run(self, **kwargs):
         return f"Mock result from {self.name}"
@@ -248,9 +251,9 @@ class TestHermesFilterSemantics:
         """Test that filter isolates winner when duplicate names exist."""
         registry = ToolRegistry()
         
-        # Register two tools with same name (second should overwrite first)
+        # Register two tools with same name in different registries (_tools and _functions)
         registry.register(MockTool("search"), name="search")
-        registry.register(mock_function_tool, name="search")  # overwrites
+        registry.register(mock_function_tool, name="search")
         
         # Register additional tools
         registry.register(MockTool("extract"))
@@ -261,7 +264,7 @@ class TestHermesFilterSemantics:
         # Should isolate the winning implementation
         assert filtered_tools == ["search"]
         
-        # Verify we can get the tool and it's the last one registered
+        # Verify lookup precedence still resolves to BaseTool entries first
         tool = registry.get("search")
         assert isinstance(tool, MockTool)
     

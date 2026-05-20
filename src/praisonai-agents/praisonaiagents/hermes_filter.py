@@ -23,8 +23,8 @@ Usage:
     filter.log_diagnostics()
 """
 
-import logging
 import os
+import logging
 from typing import Any, Dict, List, Optional, Set, Union
 
 logger = logging.getLogger(__name__)
@@ -186,7 +186,7 @@ class HermesToolFilter:
             "env_var_name": self.env_var_name,
             "env_value": self.env_value,
             "is_ci": self.is_ci,
-            "whitelist": sorted(self._whitelist) if self._whitelist else None,
+            "whitelist": list(self._whitelist) if self._whitelist else None,
             **self._diagnostics
         }
     
