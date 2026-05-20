@@ -7,6 +7,8 @@ tool registry system to ensure proper filtering across the ecosystem.
 
 import os
 import pytest
+import sys
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from praisonaiagents.tools.registry import (
@@ -14,20 +16,19 @@ from praisonaiagents.tools.registry import (
     get_registry,
     list_tools_with_hermes_filter,
 )
-from praisonaiagents.tools.base import BaseTool, ToolResult
+from praisonaiagents.tools.base import BaseTool
 
 
 class MockTool(BaseTool):
     """Mock tool for testing."""
     
     def __init__(self, name: str):
-        super().__init__(name=name)
+        self.name = name
+        self.description = f"Mock tool {name}"
+        super().__init__()
     
-    def execute(self, *args, **kwargs) -> ToolResult:
-        return ToolResult(
-            content=f"Mock result from {self.name}",
-            tool_name=self.name
-        )
+    def run(self, **kwargs):
+        return f"Mock result from {self.name}"
 
 
 def mock_function_tool():
@@ -52,7 +53,8 @@ class TestHermesFilterRegistryIntegration:
     
     def test_registry_hermes_filter_unset(self):
         """Test registry filtering with HERMES_ONLY_TOOLS unset."""
-        with patch('os.environ.get', return_value=None):
+        with patch.dict(os.environ, {"CI": "false"}, clear=False):
+            os.environ.pop("HERMES_ONLY_TOOLS", None)
             filtered_tools = self.registry.list_tools_with_hermes_filter()
         
         # Should return all tools when filter is unset
@@ -65,9 +67,10 @@ class TestHermesFilterRegistryIntegration:
     def test_registry_hermes_filter_with_whitelist(self):
         """Test registry filtering with HERMES_ONLY_TOOLS set."""
         with patch.dict(os.environ, {
-            "HERMES_ONLY_TOOLS": "search_web,send_email,unknown_tool"
+            "HERMES_ONLY_TOOLS": "search_web,send_email,unknown_tool",
+            "CI": "false",
         }):
-            with patch('logging.warning'):  # Suppress warnings about unknown tools
+            with patch('praisonaiagents.hermes_filter.logger.warning'):  # Suppress warnings about unknown tools
                 filtered_tools = self.registry.list_tools_with_hermes_filter()
         
         # Should only return whitelisted tools that exist
@@ -76,9 +79,10 @@ class TestHermesFilterRegistryIntegration:
     def test_registry_hermes_filter_empty_result(self):
         """Test registry filtering when no tools match whitelist."""
         with patch.dict(os.environ, {
-            "HERMES_ONLY_TOOLS": "nonexistent_tool1,nonexistent_tool2"
+            "HERMES_ONLY_TOOLS": "nonexistent_tool1,nonexistent_tool2",
+            "CI": "false",
         }):
-            with patch('logging.warning'):  # Suppress warnings about unknown tools
+            with patch('praisonaiagents.hermes_filter.logger.warning'):  # Suppress warnings about unknown tools
                 filtered_tools = self.registry.list_tools_with_hermes_filter()
         
         # Should return empty list when no tools match
@@ -87,7 +91,7 @@ class TestHermesFilterRegistryIntegration:
     def test_registry_hermes_filter_error_fallback(self):
         """Test registry filtering falls back on error."""
         # Mock an error in the filter
-        with patch('praisonaiagents.tools.registry.filter_tools_with_hermes',
+        with patch('praisonaiagents.hermes_filter.filter_tools_with_hermes',
                    side_effect=Exception("Mock error")):
             with patch('logging.error'):  # Suppress error logging
                 filtered_tools = self.registry.list_tools_with_hermes_filter()
@@ -98,7 +102,7 @@ class TestHermesFilterRegistryIntegration:
     def test_registry_hermes_filter_import_error_fallback(self):
         """Test registry filtering falls back on import error."""
         # Mock ImportError
-        with patch('praisonaiagents.tools.registry.filter_tools_with_hermes',
+        with patch('praisonaiagents.hermes_filter.filter_tools_with_hermes',
                    side_effect=ImportError("Module not found")):
             with patch('logging.warning'):  # Suppress warning logging
                 filtered_tools = self.registry.list_tools_with_hermes_filter()
@@ -135,8 +139,9 @@ class TestGlobalRegistryHermesFilter:
     
     def test_global_list_tools_with_hermes_filter_unset(self):
         """Test global function with HERMES_ONLY_TOOLS unset."""
-        with patch('os.environ.get', return_value=None):
-            with patch('logging.warning'):  # Suppress unset warning
+        with patch.dict(os.environ, {"CI": "false"}, clear=False):
+            os.environ.pop("HERMES_ONLY_TOOLS", None)
+            with patch('praisonaiagents.hermes_filter.logger.warning'):  # Suppress unset warning
                 filtered_tools = list_tools_with_hermes_filter()
         
         # Should return all registered tools
@@ -146,6 +151,19 @@ class TestGlobalRegistryHermesFilter:
 
 class TestHermesFilterCLIIntegration:
     """Test HERMES_ONLY_TOOLS filter integration with CLI tool loading."""
+
+    @staticmethod
+    def _mock_tools_module():
+        return SimpleNamespace(
+            internet_search=lambda: "internet_search",
+            read_file=lambda: "read_file",
+            write_file=lambda: "write_file",
+            list_files=lambda: "list_files",
+            execute_command=lambda: "execute_command",
+            read_csv=lambda: "read_csv",
+            write_csv=lambda: "write_csv",
+            analyze_csv=lambda: "analyze_csv",
+        )
     
     def test_cli_agents_load_tools_with_filter(self):
         """Test CLI agents tool loading with HERMES_ONLY_TOOLS filter."""
@@ -154,12 +172,14 @@ class TestHermesFilterCLIIntegration:
         handler = MultiAgentHandler(verbose=False)
         
         # Test with filter enabled
-        with patch.dict(os.environ, {
-            "HERMES_ONLY_TOOLS": "internet_search,read_file"
-        }):
-            tools = handler._load_tools([
-                "internet_search", "read_file", "write_file", "execute_command"
-            ])
+        with patch.dict(sys.modules, {"praisonaiagents.tools": self._mock_tools_module()}):
+            with patch.dict(os.environ, {
+                "HERMES_ONLY_TOOLS": "internet_search,read_file",
+                "CI": "false",
+            }):
+                tools = handler._load_tools([
+                    "internet_search", "read_file", "write_file", "execute_command"
+                ])
         
         # Should only load tools that pass the filter AND are requested
         # In this case, write_file and execute_command should be filtered out
@@ -173,28 +193,27 @@ class TestHermesFilterCLIIntegration:
         handler = MultiAgentHandler(verbose=False)
         
         # Test without filter (unset environment variable)
-        with patch('os.environ.get', return_value=None):
-            tools = handler._load_tools([
-                "internet_search", "read_file", "write_file"
-            ])
+        with patch.dict(sys.modules, {"praisonaiagents.tools": self._mock_tools_module()}):
+            with patch.dict(os.environ, {"CI": "false"}, clear=False):
+                os.environ.pop("HERMES_ONLY_TOOLS", None)
+                tools = handler._load_tools([
+                    "internet_search", "read_file", "write_file"
+                ])
         
         # Should load all requested tools when no filter is set
         assert len(tools) == 3
     
     def test_cli_agents_load_tools_filter_error_handling(self):
-        """Test CLI agents handles HERMES_ONLY_TOOLS filter errors gracefully."""
+        """Test CLI agents surfaces invalid HERMES_ONLY_TOOLS errors."""
         from praisonai.cli.features.agents import MultiAgentHandler
         
         handler = MultiAgentHandler(verbose=False)
         
         # Test with invalid filter configuration
-        with patch.dict(os.environ, {"HERMES_ONLY_TOOLS": ""}):
-            # Should handle the ValueError from empty string gracefully
-            tools = handler._load_tools(["internet_search", "read_file"])
-        
-        # Should still work and load tools despite filter error
-        # (the ValueError is caught and the filter is bypassed)
-        assert len(tools) >= 0  # May be 0 or more depending on error handling
+        with patch.dict(sys.modules, {"praisonaiagents.tools": self._mock_tools_module()}):
+            with patch.dict(os.environ, {"HERMES_ONLY_TOOLS": ""}):
+                with pytest.raises(ValueError, match="cannot be empty"):
+                    handler._load_tools(["internet_search", "read_file"])
 
 
 class TestHermesFilterSemantics:
@@ -244,7 +263,7 @@ class TestHermesFilterSemantics:
         
         # Verify we can get the tool and it's the last one registered
         tool = registry.get("search")
-        assert callable(tool)  # Should be the function, not the MockTool
+        assert isinstance(tool, MockTool)
     
     @patch.dict(os.environ, {"CI": "true"})
     def test_strict_mode_in_ci(self):

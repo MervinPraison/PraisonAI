@@ -211,6 +211,9 @@ class ToolRegistry:
         except ImportError:
             logging.warning("HERMES_ONLY_TOOLS filter not available, returning all tools")
             return self.list_tools()
+        except ValueError:
+            # Preserve strict HERMES_ONLY_TOOLS semantics (e.g., CI unknown tools, empty value)
+            raise
         except Exception as e:
             logging.error(f"Error applying HERMES_ONLY_TOOLS filter: {e}")
             # Fallback to all tools on error

@@ -23,10 +23,9 @@ Usage:
     filter.log_diagnostics()
 """
 
-import os
 import logging
-from typing import Set, List, Dict, Optional, Union
-from collections import OrderedDict
+import os
+from typing import Any, Dict, List, Optional, Set, Union
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +52,7 @@ class HermesToolFilter:
         self.env_value = os.environ.get(env_var_name)
         self.is_ci = os.environ.get("CI", "").lower() in ("true", "1", "yes")
         self._whitelist: Optional[Set[str]] = self._parse_whitelist()
-        self._diagnostics: Dict[str, any] = {}
+        self._diagnostics: Dict[str, Any] = {}
         
     def _parse_whitelist(self) -> Optional[Set[str]]:
         """
@@ -83,7 +82,7 @@ class HermesToolFilter:
         
         return tools
     
-    def filter_tools(self, available_tools: Union[Set[str], List[str], Dict[str, any]]) -> Set[str]:
+    def filter_tools(self, available_tools: Union[Set[str], List[str], Dict[str, Any]]) -> Set[str]:
         """
         Filter tools based on HERMES_ONLY_TOOLS whitelist.
         
@@ -176,7 +175,7 @@ class HermesToolFilter:
         logger.info("IsCI=%s", self.is_ci)
         logger.info("=" * 50)
     
-    def get_diagnostics(self) -> Dict[str, any]:
+    def get_diagnostics(self) -> Dict[str, Any]:
         """
         Get diagnostics data as a dictionary.
         
@@ -187,7 +186,7 @@ class HermesToolFilter:
             "env_var_name": self.env_var_name,
             "env_value": self.env_value,
             "is_ci": self.is_ci,
-            "whitelist": list(self._whitelist) if self._whitelist else None,
+            "whitelist": sorted(self._whitelist) if self._whitelist else None,
             **self._diagnostics
         }
     
@@ -211,7 +210,7 @@ class HermesToolFilter:
 
 
 def filter_tools_with_hermes(
-    available_tools: Union[Set[str], List[str], Dict[str, any]],
+    available_tools: Union[Set[str], List[str], Dict[str, Any]],
     env_var_name: str = "HERMES_ONLY_TOOLS",
     log_diagnostics: bool = True
 ) -> Set[str]:

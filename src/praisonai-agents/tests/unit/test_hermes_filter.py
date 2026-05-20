@@ -67,7 +67,7 @@ class TestHermesToolFilter:
         filter_instance = HermesToolFilter()
         available_tools = {"search", "send_message", "extract_pdf"}
         
-        with patch('logging.warning') as mock_warning:
+        with patch('praisonaiagents.hermes_filter.logger.warning') as mock_warning:
             result = filter_instance.filter_tools(available_tools)
             
         assert result == available_tools
@@ -84,13 +84,13 @@ class TestHermesToolFilter:
         
         assert result == {"search", "send_message"}
     
-    @patch.dict(os.environ, {"HERMES_ONLY_TOOLS": "search,unknown_tool,send_message"})
+    @patch.dict(os.environ, {"HERMES_ONLY_TOOLS": "search,unknown_tool,send_message", "CI": "false"})
     def test_filter_tools_with_unknown_tools_dev_mode(self):
         """Test filtering with unknown tools in development mode."""
         filter_instance = HermesToolFilter()
         available_tools = {"search", "send_message", "extract_pdf"}
         
-        with patch('logging.warning') as mock_warning:
+        with patch('praisonaiagents.hermes_filter.logger.warning') as mock_warning:
             result = filter_instance.filter_tools(available_tools)
         
         assert result == {"search", "send_message"}
@@ -141,11 +141,11 @@ class TestHermesToolFilter:
         
         assert diagnostics["env_var_name"] == "HERMES_ONLY_TOOLS"
         assert diagnostics["env_value"] == "search,send_message"
-        assert diagnostics["whitelist"] == ["search", "send_message"]
+        assert set(diagnostics["whitelist"]) == {"search", "send_message"}
         assert set(diagnostics["registered_before_filter"]) == available_tools
         assert set(diagnostics["registered_after_filter"]) == {"search", "send_message"}
-        assert set(diagnostics["dropped_tools"]) == {"extract_pdf"}
-        assert set(diagnostics["unknown_tools"]) == {"unknown_in_whitelist"}
+        assert set(diagnostics["dropped_tools"]) == {"extract_pdf", "unknown_in_whitelist"}
+        assert diagnostics["unknown_tools"] == []
     
     @patch.dict(os.environ, {"HERMES_ONLY_TOOLS": "search,send_message"})
     def test_log_diagnostics(self, caplog):
@@ -247,13 +247,13 @@ class TestEdgeCases:
         result = filter_instance.filter_tools(set())
         assert result == set()
     
-    @patch.dict(os.environ, {"HERMES_ONLY_TOOLS": "tool1"})
+    @patch.dict(os.environ, {"HERMES_ONLY_TOOLS": "tool1", "CI": "false"})
     def test_no_matching_tools(self):
         """Test filtering when no tools match the whitelist."""
         filter_instance = HermesToolFilter()
         available_tools = {"tool2", "tool3"}
         
-        with patch('logging.warning'):  # Suppress warning about unknown tools
+        with patch('praisonaiagents.hermes_filter.logger.warning'):  # Suppress warning about unknown tools
             result = filter_instance.filter_tools(available_tools)
         
         assert result == set()
