@@ -123,6 +123,8 @@ class MultiAgentHandler:
     def _load_tools(self, tool_names: List[str]) -> List:
         """Load tool functions by name.
         
+        Applies ALLOWED_TOOLS filter if enabled to prevent tool name collisions.
+        
         Args:
             tool_names: List of tool names to load
             
@@ -147,6 +149,26 @@ class MultiAgentHandler:
                 'write_csv': write_csv,
                 'analyze_csv': analyze_csv,
             }
+            
+            # Apply ALLOWED_TOOLS filter if enabled
+            try:
+                from praisonaiagents.allowed_tools_filter import filter_tools_with_allowed_tools
+                available_tools = set(tool_map.keys())
+                filtered_tools = filter_tools_with_allowed_tools(available_tools, log_diagnostics=False)
+                
+                # Filter tool_map to only include whitelisted tools
+                tool_map = {name: func for name, func in tool_map.items() if name in filtered_tools}
+                
+            except ImportError:
+                # ALLOWED_TOOLS filter not available, proceed normally
+                pass
+            except ValueError:
+                # Preserve strict filter semantics (invalid config / CI unknown tools)
+                raise
+            except Exception as e:
+                if self.verbose:
+                    print(f"⚠ ALLOWED_TOOLS filter error: {e}")
+                raise
             
             for name in tool_names:
                 if name in tool_map:
