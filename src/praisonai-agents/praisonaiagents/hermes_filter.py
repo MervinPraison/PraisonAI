@@ -1,7 +1,7 @@
 """
-HERMES_ONLY_TOOLS filter module with diagnostics.
+Tool whitelist filter module with diagnostics.
 
-This module provides a canonical implementation of the HERMES_ONLY_TOOLS filter
+This module provides a canonical implementation of the ALLOWED_TOOLS filter
 that prevents tool name collisions in multi-environment agent systems by 
 whitelisting only specified tools.
 
@@ -9,11 +9,15 @@ The filter is designed to solve the "tool shadowing" problem where multiple
 modules register tools with overlapping or ambiguous names, causing agents
 to invoke the wrong implementation.
 
+Environment Variables:
+    ALLOWED_TOOLS: Primary variable (comma-separated tool names)
+    HERMES_ONLY_TOOLS: Backward compatibility alias for ALLOWED_TOOLS
+
 Usage:
-    from praisonaiagents.hermes_filter import HermesToolFilter
+    from praisonaiagents.hermes_filter import AllowedToolsFilter
     
-    # Create filter from environment variable
-    filter = HermesToolFilter()
+    # Create filter from environment variable  
+    filter = AllowedToolsFilter()
     
     # Filter tools
     available_tools = {"search", "send_message", "extract_pdf"}
@@ -30,26 +34,36 @@ from typing import Any, Dict, List, Optional, Set, Union
 logger = logging.getLogger(__name__)
 
 
-class HermesToolFilter:
+class AllowedToolsFilter:
     """
-    Canonical HERMES_ONLY_TOOLS filter with diagnostics.
+    Canonical tool whitelist filter with diagnostics and backward compatibility.
     
-    This filter implements the semantics specified in the issue:
-    - HERMES_ONLY_TOOLS unset: all tools visible (with warning about collisions)
-    - HERMES_ONLY_TOOLS empty string: error - must specify tools or unset
-    - HERMES_ONLY_TOOLS with values: only whitelisted tools visible
+    This filter implements the semantics for tool filtering:
+    - ALLOWED_TOOLS unset (or HERMES_ONLY_TOOLS): all tools visible (with warning about collisions)
+    - ALLOWED_TOOLS empty string: error - must specify tools or unset
+    - ALLOWED_TOOLS with values: only whitelisted tools visible
     - Unknown tools in list: warn and strip in dev, strict fail in CI
+    
+    Backward Compatibility:
+    - Supports both ALLOWED_TOOLS and HERMES_ONLY_TOOLS
+    - ALLOWED_TOOLS takes precedence if both are set
     """
     
-    def __init__(self, env_var_name: str = "HERMES_ONLY_TOOLS"):
+    def __init__(self, env_var_name: str = "ALLOWED_TOOLS"):
         """
-        Initialize the filter.
+        Initialize the filter with backward compatibility support.
         
         Args:
-            env_var_name: Environment variable name (default: "HERMES_ONLY_TOOLS")
+            env_var_name: Primary environment variable name (default: "ALLOWED_TOOLS")
         """
-        self.env_var_name = env_var_name
-        self.env_value = os.environ.get(env_var_name)
+        # Support both new (ALLOWED_TOOLS) and legacy (HERMES_ONLY_TOOLS) naming
+        self.primary_var = env_var_name
+        self.legacy_var = "HERMES_ONLY_TOOLS"
+        
+        # ALLOWED_TOOLS takes precedence over HERMES_ONLY_TOOLS for backward compatibility
+        self.env_value = os.environ.get(self.primary_var) or os.environ.get(self.legacy_var)
+        self.env_var_name = self.primary_var if os.environ.get(self.primary_var) else self.legacy_var
+        
         self.is_ci = os.environ.get("CI", "").lower() in ("true", "1", "yes")
         self._whitelist: Optional[Set[str]] = self._parse_whitelist()
         self._diagnostics: Dict[str, Any] = {}
@@ -107,8 +121,8 @@ class HermesToolFilter:
         # If no whitelist, return all tools (with warning)
         if self._whitelist is None:
             logger.warning(
-                "HERMES_ONLY_TOOLS is unset. All %d tools are visible. "
-                "Consider using HERMES_ONLY_TOOLS to prevent tool name collisions.",
+                "Tool whitelist is unset. All %d tools are visible. "
+                "Consider using ALLOWED_TOOLS to prevent tool name collisions.",
                 len(tool_names)
             )
             self._diagnostics["registered_after_filter"] = sorted(tool_names)
@@ -165,7 +179,7 @@ class HermesToolFilter:
             return
         
         logger.info("=" * 50)
-        logger.info("HERMES_ONLY_TOOLS DIAGNOSTICS")
+        logger.info("ALLOWED_TOOLS FILTER DIAGNOSTICS")
         logger.info("=" * 50)
         logger.info("%s=%s", self.env_var_name, self.env_value or "<unset>")
         logger.info("RegisteredBeforeFilter=%s", self._diagnostics.get("registered_before_filter", []))
@@ -195,7 +209,7 @@ class HermesToolFilter:
         Check if filtering is enabled.
         
         Returns:
-            True if HERMES_ONLY_TOOLS is set and filtering is active
+            True if tool whitelist is set and filtering is active
         """
         return self._whitelist is not None
     
@@ -209,23 +223,23 @@ class HermesToolFilter:
         return self._whitelist.copy() if self._whitelist else None
 
 
-def filter_tools_with_hermes(
+def filter_tools_with_allowed_tools(
     available_tools: Union[Set[str], List[str], Dict[str, Any]],
-    env_var_name: str = "HERMES_ONLY_TOOLS",
+    env_var_name: str = "ALLOWED_TOOLS",
     log_diagnostics: bool = True
 ) -> Set[str]:
     """
-    Convenience function to filter tools with HERMES_ONLY_TOOLS.
+    Convenience function to filter tools with ALLOWED_TOOLS.
     
     Args:
         available_tools: Available tools to filter
-        env_var_name: Environment variable name (default: "HERMES_ONLY_TOOLS")
+        env_var_name: Environment variable name (default: "ALLOWED_TOOLS")
         log_diagnostics: Whether to log diagnostics (default: True)
         
     Returns:
         Filtered set of tool names
     """
-    filter_instance = HermesToolFilter(env_var_name)
+    filter_instance = AllowedToolsFilter(env_var_name)
     filtered = filter_instance.filter_tools(available_tools)
     
     if log_diagnostics:
@@ -234,6 +248,10 @@ def filter_tools_with_hermes(
     return filtered
 
 
-# Compatibility exports for different naming conventions
-hermes_filter = filter_tools_with_hermes
-apply_hermes_filter = filter_tools_with_hermes
+# Backward compatibility aliases
+filter_tools_with_hermes = filter_tools_with_allowed_tools
+hermes_filter = filter_tools_with_allowed_tools
+apply_hermes_filter = filter_tools_with_allowed_tools
+
+# Legacy class alias for backward compatibility
+HermesToolFilter = AllowedToolsFilter

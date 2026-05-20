@@ -215,7 +215,7 @@ class ToolRegistry:
             # Preserve strict HERMES_ONLY_TOOLS semantics (e.g., CI unknown tools, empty value)
             raise
         except Exception as e:
-            logging.error(f"Error applying HERMES_ONLY_TOOLS filter: {e}")
+            logging.error("Error applying HERMES_ONLY_TOOLS filter: %s", e)
             # Fallback to all tools on error
             return self.list_tools()
     

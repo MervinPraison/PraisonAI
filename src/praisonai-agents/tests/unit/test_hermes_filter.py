@@ -130,13 +130,14 @@ class TestHermesToolFilter:
         
         assert result == {"search", "send_message"}
     
-    @patch.dict(os.environ, {"HERMES_ONLY_TOOLS": "search,send_message,unknown_in_whitelist"})
+    @patch.dict(os.environ, {"HERMES_ONLY_TOOLS": "search,send_message,unknown_in_whitelist", "CI": "false"})
     def test_diagnostics_data(self):
         """Test diagnostics data collection."""
         filter_instance = HermesToolFilter()
-        available_tools = {"search", "send_message", "extract_pdf"}
+        available_tools = {"search", "send_message", "extract_pdf"}  # Note: unknown_in_whitelist not in available
         
-        filter_instance.filter_tools(available_tools)
+        with patch('praisonaiagents.hermes_filter.logger.warning'):  # Suppress warning for test
+            filter_instance.filter_tools(available_tools)
         diagnostics = filter_instance.get_diagnostics()
         
         assert diagnostics["env_var_name"] == "HERMES_ONLY_TOOLS"
