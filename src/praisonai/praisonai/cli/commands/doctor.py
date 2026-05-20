@@ -119,6 +119,20 @@ def doctor_network(
     raise typer.Exit(_run_doctor(args))
 
 
+@app.command("packaging")
+def doctor_packaging(
+    deep: bool = typer.Option(False, "--deep", help="Enable deeper probes"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+):
+    """Check packaging and entry point configuration (Windows daemon compatibility)."""
+    args = ["packaging"]
+    if deep:
+        args.append("--deep")
+    if json_output:
+        args.append("--json")
+    raise typer.Exit(_run_doctor(args))
+
+
 @app.command("performance")
 def doctor_performance(
     deep: bool = typer.Option(False, "--deep", help="Enable deeper probes"),
