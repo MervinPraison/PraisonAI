@@ -32,6 +32,7 @@ class CheckCategory(Enum):
     PERMISSIONS = "permissions"
     NETWORK = "network"
     PERFORMANCE = "performance"
+    PACKAGING = "packaging"
     SELFTEST = "selftest"
     BOTS = "bots"
 

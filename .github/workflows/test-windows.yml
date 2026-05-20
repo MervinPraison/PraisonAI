@@ -176,6 +176,19 @@ jobs:
       run: praisonai queue list
       continue-on-error: true
 
+    # ==================== PACKAGING TESTS ====================
+    - name: Test packaging/daemon entry points
+      run: |
+        echo "Testing both entry point methods..."
+        python -m praisonai --version
+        praisonai --version
+
+    - name: Test doctor packaging command
+      run: |
+        echo "Testing doctor packaging diagnostics..."
+        praisonai doctor packaging --json
+      continue-on-error: true
+
     # ==================== REAL API TESTS ====================
     - name: Real API test - Agent run
       if: env.OPENAI_API_KEY != ''
