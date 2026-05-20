@@ -201,8 +201,11 @@ def _register_builtin_knowledge_stores(registry: StoreRegistry):
 
     def _valkey_vector(url=None, **kwargs):
         from .knowledge.valkey_vector import ValkeyVectorKnowledgeStore
-        # url not used; host/port come from kwargs
-        kwargs.pop("url", None)
+        if url is not None:
+            raise ValueError(
+                "Valkey vector store does not accept 'url' parameter. "
+                "Use host/port/password kwargs instead."
+            )
         return ValkeyVectorKnowledgeStore(**kwargs)
 
     def _cassandra(url=None, **kwargs):
@@ -296,7 +299,11 @@ def _register_builtin_state_stores(registry: StoreRegistry):
 
     def _valkey(url=None, **kwargs):
         from .state.valkey import ValkeyStateStore
-        kwargs.pop("url", None)
+        if url is not None:
+            raise ValueError(
+                "Valkey state store does not accept 'url' parameter. "
+                "Use host/port/password kwargs instead."
+            )
         return ValkeyStateStore(**kwargs)
 
     def _dynamodb(url=None, **kwargs):

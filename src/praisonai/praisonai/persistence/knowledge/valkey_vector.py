@@ -115,8 +115,12 @@ class ValkeyVectorKnowledgeStore(KnowledgeStore):
         index_name = self._index_name(name)
         try:
             ft.dropindex(client, index_name)
-        except Exception:
-            return False
+        except Exception as e:
+            # Only return False for index not found, re-raise other errors
+            err_msg = str(e).lower()
+            if "index not found" in err_msg or "unknown index" in err_msg:
+                return False
+            raise RuntimeError(f"Failed to delete collection: {e}") from e
 
         # Manually remove orphaned document hashes left behind (no DD flag in ValkeySearch)
         pattern = f"{self.prefix}{name}:*"
@@ -139,8 +143,12 @@ class ValkeyVectorKnowledgeStore(KnowledgeStore):
         try:
             ft.info(client, index_name)
             return True
-        except Exception:
-            return False
+        except Exception as e:
+            # Only return False for index not found, re-raise other errors
+            err_msg = str(e).lower()
+            if "index not found" in err_msg or "unknown index" in err_msg:
+                return False
+            raise RuntimeError(f"Failed to check collection existence: {e}") from e
 
     def list_collections(self) -> List[str]:
         """List all collections."""
@@ -158,8 +166,10 @@ class ValkeyVectorKnowledgeStore(KnowledgeStore):
                         name = name[:-4]
                     result.append(name)
             return result
-        except Exception:
-            return []
+        except Exception as e:
+            # Only return empty list for connection/auth issues in some contexts
+            # but generally we should propagate errors
+            raise RuntimeError(f"Failed to list collections: {e}") from e
 
     def insert(
         self,
@@ -182,6 +192,7 @@ class ValkeyVectorKnowledgeStore(KnowledgeStore):
                 "content": doc.content,
                 "content_hash": doc.content_hash or "",
                 "created_at": str(doc.created_at),
+                "metadata": json.dumps(doc.metadata or {}),
                 "embedding": embedding_bytes,
             })
             ids.append(doc.id)
@@ -218,6 +229,8 @@ class ValkeyVectorKnowledgeStore(KnowledgeStore):
             filters: Optional dict of field-value equality filters applied as
                 a ValkeySearch pre-filter (e.g. {"content_hash": "abc"}).
             score_threshold: Minimum similarity (1 - distance) to include.
+                NOTE: Currently only accurate for cosine distance. For euclidean/L2 
+                and inner-product distances, the threshold behavior may be incorrect.
         """
         client = self._get_client()
         index_name = self._index_name(collection)
@@ -246,6 +259,7 @@ class ValkeyVectorKnowledgeStore(KnowledgeStore):
                     ReturnField("content"),
                     ReturnField("content_hash"),
                     ReturnField("created_at"),
+                    ReturnField("metadata"),
                     ReturnField("score"),
                 ],
                 params={"vec": packed},
@@ -280,7 +294,7 @@ class ValkeyVectorKnowledgeStore(KnowledgeStore):
                 id=bare_id,
                 content=field_map.get("content", ""),
                 embedding=None,
-                metadata={},
+                metadata=json.loads(field_map.get("metadata", "{}") or "{}"),
                 content_hash=field_map.get("content_hash", ""),
                 created_at=float(field_map.get("created_at", 0)),
             ))
@@ -319,12 +333,14 @@ class ValkeyVectorKnowledgeStore(KnowledgeStore):
                 content_hash = _decode(data.get(b"content_hash", data.get("content_hash", b"")))
                 created_at_raw = data.get(b"created_at", data.get("created_at", b"0"))
                 created_at = float(_decode(created_at_raw))
+                metadata_raw = _decode(data.get(b"metadata", data.get("metadata", b"{}")))
+                metadata = json.loads(metadata_raw or "{}")
 
                 doc = KnowledgeDocument(
                     id=doc_id,
                     content=content,
                     embedding=embedding,
-                    metadata={},
+                    metadata=metadata,
                     content_hash=content_hash,
                     created_at=created_at,
                 )
@@ -365,8 +381,12 @@ class ValkeyVectorKnowledgeStore(KnowledgeStore):
                 if k in info:
                     return int(info[k])
             return 0
-        except Exception:
-            return 0
+        except Exception as e:
+            # Only return 0 for index not found, re-raise other errors
+            err_msg = str(e).lower()
+            if "index not found" in err_msg or "unknown index" in err_msg:
+                return 0
+            raise RuntimeError(f"Failed to count documents: {e}") from e
 
     def close(self) -> None:
         """Close the store."""

@@ -108,9 +108,14 @@ class ValkeyStorageAdapter:
 
         try:
             if self.ttl is not None:
+                if ExpirySet is None or ExpiryType is None:
+                    from praisonai.persistence._valkey_client import _MISSING_MSG
+                    raise ImportError(_MISSING_MSG)
                 client.set(full_key, json_data, expiry=ExpirySet(ExpiryType.SEC, self.ttl))
             else:
                 client.set(full_key, json_data)
+        except ImportError:
+            raise
         except Exception as e:
             raise RuntimeError(f"Failed to save data to Valkey: {e}") from e
 
@@ -283,6 +288,10 @@ class ValkeySearchBackend:
 
     def add_document(self, doc_id: str, text: str, embedding: List[float]) -> None:
         """Add a document with its embedding to the index."""
+        if len(embedding) != self.vector_dim:
+            raise ValueError(
+                f"Embedding dimension mismatch: expected {self.vector_dim}, got {len(embedding)}"
+            )
         client = self._get_client()
         full_id = f"{self.index_name}:{doc_id}"
         packed = struct.pack(f"{len(embedding)}f", *embedding)
@@ -294,6 +303,12 @@ class ValkeySearchBackend:
 
     def search(self, query_embedding: List[float], k: int = 5) -> List[Dict[str, Any]]:
         """Search for nearest neighbors by embedding."""
+        if k <= 0:
+            raise ValueError("k must be > 0")
+        if len(query_embedding) != self.vector_dim:
+            raise ValueError(
+                f"Query embedding dimension mismatch: expected {self.vector_dim}, got {len(query_embedding)}"
+            )
         client = self._get_client()
         packed = struct.pack(f"{len(query_embedding)}f", *query_embedding)
 

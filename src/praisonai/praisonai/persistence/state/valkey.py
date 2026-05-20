@@ -79,14 +79,18 @@ class ValkeyStateStore(StateStore):
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
         """Set a value with optional TTL."""
         client = self._get_client()
-        if not isinstance(value, str):
-            value = json.dumps(value)
+        value = json.dumps(value)
 
         try:
             if ttl is not None:
+                if ExpirySet is None or ExpiryType is None:
+                    from .._valkey_client import _MISSING_MSG
+                    raise ImportError(_MISSING_MSG)
                 client.set(self._key(key), value, expiry=ExpirySet(ExpiryType.SEC, ttl))
             else:
                 client.set(self._key(key), value)
+        except ImportError:
+            raise
         except Exception as e:
             raise RuntimeError(f"Failed to set key in Valkey: {e}") from e
 
@@ -168,8 +172,7 @@ class ValkeyStateStore(StateStore):
     def hset(self, key: str, field: str, value: Any) -> None:
         """Set a field in a hash."""
         client = self._get_client()
-        if not isinstance(value, str):
-            value = json.dumps(value)
+        value = json.dumps(value)
         try:
             client.hset(self._key(key), {field: value})
         except Exception as e:
