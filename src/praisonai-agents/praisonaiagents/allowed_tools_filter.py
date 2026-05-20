@@ -10,8 +10,7 @@ modules register tools with overlapping or ambiguous names, causing agents
 to invoke the wrong implementation.
 
 Environment Variables:
-    ALLOWED_TOOLS: Primary variable (comma-separated tool names)
-    HERMES_ONLY_TOOLS: Backward compatibility alias for ALLOWED_TOOLS
+    ALLOWED_TOOLS: Comma-separated tool names
 
 Usage:
     from praisonaiagents.allowed_tools_filter import AllowedToolsFilter
@@ -36,33 +35,24 @@ logger = logging.getLogger(__name__)
 
 class AllowedToolsFilter:
     """
-    Canonical tool whitelist filter with diagnostics and backward compatibility.
+    Canonical tool whitelist filter with diagnostics.
     
     This filter implements the semantics for tool filtering:
-    - ALLOWED_TOOLS unset (or HERMES_ONLY_TOOLS): all tools visible (with warning about collisions)
+    - ALLOWED_TOOLS unset: all tools visible (with warning about collisions)
     - ALLOWED_TOOLS empty string: error - must specify tools or unset
     - ALLOWED_TOOLS with values: only whitelisted tools visible
     - Unknown tools in list: warn and strip in dev, strict fail in CI
-    
-    Backward Compatibility:
-    - Supports both ALLOWED_TOOLS and HERMES_ONLY_TOOLS
-    - ALLOWED_TOOLS takes precedence if both are set
     """
     
     def __init__(self, env_var_name: str = "ALLOWED_TOOLS"):
         """
-        Initialize the filter with backward compatibility support.
+        Initialize the filter.
         
         Args:
-            env_var_name: Primary environment variable name (default: "ALLOWED_TOOLS")
+            env_var_name: Environment variable name (default: "ALLOWED_TOOLS")
         """
-        # Support both new (ALLOWED_TOOLS) and legacy (HERMES_ONLY_TOOLS) naming
-        self.primary_var = env_var_name
-        self.legacy_var = "HERMES_ONLY_TOOLS"
-        
-        # ALLOWED_TOOLS takes precedence over HERMES_ONLY_TOOLS for backward compatibility
-        self.env_value = os.environ.get(self.primary_var) or os.environ.get(self.legacy_var)
-        self.env_var_name = self.primary_var if os.environ.get(self.primary_var) else self.legacy_var
+        self.env_var_name = env_var_name
+        self.env_value = os.environ.get(self.env_var_name)
         
         self.is_ci = os.environ.get("CI", "").lower() in ("true", "1", "yes")
         self._whitelist: Optional[Set[str]] = self._parse_whitelist()
@@ -200,7 +190,7 @@ class AllowedToolsFilter:
             "env_var_name": self.env_var_name,
             "env_value": self.env_value,
             "is_ci": self.is_ci,
-            "whitelist": list(self._whitelist) if self._whitelist else None,
+            "whitelist": sorted(self._whitelist) if self._whitelist else None,
             **self._diagnostics
         }
     
@@ -248,10 +238,3 @@ def filter_tools_with_allowed_tools(
     return filtered
 
 
-# Backward compatibility aliases
-filter_tools_with_hermes = filter_tools_with_allowed_tools
-hermes_filter = filter_tools_with_allowed_tools
-apply_hermes_filter = filter_tools_with_allowed_tools
-
-# Legacy class alias for backward compatibility
-HermesToolFilter = AllowedToolsFilter

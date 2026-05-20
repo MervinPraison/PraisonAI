@@ -310,19 +310,3 @@ class TestAllowedToolsFilterSpecSemantics:
             whitelist = filter_instance.get_whitelist()
             assert whitelist == {"search", "send_message"}
     
-    def test_spec_backward_compatibility_hermes_precedence(self):
-        """Test spec: ALLOWED_TOOLS takes precedence over HERMES_ONLY_TOOLS."""
-        from praisonaiagents.allowed_tools_filter import AllowedToolsFilter
-        
-        with patch.dict(os.environ, {
-            "ALLOWED_TOOLS": "search,send_message",
-            "HERMES_ONLY_TOOLS": "extract_pdf"
-        }):
-            filter_instance = AllowedToolsFilter()
-            available_tools = {"search", "send_message", "extract_pdf"}
-            
-            filtered = filter_instance.filter_tools(available_tools)
-            
-            # Should use ALLOWED_TOOLS, not HERMES_ONLY_TOOLS
-            assert filtered == {"search", "send_message"}
-            assert filter_instance.env_var_name == "ALLOWED_TOOLS"

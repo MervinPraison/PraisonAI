@@ -27,25 +27,6 @@ class TestAllowedToolsFilter:
             assert filter_instance.is_enabled()
             assert filter_instance.get_whitelist() == {"search", "send_message"}
     
-    def test_filter_initialization_legacy_var(self):
-        """Test filter initialization with HERMES_ONLY_TOOLS set (backward compatibility)."""
-        with patch.dict(os.environ, {"HERMES_ONLY_TOOLS": "search,send_message"}):
-            filter_instance = AllowedToolsFilter()
-            assert filter_instance.env_value == "search,send_message"
-            assert filter_instance.env_var_name == "HERMES_ONLY_TOOLS"
-            assert filter_instance.is_enabled()
-            assert filter_instance.get_whitelist() == {"search", "send_message"}
-    
-    def test_filter_initialization_primary_precedence(self):
-        """Test that ALLOWED_TOOLS takes precedence over HERMES_ONLY_TOOLS."""
-        with patch.dict(os.environ, {
-            "ALLOWED_TOOLS": "search,send_message", 
-            "HERMES_ONLY_TOOLS": "old_tool"
-        }):
-            filter_instance = AllowedToolsFilter()
-            assert filter_instance.env_value == "search,send_message"
-            assert filter_instance.env_var_name == "ALLOWED_TOOLS"
-            assert filter_instance.get_whitelist() == {"search", "send_message"}
     
     def test_filter_initialization_empty_string_error(self):
         """Test that empty string raises ValueError."""
@@ -77,7 +58,7 @@ class TestAllowedToolsFilter:
         filter_instance = AllowedToolsFilter()
         available_tools = {"search", "send_message", "extract_pdf"}
         
-        with patch.object(logging.getLogger(), 'warning') as mock_warn:
+        with patch.object(logging.getLogger('praisonaiagents.allowed_tools_filter'), 'warning') as mock_warn:
             filtered = filter_instance.filter_tools(available_tools)
             
         # Should return intersection of available and whitelisted tools
@@ -107,7 +88,7 @@ class TestAllowedToolsFilter:
         filtered = filter_instance.filter_tools(available_tools)
         assert filtered == {"search", "send_message"}
     
-    @patch.dict(os.environ, {"ALLOWED_TOOLS": "search,send_message"})
+    @patch.dict(os.environ, {"ALLOWED_TOOLS": "search,send_message", "CI": "false"})
     def test_filter_tools_partial_match(self):
         """Test filtering when only some whitelisted tools are available."""
         filter_instance = AllowedToolsFilter()
@@ -134,7 +115,7 @@ class TestAllowedToolsFilter:
         filtered = filter_instance.filter_tools(available_tools)
         assert filtered == {"search", "send_message"}
     
-    @patch.dict(os.environ, {"ALLOWED_TOOLS": "search,send_message,unknown_in_whitelist"})
+    @patch.dict(os.environ, {"ALLOWED_TOOLS": "search,send_message,unknown_in_whitelist", "CI": "false"})
     def test_diagnostics_data(self):
         """Test diagnostics data collection."""
         filter_instance = AllowedToolsFilter()
@@ -206,6 +187,34 @@ class TestAllowedToolsFilter:
             filter_instance = AllowedToolsFilter("CUSTOM_TOOLS")
             assert filter_instance.env_var_name == "CUSTOM_TOOLS"
             assert filter_instance.get_whitelist() == {"search", "send_message"}
+    
+    def test_empty_tools_edge_case(self):
+        """Test filtering with empty available tools."""
+        with patch.dict(os.environ, {"ALLOWED_TOOLS": "search,send_message", "CI": "false"}):
+            filter_instance = AllowedToolsFilter()
+            
+            filtered = filter_instance.filter_tools(set())
+            assert filtered == set()
+            
+            # Also test with empty list and dict
+            assert filter_instance.filter_tools([]) == set()
+            assert filter_instance.filter_tools({}) == set()
+    
+    def test_whitelist_immutability(self):
+        """Test that get_whitelist returns a copy, not the original."""
+        with patch.dict(os.environ, {"ALLOWED_TOOLS": "search,send_message"}):
+            filter_instance = AllowedToolsFilter()
+            
+            whitelist1 = filter_instance.get_whitelist()
+            whitelist2 = filter_instance.get_whitelist()
+            
+            # Should be equal but not the same object
+            assert whitelist1 == whitelist2
+            assert whitelist1 is not whitelist2
+            
+            # Modifying one shouldn't affect the other
+            whitelist1.add("new_tool")
+            assert whitelist1 != whitelist2
 
 
 class TestConvenienceFunction:
@@ -239,62 +248,3 @@ class TestConvenienceFunction:
         assert "ALLOWED_TOOLS FILTER DIAGNOSTICS" in caplog.text
 
 
-class TestBackwardCompatibility:
-    """Test backward compatibility aliases."""
-    
-    @patch.dict(os.environ, {"HERMES_ONLY_TOOLS": "search,send_message"})
-    def test_legacy_class_alias(self):
-        """Test HermesToolFilter alias works."""
-        from praisonaiagents.allowed_tools_filter import HermesToolFilter
-        
-        filter_instance = HermesToolFilter()
-        assert isinstance(filter_instance, AllowedToolsFilter)
-        assert filter_instance.env_var_name == "HERMES_ONLY_TOOLS"
-        assert filter_instance.get_whitelist() == {"search", "send_message"}
-    
-    @patch.dict(os.environ, {"HERMES_ONLY_TOOLS": "search,send_message"})
-    def test_legacy_function_aliases(self):
-        """Test legacy function aliases work."""
-        from praisonaiagents.allowed_tools_filter import (
-            filter_tools_with_hermes, hermes_filter, apply_hermes_filter
-        )
-        
-        available_tools = {"search", "send_message", "extract_pdf"}
-        
-        # All aliases should work and return the same result
-        result1 = filter_tools_with_hermes(available_tools, log_diagnostics=False)
-        result2 = hermes_filter(available_tools, log_diagnostics=False)
-        result3 = apply_hermes_filter(available_tools, log_diagnostics=False)
-        
-        expected = {"search", "send_message"}
-        assert result1 == expected
-        assert result2 == expected
-        assert result3 == expected
-    
-    def test_empty_tools_edge_case(self):
-        """Test filtering with empty available tools."""
-        with patch.dict(os.environ, {"ALLOWED_TOOLS": "search,send_message"}):
-            filter_instance = AllowedToolsFilter()
-            
-            filtered = filter_instance.filter_tools(set())
-            assert filtered == set()
-            
-            # Also test with empty list and dict
-            assert filter_instance.filter_tools([]) == set()
-            assert filter_instance.filter_tools({}) == set()
-    
-    def test_whitelist_immutability(self):
-        """Test that get_whitelist returns a copy, not the original."""
-        with patch.dict(os.environ, {"ALLOWED_TOOLS": "search,send_message"}):
-            filter_instance = AllowedToolsFilter()
-            
-            whitelist1 = filter_instance.get_whitelist()
-            whitelist2 = filter_instance.get_whitelist()
-            
-            # Should be equal but not the same object
-            assert whitelist1 == whitelist2
-            assert whitelist1 is not whitelist2
-            
-            # Modifying one shouldn't affect the other
-            whitelist1.add("new_tool")
-            assert whitelist1 != whitelist2

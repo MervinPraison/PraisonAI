@@ -433,7 +433,3 @@ def list_tools_with_allowed_filter(context: Optional[Dict[str, Any]] = None) -> 
     return get_registry().list_tools_with_allowed_filter(context)
 
 
-# Backward compatibility alias
-def list_tools_with_hermes_filter(context: Optional[Dict[str, Any]] = None) -> List[str]:
-    """Backward compatibility alias for list_tools_with_allowed_filter."""
-    return list_tools_with_allowed_filter(context)
