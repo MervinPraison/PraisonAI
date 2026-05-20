@@ -4616,60 +4616,57 @@ Answer:"""
                 error=f"Agent guardrail validation error: {str(e)}"
             )
 
-    def _apply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None):
-        """Apply guardrail validation with retry logic.
-        
-        Args:
-            response_text: The response to validate
-            prompt: Original prompt for regeneration if needed
-            temperature: Temperature for regeneration
-            tools: Tools for regeneration
-            
-        Returns:
-            str: The validated response text or None if validation fails after retries
-        """
+    def _validate_with_guardrail(self, response_text):
+        """Validate response with guardrail. Returns (success, result, error)."""
         if not self._guardrail_fn:
-            return response_text
+            return True, response_text, None
             
         from ..main import TaskOutput
         
+        task_output = TaskOutput(
+            description="Agent response output",
+            raw=response_text,
+            agent=self.name
+        )
+        
+        guardrail_result = self._process_guardrail(task_output)
+        
+        if guardrail_result.success:
+            # Return the potentially modified result
+            if guardrail_result.result and hasattr(guardrail_result.result, 'raw'):
+                return True, guardrail_result.result.raw, None
+            elif guardrail_result.result:
+                return True, str(guardrail_result.result), None
+            else:
+                return True, response_text, None
+        else:
+            return False, None, guardrail_result.error
+
+    def _apply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None):
+        """Apply guardrail validation with retry logic (sync version)."""
         retry_count = 0
         current_response = response_text
         
         while retry_count <= self.max_guardrail_retries:
-            # Create TaskOutput object
-            task_output = TaskOutput(
-                description="Agent response output",
-                raw=current_response,
-                agent=self.name
-            )
+            success, result, error = self._validate_with_guardrail(current_response)
             
-            # Process guardrail
-            guardrail_result = self._process_guardrail(task_output)
-            
-            if guardrail_result.success:
+            if success:
                 logging.info(f"Agent {self.name}: Guardrail validation passed")
-                # Return the potentially modified result
-                if guardrail_result.result and hasattr(guardrail_result.result, 'raw'):
-                    return guardrail_result.result.raw
-                elif guardrail_result.result:
-                    return str(guardrail_result.result)
-                else:
-                    return current_response
+                return result
             
             # Guardrail failed
             if retry_count >= self.max_guardrail_retries:
                 raise Exception(
                     f"Agent {self.name} response failed guardrail validation after {self.max_guardrail_retries} retries. "
-                    f"Last error: {guardrail_result.error}"
+                    f"Last error: {error}"
                 )
             
             retry_count += 1
-            logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {guardrail_result.error}")
+            logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {error}")
             
             # Regenerate response for retry
             try:
-                retry_prompt = f"{prompt}\n\nNote: Previous response failed validation due to: {guardrail_result.error}. Please provide an improved response."
+                retry_prompt = f"{prompt}\n\nNote: Previous response failed validation due to: {error}. Please provide an improved response."
                 response = self._chat_completion([{"role": "user", "content": retry_prompt}], temperature, tools, task_name=task_name, task_description=task_description, task_id=task_id)
                 if response and response.choices:
                     content = response.choices[0].message.content
@@ -4678,10 +4675,46 @@ Answer:"""
                     raise Exception("Failed to generate retry response")
             except Exception as e:
                 logging.error(f"Agent {self.name}: Error during guardrail retry: {e}")
-                # If we can't regenerate, fail the guardrail
+                raise Exception(f"Agent {self.name} guardrail retry failed: {e}")
+        
+        return current_response
+
+    async def _aapply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None):
+        """Apply guardrail validation with retry logic (async version)."""
+        retry_count = 0
+        current_response = response_text
+        
+        while retry_count <= self.max_guardrail_retries:
+            success, result, error = self._validate_with_guardrail(current_response)
+            
+            if success:
+                logging.info(f"Agent {self.name}: Guardrail validation passed")
+                return result
+            
+            # Guardrail failed
+            if retry_count >= self.max_guardrail_retries:
                 raise Exception(
-                    f"Agent {self.name} guardrail retry failed: {e}"
+                    f"Agent {self.name} response failed guardrail validation after {self.max_guardrail_retries} retries. "
+                    f"Last error: {error}"
                 )
+            
+            retry_count += 1
+            logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {error}")
+            
+            # Regenerate response for retry (async version)
+            try:
+                retry_prompt = f"{prompt}\n\nNote: Previous response failed validation due to: {error}. Please provide an improved response."
+                response = await self._execute_unified_achat_completion([{"role": "user", "content": retry_prompt}], temperature, tools, task_name=task_name, task_description=task_description, task_id=task_id)
+                if response and hasattr(response, 'choices') and response.choices:
+                    content = response.choices[0].message.content
+                    current_response = content.strip() if content else ""
+                elif isinstance(response, str):
+                    current_response = response.strip()
+                else:
+                    raise Exception("Failed to generate retry response")
+            except Exception as e:
+                logging.error(f"Agent {self.name}: Error during guardrail retry: {e}")
+                raise Exception(f"Agent {self.name} guardrail retry failed: {e}")
         
         return current_response
     
