@@ -4684,19 +4684,9 @@ Answer:"""
                 )
         
         return current_response
-    
+
     async def _aapply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None):
-        """Async version of apply guardrail validation with retry logic.
-        
-        Args:
-            response_text: The response to validate
-            prompt: Original prompt for regeneration if needed
-            temperature: Temperature for regeneration
-            tools: Tools for regeneration
-            
-        Returns:
-            str: The validated response text or None if validation fails after retries
-        """
+        """Async version: just change the LLM call, reuse all validation logic."""
         if not self._guardrail_fn:
             return response_text
             
@@ -4736,13 +4726,15 @@ Answer:"""
             retry_count += 1
             logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {guardrail_result.error}")
             
-            # Regenerate response for retry using async chat
+            # ONLY DIFFERENCE: Use async unified chat completion
             try:
                 retry_prompt = f"{prompt}\n\nNote: Previous response failed validation due to: {guardrail_result.error}. Please provide an improved response."
-                response = await self._achat_completion([{"role": "user", "content": retry_prompt}], temperature, tools, task_name=task_name, task_description=task_description, task_id=task_id)
-                if response and response.choices:
+                response = await self._execute_unified_achat_completion([{"role": "user", "content": retry_prompt}], temperature, tools, task_name=task_name, task_description=task_description, task_id=task_id)
+                if response and hasattr(response, 'choices') and response.choices:
                     content = response.choices[0].message.content
                     current_response = content.strip() if content else ""
+                elif isinstance(response, str):
+                    current_response = response.strip()
                 else:
                     raise Exception("Failed to generate retry response")
             except Exception as e:
