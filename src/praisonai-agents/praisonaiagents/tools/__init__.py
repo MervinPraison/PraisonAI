@@ -363,7 +363,7 @@ __all__ = list(TOOL_MAPPINGS.keys()) + [
     'BaseTool', 'ToolResult', 'ToolValidationError', 'validate_tool',
     'tool', 'FunctionTool',
     'get_registry', 'register_tool', 'get_tool', 'add_tool', 'has_tool', 'remove_tool', 
-    'list_tools', 'list_available_tools', 'ToolRegistry',
+    'list_tools', 'list_available_tools', 'list_tools_with_hermes_filter', 'ToolRegistry',
     'Tools',
     # Validation and retry protocols
     'ValidationResult', 'ToolValidatorProtocol', 'AsyncToolValidatorProtocol', 'PassthroughValidator',

@@ -162,6 +162,13 @@ class MultiAgentHandler:
             except ImportError:
                 # HERMES_ONLY_TOOLS filter not available, proceed normally
                 pass
+            except ValueError:
+                # Preserve strict filter semantics (invalid config / CI unknown tools)
+                raise
+            except Exception as e:
+                if self.verbose:
+                    print(f"⚠ HERMES_ONLY_TOOLS filter error: {e}")
+                raise
             
             for name in tool_names:
                 if name in tool_map:

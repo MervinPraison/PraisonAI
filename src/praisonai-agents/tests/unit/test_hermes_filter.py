@@ -130,22 +130,22 @@ class TestHermesToolFilter:
         
         assert result == {"search", "send_message"}
     
-    @patch.dict(os.environ, {"HERMES_ONLY_TOOLS": "search,send_message"})
+    @patch.dict(os.environ, {"HERMES_ONLY_TOOLS": "search,send_message,unknown_in_whitelist"})
     def test_diagnostics_data(self):
         """Test diagnostics data collection."""
         filter_instance = HermesToolFilter()
-        available_tools = {"search", "send_message", "extract_pdf", "unknown_in_whitelist"}
+        available_tools = {"search", "send_message", "extract_pdf"}
         
         filter_instance.filter_tools(available_tools)
         diagnostics = filter_instance.get_diagnostics()
         
         assert diagnostics["env_var_name"] == "HERMES_ONLY_TOOLS"
-        assert diagnostics["env_value"] == "search,send_message"
-        assert set(diagnostics["whitelist"]) == {"search", "send_message"}
+        assert diagnostics["env_value"] == "search,send_message,unknown_in_whitelist"
+        assert set(diagnostics["whitelist"]) == {"search", "send_message", "unknown_in_whitelist"}
         assert set(diagnostics["registered_before_filter"]) == available_tools
         assert set(diagnostics["registered_after_filter"]) == {"search", "send_message"}
-        assert set(diagnostics["dropped_tools"]) == {"extract_pdf", "unknown_in_whitelist"}
-        assert diagnostics["unknown_tools"] == []
+        assert set(diagnostics["dropped_tools"]) == {"extract_pdf"}
+        assert diagnostics["unknown_tools"] == ["unknown_in_whitelist"]
     
     @patch.dict(os.environ, {"HERMES_ONLY_TOOLS": "search,send_message"})
     def test_log_diagnostics(self, caplog):
