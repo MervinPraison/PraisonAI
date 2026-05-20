@@ -4,6 +4,8 @@ AG-UI Event Streaming
 Provides utilities for streaming PraisonAI agent responses as AG-UI events.
 """
 
+import asyncio
+import json
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Set
@@ -262,7 +264,6 @@ def stream_event_to_agui_events(
     buffer: EventBuffer,
 ) -> List[BaseEvent]:
     """Convert a PraisonAI StreamEvent into zero or more AG-UI events."""
-    import json
     from praisonaiagents.streaming.events import StreamEventType
 
     if event.type == StreamEventType.DELTA_TEXT and event.content:
@@ -320,11 +321,9 @@ async def async_stream_agent_response(
     Yields:
         AG-UI events
     """
-    import asyncio
-
     yield create_run_started_event(thread_id, run_id)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
     buffer = EventBuffer()
     message_id = str(uuid.uuid4())
@@ -401,8 +400,6 @@ async def async_stream_agents_response(
     Yields:
         AG-UI events
     """
-    import asyncio
-    
     # Emit run started
     yield create_run_started_event(thread_id, run_id)
     
@@ -414,7 +411,7 @@ async def async_stream_agents_response(
             result = await agents.astart(user_input)
         elif hasattr(agents, 'start'):
             # Run sync start in executor
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             result = await loop.run_in_executor(None, agents.start, user_input)
         else:
             raise ValueError("Agents must have 'start' or 'astart' method")

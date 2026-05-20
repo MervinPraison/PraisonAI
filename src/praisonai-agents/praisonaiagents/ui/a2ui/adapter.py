@@ -24,7 +24,8 @@ def _import(name: str):
     except ImportError as exc:
         raise ImportError(
             f"{_A2UI_INSTALL_HINT} "
-            "If installed, ensure a2a-sdk>=0.3.0,<1.0.0 (not a2a-sdk 1.x)."
+            f"(failed to import '{name}'; "
+            "if already installed, ensure a2a-sdk>=0.3.0,<1.0.0 and not a2a-sdk 1.x)"
         ) from exc
 
 

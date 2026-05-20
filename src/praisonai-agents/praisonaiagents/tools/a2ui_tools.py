@@ -33,7 +33,10 @@ def send_a2ui_messages(messages: Union[List[Dict[str, Any]], str]) -> Dict[str, 
     from praisonaiagents.ui.a2ui.adapter import create_a2ui_part
 
     if isinstance(messages, str):
-        messages = json.loads(messages)
+        try:
+            messages = json.loads(messages)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"messages JSON string is not valid JSON: {exc}") from exc
 
     if not isinstance(messages, list):
         raise ValueError("messages must be a list of A2UI message dicts or a JSON string")
