@@ -2079,7 +2079,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Apply guardrail validation for custom LLM response
                     try:
-                        validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id)
+                        validated_response = await self._aapply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id)
                         # Execute callback after validation
                         self._execute_callback_and_display(normalized_content, validated_response, time.time() - start_time, task_name, task_description, task_id)
                         return await self._atrigger_after_agent_hook(prompt, validated_response, start_time)
@@ -2208,7 +2208,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             self._persist_message("assistant", response_text)
                             # Apply guardrail validation even for JSON output
                             try:
-                                validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
+                                validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                 # Execute callback after validation
                                 self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                 return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -2227,10 +2227,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if self.verbose:
                                 logging.debug(f"Agent {self.name} final response: {response_text}")
                             # Return only reasoning content if reasoning_steps is True
-                            if reasoning_steps and hasattr(response.choices[0].message, 'reasoning_content') and response.choices[0].message.reasoning_content:
+                            if reasoning_steps and hasattr(response, 'choices') and response.choices and hasattr(response.choices[0].message, 'reasoning_content') and response.choices[0].message.reasoning_content:
                                 # Apply guardrail to reasoning content
                                 try:
-                                    validated_reasoning = self._apply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools, task_name, task_description, task_id)
+                                    validated_reasoning = await self._aapply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools, task_name, task_description, task_id)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_reasoning, time.time() - start_time, task_name, task_description, task_id)
                                     return await self._atrigger_after_agent_hook(original_prompt, validated_reasoning, start_time)
@@ -2242,7 +2242,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             else:
                                 # Apply guardrail to regular response content
                                 try:
-                                    validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
+                                    validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                     return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -2282,7 +2282,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         # Persist assistant message to DB
                                         self._persist_message("assistant", response_text)
                                         try:
-                                            validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
+                                            validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                             # Execute callback after validation
                                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                             return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -2313,7 +2313,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         # Persist assistant message to DB
                                         self._persist_message("assistant", response_text)
                                         try:
-                                            validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
+                                            validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                             # Execute callback after validation
                                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                             return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -2332,7 +2332,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         # Persist assistant message to DB
                                         self._persist_message("assistant", response_text)
                                         try:
-                                            validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
+                                            validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                             # Execute callback after validation
                                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                             return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -2364,7 +2364,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         new_response_text = self._extract_llm_response_content(new_response)
                                         if isinstance(new_response_text, str):
                                             response_text = new_response_text.strip()
-                                        reflection_messages = regenerate_messages
+                                        # Update reflection_messages to include the new response for next iteration
+                                        reflection_messages = regenerate_messages + [
+                                            {"role": "assistant", "content": response_text}
+                                        ]
                                     
                                     reflection_count += 1
                                     
@@ -2379,7 +2382,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         # Persist assistant message to DB
                                         self._persist_message("assistant", response_text)
                                         try:
-                                            validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
+                                            validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                                             # Execute callback after validation
                                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                             return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -2530,7 +2533,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         
                         # Apply guardrail validation for OpenAI client response
                         try:
-                            validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
+                            validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id)
                             # Execute callback after validation
                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                             return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
