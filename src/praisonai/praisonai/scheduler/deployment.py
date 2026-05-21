@@ -105,7 +105,7 @@ class DeploymentScheduler:
             return False
             
         try:
-            from ..base import ScheduleParser
+            from .base import ScheduleParser
             interval = ScheduleParser.parse(schedule_expr)
             self.is_running = True
             self._stop_event.clear()
