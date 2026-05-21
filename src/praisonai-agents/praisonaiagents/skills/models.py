@@ -1,8 +1,9 @@
 """Data models for Agent Skills."""
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, List, Union
 from pathlib import Path
+from enum import Enum
 
 
 class ParseError(Exception):
@@ -13,6 +14,105 @@ class ParseError(Exception):
 class ValidationError(Exception):
     """Raised when skill validation fails."""
     pass
+
+
+class SkillState(Enum):
+    """Skill activation state based on requirement validation."""
+    ACTIVE = "active"          # All requirements satisfied
+    DEGRADED = "degraded"      # Some requirements missing (soft warn)
+    UNAVAILABLE = "unavailable" # Critical requirements missing (hard fail)
+    UNKNOWN = "unknown"        # Requirements not yet validated
+
+
+@dataclass
+class SkillRequirements:
+    """Capability requirements for a skill.
+    
+    This represents the parsed and normalized requirements from skill frontmatter.
+    Supports both Hermes/OpenClaw conventions and PraisonAI-specific extensions.
+    
+    Attributes:
+        servers: Required MCP servers or service endpoints
+        tools: Required tool names (from tool registry)
+        env_vars: Required environment variables (use sparingly)
+        openclaw_hints: OpenClaw-specific metadata (passthrough)
+    """
+    servers: List[str] = field(default_factory=list)
+    tools: List[str] = field(default_factory=list) 
+    env_vars: List[str] = field(default_factory=list)
+    openclaw_hints: dict = field(default_factory=dict)
+    
+    @classmethod
+    def from_frontmatter(cls, metadata: dict) -> "SkillRequirements":
+        """Parse requirements from skill frontmatter.
+        
+        Normalizes various naming conventions:
+        - requires_servers, requires_tools (Hermes/OpenClaw style)
+        - allowed-tools (existing PraisonAI convention) 
+        - openclaw (OpenClaw-specific hints)
+        
+        Args:
+            metadata: Raw frontmatter dict
+            
+        Returns:
+            SkillRequirements instance
+        """
+        servers = []
+        tools = []
+        env_vars = []
+        openclaw_hints = {}
+        
+        # Parse servers
+        if "requires_servers" in metadata:
+            servers = cls._normalize_list(metadata["requires_servers"])
+        elif "requires-servers" in metadata:
+            servers = cls._normalize_list(metadata["requires-servers"])
+        
+        # Parse tools (multiple naming conventions)
+        if "requires_tools" in metadata:
+            tools.extend(cls._normalize_list(metadata["requires_tools"]))
+        elif "requires-tools" in metadata:
+            tools.extend(cls._normalize_list(metadata["requires-tools"]))
+            
+        # Support existing allowed-tools convention for backward compatibility
+        if "allowed-tools" in metadata:
+            tools.extend(cls._normalize_list(metadata["allowed-tools"]))
+            
+        # Parse environment variables
+        if "requires_env" in metadata:
+            env_vars = cls._normalize_list(metadata["requires_env"])
+        elif "requires-env" in metadata:
+            env_vars = cls._normalize_list(metadata["requires-env"])
+            
+        # OpenClaw hints (passthrough)
+        if "openclaw" in metadata:
+            openclaw_hints = metadata["openclaw"] if isinstance(metadata["openclaw"], dict) else {}
+            
+        return cls(
+            servers=servers,
+            tools=tools,
+            env_vars=env_vars, 
+            openclaw_hints=openclaw_hints
+        )
+    
+    @staticmethod
+    def _normalize_list(value: Union[str, List[str]]) -> List[str]:
+        """Normalize string or list to list of strings."""
+        if isinstance(value, str):
+            # Support both comma-separated and space-separated strings
+            return [item.strip() for item in value.replace(',', ' ').split() if item.strip()]
+        elif isinstance(value, (list, tuple)):
+            return [str(item).strip() for item in value if str(item).strip()]
+        else:
+            return []
+    
+    def is_empty(self) -> bool:
+        """Check if no requirements are specified."""
+        return not any([self.servers, self.tools, self.env_vars, self.openclaw_hints])
+    
+    def __bool__(self) -> bool:
+        """Truth value: True if any requirements are specified."""
+        return not self.is_empty()
 
 
 @dataclass
@@ -49,6 +149,8 @@ class SkillProperties:
     hooks: Optional[dict] = None
     paths: Optional[object] = None  # list[str] glob patterns
     shell: Optional[str] = None  # "bash" | "powershell"
+    # Capability requirements (new)
+    requirements: Optional[SkillRequirements] = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary, excluding None values and empty metadata."""

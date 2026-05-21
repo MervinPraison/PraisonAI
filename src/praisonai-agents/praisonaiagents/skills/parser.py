@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Optional, Tuple
 
-from .models import ParseError, ValidationError, SkillProperties
+from .models import ParseError, ValidationError, SkillProperties, SkillRequirements
 
 
 def find_skill_md(skill_dir: Path) -> Optional[Path]:
@@ -143,4 +143,6 @@ def read_properties(skill_dir: Path) -> SkillProperties:
         hooks=metadata.get("hooks") if isinstance(metadata.get("hooks"), dict) else None,
         paths=metadata.get("paths"),
         shell=metadata.get("shell"),
+        # Parse capability requirements
+        requirements=SkillRequirements.from_frontmatter(metadata),
     )

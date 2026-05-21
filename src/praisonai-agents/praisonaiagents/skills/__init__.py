@@ -19,7 +19,9 @@ Usage:
 __all__ = [
     # Models
     "SkillProperties",
-    "SkillMetadata",
+    "SkillMetadata", 
+    "SkillRequirements",
+    "SkillState",
     "ParseError",
     "ValidationError",
     # Parser
@@ -54,13 +56,17 @@ __all__ = [
     "SkillActivatedEvent",
     # Budget
     "SkillPromptBudget",
+    # Capability validation
+    "CapabilityValidator",
+    "EnforcementLevel",
+    "ValidationResult",
 ]
 
 
 def __getattr__(name: str):
     """Lazy load module components to avoid import overhead."""
-    if name in ("SkillProperties", "SkillMetadata", "ParseError", "ValidationError"):
-        from .models import SkillProperties, SkillMetadata, ParseError, ValidationError
+    if name in ("SkillProperties", "SkillMetadata", "SkillRequirements", "SkillState", "ParseError", "ValidationError"):
+        from .models import SkillProperties, SkillMetadata, SkillRequirements, SkillState, ParseError, ValidationError
         return locals()[name]
     
     if name in ("parse_frontmatter", "find_skill_md", "read_properties"):
@@ -130,5 +136,9 @@ def __getattr__(name: str):
             return None
 
         return load_skill
+    
+    if name in ("CapabilityValidator", "EnforcementLevel", "ValidationResult"):
+        from .capability_validator import CapabilityValidator, EnforcementLevel, ValidationResult
+        return locals()[name]
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
