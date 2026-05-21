@@ -255,7 +255,13 @@ class ValkeyVectorKnowledgeStore(KnowledgeStore):
         index_name = self._index_name(collection)
         query_bytes = np.array(query_embedding, dtype=np.float32).tobytes()
 
-        query_str = f"*=>[KNN {limit} @embedding $vec AS score]"
+        # Build query with optional filters
+        base_query = "*"
+        if filters:
+            # Convert filters to FT.SEARCH syntax: @field:{value}
+            clauses = [f"@{k}:{{{v}}}" for k, v in filters.items()]
+            base_query = " ".join(clauses)
+        query_str = f"{base_query}=>[KNN {limit} @embedding $vec AS score]"
         options = FtSearchOptions(
             return_fields=[
                 ReturnField("content"),

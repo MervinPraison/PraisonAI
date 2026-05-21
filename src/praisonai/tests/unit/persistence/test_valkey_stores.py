@@ -102,7 +102,7 @@ class TestCreateValkeyClient:
 
         monkeypatch.setenv("VALKEY_HOST", "myhost")
         monkeypatch.setenv("VALKEY_PORT", "6380")
-        monkeypatch.setenv("VALKEY_PASSWORD", "s3cr3t")
+        monkeypatch.setenv("VALKEY_PASSWORD", "test_password")
 
         with patch("glide_sync.GlideClient"), \
              patch("glide_sync.GlideClientConfiguration") as mock_cfg, \
@@ -110,7 +110,7 @@ class TestCreateValkeyClient:
              patch("glide_sync.ServerCredentials") as mock_creds:
             create_valkey_client()
             mock_addr.assert_called_once_with("myhost", 6380)
-            mock_creds.assert_called_once_with(password="s3cr3t")
+            mock_creds.assert_called_once_with(password="test_password")
             assert mock_cfg.call_args.kwargs["credentials"] is mock_creds.return_value
 
     def test_explicit_args_take_precedence_over_env(self, monkeypatch):
