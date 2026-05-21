@@ -1,16 +1,16 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 334 | **Rust Features:** 667 | **Parity:** 85.3%
+> **Python Features:** 335 | **Rust Features:** 667 | **Parity:** 85.1%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 334 |
+| Python Core Features | 335 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **49** |
+| **Actual Gap Count** | **50** |
 | Language Limitations (N/A) | 5 |
-| **Parity** | **85.3%** |
+| **Parity** | **85.1%** |
 
 ## Implemented Features
 
@@ -694,6 +694,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 
 ## Missing Features
 
+- ❌ `A2UI`
 - ❌ `AgentMessageEvent`
 - ❌ `AsyncLearnProtocol`
 - ❌ `AutoApproveBackend`

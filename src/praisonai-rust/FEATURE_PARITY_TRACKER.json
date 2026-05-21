@@ -5,14 +5,15 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 334,
+    "pythonCoreFeatures": 335,
     "rustFeatures": 667,
-    "gapCount": 55,
-    "parityPercentage": 199.7
+    "gapCount": 56,
+    "parityPercentage": 199.1
   },
   "pythonCoreSDK": {
     "exports": [
       "A2A",
+      "A2UI",
       "AGUI",
       "AUTONOMY_PRESETS",
       "Agent",
@@ -2819,6 +2820,15 @@
         "priority": "P3",
         "effort": "low",
         "status": "DONE",
+        "category": "ui"
+      },
+      {
+        "feature": "A2UI",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
         "category": "ui"
       },
       {

@@ -4,19 +4,20 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 334,
+    "pythonCoreFeatures": 335,
     "pythonWrapperFeatures": 99,
     "typescriptFeatures": 1192,
-    "gapCount": 42,
+    "gapCount": 43,
     "priorityP0": 1,
     "priorityP1": 0,
     "priorityP2": 0,
-    "priorityP3": 41
+    "priorityP3": 42
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
     "exports": [
       "A2A",
+      "A2UI",
       "AGUI",
       "AUTONOMY_PRESETS",
       "Agent",
@@ -727,6 +728,7 @@
       ],
       "ui": [
         "A2A",
+        "A2UI",
         "AGUI"
       ],
       "workflows": [
@@ -3909,6 +3911,15 @@
         "priority": "P3",
         "effort": "low",
         "status": "DONE",
+        "category": "ui"
+      },
+      {
+        "feature": "A2UI",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
         "category": "ui"
       },
       {
