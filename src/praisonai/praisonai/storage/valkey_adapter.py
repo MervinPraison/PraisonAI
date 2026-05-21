@@ -6,71 +6,28 @@ This is the wrapper implementation that contains the heavy Valkey dependency.
 """
 
 import json
-import os
 from typing import Dict, Any, List, Optional
 
-
-def create_valkey_client(
-    host: Optional[str] = None,
-    port: Optional[int] = None,
-    password: Optional[str] = None,
-    **kwargs
-) -> Any:
-    """
-    Create a Valkey client with consistent configuration across modules.
-    
-    Args:
-        host: Valkey host (default from VALKEY_HOST env var or "localhost")
-        port: Valkey port (default from VALKEY_PORT env var or 6379)
-        password: Valkey password (default from VALKEY_PASSWORD env var)
-        **kwargs: Additional client configuration
-    
-    Returns:
-        Configured Valkey client instance
-    """
-    try:
-        from glide import GlideClient, NodeAddress
-        from glide.config import GlideClientConfiguration
-    except ImportError:
-        raise ImportError(
-            "valkey-glide-sync is required for Valkey support. "
-            "Install with: pip install 'praisonai[valkey]' or pip install valkey-glide-sync>=2.3.1"
-        )
-    
-    # Resolve connection parameters from env vars or defaults
-    host = host or os.getenv("VALKEY_HOST", "localhost")
-    port = port or int(os.getenv("VALKEY_PORT", "6379"))
-    password = password or os.getenv("VALKEY_PASSWORD")
-    
-    # Build client configuration
-    addresses = [NodeAddress(host, port)]
-    
-    config = GlideClientConfiguration(
-        addresses=addresses,
-        credentials={"password": password} if password else None,
-        **kwargs
-    )
-    
-    return GlideClient(config)
+from ..persistence._valkey_client import create_valkey_client, scan_keys
 
 
 class ValkeyStorageAdapter:
     """
     Valkey-based storage backend adapter.
-    
+
     Uses Valkey for high-speed caching and ephemeral data storage.
     Implements StorageBackendProtocol from praisonaiagents.storage.protocols.
-    
+
     Example:
         ```python
         from praisonai.storage import ValkeyStorageAdapter
-        
+
         adapter = ValkeyStorageAdapter(host="localhost", port=6379)
         adapter.save("session_123", {"messages": []})
         data = adapter.load("session_123")
         ```
     """
-    
+
     def __init__(
         self,
         host: Optional[str] = None,
@@ -78,83 +35,76 @@ class ValkeyStorageAdapter:
         password: Optional[str] = None,
         prefix: str = "praisonai:",
         ttl: Optional[int] = None,
-        **kwargs
+        **kwargs: Any,
     ):
         """
         Initialize the Valkey storage adapter.
-        
+
         Args:
-            host: Valkey host (default from VALKEY_HOST env var or "localhost")
-            port: Valkey port (default from VALKEY_PORT env var or 6379)
-            password: Valkey password (default from VALKEY_PASSWORD env var)
-            prefix: Key prefix for all stored data
-            ttl: Optional TTL in seconds for all keys
-            **kwargs: Additional client configuration
+            host:     Valkey host (env ``VALKEY_HOST``, default ``"localhost"``).
+            port:     Valkey port (env ``VALKEY_PORT``, default ``6379``).
+            password: Valkey password (env ``VALKEY_PASSWORD``, optional).
+            prefix:   Key prefix for all stored data (default ``"praisonai:"``).
+            ttl:      Optional TTL in seconds applied to every saved key.
+            **kwargs: Additional ``GlideClientConfiguration`` options.
         """
         self.prefix = prefix
         self.ttl = ttl
         self._client = create_valkey_client(host=host, port=port, password=password, **kwargs)
-        
-        # Test connection
+
         try:
             self._client.ping()
-        except Exception as e:
-            raise ConnectionError(f"Failed to connect to Valkey: {e}")
-    
+        except Exception as exc:
+            raise ConnectionError(f"Failed to connect to Valkey: {exc}") from exc
+
     def _key(self, key: str) -> str:
-        """Generate prefixed key."""
+        """Return the fully-qualified key with adapter prefix."""
         return f"{self.prefix}{key}"
-    
+
     def save(self, key: str, data: Dict[str, Any]) -> None:
-        """Save data with the given key."""
+        """Serialise *data* to JSON and save it under *key*."""
         json_str = json.dumps(data, default=str)
-        
         if self.ttl:
-            from glide.commands import SetOptions
-            options = SetOptions(expiry_seconds=self.ttl)
-            self._client.set(self._key(key), json_str, options)
+            from glide_sync import ExpirySet, ExpiryType  # type: ignore[import]
+            self._client.set(self._key(key), json_str, expiry=ExpirySet(ExpiryType.SEC, self.ttl))
         else:
             self._client.set(self._key(key), json_str)
-    
+
     def load(self, key: str) -> Optional[Dict[str, Any]]:
-        """Load data by key."""
-        value = self._client.get(self._key(key))
-        if value is None:
+        """Load and deserialise the value stored under *key*."""
+        raw = self._client.get(self._key(key))
+        if raw is None:
             return None
-        
+        text = raw.decode() if isinstance(raw, (bytes, bytearray)) else raw
         try:
-            return json.loads(value)
+            return json.loads(text)
         except json.JSONDecodeError:
             return None
-    
+
     def delete(self, key: str) -> bool:
-        """Delete data by key."""
+        """Delete the entry for *key*. Returns ``True`` if it existed."""
         return self._client.delete([self._key(key)]) > 0
-    
+
     def list_keys(self, prefix: str = "") -> List[str]:
-        """List all keys with optional prefix."""
+        """Return all keys that start with *prefix* (adapter prefix excluded)."""
         pattern = self._key(prefix + "*")
-        keys = self._client.keys(pattern)
-        
-        # Remove the adapter's prefix to return clean keys
+        all_keys = scan_keys(self._client, pattern)
         prefix_len = len(self.prefix)
-        return [k[prefix_len:] for k in keys if k.startswith(self.prefix)]
-    
+        return [k[prefix_len:] for k in all_keys if k.startswith(self.prefix)]
+
     def exists(self, key: str) -> bool:
-        """Check if a key exists."""
+        """Return ``True`` if *key* exists."""
         return self._client.exists([self._key(key)]) > 0
-    
+
     def clear(self) -> int:
-        """Clear all data with this adapter's prefix."""
-        pattern = self._key("*")
-        keys = self._client.keys(pattern)
-        
-        if keys:
-            return self._client.delete(keys)
+        """Delete all keys managed by this adapter. Returns the count deleted."""
+        all_keys = scan_keys(self._client, self._key("*"))
+        if all_keys:
+            return self._client.delete(all_keys)
         return 0
-    
+
     def close(self) -> None:
-        """Close the adapter and release connections."""
+        """Close the adapter and release the underlying connection."""
         if self._client:
             self._client.close()
             self._client = None

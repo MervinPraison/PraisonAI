@@ -7,64 +7,20 @@ Install: pip install 'praisonai[valkey]'
 
 import json
 import logging
-import os
 from typing import Any, Dict, List, Optional
 
 from .base import StateStore
+from .._valkey_client import create_valkey_client, scan_keys
 
 logger = logging.getLogger(__name__)
-
-
-def create_valkey_client(
-    host: Optional[str] = None,
-    port: Optional[int] = None,
-    password: Optional[str] = None,
-    **kwargs
-) -> Any:
-    """
-    Create a Valkey client with consistent configuration across modules.
-    
-    Args:
-        host: Valkey host (default from VALKEY_HOST env var or "localhost")
-        port: Valkey port (default from VALKEY_PORT env var or 6379)
-        password: Valkey password (default from VALKEY_PASSWORD env var)
-        **kwargs: Additional client configuration
-    
-    Returns:
-        Configured Valkey client instance
-    """
-    try:
-        from glide import GlideClient, NodeAddress
-        from glide.config import GlideClientConfiguration
-    except ImportError:
-        raise ImportError(
-            "valkey-glide-sync is required for Valkey support. "
-            "Install with: pip install 'praisonai[valkey]' or pip install valkey-glide-sync>=2.3.1"
-        )
-    
-    # Resolve connection parameters from env vars or defaults
-    host = host or os.getenv("VALKEY_HOST", "localhost")
-    port = port or int(os.getenv("VALKEY_PORT", "6379"))
-    password = password or os.getenv("VALKEY_PASSWORD")
-    
-    # Build client configuration
-    addresses = [NodeAddress(host, port)]
-    
-    config = GlideClientConfiguration(
-        addresses=addresses,
-        credentials={"password": password} if password else None,
-        **kwargs
-    )
-    
-    return GlideClient(config)
 
 
 class ValkeyStateStore(StateStore):
     """
     Valkey-based state store for fast key-value operations.
-    
+
     Uses valkey-glide-sync for optimal performance and native Valkey features.
-    
+
     Example:
         store = ValkeyStateStore(
             host="localhost",
@@ -72,140 +28,159 @@ class ValkeyStateStore(StateStore):
             password="secret"
         )
     """
-    
+
     def __init__(
         self,
         host: Optional[str] = None,
         port: Optional[int] = None,
         password: Optional[str] = None,
         prefix: str = "praison:",
-        **kwargs
+        **kwargs: Any,
     ):
         """
         Initialize Valkey state store.
-        
+
         Args:
-            host: Valkey host (default from VALKEY_HOST env var or "localhost")
-            port: Valkey port (default from VALKEY_PORT env var or 6379)
-            password: Valkey password (default from VALKEY_PASSWORD env var)
-            prefix: Key prefix for namespacing
-            **kwargs: Additional client configuration
+            host:     Valkey host (env ``VALKEY_HOST``, default ``"localhost"``).
+            port:     Valkey port (env ``VALKEY_PORT``, default ``6379``).
+            password: Valkey password (env ``VALKEY_PASSWORD``, optional).
+            prefix:   Key prefix for namespacing (default ``"praison:"``).
+            **kwargs: Additional ``GlideClientConfiguration`` options.
         """
         self.prefix = prefix
         self._client = create_valkey_client(host=host, port=port, password=password, **kwargs)
-        
-        # Test connection
+
         try:
             self._client.ping()
-            logger.info(f"Connected to Valkey at {host or 'localhost'}:{port or 6379}")
-        except Exception as e:
-            logger.error(f"Failed to connect to Valkey: {e}")
+            logger.info("Connected to Valkey at %s:%s", host or "localhost", port or 6379)
+        except Exception as exc:
+            logger.error("Failed to connect to Valkey: %s", exc)
             raise
-    
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
     def _key(self, key: str) -> str:
-        """Add prefix to key."""
+        """Return the fully-qualified key with namespace prefix."""
         return f"{self.prefix}{key}"
-    
+
+    @staticmethod
+    def _decode(value: Any) -> Any:
+        """Decode bytes returned by GlideClient to str."""
+        if isinstance(value, (bytes, bytearray)):
+            return value.decode()
+        return value
+
+    @staticmethod
+    def _loads(raw: Any) -> Any:
+        """Attempt JSON decode; fall back to plain string."""
+        text = raw.decode() if isinstance(raw, (bytes, bytearray)) else raw
+        try:
+            return json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            return text
+
+    # ------------------------------------------------------------------
+    # StateStore interface
+    # ------------------------------------------------------------------
+
     def get(self, key: str) -> Optional[Any]:
         """Get a value by key."""
-        value = self._client.get(self._key(key))
-        if value is None:
+        raw = self._client.get(self._key(key))
+        if raw is None:
             return None
-        # Try to deserialize JSON
-        try:
-            return json.loads(value)
-        except (json.JSONDecodeError, TypeError):
-            return value
-    
+        return self._loads(raw)
+
     def set(
         self,
         key: str,
         value: Any,
-        ttl: Optional[int] = None
+        ttl: Optional[int] = None,
     ) -> None:
-        """Set a value with optional TTL."""
-        # Serialize non-string values
-        if not isinstance(value, str):
-            value = json.dumps(value)
-        
-        from glide.commands import SetOptions
-        
-        options = SetOptions()
+        """Set a value with optional TTL (seconds)."""
+        serialized = value if isinstance(value, str) else json.dumps(value)
         if ttl:
-            options = SetOptions(expiry_seconds=ttl)
-        
-        self._client.set(self._key(key), value, options)
-    
+            from glide_sync import ExpirySet, ExpiryType  # type: ignore[import]
+            self._client.set(self._key(key), serialized, expiry=ExpirySet(ExpiryType.SEC, ttl))
+        else:
+            self._client.set(self._key(key), serialized)
+
     def delete(self, key: str) -> bool:
-        """Delete a key."""
+        """Delete a key. Returns ``True`` if the key existed."""
         return self._client.delete([self._key(key)]) > 0
-    
+
     def exists(self, key: str) -> bool:
-        """Check if a key exists."""
+        """Return ``True`` if the key exists."""
         return self._client.exists([self._key(key)]) > 0
-    
+
     def keys(self, pattern: str = "*") -> List[str]:
-        """List keys matching pattern."""
+        """List keys matching *pattern* (prefix is added automatically)."""
         full_pattern = self._key(pattern)
-        keys = self._client.keys(full_pattern)
-        # Remove prefix from returned keys
+        all_keys = scan_keys(self._client, full_pattern)
         prefix_len = len(self.prefix)
-        return [k[prefix_len:] if k.startswith(self.prefix) else k for k in keys]
-    
+        return [k[prefix_len:] if k.startswith(self.prefix) else k for k in all_keys]
+
     def ttl(self, key: str) -> Optional[int]:
-        """Get remaining TTL in seconds."""
+        """Return remaining TTL in seconds, or ``None`` if no TTL / missing."""
         result = self._client.ttl(self._key(key))
-        if result < 0:  # -1 = no TTL, -2 = key doesn't exist
+        if result < 0:  # -1 = no expiry, -2 = key doesn't exist
             return None
         return result
-    
+
     def expire(self, key: str, ttl: int) -> bool:
-        """Set TTL on existing key."""
+        """Set a TTL on an existing key."""
         return self._client.expire(self._key(key), ttl)
-    
+
+    # ------------------------------------------------------------------
+    # Hash operations
+    # ------------------------------------------------------------------
+
     def hget(self, key: str, field: str) -> Optional[Any]:
-        """Get a field from a hash."""
-        value = self._client.hget(self._key(key), field)
-        if value is None:
+        """Get a single field from a hash."""
+        raw = self._client.hget(self._key(key), field)
+        if raw is None:
             return None
-        try:
-            return json.loads(value)
-        except (json.JSONDecodeError, TypeError):
-            return value
-    
+        return self._loads(raw)
+
     def hset(self, key: str, field: str, value: Any) -> None:
-        """Set a field in a hash."""
-        if not isinstance(value, str):
-            value = json.dumps(value)
-        self._client.hset(self._key(key), {field: value})
-    
+        """Set a single field in a hash."""
+        serialized = value if isinstance(value, str) else json.dumps(value)
+        self._client.hset(self._key(key), {field: serialized})
+
     def hgetall(self, key: str) -> Dict[str, Any]:
-        """Get all fields from a hash."""
-        data = self._client.hgetall(self._key(key))
-        result = {}
-        for k, v in data.items():
-            try:
-                result[k] = json.loads(v)
-            except (json.JSONDecodeError, TypeError):
-                result[k] = v
+        """Return all fields and values from a hash as a plain dict."""
+        raw_map = self._client.hgetall(self._key(key))
+        result: Dict[str, Any] = {}
+        for k, v in raw_map.items():
+            str_key = k.decode() if isinstance(k, (bytes, bytearray)) else k
+            result[str_key] = self._loads(v)
         return result
-    
+
     def hdel(self, key: str, *fields: str) -> int:
-        """Delete fields from a hash."""
+        """Delete one or more fields from a hash."""
         if not fields:
             return 0
-        return self._client.hdel(self._key(key), fields)
-    
+        return self._client.hdel(self._key(key), list(fields))
+
+    # ------------------------------------------------------------------
+    # Counter operations
+    # ------------------------------------------------------------------
+
     def incr(self, key: str, amount: int = 1) -> int:
-        """Increment a counter."""
+        """Increment a counter by *amount*."""
         return self._client.incrby(self._key(key), amount)
-    
+
     def decr(self, key: str, amount: int = 1) -> int:
-        """Decrement a counter."""
+        """Decrement a counter by *amount*."""
         return self._client.decrby(self._key(key), amount)
-    
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
     def close(self) -> None:
-        """Close the store."""
+        """Close the underlying Valkey connection."""
         if self._client:
             self._client.close()
             self._client = None
