@@ -477,16 +477,58 @@ class DefaultSessionStore:
 
     def update_session_metadata(self, session_id: str, **fields: Any) -> bool:
         """Merge run stats / metadata fields into a persisted session."""
-        session = self._load_session(session_id)
-        with self._lock:
+        if not fields:
+            return True
+
+        filepath = self._get_session_path(session_id)
+
+        with FileLock(filepath, self.lock_timeout):
+            if os.path.exists(filepath):
+                try:
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    session = SessionData.from_dict(data)
+                except (json.JSONDecodeError, IOError):
+                    session = SessionData(session_id=session_id)
+            else:
+                session = SessionData(session_id=session_id)
+
             for key, value in fields.items():
                 if value is None:
                     continue
                 session.metadata[key] = value
                 if key in ("agent_id", "agent_name", "user_id"):
                     setattr(session, key, value)
-            self._cache[session_id] = session
-        return self._save_session(session)
+
+            session.updated_at = datetime.now(timezone.utc).isoformat()
+
+            try:
+                dir_path = os.path.dirname(filepath) or "."
+                os.makedirs(dir_path, exist_ok=True)
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=dir_path,
+                    delete=False,
+                    suffix=".tmp",
+                ) as f:
+                    json.dump(session.to_dict(), f, indent=2, ensure_ascii=False)
+                    temp_path = f.name
+
+                os.replace(temp_path, filepath)
+
+                with self._lock:
+                    self._cache[session_id] = session
+
+                return True
+            except (IOError, OSError) as e:
+                logger.error(f"Failed to update session metadata {session_id}: {e}")
+                try:
+                    if "temp_path" in locals():
+                        os.remove(temp_path)
+                except (IOError, OSError):
+                    pass
+                return False
 
     def delete_session(self, session_id: str) -> bool:
         """Delete a session completely."""
