@@ -301,10 +301,8 @@ class BaseTool(ABC):
             if not isinstance(parameters.get("properties"), dict):
                 raise ToolValidationError(f"Tool '{self.name}' parameters.properties must be a dict for OpenAI compatibility")
             
-            if not isinstance(parameters.get("required"), list):
-                # required can be missing but if present must be a list
-                if "required" in parameters:
-                    raise ToolValidationError(f"Tool '{self.name}' parameters.required must be a list")
+            if "required" in parameters and not isinstance(parameters["required"], list):
+                raise ToolValidationError(f"Tool '{self.name}' parameters.required must be a list")
             
             return True
             
@@ -380,6 +378,7 @@ def validate_tool_schema_consistency(tools: List[Any]) -> bool:
         return True
         
     import json
+    from .decorator import get_tool_schema
     schemas = []
     
     for i, tool in enumerate(tools):
@@ -393,7 +392,6 @@ def validate_tool_schema_consistency(tools: List[Any]) -> bool:
             elif hasattr(tool, 'get_schema') and callable(getattr(tool, 'get_schema')):
                 schema = tool.get_schema()
             elif callable(tool):
-                from .decorator import get_tool_schema
                 schema = get_tool_schema(tool)
             else:
                 raise ToolValidationError(f"Cannot extract schema from tool at index {i}: {type(tool)}")
@@ -413,12 +411,12 @@ def validate_tool_schema_consistency(tools: List[Any]) -> bool:
             raise ToolValidationError(f"Tool validation failed at index {i}: {e}")
     
     # Check for duplicate tool names
-    names = []
+    names = set()
     for schema in schemas:
         name = schema.get("function", {}).get("name")
         if name in names:
             raise ToolValidationError(f"Duplicate tool name '{name}' found in tool list")
-        names.append(name)
+        names.add(name)
     
     return True
 
