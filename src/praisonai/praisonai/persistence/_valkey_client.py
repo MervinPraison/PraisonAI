@@ -73,7 +73,7 @@ def create_valkey_client(
     return GlideClient(config)
 
 
-def scan_keys(client: Any, pattern: str) -> list:
+def scan_keys(client: Any, pattern: str) -> list[str]:
     """
     Safely iterate all keys matching *pattern* using ``SCAN``.
 
@@ -87,7 +87,7 @@ def scan_keys(client: Any, pattern: str) -> list:
     Returns:
         A list of key strings matching the pattern.
     """
-    matched: list = []
+    matched: list[str] = []
     cursor: bytes = b"0"
     while True:
         result = client.scan(cursor, match=pattern, count=100)
