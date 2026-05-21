@@ -129,24 +129,37 @@ class InMemoryUsageQuery:
 
     def get_summary(self) -> Dict[str, Any]:
         records = self._sink.records
-        total_in = sum(r.get("input_tokens", 0) for r in records)
-        total_out = sum(r.get("output_tokens", 0) for r in records)
+        total_in = 0
+        total_out = 0
+        total_all = 0
         by_model: Dict[str, Dict[str, int]] = {}
         by_agent: Dict[str, Dict[str, int]] = {}
+        
+        # Single-pass optimization: calculate everything in one loop
         for r in records:
+            r_in = r.get("input_tokens", 0)
+            r_out = r.get("output_tokens", 0)
+            r_total = r.get("total_tokens", r_in + r_out)
+            
+            total_in += r_in
+            total_out += r_out
+            total_all += r_total
+            
             model = r.get("model", "unknown")
             agent = r.get("agent_name", "unknown")
-            by_model.setdefault(model, {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
-            by_agent.setdefault(agent, {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
+            
+            # Update by_model and by_agent efficiently
             for bucket, key in ((by_model, model), (by_agent, agent)):
-                bucket[key]["input_tokens"] += r.get("input_tokens", 0)
-                bucket[key]["output_tokens"] += r.get("output_tokens", 0)
-                bucket[key]["total_tokens"] += r.get("total_tokens", 0)
+                stats = bucket.setdefault(key, {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
+                stats["input_tokens"] += r_in
+                stats["output_tokens"] += r_out
+                stats["total_tokens"] += r_total
+                
         return {
             "total_requests": len(records),
             "total_input_tokens": total_in,
             "total_output_tokens": total_out,
-            "total_tokens": total_in + total_out,
+            "total_tokens": total_all,  # Use consistent calculation
             "by_model": by_model,
             "by_agent": by_agent,
         }

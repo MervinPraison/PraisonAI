@@ -160,8 +160,8 @@ class ToolExecutionMixin:
         
         # Emit TOOL_CALL_START to stream_emitter (for AIUI/AG-UI consumers)
         # Zero overhead when no callbacks registered
-        if hasattr(self, '_Agent__stream_emitter') and getattr(self, "_Agent__stream_emitter", None) is not None and getattr(self, "_Agent__stream_emitter", None).has_callbacks:
-            getattr(self, "_Agent__stream_emitter", None).emit(StreamEvent(
+        if hasattr(self, 'stream_emitter') and self.stream_emitter is not None and hasattr(self.stream_emitter, 'has_callbacks') and self.stream_emitter.has_callbacks:
+            self.stream_emitter.emit(StreamEvent(
                 type=StreamEventType.TOOL_CALL_START,
                 timestamp=_tool_start_perf,
                 tool_call={
@@ -275,10 +275,10 @@ class ToolExecutionMixin:
             
             # Emit TOOL_CALL_RESULT to stream_emitter (for AIUI/AG-UI consumers)
             # Zero overhead when no callbacks registered
-            if hasattr(self, '_Agent__stream_emitter') and getattr(self, "_Agent__stream_emitter", None) is not None and getattr(self, "_Agent__stream_emitter", None).has_callbacks:
+            if hasattr(self, 'stream_emitter') and self.stream_emitter is not None and hasattr(self.stream_emitter, 'has_callbacks') and self.stream_emitter.has_callbacks:
                 # Truncate result for stream event (keep it reasonable for UI display)
                 result_summary = str(result)[:500] if result else None
-                getattr(self, "_Agent__stream_emitter", None).emit(StreamEvent(
+                self.stream_emitter.emit(StreamEvent(
                     type=StreamEventType.TOOL_CALL_RESULT,
                     timestamp=_time.perf_counter(),
                     tool_call={
@@ -290,7 +290,7 @@ class ToolExecutionMixin:
                     agent_id=self.name,
                     metadata={"duration_ms": _duration_ms},
                 ))
-                getattr(self, "_Agent__stream_emitter", None).emit(StreamEvent(
+                self.stream_emitter.emit(StreamEvent(
                     type=StreamEventType.TOOL_CALL_END,
                     timestamp=_time.perf_counter(),
                     tool_call={
