@@ -63,6 +63,8 @@ class TestSkillRequirements:
     def test_normalize_list(self):
         """Test list normalization utility."""
         assert SkillRequirements._normalize_list("a b c") == ["a", "b", "c"]
+        assert SkillRequirements._normalize_list("a,b,c") == ["a", "b", "c"]
+        assert SkillRequirements._normalize_list("a, b c") == ["a", "b", "c"]
         assert SkillRequirements._normalize_list(["a", "b", "c"]) == ["a", "b", "c"]
         assert SkillRequirements._normalize_list("") == []
         assert SkillRequirements._normalize_list([]) == []
@@ -193,8 +195,8 @@ class TestCapabilityValidator:
         assert len(result.errors) == 1
         assert "missing_tool" in result.errors[0]
         
-    def test_validate_skill_missing_env_vars(self):
-        """Test validation with missing environment variables."""
+    def test_validate_skill_missing_env_vars_warn(self):
+        """Test validation with missing environment variables in warn mode."""
         requirements = SkillRequirements(env_vars=["MISSING_VAR"])
         skill = SkillProperties(
             name="test-skill",
@@ -202,14 +204,30 @@ class TestCapabilityValidator:
             requirements=requirements
         )
         
-        validator = CapabilityValidator(EnforcementLevel.STRICT)
+        validator = CapabilityValidator(EnforcementLevel.WARN)
         result = validator.validate_skill(skill)
         
-        # Environment variables are always warnings, never errors
         assert result.state == SkillState.DEGRADED
         assert result.missing_env_vars == ["MISSING_VAR"]
         assert len(result.warnings) == 1
         assert len(result.errors) == 0
+
+    def test_validate_skill_missing_env_vars_strict(self):
+        """Test validation with missing environment variables in strict mode."""
+        requirements = SkillRequirements(env_vars=["MISSING_VAR"])
+        skill = SkillProperties(
+            name="test-skill",
+            description="Test skill",
+            requirements=requirements
+        )
+
+        validator = CapabilityValidator(EnforcementLevel.STRICT)
+        result = validator.validate_skill(skill)
+
+        assert result.state == SkillState.UNAVAILABLE
+        assert result.missing_env_vars == ["MISSING_VAR"]
+        assert len(result.warnings) == 0
+        assert len(result.errors) == 1
         
     def test_validation_result_to_dict(self):
         """Test ValidationResult serialization."""

@@ -3,9 +3,10 @@
 
 import sys
 import os
+from pathlib import Path
 
 # Add the source path to PYTHONPATH
-sys.path.insert(0, '/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents')
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src" / "praisonai-agents"))
 
 def test_basic_functionality():
     """Test that our basic implementation works."""

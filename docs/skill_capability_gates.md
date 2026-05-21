@@ -82,7 +82,7 @@ Skills are classified into states based on requirement validation:
 |-------|-------------|
 | `ACTIVE` | All requirements satisfied |
 | `DEGRADED` | Some requirements missing (warnings) |
-| `UNAVAILABLE` | Critical requirements missing (strict mode only) |
+| `UNAVAILABLE` | Missing required dependencies in strict mode |
 | `UNKNOWN` | Requirements not yet validated |
 
 ## CLI Diagnostics
