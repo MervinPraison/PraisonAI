@@ -602,6 +602,13 @@ Methods:
 * <code title="class ContextManager">ContextManager.<a href="./src/praisonai-agents/praisonaiagents/context/manager.py">set_tool_budget</a>(tool_name: str, max_tokens: int, protected: bool = False) -> None</code>
 * <code title="class ContextManager">ContextManager.<a href="./src/praisonai-agents/praisonaiagents/context/manager.py">truncate_tool_output</a>(tool_name: str, output: str) -> str</code>
 
+# UI
+
+Types:
+```python
+from praisonaiagents import A2UI
+```
+
 # Config
 
 Types:
