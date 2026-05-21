@@ -26,6 +26,21 @@ if TYPE_CHECKING:
 class ToolExecutionMixin:
     """Mixin providing toolexecution methods for the Agent class."""
 
+    def _get_existing_stream_emitter(self):
+        """Return an already-initialized stream emitter without creating one."""
+        emitter = getattr(self, "_stream_emitter", None)
+        if emitter is not None:
+            return emitter
+
+        # Support name-mangled private attributes across class renames/inheritance.
+        for cls in type(self).mro():
+            mangled = f"_{cls.__name__}__stream_emitter"
+            if hasattr(self, mangled):
+                emitter = getattr(self, mangled, None)
+                if emitter is not None:
+                    return emitter
+        return None
+
     def _resolve_tool_names(self, tool_names):
         """Resolve tool names to actual tool instances from registry.
         
@@ -160,8 +175,9 @@ class ToolExecutionMixin:
         
         # Emit TOOL_CALL_START to stream_emitter (for AIUI/AG-UI consumers)
         # Zero overhead when no callbacks registered
-        if hasattr(self, 'stream_emitter') and self.stream_emitter is not None and hasattr(self.stream_emitter, 'has_callbacks') and self.stream_emitter.has_callbacks:
-            self.stream_emitter.emit(StreamEvent(
+        _stream_emitter = self._get_existing_stream_emitter()
+        if _stream_emitter is not None and _stream_emitter.has_callbacks:
+            _stream_emitter.emit(StreamEvent(
                 type=StreamEventType.TOOL_CALL_START,
                 timestamp=_tool_start_perf,
                 tool_call={
@@ -275,10 +291,10 @@ class ToolExecutionMixin:
             
             # Emit TOOL_CALL_RESULT to stream_emitter (for AIUI/AG-UI consumers)
             # Zero overhead when no callbacks registered
-            if hasattr(self, 'stream_emitter') and self.stream_emitter is not None and hasattr(self.stream_emitter, 'has_callbacks') and self.stream_emitter.has_callbacks:
+            if _stream_emitter is not None and _stream_emitter.has_callbacks:
                 # Truncate result for stream event (keep it reasonable for UI display)
                 result_summary = str(result)[:500] if result else None
-                self.stream_emitter.emit(StreamEvent(
+                _stream_emitter.emit(StreamEvent(
                     type=StreamEventType.TOOL_CALL_RESULT,
                     timestamp=_time.perf_counter(),
                     tool_call={
@@ -290,7 +306,7 @@ class ToolExecutionMixin:
                     agent_id=self.name,
                     metadata={"duration_ms": _duration_ms},
                 ))
-                self.stream_emitter.emit(StreamEvent(
+                _stream_emitter.emit(StreamEvent(
                     type=StreamEventType.TOOL_CALL_END,
                     timestamp=_time.perf_counter(),
                     tool_call={
@@ -938,4 +954,3 @@ class ToolExecutionMixin:
     def pending_approval_count(self) -> int:
         """Number of approval requests still waiting."""
         return len(self._pending_approvals)
-

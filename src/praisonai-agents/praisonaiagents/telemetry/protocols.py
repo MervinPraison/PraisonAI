@@ -154,7 +154,6 @@ class InMemoryUsageQuery:
                 stats["input_tokens"] += r_in
                 stats["output_tokens"] += r_out
                 stats["total_tokens"] += r_total
-                
         return {
             "total_requests": len(records),
             "total_input_tokens": total_in,
