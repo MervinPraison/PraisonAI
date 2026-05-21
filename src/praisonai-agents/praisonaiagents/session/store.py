@@ -141,7 +141,8 @@ class FileLock:
         self._lock_path = filepath + ".lock"
     
     def __enter__(self):
-        self.acquire()
+        if not self.acquire():
+            raise IOError(f"Failed to acquire file lock for {self.filepath} after {self.timeout}s")
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
