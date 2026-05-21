@@ -193,7 +193,7 @@ def validate(skill_dir: Path, strict: bool = False) -> List[str]:
     try:
         content = skill_md.read_text(encoding="utf-8")
         metadata, _ = parse_frontmatter(content)
-    except (ParseError, UnicodeDecodeError) as e:
+    except ParseError as e:
         return [str(e)]
     except UnicodeDecodeError as e:
         return [f"SKILL.md is not valid UTF-8: {e}"]
