@@ -43,6 +43,10 @@ def run(agent_file: str,
                 "No supported framework installed. "
                 "Install one of: crewai, praisonaiagents, autogen, ag2."
             )
+    else:
+        # Validate explicit framework like CLI does
+        from .framework_adapters.validators import assert_framework_available
+        assert_framework_available(framework)
 
     gen = AgentsGenerator(
         agent_file=agent_file,
@@ -57,7 +61,13 @@ def run(agent_file: str,
 
 async def arun(agent_file: str,
                framework: str | None = None,
-               **kwargs) -> str:
+               *,
+               tools: list | None = None,
+               agent_yaml: str | None = None,
+               cli_config: dict | None = None) -> str:
     """Async equivalent of `run()` for FastAPI / Jupyter async callers."""
     import asyncio
-    return await asyncio.to_thread(run, agent_file, framework, **kwargs)
+    return await asyncio.to_thread(
+        run, agent_file, framework,
+        tools=tools, agent_yaml=agent_yaml, cli_config=cli_config,
+    )

@@ -1,5 +1,4 @@
 """Lazy access to autogen_tools, with `find_spec` startup probes for crewai/autogen."""
-import importlib.util
 from praisonai.auto import _load_optional
 
 from .._framework_availability import is_available
