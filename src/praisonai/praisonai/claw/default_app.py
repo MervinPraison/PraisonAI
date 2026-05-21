@@ -77,6 +77,7 @@ configure_host(
         "debug",
     ],
     agents=_build_praison_agents(),
+    modules=["jobs"],
 )
 
 
