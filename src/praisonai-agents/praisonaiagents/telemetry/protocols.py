@@ -100,3 +100,95 @@ class InMemoryTokenUsageSink:
     def clear(self) -> None:
         """Clear all records."""
         self.records.clear()
+
+
+@runtime_checkable
+class UsageQueryProtocol(Protocol):
+    """Read path for token usage — UI dashboards and analytics."""
+
+    def get_summary(self) -> Dict[str, Any]:
+        """Aggregate totals and breakdowns by model/agent."""
+        ...
+
+    def list_recent(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Recent usage records, newest last."""
+        ...
+
+    def get_by_task(self, task_id: str) -> List[Dict[str, Any]]:
+        ...
+
+    def get_by_agent(self, agent_name: str) -> List[Dict[str, Any]]:
+        ...
+
+
+class InMemoryUsageQuery:
+    """Query adapter backed by InMemoryTokenUsageSink records."""
+
+    def __init__(self, sink: InMemoryTokenUsageSink):
+        self._sink = sink
+
+    def get_summary(self) -> Dict[str, Any]:
+        records = self._sink.records
+        total_in = sum(r.get("input_tokens", 0) for r in records)
+        total_out = sum(r.get("output_tokens", 0) for r in records)
+        by_model: Dict[str, Dict[str, int]] = {}
+        by_agent: Dict[str, Dict[str, int]] = {}
+        for r in records:
+            model = r.get("model", "unknown")
+            agent = r.get("agent_name", "unknown")
+            by_model.setdefault(model, {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
+            by_agent.setdefault(agent, {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0})
+            for bucket, key in ((by_model, model), (by_agent, agent)):
+                bucket[key]["input_tokens"] += r.get("input_tokens", 0)
+                bucket[key]["output_tokens"] += r.get("output_tokens", 0)
+                bucket[key]["total_tokens"] += r.get("total_tokens", 0)
+        return {
+            "total_requests": len(records),
+            "total_input_tokens": total_in,
+            "total_output_tokens": total_out,
+            "total_tokens": total_in + total_out,
+            "by_model": by_model,
+            "by_agent": by_agent,
+        }
+
+    def list_recent(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._sink.records[-limit:]
+
+    def get_by_task(self, task_id: str) -> List[Dict[str, Any]]:
+        return self._sink.get_by_task(task_id)
+
+    def get_by_agent(self, agent_name: str) -> List[Dict[str, Any]]:
+        return self._sink.get_by_agent(agent_name)
+
+
+class TokenCollectorUsageQuery:
+    """Query adapter reading from the global TokenCollector + optional sink."""
+
+    def __init__(self, collector: Any):
+        self._collector = collector
+
+    def get_summary(self) -> Dict[str, Any]:
+        summary = self._collector.get_session_summary()
+        return {
+            "total_requests": summary.get("total_interactions", 0),
+            "total_input_tokens": summary.get("total_metrics", {}).get("input_tokens", 0),
+            "total_output_tokens": summary.get("total_metrics", {}).get("output_tokens", 0),
+            "total_tokens": summary.get("total_tokens", 0),
+            "by_model": summary.get("by_model", {}),
+            "by_agent": summary.get("by_agent", {}),
+        }
+
+    def list_recent(self, limit: int = 50) -> List[Dict[str, Any]]:
+        return self._collector.get_recent_interactions(limit)
+
+    def get_by_task(self, task_id: str) -> List[Dict[str, Any]]:
+        sink = getattr(self._collector, "_sink", None)
+        if sink and hasattr(sink, "get_by_task"):
+            return sink.get_by_task(task_id)
+        return []
+
+    def get_by_agent(self, agent_name: str) -> List[Dict[str, Any]]:
+        sink = getattr(self._collector, "_sink", None)
+        if sink and hasattr(sink, "get_by_agent"):
+            return sink.get_by_agent(agent_name)
+        return []

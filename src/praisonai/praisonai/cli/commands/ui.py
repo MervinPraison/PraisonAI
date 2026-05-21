@@ -13,7 +13,12 @@ from typing import Optional
 
 import typer
 
-app = typer.Typer(help="🤖 PraisonAI Clean Chat UI")
+app = typer.Typer(
+    help=(
+        "🤖 PraisonAI Clean Chat UI (Pattern B host via bundled default_app). "
+        "Pattern C: AIUIGateway. Legacy: PRAISONAI_HOST_LEGACY=1."
+    )
+)
 
 UI_DIR = Path.home() / ".praisonai" / "ui"
 DEFAULT_APP = UI_DIR / "app.py"

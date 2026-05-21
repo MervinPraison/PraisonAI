@@ -15,9 +15,9 @@ from enum import Enum
 
 # Import token tracking
 try:
-    from ..telemetry.token_collector import _token_collector
+    from ..telemetry.token_collector import get_token_collector
 except ImportError:
-    _token_collector = None
+    get_token_collector = None
 
 # Import async utility for hot-path usage
 try:
@@ -1826,18 +1826,19 @@ class AgentTeam:
 
     def get_token_usage_summary(self) -> Dict[str, Any]:
         """Get a summary of token usage across all agents and tasks."""
-        if not _token_collector:
+        if not get_token_collector:
             return {"error": "Token tracking not available"}
         
-        return _token_collector.get_session_summary()
+        return get_token_collector().get_session_summary()
     
     def get_detailed_token_report(self) -> Dict[str, Any]:
         """Get a detailed token usage report."""
-        if not _token_collector:
+        if not get_token_collector:
             return {"error": "Token tracking not available"}
         
-        summary = _token_collector.get_session_summary()
-        recent = _token_collector.get_recent_interactions(limit=20)
+        collector = get_token_collector()
+        summary = collector.get_session_summary()
+        recent = collector.get_recent_interactions(limit=20)
         
         # Calculate cost estimates (example rates)
         cost_per_1k_input = 0.0005  # $0.0005 per 1K input tokens
@@ -1861,11 +1862,11 @@ class AgentTeam:
     
     def display_token_usage(self):
         """Display token usage in a formatted table."""
-        if not _token_collector:
+        if not get_token_collector:
             print("Token tracking not available")
             return
         
-        summary = _token_collector.get_session_summary()
+        summary = get_token_collector().get_session_summary()
         
         print("\n" + "="*50)
         print("TOKEN USAGE SUMMARY")

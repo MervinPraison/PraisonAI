@@ -130,9 +130,12 @@ def __getattr__(name):
     elif name == 'EmbeddingResult':
         from praisonaiagents.embedding import EmbeddingResult
         return EmbeddingResult
-    elif name == 'AgentOS':
-        from .app import AgentOS
-        return AgentOS
+    elif name == 'build_host_app':
+        from .integration.host_app import build_host_app
+        return build_host_app
+    elif name == 'configure_host':
+        from .integration.host_app import configure_host
+        return configure_host
     elif name == 'AgentApp':
         # Silent alias for AgentOS (backward compatibility)
         from .app import AgentOS

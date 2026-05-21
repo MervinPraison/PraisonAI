@@ -81,7 +81,7 @@ class SessionData:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
-        return {
+        data = {
             "session_id": self.session_id,
             "messages": [m.to_dict() for m in self.messages],
             "created_at": self.created_at,
@@ -92,6 +92,10 @@ class SessionData:
             "gateway_session_id": self.gateway_session_id,
             "agent_id": self.agent_id,
         }
+        for key in ("model", "llm", "total_tokens", "token_count", "cost", "source"):
+            if key in self.metadata:
+                data[key] = self.metadata[key]
+        return data
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SessionData":
@@ -470,7 +474,20 @@ class DefaultSessionStore:
             self._cache[session_id] = session
         
         return self._save_session(session)
-    
+
+    def update_session_metadata(self, session_id: str, **fields: Any) -> bool:
+        """Merge run stats / metadata fields into a persisted session."""
+        session = self._load_session(session_id)
+        with self._lock:
+            for key, value in fields.items():
+                if value is None:
+                    continue
+                session.metadata[key] = value
+                if key in ("agent_id", "agent_name", "user_id"):
+                    setattr(session, key, value)
+            self._cache[session_id] = session
+        return self._save_session(session)
+
     def delete_session(self, session_id: str) -> bool:
         """Delete a session completely."""
         filepath = self._get_session_path(session_id)
@@ -500,10 +517,16 @@ class DefaultSessionStore:
                             data = json.load(f)
                         sessions.append({
                             "session_id": data.get("session_id", filename[:-5]),
+                            "id": data.get("session_id", filename[:-5]),
                             "agent_name": data.get("agent_name"),
+                            "agent_id": data.get("agent_id") or (data.get("metadata") or {}).get("agent_id"),
+                            "source": data.get("source") or (data.get("metadata") or {}).get("source"),
                             "created_at": data.get("created_at"),
                             "updated_at": data.get("updated_at"),
                             "message_count": len(data.get("messages", [])),
+                            "model": data.get("model") or data.get("llm") or (data.get("metadata") or {}).get("model"),
+                            "total_tokens": data.get("total_tokens") or data.get("token_count") or (data.get("metadata") or {}).get("total_tokens"),
+                            "cost": data.get("cost") or (data.get("metadata") or {}).get("cost"),
                         })
                     except (json.JSONDecodeError, IOError):
                         continue

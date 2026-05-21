@@ -199,93 +199,24 @@ def _auto_start_services(console, host: str) -> bool:
 
 
 def _run_aiui_dashboard(port: int, host: str, console) -> bool:
-    """Run the aiui dashboard interface using proper CLI entrypoint."""
-    console.print("[bold green]🦞 Starting aiui Dashboard...[/bold green]")
-    
+    """Run the aiui dashboard in-process via ``build_host_app()`` (Pattern B)."""
+    console.print("[bold green]🦞 Starting aiui Dashboard (Pattern B host)...[/bold green]")
+
     try:
-        import tempfile
-        import os
-        
-        # Check if aiui is available first
-        result = subprocess.run([
-            sys.executable, "-c", "import praisonaiui"
-        ], capture_output=True, text=True)
-        
-        if result.returncode != 0:
-            console.print("[red]Error: aiui package not installed.[/red]")
-            console.print("[yellow]Install with: pip install aiui[/yellow]")
-            return False
-        
-        # Create a temporary script for aiui dashboard based on claw pattern
-        aiui_script = '''import os
-import praisonaiui as aiui
-from praisonai.ui._aiui_datastore import PraisonAISessionDataStore
-
-# Set up datastore bridge
-aiui.set_datastore(PraisonAISessionDataStore())
-
-# Configure dashboard style
-aiui.set_style("dashboard")
-aiui.set_branding(title="PraisonAI Unified Dashboard", logo="🌟")
-
-# Set up pages for unified dashboard
-aiui.set_pages([
-    "chat", "agents", "memory", "knowledge", 
-    "skills", "sessions", "usage", "config", "logs"
-])
-
-# Register a simple welcome message
-@aiui.welcome
-async def on_welcome():
-    await aiui.say("🌟 Welcome to PraisonAI Unified Dashboard!")
-    await aiui.say("Access all your AI services from one interface.")
-
-# Register basic reply handler
-@aiui.reply
-async def on_reply(message: str, settings: dict | None = None):
-    await aiui.think("Processing...")
-    await aiui.say(f"Unified Dashboard received: {message}")
-    await aiui.say("Use the sidebar to access Flow, Agents, Memory, and more!")
-'''
-
-        # Create temp file safely
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-            f.write(aiui_script)
-            temp_script = f.name
-        
-        try:
-            console.print(f"[green]✓ Starting aiui dashboard on {host}:{port}[/green]")
-            
-            # Use aiui CLI to run the dashboard (NOT create_app)
-            # Try aiui command first, fallback to python -m
-            try:
-                result = subprocess.run([
-                    "aiui", "run", temp_script, "--port", str(port), "--host", host
-                ], check=True)
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                # Fallback to python -m praisonaiui
-                result = subprocess.run([
-                    sys.executable, "-m", "praisonaiui.cli", "run", 
-                    temp_script, "--port", str(port), "--host", host
-                ], check=True)
-            
-            return True
-            
-        except subprocess.CalledProcessError as e:
-            console.print(f"[red]aiui dashboard exited with code {e.returncode}[/red]")
-            return False
-        finally:
-            # Clean up temp file
-            try:
-                os.unlink(temp_script)
-            except (OSError, FileNotFoundError):
-                pass
-        
-    except subprocess.CalledProcessError as e:
-        console.print(f"[red]aiui dashboard failed with code {e.returncode}[/red]")
+        import uvicorn
+        from praisonai.integration.host_app import build_host_app
+    except ImportError:
+        console.print("[red]Error: aiui integration dependencies missing.[/red]")
+        console.print('[yellow]Install with: pip install "praisonai[ui]"[/yellow]')
         return False
+
+    try:
+        app = build_host_app(pages=["chat", "sessions", "workflows", "hooks", "usage"])
+        console.print(f"[green]✓ Starting in-process host on {host}:{port}[/green]")
+        uvicorn.run(app, host=host, port=port, log_level="info")
+        return True
     except Exception as e:
-        console.print(f"[red]Error running aiui dashboard: {e}[/red]")
+        console.print(f"[red]Error running in-process host: {e}[/red]")
         return False
 
 
@@ -611,6 +542,10 @@ def unified(
 ):
     """
     Launch the PraisonAI Unified Dashboard.
+    
+    Pattern B (default with --aiui): in-process ``build_host_app()`` host.
+    Pattern C: ``praisonai serve gateway`` or ``run_integrated_gateway()``.
+    Legacy: set ``PRAISONAI_HOST_LEGACY=1`` for callback-only ``@aiui.reply`` mode.
     
     Provides a single interface at localhost:3000 to access:
     - Flow Visual Builder (Langflow) - port 7860

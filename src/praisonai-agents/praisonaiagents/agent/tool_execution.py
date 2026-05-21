@@ -290,6 +290,18 @@ class ToolExecutionMixin:
                     agent_id=self.name,
                     metadata={"duration_ms": _duration_ms},
                 ))
+                getattr(self, "_Agent__stream_emitter", None).emit(StreamEvent(
+                    type=StreamEventType.TOOL_CALL_END,
+                    timestamp=_time.perf_counter(),
+                    tool_call={
+                        "name": function_name,
+                        "arguments": arguments,
+                        "result": result_summary,
+                        "id": tool_call_id,
+                    },
+                    agent_id=self.name,
+                    metadata={"duration_ms": _duration_ms},
+                ))
             
             # Trigger AFTER_TOOL hook
             from ..hooks import HookEvent, AfterToolInput
