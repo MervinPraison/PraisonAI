@@ -478,8 +478,10 @@ Methods:
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">edit_skill</a>(name: str, content: str) -> dict</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_allowed_tools</a>(name: str) -> List[str]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_available_skills</a>() -> List[SkillMetadata]</code>
+* <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_available_skills_by_state</a>(state: SkillState) -> List[LoadedSkill]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_instructions</a>(name: str) -> Optional[str]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_skill</a>(name: str) -> Optional[LoadedSkill]</code>
+* <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_skills_diagnostics</a>() -> Dict[str, ValidationResult]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_user_invocable_skills</a>() -> List[LoadedSkill]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">invoke</a>(name: str, raw_args: str = '', session_id: Optional[str] = None, shell_exec: bool = False) -> Optional[str]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">load_resources</a>(name: str) -> bool</code>
@@ -488,6 +490,7 @@ Methods:
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">skill_names</a>() -> List[str]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">skills</a>() -> List[LoadedSkill]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">to_prompt</a>() -> str</code>
+* <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">validate_skill_capabilities</a>(skill_name: str, force_refresh: bool = False) -> ValidationResult</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">write_skill_file</a>(name: str, file_path: str, file_content: str) -> dict</code>
 * <code title="class SkillMetadata">SkillMetadata.<a href="./src/praisonai-agents/praisonaiagents/skills/models.py">from_properties</a>(props: SkillProperties) -> 'SkillMetadata'</code>
 * <code title="class SkillProperties">SkillProperties.<a href="./src/praisonai-agents/praisonaiagents/skills/models.py">to_dict</a>() -> dict</code>
@@ -869,6 +872,7 @@ Methods:
 * <code title="cli">praisonai doctor packaging <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor performance <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor selftest <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
+* <code title="cli">praisonai doctor skills <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor tools <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor troubleshoot <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai endpoints list <a href="./src/praisonai/praisonai/cli/commands/endpoints.py">--help</a></code>
