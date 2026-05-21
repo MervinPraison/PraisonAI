@@ -42,6 +42,7 @@ class MemoryBackend(str, Enum):
     FILE = "file"
     SQLITE = "sqlite"
     REDIS = "redis"
+    VALKEY = "valkey"
     POSTGRES = "postgres"
     MEM0 = "mem0"
     MONGODB = "mongodb"

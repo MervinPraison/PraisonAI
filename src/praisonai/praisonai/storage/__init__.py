@@ -3,6 +3,7 @@ Storage adapter implementations for PraisonAI.
 
 Heavy implementations that follow StorageBackendProtocol for:
 - Redis (praisonai[redis])
+- Valkey (praisonai[valkey])
 - MongoDB (praisonai[mongodb])
 - PostgreSQL (praisonai[postgresql])
 - DynamoDB (praisonai[dynamodb])
@@ -13,6 +14,7 @@ These implementations are kept in the wrapper to avoid bloating the core SDK.
 # Lazy imports - only import when needed
 __all__ = [
     "RedisStorageAdapter",
+    "ValkeyStorageAdapter",
     "MongoDBStorageAdapter", 
     "PostgreSQLStorageAdapter",
     "DynamoDBStorageAdapter",
@@ -23,6 +25,9 @@ def __getattr__(name: str):
     if name == "RedisStorageAdapter":
         from .redis_adapter import RedisStorageAdapter
         return RedisStorageAdapter
+    elif name == "ValkeyStorageAdapter":
+        from .valkey_adapter import ValkeyStorageAdapter
+        return ValkeyStorageAdapter
     elif name == "MongoDBStorageAdapter":
         from .mongodb_adapter import MongoDBStorageAdapter
         return MongoDBStorageAdapter
