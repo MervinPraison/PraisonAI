@@ -343,6 +343,7 @@ _LAZY_IMPORTS = {
     # UI (optional)
     'AGUI': ('praisonaiagents.ui.agui', 'AGUI'),
     'A2A': ('praisonaiagents.ui.a2a', 'A2A'),
+    'A2UI': ('praisonaiagents.ui.a2ui', 'A2UI'),
     
     # Feature configs
     'MemoryConfig': ('praisonaiagents.config.feature_configs', 'MemoryConfig'),
@@ -814,6 +815,6 @@ def __dir__():
 # - Workflow, Task, Route, Parallel, Loop, Repeat, Pipeline, etc.
 # - MCP, FlowDisplay, track_workflow, FastContext, etc.
 # - Plan, PlanStep, TodoList, PlanningAgent, ApprovalCallback, etc.
-# - RAG, RAGConfig, RAGResult, AGUI, A2A, etc.
+# - RAG, RAGConfig, RAGResult, AGUI, A2A, A2UI, etc.
 # - All telemetry, display, and utility functions
 # ============================================================================

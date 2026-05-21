@@ -34,3 +34,27 @@ class TestA2UITool:
             )
             assert result["mime_type"] == "application/json+a2ui"
             assert len(result["messages"]) == 1
+
+
+class TestA2UIAdapterSmoke:
+    def test_is_a2ui_part_with_sdk(self):
+        pytest.importorskip("a2ui", reason="a2ui-agent-sdk not installed")
+        from praisonaiagents.ui.a2ui.adapter import create_a2ui_part, is_a2ui_part
+
+        part = create_a2ui_part({"messages": [{"createSurface": {"surfaceId": "m"}}]})
+        assert is_a2ui_part(part) is True
+
+    def test_missing_sdk_import_error_message(self):
+        from unittest.mock import patch
+
+        from praisonaiagents.ui.a2ui import adapter
+
+        def _raise(_name):
+            raise ImportError(
+                "A2UI support requires the optional dependency. "
+                "Install with: pip install praisonaiagents[a2ui]"
+            )
+
+        with patch.object(adapter, "_import", side_effect=_raise):
+            with pytest.raises(ImportError, match="praisonaiagents\\[a2ui\\]"):
+                adapter.create_a2ui_part({"messages": []})

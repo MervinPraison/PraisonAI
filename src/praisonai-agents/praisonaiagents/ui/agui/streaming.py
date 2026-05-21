@@ -12,6 +12,7 @@ from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Set
 
 from praisonaiagents.ui.agui.types import (
     BaseEvent,
+    CustomEvent,
     TextMessageStartEvent,
     TextMessageContentEvent,
     TextMessageEndEvent,
@@ -26,6 +27,7 @@ from praisonaiagents.ui.agui.types import (
     StepFinishedEvent,
     StateSnapshotEvent,
 )
+from praisonaiagents.ui.protocols import A2UI_MIME_TYPE
 
 
 @dataclass
@@ -292,11 +294,39 @@ def stream_event_to_agui_events(
 
     if event.type == StreamEventType.TOOL_CALL_RESULT and event.tool_call:
         tool_call_id = event.tool_call.get("id") or str(uuid.uuid4())
-        content = event.content if event.content is not None else str(event.tool_call.get("result", ""))
+        raw_result = event.tool_call.get("result")
+        content = event.content if event.content is not None else str(raw_result or "")
         buffer.end_tool_call(tool_call_id)
-        return [create_tool_result_event(tool_call_id, str(content), message_id)]
+        events: List[BaseEvent] = [
+            create_tool_result_event(tool_call_id, str(content), message_id)
+        ]
+        if isinstance(raw_result, dict) and raw_result.get("mime_type") == A2UI_MIME_TYPE:
+            events.append(
+                CustomEvent(
+                    name="a2ui",
+                    value={
+                        "mime_type": A2UI_MIME_TYPE,
+                        "messages": raw_result.get("messages", []),
+                        "surface_id": _infer_a2ui_surface_id(raw_result),
+                    },
+                )
+            )
+        return events
 
     return []
+
+
+def _infer_a2ui_surface_id(result: Dict[str, Any]) -> str:
+    """Infer surface id from send_a2ui_messages result (inline, no UI-layer deps)."""
+    for msg in result.get("messages") or []:
+        if isinstance(msg, dict):
+            create = msg.get("createSurface")
+            if isinstance(create, dict):
+                sid = create.get("surfaceId") or create.get("id")
+                if sid:
+                    return str(sid)
+    sid = result.get("surface_id") or result.get("surfaceId")
+    return str(sid) if sid else "main"
 
 
 async def async_stream_agent_response(

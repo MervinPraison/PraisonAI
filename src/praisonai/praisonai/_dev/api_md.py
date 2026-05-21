@@ -119,7 +119,7 @@ class ApiMdGenerator:
         'Observability': ['obs', 'FlowDisplay', 'track_workflow'],
         'Context': ['FastContext', 'FastContextResult', 'FileMatch', 'LineRange',
                     'ContextManager', 'ManagerConfig'],
-        'UI': ['AGUI', 'A2A'],
+        'UI': ['AGUI', 'A2A', 'A2UI'],
         'Config': ['MemoryConfig', 'KnowledgeConfig', 'PlanningConfig', 'ReflectionConfig',
                    'GuardrailConfig', 'WebConfig', 'OutputConfig', 'ExecutionConfig',
                    'TemplateConfig', 'CachingConfig', 'HooksConfig', 'SkillsConfig',
