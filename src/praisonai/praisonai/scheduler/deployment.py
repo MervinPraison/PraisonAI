@@ -1,11 +1,10 @@
 """
-DEPRECATED: This module is deprecated. Use praisonai.scheduler instead.
+Real deployment scheduler that integrates with the actual deployment system.
 
-This file is kept for backward compatibility only.
-All new code should import from praisonai.scheduler.
+This module provides the actual deployment scheduler implementation that was
+previously shadowed by the mock in __init__.py.
 """
 
-import warnings
 import logging
 import threading
 import time
@@ -14,18 +13,7 @@ from abc import ABC, abstractmethod
 
 logger = logging.getLogger(__name__)
 
-# Issue deprecation warning
-warnings.warn(
-    "praisonai.scheduler module (root level) is deprecated. "
-    "Use 'from praisonai.scheduler import ...' instead.",
-    DeprecationWarning,
-    stacklevel=2
-)
 
-# Import from new scheduler module for backward compatibility
-from .scheduler.base import ScheduleParser
-
-# Keep old classes for backward compatibility
 class DeployerInterface(ABC):
     """Abstract interface for deployers to ensure provider compatibility."""
     
@@ -34,35 +22,56 @@ class DeployerInterface(ABC):
         """Execute deployment. Returns True on success, False on failure."""
         pass
 
-class CloudDeployerAdapter(DeployerInterface):
-    """Adapter for existing CloudDeployer to match interface."""
+
+class DeployHandlerAdapter(DeployerInterface):
+    """Adapter for the real DeployHandler to match the scheduler interface."""
     
-    def __init__(self):
-        from .deploy import CloudDeployer
-        self._deployer = CloudDeployer()
+    def __init__(self, provider: str = "gcp", config: Optional[Dict[str, Any]] = None):
+        self.provider = provider
+        self.config = config or {}
     
     def deploy(self) -> bool:
-        """Execute deployment using CloudDeployer."""
+        """Execute deployment using the real DeployHandler."""
         try:
-            self._deployer.run_commands()
+            from praisonai.cli.features.deploy import DeployHandler
+            
+            handler = DeployHandler()
+            
+            # Create args object for handler
+            class DeployArgs:
+                def __init__(self):
+                    self.file = "agents.yaml"
+                    self.type = None
+                    self.provider = self.provider if hasattr(self, 'provider') else 'gcp'
+                    self.json = False
+                    self.background = False
+            
+            # Create args with the provider from the scheduler
+            deploy_args = DeployArgs()
+            deploy_args.provider = self.provider
+            
+            handler.handle_deploy(deploy_args)
             return True
+            
         except Exception as e:
             logger.error(f"Deployment failed: {e}")
             return False
 
+
 class DeploymentScheduler:
     """
-    Minimal deployment scheduler with provider-agnostic design.
+    Real deployment scheduler with provider-agnostic design.
     
     Features:
     - Simple interval-based scheduling
     - Thread-safe operation
-    - Extensible deployer factory pattern
-    - Minimal dependencies
+    - Integrates with actual DeployHandler
+    - Provider dispatch support
     """
     
-    def __init__(self, schedule_config: Optional[Dict[str, Any]] = None):
-        self.config = schedule_config or {}
+    def __init__(self, provider: str = "gcp", config: Optional[Dict[str, Any]] = None):
+        self.provider = provider
+        self.config = config or {}
         self.is_running = False
         self._stop_event = threading.Event()
         self._thread = None
@@ -77,8 +86,8 @@ class DeploymentScheduler:
         if self._deployer:
             return self._deployer
         
-        # Default to CloudDeployer for backward compatibility
-        return CloudDeployerAdapter()
+        # Use real DeployHandler via adapter
+        return DeployHandlerAdapter(self.provider, self.config)
     
     def start(self, schedule_expr: str, max_retries: int = 3) -> bool:
         """
@@ -96,6 +105,7 @@ class DeploymentScheduler:
             return False
             
         try:
+            from .base import ScheduleParser
             interval = ScheduleParser.parse(schedule_expr)
             self.is_running = True
             self._stop_event.clear()
@@ -165,30 +175,16 @@ class DeploymentScheduler:
             logger.error(f"One-time deployment failed: {e}")
             return False
 
-def create_scheduler(provider: str = "gcp", config: Optional[Dict[str, Any]] = None) -> DeploymentScheduler:
+
+def create_deployment_scheduler(provider: str = "gcp", config: Optional[Dict[str, Any]] = None) -> DeploymentScheduler:
     """
-    Factory function to create scheduler for different providers.
+    Factory function to create a real deployment scheduler for different providers.
     
     Args:
         provider: Deployment provider ("gcp", "aws", "azure", etc.)
         config: Optional configuration dict
         
     Returns:
-        Configured DeploymentScheduler instance
+        Configured DeploymentScheduler instance that uses real deployment logic
     """
-    scheduler = DeploymentScheduler(config)
-    
-    # Provider-specific deployer setup can be added here
-    if provider == "gcp":
-        # Default CloudDeployer for GCP
-        pass
-    elif provider == "aws":
-        # Future: AWS deployer implementation
-        logger.warning("AWS provider not yet implemented, using default")
-    elif provider == "azure":
-        # Future: Azure deployer implementation  
-        logger.warning("Azure provider not yet implemented, using default")
-    else:
-        logger.warning(f"Unknown provider {provider}, using default")
-    
-    return scheduler
+    return DeploymentScheduler(provider, config)
