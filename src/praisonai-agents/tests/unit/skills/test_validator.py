@@ -295,3 +295,58 @@ description: A test skill for validation
             
             assert len(errors) > 0
             assert any("directory" in e.lower() for e in errors)
+    
+    def test_validate_utf8_skill(self):
+        """Test validation of UTF-8 encoded skill.
+        
+        Regression test for Windows encoding issues (Issue #1695).
+        Ensures validator can handle UTF-8 characters without errors.
+        """
+        from praisonaiagents.skills.validator import validate
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skill_dir = Path(tmpdir) / "utf8-validation-test"
+            skill_dir.mkdir()
+            
+            # Create SKILL.md with UTF-8 content
+            utf8_content = """---
+name: utf8-validation-test
+description: Validation test with UTF-8 — em dashes — and accents
+license: MIT
+compatibility: Works with café files → résumé output
+---
+
+# UTF-8 Validation Test
+
+Testing validation with various UTF-8 characters.
+"""
+            
+            # Write as UTF-8 explicitly
+            with open(skill_dir / "SKILL.md", 'w', encoding='utf-8') as f:
+                f.write(utf8_content)
+            
+            # Validate should not produce errors for UTF-8 content
+            errors = validate(skill_dir)
+            
+            assert errors == [], f"Validation should pass for UTF-8 content, got errors: {errors}"
+
+    def test_validate_non_utf8_skill_returns_error(self):
+        """Test validation returns a structured error for non-UTF-8 SKILL.md."""
+        from praisonaiagents.skills.validator import validate
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skill_dir = Path(tmpdir) / "latin1-validation-test"
+            skill_dir.mkdir()
+
+            latin1_content = """---
+name: latin1-validation-test
+description: Café skill
+---
+"""
+            with open(skill_dir / "SKILL.md", "wb") as f:
+                f.write(latin1_content.encode("cp1252"))
+
+            errors = validate(skill_dir)
+
+            assert len(errors) > 0
+            assert any("utf-8" in e.lower() for e in errors)
