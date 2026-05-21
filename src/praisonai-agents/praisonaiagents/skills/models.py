@@ -99,8 +99,8 @@ class SkillRequirements:
     def _normalize_list(value: Union[str, List[str]]) -> List[str]:
         """Normalize string or list to list of strings."""
         if isinstance(value, str):
-            # Split on whitespace for space-separated strings
-            return [item.strip() for item in value.split() if item.strip()]
+            # Support both comma-separated and space-separated strings
+            return [item.strip() for item in value.replace(',', ' ').split() if item.strip()]
         elif isinstance(value, (list, tuple)):
             return [str(item).strip() for item in value if str(item).strip()]
         else:

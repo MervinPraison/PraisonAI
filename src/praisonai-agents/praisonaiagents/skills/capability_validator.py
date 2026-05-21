@@ -160,7 +160,10 @@ class CapabilityValidator:
                 
         if missing_env_vars:
             msg = f"Missing required environment variables: {', '.join(missing_env_vars)}"
-            warnings.append(msg)  # Env vars are always warnings, not errors
+            if self.enforcement_level == EnforcementLevel.STRICT:
+                errors.append(msg)
+            else:
+                warnings.append(msg)
         
         # Determine skill state
         if errors:
