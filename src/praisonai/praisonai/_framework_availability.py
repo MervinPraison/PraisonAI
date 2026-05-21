@@ -30,6 +30,11 @@ _PROBES: dict[str, Callable[[], bool]] = {
     "agentops":          lambda: importlib.util.find_spec("agentops") is not None,
     "litellm":           lambda: importlib.util.find_spec("litellm") is not None,
     "openai":            lambda: importlib.util.find_spec("openai") is not None,
+    # Additional probes for Gap 2 consolidation
+    "acp":               lambda: importlib.util.find_spec("acp") is not None,
+    "rich":              lambda: importlib.util.find_spec("rich") is not None,
+    "gradio":            lambda: importlib.util.find_spec("gradio") is not None,
+    "unsloth":           lambda: importlib.util.find_spec("unsloth") is not None,
 }
 
 def is_available(name: str) -> bool:
