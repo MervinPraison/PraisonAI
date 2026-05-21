@@ -329,3 +329,24 @@ Testing validation with various UTF-8 characters.
             errors = validate(skill_dir)
             
             assert errors == [], f"Validation should pass for UTF-8 content, got errors: {errors}"
+
+    def test_validate_non_utf8_skill_returns_error(self):
+        """Test validation returns a structured error for non-UTF-8 SKILL.md."""
+        from praisonaiagents.skills.validator import validate
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skill_dir = Path(tmpdir) / "latin1-validation-test"
+            skill_dir.mkdir()
+
+            latin1_content = """---
+name: latin1-validation-test
+description: Café skill
+---
+"""
+            with open(skill_dir / "SKILL.md", "wb") as f:
+                f.write(latin1_content.encode("cp1252"))
+
+            errors = validate(skill_dir)
+
+            assert len(errors) > 0
+            assert any("utf-8" in e.lower() for e in errors)

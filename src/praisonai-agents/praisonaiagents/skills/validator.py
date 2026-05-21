@@ -195,5 +195,7 @@ def validate(skill_dir: Path, strict: bool = False) -> List[str]:
         metadata, _ = parse_frontmatter(content)
     except (ParseError, UnicodeDecodeError) as e:
         return [str(e)]
+    except UnicodeDecodeError as e:
+        return [f"SKILL.md is not valid UTF-8: {e}"]
 
     return validate_metadata(metadata, skill_dir, strict=strict)
