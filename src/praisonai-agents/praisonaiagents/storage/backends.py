@@ -346,13 +346,15 @@ class _LazyStorageModule:
     
     _BACKENDS = {
         "RedisBackend": "praisonai.storage",
-        "MongoDBBackend": "praisonai.storage", 
+        "MongoDBBackend": "praisonai.storage",
         "PostgreSQLBackend": "praisonai.storage",
         "DynamoDBBackend": "praisonai.storage",
+        "ValkeyBackend": "praisonai.storage",
+        "ValkeySearchBackend": "praisonai.storage",
         # Legacy names for compatibility
         "RedisStorageAdapter": "praisonai.storage",
         "MongoDBStorageAdapter": "praisonai.storage",
-        "PostgreSQLStorageAdapter": "praisonai.storage", 
+        "PostgreSQLStorageAdapter": "praisonai.storage",
         "DynamoDBStorageAdapter": "praisonai.storage",
     }
     
@@ -390,7 +392,7 @@ def get_backend(
     Factory function to get a storage backend.
     
     Args:
-        backend_type: Type of backend ("file", "sqlite", "redis", "mongodb", "postgresql", "dynamodb")
+        backend_type: Type of backend ("file", "sqlite", "redis", "mongodb", "postgresql", "dynamodb", "valkey")
         **kwargs: Backend-specific arguments
         
     Returns:
@@ -431,9 +433,13 @@ def get_backend(
         # Lazy load from wrapper
         backend_class = getattr(_heavy_backends, "DynamoDBBackend")
         return backend_class(**kwargs)
+    elif backend_type == "valkey":
+        # Lazy load from wrapper
+        backend_class = getattr(_heavy_backends, "ValkeyBackend")
+        return backend_class(**kwargs)
     else:
         raise ValueError(f"Unknown backend type: {backend_type}. "
-                        f"Supported: file, sqlite, redis, mongodb, postgresql, dynamodb")
+                        f"Supported: file, sqlite, redis, mongodb, postgresql, dynamodb, valkey")
 
 def __getattr__(name: str):
     """
@@ -442,7 +448,8 @@ def __getattr__(name: str):
     This allows `from praisonaiagents.storage.backends import RedisBackend` to work
     while maintaining lazy loading.
     """
-    if name in {"RedisBackend", "MongoDBBackend", "PostgreSQLBackend", "DynamoDBBackend"}:
+    if name in {"RedisBackend", "MongoDBBackend", "PostgreSQLBackend", "DynamoDBBackend",
+                "ValkeyBackend", "ValkeySearchBackend"}:
         return getattr(_heavy_backends, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 

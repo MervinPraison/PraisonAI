@@ -198,7 +198,13 @@ def _register_builtin_knowledge_stores(registry: StoreRegistry):
     def _redis_vector(url=None, **kwargs):
         from .knowledge.redis_vector import RedisVectorKnowledgeStore
         return RedisVectorKnowledgeStore(url=url, **kwargs)
-    
+
+    def _valkey_vector(url=None, **kwargs):
+        from .knowledge.valkey_vector import ValkeyVectorKnowledgeStore
+        # url not used; host/port come from kwargs
+        kwargs.pop("url", None)
+        return ValkeyVectorKnowledgeStore(**kwargs)
+
     def _cassandra(url=None, **kwargs):
         kwargs.pop("url", None)  # Cassandra doesn't use url parameter
         from .knowledge.cassandra import CassandraKnowledgeStore
@@ -258,9 +264,10 @@ def _register_builtin_knowledge_stores(registry: StoreRegistry):
     registry.register("milvus", _milvus)
     registry.register("pgvector", _pgvector)
     registry.register("redis", _redis_vector)
+    registry.register("valkey", _valkey_vector)
     registry.register("cassandra", _cassandra)
     registry.register("clickhouse", _clickhouse)
-    registry.register("mongodb_vector", _mongodb_vector, 
+    registry.register("mongodb_vector", _mongodb_vector,
         aliases=("mongodb_atlas", "mongo_vector"))
     
     # Register missing backends that were supported in old factory
@@ -286,7 +293,12 @@ def _register_builtin_state_stores(registry: StoreRegistry):
     def _redis(url=None, **kwargs):
         from .state.redis import RedisStateStore
         return RedisStateStore(url=url, **kwargs)
-    
+
+    def _valkey(url=None, **kwargs):
+        from .state.valkey import ValkeyStateStore
+        kwargs.pop("url", None)
+        return ValkeyStateStore(**kwargs)
+
     def _dynamodb(url=None, **kwargs):
         kwargs.pop("url", None)  # DynamoDB doesn't use url parameter
         from .state.dynamodb import DynamoDBStateStore
@@ -322,10 +334,11 @@ def _register_builtin_state_stores(registry: StoreRegistry):
         return GCSStateStore(bucket_name=bucket, **kwargs)
     
     registry.register("redis", _redis)
+    registry.register("valkey", _valkey)
     registry.register("dynamodb", _dynamodb)
     registry.register("firestore", _firestore)
     registry.register("mongodb", _mongodb)
-    registry.register("async_mongodb", _async_mongodb, 
+    registry.register("async_mongodb", _async_mongodb,
         aliases=("motor", "mongodb_async"))
     registry.register("upstash", _upstash)
     registry.register("memory", _memory)
