@@ -163,7 +163,8 @@ class ToolResolver:
         """
         # Cache availability check
         if self._praisonai_tools_available is None:
-            self._praisonai_tools_available = importlib.util.find_spec("praisonai_tools") is not None
+            from ._framework_availability import is_available
+            self._praisonai_tools_available = is_available("praisonai_tools")
         
         if not self._praisonai_tools_available:
             return None
@@ -314,7 +315,8 @@ class ToolResolver:
         
         # 3. Add praisonai-tools (if installed)
         if self._praisonai_tools_available is None:
-            self._praisonai_tools_available = importlib.util.find_spec("praisonai_tools") is not None
+            from ._framework_availability import is_available
+            self._praisonai_tools_available = is_available("praisonai_tools")
         
         if self._praisonai_tools_available:
             try:

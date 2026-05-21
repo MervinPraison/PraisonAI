@@ -1,11 +1,10 @@
 """Lazy access to autogen_tools, with `find_spec` startup probes for crewai/autogen."""
-import importlib.util
 from praisonai.auto import _load_optional
 
 from .._framework_availability import is_available
 CREWAI_AVAILABLE = is_available("crewai")
 AUTOGEN_AVAILABLE = is_available("autogen")
-PRAISONAI_TOOLS_PACKAGE_AVAILABLE = importlib.util.find_spec("praisonai_tools") is not None
+PRAISONAI_TOOLS_PACKAGE_AVAILABLE = is_available("praisonai_tools")
 
 
 def _load_autogen_tools():

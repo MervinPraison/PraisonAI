@@ -6,6 +6,8 @@ from .version import __version__
 # Define __all__ for lazy loading
 __all__ = [
     'PraisonAI',
+    'run',
+    'arun',
     '__version__',
     'Deploy',
     'DeployConfig',
@@ -92,7 +94,13 @@ def __getattr__(name):
     # Note: Telemetry initialization moved out of lazy hook to avoid side effects
     # It should be called explicitly from cli.PraisonAI.__init__ instead
 
-    if name == 'PraisonAI':
+    if name == 'run':
+        from ._entrypoint import run
+        return run
+    elif name == 'arun':
+        from ._entrypoint import arun
+        return arun
+    elif name == 'PraisonAI':
         from .cli import PraisonAI
         return PraisonAI
     elif name == 'Agent':
