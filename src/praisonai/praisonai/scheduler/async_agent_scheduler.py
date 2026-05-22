@@ -321,21 +321,14 @@ class AsyncAgentScheduler:
         Returns:
             Dictionary with execution stats (best-effort)
         """
-        import asyncio
-        try:
-            # Try to get the running loop
-            loop = asyncio.get_running_loop()
-            # If there's a loop, delegate to async version
-            return asyncio.run_coroutine_threadsafe(self.get_stats_async(), loop).result()
-        except RuntimeError:
-            # No running loop, do best-effort synchronous read
-            return {
-                "is_running": self.is_running,
-                "total_executions": self._execution_count,
-                "successful_executions": self._success_count,
-                "failed_executions": self._failure_count,
-                "success_rate": (self._success_count / self._execution_count * 100) if self._execution_count > 0 else 0,
-            }
+        # Always do best-effort synchronous read for simplicity
+        return {
+            "is_running": self.is_running,
+            "total_executions": self._execution_count,
+            "successful_executions": self._success_count,
+            "failed_executions": self._failure_count,
+            "success_rate": (self._success_count / self._execution_count * 100) if self._execution_count > 0 else 0,
+        }
     
     async def _run_schedule(self, interval: int, max_retries: int):
         """Internal method to run scheduled agent executions."""
