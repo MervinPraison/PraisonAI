@@ -126,15 +126,19 @@ def setup_bridges() -> None:
         from praisonai.integration.bridges.usage_bridge import register_usage_sink
 
         sink = register_usage_sink()
-    except Exception as exc:
+    except ImportError as exc:
         log.debug("usage bridge unavailable: %s", exc)
+    except Exception as exc:
+        log.warning("usage bridge unavailable: %s", exc)
 
     try:
         from praisonai.integration.bridges.schedules_runner import ensure_schedule_runner
 
         ensure_schedule_runner()
-    except Exception as exc:
+    except ImportError as exc:
         log.debug("schedule runner unavailable: %s", exc)
+    except Exception as exc:
+        log.warning("schedule runner unavailable: %s", exc)
 
     try:
         import praisonaiui.backends as backends
@@ -161,8 +165,10 @@ def setup_bridges() -> None:
 
         backends.set_backend("approvals_pending", list_pending_approvals)
         backends.set_backend("approvals_policies", get_approval_policies)
-    except Exception as exc:
+    except ImportError as exc:
         log.debug("aiui backend injection failed: %s", exc)
+    except Exception as exc:
+        log.warning("aiui backend injection failed: %s", exc)
 
 
 def create_host_app():

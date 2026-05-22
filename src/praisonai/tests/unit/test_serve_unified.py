@@ -84,6 +84,14 @@ class TestServeUnifiedCommands:
         
         # Should show help for ui command
         assert "ui" in result.output.lower() or "chainlit" in result.output.lower() or result.exit_code == 0
+
+    def test_serve_ui_gateway_command_exists(self):
+        """Test serve ui-gateway command is registered."""
+        from praisonai.cli.commands.serve import app
+
+        result = runner.invoke(app, ["ui-gateway", "--help"])
+
+        assert "ui-gateway" in result.output.lower() or result.exit_code == 0
     
     def test_serve_rag_command_exists(self):
         """Test serve rag command is registered."""
@@ -188,6 +196,13 @@ class TestServeCommandOptions:
         
         result = runner.invoke(app, ["mcp", "--help"])
         assert "--transport" in result.output or "-T" in result.output
+
+    def test_serve_ui_gateway_has_agents_option(self):
+        """Test serve ui-gateway has --agents option."""
+        from praisonai.cli.commands.serve import app
+
+        result = runner.invoke(app, ["ui-gateway", "--help"])
+        assert "--agents" in result.output or "-a" in result.output
 
 
 class TestDeprecationWarnings:

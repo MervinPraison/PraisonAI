@@ -25,17 +25,9 @@ jobs:
       uses: actions/checkout@v4
       with:
         path: PraisonAI
+        ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         
     - name: Checkout PraisonAIUI
-      uses: actions/checkout@v4
-      with:
-        repository: MervinPraison/PraisonAIUI
-        path: PraisonAIUI
-        # Use matching ref if available, otherwise main
-        ref: ${{ github.ref_name }}
-        
-    - name: Fallback to main branch for PraisonAIUI
-      if: failure()
       uses: actions/checkout@v4
       with:
         repository: MervinPraison/PraisonAIUI
@@ -130,6 +122,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         path: PraisonAI
+        ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         
     - name: Checkout PraisonAIUI
       uses: actions/checkout@v4
