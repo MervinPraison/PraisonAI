@@ -305,6 +305,43 @@ class TestDefaultSessionStore:
             session = writer.get_session("session-1")
             assert session.metadata.get("model") == "gpt-4o-mini"
             assert session.metadata.get("total_tokens") == 42
+
+    def test_set_agent_info_preserves_messages(self, temp_store):
+        """Agent info updates must not drop messages added by another store instance."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = DefaultSessionStore(session_dir=tmpdir)
+            reader = DefaultSessionStore(session_dir=tmpdir)
+
+            writer.add_user_message("session-1", "first")
+            reader._load_session("session-1")
+            writer.add_user_message("session-1", "second")
+
+            assert reader.set_agent_info("session-1", agent_name="TestBot", user_id="u-1")
+
+            writer.invalidate_cache("session-1")
+            history = writer.get_chat_history("session-1")
+            assert len(history) == 2
+            assert history[1]["content"] == "second"
+
+            session = writer.get_session("session-1")
+            assert session.agent_name == "TestBot"
+            assert session.user_id == "u-1"
+
+    def test_clear_session_preserves_new_messages(self, temp_store):
+        """Clear must reload from disk so concurrent adds are not lost."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = DefaultSessionStore(session_dir=tmpdir)
+            reader = DefaultSessionStore(session_dir=tmpdir)
+
+            writer.add_user_message("session-1", "first")
+            reader._load_session("session-1")
+            writer.add_user_message("session-1", "second")
+
+            assert reader.clear_session("session-1")
+
+            writer.invalidate_cache("session-1")
+            history = writer.get_chat_history("session-1")
+            assert len(history) == 0
     
     def test_concurrent_writes(self, temp_store):
         """Test concurrent writes to same session."""
