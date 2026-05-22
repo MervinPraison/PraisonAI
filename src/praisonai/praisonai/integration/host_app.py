@@ -144,6 +144,11 @@ def setup_bridges() -> None:
 
         backends.set_backend("approvals_pending", list_pending_approvals)
         backends.set_backend("approvals_policies", get_approval_policies)
+        
+        # Kanban and jobs backends
+        from praisonai.integration.bridges.kanban_bridge import register_kanban_backends
+        register_kanban_backends()
+        
     except Exception as exc:
         log.debug("aiui backend injection failed: %s", exc)
 
