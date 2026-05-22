@@ -196,10 +196,8 @@ def _load_basic_tools() -> Dict[str, Callable]:
 # ── Context-local runtime for multi-agent safety ──────────────────────────
 # Each agent/task/request gets its own runtime context to avoid config conflicts and race conditions.
 import contextvars
-import threading
 
 _runtime_var: contextvars.ContextVar = contextvars.ContextVar("interactive_runtime", default=None)
-_runtime_lock = threading.Lock()  # only guards the first creation per context
 
 
 def _get_shared_runtime(config: ToolConfig):
@@ -208,32 +206,34 @@ def _get_shared_runtime(config: ToolConfig):
     Each context (agent/task/request) gets its own runtime with the config provided.
     This prevents race conditions and config capture issues from global singletons.
     
+    First-caller-wins policy: Once a runtime is created for a context with specific
+    config, subsequent calls in the same context will return the cached runtime and
+    ignore any different config parameters.
+    
     Returns (runtime, all_tools) — the runtime and the full list of
     agent-centric tool functions created from it.
     """
     bundle = _runtime_var.get()
     if bundle is not None:
+        # Return cached runtime (first-caller-wins for this context)
         return bundle
         
-    with _runtime_lock:
-        # Double-check after acquiring lock
-        bundle = _runtime_var.get()
-        if bundle is None:
-            from .interactive_runtime import InteractiveRuntime, RuntimeConfig
-            from .agent_tools import create_agent_centric_tools
-            
-            runtime_config = RuntimeConfig(
-                workspace=config.workspace,
-                lsp_enabled=config.lsp_enabled,
-                acp_enabled=config.acp_enabled,
-                approval_mode=config.approval_mode,
-            )
-            
-            runtime = InteractiveRuntime(runtime_config)
-            agent_tools = create_agent_centric_tools(runtime)
-            bundle = (runtime, agent_tools)
-            _runtime_var.set(bundle)
-            logger.debug("Created context-local InteractiveRuntime")
+    # Create new runtime for this context
+    from .interactive_runtime import InteractiveRuntime, RuntimeConfig
+    from .agent_tools import create_agent_centric_tools
+    
+    runtime_config = RuntimeConfig(
+        workspace=config.workspace,
+        lsp_enabled=config.lsp_enabled,
+        acp_enabled=config.acp_enabled,
+        approval_mode=config.approval_mode,
+    )
+    
+    runtime = InteractiveRuntime(runtime_config)
+    agent_tools = create_agent_centric_tools(runtime)
+    bundle = (runtime, agent_tools)
+    _runtime_var.set(bundle)
+    logger.debug("Created context-local InteractiveRuntime")
     
     return bundle
 

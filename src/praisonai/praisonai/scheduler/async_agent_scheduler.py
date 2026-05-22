@@ -125,7 +125,6 @@ class AsyncAgentScheduler:
         # Sync lock for async primitives creation and bound loop tracking
         self._primitives_lock = threading.Lock()
         self._stop_event: Optional[asyncio.Event] = None
-        self._cancel_event: Optional[asyncio.Event] = None
         self._stats_lock: Optional[asyncio.Lock] = None
         self._bound_loop: Optional[asyncio.AbstractEventLoop] = None
 
@@ -140,7 +139,6 @@ class AsyncAgentScheduler:
         with self._primitives_lock:
             if self._bound_loop is not loop:
                 self._stop_event = asyncio.Event()
-                self._cancel_event = asyncio.Event()
                 self._stats_lock = asyncio.Lock()
                 self._bound_loop = loop
 
@@ -267,7 +265,30 @@ class AsyncAgentScheduler:
     
     async def get_stats(self) -> Dict[str, Any]:
         """
-        Get current execution statistics with atomic snapshot.
+        Get current execution statistics (best-effort synchronous access).
+        
+        Warning: This method provides a best-effort view of stats without
+        guaranteeing atomicity. For consistent snapshots in async context,
+        use get_stats_async() instead.
+        
+        Returns:
+            Dictionary with execution stats
+        """
+        # Best-effort read without lock for backward compatibility
+        return {
+            "is_running": self.is_running,
+            "total_executions": self._execution_count,
+            "successful_executions": self._success_count,
+            "failed_executions": self._failure_count,
+            "success_rate": (self._success_count / self._execution_count * 100) if self._execution_count > 0 else 0,
+            # TODO: Add cost tracking from sync version:
+            # "total_cost": self._total_cost,
+            # "remaining_budget": (self.max_cost - self._total_cost) if self.max_cost else None,
+        }
+    
+    async def get_stats_async(self) -> Dict[str, Any]:
+        """
+        Get current execution statistics with atomic snapshot (async).
         
         Returns:
             Dictionary with execution stats
@@ -292,6 +313,29 @@ class AsyncAgentScheduler:
             # "total_cost": self._total_cost,
             # "remaining_budget": (self.max_cost - self._total_cost) if self.max_cost else None,
         }
+    
+    def get_stats_sync(self) -> Dict[str, Any]:
+        """
+        Synchronous alias for get_stats() for clarity.
+        
+        Returns:
+            Dictionary with execution stats (best-effort)
+        """
+        import asyncio
+        try:
+            # Try to get the running loop
+            loop = asyncio.get_running_loop()
+            # If there's a loop, delegate to async version
+            return asyncio.run_coroutine_threadsafe(self.get_stats_async(), loop).result()
+        except RuntimeError:
+            # No running loop, do best-effort synchronous read
+            return {
+                "is_running": self.is_running,
+                "total_executions": self._execution_count,
+                "successful_executions": self._success_count,
+                "failed_executions": self._failure_count,
+                "success_rate": (self._success_count / self._execution_count * 100) if self._execution_count > 0 else 0,
+            }
     
     async def _run_schedule(self, interval: int, max_retries: int):
         """Internal method to run scheduled agent executions."""
@@ -361,7 +405,10 @@ class AsyncAgentScheduler:
             except asyncio.TimeoutError as e:
                 last_exc = e
                 logger.error(f"Async execution timeout on attempt {attempt + 1}: {e}")
-                # Continue to retry logic
+                if attempt < max_retries - 1:
+                    wait_time = backoff_delay(attempt)
+                    logger.info(f"Waiting {wait_time}s before async retry after timeout...")
+                    await asyncio.sleep(wait_time)
             except Exception as e:
                 last_exc = e
                 logger.error(f"Async agent execution failed on attempt {attempt + 1}: {e}")
