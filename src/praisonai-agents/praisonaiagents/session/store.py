@@ -22,7 +22,7 @@ else:
     _HAS_FCNTL = False
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from ..paths import get_sessions_dir
 
@@ -291,6 +291,63 @@ class DefaultSessionStore:
             self._cache[session_id] = session
         
         return session
+
+    def _load_session_from_disk(self, session_id: str, filepath: str) -> SessionData:
+        """Load session JSON from disk (caller must hold FileLock)."""
+        if os.path.exists(filepath):
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                return SessionData.from_dict(data)
+            except (json.JSONDecodeError, IOError):
+                pass
+        return SessionData(session_id=session_id)
+
+    def _modify_session_locked(
+        self,
+        session_id: str,
+        mutator: Callable[[SessionData], None],
+        *,
+        error_label: str = "modify session",
+    ) -> bool:
+        """Apply mutator after reloading from disk under FileLock."""
+        filepath = self._get_session_path(session_id)
+
+        with FileLock(filepath, self.lock_timeout):
+            session = self._load_session_from_disk(session_id, filepath)
+            mutator(session)
+            session.updated_at = datetime.now(timezone.utc).isoformat()
+
+            if len(session.messages) > self.max_messages:
+                session.messages = session.messages[-self.max_messages:]
+
+            try:
+                dir_path = os.path.dirname(filepath) or "."
+                os.makedirs(dir_path, exist_ok=True)
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=dir_path,
+                    delete=False,
+                    suffix=".tmp",
+                ) as f:
+                    json.dump(session.to_dict(), f, indent=2, ensure_ascii=False)
+                    temp_path = f.name
+
+                os.replace(temp_path, filepath)
+
+                with self._lock:
+                    self._cache[session_id] = session
+
+                return True
+            except (IOError, OSError) as e:
+                logger.error(f"Failed to {error_label} {session_id}: {e}")
+                try:
+                    if "temp_path" in locals():
+                        os.remove(temp_path)
+                except (IOError, OSError):
+                    pass
+                return False
     
     def _save_session(self, session: SessionData) -> bool:
         """Save session to disk with atomic write."""
@@ -455,45 +512,31 @@ class DefaultSessionStore:
         user_id: Optional[str] = None,
     ) -> bool:
         """Set agent info for a session."""
-        session = self._load_session(session_id)
-        
-        with self._lock:
+
+        def _apply(session: SessionData) -> None:
             if agent_name:
                 session.agent_name = agent_name
             if user_id:
                 session.user_id = user_id
-            self._cache[session_id] = session
-        
-        return self._save_session(session)
+
+        return self._modify_session_locked(
+            session_id, _apply, error_label="set agent info for session"
+        )
     
     def clear_session(self, session_id: str) -> bool:
         """Clear all messages from a session."""
-        session = self._load_session(session_id)
-        
-        with self._lock:
-            session.messages.clear()
-            self._cache[session_id] = session
-        
-        return self._save_session(session)
+        return self._modify_session_locked(
+            session_id,
+            lambda session: session.messages.clear(),
+            error_label="clear session",
+        )
 
     def update_session_metadata(self, session_id: str, **fields: Any) -> bool:
         """Merge run stats / metadata fields into a persisted session."""
         if not fields:
             return True
 
-        filepath = self._get_session_path(session_id)
-
-        with FileLock(filepath, self.lock_timeout):
-            if os.path.exists(filepath):
-                try:
-                    with open(filepath, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    session = SessionData.from_dict(data)
-                except (json.JSONDecodeError, IOError):
-                    session = SessionData(session_id=session_id)
-            else:
-                session = SessionData(session_id=session_id)
-
+        def _apply(session: SessionData) -> None:
             for key, value in fields.items():
                 if value is None:
                     continue
@@ -501,35 +544,9 @@ class DefaultSessionStore:
                 if key in ("agent_id", "agent_name", "user_id"):
                     setattr(session, key, value)
 
-            session.updated_at = datetime.now(timezone.utc).isoformat()
-
-            try:
-                dir_path = os.path.dirname(filepath) or "."
-                os.makedirs(dir_path, exist_ok=True)
-                with tempfile.NamedTemporaryFile(
-                    mode="w",
-                    encoding="utf-8",
-                    dir=dir_path,
-                    delete=False,
-                    suffix=".tmp",
-                ) as f:
-                    json.dump(session.to_dict(), f, indent=2, ensure_ascii=False)
-                    temp_path = f.name
-
-                os.replace(temp_path, filepath)
-
-                with self._lock:
-                    self._cache[session_id] = session
-
-                return True
-            except (IOError, OSError) as e:
-                logger.error(f"Failed to update session metadata {session_id}: {e}")
-                try:
-                    if "temp_path" in locals():
-                        os.remove(temp_path)
-                except (IOError, OSError):
-                    pass
-                return False
+        return self._modify_session_locked(
+            session_id, _apply, error_label="update session metadata"
+        )
 
     def delete_session(self, session_id: str) -> bool:
         """Delete a session completely."""
@@ -683,16 +700,15 @@ class DefaultSessionStore:
         Returns:
             True if saved successfully
         """
-        session = self._load_session(session_id)
-        
-        with self._lock:
+        def _apply(session: SessionData) -> None:
             if gateway_session_id:
                 session.gateway_session_id = gateway_session_id
             if agent_id:
                 session.agent_id = agent_id
-            self._cache[session_id] = session
-        
-        return self._save_session(session)
+
+        return self._modify_session_locked(
+            session_id, _apply, error_label="set gateway info for session"
+        )
     
     def get_by_gateway_session(self, gateway_session_id: str) -> Optional[SessionData]:
         """Get session data linked to a gateway session.
