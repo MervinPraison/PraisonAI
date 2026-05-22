@@ -48,7 +48,7 @@ class KanbanTaskProtocol(TypedDict, total=False):
 class KanbanStoreProtocol(Protocol):
     """Protocol contract for kanban store implementations.
     
-    This protocol defines the interface that PraisonAIUI expects
+    This protocol defines the core interface that PraisonAIUI expects
     for injected kanban stores. Wrapper implementations must
     implement all methods to be compatible.
     
@@ -163,11 +163,18 @@ class KanbanStoreProtocol(Protocol):
         """
         ...
 
-    # Optional P4 extensions - define in protocol now, implement in wrapper later
-    # Use default implementations or NotImplementedError in adapters
+
+@runtime_checkable
+class KanbanCommentingProtocol(Protocol):
+    """Extension protocol for kanban task commenting functionality.
+    
+    This protocol is implemented separately from KanbanStoreProtocol to allow
+    stores to optionally support commenting without breaking isinstance checks
+    on the core protocol.
+    """
     
     def add_comment(self, task_id: str, text: str, author: str | None = None) -> dict | None:
-        """Add a comment to a task (optional P4 extension).
+        """Add a comment to a task.
         
         Args:
             task_id: Task identifier
@@ -177,10 +184,20 @@ class KanbanStoreProtocol(Protocol):
         Returns:
             Comment data or None if task not found
         """
-        raise NotImplementedError("Comment functionality not implemented")
+        ...
 
+
+@runtime_checkable 
+class KanbanLinkingProtocol(Protocol):
+    """Extension protocol for kanban task linking functionality.
+    
+    This protocol is implemented separately from KanbanStoreProtocol to allow
+    stores to optionally support task relationships without breaking isinstance
+    checks on the core protocol.
+    """
+    
     def link_tasks(self, parent_id: str, child_id: str) -> bool:
-        """Link two tasks in parent-child relationship (optional P4 extension).
+        """Link two tasks in parent-child relationship.
         
         Args:
             parent_id: Parent task identifier
@@ -189,10 +206,10 @@ class KanbanStoreProtocol(Protocol):
         Returns:
             True if linked successfully, False otherwise
         """
-        raise NotImplementedError("Task linking not implemented")
+        ...
 
     def unlink_tasks(self, parent_id: str, child_id: str) -> bool:
-        """Unlink parent-child task relationship (optional P4 extension).
+        """Unlink parent-child task relationship.
         
         Args:
             parent_id: Parent task identifier
@@ -201,4 +218,4 @@ class KanbanStoreProtocol(Protocol):
         Returns:
             True if unlinked successfully, False otherwise
         """
-        raise NotImplementedError("Task unlinking not implemented")
+        ...

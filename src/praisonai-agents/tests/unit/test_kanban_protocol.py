@@ -12,6 +12,8 @@ from typing import runtime_checkable
 from praisonaiagents.kanban.protocols import (
     KanbanStoreProtocol,
     KanbanTaskProtocol,
+    KanbanCommentingProtocol,
+    KanbanLinkingProtocol,
     VALID_KANBAN_STATUSES,
 )
 from praisonaiagents.hooks.types import (
@@ -46,10 +48,10 @@ class TestKanbanProtocol:
         assert isinstance(VALID_KANBAN_STATUSES, frozenset)
         
     def test_mock_store_passes_isinstance_check(self):
-        """Test that a mock store implementing the protocol passes isinstance check."""
+        """Test that a mock store implementing the core protocol passes isinstance check."""
         
         class MockKanbanStore:
-            """Mock implementation for testing."""
+            """Mock implementation for testing - only core methods required."""
             
             def get_board(self, *, board="default", tenant=None, include_archived=False):
                 return {"board": board, "tasks": []}
@@ -77,19 +79,70 @@ class TestKanbanProtocol:
                 
             def health(self):
                 return {"status": "healthy"}
-                
-            # Optional P4 methods can raise NotImplementedError
-            def add_comment(self, task_id: str, text: str, author: str = None):
-                raise NotImplementedError("Comment functionality not implemented")
-                
-            def link_tasks(self, parent_id: str, child_id: str):
-                raise NotImplementedError("Task linking not implemented")
-                
-            def unlink_tasks(self, parent_id: str, child_id: str):
-                raise NotImplementedError("Task unlinking not implemented")
         
         mock_store = MockKanbanStore()
         assert isinstance(mock_store, KanbanStoreProtocol)
+        
+    def test_extension_protocol_checks(self):
+        """Test that extension protocols work independently."""
+        
+        class CommentingStore:
+            """Store that implements commenting functionality."""
+            def add_comment(self, task_id: str, text: str, author: str | None = None):
+                return {"id": "comment_1", "text": text, "author": author}
+                
+        class LinkingStore:
+            """Store that implements linking functionality."""
+            def link_tasks(self, parent_id: str, child_id: str):
+                return True
+            def unlink_tasks(self, parent_id: str, child_id: str):
+                return True
+                
+        class FullFeaturedStore:
+            """Store that implements all protocols."""
+            # Core protocol
+            def get_board(self, *, board="default", tenant=None, include_archived=False):
+                return {"board": board, "tasks": []}
+            def get_task(self, task_id: str):
+                return {"id": task_id}
+            def create_task(self, data: dict):
+                return {"id": "task_123", **data}
+            def update_task(self, task_id: str, data: dict):
+                return {"id": task_id, **data}
+            def move_task(self, task_id: str, status: str):
+                return {"id": task_id, "status": status}
+            def bulk_update(self, task_ids: list[str], status: str):
+                return {"updated": len(task_ids)}
+            def delete_task(self, task_id: str):
+                return True
+            def list_events(self, since: float = 0.0, board: str = "default"):
+                return []
+            def health(self):
+                return {"status": "healthy"}
+            # Extension protocols
+            def add_comment(self, task_id: str, text: str, author: str | None = None):
+                return {"id": "comment_1", "text": text}
+            def link_tasks(self, parent_id: str, child_id: str):
+                return True
+            def unlink_tasks(self, parent_id: str, child_id: str):
+                return True
+        
+        commenting_store = CommentingStore()
+        linking_store = LinkingStore()
+        full_store = FullFeaturedStore()
+        
+        # Test individual extension protocols
+        assert isinstance(commenting_store, KanbanCommentingProtocol)
+        assert isinstance(linking_store, KanbanLinkingProtocol)
+        
+        # Test that extension stores don't implement core protocol
+        assert not isinstance(commenting_store, KanbanStoreProtocol)
+        assert not isinstance(linking_store, KanbanStoreProtocol)
+        
+        # Test full featured store implements all protocols
+        assert isinstance(full_store, KanbanStoreProtocol)
+        assert isinstance(full_store, KanbanCommentingProtocol)
+        assert isinstance(full_store, KanbanLinkingProtocol)
         
     def test_kanban_task_protocol_shape(self):
         """Test KanbanTaskProtocol typed dict structure."""
@@ -228,9 +281,13 @@ class TestProtocolIntegration:
         from praisonaiagents.kanban import (
             KanbanStoreProtocol,
             KanbanTaskProtocol,
+            KanbanCommentingProtocol,
+            KanbanLinkingProtocol,
             VALID_KANBAN_STATUSES,
         )
         
         assert KanbanStoreProtocol is not None
-        assert KanbanTaskProtocol is not None 
+        assert KanbanTaskProtocol is not None
+        assert KanbanCommentingProtocol is not None
+        assert KanbanLinkingProtocol is not None
         assert VALID_KANBAN_STATUSES is not None

@@ -9,11 +9,15 @@ interface without coupling the core to SQLite or other heavy implementations.
 from praisonaiagents.kanban.protocols import (
     KanbanStoreProtocol,
     KanbanTaskProtocol,
+    KanbanCommentingProtocol,
+    KanbanLinkingProtocol,
     VALID_KANBAN_STATUSES,
 )
 
 __all__ = [
     "KanbanStoreProtocol",
-    "KanbanTaskProtocol", 
+    "KanbanTaskProtocol",
+    "KanbanCommentingProtocol", 
+    "KanbanLinkingProtocol",
     "VALID_KANBAN_STATUSES",
 ]
