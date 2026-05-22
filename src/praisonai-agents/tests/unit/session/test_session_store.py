@@ -342,6 +342,27 @@ class TestDefaultSessionStore:
             writer.invalidate_cache("session-1")
             history = writer.get_chat_history("session-1")
             assert len(history) == 0
+
+    def test_set_gateway_info_preserves_messages(self, temp_store):
+        """Gateway info updates must not drop messages added by another store instance."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = DefaultSessionStore(session_dir=tmpdir)
+            reader = DefaultSessionStore(session_dir=tmpdir)
+
+            writer.add_user_message("session-1", "first")
+            reader._load_session("session-1")
+            writer.add_user_message("session-1", "second")
+
+            assert reader.set_gateway_info("session-1", gateway_session_id="gw-123", agent_id="agent-456")
+
+            writer.invalidate_cache("session-1")
+            history = writer.get_chat_history("session-1")
+            assert len(history) == 2
+            assert history[1]["content"] == "second"
+
+            session = writer.get_session("session-1")
+            assert session.gateway_session_id == "gw-123"
+            assert session.agent_id == "agent-456"
     
     def test_concurrent_writes(self, temp_store):
         """Test concurrent writes to same session."""
