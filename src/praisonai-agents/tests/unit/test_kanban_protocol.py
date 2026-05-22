@@ -6,6 +6,7 @@ implementations like SQLite or LLM calls.
 """
 
 import pytest
+import json
 from typing import runtime_checkable
 
 from praisonaiagents.kanban.protocols import (
@@ -142,9 +143,10 @@ class TestKanbanHookEvents:
         ]
         
         for event in events:
-            # Should be able to convert to string and back
-            assert isinstance(event.value, str)
-            assert HookEvent(event.value) == event
+            # Should be able to serialize to JSON and reconstruct enum value
+            serialized = json.dumps({"event": event.value})
+            restored = HookEvent(json.loads(serialized)["event"])
+            assert restored == event
     
     def test_kanban_hook_input_creation(self):
         """Test KanbanHookInput dataclass creation and fields."""
