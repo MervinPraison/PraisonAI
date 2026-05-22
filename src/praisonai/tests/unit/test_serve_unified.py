@@ -91,7 +91,8 @@ class TestServeUnifiedCommands:
 
         result = runner.invoke(app, ["ui-gateway", "--help"])
 
-        assert "ui-gateway" in result.output.lower() or result.exit_code == 0
+        assert result.exit_code == 0
+        assert "ui-gateway" in result.output.lower()
     
     def test_serve_rag_command_exists(self):
         """Test serve rag command is registered."""
@@ -202,6 +203,7 @@ class TestServeCommandOptions:
         from praisonai.cli.commands.serve import app
 
         result = runner.invoke(app, ["ui-gateway", "--help"])
+        assert result.exit_code == 0
         assert "--agents" in result.output or "-a" in result.output
 
 
