@@ -1,0 +1,165 @@
+name: Cross-Repo Integration Tests
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/praisonai/praisonai/integration/**'
+      - 'src/praisonai/tests/integration/test_aiui_*'
+      - 'src/praisonai/pyproject.toml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/praisonai/praisonai/integration/**'
+      - 'src/praisonai/tests/integration/test_aiui_*'
+      - 'src/praisonai/pyproject.toml'
+  workflow_dispatch:
+
+jobs:
+  cross-repo-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout PraisonAI
+      uses: actions/checkout@v4
+      with:
+        path: PraisonAI
+        
+    - name: Checkout PraisonAIUI
+      uses: actions/checkout@v4
+      with:
+        repository: MervinPraison/PraisonAIUI
+        path: PraisonAIUI
+        # Use matching ref if available, otherwise main
+        ref: ${{ github.ref_name }}
+        
+    - name: Fallback to main branch for PraisonAIUI
+      if: failure()
+      uses: actions/checkout@v4
+      with:
+        repository: MervinPraison/PraisonAIUI
+        path: PraisonAIUI
+        ref: main
+        
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        # Install PraisonAI packages in development mode
+        cd PraisonAI/src/praisonai-agents
+        pip install -e .
+        cd ../praisonai
+        pip install -e ".[ui,dev]"
+        # Install PraisonAIUI in development mode
+        cd ../../PraisonAIUI
+        pip install -e .
+        
+    - name: Verify versions
+      run: |
+        python -c "import praisonaiagents; print(f'praisonaiagents: {praisonaiagents.__version__}')"
+        python -c "import praisonai; print(f'praisonai: {praisonai.__version__}')"
+        python -c "import praisonaiui; print(f'praisonaiui: {praisonaiui.__version__}')"
+        
+    - name: Run PraisonAI integration tests
+      run: |
+        cd PraisonAI/src/praisonai
+        python -m pytest tests/integration/test_aiui_* -v --timeout=300
+        
+    - name: Run PraisonAIUI integration tests
+      run: |
+        cd PraisonAIUI
+        if [ -f tests/integration/test_agentic_roundtrip.py ]; then
+          python -m pytest tests/integration/test_agentic_roundtrip.py -v --timeout=300
+        fi
+        if [ -f tests/test_feature_sdk_backends.py ]; then
+          python -m pytest tests/test_feature_sdk_backends.py -v --timeout=300
+        fi
+        
+    - name: Test Pattern C CLI
+      run: |
+        cd PraisonAI/src/praisonai
+        # Test that ui-gateway command exists
+        python -m praisonai serve --help | grep ui-gateway
+        
+    - name: Test public API exports
+      run: |
+        cd PraisonAI/src/praisonai
+        python -c "from praisonai import run_integrated_gateway; print('✓ run_integrated_gateway imported')"
+        python -c "from praisonai import configure_host; print('✓ configure_host imported')"
+        
+    - name: Integration smoke test
+      env:
+        PRAISONAI_TEST_MODE: "1"
+        PYTHONPATH: ${{ github.workspace }}/PraisonAI/src/praisonai:${{ github.workspace }}/PraisonAI/src/praisonai-agents:${{ github.workspace }}/PraisonAIUI
+      run: |
+        cd PraisonAI/src/praisonai
+        python -c "
+        import sys
+        sys.path.insert(0, '.')
+        from praisonai.integration.host_app import configure_host
+        from praisonai import run_integrated_gateway
+        print('✓ Integration imports successful')
+        
+        # Test configure_host with new parameters
+        try:
+            configure_host(
+                style='dashboard', 
+                context_paths=['AGENTS.md'],
+                title='Test App'
+            )
+            print('✓ configure_host with new parameters works')
+        except Exception as e:
+            print(f'× configure_host failed: {e}')
+            sys.exit(1)
+        "
+        
+  # Optional job with API key for agentic tests (if secret is available)
+  agentic-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: ${{ vars.RUN_AGENTIC_TESTS == 'true' }}
+    needs: cross-repo-integration
+    
+    steps:
+    - name: Checkout PraisonAI
+      uses: actions/checkout@v4
+      with:
+        path: PraisonAI
+        
+    - name: Checkout PraisonAIUI
+      uses: actions/checkout@v4
+      with:
+        repository: MervinPraison/PraisonAIUI
+        path: PraisonAIUI
+        ref: main
+        
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        cd PraisonAI/src/praisonai-agents
+        pip install -e .
+        cd ../praisonai
+        pip install -e ".[ui,dev]"
+        cd ../../PraisonAIUI
+        pip install -e .
+        
+    - name: Run agentic integration test
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      run: |
+        cd PraisonAI/src/praisonai
+        if [ -n "$OPENAI_API_KEY" ]; then
+          python -m pytest tests/integration/test_aiui_host_agentic.py -v --timeout=600
+        else
+          echo "OPENAI_API_KEY not available, skipping agentic tests"
+        fi

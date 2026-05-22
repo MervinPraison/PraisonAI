@@ -33,6 +33,8 @@ def configure_host(
     agent_kwargs: Optional[Dict[str, Any]] = None,
     gateway: Any = None,
     modules: Optional[Sequence[str]] = None,
+    style: str = "dashboard",
+    context_paths: Optional[Sequence[str]] = None,
 ) -> None:
     """Apply PraisonAIUI host settings and wire L1 backends (unless legacy mode)."""
     global _CONFIGURED
@@ -41,7 +43,7 @@ def configure_host(
     from praisonai.ui._aiui_datastore import PraisonAISessionDataStore
 
     aiui.set_datastore(PraisonAISessionDataStore())
-    aiui.set_style("dashboard")
+    aiui.set_style(style)
     aiui.set_branding(title=title, logo=logo)
 
     if pages is not None:
@@ -80,13 +82,21 @@ def configure_host(
         if agents:
             set_provider(PraisonAIProvider(agents=list(agents), **kwargs))
         else:
+            # Load context files if specified
+            instructions = kwargs.pop("instructions", "You are a helpful assistant.")
+            if context_paths:
+                try:
+                    from praisonai.integration.context_files import load_context_files
+                    context = load_context_files(list(context_paths))
+                    if context:
+                        instructions = f"{instructions}\n\nContext:\n{context}"
+                except ImportError:
+                    pass  # Context files helper is optional
+            
             set_provider(
                 PraisonAIProvider(
                     name=kwargs.pop("name", "PraisonAI"),
-                    instructions=kwargs.pop(
-                        "instructions",
-                        "You are a helpful assistant.",
-                    ),
+                    instructions=instructions,
                     llm=kwargs.pop(
                         "llm", os.getenv("PRAISONAI_MODEL", "gpt-4o-mini")
                     ),
@@ -94,6 +104,12 @@ def configure_host(
                 )
             )
         setup_bridges()
+
+    # Register L3 dashboard pages
+    try:
+        from praisonai.integration.pages import workflow_runs, bot_health
+    except ImportError:
+        pass  # L3 pages are optional
 
     _CONFIGURED = True
 
@@ -110,14 +126,14 @@ def setup_bridges() -> None:
 
         sink = register_usage_sink()
     except Exception as exc:
-        log.debug("usage bridge unavailable: %s", exc)
+        log.warning("usage bridge unavailable: %s", exc)
 
     try:
         from praisonai.integration.bridges.schedules_runner import ensure_schedule_runner
 
         ensure_schedule_runner()
     except Exception as exc:
-        log.debug("schedule runner unavailable: %s", exc)
+        log.warning("schedule runner unavailable: %s", exc)
 
     try:
         import praisonaiui.backends as backends
@@ -145,7 +161,7 @@ def setup_bridges() -> None:
         backends.set_backend("approvals_pending", list_pending_approvals)
         backends.set_backend("approvals_policies", get_approval_policies)
     except Exception as exc:
-        log.debug("aiui backend injection failed: %s", exc)
+        log.warning("aiui backend injection failed: %s", exc)
 
 
 def create_host_app():
