@@ -455,26 +455,37 @@ class ToolResolver:
             return {}
 
 
-# Process-level lazy singleton for performance (matches profiler.py pattern)
-_default_resolver: Optional[ToolResolver] = None
-_default_resolver_lock = threading.Lock()
+# Context-local resolver for multi-project safety
+import contextvars
+
+_resolver_var: contextvars.ContextVar[Optional[ToolResolver]] = contextvars.ContextVar(
+    "tool_resolver", default=None,
+)
 
 def _get_default_resolver() -> ToolResolver:
-    """Process-default ToolResolver (double-checked lazy init).
+    """Per-context resolver. Falls back to a fresh ToolResolver per context,
+    so changing CWD between agents / requests is honoured.
     
-    Returns cached ToolResolver that is anchored to the working directory
-    at first call. Local tools.py resolution is CWD-dependent and cached
-    for the lifetime of the process.
+    Each context (agent/task/request) gets its own resolver anchored to the
+    working directory at the time of first use in that context. This prevents
+    the singleton bug where the first caller locks in their CWD for the entire process.
     
     For test isolation or multi-project CLIs, create explicit resolver
     instances instead of using this cached default.
     """
-    global _default_resolver
-    if _default_resolver is None:
-        with _default_resolver_lock:
-            if _default_resolver is None:
-                _default_resolver = ToolResolver()
-    return _default_resolver
+    resolver = _resolver_var.get()
+    if resolver is None:
+        resolver = ToolResolver()
+        _resolver_var.set(resolver)
+    return resolver
+
+def reset_default_resolver() -> None:
+    """Explicit invalidation hook for daemons / IDE plugins switching projects.
+    
+    Call this when changing working directories or switching between projects
+    to ensure the next tool resolution uses the new CWD.
+    """
+    _resolver_var.set(None)
 
 
 # Convenience functions that use cached default resolver for performance
