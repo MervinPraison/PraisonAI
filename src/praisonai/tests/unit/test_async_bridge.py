@@ -19,6 +19,7 @@ parameter and would fail fixture resolution.
 """
 
 import asyncio
+import threading
 import unittest
 
 from praisonai._async_bridge import _BG, run_sync
@@ -67,6 +68,23 @@ class TestRunSync(unittest.TestCase):
             return False
 
         self.assertTrue(run_sync(nested_call()))
+
+    def test_timeout_cancels_coroutine_and_runs_finally(self):
+        cleanup_done = threading.Event()
+
+        async def never_finishes() -> None:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cleanup_done.set()
+
+        with self.assertRaises(TimeoutError):
+            run_sync(never_finishes(), timeout=0.01)
+
+        self.assertTrue(
+            cleanup_done.wait(timeout=2.0),
+            "timed out coroutine should be cancelled and run its cleanup",
+        )
 
 
 class TestBackgroundThread(unittest.TestCase):
