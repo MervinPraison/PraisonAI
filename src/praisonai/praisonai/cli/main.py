@@ -166,17 +166,19 @@ AUTOGEN_AVAILABLE = False
 PRAISONAI_AVAILABLE = False
 TRAIN_AVAILABLE = False
 
-# Use find_spec for fast availability checks (no actual import)
-import importlib.util
-GRADIO_AVAILABLE = importlib.util.find_spec("gradio") is not None
+# Use centralized availability detection
+from .._framework_availability import is_available
+
+GRADIO_AVAILABLE = is_available("gradio")
 try:
+    import importlib.util
     CALL_MODULE_AVAILABLE = importlib.util.find_spec("praisonai.api.call") is not None
 except (ModuleNotFoundError, AttributeError):
     CALL_MODULE_AVAILABLE = False
-CREWAI_AVAILABLE = importlib.util.find_spec("crewai") is not None
-AUTOGEN_AVAILABLE = importlib.util.find_spec("autogen") is not None
-PRAISONAI_AVAILABLE = importlib.util.find_spec("praisonaiagents") is not None
-TRAIN_AVAILABLE = importlib.util.find_spec("unsloth") is not None
+CREWAI_AVAILABLE = is_available("crewai")
+AUTOGEN_AVAILABLE = is_available("autogen")
+PRAISONAI_AVAILABLE = is_available("praisonaiagents")
+TRAIN_AVAILABLE = is_available("unsloth")
 
 # Lazy import helpers for optional dependencies (defined after availability flags)
 def _get_call_module():

@@ -7,7 +7,7 @@ import logging
 from praisonaiagents._logging import get_logger
 
 # Import dependencies
-from .token_collector import _token_collector, TokenMetrics
+from .token_collector import get_token_collector, TokenMetrics
 from .telemetry import get_telemetry
 
 logger = get_logger(__name__)
@@ -56,11 +56,12 @@ class TokenTelemetryBridge:
     
     def export_token_metrics(self) -> Dict[str, Any]:
         """Export token metrics for telemetry reporting."""
-        if not _token_collector:
+        collector = get_token_collector()
+        if not collector:
             return {}
         
         try:
-            metrics = _token_collector.export_metrics()
+            metrics = collector.export_metrics()
             
             # Prepare telemetry-friendly format
             return {
@@ -77,8 +78,7 @@ class TokenTelemetryBridge:
     
     def reset_token_metrics(self):
         """Reset token metrics collection."""
-        if _token_collector:
-            _token_collector.reset()
+        get_token_collector().reset()
 
 # Global telemetry bridge instance
 _token_telemetry_bridge = TokenTelemetryBridge()

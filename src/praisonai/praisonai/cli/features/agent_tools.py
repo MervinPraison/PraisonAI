@@ -110,7 +110,7 @@ def create_agent_centric_tools(
     if orchestrator is None:
         orchestrator = ActionOrchestrator(runtime)
     
-    # Use the shared async bridge for consistency
+    # Helper to run async functions synchronously using the shared bridge
     from praisonai._async_bridge import run_sync
     
     # =========================================================================

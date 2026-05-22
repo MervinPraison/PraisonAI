@@ -15,9 +15,8 @@ from typing import Any, Dict, List, Optional, Type, TypeVar
 import os
 import json
 import yaml
-from rich import print
 import threading
-from collections import OrderedDict
+from rich import print
 from praisonai._logging import get_logger
 
 # Type variable for Pydantic models
@@ -59,17 +58,43 @@ def _load_optional(key: str, loader):
         return _optional_cache[key]
 
 
-# Bounded LRU cache for OpenAI clients (one per (api_key, base_url) tuple)
-_OPENAI_CLIENT_CACHE_MAX = 8
-_openai_clients: "OrderedDict[tuple, object]" = OrderedDict()
-_openai_clients_lock = threading.Lock()
 
 
 # --- CrewAI lazy loading ---
+# Availability checks now delegated to centralized module
+from ._framework_availability import is_available
+
 def _check_crewai_available() -> bool:
     """Check if crewai is available (cached, thread-safe)."""
-    result = _load_optional("crewai_check", lambda: __import__("crewai"))
-    return result is not None
+    return is_available("crewai")
+
+def _check_autogen_available() -> bool:
+    """Check if autogen v0.2 is available (cached, thread-safe)."""
+    return is_available("autogen")
+
+def _check_autogen_v4_available() -> bool:
+    """Check if autogen v0.4 is available (cached, thread-safe)."""
+    return is_available("autogen_v4")
+
+def _check_ag2_available() -> bool:
+    """Check if AG2 (community fork of AutoGen) is available (cached, thread-safe)."""
+    return is_available("ag2")
+
+def _check_praisonai_available() -> bool:
+    """Check if praisonaiagents is available (cached, thread-safe)."""
+    return is_available("praisonaiagents")
+
+def _check_praisonai_tools_available() -> bool:
+    """Check if praisonai_tools is available (cached, thread-safe)."""
+    return is_available("praisonai_tools")
+
+def _check_litellm_available() -> bool:
+    """Check if litellm is available (cached, thread-safe)."""
+    return is_available("litellm")
+
+def _check_openai_available() -> bool:
+    """Check if openai is available (cached, thread-safe)."""
+    return is_available("openai")
 
 
 def _get_crewai():
@@ -79,31 +104,6 @@ def _get_crewai():
         __import__("crewai", fromlist=["Agent", "Task", "Crew"]).Task,
         __import__("crewai", fromlist=["Agent", "Task", "Crew"]).Crew,
     ))
-
-
-# --- AutoGen lazy loading ---
-def _check_autogen_available() -> bool:
-    """Check if autogen v0.2 is available (cached, thread-safe)."""
-    result = _load_optional("autogen_check", lambda: __import__("autogen"))
-    return result is not None
-
-
-def _check_autogen_v4_available() -> bool:
-    """Check if autogen v0.4 is available (cached, thread-safe)."""
-    result = _load_optional("autogen_v4_check", lambda: __import__("autogen_agentchat.agents", fromlist=["AssistantAgent"]))
-    return result is not None
-
-
-def _check_ag2_available() -> bool:
-    """Check if AG2 (community fork of AutoGen) is available (cached, thread-safe)."""
-    def ag2_loader():
-        import importlib.metadata
-        importlib.metadata.distribution('ag2')
-        from autogen import LLMConfig  # AG2-exclusive class
-        return True
-    
-    result = _load_optional("ag2_check", ag2_loader)
-    return result is not None
 
 
 def _get_autogen():
@@ -121,13 +121,6 @@ def _get_autogen_v4():
     return _load_optional("autogen_v4_classes", autogen_v4_loader)
 
 
-# --- PraisonAI Agents lazy loading ---
-def _check_praisonai_available() -> bool:
-    """Check if praisonaiagents is available (cached, thread-safe)."""
-    result = _load_optional("praisonai_check", lambda: __import__("praisonaiagents"))
-    return result is not None
-
-
 def _get_praisonai():
     """Lazy load praisonaiagents classes (thread-safe)."""
     def praisonai_loader():
@@ -138,12 +131,6 @@ def _get_praisonai():
 
 
 # --- PraisonAI Tools lazy loading ---
-def _check_praisonai_tools_available() -> bool:
-    """Check if praisonai_tools is available (cached, thread-safe)."""
-    result = _load_optional("praisonai_tools_check", lambda: __import__("praisonai_tools"))
-    return result is not None
-
-
 def _get_praisonai_tools():
     """Lazy load praisonai_tools classes (thread-safe)."""
     def tools_loader():
@@ -177,13 +164,6 @@ def _get_praisonai_tools():
     return _load_optional("praisonai_tools_dict", tools_loader)
 
 
-# --- LiteLLM lazy loading ---
-def _check_litellm_available() -> bool:
-    """Check if litellm is available (cached)."""
-    result = _load_optional("litellm_check", lambda: __import__("litellm"))
-    return result is not None
-
-
 def _get_litellm():
     """Lazy load litellm module."""
     result = _load_optional("litellm", lambda: __import__("litellm"))
@@ -193,44 +173,8 @@ def _get_litellm():
 
 
 # --- OpenAI lazy loading ---
-def _check_openai_available() -> bool:
-    """Check if openai is available (cached)."""
-    result = _load_optional("openai_check", lambda: __import__("openai"))
-    return result is not None
 
 
-def _get_openai_client(api_key: str = None, base_url: str = None):
-    """Lazy load OpenAI client with bounded LRU cache (thread-safe, multi-tenant).
-
-    Multi-tenant safe: each (api_key, base_url) tuple gets its own cached client.
-    Bounded by _OPENAI_CLIENT_CACHE_MAX with proper LRU eviction.
-    """
-    key = (api_key or os.environ.get("OPENAI_API_KEY"), base_url)
-
-    with _openai_clients_lock:
-        # Check if client exists and update LRU position
-        client = _openai_clients.get(key)
-        if client is not None:
-            _openai_clients.move_to_end(key)
-            return client
-
-        # Create new client
-        try:
-            from openai import OpenAI
-        except ImportError as e:
-            raise ImportError("Install with: pip install openai") from e
-        client = OpenAI(api_key=key[0], base_url=key[1])
-        _openai_clients[key] = client
-
-        # Bound the cache; close the LRU victim
-        if len(_openai_clients) > _OPENAI_CLIENT_CACHE_MAX:
-            _, victim = _openai_clients.popitem(last=False)
-            try:
-                victim.close()
-            except Exception:
-                pass  # Best-effort cleanup
-
-        return client
 
 
 # Use namespaced logger; root logger is configured only by the CLI
@@ -478,6 +422,38 @@ class BaseAutoGenerator:
                 'api_key': ep.api_key
             }
         ]
+        self._openai_client = None  # lazy, per-instance
+        self._openai_client_lock = threading.Lock()
+        
+    def _get_openai_client(self):
+        """Get or create the OpenAI client for this instance."""
+        if self._openai_client is None:
+            with self._openai_client_lock:
+                if self._openai_client is None:
+                    try:
+                        from openai import OpenAI
+                    except ImportError as e:
+                        raise ImportError("Install with: pip install openai") from e
+                    cfg = self.config_list[0]
+                    self._openai_client = OpenAI(
+                        api_key=cfg.get("api_key") or os.environ.get("OPENAI_API_KEY"),
+                        base_url=cfg.get("base_url"),
+                    )
+        return self._openai_client
+
+    def close(self):
+        """Close the OpenAI client if it exists."""
+        if not hasattr(self, '_openai_client_lock'):
+            return  # Object was never fully initialized
+        with self._openai_client_lock:
+            client = getattr(self, '_openai_client', None)
+            self._openai_client = None
+        if client is not None:
+            client.close()
+
+    def __del__(self):
+        """Best-effort cleanup, but the canonical path is explicit close()."""
+        self.close()
     
     def _structured_completion(self, response_model: Type[T], messages: List[Dict], **kwargs) -> T:
         """
@@ -514,10 +490,7 @@ class BaseAutoGenerator:
         
         # Fallback to OpenAI SDK (uses beta.chat.completions.parse)
         if _check_openai_available():
-            client = _get_openai_client(
-                api_key=self.config_list[0].get('api_key'),
-                base_url=self.config_list[0].get('base_url')
-            )
+            client = self._get_openai_client()
             response = client.beta.chat.completions.parse(
                 model=model_name,
                 messages=messages,
@@ -978,7 +951,7 @@ Use the recommended tools: {', '.join(recommended_tools)}
 # Workflow Auto-Generation (Feature Parity)
 # =============================================================================
 
-class TaskDetails(BaseModel):
+class WorkflowStepDetails(BaseModel):
     """Details for a workflow step."""
     agent: str
     action: str
@@ -992,7 +965,7 @@ class WorkflowRouteDetails(BaseModel):
 class WorkflowParallelDetails(BaseModel):
     """Details for a parallel step."""
     name: str
-    parallel: List[TaskDetails]
+    parallel: List[WorkflowStepDetails]
 
 class WorkflowAgentDetails(BaseModel):
     """Details for a workflow agent."""

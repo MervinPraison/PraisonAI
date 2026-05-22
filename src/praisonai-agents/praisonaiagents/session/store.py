@@ -81,7 +81,7 @@ class SessionData:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
-        return {
+        data = {
             "session_id": self.session_id,
             "messages": [m.to_dict() for m in self.messages],
             "created_at": self.created_at,
@@ -92,6 +92,10 @@ class SessionData:
             "gateway_session_id": self.gateway_session_id,
             "agent_id": self.agent_id,
         }
+        for key in ("model", "llm", "total_tokens", "token_count", "cost", "source"):
+            if key in self.metadata:
+                data[key] = self.metadata[key]
+        return data
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "SessionData":
@@ -137,7 +141,8 @@ class FileLock:
         self._lock_path = filepath + ".lock"
     
     def __enter__(self):
-        self.acquire()
+        if not self.acquire():
+            raise IOError(f"Failed to acquire file lock for {self.filepath} after {self.timeout}s")
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -470,7 +475,62 @@ class DefaultSessionStore:
             self._cache[session_id] = session
         
         return self._save_session(session)
-    
+
+    def update_session_metadata(self, session_id: str, **fields: Any) -> bool:
+        """Merge run stats / metadata fields into a persisted session."""
+        if not fields:
+            return True
+
+        filepath = self._get_session_path(session_id)
+
+        with FileLock(filepath, self.lock_timeout):
+            if os.path.exists(filepath):
+                try:
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    session = SessionData.from_dict(data)
+                except (json.JSONDecodeError, IOError):
+                    session = SessionData(session_id=session_id)
+            else:
+                session = SessionData(session_id=session_id)
+
+            for key, value in fields.items():
+                if value is None:
+                    continue
+                session.metadata[key] = value
+                if key in ("agent_id", "agent_name", "user_id"):
+                    setattr(session, key, value)
+
+            session.updated_at = datetime.now(timezone.utc).isoformat()
+
+            try:
+                dir_path = os.path.dirname(filepath) or "."
+                os.makedirs(dir_path, exist_ok=True)
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=dir_path,
+                    delete=False,
+                    suffix=".tmp",
+                ) as f:
+                    json.dump(session.to_dict(), f, indent=2, ensure_ascii=False)
+                    temp_path = f.name
+
+                os.replace(temp_path, filepath)
+
+                with self._lock:
+                    self._cache[session_id] = session
+
+                return True
+            except (IOError, OSError) as e:
+                logger.error(f"Failed to update session metadata {session_id}: {e}")
+                try:
+                    if "temp_path" in locals():
+                        os.remove(temp_path)
+                except (IOError, OSError):
+                    pass
+                return False
+
     def delete_session(self, session_id: str) -> bool:
         """Delete a session completely."""
         filepath = self._get_session_path(session_id)
@@ -500,10 +560,16 @@ class DefaultSessionStore:
                             data = json.load(f)
                         sessions.append({
                             "session_id": data.get("session_id", filename[:-5]),
+                            "id": data.get("session_id", filename[:-5]),
                             "agent_name": data.get("agent_name"),
+                            "agent_id": data.get("agent_id") or (data.get("metadata") or {}).get("agent_id"),
+                            "source": data.get("source") or (data.get("metadata") or {}).get("source"),
                             "created_at": data.get("created_at"),
                             "updated_at": data.get("updated_at"),
                             "message_count": len(data.get("messages", [])),
+                            "model": data.get("model") or data.get("llm") or (data.get("metadata") or {}).get("model"),
+                            "total_tokens": data.get("total_tokens") or data.get("token_count") or (data.get("metadata") or {}).get("total_tokens"),
+                            "cost": data.get("cost") or (data.get("metadata") or {}).get("cost"),
                         })
                     except (json.JSONDecodeError, IOError):
                         continue

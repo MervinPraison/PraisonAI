@@ -24,6 +24,7 @@ class PluginRegistry(Generic[T]):
     - Built-in plugins with lazy loading
     - Entry points discovery
     - Runtime registration
+    - Alias support for alternative names
     - Thread-safe operations
     """
 
@@ -41,6 +42,7 @@ class PluginRegistry(Generic[T]):
         """
         self._entry_point_group = entry_point_group
         self._items: Dict[str, Type[T]] = {}
+        self._aliases: Dict[str, str] = {}  # alias -> canonical name
         self._lock = threading.Lock()
         
         # Load built-in plugins with error handling
@@ -76,15 +78,29 @@ class PluginRegistry(Generic[T]):
             # entry_points() might not be available in older Python versions
             logger.debug("Entry points not available for group %s", self._entry_point_group)
 
-    def register(self, name: str, cls: Type[T]) -> None:
+    def register(
+        self, 
+        name: str, 
+        cls: Type[T], 
+        *, 
+        aliases: Optional[list[str]] = None
+    ) -> None:
         """Register a plugin at runtime.
         
         Args:
             name: Plugin name
             cls: Plugin class
+            aliases: Optional list of alias names for this plugin
         """
         with self._lock:
-            self._items[name.lower()] = cls
+            canonical_name = name.lower()
+            self._items[canonical_name] = cls
+            
+            # Register aliases
+            if aliases:
+                for alias in aliases:
+                    normalized_alias = alias.lower()
+                    self._aliases[normalized_alias] = canonical_name
 
     def unregister(self, name: str) -> bool:
         """Unregister a plugin.
@@ -96,7 +112,27 @@ class PluginRegistry(Generic[T]):
             True if plugin was found and removed, False otherwise
         """
         with self._lock:
-            return self._items.pop(name.lower(), None) is not None
+            normalized_name = name.lower()
+            
+            # Check if it's an alias
+            if normalized_name in self._aliases:
+                del self._aliases[normalized_name]
+                return True
+            
+            # Check if it's a canonical name
+            if normalized_name in self._items:
+                # Remove all aliases pointing to this plugin
+                aliases_to_remove = [
+                    alias for alias, canonical in self._aliases.items()
+                    if canonical == normalized_name
+                ]
+                for alias in aliases_to_remove:
+                    del self._aliases[alias]
+                
+                del self._items[normalized_name]
+                return True
+            
+            return False
 
     def resolve(self, name: str) -> Type[T]:
         """Resolve a plugin name to its class.
@@ -111,10 +147,20 @@ class PluginRegistry(Generic[T]):
             ValueError: If plugin is not found
         """
         with self._lock:
-            cls = self._items.get(name.lower())
+            normalized_name = name.lower()
+            
+            # Resolve alias to canonical name
+            canonical_name = self._aliases.get(normalized_name, normalized_name)
+            cls = self._items.get(canonical_name)
+            
             # Capture available plugins snapshot while holding lock
             # to avoid race condition between check and error message
-            available_snapshot = sorted(self._items.keys()) if cls is None else None
+            if cls is None:
+                available_plugins = sorted(self._items.keys())
+                available_aliases = sorted(self._aliases.keys())
+                available_snapshot = available_plugins + available_aliases
+            else:
+                available_snapshot = None
         
         if cls is None:
             raise ValueError(
@@ -162,3 +208,21 @@ class PluginRegistry(Generic[T]):
             return True
         except ValueError:
             return False
+
+    def list_aliases(self) -> Dict[str, str]:
+        """List all aliases and their target plugins.
+        
+        Returns:
+            Dict mapping alias -> canonical name
+        """
+        with self._lock:
+            return dict(self._aliases)
+
+    def list_all_names(self) -> list[str]:
+        """List all names including aliases.
+        
+        Returns:
+            Sorted list of all registered names and aliases
+        """
+        with self._lock:
+            return sorted(list(self._items.keys()) + list(self._aliases.keys()))

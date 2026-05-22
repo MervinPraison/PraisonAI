@@ -169,8 +169,7 @@ class TestAgentSchedulerExecution:
         with pytest.raises(Exception, match="Agent error"):
             scheduler.execute_once()
     
-    @patch('time.sleep')
-    def test_execute_with_retry_success_first_try(self, mock_sleep):
+    def test_execute_with_retry_success_first_try(self):
         """Test _execute_with_retry() succeeds on first try."""
         mock_agent = Mock()
         mock_agent.start = Mock(return_value="Success")
@@ -180,10 +179,8 @@ class TestAgentSchedulerExecution:
         
         assert scheduler._success_count == 1
         assert scheduler._failure_count == 0
-        mock_sleep.assert_not_called()
     
-    @patch('time.sleep')
-    def test_execute_with_retry_success_on_retry(self, mock_sleep):
+    def test_execute_with_retry_success_on_retry(self):
         """Test _execute_with_retry() succeeds on retry."""
         mock_agent = Mock()
         mock_agent.start = Mock(side_effect=[
@@ -192,37 +189,56 @@ class TestAgentSchedulerExecution:
         ])
         
         scheduler = AgentScheduler(mock_agent, "Test task")
+        # Mock Event.wait() to return False immediately (not stopped, backoff skipped)
+        scheduler._stop_event.wait = Mock(return_value=False)
         scheduler._execute_with_retry(max_retries=3)
         
         assert scheduler._success_count == 1
         assert scheduler._failure_count == 0
         assert mock_agent.start.call_count == 2
     
-    @patch('time.sleep')
-    def test_execute_with_retry_all_fail(self, mock_sleep):
+    def test_execute_with_retry_all_fail(self):
         """Test _execute_with_retry() when all retries fail."""
         mock_agent = Mock()
         mock_agent.start = Mock(side_effect=Exception("Always fails"))
         
         scheduler = AgentScheduler(mock_agent, "Test task")
+        # Mock Event.wait() to return False immediately (not stopped, backoff skipped)
+        scheduler._stop_event.wait = Mock(return_value=False)
         scheduler._execute_with_retry(max_retries=3)
         
         assert scheduler._success_count == 0
         assert scheduler._failure_count == 1
         assert mock_agent.start.call_count == 3
     
-    @patch('time.sleep')
-    def test_execute_with_retry_exponential_backoff(self, mock_sleep):
-        """Test _execute_with_retry() uses exponential backoff."""
+    def test_execute_with_retry_backoff_uses_stop_event(self):
+        """Test _execute_with_retry() uses Event.wait() for backoff, not time.sleep()."""
         mock_agent = Mock()
         mock_agent.start = Mock(side_effect=Exception("Always fails"))
         
         scheduler = AgentScheduler(mock_agent, "Test task")
+        scheduler._stop_event.wait = Mock(return_value=False)
         scheduler._execute_with_retry(max_retries=3)
         
-        # Should sleep 30s, then 60s (exponential backoff)
-        assert mock_sleep.call_count == 2
-        mock_sleep.assert_has_calls([call(30), call(60)])
+        # Should call Event.wait() twice (between attempt 1->2 and 2->3)
+        assert scheduler._stop_event.wait.call_count == 2
+        # Each wait should be called with a positive backoff delay
+        for call_args in scheduler._stop_event.wait.call_args_list:
+            wait_time = call_args[0][0]
+            assert wait_time > 0, "backoff delay must be positive"
+
+    def test_execute_with_retry_stops_immediately_on_stop_event(self):
+        """Test that _execute_with_retry() exits when stop() is called during backoff."""
+        mock_agent = Mock()
+        mock_agent.start = Mock(side_effect=Exception("Always fails"))
+        
+        scheduler = AgentScheduler(mock_agent, "Test task")
+        # Mock Event.wait() to return True (stop was signaled)
+        scheduler._stop_event.wait = Mock(return_value=True)
+        scheduler._execute_with_retry(max_retries=3)
+        
+        # Should stop after first failure + backoff signal, not complete all retries
+        assert mock_agent.start.call_count == 1
 
 
 class TestAgentSchedulerCallbacks:
@@ -239,14 +255,15 @@ class TestAgentSchedulerCallbacks:
         
         on_success.assert_called_once_with("Success result")
     
-    @patch('time.sleep')
-    def test_on_failure_callback_invoked(self, mock_sleep):
+    def test_on_failure_callback_invoked(self):
         """Test on_failure callback is invoked on failure."""
         mock_agent = Mock()
         mock_agent.start = Mock(side_effect=Exception("Error"))
         on_failure = Mock()
         
         scheduler = AgentScheduler(mock_agent, "Test task", on_failure=on_failure)
+        # Mock Event.wait() to return False immediately (not stopped, backoff skipped)
+        scheduler._stop_event.wait = Mock(return_value=False)
         scheduler._execute_with_retry(max_retries=2)
         
         on_failure.assert_called_once()

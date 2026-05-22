@@ -229,3 +229,99 @@ def check_skills_praisonai_integration(config: DoctorConfig) -> CheckResult:
             message="Skills module not available",
             details=str(e),
         )
+
+
+@register_check(
+    id="skills_capabilities",
+    title="Skills Capability Requirements",
+    description="Check skill capability requirements and enforcement",
+    category=CheckCategory.SKILLS,
+    severity=CheckSeverity.MEDIUM,
+    dependencies=["skills_praisonai_integration"],
+)
+def check_skills_capabilities(config: DoctorConfig) -> CheckResult:
+    """Check skill capability requirements."""
+    try:
+        from praisonaiagents.skills import SkillManager
+        from praisonaiagents.skills.capability_validator import EnforcementLevel
+        
+        # Initialize skill manager
+        manager = SkillManager()
+        
+        # Discover skills
+        discovered = manager.discover(include_defaults=True)
+        if discovered == 0:
+            return CheckResult(
+                id="skills_capabilities",
+                title="Skills Capability Requirements", 
+                category=CheckCategory.SKILLS,
+                status=CheckStatus.SKIP,
+                message="No skills found to check",
+            )
+        
+        # Get diagnostics for all skills
+        diagnostics = manager.get_skills_diagnostics()
+        
+        active_count = 0
+        degraded_count = 0
+        unavailable_count = 0
+        issues = []
+        
+        for skill_name, result in diagnostics.items():
+            if result.state.value == "active":
+                active_count += 1
+            elif result.state.value == "degraded":
+                degraded_count += 1
+                issues.extend([f"{skill_name}: {w}" for w in result.warnings[:2]])
+            elif result.state.value == "unavailable":
+                unavailable_count += 1
+                issues.extend([f"{skill_name}: {e}" for e in result.errors[:2]])
+        
+        total = active_count + degraded_count + unavailable_count
+        
+        # Determine status
+        enforcement_level = manager._validator.enforcement_level
+        
+        if unavailable_count == 0 and degraded_count == 0:
+            status = CheckStatus.PASS
+            message = f"All {total} skill(s) have requirements satisfied"
+        elif unavailable_count > 0 and enforcement_level == EnforcementLevel.STRICT:
+            status = CheckStatus.FAIL
+            message = f"{unavailable_count}/{total} skills unavailable (strict enforcement)"
+        elif unavailable_count > 0 or degraded_count > 0:
+            status = CheckStatus.WARN
+            message = f"{active_count}/{total} skills fully available, {degraded_count} degraded, {unavailable_count} unavailable"
+        else:
+            status = CheckStatus.PASS
+            message = f"Skills capability check completed"
+        
+        details = "; ".join(issues[:5]) + ("..." if len(issues) > 5 else "") if issues else None
+        
+        metadata = {
+            "total_skills": total,
+            "active": active_count,
+            "degraded": degraded_count,
+            "unavailable": unavailable_count,
+            "enforcement_level": enforcement_level.value,
+            "sample_issues": issues[:10]
+        }
+        
+        return CheckResult(
+            id="skills_capabilities",
+            title="Skills Capability Requirements",
+            category=CheckCategory.SKILLS,
+            status=status,
+            message=message,
+            details=details,
+            metadata=metadata,
+        )
+        
+    except ImportError as e:
+        return CheckResult(
+            id="skills_capabilities",
+            title="Skills Capability Requirements",
+            category=CheckCategory.SKILLS,
+            status=CheckStatus.SKIP,
+            message="Skills capability validation not available",
+            details=str(e),
+        )

@@ -82,7 +82,7 @@ class PythonFeatureExtractor:
         'telemetry': ['telemetry'],
         'context': ['context.fast', 'context.manager', 'context.models'],
         'session': ['session'],
-        'ui': ['ui.agui', 'ui.a2a'],
+        'ui': ['ui.agui', 'ui.a2a', 'ui.a2ui'],
         'rag': ['rag'],
         'planning': ['planning'],
         'config': ['config.feature_configs', 'config.param_resolver', 

@@ -8,29 +8,9 @@ Custom page: Feature Explorer
 """
 
 import os
+
 import praisonaiui as aiui
-from praisonai.ui._aiui_datastore import PraisonAISessionDataStore
-
-# ── Set up datastore bridge ─────────────────────────────────
-aiui.set_datastore(PraisonAISessionDataStore())
-
-# ── Dashboard style ─────────────────────────────────────────
-aiui.set_style("dashboard")
-aiui.set_pages([
-    "chat",        # Core AI chat
-    "channels",    # Messaging platforms
-    "agents",      # Agent management
-    "skills",      # Available tools
-    "memory",      # Agent memory
-    "knowledge",   # Knowledge base
-    "cron",        # Scheduled jobs
-    "guardrails",  # Safety rules
-    "sessions",    # Conversation history
-    "usage",       # Token usage & costs
-    "config",      # Runtime configuration
-    "logs",        # Server logs
-    "debug",       # System debug info
-])
+from praisonai.integration.host_app import configure_host, create_host_app
 
 # ── Agent definitions ───────────────────────────────────────
 AGENTS = [
@@ -71,6 +51,35 @@ AGENTS = [
 ]
 
 
+def _build_praison_agents():
+    from praisonaiagents import Agent
+
+    return [
+        Agent(name=a["name"], instructions=a["instructions"], llm=a["model"])
+        for a in AGENTS
+    ]
+
+
+configure_host(
+    pages=[
+        "chat",
+        "channels",
+        "agents",
+        "skills",
+        "memory",
+        "knowledge",
+        "cron",
+        "guardrails",
+        "sessions",
+        "usage",
+        "config",
+        "logs",
+        "debug",
+    ],
+    agents=_build_praison_agents(),
+    modules=["jobs"],
+)
+
 
 # ── Custom page: Feature Explorer ───────────────────────────
 
@@ -110,7 +119,10 @@ def _register_agents_in_dashboard():
         })
         print(f"   ✓ Agent: {agent_def['icon']} {agent_def['name']}")
 
+
 try:
     _register_agents_in_dashboard()
 except Exception as e:
     print(f"   ⚠️  Agent registration failed (non-fatal): {e}")
+
+app = create_host_app()

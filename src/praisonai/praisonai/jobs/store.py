@@ -83,8 +83,9 @@ class InMemoryJobStore(JobStore):
     def _get_lock(self) -> asyncio.Lock:
         """Get the asyncio lock, creating it lazily if needed.
         
-        This deferred creation is required for Python 3.9 compatibility
-        where asyncio.Lock() calls get_event_loop() at creation time.
+        Deferred creation avoids touching the event loop at __init__ time,
+        which keeps the store safe to instantiate from sync contexts on
+        Python 3.9 (where asyncio.Lock() implicitly calls get_event_loop()).
         """
         if self.__lock is None:
             self.__lock = asyncio.Lock()
@@ -125,14 +126,14 @@ class InMemoryJobStore(JobStore):
     
     async def get(self, job_id: str) -> Optional[Job]:
         """Get a job by ID."""
-        return self._jobs.get(job_id)
+        async with self._get_lock():
+            return self._jobs.get(job_id)
     
     async def get_by_idempotency_key(self, key: str) -> Optional[Job]:
         """Get a job by idempotency key."""
-        job_id = self._idempotency_keys.get(key)
-        if job_id:
-            return self._jobs.get(job_id)
-        return None
+        async with self._get_lock():
+            job_id = self._idempotency_keys.get(key)
+            return self._jobs.get(job_id) if job_id else None
     
     async def list_jobs(
         self,
@@ -142,9 +143,10 @@ class InMemoryJobStore(JobStore):
         offset: int = 0
     ) -> List[Job]:
         """List jobs with optional filters."""
-        jobs = list(self._jobs.values())
+        async with self._get_lock():
+            jobs = list(self._jobs.values())
         
-        # Apply filters
+        # Apply filters outside the lock - values() snapshot is already taken
         if status:
             jobs = [j for j in jobs if j.status == status]
         if session_id:
@@ -162,7 +164,8 @@ class InMemoryJobStore(JobStore):
         session_id: Optional[str] = None
     ) -> int:
         """Count jobs matching filters."""
-        jobs = list(self._jobs.values())
+        async with self._get_lock():
+            jobs = list(self._jobs.values())
         
         if status:
             jobs = [j for j in jobs if j.status == status]
@@ -201,15 +204,20 @@ class InMemoryJobStore(JobStore):
             
             return len(to_remove)
     
-    def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> Dict[str, Any]:
         """Get store statistics."""
+        async with self._get_lock():
+            # Take a snapshot to avoid RuntimeError if the dict is mutated concurrently
+            jobs_snapshot = list(self._jobs.values())
+            idempotency_count = len(self._idempotency_keys)
+        
         status_counts = {}
-        for job in self._jobs.values():
+        for job in jobs_snapshot:
             status_counts[job.status.value] = status_counts.get(job.status.value, 0) + 1
         
         return {
-            "total_jobs": len(self._jobs),
-            "idempotency_keys": len(self._idempotency_keys),
+            "total_jobs": len(jobs_snapshot),
+            "idempotency_keys": idempotency_count,
             "max_jobs": self._max_jobs,
             "status_counts": status_counts
         }

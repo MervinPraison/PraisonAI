@@ -73,10 +73,10 @@ def _get_live():
 
 # Import token tracking
 try:
-    from ..telemetry.token_collector import TokenMetrics, _token_collector
+    from ..telemetry.token_collector import TokenMetrics, get_token_collector
 except ImportError:
     TokenMetrics = None
-    _token_collector = None
+    get_token_collector = None
 
 # Logging is already configured in _logging.py via __init__.py
 
@@ -4519,7 +4519,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def _track_token_usage(self, response: Dict[str, Any], model: str) -> Optional[TokenMetrics]:
         """Extract and track token usage from LLM response."""
-        if not TokenMetrics or not _token_collector:
+        if not TokenMetrics or not get_token_collector:
             return None
         
         # Note: metrics check moved to call sites for performance
@@ -4551,7 +4551,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Track in global collector
             # Extract provider from model string (e.g., 'openai' from 'openai/gpt-4o-mini')
             provider = model.split('/')[0] if '/' in model else 'litellm'
-            _token_collector.track_tokens(
+            get_token_collector().track_tokens(
                 model=model,
                 agent=self.current_agent_name,
                 metrics=metrics,

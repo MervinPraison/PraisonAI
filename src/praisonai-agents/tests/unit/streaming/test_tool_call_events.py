@@ -225,3 +225,19 @@ class TestToolCallIdPropagation:
         )
         
         assert event.tool_call["id"] == "call_abc123xyz"
+
+
+class TestToolExecutionMixinStreamEmitterLookup:
+    def test_mixin_resolves_name_mangled_stream_emitter_without_agent_class_name(self):
+        from praisonaiagents.agent.tool_execution import ToolExecutionMixin
+        from praisonaiagents.streaming.events import StreamEventEmitter
+
+        class CustomAgent(ToolExecutionMixin):
+            def __init__(self):
+                self.__stream_emitter = StreamEventEmitter()
+
+        agent = CustomAgent()
+        emitter = agent._get_existing_stream_emitter()
+
+        assert emitter is not None
+        assert isinstance(emitter, StreamEventEmitter)

@@ -28,8 +28,8 @@ def _get_rich_available() -> bool:
     global _rich_available
     if _rich_available is None:
         try:
-            import importlib.util
-            _rich_available = importlib.util.find_spec("rich") is not None
+            from ..._framework_availability import is_available
+            _rich_available = is_available("rich")
         except ImportError:
             _rich_available = False
     return _rich_available

@@ -253,7 +253,7 @@ class A2A:
         from praisonaiagents.ui.a2a.conversion import (
             extract_user_input,
             praisonai_to_a2a_message,
-            create_artifact,
+            create_response_artifact,
         )
         
         # Validate params
@@ -286,7 +286,8 @@ class A2A:
                     else:
                         raise RuntimeError("No agent or agents configured")
                     response_msg = praisonai_to_a2a_message(str(response), task_id=task_id)
-                    artifact = create_artifact(str(response))
+                    history = getattr(self.agent, "chat_history", None) if self.agent else None
+                    artifact = create_response_artifact(str(response), chat_history=history)
                     self.task_store.add_to_history(task_id, response_msg)
                     self.task_store.add_artifact(task_id, artifact)
                     self.task_store.update_status(task_id, TaskState.COMPLETED)
@@ -322,7 +323,8 @@ class A2A:
             response_msg = praisonai_to_a2a_message(
                 str(response), task_id=task.id
             )
-            artifact = create_artifact(str(response))
+            history = getattr(self.agent, "chat_history", None) if self.agent else None
+            artifact = create_response_artifact(str(response), chat_history=history)
             
             # Update task store
             self.task_store.add_to_history(task.id, response_msg)

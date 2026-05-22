@@ -44,9 +44,16 @@ class ProjectService:
         await self._session.flush()
         return project
 
-    async def get(self, project_id: str) -> Optional[Project]:
-        """Get project by ID."""
-        return await self._session.get(Project, project_id)
+    async def get(
+        self, project_id: str, *, workspace_id: Optional[str] = None
+    ) -> Optional[Project]:
+        """Get project by ID, optionally scoped to a workspace."""
+        project = await self._session.get(Project, project_id)
+        if project is None:
+            return None
+        if workspace_id is not None and project.workspace_id != workspace_id:
+            return None
+        return project
 
     async def list_for_workspace(
         self,
@@ -62,6 +69,8 @@ class ProjectService:
     async def update(
         self,
         project_id: str,
+        *,
+        workspace_id: Optional[str] = None,
         title: Optional[str] = None,
         description: Optional[str] = None,
         status: Optional[str] = None,
@@ -69,7 +78,7 @@ class ProjectService:
         lead_id: Optional[str] = None,
     ) -> Optional[Project]:
         """Update project fields."""
-        project = await self.get(project_id)
+        project = await self.get(project_id, workspace_id=workspace_id)
         if project is None:
             return None
         if title is not None:
@@ -85,9 +94,11 @@ class ProjectService:
         await self._session.flush()
         return project
 
-    async def delete(self, project_id: str) -> bool:
+    async def delete(
+        self, project_id: str, *, workspace_id: Optional[str] = None
+    ) -> bool:
         """Delete a project."""
-        project = await self.get(project_id)
+        project = await self.get(project_id, workspace_id=workspace_id)
         if project is None:
             return False
         await self._session.delete(project)

@@ -6,12 +6,12 @@ at regular intervals, enabling 24/7 autonomous agent operations.
 """
 
 import threading
-import time
 import logging
 from datetime import datetime
 from typing import Optional, Dict, Any, Callable
 
 from .base import ScheduleParser, PraisonAgentExecutor
+from .shared import backoff_delay
 
 logger = logging.getLogger(__name__)
 
@@ -292,9 +292,11 @@ class AgentScheduler:
                 logger.error(f"Agent execution failed on attempt {attempt + 1}: {e}")
                 
                 if attempt < max_retries - 1:
-                    wait_time = 30 * (attempt + 1)  # Exponential backoff
+                    wait_time = backoff_delay(attempt, initial=30.0, cap=300.0)
                     logger.debug(f"Waiting {wait_time}s before retry...")
-                    time.sleep(wait_time)
+                    if self._stop_event.wait(wait_time):
+                        # stop() was called during backoff — exit immediately
+                        return
         
         if not success:
             self._failure_count += 1

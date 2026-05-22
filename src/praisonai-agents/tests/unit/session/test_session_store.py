@@ -282,6 +282,29 @@ class TestDefaultSessionStore:
         session = temp_store.get_session("session-1")
         assert session.agent_name == "TestBot"
         assert session.user_id == "user-123"
+
+    def test_update_session_metadata_preserves_messages(self, temp_store):
+        """Metadata updates must not drop messages added by another store instance."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = DefaultSessionStore(session_dir=tmpdir)
+            reader = DefaultSessionStore(session_dir=tmpdir)
+
+            writer.add_user_message("session-1", "first")
+            reader._load_session("session-1")
+            writer.add_user_message("session-1", "second")
+
+            assert reader.update_session_metadata(
+                "session-1", model="gpt-4o-mini", total_tokens=42
+            )
+
+            writer.invalidate_cache("session-1")
+            history = writer.get_chat_history("session-1")
+            assert len(history) == 2
+            assert history[1]["content"] == "second"
+
+            session = writer.get_session("session-1")
+            assert session.metadata.get("model") == "gpt-4o-mini"
+            assert session.metadata.get("total_tokens") == 42
     
     def test_concurrent_writes(self, temp_store):
         """Test concurrent writes to same session."""

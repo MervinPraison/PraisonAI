@@ -71,3 +71,57 @@ async def require_workspace_member(
         )
     user.workspace_id = workspace_id
     return user
+
+
+async def require_workspace_admin(
+    workspace_id: str,
+    user: AuthIdentity = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> AuthIdentity:
+    """Require admin or owner role in the workspace."""
+    return await require_workspace_member(
+        workspace_id, user, session, min_role="admin"
+    )
+
+
+async def require_workspace_owner(
+    workspace_id: str,
+    user: AuthIdentity = Depends(get_current_user),
+    session: AsyncSession = Depends(get_db),
+) -> AuthIdentity:
+    """Require owner role in the workspace."""
+    return await require_workspace_member(
+        workspace_id, user, session, min_role="owner"
+    )
+
+
+def ensure_resource_in_workspace(
+    resource_workspace_id: str | None,
+    workspace_id: str,
+    *,
+    label: str = "Resource",
+) -> None:
+    """Reject cross-workspace access (IDOR) with a generic 404."""
+    if resource_workspace_id != workspace_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"{label} not found",
+        )
+
+
+async def require_issue_in_workspace(
+    workspace_id: str,
+    issue_id: str,
+    session: AsyncSession,
+):
+    """Load an issue and verify it belongs to the URL workspace."""
+    from ..db.models import Issue
+
+    issue = await session.get(Issue, issue_id)
+    if issue is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Issue not found",
+        )
+    ensure_resource_in_workspace(issue.workspace_id, workspace_id, label="Issue")
+    return issue

@@ -108,7 +108,7 @@ class SkillLoader:
             return False
 
         try:
-            content = skill_md.read_text()
+            content = skill_md.read_text(encoding="utf-8")
             _, body = parse_frontmatter(content)
             skill.instructions = body
             return True
@@ -136,7 +136,7 @@ class SkillLoader:
             for script_file in scripts_dir.iterdir():
                 if script_file.is_file():
                     try:
-                        scripts[script_file.name] = script_file.read_text()
+                        scripts[script_file.name] = script_file.read_text(encoding="utf-8")
                     except Exception:
                         continue
         except PermissionError:
@@ -166,7 +166,7 @@ class SkillLoader:
             for ref_file in refs_dir.iterdir():
                 if ref_file.is_file():
                     try:
-                        refs[ref_file.name] = ref_file.read_text()
+                        refs[ref_file.name] = ref_file.read_text(encoding="utf-8")
                     except Exception:
                         continue
         except PermissionError:
