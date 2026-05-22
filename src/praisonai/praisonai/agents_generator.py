@@ -91,6 +91,73 @@ def safe_format(template: str, **kwargs) -> str:
     return re.sub(pattern, replace_var, template)
 
 
+def _wrap_with_timeout(tool, timeout_seconds: float):
+    """Enforce per-call timeout on a tool, sync or async, without
+    leaking the worker thread/task on timeout.
+    """
+    if timeout_seconds is None or timeout_seconds <= 0 or not callable(tool):
+        return tool
+    
+    import asyncio
+    import functools
+    import inspect
+    import json
+    
+    if inspect.iscoroutinefunction(tool):
+        @functools.wraps(tool)
+        async def _async_wrapped(*args, **kwargs):
+            try:
+                return await asyncio.wait_for(tool(*args, **kwargs), timeout=timeout_seconds)
+            except asyncio.TimeoutError:
+                return json.dumps({
+                    "error": "tool_timeout",
+                    "tool": getattr(tool, "__name__", repr(tool)),
+                    "timeout_seconds": timeout_seconds,
+                })
+        return _async_wrapped
+
+    @functools.wraps(tool)
+    def _sync_wrapped(*args, **kwargs):
+        import queue
+        import threading
+
+        result_queue: queue.Queue[tuple[bool, object]] = queue.Queue(maxsize=1)
+
+        def _runner():
+            try:
+                result_queue.put((True, tool(*args, **kwargs)))
+            except BaseException as exc:
+                result_queue.put((False, exc))
+
+        # Daemon thread avoids blocking process shutdown if the tool call hangs.
+        worker = threading.Thread(target=_runner, daemon=True)
+        worker.start()
+        worker.join(timeout_seconds)
+
+        if worker.is_alive():
+            return json.dumps({
+                "error": "tool_timeout",
+                "tool": getattr(tool, "__name__", repr(tool)),
+                "timeout_seconds": timeout_seconds,
+            })
+
+        try:
+            success, payload = result_queue.get_nowait()
+        except queue.Empty:
+            # Defensive fallback: if the worker exits without publishing a result,
+            # avoid blocking indefinitely and surface an execution failure.
+            return json.dumps({
+                "error": "tool_execution_error",
+                "tool": getattr(tool, "__name__", repr(tool)),
+                "detail": "worker_exited_without_result",
+            })
+
+        if success:
+            return payload
+        raise payload
+    return _sync_wrapped
+
+
 def noop(*args, **kwargs):
     pass
 
