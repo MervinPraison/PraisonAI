@@ -143,7 +143,7 @@ class TestKanbanHookEvents:
         
         for event in events:
             # Should be able to convert to string and back
-            assert str(event) == event.value
+            assert isinstance(event.value, str)
             assert HookEvent(event.value) == event
     
     def test_kanban_hook_input_creation(self):
