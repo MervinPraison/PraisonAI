@@ -19,4 +19,5 @@ from .scheduler.async_agent_scheduler import (  # noqa: F401
     AsyncPraisonAgentExecutor, 
     AsyncAgentExecutorInterface,
     create_async_agent_scheduler,
+    logger,
 )

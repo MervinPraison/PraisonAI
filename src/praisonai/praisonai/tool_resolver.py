@@ -500,8 +500,8 @@ def resolve_tool(name: str, resolver: Optional[ToolResolver] = None) -> Optional
         Callable if found, None otherwise
         
     Note:
-        When resolver=None, uses a process-level cached resolver that is anchored
-        to the working directory at first call. For test isolation or multi-project
+        When resolver=None, uses a context-local cached resolver anchored to the
+        working directory for that context. For test isolation or multi-project
         CLIs, pass an explicit resolver instance.
     """
     return (resolver or _get_default_resolver()).resolve(name)
