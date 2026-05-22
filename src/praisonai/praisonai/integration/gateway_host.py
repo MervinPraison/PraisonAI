@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 async def _run_integrated_gateway_async(
     *,
-    port: int = 8080,
+    port: int = 8765,
     host: str = "127.0.0.1",
     static_dir: Optional[str] = None,
     ui_config: Optional[dict[str, Any]] = None,
@@ -30,7 +30,7 @@ async def _run_integrated_gateway_async(
 
 def run_integrated_gateway(
     *,
-    port: int = 8080,
+    port: int = 8765,
     host: str = "127.0.0.1",
     static_dir: Optional[str] = None,
     ui_config: Optional[dict[str, Any]] = None,

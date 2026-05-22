@@ -35,6 +35,7 @@ def configure_host(
     modules: Optional[Sequence[str]] = None,
     style: str = "dashboard",
     context_paths: Optional[Sequence[str]] = None,
+    **kwargs: Any,
 ) -> None:
     """Apply PraisonAIUI host settings and wire L1 backends (unless legacy mode)."""
     global _CONFIGURED
@@ -126,14 +127,14 @@ def setup_bridges() -> None:
 
         sink = register_usage_sink()
     except Exception as exc:
-        log.warning("usage bridge unavailable: %s", exc)
+        log.debug("usage bridge unavailable: %s", exc)
 
     try:
         from praisonai.integration.bridges.schedules_runner import ensure_schedule_runner
 
         ensure_schedule_runner()
     except Exception as exc:
-        log.warning("schedule runner unavailable: %s", exc)
+        log.debug("schedule runner unavailable: %s", exc)
 
     try:
         import praisonaiui.backends as backends
@@ -161,7 +162,7 @@ def setup_bridges() -> None:
         backends.set_backend("approvals_pending", list_pending_approvals)
         backends.set_backend("approvals_policies", get_approval_policies)
     except Exception as exc:
-        log.warning("aiui backend injection failed: %s", exc)
+        log.debug("aiui backend injection failed: %s", exc)
 
 
 def create_host_app():

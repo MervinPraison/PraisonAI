@@ -395,8 +395,7 @@ def serve_ui_gateway(
             host=host,
             port=port,
             title=title,
-            style=style,
-            agents_file=agents_file
+            style=style
         )
     except ImportError as e:
         output.print_error(f"UI-Gateway module not available: {e}")
