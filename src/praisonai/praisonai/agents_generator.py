@@ -580,7 +580,7 @@ class AgentsGenerator:
         tools_dict = {}
         
         # Demand-driven tool resolution - only resolve tools actually used in YAML
-        if PRAISONAI_TOOLS_AVAILABLE and (CREWAI_AVAILABLE or AUTOGEN_AVAILABLE or PRAISONAI_AVAILABLE or AG2_AVAILABLE):
+        if CREWAI_AVAILABLE or AUTOGEN_AVAILABLE or PRAISONAI_AVAILABLE or AG2_AVAILABLE:
             try:
                 # Collect all tool names mentioned in the YAML config
                 needed_tools: set[str] = set()
@@ -597,15 +597,20 @@ class AgentsGenerator:
 
                 # Resolve only the tools actually referenced in YAML
                 for tool_name in needed_tools:
-                    resolved_tool = self.tool_resolver.resolve(tool_name)
-                    if resolved_tool is None:
-                        self.logger.warning(f"Tool '{tool_name}' not found")
+                    try:
+                        resolved_tool = self.tool_resolver.resolve(tool_name)
+                        if resolved_tool is None:
+                            self.logger.warning(f"Tool '{tool_name}' not found")
+                            continue
+                        tools_dict[tool_name] = (
+                            resolved_tool() if inspect.isclass(resolved_tool) else resolved_tool
+                        )
+                    except Exception as e:
+                        self.logger.warning(f"Failed to initialize tool '{tool_name}': {e}")
                         continue
-                    tools_dict[tool_name] = resolved_tool() if inspect.isclass(resolved_tool) else resolved_tool
                             
             except Exception as e:
-                self.logger.debug(f"Error resolving tools: {e}")
-                tools_dict = {}
+                self.logger.warning(f"Error collecting YAML tool references: {e}")
             
             # Add tools from class names
             for tool_class in self.tools:

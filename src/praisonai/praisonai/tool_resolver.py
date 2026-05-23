@@ -272,6 +272,9 @@ class ToolResolver:
         if cached is not _SENTINEL:
             return cached
 
+        # Load local tools outside the cache lock to prevent lock-order inversion
+        local_tools = self._load_local_tools()
+
         with self._resolve_cache_lock:
             # Double-check inside lock
             cached = self._resolve_cache.get(name, _SENTINEL)
@@ -279,7 +282,6 @@ class ToolResolver:
                 return cached
 
             # 1. Check local tools.py first (highest priority)
-            local_tools = self._load_local_tools()
             if name in local_tools:
                 logger.debug(f"Resolved '{name}' from local tools.py")
                 tool = local_tools[name]

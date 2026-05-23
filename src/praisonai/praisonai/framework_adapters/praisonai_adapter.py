@@ -96,6 +96,9 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             except ImportError as e:
                 logger.warning(f"InteractiveRuntime not available: {e}")
                 interactive_runtime = None
+            except (RuntimeError, OSError, ConnectionError) as e:
+                logger.warning(f"InteractiveRuntime startup failed: {e}")
+                interactive_runtime = None
         try:
             # All work that can throw *after* start() lives here, including
             # create_agent_centric_tools, tools_dict.update, agent construction,
