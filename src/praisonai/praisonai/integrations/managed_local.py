@@ -492,10 +492,15 @@ class LocalManagedAgent:
                 store.update_session_metadata(self._session_id, **state)
             else:
                 session = store.get_session(self._session_id)
-                if not isinstance(session.metadata, dict):
-                    session.metadata = {}
-                session.metadata.update(state)
-                store._save_session(session)
+                if session is None:
+                    from praisonaiagents.session.store import SessionData
+
+                    store._save_session(SessionData(session_id=self._session_id, metadata=state))
+                else:
+                    if not isinstance(session.metadata, dict):
+                        session.metadata = {}
+                    session.metadata.update(state)
+                    store._save_session(session)
         except Exception as e:
             logger.debug("[local_managed] _persist_state failed: %s", e)
 
