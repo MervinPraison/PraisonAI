@@ -85,27 +85,27 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                     lsp_enabled=lsp_enabled,
                     approval_mode=os.environ.get("PRAISONAI_APPROVAL_MODE", "prompt")
                 )
-                interactive_runtime = InteractiveRuntime(runtime_config)
+                rt = InteractiveRuntime(runtime_config)
                 logger.info(f"Starting InteractiveRuntime (ACP: {acp_enabled}, LSP: {lsp_enabled})")
                 
                 # Start the runtime on the shared background loop where it stays alive
                 # and its asyncio primitives remain valid for the duration of this call
-                run_sync(interactive_runtime.start())
-                
-                centric_tools = create_agent_centric_tools(interactive_runtime)
-                logger.info(f"Loaded {len(centric_tools)} InteractiveRuntime tools")
-                
-                # Merge with tools_dict
-                if tools_dict:
-                    tools_dict.update(centric_tools)
-                else:
-                    tools_dict = centric_tools
+                run_sync(rt.start())
+                interactive_runtime = rt  # only assign AFTER start() succeeds
                 
             except ImportError as e:
                 logger.warning(f"InteractiveRuntime not available: {e}")
-            except Exception as e:
-                logger.error(f"Error setting up InteractiveRuntime: {e}")
+                interactive_runtime = None
         try:
+            # All work that can throw *after* start() lives here, including
+            # create_agent_centric_tools, tools_dict.update, agent construction,
+            # team.start(), etc.
+            if interactive_runtime is not None:
+                from praisonai.cli.features.agent_tools import create_agent_centric_tools
+                centric_tools = create_agent_centric_tools(interactive_runtime)
+                logger.info(f"Loaded {len(centric_tools)} InteractiveRuntime tools")
+                tools_dict = {**(tools_dict or {}), **centric_tools}
+
             # Create agents from roles
             for role, details in config.get('roles', {}).items():
                 role_filled = self._format_template(details.get('role', role), topic=topic)
