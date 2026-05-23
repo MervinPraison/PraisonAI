@@ -174,7 +174,14 @@ class ChromaKnowledgeAdapter:
             
             # Add where filter if any conditions specified
             if where_filter:
-                query_kwargs["where"] = where_filter
+                # ChromaDB validation expects exactly one condition in the where clause
+                # When multiple conditions exist, use $and operator to combine them
+                if len(where_filter) == 1:
+                    query_kwargs["where"] = where_filter
+                else:
+                    # Convert multiple conditions to ChromaDB's $and format
+                    and_conditions = [{k: v} for k, v in where_filter.items()]
+                    query_kwargs["where"] = {"$and": and_conditions}
             
             response = self.collection.query(**query_kwargs)
             
