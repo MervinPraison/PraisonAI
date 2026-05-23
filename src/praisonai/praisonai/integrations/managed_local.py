@@ -486,18 +486,16 @@ class LocalManagedAgent:
             store.set_metadata(self._session_id, state)
             return
 
-        # DefaultSessionStore path — write into SessionData.metadata
+        # DefaultSessionStore path — merge metadata under file lock (preserves messages)
         try:
-            session = store.get_session(self._session_id)
-            if session is not None:
+            if hasattr(store, "update_session_metadata"):
+                store.update_session_metadata(self._session_id, **state)
+            else:
+                session = store.get_session(self._session_id)
                 if not isinstance(session.metadata, dict):
                     session.metadata = {}
                 session.metadata.update(state)
                 store._save_session(session)
-            else:
-                from praisonaiagents.session.store import SessionData
-                new_session = SessionData(session_id=self._session_id, metadata=state)
-                store._save_session(new_session)
         except Exception as e:
             logger.debug("[local_managed] _persist_state failed: %s", e)
 
