@@ -507,7 +507,7 @@ Your Goal: {self.goal}"""
             emit_events=True
         )
 
-    def _chat_completion(self, messages, temperature=1.0, tools=None, stream=True, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, _retry_depth=0):
+    def _chat_completion(self, messages, temperature=1.0, tools=None, stream=False, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, _retry_depth=0):
         start_time = time.time()
 
         # --- Context compaction (opt-in via ExecutionConfig.context_compaction) ---
@@ -774,7 +774,7 @@ Your Goal: {self.goal}"""
         messages, 
         temperature=1.0, 
         tools=None, 
-        stream=True,
+        stream=False,
         reasoning_steps=False,
         task_name=None,
         task_description=None,
