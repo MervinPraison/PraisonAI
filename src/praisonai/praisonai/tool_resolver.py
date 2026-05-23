@@ -34,6 +34,9 @@ from ._safe_loader import load_user_module
 
 logger = logging.getLogger(__name__)
 
+# Sentinel for cache - needed because None is a valid cached result (tool not found)
+_SENTINEL = object()
+
 
 class ToolResolver:
     """Resolves tool names to callables from multiple sources.
@@ -46,6 +49,8 @@ class ToolResolver:
         _local_tools_cache: Cached tools from local tools.py
         _local_tools_loaded: Whether local tools have been loaded
         _registry: Optional ToolRegistry for wrapper-level tool registration
+        _resolve_cache: Cached results from resolve() calls
+        _resolve_cache_lock: Thread lock for resolve cache
     """
     
     def __init__(
@@ -65,6 +70,10 @@ class ToolResolver:
         self._praisonai_tools_available: Optional[bool] = None
         self._local_tools_lock = threading.Lock()
         self._registry = registry
+        
+        # Cache for resolved tools to avoid repeated resolution
+        self._resolve_cache: Dict[str, Optional[Callable]] = {}
+        self._resolve_cache_lock = threading.Lock()
     
     def _load_local_tools(self) -> Mapping[str, Callable]:
         """Load tools from local tools.py file.
@@ -257,35 +266,56 @@ class ToolResolver:
         name = name.strip()
         if not name:
             return None
-        
-        # 1. Check local tools.py first (highest priority)
+
+        # Fast path: cached result
+        cached = self._resolve_cache.get(name, _SENTINEL)
+        if cached is not _SENTINEL:
+            return cached
+
+        # Load local tools outside the cache lock to prevent lock-order inversion
         local_tools = self._load_local_tools()
-        if name in local_tools:
-            logger.debug(f"Resolved '{name}' from local tools.py")
-            return local_tools[name]
-        
-        # 2. Check wrapper ToolRegistry (NEW - ahead of SDK paths)
-        tool = self._resolve_from_wrapper_registry(name)
-        if tool is not None:
-            return tool
-        
-        # 3. Check praisonaiagents.tools
-        tool = self._resolve_from_praisonaiagents(name)
-        if tool is not None:
-            return tool
-        
-        # 4. Check praisonai-tools package
-        tool = self._resolve_from_praisonai_tools(name)
-        if tool is not None:
-            return tool
-        
-        # 5. Check core SDK tool registry
-        tool = self._resolve_from_registry(name)
-        if tool is not None:
-            return tool
-        
-        logger.warning(f"Tool '{name}' not found in any source")
-        return None
+
+        with self._resolve_cache_lock:
+            # Double-check inside lock
+            cached = self._resolve_cache.get(name, _SENTINEL)
+            if cached is not _SENTINEL:
+                return cached
+
+            # 1. Check local tools.py first (highest priority)
+            if name in local_tools:
+                logger.debug(f"Resolved '{name}' from local tools.py")
+                tool = local_tools[name]
+                self._resolve_cache[name] = tool
+                return tool
+            
+            # 2. Check wrapper ToolRegistry (NEW - ahead of SDK paths)
+            tool = self._resolve_from_wrapper_registry(name)
+            if tool is not None:
+                self._resolve_cache[name] = tool
+                return tool
+            
+            # 3. Check praisonaiagents.tools
+            tool = self._resolve_from_praisonaiagents(name)
+            if tool is not None:
+                self._resolve_cache[name] = tool
+                return tool
+            
+            # 4. Check praisonai-tools package
+            tool = self._resolve_from_praisonai_tools(name)
+            if tool is not None:
+                self._resolve_cache[name] = tool
+                return tool
+            
+            # 5. Check core SDK tool registry
+            tool = self._resolve_from_registry(name)
+            if tool is not None:
+                self._resolve_cache[name] = tool
+                return tool
+            
+            # Cache the None result to avoid repeated failed lookups
+            logger.warning(f"Tool '{name}' not found in any source")
+            self._resolve_cache[name] = None
+            return None
     
     def resolve_many(self, names: List[str]) -> List[Callable]:
         """Resolve multiple tool names to callables.
@@ -394,13 +424,15 @@ class ToolResolver:
         return list(set(missing))  # Remove duplicates
     
     def clear_cache(self) -> None:
-        """Clear the local tools cache.
+        """Clear both the local tools cache and resolve cache.
         
         Useful when tools.py has been modified and needs to be reloaded.
         """
         with self._local_tools_lock:
             self._local_tools_cache = MappingProxyType({})
             self._local_tools_loaded = False
+        with self._resolve_cache_lock:
+            self._resolve_cache.clear()
     
     def get_local_callables(self) -> List[Callable]:
         """Get functions exposed by tools.py (path A semantics).
