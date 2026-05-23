@@ -204,6 +204,10 @@ class ChromaKnowledgeAdapter:
             return SearchResult(results=items)
             
         except Exception as e:
+            # Log ChromaDB query errors for better debugging
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"ChromaDB search failed: {e}")
             return SearchResult(results=[])
     
     def add(self, content: Any, *, user_id: Optional[str] = None, agent_id: Optional[str] = None,
