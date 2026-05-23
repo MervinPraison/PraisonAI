@@ -857,7 +857,7 @@ Your Goal: {self.goal}"""
         messages, 
         temperature=1.0, 
         tools=None, 
-        stream=True,
+        stream=True,  # Async methods keep stream=True default (async adapters support streaming)
         reasoning_steps=False,
         task_name=None,
         task_description=None,
