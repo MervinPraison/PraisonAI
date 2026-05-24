@@ -460,12 +460,12 @@ class BaseAutoGenerator:
         with self._client_lock:
             sync_client = getattr(self, '_openai_client', None)
             self._openai_client = None
-            client = getattr(self, '_async_openai_client', None)
+            async_client = getattr(self, '_async_openai_client', None)
             self._async_openai_client = None
         if sync_client is not None:
             await asyncio.to_thread(sync_client.close)
-        if client is not None:
-            await client.close()
+        if async_client is not None:
+            await async_client.close()
     
     def __enter__(self):
         return self
