@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from typing import Any, Dict, List, Optional, Type, TypeVar
 import os
 import json
+import asyncio
 import yaml
 import threading
 from rich import print
@@ -454,13 +455,15 @@ class BaseAutoGenerator:
     
     async def aclose(self):
         """Close both sync and async OpenAI clients if they exist."""
-        # Ensure sync client is also released for mixed sync/async usage.
-        self.close()
         if not hasattr(self, '_client_lock'):
             return  # Object was never fully initialized
         with self._client_lock:
+            sync_client = getattr(self, '_openai_client', None)
+            self._openai_client = None
             client = getattr(self, '_async_openai_client', None)
             self._async_openai_client = None
+        if sync_client is not None:
+            await asyncio.to_thread(sync_client.close)
         if client is not None:
             await client.close()
     
