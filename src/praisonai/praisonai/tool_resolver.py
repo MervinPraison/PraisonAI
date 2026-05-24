@@ -64,7 +64,9 @@ class ToolResolver:
             tools_py_path: Optional path to tools.py. If None, uses ./tools.py
             registry: Optional ToolRegistry to include in resolution chain
         """
-        self._tools_py_path = tools_py_path or "tools.py"
+        from pathlib import Path
+        # Resolve path eagerly in constructor to make binding explicit and inspectable
+        self._tools_py_path = str(Path(tools_py_path or "tools.py").resolve())
         self._local_tools_cache: Mapping[str, Callable] = MappingProxyType({})
         self._local_tools_loaded: bool = False
         self._praisonai_tools_available: Optional[bool] = None
@@ -577,3 +579,17 @@ def validate_yaml_tools(yaml_config: Dict[str, Any], resolver: Optional[ToolReso
         List of missing tool names
     """
     return (resolver or _get_default_resolver()).validate_yaml_tools(yaml_config)
+
+
+def reset_default_resolver() -> None:
+    """Clear the process-default resolver.
+    
+    Call this between tenants, on CWD change, or in test setup to ensure
+    that local tools.py resolution is not affected by previous calls.
+    
+    This follows the same pattern as _framework_availability.invalidate()
+    for resetting cached state.
+    """
+    global _default_resolver
+    with _default_resolver_lock:
+        _default_resolver = None
