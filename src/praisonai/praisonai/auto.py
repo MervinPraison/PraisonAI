@@ -453,7 +453,9 @@ class BaseAutoGenerator:
             client.close()
     
     async def aclose(self):
-        """Close the async OpenAI client if it exists."""
+        """Close both sync and async OpenAI clients if they exist."""
+        # Ensure sync client is also released for mixed sync/async usage.
+        self.close()
         if not hasattr(self, '_client_lock'):
             return  # Object was never fully initialized
         with self._client_lock:
