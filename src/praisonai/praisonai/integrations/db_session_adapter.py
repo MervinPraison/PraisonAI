@@ -37,16 +37,43 @@ class DbSessionAdapter:
         self._sessions: Set[str] = set()
         self._metadata: Dict[str, Dict[str, Any]] = {}
         self._history_cache: Dict[str, List[Dict[str, str]]] = {}
+        self._cleared_sessions: Set[str] = set()
+
+    def _conversation_store(self) -> Any:
+        """Optional ConversationStore behind the DbAdapter (if present)."""
+        conv = getattr(self._db, "conversation", None)
+        if conv is not None:
+            return conv
+        orchestrator = getattr(self._db, "_orchestrator", None)
+        return getattr(orchestrator, "conversation", None) if orchestrator else None
+
+    def _purge_persisted_messages(self, session_id: str) -> None:
+        """Remove persisted messages when the session is cleared or deleted."""
+        conv = self._conversation_store()
+        if conv is not None and hasattr(conv, "delete_messages"):
+            try:
+                conv.delete_messages(session_id, None)
+            except Exception as e:
+                logger.warning(
+                    "[db_session_adapter] delete_messages failed for %s: %s",
+                    session_id,
+                    e,
+                )
 
     def _ensure_session(self, session_id: str, agent_name: str = "ManagedAgent") -> None:
         """Ensure session exists in the DB adapter."""
         if session_id not in self._sessions:
+            skip_history = session_id in self._cleared_sessions
+            if skip_history:
+                self._cleared_sessions.discard(session_id)
             try:
                 msgs = self._db.on_agent_start(agent_name, session_id)
-                if msgs:
+                if msgs and not skip_history:
                     self._history_cache[session_id] = [
                         {"role": m.role, "content": m.content} for m in msgs
                     ]
+                elif skip_history:
+                    self._history_cache[session_id] = []
                 self._sessions.add(session_id)
             except Exception as e:
                 logger.warning("[db_session_adapter] on_agent_start failed: %s", e)
@@ -99,14 +126,24 @@ class DbSessionAdapter:
 
     def clear_session(self, session_id: str) -> bool:
         """Clear all messages from a session."""
-        self._history_cache.pop(session_id, None)
+        if session_id in self._sessions:
+            try:
+                self._db.on_agent_end(session_id)
+            except Exception as e:
+                logger.warning("[db_session_adapter] on_agent_end failed: %s", e)
+        self._purge_persisted_messages(session_id)
+        self._history_cache[session_id] = []
+        self._sessions.discard(session_id)
+        self._cleared_sessions.add(session_id)
         return True
 
     def delete_session(self, session_id: str) -> bool:
         """Delete a session completely."""
+        self._purge_persisted_messages(session_id)
         self._history_cache.pop(session_id, None)
         self._metadata.pop(session_id, None)
         self._sessions.discard(session_id)
+        self._cleared_sessions.discard(session_id)
         try:
             self._db.on_agent_end(session_id)
         except Exception:

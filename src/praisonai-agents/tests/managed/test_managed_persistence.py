@@ -349,6 +349,50 @@ class TestDbSessionAdapter:
         assert meta["agent_id"] == "abc"
         assert meta["total_input_tokens"] == 42
 
+    def test_clear_session_purges_db_history(self):
+        """clear_session must not leave stale messages reloadable from the DB."""
+        from praisonai.integrations.db_session_adapter import DbSessionAdapter
+        from praisonaiagents.db.protocol import DbMessage
+
+        persisted: list = []
+
+        mock_db = MagicMock()
+
+        def _on_start(agent_name, session_id):
+            return list(persisted)
+
+        def _on_user(sid, content, **kw):
+            persisted.append(DbMessage(role="user", content=content))
+
+        def _on_assistant(sid, content, **kw):
+            persisted.append(DbMessage(role="assistant", content=content))
+
+        mock_db.on_agent_start.side_effect = _on_start
+        mock_db.on_user_message.side_effect = _on_user
+        mock_db.on_agent_message.side_effect = _on_assistant
+
+        conv = MagicMock()
+        conv.delete_messages.side_effect = lambda sid, ids: persisted.clear()
+        mock_db.conversation = conv
+
+        adapter = DbSessionAdapter(mock_db)
+        sid = "bot-trim-session"
+        adapter.add_message(sid, "user", "old")
+        adapter.add_message(sid, "assistant", "old-reply")
+        assert len(persisted) == 2
+
+        adapter.clear_session(sid)
+        conv.delete_messages.assert_called_once_with(sid, None)
+        assert persisted == []
+        assert adapter.get_chat_history(sid) == []
+
+        adapter.add_message(sid, "user", "new-only")
+        assert len(adapter.get_chat_history(sid)) == 1
+        assert len(persisted) == 1
+
+        adapter2 = DbSessionAdapter(mock_db)
+        assert adapter2.get_chat_history(sid) == [{"role": "user", "content": "new-only"}]
+
 
 # ===========================================================================
 # 7. ManagedAgent factory wiring
