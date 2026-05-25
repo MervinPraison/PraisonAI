@@ -6,7 +6,13 @@ No heavy imports - only stdlib.
 """
 
 import hashlib
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
+
+if TYPE_CHECKING:
+    from ..knowledge.models import SearchResultItem
+
+
+ResultItem = Union[Dict[str, Any], "SearchResultItem"]
 
 
 def _estimate_tokens(text: str) -> int:
@@ -19,7 +25,7 @@ def _estimate_tokens(text: str) -> int:
     return len(text) // 4 + 1
 
 
-def _extract_value(item: Union[Dict[str, Any], Any], key: str, default: Any = None) -> Any:
+def _extract_value(item: ResultItem, key: str, default: Any = None) -> Any:
     """
     Extract value from either dict or object (e.g., SearchResultItem).
     
@@ -53,9 +59,9 @@ def _chunk_hash(text: str, source: Optional[str] = None) -> str:
 
 
 def deduplicate_chunks(
-    results: List[Union[Dict[str, Any], Any]],
+    results: List[ResultItem],
     similarity_threshold: float = 0.9,
-) -> List[Union[Dict[str, Any], Any]]:
+) -> List[ResultItem]:
     """
     Deduplicate chunks by content hash.
     
@@ -69,7 +75,7 @@ def deduplicate_chunks(
         Deduplicated list of results
     """
     seen_hashes: Set[str] = set()
-    unique_results: List[Union[Dict[str, Any], Any]] = []
+    unique_results: List[ResultItem] = []
     
     for result in results:
         # Skip None results
@@ -84,7 +90,7 @@ def deduplicate_chunks(
         if not isinstance(metadata, dict):
             metadata = {}
         
-        source = metadata.get("source", "") if isinstance(metadata, dict) else ""
+        source = metadata.get("source", "") or _extract_value(result, "source", "")
         
         chunk_id = _chunk_hash(text, source)
         
@@ -131,12 +137,12 @@ def truncate_context(
 
 
 def build_context(
-    results: List[Union[Dict[str, Any], Any]],
+    results: List[ResultItem],
     max_tokens: int = 4000,
     deduplicate: bool = True,
     separator: str = "\n\n---\n\n",
     include_source: bool = True,
-) -> Tuple[str, List[Union[Dict[str, Any], Any]]]:
+) -> Tuple[str, List[ResultItem]]:
     """
     Build context string from retrieval results.
     
@@ -160,7 +166,7 @@ def build_context(
         results = deduplicate_chunks(results)
     
     context_parts: List[str] = []
-    used_results: List[Union[Dict[str, Any], Any]] = []
+    used_results: List[ResultItem] = []
     current_tokens = 0
     separator_tokens = _estimate_tokens(separator)
     
@@ -181,8 +187,8 @@ def build_context(
             if not isinstance(metadata, dict):
                 metadata = {}
             
-            source = metadata.get("source", "") if isinstance(metadata, dict) else ""
-            filename = metadata.get("filename", "") if isinstance(metadata, dict) else ""
+            source = metadata.get("source", "") or _extract_value(result, "source", "")
+            filename = metadata.get("filename", "") or _extract_value(result, "filename", "")
             source_label = filename or source or f"Source {i + 1}"
             chunk_text = f"[{source_label}]\n{text}"
         else:
@@ -225,7 +231,7 @@ class DefaultContextBuilder:
     
     def build(
         self,
-        results: List[Union[Dict[str, Any], Any]],
+        results: List[ResultItem],
         max_tokens: int = 4000,
         deduplicate: bool = True,
     ) -> str:
