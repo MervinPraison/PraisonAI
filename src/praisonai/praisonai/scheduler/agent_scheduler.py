@@ -246,12 +246,15 @@ class AgentScheduler:
                 
                 # Execute with timeout if specified
                 if self.timeout:
-                    with ThreadPoolExecutor(max_workers=1) as executor:
-                        future = executor.submit(self._executor.execute, self.task)
-                        try:
-                            result = future.result(timeout=self.timeout)
-                        except FuturesTimeout:
-                            raise TimeoutError(f"Execution exceeded {self.timeout}s timeout")
+                    executor = ThreadPoolExecutor(max_workers=1)
+                    future = executor.submit(self._executor.execute, self.task)
+                    try:
+                        result = future.result(timeout=self.timeout)
+                    except FuturesTimeout:
+                        future.cancel()
+                        raise TimeoutError(f"Execution exceeded {self.timeout}s timeout")
+                    finally:
+                        executor.shutdown(wait=False, cancel_futures=True)
                 else:
                     result = self._executor.execute(self.task)
                 

@@ -240,6 +240,27 @@ class TestAgentSchedulerExecution:
         # Should stop after first failure + backoff signal, not complete all retries
         assert mock_agent.start.call_count == 1
 
+    def test_execute_with_retry_timeout_returns_quickly(self):
+        """Test timeout handling does not block until worker completion."""
+        mock_agent = Mock()
+        finished = threading.Event()
+
+        def slow_start(_task):
+            finished.wait(timeout=1.2)
+            return "late"
+
+        mock_agent.start = Mock(side_effect=slow_start)
+        scheduler = AgentScheduler(mock_agent, "Test task", timeout=0.1)
+        scheduler._stop_event.wait = Mock(return_value=False)
+
+        start = time.time()
+        scheduler._execute_with_retry(max_retries=1)
+        duration = time.time() - start
+
+        assert scheduler._failure_count == 1
+        assert scheduler._success_count == 0
+        assert duration < 0.6
+
 
 class TestAgentSchedulerCallbacks:
     """Test AgentScheduler callback functionality."""
