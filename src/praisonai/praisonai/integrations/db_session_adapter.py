@@ -115,6 +115,26 @@ class DbSessionAdapter:
                     e,
                 )
 
+    def _purge_persisted_metadata(self, session_id: str) -> None:
+        """Remove persisted metadata when the session is deleted."""
+        conv = self._conversation_store()
+        if conv is None:
+            return
+        try:
+            if hasattr(conv, "delete_session"):
+                conv.delete_session(session_id)
+            elif hasattr(conv, "get_session") and hasattr(conv, "update_session"):
+                session = conv.get_session(session_id)
+                if session is not None:
+                    session.metadata = {}
+                    conv.update_session(session)
+        except Exception as e:
+            logger.warning(
+                "[db_session_adapter] purge metadata failed for %s: %s",
+                session_id,
+                e,
+            )
+
     def _ensure_session(self, session_id: str, agent_name: str = "ManagedAgent") -> None:
         """Ensure session exists in the DB adapter."""
         if session_id not in self._sessions:
@@ -199,6 +219,7 @@ class DbSessionAdapter:
     def delete_session(self, session_id: str) -> bool:
         """Delete a session completely."""
         self._purge_persisted_messages(session_id)
+        self._purge_persisted_metadata(session_id)
         self._history_cache.pop(session_id, None)
         self._metadata.pop(session_id, None)
         self._sessions.discard(session_id)

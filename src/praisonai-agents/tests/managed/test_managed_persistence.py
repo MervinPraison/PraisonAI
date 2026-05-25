@@ -416,6 +416,7 @@ class TestDbSessionAdapter:
 
         mock_db = MagicMock()
         mock_db.on_agent_start.return_value = []
+        mock_db.conversation = None  # Prevent auto-creation of conversation attr
         mock_db._conversation_store = conv
 
         sid = "meta-restart-session"
@@ -434,6 +435,74 @@ class TestDbSessionAdapter:
         assert meta["agent_id"] == "agent-xyz"
         assert meta["total_input_tokens"] == 99
         assert meta["session_history"] == [{"turn": 1}]
+
+    def test_managed_agent_metadata_persistence_e2e(self):
+        """Integration test: ManagedAgent metadata survives restart via real adapter."""
+        import tempfile
+        import os
+        from praisonaiagents.managed import LocalManagedAgent
+        from praisonai.integrations.db_session_adapter import DbSessionAdapter
+        
+        # Create a real SQLite database for this test
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+            db_path = tmp.name
+        
+        try:
+            # Mock PraisonDB that uses file-based conversation store
+            mock_db = MagicMock()
+            mock_db.on_agent_start.return_value = []
+            
+            # Real conversation store backed by file
+            from praisonai.persistence.conversation.base import ConversationSession
+            from praisonai.persistence.conversation.file_store import FileConversationStore
+            
+            conv_store = FileConversationStore(store_path=db_path + "_conv.json")
+            mock_db.conversation = None
+            mock_db._conversation_store = conv_store
+            
+            # Create and run agent with metadata
+            adapter = DbSessionAdapter(mock_db)
+            agent = LocalManagedAgent(
+                name="test-agent",
+                instructions="You are a helpful assistant.",
+                session_store=adapter,
+                llm="gpt-4o-mini"
+            )
+            
+            # Start agent and collect session metadata
+            session_id = "integration-test-session"
+            adapter._ensure_session(session_id, agent.name)
+            
+            # Set some metadata that should persist
+            test_metadata = {
+                "agent_id": "test-agent-123",
+                "total_input_tokens": 150,
+                "session_history": [{"turn": 1, "action": "started"}],
+                "compute_instance": "test-instance-1"
+            }
+            adapter.set_metadata(session_id, test_metadata)
+            
+            # Simulate process restart with new adapter and agent
+            adapter2 = DbSessionAdapter(mock_db)
+            agent2 = LocalManagedAgent(
+                name="test-agent",
+                instructions="You are a helpful assistant.",
+                session_store=adapter2,
+                llm="gpt-4o-mini"
+            )
+            
+            # Metadata should be restored from persistence
+            restored_meta = adapter2.get_metadata(session_id)
+            assert restored_meta["agent_id"] == "test-agent-123"
+            assert restored_meta["total_input_tokens"] == 150
+            assert restored_meta["session_history"] == [{"turn": 1, "action": "started"}]
+            assert restored_meta["compute_instance"] == "test-instance-1"
+            
+        finally:
+            # Clean up temp files
+            for path in [db_path, db_path + "_conv.json"]:
+                if os.path.exists(path):
+                    os.unlink(path)
 
 
 # ===========================================================================
