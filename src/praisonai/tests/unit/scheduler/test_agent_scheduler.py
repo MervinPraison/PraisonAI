@@ -256,10 +256,11 @@ class TestAgentSchedulerExecution:
         start = time.time()
         scheduler._execute_with_retry(max_retries=1)
         duration = time.time() - start
+        max_expected_duration = 0.6
 
         assert scheduler._failure_count == 1
         assert scheduler._success_count == 0
-        assert duration < 0.6
+        assert duration < max_expected_duration
 
 
 class TestAgentSchedulerCallbacks:
