@@ -245,7 +245,8 @@ class TestAgentSchedulerExecution:
         mock_agent = Mock()
 
         def slow_start(_task):
-            threading.Event().wait(timeout=1.2)
+            blocker = threading.Event()
+            blocker.wait(timeout=1.2)
             return "late"
 
         mock_agent.start = Mock(side_effect=slow_start)
