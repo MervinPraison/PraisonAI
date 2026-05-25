@@ -90,7 +90,9 @@ def deduplicate_chunks(
         if not isinstance(metadata, dict):
             metadata = {}
         
-        source = metadata.get("source", "") or _extract_value(result, "source", "")
+        source = metadata.get("source")
+        if source is None:
+            source = _extract_value(result, "source", "")
         
         chunk_id = _chunk_hash(text, source)
         
@@ -187,8 +189,12 @@ def build_context(
             if not isinstance(metadata, dict):
                 metadata = {}
             
-            source = metadata.get("source", "") or _extract_value(result, "source", "")
-            filename = metadata.get("filename", "") or _extract_value(result, "filename", "")
+            source = metadata.get("source")
+            if source is None:
+                source = _extract_value(result, "source", "")
+            filename = metadata.get("filename")
+            if filename is None:
+                filename = _extract_value(result, "filename", "")
             source_label = filename or source or f"Source {i + 1}"
             chunk_text = f"[{source_label}]\n{text}"
         else:
