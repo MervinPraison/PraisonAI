@@ -358,7 +358,7 @@ class AgentsGenerator:
             if 'handoff_max_concurrent' in cli_config:
                 handoff_config['max_concurrent'] = cli_config['handoff_max_concurrent']
             if 'handoff_detect_cycles' in cli_config:
-                handoff_config['detect_cycles'] = cli_config['handoff_detect_cycles'] == 'true'
+                handoff_config['detect_cycles'] = cli_config['handoff_detect_cycles'].lower() == 'true'
             
             if handoff_config:
                 agent_overrides['handoff'] = handoff_config
@@ -608,12 +608,17 @@ class AgentsGenerator:
             except Exception as e:
                 self.logger.warning(f"Error collecting YAML tool references: {e}")
             
-            # Add tools from class names
+            # Add tools from class names - use tool_resolver to check tool validity
             for tool_class in self.tools:
-                if isinstance(tool_class, type) and BaseTool and issubclass(tool_class, BaseTool):
-                    tool_name = tool_class.__name__
-                    tools_dict[tool_name] = tool_class()
-                    self.logger.debug(f"Added tool: {tool_name}")
+                if isinstance(tool_class, type):
+                    try:
+                        # Try to instantiate the tool to validate it
+                        tool_instance = tool_class()
+                        tool_name = tool_class.__name__
+                        tools_dict[tool_name] = tool_instance
+                        self.logger.debug(f"Added tool: {tool_name}")
+                    except Exception as e:
+                        self.logger.warning(f"Failed to instantiate tool class {tool_class.__name__}: {e}")
 
         root_directory = os.getcwd()
         tools_py_path = os.path.join(root_directory, 'tools.py')
