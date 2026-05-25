@@ -43,6 +43,21 @@ def _extract_value(item: ResultItem, key: str, default: Any = None) -> Any:
         return getattr(item, key, default)
 
 
+def _extract_metadata_value(
+    item: ResultItem,
+    metadata: Dict[str, Any],
+    key: str,
+    default: Any = "",
+) -> Any:
+    """
+    Extract metadata value with fallback to top-level item attribute.
+    """
+    value = metadata.get(key)
+    if value is None:
+        return _extract_value(item, key, default)
+    return value
+
+
 def _chunk_hash(text: str, source: Optional[str] = None) -> str:
     """
     Generate stable hash for chunk deduplication.
@@ -90,9 +105,7 @@ def deduplicate_chunks(
         if not isinstance(metadata, dict):
             metadata = {}
         
-        source = metadata.get("source")
-        if source is None:
-            source = _extract_value(result, "source", "")
+        source = _extract_metadata_value(result, metadata, "source", "")
         
         chunk_id = _chunk_hash(text, source)
         
@@ -189,12 +202,8 @@ def build_context(
             if not isinstance(metadata, dict):
                 metadata = {}
             
-            source = metadata.get("source")
-            if source is None:
-                source = _extract_value(result, "source", "")
-            filename = metadata.get("filename")
-            if filename is None:
-                filename = _extract_value(result, "filename", "")
+            source = _extract_metadata_value(result, metadata, "source", "")
+            filename = _extract_metadata_value(result, metadata, "filename", "")
             source_label = filename or source or f"Source {i + 1}"
             chunk_text = f"[{source_label}]\n{text}"
         else:
