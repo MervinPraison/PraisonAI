@@ -393,6 +393,48 @@ class TestDbSessionAdapter:
         adapter2 = DbSessionAdapter(mock_db)
         assert adapter2.get_chat_history(sid) == [{"role": "user", "content": "new-only"}]
 
+    def test_metadata_survives_adapter_restart(self):
+        """set_metadata must persist to the conversation store for resume after restart."""
+        from praisonai.integrations.db_session_adapter import DbSessionAdapter
+        from praisonai.persistence.conversation.base import ConversationSession
+
+        sessions: dict = {}
+
+        def _get_session(sid):
+            return sessions.get(sid)
+
+        def _create_session(session):
+            sessions[session.session_id] = session
+
+        def _update_session(session):
+            sessions[session.session_id] = session
+
+        conv = MagicMock()
+        conv.get_session.side_effect = _get_session
+        conv.create_session.side_effect = _create_session
+        conv.update_session.side_effect = _update_session
+
+        mock_db = MagicMock()
+        mock_db.on_agent_start.return_value = []
+        mock_db._conversation_store = conv
+
+        sid = "meta-restart-session"
+        adapter1 = DbSessionAdapter(mock_db)
+        adapter1.set_metadata(
+            sid,
+            {
+                "agent_id": "agent-xyz",
+                "total_input_tokens": 99,
+                "session_history": [{"turn": 1}],
+            },
+        )
+
+        adapter2 = DbSessionAdapter(mock_db)
+        meta = adapter2.get_metadata(sid)
+        assert meta["agent_id"] == "agent-xyz"
+        assert meta["total_input_tokens"] == 99
+        assert meta["session_history"] == [{"turn": 1}]
+
 
 # ===========================================================================
 # 7. ManagedAgent factory wiring
