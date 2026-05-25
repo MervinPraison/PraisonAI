@@ -256,7 +256,8 @@ class TestAgentSchedulerExecution:
         start = time.time()
         scheduler._execute_with_retry(max_retries=1)
         duration = time.time() - start
-        max_expected_duration = scheduler.timeout + 1.0
+        timing_buffer_seconds = 1.0
+        max_expected_duration = scheduler.timeout + timing_buffer_seconds
 
         assert scheduler._failure_count == 1
         assert scheduler._success_count == 0
