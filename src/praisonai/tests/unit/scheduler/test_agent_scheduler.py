@@ -243,10 +243,9 @@ class TestAgentSchedulerExecution:
     def test_execute_with_retry_timeout_returns_quickly(self):
         """Test timeout handling does not block until worker completion."""
         mock_agent = Mock()
-        finished = threading.Event()
 
         def slow_start(_task):
-            finished.wait(timeout=1.2)
+            threading.Event().wait(timeout=1.2)
             return "late"
 
         mock_agent.start = Mock(side_effect=slow_start)
