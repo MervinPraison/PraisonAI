@@ -186,7 +186,6 @@ class HierarchicalSessionStore(DefaultSessionStore):
         
         Overrides parent to preserve extended session data.
         """
-        from .store import SessionMessage
 
         message = SessionMessage(
             role=role,
