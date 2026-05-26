@@ -237,7 +237,7 @@ class WebSocketGateway:
         
         # Ensure single source of truth: export resolved token so all auth paths use the same secret
         if self.config.auth_token:
-            os.environ.setdefault("GATEWAY_AUTH_TOKEN", self.config.auth_token)
+            os.environ["GATEWAY_AUTH_TOKEN"] = self.config.auth_token
         
         # Load allowed origins from environment if not set
         if hasattr(self.config, 'allowed_origins') and not self.config.allowed_origins:
