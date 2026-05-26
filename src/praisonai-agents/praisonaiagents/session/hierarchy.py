@@ -144,6 +144,35 @@ class HierarchicalSessionStore(DefaultSessionStore):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._extended_cache: Dict[str, ExtendedSessionData] = {}
+
+    def _load_session_from_disk(self, session_id: str, filepath: str) -> ExtendedSessionData:
+        """Load extended session JSON from disk (caller must hold FileLock)."""
+        if os.path.exists(filepath):
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                return ExtendedSessionData.from_dict(data)
+            except (json.JSONDecodeError, IOError):
+                pass
+        return ExtendedSessionData(session_id=session_id)
+
+    def _modify_session_locked(
+        self,
+        session_id: str,
+        mutator,
+        *,
+        error_label: str = "modify session",
+    ) -> bool:
+        """Locked read-modify-write preserving extended session fields."""
+        result = super()._modify_session_locked(
+            session_id, mutator, error_label=error_label
+        )
+        if result:
+            with self._lock:
+                cached = self._cache.get(session_id)
+                if isinstance(cached, ExtendedSessionData):
+                    self._extended_cache[session_id] = cached
+        return result
     
     def add_message(
         self,
@@ -158,24 +187,22 @@ class HierarchicalSessionStore(DefaultSessionStore):
         Overrides parent to preserve extended session data.
         """
         from .store import SessionMessage
-        
-        # Load extended session (force reload to get latest)
-        session = self._load_extended_session(session_id, force_reload=True)
-        
+
         message = SessionMessage(
             role=role,
             content=content,
             timestamp=time.time(),
             metadata=metadata or {},
         )
-        
-        session.messages.append(message)
-        
-        # Trim messages if over limit
-        if len(session.messages) > self.max_messages:
-            session.messages = session.messages[-self.max_messages:]
-        
-        return self._save_extended_session(session)
+
+        def _apply(session: SessionData) -> None:
+            session.messages.append(message)
+            if len(session.messages) > self.max_messages:
+                session.messages = session.messages[-self.max_messages :]
+
+        return self._modify_session_locked(
+            session_id, _apply, error_label="add message to session"
+        )
     
     def _load_extended_session(self, session_id: str, force_reload: bool = False) -> ExtendedSessionData:
         """Load extended session from disk."""
