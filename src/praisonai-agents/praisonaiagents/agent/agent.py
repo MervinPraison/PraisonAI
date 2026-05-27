@@ -1952,6 +1952,102 @@ Your Goal: {self.goal}
         # Sandbox configuration - initialize SandboxMixin
         super().__init__(sandbox=sandbox)
 
+    def clone_for_channel(self) -> "Agent":
+        """Create a deep clone of this agent for use in multi-channel gateway scenarios.
+        
+        This method safely clones an Agent instance without running into threading.RLock
+        deepcopy issues that occur with copy.deepcopy(agent). It creates a new Agent
+        instance with the same configuration but fresh thread-safe objects.
+        
+        Returns:
+            Agent: A new Agent instance with the same configuration but fresh locks and state.
+            
+        Note:
+            This method is specifically designed to address issue #1746 where
+            copy.deepcopy(agent) fails due to threading.RLock objects not being picklable.
+        """
+        import copy
+        
+        # Core identity attributes (safe to deepcopy)
+        cloned_kwargs = {
+            'name': copy.deepcopy(self.name) if self.name else None,
+            'role': copy.deepcopy(self.role) if hasattr(self, 'role') else None,
+            'goal': copy.deepcopy(self.goal) if hasattr(self, 'goal') else None,
+            'backstory': copy.deepcopy(self.backstory) if hasattr(self, 'backstory') else None,
+            'instructions': copy.deepcopy(self.instructions) if hasattr(self, 'instructions') else None,
+        }
+        
+        # LLM configuration (safe to copy)
+        if hasattr(self, 'llm'):
+            cloned_kwargs['llm'] = self.llm  # String or simple object, safe to copy
+        if hasattr(self, 'base_url') and self.base_url:
+            cloned_kwargs['base_url'] = self.base_url
+        if hasattr(self, 'api_key') and self.api_key:
+            cloned_kwargs['api_key'] = self.api_key
+        if hasattr(self, 'auth') and self.auth:
+            cloned_kwargs['auth'] = self.auth
+            
+        # Tools (deep copy the list but be careful with callable objects)
+        if hasattr(self, 'tools'):
+            cloned_kwargs['tools'] = copy.deepcopy(self.tools) if self.tools else []
+            
+        # Handoffs (deep copy)
+        if hasattr(self, 'handoffs'):
+            cloned_kwargs['handoffs'] = copy.deepcopy(self.handoffs) if self.handoffs else []
+            
+        # Feature configurations - these are typically config objects that can be deep-copied
+        if hasattr(self, '_memory_config_obj'):
+            cloned_kwargs['memory'] = copy.deepcopy(self._memory_config_obj)
+        if hasattr(self, '_knowledge_config_obj'):
+            cloned_kwargs['knowledge'] = copy.deepcopy(self._knowledge_config_obj)
+        if hasattr(self, '_planning_config_obj'):
+            cloned_kwargs['planning'] = copy.deepcopy(self._planning_config_obj)
+        if hasattr(self, '_reflection_config_obj'):
+            cloned_kwargs['reflection'] = copy.deepcopy(self._reflection_config_obj)
+        if hasattr(self, '_guardrail_config_obj'):
+            cloned_kwargs['guardrails'] = copy.deepcopy(self._guardrail_config_obj)
+        if hasattr(self, '_web_config_obj'):
+            cloned_kwargs['web'] = copy.deepcopy(self._web_config_obj)
+        if hasattr(self, '_context_config_obj'):
+            cloned_kwargs['context'] = copy.deepcopy(self._context_config_obj)
+        if hasattr(self, '_autonomy_config_obj'):
+            cloned_kwargs['autonomy'] = copy.deepcopy(self._autonomy_config_obj)
+        if hasattr(self, '_output_config_obj'):
+            cloned_kwargs['output'] = copy.deepcopy(self._output_config_obj)
+        if hasattr(self, '_execution_config_obj'):
+            cloned_kwargs['execution'] = copy.deepcopy(self._execution_config_obj)
+        if hasattr(self, '_caching_config_obj'):
+            cloned_kwargs['caching'] = copy.deepcopy(self._caching_config_obj)
+        if hasattr(self, '_hooks_config_obj'):
+            cloned_kwargs['hooks'] = copy.deepcopy(self._hooks_config_obj)
+        if hasattr(self, '_skills_config_obj'):
+            cloned_kwargs['skills'] = copy.deepcopy(self._skills_config_obj)
+        if hasattr(self, '_approval_config_obj'):
+            cloned_kwargs['approval'] = copy.deepcopy(self._approval_config_obj)
+        if hasattr(self, '_learn_config_obj'):
+            cloned_kwargs['learn'] = copy.deepcopy(self._learn_config_obj)
+        if hasattr(self, '_templates_config_obj'):
+            cloned_kwargs['templates'] = copy.deepcopy(self._templates_config_obj)
+            
+        # Other simple attributes
+        if hasattr(self, 'parallel_tool_calls'):
+            cloned_kwargs['parallel_tool_calls'] = self.parallel_tool_calls
+        if hasattr(self, 'tool_timeout'):
+            cloned_kwargs['tool_timeout'] = self.tool_timeout
+        if hasattr(self, 'backend'):
+            cloned_kwargs['backend'] = self.backend  # External backend reference
+        if hasattr(self, 'cli_backend'):
+            cloned_kwargs['cli_backend'] = self.cli_backend
+        if hasattr(self, 'interrupt_controller'):
+            cloned_kwargs['interrupt_controller'] = self.interrupt_controller
+        if hasattr(self, '_sandbox_config_obj'):
+            cloned_kwargs['sandbox'] = copy.deepcopy(self._sandbox_config_obj)
+            
+        # Create new agent instance - this will create fresh locks and state
+        cloned_agent = Agent(**cloned_kwargs)
+        
+        return cloned_agent
+
     @property
     def _telemetry(self):
         """Lazy-loaded telemetry instance for performance."""

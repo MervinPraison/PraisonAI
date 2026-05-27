@@ -1654,8 +1654,8 @@ class WebSocketGateway:
     ) -> Any:
         """Create a bot instance for the given channel type."""
         # Clone agent to prevent channel-specific settings from leaking between channels
-        import copy
-        agent = copy.deepcopy(agent)
+        # Use clone_for_channel() instead of copy.deepcopy() to avoid RLock issues (fixes #1746)
+        agent = agent.clone_for_channel()
         
         # Apply smart defaults to agent (same logic as Bot() wrapper)
         from praisonai.bots._defaults import apply_bot_smart_defaults
