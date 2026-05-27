@@ -327,6 +327,20 @@ class TestDefaultSessionStore:
             assert session.agent_name == "TestBot"
             assert session.user_id == "u-1"
 
+    def test_get_chat_history_sees_writes_from_other_store(self, temp_store):
+        """Reads must reload from disk, not a stale in-memory cache."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = DefaultSessionStore(session_dir=tmpdir)
+            reader = DefaultSessionStore(session_dir=tmpdir)
+
+            writer.add_user_message("session-1", "first")
+            reader._load_session("session-1")
+            writer.add_user_message("session-1", "second")
+
+            history = reader.get_chat_history("session-1")
+            assert len(history) == 2
+            assert history[1]["content"] == "second"
+
     def test_clear_session_preserves_new_messages(self, temp_store):
         """Clear must reload from disk so concurrent adds are not lost."""
         with tempfile.TemporaryDirectory() as tmpdir:
