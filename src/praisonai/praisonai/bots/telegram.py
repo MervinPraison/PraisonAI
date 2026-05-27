@@ -33,6 +33,7 @@ from ._debounce import InboundDebouncer
 from ._ack import AckReactor
 from ._unknown_user import UnknownUserHandler, BotContext
 from ._pairing_ui import PairingUIBuilder, PairingCallbackHandler
+from ..gateway.unicode_utils import safe_error_message, safe_log_message, extract_root_cause_from_error
 from ..gateway.pairing import PairingStore
 
 logger = logging.getLogger(__name__)
@@ -278,15 +279,9 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     if ack_ctx:
                         await self._ack.done(ack_ctx, react_fn=_tg_react, unreact_fn=_tg_unreact)
                 except Exception as e:
-                    from ..gateway.unicode_utils import safe_error_message, safe_log_message, extract_root_cause_from_error
-                    
-                    # Log full error for debugging with safe logging
                     logger.error(f"Agent error: {safe_log_message(e)}")
-                    
-                    # Extract meaningful error message for user
                     user_error = extract_root_cause_from_error(str(e))
-                    safe_error = safe_error_message(user_error)
-                    await update.message.reply_text(f"Error: {safe_error}")
+                    await update.message.reply_text(f"Error: {safe_error_message(user_error)}")
         
         async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             """Handle voice messages."""

@@ -29,6 +29,8 @@ from praisonaiagents.gateway import (
 
 logger = logging.getLogger(__name__)
 
+from .unicode_utils import safe_error_message, safe_log_message, extract_root_cause_from_error
+
 
 @dataclass
 class GatewaySession:
@@ -1902,15 +1904,9 @@ class WebSocketGateway:
                 if ack_ctx:
                     await bot._ack.done(ack_ctx, react_fn=_tg_react, unreact_fn=_tg_unreact)
             except Exception as e:
-                from .unicode_utils import safe_error_message, safe_log_message, extract_root_cause_from_error
-                
-                # Log full error for debugging with safe logging
                 logger.error(f"Agent error in {name}: {safe_log_message(e)}")
-                
-                # Extract meaningful error message for user
                 user_error = extract_root_cause_from_error(str(e))
-                safe_error = safe_error_message(user_error)
-                await update.message.reply_text(f"Error: {safe_error}")
+                await update.message.reply_text(f"Error: {safe_error_message(user_error)}")
 
         async def handle_voice(update: Update, context: Any):
             await handle_message(update, context)
