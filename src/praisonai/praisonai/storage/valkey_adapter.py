@@ -80,6 +80,7 @@ class ValkeyStorageAdapter:
                 host=self.host,
                 port=self.port,
                 password=self.password,
+                client_name="praisonai_storage_client",
             )
         return self._client
 
@@ -260,6 +261,7 @@ class ValkeySearchBackend:
                 host=self.host,
                 port=self.port,
                 password=self.password,
+                client_name="praisonai_search_client",
             )
         return self._client
 

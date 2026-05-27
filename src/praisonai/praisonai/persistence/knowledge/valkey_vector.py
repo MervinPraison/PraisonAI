@@ -73,6 +73,7 @@ class ValkeyVectorKnowledgeStore(KnowledgeStore):
                 host=self.host,
                 port=self.port,
                 password=self.password,
+                client_name="praisonai_knowledge_client",
             )
         return self._client
 

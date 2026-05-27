@@ -32,6 +32,7 @@ def create_valkey_client(
     port: int = 6379,
     password: Optional[str] = None,
     db: int = 0,
+    client_name: str = _CLIENT_NAME,
 ):
     """Create and return a GlideClientSync instance."""
     if GlideClientSync is None:
@@ -42,6 +43,6 @@ def create_valkey_client(
         addresses=addresses,
         credentials=creds,
         database_id=db,
-        client_name=_CLIENT_NAME,
+        client_name=client_name,
     )
     return GlideClientSync.create(config)
