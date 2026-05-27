@@ -45,7 +45,7 @@ For multiple bots on the same platform, use this naming convention:
 ### Setting Up Tokens
 
 1. **Create bots in @BotFather**:
-   ```
+   ```text
    /newbot
    Bot name: Company CFO Bot
    Username: @company_cfo_bot

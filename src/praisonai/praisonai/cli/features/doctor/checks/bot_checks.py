@@ -251,10 +251,24 @@ def check_multi_channel_tokens(config: DoctorConfig) -> CheckResult:
                     channel_tokens[env_var] = []
                 channel_tokens[env_var].append(channel_name)
         
-        # Check for duplicate token usage
+        # Check for duplicate token usage by env var reference
         for env_var, channels in channel_tokens.items():
             if len(channels) > 1:
                 errors.append(f"Token {env_var} is used by multiple channels: {', '.join(channels)}")
+
+        # Also check duplicate token usage by resolved token value
+        token_value_to_channels = {}  # token_value -> [channel_keys]
+        for env_var, channels in channel_tokens.items():
+            token_value = os.environ.get(env_var)
+            if token_value:
+                token_value_to_channels.setdefault(token_value, []).extend(channels)
+
+        for _, channels in token_value_to_channels.items():
+            unique_channels = sorted(set(channels))
+            if len(unique_channels) > 1:
+                errors.append(
+                    f"Same bot token value is used by multiple channels: {', '.join(unique_channels)}"
+                )
         
         # Check for multi-platform channels with good naming conventions
         for platform, channels in channel_platforms.items():

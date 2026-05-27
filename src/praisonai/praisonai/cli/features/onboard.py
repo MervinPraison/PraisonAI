@@ -18,6 +18,7 @@ import asyncio
 import getpass
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -368,6 +369,7 @@ class OnboardWizard:
     def __init__(self):
         self.selected_platforms: List[str] = []
         self.channels: Dict[str, Dict] = {}  # channel_key -> {platform, token, role, env_var}
+        self.tokens: Dict[str, str] = {}  # legacy/fallback compatibility
         self.agent_name: str = "assistant"
         self.agent_instructions: str = "You are a helpful AI assistant."
         self.config_path: str = "bot.yaml"
@@ -451,196 +453,8 @@ class OnboardWizard:
                 self.selected_platforms.append(platform)
                 
             self._configure_channel(console, Prompt, platform, is_first=False)
-
-    def _configure_channel(self, console, prompt_cls, platform: str, is_first: bool = False) -> None:
-        """Configure a single channel for a platform."""
-        info = PLATFORMS[platform]
         
-        if is_first:
-            # For first channel, use default channel name
-            role = ""
-            channel_key = platform
-        else:
-            # For additional channels, ask for role
-            role = _prompt_ask(
-                prompt_cls,
-                f"Role for this {info['name']} bot (e.g., 'cfo', 'ops', 'support')",
-                default="",
-            ).strip().lower()
-            
-            if role:
-                channel_key = f"{platform}_{role}"
-            else:
-                # Count existing channels for this platform
-                existing_count = sum(1 for k in self.channels.keys() if k.startswith(f"{platform}"))
-                channel_key = f"{platform}_{existing_count + 1}"
-        
-        # Generate environment variable name
-        if role:
-            env_var = f"{platform.upper()}_{role.upper()}_BOT_TOKEN"
-        else:
-            # Use standard name for single channel
-            env_var = info["token_env"]
-            
-        # Store channel configuration
-        self.channels[channel_key] = {
-            "platform": platform,
-            "role": role or "assistant",
-            "env_var": env_var,
-            "token": "",
-            "info": info
-        }
-        
-        console.print(f"  [green]✓[/green] Configured channel '[cyan]{channel_key}[/cyan]' (env: [cyan]{env_var}[/cyan])")
-
-    def _configure_tokens(self, console, prompt_cls) -> Dict[str, Optional[str]]:
-        """Configure tokens for all channels."""
-        console.print("\n[bold]Step 2: Configure tokens[/bold]\n")
-        console.print(
-            "  [dim]Press Enter to keep the existing value, or type a new one to update.[/dim]\n"
-        )
-        env_to_save: Dict[str, Optional[str]] = {}
-
-        def _mask(value: str) -> str:
-            if not value:
-                return ""
-            if len(value) <= 6:
-                return "*" * len(value)
-            return f"{value[:2]}{'*' * (len(value) - 4)}{value[-2:]}"
-
-        for channel_key, channel in self.channels.items():
-            platform = channel["platform"]
-            role = channel["role"]
-            env_var = channel["env_var"]
-            info = channel["info"]
-            existing = os.environ.get(env_var, "")
-
-            console.print(f"\n[bold]Channel: {channel_key}[/bold]")
-            
-            if existing:
-                console.print(
-                    f"  [green]✓[/green] {info['name']}: {env_var} = [cyan]{_mask(existing)}[/cyan]"
-                )
-                console.print(f"    [dim]{info['token_help']}[/dim]")
-                new_token = _prompt_ask(
-                    prompt_cls,
-                    f"  Update token for {channel_key}? (Enter = keep current)",
-                    password=True,
-                    default="",
-                    show_default=False,
-                )
-                if new_token:
-                    channel["token"] = new_token
-                    os.environ[env_var] = new_token
-                    env_to_save[env_var] = new_token
-                    console.print("  [green]✓[/green] Token updated")
-                else:
-                    channel["token"] = existing
-            else:
-                console.print(f"  [dim]{info['token_help']}[/dim]")
-                token = _prompt_ask(
-                    prompt_cls,
-                    f"  Token for {channel_key} ({env_var})",
-                    password=True,
-                    default="",
-                    show_default=False,
-                )
-                if token:
-                    channel["token"] = token
-                    os.environ[env_var] = token
-                    env_to_save[env_var] = token
-                    console.print("  [green]✓[/green] Token captured")
-                else:
-                    console.print(
-                        f"  [yellow]⚠[/yellow] No token — you'll need to set {env_var} before starting"
-                    )
-
-            # Handle extra env vars (e.g., Slack app token)
-            for extra_env, extra_desc in info.get("extra_env", {}).items():
-                existing_extra = os.environ.get(extra_env, "")
-                if existing_extra:
-                    console.print(
-                        f"    [green]✓[/green] {extra_env} = [cyan]{_mask(existing_extra)}[/cyan]"
-                    )
-                    new_extra = _prompt_ask(
-                        prompt_cls,
-                        f"    Update {extra_desc}? (Enter = keep current)",
-                        password=True,
-                        default="",
-                        show_default=False,
-                    )
-                    if new_extra:
-                        os.environ[extra_env] = new_extra
-                        env_to_save[extra_env] = new_extra
-                        console.print(f"    [green]✓[/green] {extra_env} updated")
-                else:
-                    extra_val = _prompt_ask(
-                        prompt_cls,
-                        f"  {extra_desc} ({extra_env})",
-                        password=True,
-                        default="",
-                        show_default=False,
-                    )
-                    if extra_val:
-                        os.environ[extra_env] = extra_val
-                        env_to_save[extra_env] = extra_val
-
-            # Configure allowlist for this channel
-            allowed_env = info.get("allowed_users_env")
-            if allowed_env:
-                existing_allow = os.environ.get(allowed_env, "").strip()
-                if existing_allow:
-                    console.print(
-                        f"  [green]✓[/green] {allowed_env} = [cyan]{existing_allow}[/cyan]"
-                    )
-                    console.print(
-                        f"    [dim]{info.get('user_id_help', 'Comma-separated user IDs')}[/dim]"
-                    )
-                    new_allow = _prompt_ask(
-                        prompt_cls,
-                        f"  Update allowed users for {channel_key}? (Enter = keep, 'clear' = remove)",
-                        default="",
-                        show_default=False,
-                    ).strip()
-                    if new_allow.lower() == "clear":
-                        os.environ.pop(allowed_env, None)
-                        env_to_save[allowed_env] = None
-                        console.print(
-                            "  [yellow]✓ Allowlist cleared — open access restored[/yellow]"
-                        )
-                    elif new_allow:
-                        new_allow = new_allow.replace(" ", "")
-                        os.environ[allowed_env] = new_allow
-                        env_to_save[allowed_env] = new_allow
-                        console.print("  [green]✓[/green] Allowlist updated")
-                else:
-                    console.print(
-                        f"  [bold]🔒 Security — restrict who can use {channel_key}[/bold]"
-                    )
-                    console.print(
-                        f"  [dim]{info.get('user_id_help', 'Enter comma-separated user IDs')}[/dim]"
-                    )
-                    allow_val = _prompt_ask(
-                        prompt_cls,
-                        "  Allowed user IDs (comma-separated, empty = open access)",
-                        default="",
-                        show_default=False,
-                    )
-                    allow_val = allow_val.replace(" ", "")
-                    if allow_val:
-                        os.environ[allowed_env] = allow_val
-                        env_to_save[allowed_env] = allow_val
-                        console.print(
-                            "  [green]✓[/green] Allowlist saved — only listed users can talk to the bot"
-                        )
-                    else:
-                        console.print(
-                            f"  [yellow]⚠  Warning:[/yellow] no allowlist set for {channel_key} — anyone who finds your bot can use it."
-                        )
-
-        return env_to_save
-
-        # Step 2: Use the new token configuration method
+        # Step 2: Configure tokens
         env_to_save = self._configure_tokens(console, Prompt)
 
         # Persist everything collected above to ~/.praisonai/.env
@@ -814,6 +628,200 @@ class OnboardWizard:
             title="✅ Done",
             border_style="green",
         ))
+
+    def _configure_channel(self, console, prompt_cls, platform: str, is_first: bool = False) -> None:
+        """Configure a single channel for a platform."""
+        info = PLATFORMS[platform]
+        
+        if is_first:
+            # For first channel, use default channel name
+            role = ""
+            channel_key = platform
+        else:
+            # For additional channels, ask for role
+            role = _prompt_ask(
+                prompt_cls,
+                f"Role for this {info['name']} bot (e.g., 'cfo', 'ops', 'support')",
+                default="",
+            ).strip().lower()
+            # Sanitize role: only allow alphanumeric and underscores
+            role = re.sub(r"[^a-z0-9_]+", "_", role).strip("_")
+            
+            if role:
+                channel_key = f"{platform}_{role}"
+                # Ensure channel key is unique
+                if channel_key in self.channels:
+                    console.print(f"[red]Channel '{channel_key}' already exists. Choose a different role.[/red]")
+                    return
+            else:
+                # Count existing channels for this platform
+                existing_count = sum(1 for k in self.channels.keys() if k.startswith(f"{platform}"))
+                channel_key = f"{platform}_{existing_count + 1}"
+        
+        # Generate environment variable name
+        if role:
+            env_var = f"{platform.upper()}_{role.upper()}_BOT_TOKEN"
+        else:
+            # Use standard name for single channel
+            env_var = info["token_env"]
+            
+        # Store channel configuration
+        self.channels[channel_key] = {
+            "platform": platform,
+            "role": role or "assistant",
+            "env_var": env_var,
+            "token": "",
+            "info": info
+        }
+        
+        console.print(f"  [green]✓[/green] Configured channel '[cyan]{channel_key}[/cyan]' (env: [cyan]{env_var}[/cyan])")
+
+    def _configure_tokens(self, console, prompt_cls) -> Dict[str, Optional[str]]:
+        """Configure tokens for all channels."""
+        console.print("\n[bold]Step 2: Configure tokens[/bold]\n")
+        console.print(
+            "  [dim]Press Enter to keep the existing value, or type a new one to update.[/dim]\n"
+        )
+        env_to_save: Dict[str, Optional[str]] = {}
+
+        def _mask(value: str) -> str:
+            if not value:
+                return ""
+            if len(value) <= 6:
+                return "*" * len(value)
+            return f"{value[:2]}{'*' * (len(value) - 4)}{value[-2:]}"
+
+        for channel_key, channel in self.channels.items():
+            platform = channel["platform"]
+            role = channel["role"]
+            env_var = channel["env_var"]
+            info = channel["info"]
+            existing = os.environ.get(env_var, "")
+
+            console.print(f"\n[bold]Channel: {channel_key}[/bold]")
+            
+            if existing:
+                console.print(
+                    f"  [green]✓[/green] {info['name']}: {env_var} = [cyan]{_mask(existing)}[/cyan]"
+                )
+                console.print(f"    [dim]{info['token_help']}[/dim]")
+                new_token = _prompt_ask(
+                    prompt_cls,
+                    f"  Update token for {channel_key}? (Enter = keep current)",
+                    password=True,
+                    default="",
+                    show_default=False,
+                )
+                if new_token:
+                    channel["token"] = new_token
+                    os.environ[env_var] = new_token
+                    env_to_save[env_var] = new_token
+                    console.print("  [green]✓[/green] Token updated")
+                else:
+                    channel["token"] = existing
+            else:
+                console.print(f"  [dim]{info['token_help']}[/dim]")
+                token = _prompt_ask(
+                    prompt_cls,
+                    f"  Token for {channel_key} ({env_var})",
+                    password=True,
+                    default="",
+                    show_default=False,
+                )
+                if token:
+                    channel["token"] = token
+                    os.environ[env_var] = token
+                    env_to_save[env_var] = token
+                    console.print("  [green]✓[/green] Token captured")
+                else:
+                    console.print(
+                        f"  [yellow]⚠[/yellow] No token — you'll need to set {env_var} before starting"
+                    )
+
+            # Handle extra env vars (e.g., Slack app token)
+            for extra_env, extra_desc in info.get("extra_env", {}).items():
+                existing_extra = os.environ.get(extra_env, "")
+                if existing_extra:
+                    console.print(
+                        f"    [green]✓[/green] {extra_env} = [cyan]{_mask(existing_extra)}[/cyan]"
+                    )
+                    new_extra = _prompt_ask(
+                        prompt_cls,
+                        f"    Update {extra_desc}? (Enter = keep current)",
+                        password=True,
+                        default="",
+                        show_default=False,
+                    )
+                    if new_extra:
+                        os.environ[extra_env] = new_extra
+                        env_to_save[extra_env] = new_extra
+                        console.print(f"    [green]✓[/green] {extra_env} updated")
+                else:
+                    extra_val = _prompt_ask(
+                        prompt_cls,
+                        f"  {extra_desc} ({extra_env})",
+                        password=True,
+                        default="",
+                        show_default=False,
+                    )
+                    if extra_val:
+                        os.environ[extra_env] = extra_val
+                        env_to_save[extra_env] = extra_val
+
+            # Configure allowlist for this channel
+            allowed_env = info.get("allowed_users_env")
+            if allowed_env:
+                existing_allow = os.environ.get(allowed_env, "").strip()
+                if existing_allow:
+                    console.print(
+                        f"  [green]✓[/green] {allowed_env} = [cyan]{existing_allow}[/cyan]"
+                    )
+                    console.print(
+                        f"    [dim]{info.get('user_id_help', 'Comma-separated user IDs')}[/dim]"
+                    )
+                    new_allow = _prompt_ask(
+                        prompt_cls,
+                        f"  Update allowed users for {channel_key}? (Enter = keep, 'clear' = remove)",
+                        default="",
+                        show_default=False,
+                    ).strip()
+                    if new_allow.lower() == "clear":
+                        os.environ.pop(allowed_env, None)
+                        env_to_save[allowed_env] = None
+                        console.print(
+                            "  [yellow]✓ Allowlist cleared — open access restored[/yellow]"
+                        )
+                    elif new_allow:
+                        new_allow = new_allow.replace(" ", "")
+                        os.environ[allowed_env] = new_allow
+                        env_to_save[allowed_env] = new_allow
+                        console.print("  [green]✓[/green] Allowlist updated")
+                else:
+                    console.print(
+                        f"  [bold]🔒 Security — restrict who can use {channel_key}[/bold]"
+                    )
+                    console.print(
+                        f"  [dim]{info.get('user_id_help', 'Enter comma-separated user IDs')}[/dim]"
+                    )
+                    allow_val = _prompt_ask(
+                        prompt_cls,
+                        "  Allowed user IDs (comma-separated, empty = open access)",
+                        default="",
+                        show_default=False,
+                    )
+                    allow_val = allow_val.replace(" ", "")
+                    if allow_val:
+                        os.environ[allowed_env] = allow_val
+                        env_to_save[allowed_env] = allow_val
+                        console.print(
+                            "  [green]✓[/green] Allowlist saved — only listed users can talk to the bot"
+                        )
+                    else:
+                        console.print(
+                            f"  [yellow]⚠  Warning:[/yellow] no allowlist set for {channel_key} — anyone who finds your bot can use it."
+                        )
+
+        return env_to_save
 
     async def _probe_channel(self, channel: Dict):
         """Run a probe for a channel."""
