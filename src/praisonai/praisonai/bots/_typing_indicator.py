@@ -7,9 +7,11 @@ during long-running operations like agent.chat() calls.
 
 import asyncio
 import logging
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Coroutine, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 
 class TypingIndicator:
@@ -74,9 +76,9 @@ class TypingIndicator:
 
 async def with_typing_renewal(
     typing_func: Callable[[], Any],
-    operation_coro,
-    interval: float = 4.0
-):
+    operation_coro: Coroutine[Any, Any, T],
+    interval: float = 4.0,
+) -> T:
     """
     Execute an operation with typing indicator renewal.
     
@@ -89,16 +91,21 @@ async def with_typing_renewal(
         Result of the operation
     """
     indicator = TypingIndicator(interval=interval)
-    
+
     try:
         # Start typing renewal
         await indicator.start(typing_func)
-        
+
         # Execute the operation
         result = await operation_coro
-        
+
         return result
-        
+
     finally:
-        # Always cancel typing renewal
+        # Always cancel typing renewal and await cleanup
         indicator.cancel()
+        if indicator._task is not None:
+            try:
+                await indicator._task
+            except (asyncio.CancelledError, Exception):
+                pass
