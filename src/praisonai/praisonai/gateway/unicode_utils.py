@@ -127,6 +127,7 @@ def safe_log_message(exc: Union[BaseException, str, Any]) -> str:
     else:
         text = str(exc)
 
+    # Replace lone surrogates that cannot be encoded in UTF-8
     return text.encode('utf-8', errors='replace').decode('utf-8')
 
 
@@ -162,4 +163,5 @@ def extract_root_cause_from_error(error_text: str) -> str:
     if "timeout" in lower:
         return "Request timeout. Try again."
 
+    # Return raw error text - caller will sanitize with safe_error_message
     return error_text
