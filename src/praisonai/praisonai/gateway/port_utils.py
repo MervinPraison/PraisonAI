@@ -64,14 +64,18 @@ def check_port_available(host: str, port: int) -> Tuple[bool, Optional[int]]:
 class GatewayPIDLock:
     """Manages PID lock file for single-instance gateway enforcement."""
     
-    def __init__(self, lock_dir: Optional[Path] = None):
+    def __init__(self, lock_dir: Optional[Path] = None, host: str = "127.0.0.1", port: int = 8765):
         """Initialize PID lock manager.
         
         Args:
             lock_dir: Directory for lock file (default: ~/.praisonai/)
+            host: Gateway host
+            port: Gateway port
         """
         self.lock_dir = lock_dir or Path.home() / ".praisonai"
-        self.lock_file = self.lock_dir / "gateway.pid"
+        # Make lock file specific to host and port to allow multiple instances
+        safe_host = host.replace(":", "_").replace(".", "_")
+        self.lock_file = self.lock_dir / f"gateway-{safe_host}-{port}.pid"
         self.lock_dir.mkdir(exist_ok=True)
     
     def acquire_lock(self, host: str, port: int) -> bool:
@@ -105,10 +109,13 @@ class GatewayPIDLock:
                 # Corrupted lock file, remove it
                 self._remove_stale_lock()
         
-        # Write new lock
+        # Write new lock atomically to avoid race condition
         lock_content = f"{current_pid}\n{host}\n{port}\n{int(time.time())}\n"
         try:
-            self.lock_file.write_text(lock_content)
+            # Use a temporary file and atomic rename to prevent race conditions
+            temp_lock_file = self.lock_file.with_suffix(".tmp")
+            temp_lock_file.write_text(lock_content)
+            temp_lock_file.replace(self.lock_file)
             return True
         except OSError:
             return False

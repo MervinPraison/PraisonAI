@@ -182,7 +182,7 @@ class GatewayHandler:
             print(f"Error: Gateway utilities not available. {e}")
             return
         
-        pid_lock = GatewayPIDLock()
+        pid_lock = GatewayPIDLock(host=host, port=port)
         lock_info = pid_lock.get_lock_info()
         
         if not lock_info:
@@ -231,13 +231,16 @@ class GatewayHandler:
             print(f"Process {pid} not found or already stopped")
     
     def _force_kill_process(self, pid: int) -> None:
-        """Force kill a process with SIGKILL."""
+        """Force kill a process with SIGKILL (Windows: SIGTERM)."""
         import signal
         import os
+        import sys
         
         try:
             print(f"Force killing PID {pid}...")
-            os.kill(pid, signal.SIGKILL)
+            # Use SIGTERM on Windows since SIGKILL is not available
+            sig = signal.SIGTERM if sys.platform == "win32" else signal.SIGKILL
+            os.kill(pid, sig)
         except (OSError, ProcessLookupError):
             print(f"Process {pid} not found or already stopped")
 
@@ -254,7 +257,7 @@ class GatewayHandler:
         # Check PID lock info first
         try:
             from praisonai.gateway.port_utils import GatewayPIDLock, is_port_in_use
-            pid_lock = GatewayPIDLock()
+            pid_lock = GatewayPIDLock(host=host, port=port)
             lock_info = pid_lock.get_lock_info()
             
             if lock_info:

@@ -294,7 +294,7 @@ class WebSocketGateway:
         # Preflight port collision check
         from .port_utils import check_port_available, GatewayPIDLock, format_collision_error
         
-        pid_lock = GatewayPIDLock()
+        pid_lock = GatewayPIDLock(host=self._host, port=self._port)
         
         # Check if port is available
         port_available, pid_using_port = check_port_available(self._host, self._port)
@@ -740,7 +740,15 @@ class WebSocketGateway:
         
         logger.info(f"Gateway started on ws://{self._host}:{self._port}")
         
-        await self._server.serve()
+        try:
+            await self._server.serve()
+        except Exception as e:
+            # Clean up PID lock on any startup failure
+            if hasattr(self, '_pid_lock') and self._pid_lock:
+                self._pid_lock.release_lock()
+                self._pid_lock = None
+            # Re-raise the original exception
+            raise
     
     async def stop(self) -> None:
         """Stop the gateway server."""

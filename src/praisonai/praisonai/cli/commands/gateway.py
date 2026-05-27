@@ -67,7 +67,6 @@ def gateway_stop(
         except ValueError:
             port = 8765
     
-    output = get_output_controller()
     handler = GatewayHandler()
     handler.stop(host=host, port=port, force=force)
 
