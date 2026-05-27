@@ -51,45 +51,6 @@ AGENTOPS_AVAILABLE        = is_available("agentops")
 # Note: OTEL_SDK_DISABLED moved to CLI entry point per issue requirements
 
 
-def safe_format(template: str, **kwargs) -> str:
-    """
-    Safely format a string template, preserving JSON-like curly braces.
-    
-    This handles cases where templates contain Gutenberg block syntax like
-    {"level":2} which would cause KeyError with standard .format().
-    
-    Uses a two-pass approach:
-    1. Escape all {{ and }} (already escaped braces)
-    2. Only substitute known variable placeholders
-    
-    Args:
-        template: String template with {variable} placeholders
-        **kwargs: Variable substitutions to apply
-        
-    Returns:
-        Formatted string with variables substituted and JSON preserved
-        
-    Example:
-        >>> safe_format('Use <!-- wp:heading {"level":2} --> for {topic}', topic='AI')
-        'Use <!-- wp:heading {"level":2} --> for AI'
-    """
-    import re
-    
-    # Pattern to match {word} but not {"key": or {number} patterns
-    # This matches simple variable names like {topic}, {style}, etc.
-    def replace_var(match):
-        var_name = match.group(1)
-        if var_name in kwargs:
-            return str(kwargs[var_name])
-        # If not in kwargs, leave it as-is (don't raise KeyError)
-        return match.group(0)
-    
-    # Match {variable_name} where variable_name is a valid Python identifier
-    # but NOT {" (JSON start) or {number (like {2})
-    pattern = r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}'
-    
-    return re.sub(pattern, replace_var, template)
-
 
 def _wrap_with_timeout(tool, timeout_seconds: float):
     """Enforce per-call timeout on a tool, sync or async, without
@@ -686,6 +647,97 @@ class AgentsGenerator:
             task_callback=getattr(self, 'task_callback', None),
             cli_config=getattr(self, 'cli_config', None),
         )
+
+    async def agenerate_crew_and_kickoff(self):
+        """
+        Asynchronous version of generate_crew_and_kickoff using native async framework adapters.
+        
+        This provides true async execution by calling the framework adapter's arun() method
+        instead of thread-offloading the sync path.
+        
+        Returns:
+            str: The output of the tasks performed by the crew of agents.
+        """
+        if self.agent_yaml:
+            config = yaml.safe_load(self.agent_yaml)
+        else:
+            if self.agent_file == '/app/api:app' or self.agent_file == 'api:app':
+                self.agent_file = 'agents.yaml'
+            try:
+                with open(self.agent_file, 'r') as f:
+                    config = yaml.safe_load(f)
+            except FileNotFoundError:
+                print(f"File not found: {self.agent_file}")
+                return
+
+        if not config:
+            print("Empty or invalid configuration")
+            return
+
+        # Handle workflow mode async
+        if config.get('process') == 'workflow':
+            return await self._arun_yaml_workflow(config)
+
+        # Merge CLI config if provided
+        if hasattr(self, 'cli_config') and self.cli_config:
+            config = {**config, **self.cli_config}
+
+        # Pre-create tools dict
+        tools_dict = None
+        if self.tools:
+            tools_dict = ToolRegistry.build_all_tools(self.tools, agent_tools=True)
+
+        # Get topic from tasks and validate
+        topic = self._extract_topic(config)
+
+        # Choose and validate framework
+        framework = self.framework
+        
+        # Validate framework availability for non-CLI callers
+        from .framework_adapters.validators import assert_framework_available
+        assert_framework_available(framework)
+        
+        self.logger.info(f"Using framework: {framework} (async)")
+        return await self.framework_adapter.arun(
+            config,
+            self.config_list,
+            topic,
+            tools_dict=tools_dict,
+            agent_callback=getattr(self, 'agent_callback', None),
+            task_callback=getattr(self, 'task_callback', None),
+            cli_config=getattr(self, 'cli_config', None),
+        )
+
+    async def _arun_yaml_workflow(self, config):
+        """
+        Async version of _run_yaml_workflow using YAMLWorkflowParser.
+        
+        This method handles agents.yaml files that have:
+        - process: workflow
+        
+        Args:
+            config: YAML configuration dictionary
+            
+        Returns:
+            str: Workflow execution result
+        """
+        from .cli.features.workflow import YAMLWorkflowParser
+        
+        # Use default topic if not specified
+        topic = config.get('topic', 'Complete the workflow')
+        
+        workflow_parser = YAMLWorkflowParser(config)
+        workflow = workflow_parser.parse()
+        
+        self.logger.info(f"Starting async YAML workflow with topic: {topic}")
+        
+        # Use workflow.astart() for async execution if available
+        if hasattr(workflow, 'astart'):
+            return await workflow.astart(topic)
+        else:
+            # Fall back to thread-offloaded sync execution
+            import asyncio
+            return await asyncio.to_thread(workflow.start, topic)
 
     def _run_yaml_workflow(self, config):
         """
