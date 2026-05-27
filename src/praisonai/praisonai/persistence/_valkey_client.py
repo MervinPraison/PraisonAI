@@ -24,6 +24,8 @@ _MISSING_MSG = (
     "Install with: pip install 'praisonai[valkey]'"
 )
 
+_CLIENT_NAME = "praisonai_persistence_client"
+
 
 def create_valkey_client(
     host: str = "localhost",
@@ -40,5 +42,6 @@ def create_valkey_client(
         addresses=addresses,
         credentials=creds,
         database_id=db,
+        client_name=_CLIENT_NAME,
     )
     return GlideClientSync.create(config)
