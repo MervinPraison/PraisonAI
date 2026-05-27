@@ -180,37 +180,10 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         )
         
         async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            # Handle text OR audio messages
-            message_text = None
-            
-            if update.message:
-                # Check for voice/audio first
-                if update.message.voice or update.message.audio:
-                    message_text = await self._transcribe_audio(update)
-                elif update.message.text:
-                    message_text = update.message.text
-            
-            if not update.message or not message_text:
-                return
-            
-            message = self._convert_update_to_message(update, override_text=message_text)
-            
-            # Add channel type for pairing system
-            message._channel_type = "telegram"
-            
-            self.fire_message_received(message)
-            
-            # Check if channel is allowed
-            if not self.config.is_channel_allowed(message.channel.channel_id if message.channel else ""):
-                return
-            
-            # Handle unknown users with pairing system
-            user_id = message.sender.user_id if message.sender else ""
-            is_explicitly_allowed = bool(self.config.allowed_users) and self.config.is_user_allowed(user_id)
-            if not is_explicitly_allowed:
-                user_allowed = await UnknownUserHandler.handle(message, self._bot_context)
-                if not user_allowed:
-                    return
+            # Use shared security pipeline for consistent enforcement
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return  # Message was dropped by security checks
             
             for handler in self._message_handlers:
                 try:
@@ -254,7 +227,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     update.message.from_user.username or update.message.from_user.first_name or ""
                 ) if update.message.from_user else ""
                 try:
-                    message_text = await self._debouncer.debounce(user_id, message_text)
+                    message_text = await self._debouncer.debounce(user_id, message.content)
                     response = await self._session.chat(
                         self._agent, user_id, message_text,
                         chat_id=str(update.message.chat_id) if update.message.chat_id else "",
@@ -831,4 +804,97 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             )
         except Exception as e:
             logger.error(f"Failed to send reply: {e}")
+
+
+async def process_inbound_telegram_message(
+    update,  # Telegram Update
+    bot: TelegramBot,
+    gateway_context: Optional[Dict] = None
+) -> Optional[BotMessage]:
+    """
+    Shared security pipeline for processing inbound Telegram messages.
+    
+    Used by both standalone bot (TelegramBot.handle_message) and 
+    gateway polling (_start_telegram_bot_polling) to ensure consistent
+    access control enforcement.
+    
+    Args:
+        update: Telegram Update object
+        bot: TelegramBot instance with config and security settings
+        gateway_context: Optional dict with gateway-specific context
+        
+    Returns:
+        BotMessage if message passes all security checks, None if dropped
+    """
+    if not update.message:
+        return None
+    
+    # Extract message text (including audio transcription)
+    message_text = None
+    if update.message.voice or update.message.audio:
+        message_text = await bot._transcribe_audio(update)
+    elif update.message.text:
+        message_text = update.message.text
+    
+    if not message_text:
+        return None
+    
+    # Convert to BotMessage for consistent processing
+    message = bot._convert_update_to_message(update, override_text=message_text)
+    
+    # Set channel type for pairing system
+    message._channel_type = "telegram"
+    
+    # Fire message received event
+    bot.fire_message_received(message)
+    
+    # 1. Channel allowlist check
+    channel_id = message.channel.channel_id if message.channel else ""
+    if not bot.config.is_channel_allowed(channel_id):
+        logger.debug(f"Message dropped: channel {channel_id} not in allowed_channels")
+        return None
+    
+    # 2. User allowlist and pairing check
+    user_id = message.sender.user_id if message.sender else ""
+    is_explicitly_allowed = bool(bot.config.allowed_users) and bot.config.is_user_allowed(user_id)
+    
+    if not is_explicitly_allowed:
+        # Check if bot context is available for pairing system
+        if not hasattr(bot, '_bot_context') or bot._bot_context is None:
+            # For gateway mode, we need to create bot context on demand
+            if not hasattr(bot, '_pairing_store'):
+                from ..gateway.pairing import PairingStore
+                bot._pairing_store = PairingStore()
+            
+            bot._bot_context = BotContext(
+                config=bot.config,
+                pairing_store=bot._pairing_store,
+                adapter=bot
+            )
+        
+        user_allowed = await UnknownUserHandler.handle(message, bot._bot_context)
+        if not user_allowed:
+            logger.debug(f"Message dropped: user {user_id} not allowed by pairing system")
+            return None
+    
+    # 3. Group policy enforcement
+    if message.channel and message.channel.channel_type not in ("dm", "private"):
+        # This is a group/channel message, check group policies
+        group_policy = getattr(bot.config, 'group_policy', 'mention_only')
+        mention_required = getattr(bot.config, 'mention_required', True)
+        
+        if group_policy == "mention_only" or mention_required:
+            # Check if bot was mentioned in the message
+            bot_username = bot._bot_user.username if bot._bot_user else ""
+            bot_mentioned = (
+                bot_username and f"@{bot_username}" in message.content.lower()
+            ) or message.message_type == MessageType.COMMAND  # Commands are always allowed
+            
+            if not bot_mentioned:
+                logger.debug(f"Message dropped: bot not mentioned in group {channel_id}")
+                return None
+    
+    # All security checks passed
+    logger.debug(f"Message security checks passed for user {user_id} in channel {channel_id}")
+    return message
 

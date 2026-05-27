@@ -1836,19 +1836,16 @@ class WebSocketGateway:
         gateway = self
 
         async def handle_message(update: Update, context: Any):
-            if not update.message:
-                return
-
-            message_text = None
-            if update.message.voice or update.message.audio:
-                message_text = await bot._transcribe_audio(update)
-            elif update.message.text:
-                message_text = update.message.text
-
-            if not message_text:
-                return
+            # Import the shared security pipeline from telegram.py
+            from praisonai.bots.telegram import process_inbound_telegram_message
+            
+            # Use shared security pipeline for consistent enforcement
+            message = await process_inbound_telegram_message(update, bot)
+            if not message:
+                return  # Message was dropped by security checks
 
             user_id = str(update.message.from_user.id) if update.message.from_user else "unknown"
+            message_text = message.content
 
             # Determine routing context
             chat_type = update.message.chat.type if update.message.chat else "private"
