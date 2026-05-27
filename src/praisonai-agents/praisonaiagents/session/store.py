@@ -655,7 +655,7 @@ class DefaultSessionStore:
             List of SessionData objects for the specified agent
         """
         session_ids = self.list_sessions_by_agent(agent_name, limit)
-        return [self._load_session(sid) for sid in session_ids]
+        return [self._read_session_fresh(sid) for sid in session_ids]
     
     def get_agent_chat_history(
         self,

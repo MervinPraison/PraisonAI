@@ -408,7 +408,7 @@ class TestDefaultSessionStore:
         assert history == []
     
     def test_invalidate_cache(self, temp_store):
-        """Test cache invalidation."""
+        """Test that reads always see latest disk state."""
         temp_store.add_user_message("session-1", "Hello")
         
         # Modify file directly
@@ -419,11 +419,11 @@ class TestDefaultSessionStore:
         with open(filepath, "w") as f:
             json.dump(data, f)
         
-        # Without invalidation, cache returns old data
+        # Reads always reload from disk (no stale cache)
         history = temp_store.get_chat_history("session-1")
-        assert len(history) == 1  # Cached
+        assert len(history) == 2  # Fresh from disk
         
-        # After invalidation, new data is loaded
+        # invalidate_cache still works but is now essentially a no-op for reads
         temp_store.invalidate_cache("session-1")
         history = temp_store.get_chat_history("session-1")
         assert len(history) == 2
