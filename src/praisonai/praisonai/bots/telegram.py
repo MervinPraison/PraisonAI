@@ -742,6 +742,41 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             error=probe_result.error if not probe_result.ok else None,
         )
 
+    def get_error_state(self) -> dict:
+        """Get current error state for health reporting.
+        
+        Returns:
+            Dictionary with error details or empty if no errors
+        """
+        if not self._monitor or not self._monitor.last_error:
+            return {}
+            
+        from ._resilience import is_conflict_error
+        
+        # Detect telegram conflicts
+        error_type = "unknown"
+        if self._monitor.last_error:
+            # Check if this is a telegram conflict by creating a dummy exception
+            try:
+                # Parse common conflict patterns from the error string
+                error_msg = self._monitor.last_error.lower()
+                if ("409" in error_msg and "conflict" in error_msg) or \
+                   ("getupdates" in error_msg and ("conflict" in error_msg or "terminated" in error_msg)):
+                    error_type = "telegram_conflict"
+                else:
+                    error_type = "polling_error"
+            except Exception:
+                error_type = "unknown"
+        
+        result = {
+            "last_error": self._monitor.last_error,
+            "last_error_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self._monitor.last_error_time)) if self._monitor.last_error_time else None,
+            "retry_count": self._monitor.attempt,
+            "error_type": error_type
+        }
+        
+        return result
+
     def _format_status(self) -> str:
         """Format /status response."""
         return format_status(self._agent, self.platform, self._started_at, self._is_running)

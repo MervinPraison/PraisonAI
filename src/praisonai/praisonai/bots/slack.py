@@ -642,6 +642,16 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
             error=probe_result.error if not probe_result.ok else None,
         )
 
+    def get_error_state(self) -> dict:
+        """Get current error state for health reporting.
+        
+        Returns:
+            Dictionary with error details or empty if no errors
+        """
+        # Slack bot doesn't have resilience monitoring like Telegram yet
+        # Return empty dict for now - can be enhanced later
+        return {}
+
     def _format_status(self) -> str:
         """Format /status response."""
         return format_status(self._agent, self.platform, self._started_at, self._is_running)

@@ -1152,15 +1152,41 @@ class WebSocketGateway:
         """Get gateway health status including per-channel bot status."""
         uptime = time.time() - self._started_at if self._started_at else 0
         channel_status = {}
+        has_degraded_channels = False
+        
         for name, bot in self._channel_bots.items():
             running = getattr(bot, "is_running", False)
             platform = getattr(bot, "platform", "unknown")
-            channel_status[name] = {
+            
+            channel_data = {
                 "platform": platform,
                 "running": running,
             }
+            
+            # Add error state if bot supports it
+            if hasattr(bot, 'get_error_state'):
+                try:
+                    error_state = bot.get_error_state()
+                    if error_state:
+                        channel_data.update(error_state)
+                        # Channel is degraded if it has errors
+                        if not running or error_state.get('last_error'):
+                            has_degraded_channels = True
+                except Exception:
+                    # Ignore errors from get_error_state to not break health endpoint
+                    pass
+            
+            channel_status[name] = channel_data
+        
+        # Overall status is degraded if any channel has failures
+        overall_status = "healthy"
+        if not self._is_running:
+            overall_status = "stopped"
+        elif has_degraded_channels:
+            overall_status = "degraded"
+            
         result = {
-            "status": "healthy" if self._is_running else "stopped",
+            "status": overall_status,
             "uptime": uptime,
             "agents": len(self._agents),
             "sessions": len(self._sessions),
