@@ -49,7 +49,12 @@ class TypingIndicator:
             self._task.cancel()
     
     async def _typing_loop(self, typing_func: Callable[[], Any]) -> None:
-        """Background loop that periodically sends typing action."""
+        """
+        Background loop that periodically sends typing action.
+        
+        Args:
+            typing_func: Function to call for sending typing indicator
+        """
         try:
             while not self._cancelled:
                 try:
