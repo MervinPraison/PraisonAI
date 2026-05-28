@@ -5,7 +5,7 @@ This replaces the manual __getattr__ ladder with a data-driven registry approach
 supporting CLI tools, managed agents, framework adapters, and RAG components.
 """
 
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict
 from .._registry import PluginRegistry
 
 
@@ -14,7 +14,49 @@ class IntegrationRegistry(PluginRegistry[Any]):
     
     def __init__(self):
         super().__init__(entry_point_group="praisonai.integrations")
+        self._loaders: Dict[str, Callable[[], Any]] = {}
         self._register_builtin_integrations()
+
+    def register_lazy(
+        self,
+        name: str,
+        loader: Callable[[], Any],
+        *,
+        aliases: list[str] | None = None,
+    ) -> None:
+        """Register a lazily loaded integration."""
+        with self._lock:
+            canonical_name = name.lower()
+            self._loaders[canonical_name] = loader
+
+            if aliases:
+                for alias in aliases:
+                    self._aliases[alias.lower()] = canonical_name
+
+    def resolve(self, name: str) -> Any:
+        """Resolve integration name with lazy loader materialization."""
+        with self._lock:
+            normalized_name = name.lower()
+            canonical_name = self._aliases.get(normalized_name, normalized_name)
+
+            item = self._items.get(canonical_name)
+            if item is None:
+                loader = self._loaders.get(canonical_name)
+                if loader is not None:
+                    item = loader()
+                    self._items[canonical_name] = item
+
+            if item is not None:
+                return item
+
+            available_snapshot = sorted(
+                set(self._items.keys()) | set(self._loaders.keys()) | set(self._aliases.keys())
+            )
+
+        raise ValueError(
+            f"Unknown {self._entry_point_group} plugin: {name!r}. "
+            f"Available: {available_snapshot}"
+        )
     
     def _register_builtin_integrations(self):
         """Register all built-in integrations with lazy loading."""
@@ -115,36 +157,36 @@ class IntegrationRegistry(PluginRegistry[Any]):
             return create_integration
         
         # Register all with appropriate aliases
-        self.register("BaseCLIIntegration", _base_cli_integration)
-        self.register("CLIExecutionError", _cli_execution_error)
+        self.register_lazy("BaseCLIIntegration", _base_cli_integration)
+        self.register_lazy("CLIExecutionError", _cli_execution_error)
         
-        self.register("ClaudeCodeIntegration", _claude_code)
-        self.register("GeminiCLIIntegration", _gemini_cli)
-        self.register("CodexCLIIntegration", _codex_cli)
-        self.register("CursorCLIIntegration", _cursor_cli)
+        self.register_lazy("ClaudeCodeIntegration", _claude_code)
+        self.register_lazy("GeminiCLIIntegration", _gemini_cli)
+        self.register_lazy("CodexCLIIntegration", _codex_cli)
+        self.register_lazy("CursorCLIIntegration", _cursor_cli)
         
-        self.register("ManagedAgent", _managed_agent, 
+        self.register_lazy("ManagedAgent", _managed_agent, 
                      aliases=["ManagedAgentIntegration"])
-        self.register("AnthropicManagedAgent", _anthropic_managed_agent)
-        self.register("ManagedConfig", _managed_config,
+        self.register_lazy("AnthropicManagedAgent", _anthropic_managed_agent)
+        self.register_lazy("ManagedConfig", _managed_config,
                      aliases=["ManagedBackendConfig"])
         
-        self.register("LocalManagedAgent", _local_managed_agent)
-        self.register("LocalManagedConfig", _local_managed_config)
+        self.register_lazy("LocalManagedAgent", _local_managed_agent)
+        self.register_lazy("LocalManagedConfig", _local_managed_config)
         
-        self.register("SandboxedAgent", _sandboxed_agent)
-        self.register("SandboxedAgentConfig", _sandboxed_agent_config)
+        self.register_lazy("SandboxedAgent", _sandboxed_agent)
+        self.register_lazy("SandboxedAgentConfig", _sandboxed_agent_config)
         
-        self.register("HostedAgent", _hosted_agent)
-        self.register("HostedAgentConfig", _hosted_agent_config)
-        self.register("LocalAgent", _local_agent)
-        self.register("LocalAgentConfig", _local_agent_config)
+        self.register_lazy("HostedAgent", _hosted_agent)
+        self.register_lazy("HostedAgentConfig", _hosted_agent_config)
+        self.register_lazy("LocalAgent", _local_agent)
+        self.register_lazy("LocalAgentConfig", _local_agent_config)
         
-        self.register("get_available_integrations", _get_available_integrations)
-        self.register("ExternalAgentRegistry", _external_agent_registry)
-        self.register("get_registry", _get_registry)
-        self.register("register_integration", _register_integration)
-        self.register("create_integration", _create_integration)
+        self.register_lazy("get_available_integrations", _get_available_integrations)
+        self.register_lazy("ExternalAgentRegistry", _external_agent_registry)
+        self.register_lazy("get_registry", _get_registry)
+        self.register_lazy("register_integration", _register_integration)
+        self.register_lazy("create_integration", _create_integration)
 
 
 # Global registry instance

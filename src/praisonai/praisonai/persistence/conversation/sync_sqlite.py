@@ -220,8 +220,16 @@ class SyncSQLiteConversationStore(ConversationStore):
                 params.append(agent_id)
             
             where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
-            limit_clause = f" LIMIT {limit}" if limit else ""
-            offset_clause = f" OFFSET {offset}" if offset else ""
+            if limit is not None:
+                params.append(limit)
+                limit_clause = " LIMIT ?"
+            else:
+                limit_clause = ""
+            if offset is not None:
+                params.append(offset)
+                offset_clause = " OFFSET ?"
+            else:
+                offset_clause = ""
             
             cursor = conn.execute(f"""
                 SELECT * FROM {table}{where_clause}
@@ -279,13 +287,22 @@ class SyncSQLiteConversationStore(ConversationStore):
         conn = self._get_connection()
         try:
             table = f"{self.table_prefix}messages"
-            limit_clause = f" LIMIT {limit}" if limit else ""
-            offset_clause = f" OFFSET {offset}" if offset else ""
+            params: list = [session_id]
+            if limit is not None:
+                params.append(limit)
+                limit_clause = " LIMIT ?"
+            else:
+                limit_clause = ""
+            if offset is not None:
+                params.append(offset)
+                offset_clause = " OFFSET ?"
+            else:
+                offset_clause = ""
             
             cursor = conn.execute(f"""
                 SELECT * FROM {table} WHERE session_id = ?
                 ORDER BY created_at{limit_clause}{offset_clause}
-            """, (session_id,))
+            """, params)
             
             messages = []
             for row in cursor.fetchall():
