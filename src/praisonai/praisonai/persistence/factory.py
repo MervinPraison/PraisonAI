@@ -6,7 +6,7 @@ unused dependencies. Uses registry pattern for extensibility.
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 from .config import PersistenceConfig
 from .registry import CONVERSATION_STORES, KNOWLEDGE_STORES, STATE_STORES
@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 def create_conversation_store(
     backend: str,
     url: Optional[str] = None,
+    mode: Literal["sync", "async", "auto"] = "auto", 
     **options: Any
 ):
     """
@@ -25,18 +26,40 @@ def create_conversation_store(
     Args:
         backend: Backend type (postgres, mysql, sqlite, etc.) 
         url: Connection URL
+        mode: "sync" for blocking, "async" for async-only, "auto" for legacy behavior
         **options: Backend-specific options
     
     Returns:
         ConversationStore instance
     
     Example:
+        # Async-safe SQLite store
         store = create_conversation_store(
-            "postgres",
-            url="postgresql://localhost:5432/praisonai"
+            "sqlite", 
+            path="./conversations.db",
+            mode="async"
+        )
+        
+        # Sync-only SQLite store (multi-agent safe)
+        store = create_conversation_store(
+            "sqlite",
+            path="./conversations.db", 
+            mode="sync"
         )
     """
-    return CONVERSATION_STORES.create(backend, url=url, **options)
+    
+    # Handle sync/async mode routing
+    if mode == "sync" and backend in ("sqlite", "postgres", "mysql"):
+        backend_name = f"sync_{backend}"
+    elif mode == "async" and backend in ("sqlite", "postgres", "mysql"):
+        backend_name = f"async_{backend}"
+    elif mode == "auto":
+        # Legacy behavior - use existing backend as-is
+        backend_name = backend
+    else:
+        backend_name = backend
+    
+    return CONVERSATION_STORES.create(backend_name, url=url, **options)
 
 
 def create_knowledge_store(
@@ -103,10 +126,15 @@ def create_stores_from_config(config: PersistenceConfig) -> Dict[str, Any]:
     }
     
     if config.conversation_store:
+        # Extract mode from conversation_options if present
+        conversation_options = dict(config.conversation_options) 
+        mode = conversation_options.pop("mode", "auto")
+        
         stores["conversation"] = create_conversation_store(
             config.conversation_store,
             url=config.conversation_url,
-            **config.conversation_options
+            mode=mode,
+            **conversation_options
         )
     
     if config.knowledge_store:

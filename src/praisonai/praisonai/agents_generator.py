@@ -639,45 +639,28 @@ class AgentsGenerator:
                 self.logger.debug("tools folder exists in the root directory")
 
         framework = self.framework or config.get('framework', 'crewai')
-
-        # Determine AutoGen version if needed (keeping compatibility logic)
-        if framework == "autogen":
-            autogen_version = os.environ.get("AUTOGEN_VERSION", "auto").lower()
-            autogen_v4_adapter = self._get_framework_adapter("autogen_v4")
-            autogen_v2_adapter = self._get_framework_adapter("autogen")
-            
-            use_v4 = False
-            if autogen_version == "v0.4" and autogen_v4_adapter.is_available():
-                use_v4 = True
-            elif autogen_version == "v0.2" and autogen_v2_adapter.is_available():
-                use_v4 = False
-            elif autogen_version == "auto":
-                use_v4 = autogen_v4_adapter.is_available()
-            else:
-                use_v4 = autogen_v4_adapter.is_available() and not autogen_v2_adapter.is_available()
-            
-            framework = "autogen_v4" if use_v4 else "autogen"
-            
-        # Initialize AgentOps if available
-        try:
-            import agentops
-            agentops_api_key = os.getenv("AGENTOPS_API_KEY")
-            if agentops_api_key:
-                agentops.init(agentops_api_key, default_tags=[framework])
-        except ImportError:
-            pass
-            
-        # Update framework adapter if framework changed (e.g., AutoGen version selection)
-        if framework != self.framework:
-            self.framework = framework
-            self.framework_adapter = self._get_framework_adapter(framework)
+        
+        # Get initial adapter and resolve to concrete variant
+        initial_adapter = self._get_framework_adapter(framework)
+        adapter = initial_adapter.resolve()
+        
+        # Initialize observability hooks
+        from .observability.hooks import init_observability
+        init_observability(adapter.name)
+        
+        # Run adapter setup hooks
+        adapter.setup(framework_tag=adapter.name)
+        
+        # Update framework reference if resolution changed it
+        self.framework = adapter.name
+        self.framework_adapter = adapter
             
         # Validate framework availability for non-CLI callers
         from .framework_adapters.validators import assert_framework_available
-        assert_framework_available(framework)
+        assert_framework_available(adapter.name)
         
-        self.logger.info(f"Using framework: {framework}")
-        return self.framework_adapter.run(
+        self.logger.info(f"Using framework: {adapter.name}")
+        return adapter.run(
             config,
             self.config_list,
             topic,

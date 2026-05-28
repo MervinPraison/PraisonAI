@@ -121,6 +121,10 @@ def _register_builtin_conversation_stores(registry: StoreRegistry):
         from .conversation.sqlite import SQLiteConversationStore
         return SQLiteConversationStore(path=url or path, **kwargs)
     
+    def _sync_sqlite(url=None, path=None, **kwargs):
+        from .conversation.sync_sqlite import SyncSQLiteConversationStore
+        return SyncSQLiteConversationStore(path=url or path, **kwargs)
+    
     def _async_sqlite(url=None, path=None, **kwargs):
         from .conversation.async_sqlite import AsyncSQLiteConversationStore
         return AsyncSQLiteConversationStore(path=url or path, **kwargs)
@@ -154,6 +158,8 @@ def _register_builtin_conversation_stores(registry: StoreRegistry):
     registry.register("async_mysql", _async_mysql,
         aliases=("aiomysql", "mysql_async"))
     registry.register("sqlite", _sqlite)
+    registry.register("sync_sqlite", _sync_sqlite,
+        aliases=("sqlite_sync",))
     registry.register("async_sqlite", _async_sqlite,
         aliases=("aiosqlite", "sqlite_async"))
     registry.register("json", _json)
