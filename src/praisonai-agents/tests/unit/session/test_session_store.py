@@ -405,14 +405,28 @@ class TestDefaultSessionStore:
         with open(filepath, "w") as f:
             json.dump(data, f)
         
-        # Without invalidation, cache returns old data
+        # Reads reload from disk when the session file exists
         history = temp_store.get_chat_history("session-1")
-        assert len(history) == 1  # Cached
-        
-        # After invalidation, new data is loaded
+        assert len(history) == 2
+
+        # invalidate_cache still clears in-memory state for non-existent files
         temp_store.invalidate_cache("session-1")
         history = temp_store.get_chat_history("session-1")
         assert len(history) == 2
+
+    def test_get_chat_history_sees_other_store_instance(self, temp_store):
+        """Another store on the same session_dir must see new messages without invalidate_cache."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = DefaultSessionStore(session_dir=tmpdir)
+            reader = DefaultSessionStore(session_dir=tmpdir)
+
+            writer.add_user_message("session-1", "first")
+            reader._load_session("session-1")
+            writer.add_user_message("session-1", "second")
+
+            history = reader.get_chat_history("session-1")
+            assert len(history) == 2
+            assert history[1]["content"] == "second"
     
     def test_list_sessions_with_none_updated_at(self, temp_store):
         """Test list_sessions handles None updated_at values without crashing.
