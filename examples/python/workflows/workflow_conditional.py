@@ -48,7 +48,7 @@ finalizer = Agent(
 )
 
 # Create workflow with conditional steps
-workflow = AgentFlow(
+workflow = Workflow(
     name="Conditional Agentic Pipeline",
     steps=[
         analyzer,  # Always runs
