@@ -531,6 +531,27 @@ class DefaultSessionStore:
             error_label="clear session",
         )
 
+    def set_chat_history(
+        self,
+        session_id: str,
+        messages: List[Dict[str, str]],
+    ) -> bool:
+        """Replace session messages atomically (file-locked read-modify-write)."""
+
+        def _apply(session: SessionData) -> None:
+            session.messages.clear()
+            for msg in messages:
+                session.messages.append(
+                    SessionMessage(
+                        role=msg.get("role", "user"),
+                        content=msg.get("content", ""),
+                    )
+                )
+
+        return self._modify_session_locked(
+            session_id, _apply, error_label="set chat history"
+        )
+
     def update_session_metadata(self, session_id: str, **fields: Any) -> bool:
         """Merge run stats / metadata fields into a persisted session."""
         if not fields:

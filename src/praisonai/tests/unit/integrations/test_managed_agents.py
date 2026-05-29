@@ -298,6 +298,42 @@ def test_backward_compatible_aliases():
     assert ManagedBackendConfig == ManagedConfig
 
 
+@pytest.mark.asyncio
+async def test_local_managed_stream_persists_messages():
+    """stream() must persist user/assistant messages like execute()."""
+    import tempfile
+    from unittest.mock import MagicMock, patch
+
+    from praisonaiagents.session.store import DefaultSessionStore
+    from praisonai.integrations.managed_local import LocalManagedAgent
+
+    with tempfile.TemporaryDirectory() as session_dir:
+        store = DefaultSessionStore(session_dir=session_dir)
+        managed = LocalManagedAgent(session_store=store)
+
+        mock_agent = MagicMock()
+
+        def _fake_chat(prompt, stream=False):
+            if stream:
+                return iter(["Hel", "lo"])
+            return "Hello"
+
+        mock_agent.chat.side_effect = _fake_chat
+
+        with patch.object(managed, "_ensure_agent", return_value=mock_agent):
+            chunks = []
+            async for chunk in managed.stream("Hi there"):
+                chunks.append(chunk)
+
+        assert "".join(chunks) == "Hello"
+        assert managed.session_id
+        history = store.get_chat_history(managed.session_id)
+        assert history == [
+            {"role": "user", "content": "Hi there"},
+            {"role": "assistant", "content": "Hello"},
+        ]
+
+
 def test_local_managed_persist_state_preserves_messages():
     """_persist_state must not overwrite messages added concurrently on disk."""
     import tempfile

@@ -349,6 +349,20 @@ class TestDbSessionAdapter:
         assert meta["agent_id"] == "abc"
         assert meta["total_input_tokens"] == 42
 
+    def test_update_session_metadata_accepts_keyword_fields(self):
+        """update_session_metadata matches DefaultSessionStore **fields API."""
+        from praisonai.integrations.db_session_adapter import DbSessionAdapter
+
+        mock_db = MagicMock()
+        adapter = DbSessionAdapter(mock_db)
+        adapter.update_session_metadata(
+            "sess1", model="gpt-4o-mini", total_tokens=99, cost=0.01
+        )
+        meta = adapter.get_metadata("sess1")
+        assert meta["model"] == "gpt-4o-mini"
+        assert meta["total_tokens"] == 99
+        assert meta["cost"] == 0.01
+
     def test_clear_session_purges_db_history(self):
         """clear_session must not leave stale messages reloadable from the DB."""
         from praisonai.integrations.db_session_adapter import DbSessionAdapter
