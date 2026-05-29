@@ -545,6 +545,8 @@ class DefaultSessionStore:
                     SessionMessage(
                         role=msg.get("role", "user"),
                         content=msg.get("content", ""),
+                        timestamp=msg.get("timestamp", time.time()),
+                        metadata=msg.get("metadata", {}),
                     )
                 )
 
