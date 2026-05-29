@@ -41,39 +41,28 @@ class PluginRegistry(Generic[T]):
             builtins: Dict of name -> loader function for built-in plugins
         """
         self._entry_point_group = entry_point_group
-        self._items: Dict[str, Type[T]] = {}
+        self._loaders: Dict[str, Callable[[], Type[T]]] = {}  # lazy loaders
+        self._items: Dict[str, Type[T]] = {}  # resolved cache
         self._aliases: Dict[str, str] = {}  # alias -> canonical name
         self._lock = threading.Lock()
         
-        # Load built-in plugins with error handling
+        # Store built-in loaders (normalized) without calling them
         if builtins:
             for name, loader in builtins.items():
-                try:
-                    self._items[name] = loader()
-                except ImportError:
-                    # Built-in plugin dependencies not available, skip
-                    pass
-                except Exception:
-                    # Log other errors but don't crash initialization
-                    logger.warning("Failed to load built-in plugin %r", name, exc_info=True)
+                self._add_loader(name, loader)
         
-        self._load_entry_points()
+        self._discover_entry_points()
 
-    def _load_entry_points(self) -> None:
-        """Load plugins from entry points."""
+    def _add_loader(self, name: str, loader: Callable[[], Type[T]]) -> None:
+        """Add a loader with normalized name."""
+        normalized_name = name.lower()
+        self._loaders[normalized_name] = loader
+
+    def _discover_entry_points(self) -> None:
+        """Discover entry point loaders without loading them."""
         try:
             for ep in entry_points(group=self._entry_point_group):
-                try:
-                    plugin_class = ep.load()
-                    with self._lock:
-                        self._items[ep.name] = plugin_class
-                except Exception:
-                    # Do not break plugin dispatch because one plugin is broken
-                    logger.warning(
-                        "Failed to load plugin %r from entry point",
-                        ep.name,
-                        exc_info=True,
-                    )
+                self._add_loader(ep.name, ep.load)
         except Exception:
             # entry_points() might not be available in older Python versions
             logger.debug("Entry points not available for group %s", self._entry_point_group)
@@ -120,7 +109,7 @@ class PluginRegistry(Generic[T]):
                 return True
             
             # Check if it's a canonical name
-            if normalized_name in self._items:
+            if normalized_name in self._loaders:
                 # Remove all aliases pointing to this plugin
                 aliases_to_remove = [
                     alias for alias, canonical in self._aliases.items()
@@ -129,7 +118,9 @@ class PluginRegistry(Generic[T]):
                 for alias in aliases_to_remove:
                     del self._aliases[alias]
                 
-                del self._items[normalized_name]
+                # Remove from both loaders and items cache
+                del self._loaders[normalized_name]
+                self._items.pop(normalized_name, None)
                 return True
             
             return False
@@ -146,28 +137,39 @@ class PluginRegistry(Generic[T]):
         Raises:
             ValueError: If plugin is not found
         """
+        normalized_name = name.lower()
+        
         with self._lock:
-            normalized_name = name.lower()
-            
-            # Resolve alias to canonical name
+            # Check cache first
             canonical_name = self._aliases.get(normalized_name, normalized_name)
             cls = self._items.get(canonical_name)
             
-            # Capture available plugins snapshot while holding lock
-            # to avoid race condition between check and error message
-            if cls is None:
-                available_plugins = sorted(self._items.keys())
+            if cls is not None:
+                return cls
+            
+            # Try to load from loaders
+            loader = self._loaders.get(canonical_name)
+            if loader is None:
+                # Capture available plugins snapshot while holding lock
+                available_loaders = sorted(self._loaders.keys())
                 available_aliases = sorted(self._aliases.keys())
-                available_snapshot = available_plugins + available_aliases
-            else:
-                available_snapshot = None
-        
-        if cls is None:
-            raise ValueError(
-                f"Unknown {self._entry_point_group} plugin: {name!r}. "
-                f"Available: {available_snapshot}"
-            )
-        return cls
+                available_snapshot = available_loaders + available_aliases
+                raise ValueError(
+                    f"Unknown {self._entry_point_group} plugin: {name!r}. "
+                    f"Available: {available_snapshot}"
+                )
+            
+            # Load and cache the plugin
+            try:
+                cls = loader()
+            except ImportError as e:
+                raise ValueError(
+                    f"Plugin {name!r} is registered but its dependencies "
+                    f"are not installed: {e}"
+                ) from e
+            
+            self._items[canonical_name] = cls
+            return cls
 
     def create(self, name: str, *args, **kwargs) -> T:
         """Create an instance of the specified plugin.
@@ -192,7 +194,7 @@ class PluginRegistry(Generic[T]):
             Sorted list of plugin names
         """
         with self._lock:
-            return sorted(self._items.keys())
+            return sorted(self._loaders.keys())
 
     def is_available(self, name: str) -> bool:
         """Check if a plugin is available.
@@ -225,4 +227,4 @@ class PluginRegistry(Generic[T]):
             Sorted list of all registered names and aliases
         """
         with self._lock:
-            return sorted(list(self._items.keys()) + list(self._aliases.keys()))
+            return sorted(list(self._loaders.keys()) + list(self._aliases.keys()))
