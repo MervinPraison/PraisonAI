@@ -44,7 +44,7 @@ class PluginRegistry(Generic[T]):
         self._loaders: Dict[str, Callable[[], Type[T]]] = {}  # lazy loaders
         self._items: Dict[str, Type[T]] = {}  # resolved cache
         self._aliases: Dict[str, str] = {}  # alias -> canonical name
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # Use RLock for re-entrant access
         
         # Store built-in loaders (normalized) without calling them
         if builtins:
@@ -83,6 +83,8 @@ class PluginRegistry(Generic[T]):
         """
         with self._lock:
             canonical_name = name.lower()
+            # Store both in loaders (for consistency with discovery) and items (for immediate access)
+            self._loaders[canonical_name] = lambda: cls
             self._items[canonical_name] = cls
             
             # Register aliases
@@ -159,15 +161,20 @@ class PluginRegistry(Generic[T]):
                     f"Available: {available_snapshot}"
                 )
             
-            # Load and cache the plugin
-            try:
-                cls = loader()
-            except ImportError as e:
-                raise ValueError(
-                    f"Plugin {name!r} is registered but its dependencies "
-                    f"are not installed: {e}"
-                ) from e
-            
+            # Load and cache the plugin (release lock during loading to prevent deadlock)
+            pass
+        
+        # Load outside the lock to prevent deadlock if loader calls back into registry
+        try:
+            cls = loader()
+        except ImportError as e:
+            raise ValueError(
+                f"Plugin {name!r} is registered but its dependencies "
+                f"are not installed: {e}"
+            ) from e
+        
+        # Re-acquire lock to cache the result
+        with self._lock:
             self._items[canonical_name] = cls
             return cls
 

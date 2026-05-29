@@ -5,6 +5,7 @@ Provides wrapper functions to add persistence capabilities to PraisonAI agents
 without modifying the core SDK.
 """
 
+import asyncio
 import time
 import uuid
 import logging
@@ -162,9 +163,14 @@ def wrap_agent_with_persistence(
         """End the current session."""
         orchestrator.on_agent_end(agent, session_id)
     
+    async def aend_session():
+        """End the current session (async version)."""
+        await orchestrator.aon_agent_end(agent, session_id)
+    
     agent.get_session = get_session
     agent.get_messages = get_messages
     agent.end_session = end_session
+    agent.aend_session = aend_session
     
     return agent
 
@@ -278,8 +284,8 @@ class PersistentAgent:
         if hasattr(self._agent, 'achat'):
             response = await self._agent.achat(prompt, *args, **kwargs)
         else:
-            # Fallback to sync chat if achat is not available
-            response = self._agent.chat(prompt, *args, **kwargs)
+            # Fallback to sync chat if achat is not available - use asyncio.to_thread to avoid blocking
+            response = await asyncio.to_thread(self._agent.chat, prompt, *args, **kwargs)
         
         # Persist assistant response
         if response:
@@ -298,6 +304,10 @@ class PersistentAgent:
     def end_session(self):
         """End the current session."""
         self._orchestrator.on_agent_end(self._agent, self._session_id)
+    
+    async def aend_session(self):
+        """End the current session (async version)."""
+        await self._orchestrator.aon_agent_end(self._agent, self._session_id)
     
     @property
     def session_id(self) -> str:
