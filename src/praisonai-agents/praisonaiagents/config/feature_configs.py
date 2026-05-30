@@ -8,6 +8,7 @@ Provides dataclasses for consolidated feature configuration:
 - ReflectionConfig: Self-reflection settings
 - GuardrailConfig: Safety and validation
 - WebConfig: Web search and fetch
+- ToolSearchConfig: Progressive tool disclosure
 
 All configs follow the agent-centric pattern:
 - False: Feature disabled (zero overhead)
@@ -16,21 +17,22 @@ All configs follow the agent-centric pattern:
 - Instance: Pre-configured manager/engine
 
 Usage:
-    from praisonaiagents import Agent, MemoryConfig, KnowledgeConfig
+    from praisonaiagents import Agent, MemoryConfig, KnowledgeConfig, ToolSearchConfig
     
     # Simple enable
-    agent = Agent(instructions="...", memory=True)
+    agent = Agent(instructions="...", memory=True, tool_search=True)
     
     # With config
     agent = Agent(
         instructions="...",
         memory=MemoryConfig(backend="redis", user_id="user123"),
         knowledge=KnowledgeConfig(sources=["docs/"], rerank=True),
+        tool_search=ToolSearchConfig(enabled="auto", threshold_pct=15),
     )
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional, Callable, Tuple, Union
+from typing import Dict, List, Any, Optional, Callable, Tuple, Union, FrozenSet
 from enum import Enum
 
 # Import AutonomyConfig from canonical location (no circular dep)
@@ -1072,6 +1074,53 @@ class MultiAgentMemoryConfig:
         }
 
 
+@dataclass
+class ToolSearchConfig:
+    """
+    Configuration for Tool Search feature - progressive MCP/plugin tool disclosure.
+    
+    When deferrable tool schemas would consume a large share of the model context window,
+    replace them with bridge tools (tool_search, tool_describe, tool_call) and load 
+    individual schemas on demand.
+    
+    Consolidates: tool_search parameter
+    
+    Usage:
+        # Simple enable (auto mode)
+        Agent(tool_search=True)
+        
+        # Auto mode with custom threshold
+        Agent(tool_search=ToolSearchConfig(enabled="auto", threshold_pct=15))
+        
+        # Always on mode
+        Agent(tool_search=ToolSearchConfig(enabled="on"))
+    """
+    # Control mode: "auto" | "on" | "off"  
+    enabled: Union[bool, str] = "auto"
+    
+    # Percentage of context window for deferral threshold (auto mode)
+    threshold_pct: float = 10.0
+    
+    # Default number of search results
+    search_default_limit: int = 5
+    
+    # Maximum search results allowed  
+    max_search_limit: int = 20
+    
+    # Override core tools set (advanced usage)
+    core_tools: Optional[FrozenSet[str]] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "enabled": self.enabled,
+            "threshold_pct": self.threshold_pct, 
+            "search_default_limit": self.search_default_limit,
+            "max_search_limit": self.max_search_limit,
+            "core_tools": list(self.core_tools) if self.core_tools else None,
+        }
+
+
 class AutonomyLevel(str, Enum):
     """Autonomy levels for agent behavior."""
     SUGGEST = "suggest"
@@ -1092,6 +1141,7 @@ CachingParam = Union[bool, CachingConfig]
 HooksParam = Union[List[Any], HooksConfig]
 SkillsParam = Union[List[str], SkillsConfig]
 AutonomyParam = Union[bool, Dict[str, Any], "AutonomyConfig"]
+ToolSearchParam = Union[bool, str, Dict[str, Any], ToolSearchConfig]
 
 
 # =============================================================================
@@ -1368,6 +1418,7 @@ __all__ = [
     "HooksConfig",
     "SkillsConfig",
     "AutonomyConfig",
+    "ToolSearchConfig",
     # Config classes (Multi-Agent)
     "MultiAgentHooksConfig",
     "MultiAgentOutputConfig",
@@ -1388,6 +1439,7 @@ __all__ = [
     "HooksParam",
     "SkillsParam",
     "AutonomyParam",
+    "ToolSearchParam",
     # Precedence ladder resolvers
     "resolve_memory",
     "resolve_knowledge",

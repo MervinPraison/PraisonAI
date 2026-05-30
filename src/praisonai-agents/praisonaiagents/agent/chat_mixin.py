@@ -331,6 +331,7 @@ Your Goal: {self.goal}"""
         - Callable functions
         - String function names
         - Objects with to_openai_tool() method
+        - Tool Search progressive disclosure (if enabled)
         
         Args:
             tools: List of tools in various formats or None to use self.tools
@@ -344,9 +345,11 @@ Your Goal: {self.goal}"""
         if not tools:
             return []
         
-        # Check cache first
+        # Check cache first - include tool_search config in cache key for safety
         tools_key = self._get_tools_cache_key(tools)
-        cached_tools = self._cache_get(self._formatted_tools_cache, tools_key)
+        tool_search_enabled = getattr(self, '_tool_search_config', None) is not None
+        cache_key = f"{tools_key}:tool_search={tool_search_enabled}"
+        cached_tools = self._cache_get(self._formatted_tools_cache, cache_key)
         if cached_tools is not None:
             return cached_tools
             
@@ -399,8 +402,30 @@ Your Goal: {self.goal}"""
                 logging.error(f"Tools are not JSON serializable: {e}")
                 return []
         
+        # Apply tool search assembly if enabled (after formatting, before caching)
+        if hasattr(self, '_tool_search_config') and self._tool_search_config is not None:
+            try:
+                from ..tools.tool_search import assemble_tool_defs
+                # Get context length from LLM config if available
+                context_length = getattr(self, '_context_window_size', None)
+                
+                # Assemble tools with bridge mode check
+                assembled_tools, metadata = assemble_tool_defs(
+                    tool_defs=formatted_tools,
+                    config=self._tool_search_config,
+                    context_length=context_length
+                )
+                
+                # Store metadata for bridge tool dispatch
+                self._tool_search_metadata = metadata
+                formatted_tools = assembled_tools
+                
+            except ImportError:
+                # Tool search module not available, continue with original tools
+                logging.warning("Tool search requested but tool_search module not available")
+        
         # Cache the formatted tools with LRU eviction
-        self._cache_put(self._formatted_tools_cache, tools_key, formatted_tools)
+        self._cache_put(self._formatted_tools_cache, cache_key, formatted_tools)
         return formatted_tools
 
     def _build_multimodal_prompt(

@@ -609,7 +609,8 @@ class MCP:
                     "name": tool.name,
                     "description": tool.description if hasattr(tool, 'description') else f"Call the {tool.name} tool",
                     "parameters": parameters
-                }
+                },
+                "__praisonai_deferrable__": True  # Mark MCP tools as deferrable for tool search
             })
         
         return openai_tools
