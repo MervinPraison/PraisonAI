@@ -65,8 +65,8 @@ def register_kanban_backends():
             backends.set_backend("jobs_executor", jobs_executor)
             log.debug("jobs_executor backend registered")
         
-        # Start kanban dispatcher
-        ensure_kanban_dispatcher()
+        # Register kanban dispatcher startup handler
+        register_kanban_startup_handler()
             
         return True
         
@@ -75,34 +75,39 @@ def register_kanban_backends():
         return False
 
 
-def ensure_kanban_dispatcher():
-    """Ensure kanban dispatcher is running in background."""
-    import asyncio
+def register_kanban_startup_handler():
+    """Register kanban dispatcher startup handler with the ASGI app."""
     import logging
     
     log = logging.getLogger(__name__)
     
     try:
+        import praisonaiui.backends as backends
         from praisonai.gateway.kanban_dispatcher import start_kanban_dispatcher, is_dispatcher_running
         
-        if not is_dispatcher_running():
-            # Start dispatcher in background
-            loop = None
+        async def _startup_handler():
+            """Startup handler for kanban dispatcher."""
             try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                # No event loop in this thread, create one
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            
-            if loop and loop.is_running():
-                # Loop is running, schedule the task
-                asyncio.create_task(start_kanban_dispatcher())
-                log.debug("kanban dispatcher scheduled to start")
-            else:
-                # No loop or loop not running, we can't start dispatcher here
-                # This is expected in CLI/sync contexts
-                log.debug("kanban dispatcher cannot start (no async context)")
+                if not is_dispatcher_running():
+                    await start_kanban_dispatcher()
+                    log.info("kanban dispatcher started")
+            except Exception as exc:
+                log.warning("failed to start kanban dispatcher: %s", exc)
         
+        # Register startup handler if the backend supports it
+        if hasattr(backends, 'register_startup_handler'):
+            backends.register_startup_handler(_startup_handler)
+            log.debug("kanban dispatcher startup handler registered")
+        else:
+            # Fallback: try immediate start if event loop is running
+            try:
+                import asyncio
+                loop = asyncio.get_running_loop()
+                if loop and not is_dispatcher_running():
+                    asyncio.create_task(start_kanban_dispatcher())
+                    log.debug("kanban dispatcher started via task")
+            except RuntimeError:
+                log.debug("kanban dispatcher deferred (no running event loop)")
+                
     except Exception as exc:
-        log.debug("kanban dispatcher startup failed: %s", exc)
+        log.debug("kanban startup handler registration failed: %s", exc)

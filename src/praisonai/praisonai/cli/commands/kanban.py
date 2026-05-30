@@ -282,10 +282,25 @@ def kanban_boards_cmd(
                 raise typer.Exit(1)
             
             import os
+            from pathlib import Path
+            import json
+            
+            # Set for current session
             os.environ['PRAISONAI_KANBAN_BOARD'] = board
             
-            output.print_success(f"Switched to board '{board}'")
-            output.print_info("Note: This only affects the current CLI session")
+            # Persist to config file for future sessions
+            config_dir = Path.home() / ".praisonai"
+            config_dir.mkdir(exist_ok=True)
+            config_file = config_dir / "kanban_config.json"
+            
+            try:
+                config = {"active_board": board}
+                with open(config_file, 'w') as f:
+                    json.dump(config, f, indent=2)
+                output.print_success(f"Switched to board '{board}' (persisted)")
+            except Exception as e:
+                output.print_success(f"Switched to board '{board}' (session only)")
+                output.print_info(f"Could not persist setting: {e}")
         
         else:
             output.print_error(f"Unknown action: {action}")

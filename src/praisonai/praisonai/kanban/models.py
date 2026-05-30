@@ -37,10 +37,11 @@ class Task:
     metadata: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
+        from datetime import timezone
         if self.created_at is None:
-            self.created_at = datetime.utcnow()
+            self.created_at = datetime.now(timezone.utc)
         if self.updated_at is None:
-            self.updated_at = datetime.utcnow()
+            self.updated_at = datetime.now(timezone.utc)
         if self.metadata is None:
             self.metadata = {}
 

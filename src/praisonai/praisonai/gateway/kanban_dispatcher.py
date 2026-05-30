@@ -144,14 +144,23 @@ class KanbanDispatcher:
             
             logger.info(f"Spawning worker for task {task.id}: {' '.join(cmd)}")
             
-            # Start process
+            # Start process with output redirect to avoid deadlock
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.log') as temp_log:
+                temp_log_path = temp_log.name
+            
             process = subprocess.Popen(
                 cmd,
                 env=env,
-                stdout=subprocess.PIPE,
+                stdout=open(temp_log_path, 'w'),
                 stderr=subprocess.STDOUT,
                 text=True
             )
+            
+            # Store log path for later cleanup
+            if not hasattr(self, '_temp_logs'):
+                self._temp_logs = {}
+            self._temp_logs[task.id] = temp_log_path
             
             # Track the running task
             self.running_tasks[task.id] = process
@@ -208,8 +217,17 @@ class KanbanDispatcher:
                     # Get return code
                     return_code = process.returncode
                     
-                    # Read output
-                    stdout_data, _ = process.communicate(timeout=1)
+                    # Read output from temp log file
+                    stdout_data = ""
+                    if hasattr(self, '_temp_logs') and task_id in self._temp_logs:
+                        try:
+                            with open(self._temp_logs[task_id], 'r') as f:
+                                stdout_data = f.read()
+                        except Exception as e:
+                            logger.warning(f"Failed to read log for task {task_id}: {e}")
+                            stdout_data = f"<log read error: {e}>"
+                    else:
+                        stdout_data = "<no log available>"
                     
                     # Update task based on exit code
                     if return_code == 0:
@@ -260,9 +278,19 @@ class KanbanDispatcher:
                     except:
                         pass
         
-        # Remove completed tasks from tracking
+        # Remove completed tasks from tracking and clean up temp logs
         for task_id in completed:
             del self.running_tasks[task_id]
+            
+            # Clean up temporary log file
+            if hasattr(self, '_temp_logs') and task_id in self._temp_logs:
+                try:
+                    import os
+                    os.unlink(self._temp_logs[task_id])
+                except Exception as e:
+                    logger.warning(f"Failed to cleanup temp log for task {task_id}: {e}")
+                finally:
+                    del self._temp_logs[task_id]
     
     async def run_forever(self):
         """

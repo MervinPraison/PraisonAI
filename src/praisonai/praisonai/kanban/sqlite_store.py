@@ -106,6 +106,8 @@ class SQLiteKanbanStore:
         """Get database connection with proper cleanup."""
         conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.row_factory = sqlite3.Row
+        # Enable foreign key constraints for this connection
+        conn.execute("PRAGMA foreign_keys=ON")
         try:
             yield conn
             conn.commit()
@@ -267,11 +269,58 @@ class SQLiteKanbanStore:
             cursor = conn.execute(query, values)
             return [Task.from_dict(dict(row)) for row in cursor.fetchall()]
 
+    def _get_task_with_conn(self, task_id: str, conn: sqlite3.Connection) -> Optional[Task]:
+        """Get task using existing connection to avoid nesting."""
+        cursor = conn.execute(
+            "SELECT * FROM tasks WHERE id = ?", (task_id,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return Task.from_dict(dict(row))
+        return None
+    
+    def _update_task_with_conn(self, task_id: str, updates: Dict[str, Any], conn: sqlite3.Connection) -> Task:
+        """Update task using existing connection to avoid nesting."""
+        from datetime import timezone
+        
+        if not updates:
+            return self._get_task_with_conn(task_id, conn)
+        
+        # Build update query
+        set_clauses = []
+        params = []
+        
+        for key, value in updates.items():
+            if key in ['id', 'created_at']:  # Don't allow updating immutable fields
+                continue
+            set_clauses.append(f"{key} = ?")
+            params.append(value)
+        
+        if not set_clauses:
+            return self._get_task_with_conn(task_id, conn)
+        
+        # Always update timestamp and version
+        set_clauses.append("updated_at = ?")
+        set_clauses.append("version = version + 1")
+        params.append(datetime.now(timezone.utc).isoformat())
+        params.append(task_id)
+        
+        query = f"UPDATE tasks SET {', '.join(set_clauses)} WHERE id = ?"
+        cursor = conn.execute(query, params)
+        
+        if cursor.rowcount == 0:
+            raise ValueError(f"Task {task_id} not found")
+        
+        # Log the update
+        self._log_event(conn, task_id, 'updated', updates)
+        
+        return self._get_task_with_conn(task_id, conn)
+
     def move_task(self, task_id: str, status: str) -> Task:
         """Move task to new status with parent/child promotion logic."""
         with self._get_connection() as conn:
             # Check if task exists
-            task = self.get_task(task_id)
+            task = self._get_task_with_conn(task_id, conn)
             if not task:
                 raise ValueError(f"Task {task_id} not found")
             
@@ -290,7 +339,7 @@ class SQLiteKanbanStore:
                     raise ValueError("Cannot move to ready: incomplete parent tasks")
             
             # Update task status
-            updated_task = self.update_task(task_id, {'status': status})
+            updated_task = self._update_task_with_conn(task_id, {'status': status}, conn)
             
             # Promote children if moving to done
             if new_status == TaskStatus.DONE:
@@ -300,7 +349,7 @@ class SQLiteKanbanStore:
                 
                 for row in cursor.fetchall():
                     child_id = row['child_id']
-                    child_task = self.get_task(child_id)
+                    child_task = self._get_task_with_conn(child_id, conn)
                     
                     if child_task and child_task.status == TaskStatus.TODO:
                         # Check if all other parents are done
@@ -312,7 +361,7 @@ class SQLiteKanbanStore:
                         """, (child_id,))
                         
                         if parent_check.fetchone()['incomplete_parents'] == 0:
-                            self.update_task(child_id, {'status': TaskStatus.READY.value})
+                            self._update_task_with_conn(child_id, {'status': TaskStatus.READY.value}, conn)
             
             self._log_event(conn, task_id, 'moved', {
                 'old_status': task.status.value,
@@ -484,12 +533,13 @@ class SQLiteKanbanStore:
     def claim_task(self, task_id: str, worker_id: str) -> bool:
         """Claim a ready task for execution (CAS operation)."""
         with self._get_connection() as conn:
-            # Atomic claim with CAS on status and claim_lock
+            # Atomic claim with CAS on status and claim_lock, increment version for optimistic locking
+            from datetime import timezone
             result = conn.execute("""
                 UPDATE tasks 
-                SET claim_lock = ?, updated_at = ?, status = 'running'
+                SET claim_lock = ?, updated_at = ?, status = 'running', version = version + 1
                 WHERE id = ? AND status = 'ready' AND (claim_lock IS NULL OR claim_lock = '')
-            """, (worker_id, datetime.utcnow().isoformat(), task_id))
+            """, (worker_id, datetime.now(timezone.utc).isoformat(), task_id))
             
             if result.rowcount > 0:
                 self._log_event(conn, task_id, 'claimed', {'worker_id': worker_id})
@@ -500,11 +550,13 @@ class SQLiteKanbanStore:
     def release_claim(self, task_id: str, worker_id: str) -> bool:
         """Release claim on task."""
         with self._get_connection() as conn:
+            # Release claim and increment version for optimistic locking
+            from datetime import timezone
             result = conn.execute("""
                 UPDATE tasks 
-                SET claim_lock = NULL, updated_at = ?, status = 'ready'
+                SET claim_lock = NULL, updated_at = ?, status = 'ready', version = version + 1
                 WHERE id = ? AND claim_lock = ?
-            """, (datetime.utcnow().isoformat(), task_id, worker_id))
+            """, (datetime.now(timezone.utc).isoformat(), task_id, worker_id))
             
             if result.rowcount > 0:
                 self._log_event(conn, task_id, 'released', {'worker_id': worker_id})

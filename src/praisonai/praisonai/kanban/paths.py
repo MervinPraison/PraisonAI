@@ -22,7 +22,20 @@ def get_kanban_db_path(board: Optional[str] = None) -> Path:
     
     # Read from environment variable for override
     if board is None:
-        board = os.environ.get('PRAISONAI_KANBAN_BOARD', 'default')
+        board = os.environ.get('PRAISONAI_KANBAN_BOARD')
+        if not board:
+            # Try to read from persisted config file
+            try:
+                import json
+                config_file = home / "kanban_config.json"
+                if config_file.exists():
+                    with open(config_file) as f:
+                        config = json.load(f)
+                        board = config.get('active_board', 'default')
+                else:
+                    board = 'default'
+            except Exception:
+                board = 'default'
     
     # Legacy override for single DB file
     if db_override := os.environ.get('PRAISONAI_KANBAN_DB'):
