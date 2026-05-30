@@ -83,11 +83,23 @@ def __getattr__(name):
     elif name == "OAUTH_CALLBACK_PATH":
         from .mcp_oauth_callback import OAUTH_CALLBACK_PATH
         return OAUTH_CALLBACK_PATH
+    # Protocols (lazy loaded)
+    elif name == "MCPClientProtocol":
+        from .protocols import MCPClientProtocol
+        return MCPClientProtocol
+    # Loader (lazy loaded)
+    elif name == "load_mcp_tools":
+        from .loader import load_mcp_tools
+        return load_mcp_tools
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     # Client
     "MCP",
+    # Protocols (lazy loaded)
+    "MCPClientProtocol",
+    # Loader (lazy loaded)
+    "load_mcp_tools",
     # Server (lazy loaded)
     "ToolsMCPServer",
     "launch_tools_mcp_server",

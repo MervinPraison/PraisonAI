@@ -1,0 +1,47 @@
+# Example: Agent with MCP Tool Integration
+#
+# This example shows how to configure an agent with MCP (Model Context Protocol)
+# servers for additional tool capabilities.
+#
+# Usage:
+#   praisonai workflow run --file examples/yaml/agent-with-mcp.yaml
+
+agent:
+  name: mcp_assistant
+  instructions: |
+    You are a helpful assistant with access to filesystem and time tools.
+    Use the MCP tools when needed to help users with file operations or time queries.
+  llm: gpt-4o-mini
+
+# MCP server configuration
+mcp:
+  servers:
+    filesystem:
+      command: npx
+      args:
+        - "-y"
+        - "@modelcontextprotocol/server-filesystem"
+        - "."
+      env: {}
+      enabled: true
+      description: "Filesystem access for the agent"
+    
+    time:
+      command: npx
+      args:
+        - "-y" 
+        - "@modelcontextprotocol/server-time"
+      env: {}
+      enabled: true
+      description: "Time and date utilities"
+
+# Optional: Tool filtering per server
+# mcp:
+#   servers:
+#     filesystem:
+#       command: npx
+#       args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
+#       tools:
+#         include: ["read_file", "write_file", "list_directory"]
+#         # exclude: ["delete_file"]
+#       enabled: true
