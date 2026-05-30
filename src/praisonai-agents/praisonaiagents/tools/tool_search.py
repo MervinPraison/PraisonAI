@@ -139,9 +139,9 @@ def _is_tool_deferrable(tool_def: ToolDef) -> bool:
     if function_def.get("deferrable", False):
         return True
         
-    # Check tool name patterns for MCP tools
+    # Check tool name patterns for MCP tools (prefix only, to avoid false-positives)
     tool_name = function_def.get("name", "")
-    if tool_name.startswith("mcp_") or "mcp" in tool_name.lower():
+    if tool_name.startswith("mcp_"):
         return True
         
     return False
@@ -234,6 +234,7 @@ class BM25ToolSearcher:
     
     def _build_index(self):
         """Build BM25 index from catalog."""
+        total_length = 0
         # Calculate term frequencies for each document
         for item in self.catalog:
             doc_text = f"{item['name']} {item['description']}"
@@ -245,11 +246,15 @@ class BM25ToolSearcher:
                 tf[token] += 1
                 
             self.term_frequencies.append(dict(tf))
+            total_length += len(tokens)
             
             # Document frequency (how many docs contain each term)
             unique_tokens = set(tokens)
             for token in unique_tokens:
                 self.doc_frequencies[token] += 1
+        
+        # Cache average document length to avoid O(n) recomputation in hot path
+        self._cached_avg_doc_length = total_length / len(self.catalog) if self.catalog else 0.0
     
     def search(self, query: str, limit: int = 5) -> List[Dict[str, str]]:
         """
@@ -269,7 +274,7 @@ class BM25ToolSearcher:
         scores = []
         k1, b = 1.5, 0.75  # BM25 parameters
         
-        for i, (item, tf) in enumerate(zip(self.catalog, self.term_frequencies)):
+        for item, tf in zip(self.catalog, self.term_frequencies, strict=True):
             score = 0.0
             doc_length = sum(tf.values())
             
@@ -280,7 +285,7 @@ class BM25ToolSearcher:
                                  (self.doc_frequencies[token] + 0.5))
                     term_freq = tf[token]
                     score += idf * (term_freq * (k1 + 1)) / (
-                        term_freq + k1 * (1 - b + b * (doc_length / self._avg_doc_length()))
+                        term_freq + k1 * (1 - b + b * (doc_length / self._cached_avg_doc_length))
                     )
             
             if score > 0:
@@ -290,12 +295,6 @@ class BM25ToolSearcher:
         scores.sort(key=lambda x: x[0], reverse=True)
         return [item for _, item in scores[:limit]]
     
-    def _avg_doc_length(self) -> float:
-        """Calculate average document length."""
-        if not self.term_frequencies:
-            return 0.0
-        total_length = sum(sum(tf.values()) for tf in self.term_frequencies)
-        return total_length / len(self.term_frequencies)
 
 def search_catalog(
     deferrable_tools: ToolDefList, 
@@ -544,6 +543,13 @@ def resolve_underlying_call(tool_name: str, tool_args: Dict[str, Any]) -> Tuple[
     if tool_name != "tool_call":
         # Not a bridge call, return as-is
         return tool_name, tool_args
+    
+    # Validate tool_args is a dict
+    if not isinstance(tool_args, dict):
+        raise TypeError(
+            f"tool_call expects a dictionary for tool_args, got {type(tool_args).__name__}. "
+            "Ensure the LLM output is properly formatted."
+        )
     
     # Extract real tool call from bridge args
     real_tool_name = tool_args.get("tool_name", "")

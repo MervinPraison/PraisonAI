@@ -136,7 +136,9 @@ class ToolExecutionMixin:
         logging.debug(f"{self.name} executing tool {function_name} with arguments: {arguments}")
         
         # Handle bridge tool unwrapping BEFORE trace/stream/hooks (design invariant #6)
-        if function_name in ("tool_search", "tool_describe", "tool_call"):
+        # Only intercept when tool_search is active; otherwise fall through to real tool execution
+        if (getattr(self, '_tool_search_config', None) is not None and
+                function_name in ("tool_search", "tool_describe", "tool_call")):
             return self._handle_bridge_tool_call(function_name, arguments, tool_call_id)
         
         # NOTE: tool_call callback is triggered by display_tool_call in openai_client.py
@@ -976,13 +978,13 @@ class ToolExecutionMixin:
         """
         # Ensure tool search metadata is available
         if not hasattr(self, '_tool_search_metadata') or self._tool_search_metadata is None:
-            return f"Tool search not available or not in bridge mode"
+            return "Tool search not available or not in bridge mode"
         
         metadata = self._tool_search_metadata
         
         # Check if we're in bridge mode
         if not metadata.get("bridge_mode", False):
-            return f"Tool search not in bridge mode"
+            return "Tool search not in bridge mode"
         
         # Get deferrable tools from metadata
         deferrable_tools = metadata.get("deferrable_tools", [])

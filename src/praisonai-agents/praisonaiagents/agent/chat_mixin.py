@@ -349,8 +349,10 @@ Your Goal: {self.goal}"""
         tools_key = self._get_tools_cache_key(tools)
         tool_search_enabled = getattr(self, '_tool_search_config', None) is not None
         cache_key = f"{tools_key}:tool_search={tool_search_enabled}"
-        cached_tools = self._cache_get(self._formatted_tools_cache, cache_key)
-        if cached_tools is not None:
+        cached_entry = self._cache_get(self._formatted_tools_cache, cache_key)
+        if cached_entry is not None:
+            cached_tools, cached_metadata = cached_entry
+            self._tool_search_metadata = cached_metadata
             return cached_tools
             
         formatted_tools = []
@@ -424,9 +426,24 @@ Your Goal: {self.goal}"""
                 # Tool search module not available, continue with original tools
                 logging.warning("Tool search requested but tool_search module not available")
         
-        # Cache the formatted tools with LRU eviction
-        self._cache_put(self._formatted_tools_cache, cache_key, formatted_tools)
-        return formatted_tools
+        # Strip __praisonai_deferrable__ from provider-facing tool payloads
+        # Keep the marker only for internal tool classification
+        cleaned_tools = []
+        for tool in formatted_tools:
+            if isinstance(tool, dict) and "__praisonai_deferrable__" in tool:
+                tool_copy = tool.copy()
+                tool_copy.pop("__praisonai_deferrable__", None)
+                cleaned_tools.append(tool_copy)
+            else:
+                cleaned_tools.append(tool)
+        
+        # Cache the formatted tools with LRU eviction, including tool search metadata
+        self._cache_put(
+            self._formatted_tools_cache,
+            cache_key,
+            (cleaned_tools, getattr(self, "_tool_search_metadata", None)),
+        )
+        return cleaned_tools
 
     def _build_multimodal_prompt(
         self, 

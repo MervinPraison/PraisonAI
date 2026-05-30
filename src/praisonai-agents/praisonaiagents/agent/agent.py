@@ -1458,8 +1458,14 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
             from ..tools.tool_search import ToolSearchConfig as _ToolSearchConfig
             self._tool_search_config = _ToolSearchConfig(**tool_search)
         else:
-            # Assume ToolSearchConfig instance or similar
-            self._tool_search_config = tool_search
+            from ..tools.tool_search import ToolSearchConfig as _ToolSearchConfig
+            if isinstance(tool_search, _ToolSearchConfig):
+                self._tool_search_config = tool_search
+            else:
+                raise TypeError(
+                    "tool_search must be False/None, True, a mode string, "
+                    "a dict of ToolSearchConfig fields, or ToolSearchConfig"
+                )
         
         # ============================================================
         # END CONSOLIDATED PARAMS EXTRACTION
@@ -2057,6 +2063,7 @@ Your Goal: {self.goal}
             'skills': getattr(self, '_skills_config', None),
             'approval': getattr(self, '_approval_config', None),
             'learn': getattr(self, '_learn_config', None),
+            'tool_search': getattr(self, '_tool_search_config', None),
             
             # Tool configuration
             'tool_timeout': getattr(self, '_tool_timeout', None),

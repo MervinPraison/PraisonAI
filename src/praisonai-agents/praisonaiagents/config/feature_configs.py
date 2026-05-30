@@ -1074,51 +1074,23 @@ class MultiAgentMemoryConfig:
         }
 
 
-@dataclass
-class ToolSearchConfig:
-    """
-    Configuration for Tool Search feature - progressive MCP/plugin tool disclosure.
-    
-    When deferrable tool schemas would consume a large share of the model context window,
-    replace them with bridge tools (tool_search, tool_describe, tool_call) and load 
-    individual schemas on demand.
-    
-    Consolidates: tool_search parameter
-    
-    Usage:
-        # Simple enable (auto mode)
-        Agent(tool_search=True)
-        
-        # Auto mode with custom threshold
-        Agent(tool_search=ToolSearchConfig(enabled="auto", threshold_pct=15))
-        
-        # Always on mode
-        Agent(tool_search=ToolSearchConfig(enabled="on"))
-    """
-    # Control mode: "auto" | "on" | "off"  
-    enabled: Union[bool, str] = "auto"
-    
-    # Percentage of context window for deferral threshold (auto mode)
-    threshold_pct: float = 10.0
-    
-    # Default number of search results
-    search_default_limit: int = 5
-    
-    # Maximum search results allowed  
-    max_search_limit: int = 20
-    
-    # Override core tools set (advanced usage)
-    core_tools: Optional[FrozenSet[str]] = None
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "enabled": self.enabled,
-            "threshold_pct": self.threshold_pct, 
-            "search_default_limit": self.search_default_limit,
-            "max_search_limit": self.max_search_limit,
-            "core_tools": list(self.core_tools) if self.core_tools else None,
-        }
+# Import ToolSearchConfig from tools module to avoid duplication
+def __get_tool_search_config():
+    try:
+        from ..tools.tool_search import ToolSearchConfig as _ToolSearchConfig
+        return _ToolSearchConfig
+    except ImportError:
+        # Fallback minimal config if tools module not available
+        @dataclass
+        class FallbackToolSearchConfig:
+            enabled: Union[bool, str] = "auto"
+            threshold_pct: float = 10.0
+            search_default_limit: int = 5
+            max_search_limit: int = 20
+            core_tools: Optional[FrozenSet[str]] = None
+        return FallbackToolSearchConfig
+
+ToolSearchConfig = __get_tool_search_config()
 
 
 class AutonomyLevel(str, Enum):
@@ -1393,6 +1365,21 @@ def resolve_autonomy(value: AutonomyParam) -> Optional[AutonomyConfig]:
     return value
 
 
+def resolve_tool_search(value: ToolSearchParam) -> Optional[ToolSearchConfig]:
+    """Resolve tool_search= parameter following precedence ladder."""
+    if value is None or value is False:
+        return None
+    if value is True:
+        return ToolSearchConfig()
+    if isinstance(value, str):
+        return ToolSearchConfig(enabled=value)
+    if isinstance(value, dict):
+        return ToolSearchConfig(**value)
+    if isinstance(value, ToolSearchConfig):
+        return value
+    return value
+
+
 __all__ = [
     # Enums
     "MemoryBackend",
@@ -1451,4 +1438,5 @@ __all__ = [
     "resolve_execution",
     "resolve_caching",
     "resolve_autonomy",
+    "resolve_tool_search",
 ]
