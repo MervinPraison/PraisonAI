@@ -275,6 +275,9 @@ class WebSocketGateway:
         
         # Scheduler tick background task
         self._scheduler_task: Optional[asyncio.Task] = None
+        
+        # PID lock for single-instance enforcement
+        self._pid_lock: Optional[Any] = None
     
     @property
     def is_running(self) -> bool:
@@ -293,6 +296,30 @@ class WebSocketGateway:
         if self._is_running:
             logger.warning("Gateway already running")
             return
+        
+        # Preflight port collision check
+        from .port_utils import check_port_available, GatewayPIDLock, format_collision_error
+        
+        pid_lock = GatewayPIDLock(host=self._host, port=self._port)
+        
+        # Check if port is available
+        port_available, pid_using_port = check_port_available(self._host, self._port)
+        if not port_available:
+            # Check if we have a PID lock
+            lock_info = pid_lock.get_lock_info()
+            error_msg = format_collision_error(self._host, self._port, lock_info)
+            logger.error("Gateway startup failed due to port collision")
+            raise RuntimeError(error_msg)
+        
+        # Try to acquire PID lock
+        if not pid_lock.acquire_lock(self._host, self._port):
+            lock_info = pid_lock.get_lock_info()
+            error_msg = format_collision_error(self._host, self._port, lock_info)
+            logger.error("Gateway startup failed - another instance is running")
+            raise RuntimeError(error_msg)
+        
+        # Store PID lock for cleanup
+        self._pid_lock = pid_lock
         
         # Validate bind-aware auth configuration before starting
         from .auth import assert_external_bind_safe
@@ -719,7 +746,15 @@ class WebSocketGateway:
         
         logger.info(f"Gateway started on ws://{self._host}:{self._port}")
         
-        await self._server.serve()
+        try:
+            await self._server.serve()
+        except Exception as e:
+            # Clean up PID lock on any startup failure
+            if hasattr(self, '_pid_lock') and self._pid_lock:
+                self._pid_lock.release_lock()
+                self._pid_lock = None
+            # Re-raise the original exception
+            raise
     
     async def stop(self) -> None:
         """Stop the gateway server."""
@@ -742,6 +777,10 @@ class WebSocketGateway:
         
         if self._server:
             self._server.should_exit = True
+        
+        # Release PID lock
+        if hasattr(self, '_pid_lock'):
+            self._pid_lock.release_lock()
         
         logger.info("Gateway stopped")
     
