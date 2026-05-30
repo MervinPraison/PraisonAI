@@ -265,6 +265,8 @@ def _generate_bot_yaml(platforms: List[str], agent_name: str = "assistant", agen
             lines.append(f"    allowed_users: ${{{allowed_env}}}")
         lines.append("    # auto_approve_tools: true # Chat bots cannot show CLI approval prompts; safe tools auto-approved by default.")
         lines.append("                               # Set to false only if you add destructive tools AND have a chat-level approval flow.")
+        lines.append('    ack_emoji: "⏳"            # Show processing indicator during long agent operations')
+        lines.append('    done_emoji: "✅"           # Replace ack_emoji when operation completes')
         if plat == "whatsapp":
             lines.append("    phone_number_id: ${WHATSAPP_PHONE_NUMBER_ID}")
         # Gateway-style routing (ignored by `bot start` which uses top-level routing).

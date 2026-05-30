@@ -222,9 +222,6 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     logger.error(f"Message handler error: {e}")
             
             if self._agent and not message.is_command:
-                if self.config.typing_indicator:
-                    await update.message.chat.send_action("typing")
-                
                 # Ack reaction
                 ack_ctx = None
                 if self._ack.enabled:
@@ -255,11 +252,28 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 ) if update.message.from_user else ""
                 try:
                     message_text = await self._debouncer.debounce(user_id, message_text)
-                    response = await self._session.chat(
-                        self._agent, user_id, message_text,
-                        chat_id=str(update.message.chat_id) if update.message.chat_id else "",
-                        user_name=user_name,
-                    )
+                    
+                    # Show typing indicator with renewal during long operation
+                    if self.config.typing_indicator:
+                        from ._typing_indicator import with_typing_renewal
+                        
+                        async def _typing_action():
+                            await update.message.chat.send_action("typing")
+                        
+                        response = await with_typing_renewal(
+                            typing_func=_typing_action,
+                            operation_coro=self._session.chat(
+                                self._agent, user_id, message_text,
+                                chat_id=str(update.message.chat_id) if update.message.chat_id else "",
+                                user_name=user_name,
+                            )
+                        )
+                    else:
+                        response = await self._session.chat(
+                            self._agent, user_id, message_text,
+                            chat_id=str(update.message.chat_id) if update.message.chat_id else "",
+                            user_name=user_name,
+                        )
                     send_result = self.fire_message_sending(
                         str(update.message.chat_id), str(response),
                         reply_to=str(update.message.message_id),

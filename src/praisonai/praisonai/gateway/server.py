@@ -1863,10 +1863,6 @@ class WebSocketGateway:
             if not agent:
                 agent = bot._agent  # fallback to default
 
-            # Show typing indicator
-            if bot.config.typing_indicator:
-                await update.message.chat.send_action("typing")
-
             # Ack reaction — show processing indicator
             ack_ctx = None
             if bot._ack.enabled:
@@ -1893,7 +1889,20 @@ class WebSocketGateway:
 
             try:
                 message_text = await bot._debouncer.debounce(user_id, message_text)
-                response = await bot._session.chat(agent, user_id, message_text)
+                
+                # Show typing indicator with renewal during long operation
+                if bot.config.typing_indicator:
+                    from praisonai.bots._typing_indicator import with_typing_renewal
+                    
+                    async def _typing_action():
+                        await update.message.chat.send_action("typing")
+                    
+                    response = await with_typing_renewal(
+                        typing_func=_typing_action,
+                        operation_coro=bot._session.chat(agent, user_id, message_text)
+                    )
+                else:
+                    response = await bot._session.chat(agent, user_id, message_text)
                 if hasattr(bot, '_send_response_with_media'):
                     await bot._send_response_with_media(
                         update.message.chat_id,
