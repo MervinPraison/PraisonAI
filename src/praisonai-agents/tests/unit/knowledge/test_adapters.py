@@ -5,6 +5,8 @@ Tests Mem0Adapter lazy loading and normalization.
 """
 
 import sys
+import importlib
+from types import SimpleNamespace
 import pytest
 from unittest.mock import MagicMock
 
@@ -174,3 +176,54 @@ class TestProtocolCompliance:
         
         for method in required_methods:
             assert hasattr(Mem0Adapter, method), f"Missing method: {method}"
+
+
+class TestChromaKnowledgeAdapterWhereFilters:
+    """Tests for ChromaKnowledgeAdapter where-filter formatting."""
+
+    def _make_adapter(self):
+        from praisonaiagents.knowledge.adapters.factories import ChromaKnowledgeAdapter
+
+        adapter = ChromaKnowledgeAdapter.__new__(ChromaKnowledgeAdapter)
+        adapter.collection = MagicMock()
+        adapter.collection.query.return_value = {
+            "ids": [[]],
+            "documents": [[]],
+            "metadatas": [[]],
+            "distances": [[]],
+        }
+        return adapter
+
+    def test_search_wraps_multiple_where_filters_with_and(self, monkeypatch):
+        embedding_module = importlib.import_module("praisonaiagents.embedding")
+
+        adapter = self._make_adapter()
+        monkeypatch.setattr(
+            embedding_module,
+            "embedding",
+            lambda *args, **kwargs: SimpleNamespace(embeddings=[[0.1, 0.2]]),
+            raising=False,
+        )
+
+        adapter.search("q", user_id="u1", agent_id="a1", run_id="r1")
+
+        where = adapter.collection.query.call_args.kwargs["where"]
+        assert where == {
+            "$and": [{"user_id": "u1"}, {"agent_id": "a1"}, {"run_id": "r1"}]
+        }
+
+    def test_search_keeps_single_where_filter_unwrapped(self, monkeypatch):
+        embedding_module = importlib.import_module("praisonaiagents.embedding")
+
+        adapter = self._make_adapter()
+        monkeypatch.setattr(
+            embedding_module,
+            "embedding",
+            lambda *args, **kwargs: SimpleNamespace(embeddings=[[0.1, 0.2]]),
+            raising=False,
+        )
+
+        adapter.search("q", user_id="u1")
+
+        where = adapter.collection.query.call_args.kwargs["where"]
+        assert where == {"user_id": "u1"}
