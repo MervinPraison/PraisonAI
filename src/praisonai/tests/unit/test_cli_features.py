@@ -459,6 +459,47 @@ class TestCLIArgumentParsing:
         with patch.object(sys, 'argv', ['praisonai', '--image', '/path/to/image.png']):
             PraisonAI()  # Just verify no exception is raised
 
+    def test_extract_cli_config_includes_new_yaml_parity_flags(self):
+        """Test YAML CLI parity extraction includes planning/web/handoff flags."""
+        from types import SimpleNamespace
+        from praisonai.cli import PraisonAI
+
+        app = PraisonAI()
+        app.args = SimpleNamespace(
+            trust=False,
+            tool_timeout=None,
+            planning_tools=None,
+            planning=True,
+            web=True,
+            web_fetch=True,
+            acp=False,
+            lsp=False,
+            autonomy=None,
+            guardrail=None,
+            approval=None,
+            approve_all_tools=None,
+            approval_timeout=None,
+            stream=False,
+            stream_metrics=False,
+            handoff='writer,reviewer',
+            handoff_policy='summary',
+            handoff_timeout=12.0,
+            handoff_max_depth=4,
+            handoff_max_concurrent=2,
+            handoff_detect_cycles='false',
+        )
+        cli_config = app._extract_cli_config_for_yaml()
+
+        assert cli_config['planning'] is True
+        assert cli_config['web'] is True
+        assert cli_config['web_fetch'] is True
+        assert cli_config['handoff'] == 'writer,reviewer'
+        assert cli_config['handoff_policy'] == 'summary'
+        assert cli_config['handoff_timeout'] == 12.0
+        assert cli_config['handoff_max_depth'] == 4
+        assert cli_config['handoff_max_concurrent'] == 2
+        assert cli_config['handoff_detect_cycles'] == 'false'
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short", "-x"])

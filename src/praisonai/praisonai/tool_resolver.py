@@ -456,37 +456,66 @@ class ToolResolver:
             module = load_user_module(self._tools_py_path, name="tools_module")
             if module is None:
                 return {}
-            
-            # Import the necessary classes (matching agents_generator.py logic)
-            BaseTool = None
-            PRAISONAI_TOOLS_AVAILABLE = False
-            try:
-                from praisonai_tools import BaseTool
-                PRAISONAI_TOOLS_AVAILABLE = True
-            except ImportError:
-                try:
-                    from praisonai.tools import BaseTool
-                    PRAISONAI_TOOLS_AVAILABLE = True
-                except ImportError:
-                    pass
-            
-            result = {}
-            for name, obj in inspect.getmembers(module, 
-                lambda x: inspect.isclass(x) and (
-                    x.__module__.startswith('langchain_community.tools') or 
-                    (PRAISONAI_TOOLS_AVAILABLE and BaseTool and issubclass(x, BaseTool))
-                ) and x is not BaseTool):
-                try:
-                    result[name] = obj()
-                    logger.debug(f"Loaded local tool class: {name}")
-                except Exception as e:
-                    logger.warning(f"Error instantiating tool class {name}: {e}")
-                    continue
-            
-            return result
+            return self._extract_tool_classes(module)
         except Exception as e:
             logger.warning(f"Error loading tool classes from {self._tools_py_path}: {e}")
             return {}
+
+    def get_local_tool_classes_from_dir(self, tools_dir: "os.PathLike|str") -> Dict[str, Any]:
+        """Load BaseTool/langchain classes from every *.py in a tools/ directory.
+        
+        Args:
+            tools_dir: Path to the tools directory
+            
+        Returns:
+            Dictionary mapping class names to instantiated tool objects
+        """
+        from pathlib import Path
+        from ._safe_loader import load_user_module
+        
+        classes: Dict[str, Any] = {}
+        for py_file in Path(tools_dir).glob("*.py"):
+            if py_file.name.startswith("__"):
+                continue
+            try:
+                module = load_user_module(py_file, name=f"tools_{py_file.stem}")
+                if module is not None:
+                    classes.update(self._extract_tool_classes(module))
+            except Exception as e:
+                logger.warning(f"Error loading tool classes from file {py_file}: {e}")
+        return classes
+
+    def _extract_tool_classes(self, module):
+        """Extract tool classes from a loaded module that inherit from BaseTool 
+        or are part of langchain_community.tools package.
+        """
+        # Import the necessary classes (matching agents_generator.py logic)
+        BaseTool = None
+        PRAISONAI_TOOLS_AVAILABLE = False
+        try:
+            from praisonai_tools import BaseTool
+            PRAISONAI_TOOLS_AVAILABLE = True
+        except ImportError:
+            try:
+                from praisonai.tools import BaseTool
+                PRAISONAI_TOOLS_AVAILABLE = True
+            except ImportError:
+                pass
+        
+        result = {}
+        for name, obj in inspect.getmembers(module, 
+            lambda x: inspect.isclass(x) and (
+                x.__module__.startswith('langchain_community.tools') or 
+                (PRAISONAI_TOOLS_AVAILABLE and BaseTool and issubclass(x, BaseTool))
+            ) and x is not BaseTool):
+            try:
+                result[name] = obj()
+                logger.debug(f"Loaded tool class: {name}")
+            except Exception as e:
+                logger.warning(f"Error instantiating tool class {name}: {e}")
+                continue
+        
+        return result
 
 
 # Process-level lazy singleton for performance (matches profiler.py pattern)
