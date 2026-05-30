@@ -223,3 +223,188 @@ class TestDefaultContextBuilder:
         
         context = builder.build(results)
         assert "\n\n" in context
+
+
+class TestExtractValue:
+    """Tests for the _extract_value helper function."""
+    
+    def test_extract_value_from_dict(self):
+        """Test extracting value from dictionary."""
+        from praisonaiagents.rag.context import _extract_value
+        
+        item = {"text": "test content", "metadata": {"source": "test.pdf"}}
+        
+        assert _extract_value(item, "text") == "test content"
+        assert _extract_value(item, "metadata")["source"] == "test.pdf"
+        assert _extract_value(item, "nonexistent", "default") == "default"
+    
+    def test_extract_value_from_searchresultitem(self):
+        """Test extracting value from SearchResultItem object."""
+        from praisonaiagents.rag.context import _extract_value
+        from praisonaiagents.knowledge.models import SearchResultItem
+        
+        item = SearchResultItem(
+            text="test content",
+            source="test.pdf",
+            filename="test.pdf",
+            metadata={"extra": "data"}
+        )
+        
+        assert _extract_value(item, "text") == "test content"
+        assert _extract_value(item, "source") == "test.pdf"
+        assert _extract_value(item, "filename") == "test.pdf"
+        assert _extract_value(item, "metadata")["extra"] == "data"
+        assert _extract_value(item, "nonexistent", "default") == "default"
+
+
+class TestExtractMetadataValue:
+    """Tests for the _extract_metadata_value helper function."""
+    
+    def test_extract_metadata_value_from_metadata(self):
+        """Test extracting value from metadata dict."""
+        from praisonaiagents.rag.context import _extract_metadata_value
+        from praisonaiagents.knowledge.models import SearchResultItem
+        
+        item = SearchResultItem(text="content", source="fallback.pdf")
+        metadata = {"source": "metadata.pdf"}
+        
+        # Should prefer metadata over top-level
+        result = _extract_metadata_value(item, metadata, "source", "")
+        assert result == "metadata.pdf"
+    
+    def test_extract_metadata_value_fallback_to_toplevel(self):
+        """Test fallback to top-level when metadata doesn't have key."""
+        from praisonaiagents.rag.context import _extract_metadata_value
+        from praisonaiagents.knowledge.models import SearchResultItem
+        
+        item = SearchResultItem(text="content", source="toplevel.pdf")
+        metadata = {}  # Empty metadata
+        
+        # Should fall back to top-level source
+        result = _extract_metadata_value(item, metadata, "source", "")
+        assert result == "toplevel.pdf"
+    
+    def test_extract_metadata_value_with_default(self):
+        """Test fallback to default when neither metadata nor top-level have key."""
+        from praisonaiagents.rag.context import _extract_metadata_value
+        from praisonaiagents.knowledge.models import SearchResultItem
+        
+        item = SearchResultItem(text="content")  # No source
+        metadata = {}  # No source in metadata
+        
+        # Should use default
+        result = _extract_metadata_value(item, metadata, "source", "default.pdf")
+        assert result == "default.pdf"
+
+
+class TestSearchResultItemSupport:
+    """Tests for SearchResultItem object support in context functions."""
+    
+    def test_deduplicate_chunks_with_searchresultitem(self):
+        """Test deduplication with SearchResultItem objects."""
+        from praisonaiagents.rag.context import deduplicate_chunks
+        from praisonaiagents.knowledge.models import SearchResultItem
+        
+        results = [
+            SearchResultItem(text="Same content", source="a.pdf"),
+            SearchResultItem(text="Same content", source="a.pdf"),  # Duplicate
+            SearchResultItem(text="Different content", source="b.pdf"),
+        ]
+        
+        deduped = deduplicate_chunks(results)
+        assert len(deduped) == 2  # One duplicate should be removed
+    
+    def test_deduplicate_chunks_mixed_formats(self):
+        """Test deduplication with mixed dict and SearchResultItem formats."""
+        from praisonaiagents.rag.context import deduplicate_chunks
+        from praisonaiagents.knowledge.models import SearchResultItem
+        
+        results = [
+            {"text": "Content A", "metadata": {"source": "a.pdf"}},
+            SearchResultItem(text="Content A", source="a.pdf"),  # Should be deduped
+            SearchResultItem(text="Content B", source="b.pdf"),
+        ]
+        
+        deduped = deduplicate_chunks(results)
+        assert len(deduped) == 2  # One duplicate should be removed
+    
+    def test_deduplicate_with_top_level_source(self):
+        """Test deduplication considers top-level source from SearchResultItem."""
+        from praisonaiagents.rag.context import deduplicate_chunks
+        from praisonaiagents.knowledge.models import SearchResultItem
+        
+        results = [
+            SearchResultItem(text="Same text", source="source1.pdf"),
+            SearchResultItem(text="Same text", source="source2.pdf"),
+        ]
+        
+        deduped = deduplicate_chunks(results)
+        assert len(deduped) == 2  # Different sources should not be deduped
+    
+    def test_build_context_with_searchresultitem(self):
+        """Test building context with SearchResultItem objects."""
+        from praisonaiagents.rag.context import build_context
+        from praisonaiagents.knowledge.models import SearchResultItem
+        
+        results = [
+            SearchResultItem(
+                text="First content",
+                source="source1.pdf",
+                filename="file1.pdf"
+            ),
+            SearchResultItem(
+                text="Second content", 
+                source="source2.pdf",
+                filename="file2.pdf"
+            ),
+        ]
+        
+        context, used = build_context(results)
+        
+        assert "First content" in context
+        assert "Second content" in context
+        assert "file1.pdf" in context  # Should use filename
+        assert "file2.pdf" in context
+        assert len(used) == 2
+    
+    def test_build_context_source_fallback(self):
+        """Test that build_context falls back to top-level source when metadata is empty."""
+        from praisonaiagents.rag.context import build_context
+        from praisonaiagents.knowledge.models import SearchResultItem
+        
+        # SearchResultItem with source but empty metadata
+        results = [
+            SearchResultItem(
+                text="Content with source",
+                source="fallback.pdf",
+                metadata={}  # Empty metadata, should fall back to top-level source
+            )
+        ]
+        
+        context, used = build_context(results, include_source=True)
+        
+        assert "Content with source" in context
+        assert "fallback.pdf" in context  # Should use top-level source
+        assert len(used) == 1
+    
+    def test_build_context_mixed_formats_with_sources(self):
+        """Test building context with mixed dict/SearchResultItem formats."""
+        from praisonaiagents.rag.context import build_context
+        from praisonaiagents.knowledge.models import SearchResultItem
+        
+        results = [
+            {"text": "Dict content", "metadata": {"filename": "dict.pdf"}},
+            SearchResultItem(
+                text="Object content",
+                filename="object.pdf",
+                metadata={}
+            ),
+        ]
+        
+        context, used = build_context(results, include_source=True)
+        
+        assert "Dict content" in context
+        assert "Object content" in context
+        assert "dict.pdf" in context
+        assert "object.pdf" in context  # Should use top-level filename
+        assert len(used) == 2
