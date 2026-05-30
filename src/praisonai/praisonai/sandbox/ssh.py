@@ -165,10 +165,10 @@ class SSHSandbox:
         execution_id = str(uuid.uuid4())
         started_at = time.time()
         
+        # Create temporary file for code
+        remote_file = f"{self.working_dir}/exec_{execution_id}.{self._get_file_extension(language)}"
+        
         try:
-            # Create temporary file for code
-            remote_file = f"{self.working_dir}/exec_{execution_id}.{self._get_file_extension(language)}"
-            
             # Write code to remote file
             await self.write_file(remote_file, code)
             
@@ -181,9 +181,6 @@ class SSHSandbox:
                 limits, 
                 working_dir or self.working_dir
             )
-            
-            # Cleanup temp file
-            await self._connection.run(f"rm -f {shlex.quote(remote_file)}")
             
             completed_at = time.time()
             duration = completed_at - started_at
@@ -220,6 +217,12 @@ class SSHSandbox:
                 duration_seconds=time.time() - started_at,
                 metadata={"host": self.host, "language": language}
             )
+        finally:
+            # Always cleanup temp file, never mask the real result/error with cleanup failure
+            try:
+                await self._connection.run(f"rm -f {shlex.quote(remote_file)}")
+            except Exception:
+                pass  # Don't propagate cleanup errors
     
     async def execute_file(
         self,
@@ -525,12 +528,19 @@ class SSHSandbox:
         """Run command with resource limits."""
         # Change to working directory and execute command
         # Note: The command has already been processed for shell safety by the caller
-        full_command = f"cd {shlex.quote(working_dir)} && {command}"
         
         # Set timeout
         timeout = None
         if limits and limits.timeout_seconds > 0:
             timeout = limits.timeout_seconds
+        
+        # Build command with remote-side timeout if needed
+        if timeout:
+            # Use timeout command to ensure remote process terminates
+            timeout_cmd = f"timeout {int(timeout)} sh -c {shlex.quote(command)}"
+            full_command = f"cd {shlex.quote(working_dir)} && {timeout_cmd}"
+        else:
+            full_command = f"cd {shlex.quote(working_dir)} && {command}"
         
         # Execute with timeout
         if timeout:
