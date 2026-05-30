@@ -102,7 +102,7 @@ class TestStopAlwaysClearsIsRunning:
         scheduler._stop_event.set()
 
         # The exception should be caught, logged, and stop should return True
-        with patch("praisonai.async_agent_scheduler.logger") as mock_logger:
+        with patch("praisonai.scheduler.async_agent_scheduler.logger") as mock_logger:
             result = await scheduler.stop()
 
         assert result is True
@@ -176,7 +176,7 @@ class TestStopTimeoutCancelPath:
         scheduler._stop_event.set()
 
         with patch("asyncio.wait_for", side_effect=asyncio.TimeoutError), \
-             patch("praisonai.async_agent_scheduler.logger") as mock_logger:
+             patch("praisonai.scheduler.async_agent_scheduler.logger") as mock_logger:
             await scheduler.stop()
 
         # The error should have been logged

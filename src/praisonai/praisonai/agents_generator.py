@@ -555,7 +555,7 @@ class AgentsGenerator:
             for agent_name, agent_config in config['agents'].items():
                 role_config = dict(agent_config) if agent_config else {}
                 # Convert 'instructions' to 'backstory' if present
-                # Note: preserve 'instructions' key for framework adapters
+                # Note: preserve 'instructions' key for adapters that pass it to PraisonAgent
                 if 'instructions' in role_config and 'backstory' not in role_config:
                     role_config['backstory'] = role_config['instructions']
                 # Ensure required fields have defaults
