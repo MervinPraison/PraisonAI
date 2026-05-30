@@ -32,6 +32,8 @@ __all__ = [
     'HostedAgentConfig', 
     'LocalAgent',
     'LocalAgentConfig',
+    # Integration functions
+    'run_integrated_gateway',
 ]
 
 # Telemetry initialization state - thread-safe (threading imported above)
@@ -144,6 +146,9 @@ def __getattr__(name):
     elif name == 'configure_host':
         from .integration.host_app import configure_host
         return configure_host
+    elif name == 'run_integrated_gateway':
+        from .integration.gateway_host import run_integrated_gateway
+        return run_integrated_gateway
     elif name == 'AgentApp':
         # Silent alias for AgentOS (backward compatibility)
         from .app import AgentOS
