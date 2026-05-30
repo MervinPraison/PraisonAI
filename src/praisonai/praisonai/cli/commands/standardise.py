@@ -378,7 +378,7 @@ def _run_ai(parsed) -> int:
             acp=False  # ACP not needed for generation
         )
         # Start runtime in background
-        asyncio.get_event_loop().run_until_complete(runtime.start())
+        asyncio.run(runtime.start())
         if runtime.lsp_ready:
             print("🔧 LSP server ready for code intelligence")
     except Exception:
@@ -488,7 +488,7 @@ def _run_ai(parsed) -> int:
     # Cleanup runtime
     if runtime:
         try:
-            asyncio.get_event_loop().run_until_complete(runtime.stop())
+            asyncio.run(runtime.stop())
         except Exception:
             pass
     

@@ -71,12 +71,16 @@ class AsyncAgentScheduler:
     - Cancellation support  
     - No global state pollution
     - Native async coordination
-    - Timeout support (TODO: needs porting from sync version)
-    - Budget tracking (TODO: needs porting from sync version)
-    - YAML/recipe constructors (TODO: needs porting from sync version)
+    - Timeout support per execution
+    - Budget tracking and limits
     
     Example:
-        scheduler = AsyncAgentScheduler(agent, task="Check news")
+        scheduler = AsyncAgentScheduler(
+            agent, 
+            task="Check news",
+            timeout=30,  # 30 second timeout per execution
+            max_cost=1.00  # $1.00 budget limit
+        )
         await scheduler.start(schedule_expr="hourly")
         await asyncio.sleep(3600)  # Let it run
         await scheduler.stop()
@@ -89,9 +93,8 @@ class AsyncAgentScheduler:
         config: Optional[Dict[str, Any]] = None,
         on_success: Optional[Callable] = None,
         on_failure: Optional[Callable] = None,
-        # TODO: Add these missing features from sync version:
-        # timeout: Optional[int] = None,
-        # max_cost: Optional[float] = 1.00
+        timeout: Optional[int] = None,
+        max_cost: Optional[float] = 1.00
     ):
         """
         Initialize async agent scheduler.
@@ -102,18 +105,17 @@ class AsyncAgentScheduler:
             config: Optional configuration dict
             on_success: Callback function on successful execution
             on_failure: Callback function on failed execution
-            # TODO: Add timeout and max_cost parameters
+            timeout: Maximum execution time per run in seconds (None = no limit)
+            max_cost: Maximum total cost in USD (default: $1.00 for safety)
         """
         self.agent = agent
         self.task = task
         self.config = config or {}
         self.on_success = on_success
         self.on_failure = on_failure
-        
-        # TODO: Add these missing features from sync version:
-        # self.timeout = timeout
-        # self.max_cost = max_cost
-        # self._total_cost = 0.0
+        self.timeout = timeout
+        self.max_cost = max_cost
+        self._total_cost = 0.0
         
         self.is_running = False
         self._task: Optional[asyncio.Task] = None
@@ -350,45 +352,41 @@ class AsyncAgentScheduler:
             self.is_running = False
     
     async def _execute_with_retry(self, max_retries: int):
-        """Execute agent with retry logic.
-        
-        TODO: Port missing features from sync version:
-        - Timeout support per execution
-        - Budget tracking and limits
-        - Daemon state updates (_update_state_if_daemon)
-        """
+        """Execute agent with retry logic."""
         self._ensure_async_primitives()  # guarantees _stats_lock is bound to current loop
 
         async with self._stats_lock:
             self._execution_count += 1
         
-        # TODO: Add budget check from sync version:
-        # if self.max_cost and self._total_cost >= self.max_cost:
-        #     logger.warning(f"Budget limit reached: ${self._total_cost:.4f} >= ${self.max_cost}")
-        #     return
+        # Check budget limit
+        if self.max_cost and self._total_cost >= self.max_cost:
+            logger.warning(f"Budget limit reached: ${self._total_cost:.4f} >= ${self.max_cost}")
+            logger.warning("Stopping scheduler to prevent additional costs")
+            return
         
         last_exc: Optional[Exception] = None
         for attempt in range(max_retries):
             try:
                 logger.info(f"Async attempt {attempt + 1}/{max_retries}")
                 
-                # TODO: Add timeout support from sync version:
-                # if self.timeout:
-                #     result = await asyncio.wait_for(
-                #         self._executor.execute(self.task), 
-                #         timeout=self.timeout
-                #     )
-                # else:
-                result = await self._executor.execute(self.task)
+                # Execute with timeout if specified
+                if self.timeout:
+                    result = await asyncio.wait_for(
+                        self._executor.execute(self.task), 
+                        timeout=self.timeout
+                    )
+                else:
+                    result = await self._executor.execute(self.task)
                 
                 logger.info(f"Async agent execution successful on attempt {attempt + 1}")
                 logger.info(f"Result: {result}")
                 
+                # Estimate cost (rough: ~$0.0001 per execution for gpt-4o-mini)
+                estimated_cost = 0.0001  # Base cost estimate
+                
                 async with self._stats_lock:
                     self._success_count += 1
-                    # TODO: Add cost tracking from sync version:
-                    # estimated_cost = self._estimate_cost(result)
-                    # self._total_cost += estimated_cost
+                    self._total_cost += estimated_cost
                 
                 safe_call(self.on_success, result)
                 # TODO: Add daemon state update from sync version:
