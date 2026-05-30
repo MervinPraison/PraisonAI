@@ -23,11 +23,14 @@ class AgentConfigSchema(BaseModel):
 
 class ChannelConfigSchema(BaseModel):
     """Schema for a single channel configuration."""
+    platform: Optional[str] = None
     token: str = ""
     mode: str = "poll"  # poll | ws | webhook | hybrid
     group_policy: str = "respond_all"  # respond_all, mention_only, command_only
     allowlist: List[str] = Field(default_factory=list)
     blocklist: List[str] = Field(default_factory=list)
+    allowed_users: Optional[str] = None
+    routes: Dict[str, str] = Field(default_factory=dict)
     webhook_url: Optional[str] = None
     webhook_port: int = 8080
     
@@ -102,12 +105,15 @@ class BotYamlSchema(BaseModel):
                 "No channels configured. Add at least one channel "
                 "(telegram, discord, slack, whatsapp) to your bot.yaml"
             )
-        # Validate channel names
+        # Channel keys may be platform names (telegram) or custom ids (telegram_cfo)
+        # when ``platform`` is set on the channel block (gateway / multi-bot YAML).
         valid_platforms = {"telegram", "discord", "slack", "whatsapp", "email", "agentmail"}
-        for name in self.channels:
-            if name not in valid_platforms:
+        for name, channel in self.channels.items():
+            platform = (channel.platform or name).lower()
+            if platform not in valid_platforms:
                 raise ValueError(
-                    f"Unknown channel '{name}'. Supported: {', '.join(sorted(valid_platforms))}"
+                    f"Unknown channel '{name}' (platform '{platform}'). "
+                    f"Supported platforms: {', '.join(sorted(valid_platforms))}"
                 )
         return self
 
