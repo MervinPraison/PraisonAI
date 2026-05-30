@@ -767,7 +767,7 @@ Methods:
 
 Types:
 ```python
-from praisonai import Agent, AgentApp, AgentOS, AnthropicManagedAgent, CloudProvider, DB, Deploy, DeployConfig, DeployType, HostedAgent, HostedAgentConfig, LocalAgent, LocalAgentConfig, LocalManagedAgent, LocalManagedConfig, ManagedAgent, ManagedConfig, PraisonAI, __version__, arun, run
+from praisonai import Agent, AgentApp, AgentOS, AnthropicManagedAgent, CloudProvider, DB, Deploy, DeployConfig, DeployType, HostedAgent, HostedAgentConfig, LocalAgent, LocalAgentConfig, LocalManagedAgent, LocalManagedConfig, ManagedAgent, ManagedConfig, PraisonAI, __version__, arun, run, run_integrated_gateway
 ```
 
 # CLI
@@ -1066,6 +1066,7 @@ Methods:
 * <code title="cli">praisonai serve status <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai serve stop <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai serve ui <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
+* <code title="cli">praisonai serve ui-gateway <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai serve unified <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai session delete <a href="./src/praisonai/praisonai/cli/commands/session.py">--help</a></code>
 * <code title="cli">praisonai session export <a href="./src/praisonai/praisonai/cli/commands/session.py">--help</a></code>

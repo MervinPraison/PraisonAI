@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from typing import Any, Dict, List, Optional, Type, TypeVar
 import os
 import json
+import asyncio
 import yaml
 import threading
 from rich import print
@@ -423,12 +424,13 @@ class BaseAutoGenerator:
             }
         ]
         self._openai_client = None  # lazy, per-instance
-        self._openai_client_lock = threading.Lock()
+        self._async_openai_client = None  # lazy, per-instance async client
+        self._client_lock = threading.Lock()
         
     def _get_openai_client(self):
         """Get or create the OpenAI client for this instance."""
         if self._openai_client is None:
-            with self._openai_client_lock:
+            with self._client_lock:
                 if self._openai_client is None:
                     try:
                         from openai import OpenAI
@@ -442,18 +444,43 @@ class BaseAutoGenerator:
         return self._openai_client
 
     def close(self):
-        """Close the OpenAI client if it exists."""
-        if not hasattr(self, '_openai_client_lock'):
+        """Close the sync OpenAI client if it exists."""
+        if not hasattr(self, '_client_lock'):
             return  # Object was never fully initialized
-        with self._openai_client_lock:
+        with self._client_lock:
             client = getattr(self, '_openai_client', None)
             self._openai_client = None
         if client is not None:
             client.close()
-
-    def __del__(self):
-        """Best-effort cleanup, but the canonical path is explicit close()."""
+    
+    async def aclose(self):
+        """Close both sync and async OpenAI clients if they exist."""
+        if not hasattr(self, '_client_lock'):
+            return  # Object was never fully initialized
+        with self._client_lock:
+            sync_client = getattr(self, '_openai_client', None)
+            self._openai_client = None
+            async_client = getattr(self, '_async_openai_client', None)
+            self._async_openai_client = None
+        if sync_client is not None:
+            await asyncio.to_thread(sync_client.close)
+        if async_client is not None:
+            await async_client.close()
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc, tb):
         self.close()
+        return False
+    
+    async def __aenter__(self):
+        return self
+    
+    async def __aexit__(self, exc_type, exc, tb):
+        await self.aclose()
+        return False
+
     
     def _structured_completion(self, response_model: Type[T], messages: List[Dict], **kwargs) -> T:
         """
@@ -492,6 +519,68 @@ class BaseAutoGenerator:
         if _check_openai_available():
             client = self._get_openai_client()
             response = client.beta.chat.completions.parse(
+                model=model_name,
+                messages=messages,
+                response_format=response_model,
+                **kwargs
+            )
+            return response.choices[0].message.parsed
+        
+        # Neither available - raise helpful error
+        raise ImportError(
+            "Structured output requires either litellm or openai. "
+            "Install with: pip install litellm  OR  pip install openai"
+        )
+    
+    async def _astructured_completion(self, response_model: Type[T], messages: List[Dict], **kwargs) -> T:
+        """
+        Make an async structured LLM completion with provider fallback.
+        
+        Priority:
+        1. LiteLLM async (if available) - supports 100+ LLM providers
+        2. OpenAI AsyncSDK (fallback) - uses beta.chat.completions.parse
+        
+        Args:
+            response_model: Pydantic model class for structured output
+            messages: List of message dicts for the LLM
+            **kwargs: Additional arguments passed to the LLM
+            
+        Returns:
+            Instance of response_model with parsed response
+            
+        Raises:
+            ImportError: If neither litellm nor openai is installed
+        """
+        model_name = self.config_list[0]['model']
+        
+        # Try LiteLLM async first (preferred - supports 100+ providers)
+        if _check_litellm_available():
+            litellm = _get_litellm()
+            response = await litellm.acompletion(
+                model=model_name,
+                messages=messages,
+                response_format=response_model,
+                **kwargs
+            )
+            content = response.choices[0].message.content
+            return response_model.model_validate_json(content)
+        
+        # Fallback to OpenAI AsyncSDK (uses beta.chat.completions.parse)
+        if _check_openai_available():
+            if self._async_openai_client is None:
+                with self._client_lock:
+                    if self._async_openai_client is None:
+                        try:
+                            from openai import AsyncOpenAI
+                        except ImportError as e:
+                            raise ImportError("Install with: pip install openai") from e
+                        cfg = self.config_list[0]
+                        self._async_openai_client = AsyncOpenAI(
+                            api_key=cfg.get("api_key") or os.environ.get("OPENAI_API_KEY"),
+                            base_url=cfg.get("base_url"),
+                        )
+            
+            response = await self._async_openai_client.beta.chat.completions.parse(
                 model=model_name,
                 messages=messages,
                 response_format=response_model,
@@ -698,6 +787,36 @@ class AutoGenerator(BaseAutoGenerator):
             print(path)
         """
         response = self._structured_completion(
+            response_model=TeamStructure,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant designed to output complex team structures."},
+                {"role": "user", "content": self.get_user_content()}
+            ]
+        )
+        json_data = json.loads(response.model_dump_json())
+        self.convert_and_save(json_data, merge=merge)
+        full_path = os.path.abspath(self.agent_file)
+        return full_path
+    
+    async def agenerate(self, merge=False):
+        """
+        Async version of generate() - generates a team structure for the specified topic.
+
+        Args:
+            merge (bool): Whether to merge with existing agents.yaml file instead of overwriting.
+
+        Returns:
+            str: The full path of the YAML file containing the generated team structure.
+
+        Raises:
+            Exception: If the generation process fails.
+
+        Usage:
+            async with AutoGenerator(framework="crewai", topic="Create a movie script about Cat in Mars") as gen:
+                path = await gen.agenerate()
+                print(path)
+        """
+        response = await self._astructured_completion(
             response_model=TeamStructure,
             messages=[
                 {"role": "system", "content": "You are a helpful assistant designed to output complex team structures."},
@@ -1121,6 +1240,32 @@ Respond with:
             return self._save_workflow(self.merge_with_existing_workflow(json_data), pattern)
         return self._save_workflow(json_data, pattern)
     
+    async def agenerate(self, pattern: str = "sequential", merge: bool = False) -> str:
+        """
+        Async version of generate() - Generate a workflow YAML file.
+        
+        Args:
+            pattern: Workflow pattern - "sequential", "routing", "parallel", "loop",
+                     "orchestrator-workers", "evaluator-optimizer"
+            merge: If True, merge with existing workflow file instead of overwriting
+            
+        Returns:
+            Path to the generated workflow file
+        """
+        response = await self._astructured_completion(
+            response_model=WorkflowStructure,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that designs workflow structures."},
+                {"role": "user", "content": self._get_prompt(pattern)}
+            ]
+        )
+        
+        json_data = json.loads(response.model_dump_json())
+        
+        if merge and os.path.exists(self.workflow_file):
+            return self._save_workflow(self.merge_with_existing_workflow(json_data), pattern)
+        return self._save_workflow(json_data, pattern)
+    
     def merge_with_existing_workflow(self, new_data: Dict) -> Dict:
         """
         Merge new workflow data with existing workflow file.
@@ -1412,6 +1557,29 @@ class JobWorkflowAutoGenerator(BaseAutoGenerator):
         prompt = self._get_prompt(include_judge, include_approve)
         
         response = self._structured_completion(
+            response_model=JobWorkflowStructure,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant that designs job workflow structures with AI agent steps."},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        return self._save_workflow(response)
+    
+    async def agenerate(self, include_judge: bool = True, include_approve: bool = False) -> str:
+        """
+        Async version of generate() - Generate a job workflow YAML file.
+        
+        Args:
+            include_judge: Include a judge step for quality gating
+            include_approve: Include an approve step for human approval
+            
+        Returns:
+            Path to the generated workflow file
+        """
+        prompt = self._get_prompt(include_judge, include_approve)
+        
+        response = await self._astructured_completion(
             response_model=JobWorkflowStructure,
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that designs job workflow structures with AI agent steps."},

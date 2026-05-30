@@ -26,15 +26,7 @@ from .tool_registry import ToolRegistry
 # Compatibility imports - now handled by centralized detection
 # (inbuilt_tools still defines these but they're read-only compatibility)
 
-# Import BaseTool for tools handling
-BaseTool = None
-try:
-    from praisonai_tools import BaseTool
-except ImportError:
-    try:
-        from praisonai.tools import BaseTool
-    except ImportError:
-        pass
+# BaseTool import is now handled centrally by ToolResolver
 
 # Check for additional framework availability using centralized detection
 from ._framework_availability import is_available
@@ -346,8 +338,30 @@ class AgentsGenerator:
                 self.logger.debug(f"CLI override: lsp = {cli_config['lsp']}")
         
         # Handle agent-level overrides using unified approach
-        agent_level_fields = ['tool_timeout', 'planning_tools', 'autonomy']
+        agent_level_fields = ['tool_timeout', 'planning_tools', 'autonomy', 'planning', 'web', 'web_fetch']
         agent_overrides = {k: v for k, v in cli_config.items() if k in agent_level_fields}
+        
+        # Handle handoff configuration - convert CLI flags into handoff dict
+        handoff_fields = ['handoff', 'handoff_policy', 'handoff_timeout', 'handoff_max_depth', 'handoff_max_concurrent', 'handoff_detect_cycles']
+        if any(field in cli_config for field in handoff_fields):
+            handoff_config = {}
+            if 'handoff' in cli_config:
+                # Convert comma-separated roles to list
+                handoff_roles = [role.strip() for role in cli_config['handoff'].split(',') if role.strip()]
+                handoff_config['to'] = handoff_roles
+            if 'handoff_policy' in cli_config:
+                handoff_config['policy'] = cli_config['handoff_policy']
+            if 'handoff_timeout' in cli_config:
+                handoff_config['timeout'] = cli_config['handoff_timeout']
+            if 'handoff_max_depth' in cli_config:
+                handoff_config['max_depth'] = cli_config['handoff_max_depth']
+            if 'handoff_max_concurrent' in cli_config:
+                handoff_config['max_concurrent'] = cli_config['handoff_max_concurrent']
+            if 'handoff_detect_cycles' in cli_config:
+                handoff_config['detect_cycles'] = cli_config['handoff_detect_cycles'].lower() == 'true'
+            
+            if handoff_config:
+                agent_overrides['handoff'] = handoff_config
         
         # Handle approval configuration using unified spec
         approval_fields = ['trust', 'approval', 'approve_all_tools', 'approval_timeout', 'approve_level']
@@ -399,7 +413,7 @@ class AgentsGenerator:
             'max_execution_time', 'verbose', 'cache', 'system_template',
             'prompt_template', 'response_template', 'tool_timeout', 'planning_tools',
             'planning', 'autonomy', 'guardrails', 'streaming', 'stream',
-            'approval', 'skills', 'cli_backend', 'reflection'
+            'approval', 'skills', 'cli_backend', 'reflection', 'handoff', 'web', 'web_fetch'
         }
 
         for section_name in ('agents', 'roles'):
@@ -456,24 +470,6 @@ class AgentsGenerator:
             return {}
         return {name: obj for name, obj in inspect.getmembers(module, self.is_function_or_decorated)}
     
-    def _extract_tool_classes(self, module):
-        """
-        Extract tool classes from a loaded module that inherit from BaseTool 
-        or are part of langchain_community.tools package.
-        """
-        result = {}
-        for name, obj in inspect.getmembers(module, 
-            lambda x: inspect.isclass(x) and (
-                x.__module__.startswith('langchain_community.tools') or 
-                (PRAISONAI_TOOLS_AVAILABLE and BaseTool and issubclass(x, BaseTool))
-            ) and x is not BaseTool):
-            try:
-                result[name] = obj()
-            except Exception as e:
-                self.logger.warning(f"Error instantiating tool class {name}: {e}")
-                continue
-        return result
-    
     def load_tools_from_module_class(self, module_path):
         """
         Load BaseTool / langchain tool classes from a user-supplied module (gated by PRAISONAI_ALLOW_LOCAL_TOOLS).
@@ -482,7 +478,7 @@ class AgentsGenerator:
         module = load_user_module(module_path, name="tools_module")
         if module is None:
             return {}
-        return self._extract_tool_classes(module)
+        return self.tool_resolver._extract_tool_classes(module)
 
     def load_tools_from_package(self, package_path):
         """
@@ -579,39 +575,50 @@ class AgentsGenerator:
         
         tools_dict = {}
         
-        # Use ToolResolver to get available tools (consistent tool resolution)
-        if PRAISONAI_TOOLS_AVAILABLE and (CREWAI_AVAILABLE or AUTOGEN_AVAILABLE or PRAISONAI_AVAILABLE or AG2_AVAILABLE):
+        # Demand-driven tool resolution - only resolve tools actually used in YAML
+        if CREWAI_AVAILABLE or AUTOGEN_AVAILABLE or PRAISONAI_AVAILABLE or AG2_AVAILABLE:
             try:
-                # Get available tools from the resolver
-                available_tools = self.tool_resolver.list_available()
-                tools_dict = {}
-                
-                # Standard praisonai-tools tool names
-                standard_tools = [
-                    'CodeDocsSearchTool', 'CSVSearchTool', 'DirectorySearchTool', 'DOCXSearchTool',
-                    'DirectoryReadTool', 'FileReadTool', 'TXTSearchTool', 'JSONSearchTool',
-                    'MDXSearchTool', 'PDFSearchTool', 'RagTool', 'ScrapeElementFromWebsiteTool',
-                    'ScrapeWebsiteTool', 'WebsiteSearchTool', 'XMLSearchTool',
-                    'YoutubeChannelSearchTool', 'YoutubeVideoSearchTool',
-                ]
-                
-                # Resolve only tools that are actually available
-                for tool_name in standard_tools:
-                    if tool_name in available_tools:
+                # Collect all tool names mentioned in the YAML config
+                needed_tools: set[str] = set()
+                for role_cfg in config.get('roles', {}).values():
+                    for t in role_cfg.get('tools') or []:
+                        if isinstance(t, str) and t.strip():
+                            needed_tools.add(t.strip())
+                    for task_cfg in (role_cfg.get('tasks') or {}).values():
+                        if not isinstance(task_cfg, dict):
+                            continue
+                        for t in task_cfg.get('tools') or []:
+                            if isinstance(t, str) and t.strip():
+                                needed_tools.add(t.strip())
+
+                # Resolve only the tools actually referenced in YAML
+                for tool_name in needed_tools:
+                    try:
                         resolved_tool = self.tool_resolver.resolve(tool_name)
-                        if resolved_tool is not None:
-                            tools_dict[tool_name] = resolved_tool() if inspect.isclass(resolved_tool) else resolved_tool
+                        if resolved_tool is None:
+                            self.logger.warning(f"Tool '{tool_name}' not found")
+                            continue
+                        tools_dict[tool_name] = (
+                            resolved_tool() if inspect.isclass(resolved_tool) else resolved_tool
+                        )
+                    except Exception as e:
+                        self.logger.warning(f"Failed to initialize tool '{tool_name}': {e}")
+                        continue
                             
             except Exception as e:
-                self.logger.debug(f"Error resolving praisonai_tools: {e}")
-                tools_dict = {}
+                self.logger.warning(f"Error collecting YAML tool references: {e}")
             
-            # Add tools from class names
+            # Add tools from class names - use tool_resolver to check tool validity
             for tool_class in self.tools:
-                if isinstance(tool_class, type) and BaseTool and issubclass(tool_class, BaseTool):
-                    tool_name = tool_class.__name__
-                    tools_dict[tool_name] = tool_class()
-                    self.logger.debug(f"Added tool: {tool_name}")
+                if isinstance(tool_class, type):
+                    try:
+                        # Try to instantiate the tool to validate it
+                        tool_instance = tool_class()
+                        tool_name = tool_class.__name__
+                        tools_dict[tool_name] = tool_instance
+                        self.logger.debug(f"Added tool: {tool_name}")
+                    except Exception as e:
+                        self.logger.warning(f"Failed to instantiate tool class {tool_class.__name__}: {e}")
 
         root_directory = os.getcwd()
         tools_py_path = os.path.join(root_directory, 'tools.py')
@@ -622,13 +629,7 @@ class AgentsGenerator:
         if os.path.isfile(tools_py_path):
             self.logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
         elif tools_dir_path.is_dir():
-            from ._safe_loader import load_user_module
-            for py_file in tools_dir_path.glob("*.py"):
-                if py_file.name.startswith("__"):
-                    continue
-                module = load_user_module(py_file, name=f"tools_{py_file.stem}")
-                if module is not None:
-                    tools_dict.update(self._extract_tool_classes(module))
+            tools_dict.update(self.tool_resolver.get_local_tool_classes_from_dir(tools_dir_path))
             if tools_dict:
                 self.logger.debug("tools folder exists in the root directory")
 
@@ -736,4 +737,3 @@ class AgentsGenerator:
             return result.get("output", "Workflow completed successfully")
         else:
             return f"Workflow failed: {result.get('error', 'Unknown error')}"
-

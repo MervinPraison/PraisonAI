@@ -37,16 +37,122 @@ class DbSessionAdapter:
         self._sessions: Set[str] = set()
         self._metadata: Dict[str, Dict[str, Any]] = {}
         self._history_cache: Dict[str, List[Dict[str, str]]] = {}
+        self._cleared_sessions: Set[str] = set()
+
+    def _conversation_store(self) -> Any:
+        """Optional ConversationStore behind the DbAdapter (if present)."""
+        init = getattr(self._db, "_init_stores", None)
+        if callable(init):
+            try:
+                init()
+            except Exception as e:
+                logger.debug("[db_session_adapter] _init_stores failed: %s", e)
+
+        for obj in (self._db, getattr(self._db, "_orchestrator", None)):
+            if obj is None:
+                continue
+            conv = getattr(obj, "conversation", None)
+            if conv is not None:
+                return conv
+            conv = getattr(obj, "_conversation_store", None)
+            if conv is not None:
+                return conv
+        return None
+
+    def _load_metadata_from_db(self, session_id: str) -> Dict[str, Any]:
+        """Load persisted session metadata after a process restart."""
+        conv = self._conversation_store()
+        if conv is None or not hasattr(conv, "get_session"):
+            return {}
+        try:
+            session = conv.get_session(session_id)
+            if session is not None and getattr(session, "metadata", None):
+                return dict(session.metadata)
+        except Exception as e:
+            logger.warning(
+                "[db_session_adapter] load metadata failed for %s: %s",
+                session_id,
+                e,
+            )
+        return {}
+
+    def _persist_metadata_to_db(self, session_id: str) -> None:
+        """Flush in-memory metadata to the conversation session row."""
+        meta = self._metadata.get(session_id)
+        if not meta:
+            return
+        conv = self._conversation_store()
+        if conv is None or not hasattr(conv, "get_session"):
+            return
+        try:
+            from ..persistence.conversation.base import ConversationSession
+
+            session = conv.get_session(session_id)
+            if session is None:
+                conv.create_session(
+                    ConversationSession(session_id=session_id, metadata=dict(meta))
+                )
+            else:
+                session.metadata = {**(session.metadata or {}), **meta}
+                conv.update_session(session)
+        except Exception as e:
+            logger.warning(
+                "[db_session_adapter] persist metadata failed for %s: %s",
+                session_id,
+                e,
+            )
+
+    def _purge_persisted_messages(self, session_id: str) -> None:
+        """Remove persisted messages when the session is cleared or deleted."""
+        conv = self._conversation_store()
+        if conv is not None and hasattr(conv, "delete_messages"):
+            try:
+                conv.delete_messages(session_id, None)
+            except Exception as e:
+                logger.warning(
+                    "[db_session_adapter] delete_messages failed for %s: %s",
+                    session_id,
+                    e,
+                )
+
+    def _purge_persisted_metadata(self, session_id: str) -> None:
+        """Remove persisted metadata when the session is deleted."""
+        conv = self._conversation_store()
+        if conv is None:
+            return
+        try:
+            if hasattr(conv, "delete_session"):
+                conv.delete_session(session_id)
+            elif hasattr(conv, "get_session") and hasattr(conv, "update_session"):
+                session = conv.get_session(session_id)
+                if session is not None:
+                    session.metadata = {}
+                    conv.update_session(session)
+        except Exception as e:
+            logger.warning(
+                "[db_session_adapter] purge metadata failed for %s: %s",
+                session_id,
+                e,
+            )
 
     def _ensure_session(self, session_id: str, agent_name: str = "ManagedAgent") -> None:
         """Ensure session exists in the DB adapter."""
         if session_id not in self._sessions:
+            skip_history = session_id in self._cleared_sessions
+            if skip_history:
+                self._cleared_sessions.discard(session_id)
             try:
                 msgs = self._db.on_agent_start(agent_name, session_id)
-                if msgs:
+                if msgs and not skip_history:
                     self._history_cache[session_id] = [
                         {"role": m.role, "content": m.content} for m in msgs
                     ]
+                elif skip_history:
+                    self._history_cache[session_id] = []
+                if session_id not in self._metadata:
+                    loaded = self._load_metadata_from_db(session_id)
+                    if loaded:
+                        self._metadata[session_id] = loaded
                 self._sessions.add(session_id)
             except Exception as e:
                 logger.warning("[db_session_adapter] on_agent_start failed: %s", e)
@@ -99,14 +205,25 @@ class DbSessionAdapter:
 
     def clear_session(self, session_id: str) -> bool:
         """Clear all messages from a session."""
-        self._history_cache.pop(session_id, None)
+        if session_id in self._sessions:
+            try:
+                self._db.on_agent_end(session_id)
+            except Exception as e:
+                logger.warning("[db_session_adapter] on_agent_end failed: %s", e)
+        self._purge_persisted_messages(session_id)
+        self._history_cache[session_id] = []
+        self._sessions.discard(session_id)
+        self._cleared_sessions.add(session_id)
         return True
 
     def delete_session(self, session_id: str) -> bool:
         """Delete a session completely."""
+        self._purge_persisted_messages(session_id)
+        self._purge_persisted_metadata(session_id)
         self._history_cache.pop(session_id, None)
         self._metadata.pop(session_id, None)
         self._sessions.discard(session_id)
+        self._cleared_sessions.discard(session_id)
         try:
             self._db.on_agent_end(session_id)
         except Exception:
@@ -126,10 +243,16 @@ class DbSessionAdapter:
         if session_id not in self._metadata:
             self._metadata[session_id] = {}
         self._metadata[session_id].update(metadata)
+        self._persist_metadata_to_db(session_id)
 
     def get_metadata(self, session_id: str) -> Dict[str, Any]:
         """Retrieve metadata for a session."""
-        return dict(self._metadata.get(session_id, {}))
+        if session_id in self._metadata:
+            return dict(self._metadata[session_id])
+        loaded = self._load_metadata_from_db(session_id)
+        if loaded:
+            self._metadata[session_id] = loaded
+        return dict(loaded)
 
     # ------------------------------------------------------------------
     # Session data access (used by DefaultSessionStore-compatible code)
