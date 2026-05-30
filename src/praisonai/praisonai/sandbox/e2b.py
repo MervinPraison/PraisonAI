@@ -216,9 +216,8 @@ class E2BSandbox:
             if env:
                 import shlex
                 for key, value in env.items():
-                    await asyncio.get_event_loop().run_in_executor(
-                        None,
-                        lambda k=key, v=value: self._sandbox.commands.run(f"export {shlex.quote(k)}={shlex.quote(v)}", timeout=5)
+                    await asyncio.to_thread(
+                        self._sandbox.commands.run, f"export {shlex.quote(key)}={shlex.quote(value)}", timeout=5
                     )
             
             # Change directory if needed

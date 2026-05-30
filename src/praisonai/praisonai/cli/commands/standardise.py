@@ -355,18 +355,10 @@ def _run_init(parsed) -> int:
     return 0
 
 
-def _run_ai(parsed) -> int:
-    """Run the AI generation subcommand with ACP/LSP runtime support."""
-    import asyncio
+async def _run_ai_with_runtime(parsed, config, slug):
+    """Helper function to run AI generation with proper runtime lifecycle."""
     from praisonai.standardise.ai_generator import AIGenerator
-    from praisonai.standardise.models import ArtifactType, FeatureSlug
-    
-    config = _create_config(parsed)
-    
-    slug = FeatureSlug.from_string(parsed.feature)
-    if not slug.is_valid:
-        print(f"Error: Invalid feature slug: {slug.validation_error}")
-        return 2
+    from praisonai.standardise.models import ArtifactType
     
     # Start ACP/LSP runtime for context gathering
     runtime = None
@@ -377,13 +369,29 @@ def _run_ai(parsed) -> int:
             lsp=True,
             acp=False  # ACP not needed for generation
         )
-        # Start runtime in background
-        asyncio.run(runtime.start())
+        # Start runtime
+        await runtime.start()
         if runtime.lsp_ready:
             print("🔧 LSP server ready for code intelligence")
     except Exception:
         # Runtime is optional, continue without it
         pass
+    
+    try:
+        return await _run_generation_logic(parsed, config, slug, runtime)
+    finally:
+        # Cleanup runtime
+        if runtime:
+            try:
+                await runtime.stop()
+            except Exception:
+                pass
+
+
+async def _run_generation_logic(parsed, config, slug, runtime):
+    """Main AI generation logic."""
+    from praisonai.standardise.ai_generator import AIGenerator
+    from praisonai.standardise.models import ArtifactType
     
     generator = AIGenerator(
         model=parsed.model,
@@ -485,14 +493,23 @@ def _run_ai(parsed) -> int:
     if not parsed.apply:
         print("\nRun with --apply to create these files.")
     
-    # Cleanup runtime
-    if runtime:
-        try:
-            asyncio.run(runtime.stop())
-        except Exception:
-            pass
-    
     return 0
+
+
+def _run_ai(parsed) -> int:
+    """Run the AI generation subcommand with ACP/LSP runtime support."""
+    import asyncio
+    from praisonai.standardise.models import FeatureSlug
+    
+    config = _create_config(parsed)
+    
+    slug = FeatureSlug.from_string(parsed.feature)
+    if not slug.is_valid:
+        print(f"Error: Invalid feature slug: {slug.validation_error}")
+        return 2
+    
+    # Run the async workflow with single event loop
+    return asyncio.run(_run_ai_with_runtime(parsed, config, slug))
 
 
 def _run_checkpoint(parsed) -> int:
