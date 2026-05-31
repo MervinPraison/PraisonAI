@@ -41,6 +41,8 @@ _AVAIL = {
     "AGENTOPS_AVAILABLE": "agentops",
 }
 
+__all__ = list(_AVAIL.keys())
+
 def __getattr__(name):
     """Lazy attribute access for framework availability constants.
     
@@ -50,6 +52,9 @@ def __getattr__(name):
     if name in _AVAIL:
         return is_available(_AVAIL[name])
     raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
+def __dir__():
+    return sorted(set(globals()) | set(_AVAIL))
 
 # Framework adapter registry - now uses proper registry pattern
 # This replaces the hardcoded FRAMEWORK_ADAPTERS dict
@@ -296,7 +301,7 @@ class AgentsGenerator:
         
         # Keep tool registry for backward compatibility with autogen adapters
         self.tool_registry = ToolRegistry()
-        self.tool_registry.register_builtin_autogen_adapters()
+        self.tool_registry.register_builtin_autogen_adapters(_suppress_deprecation_warning=True)
         
         # Initialize tool resolver with the registry wired in (single source of truth for tool resolution)
         from .tool_resolver import ToolResolver

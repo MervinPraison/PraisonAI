@@ -144,5 +144,6 @@ def run_sync(coro: Awaitable[T], *, timeout: float | None = _DEFAULT_TIMEOUT) ->
 
 def shutdown() -> None:
     """Public hook for long-running server processes to stop the bridge cleanly."""
-    bg = _get_bg()
-    bg.shutdown()
+    bg = _BG
+    if bg is not None:
+        bg.shutdown()

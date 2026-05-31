@@ -30,21 +30,22 @@ class ToolRegistry:
             self._functions[name] = func
         logger.debug(f"Registered function tool: {name}")
     
-    def register_autogen_adapter(self, tool_type_name: str, adapter: Callable) -> None:
+    def register_autogen_adapter(self, tool_type_name: str, adapter: Callable, _suppress_deprecation_warning: bool = False) -> None:
         """Deprecated: AutoGen adapters moved to framework_adapters.autogen module."""
-        import warnings
-        warnings.warn(
-            "ToolRegistry.register_autogen_adapter is deprecated. "
-            "AutoGen-specific logic has been moved to framework_adapters.autogen module.",
-            DeprecationWarning,
-            stacklevel=2
-        )
+        if not _suppress_deprecation_warning:
+            import warnings
+            warnings.warn(
+                "ToolRegistry.register_autogen_adapter is deprecated. "
+                "AutoGen-specific logic has been moved to framework_adapters.autogen module.",
+                DeprecationWarning,
+                stacklevel=2
+            )
         # For backward compatibility, still store but warn
-        if not hasattr(self, '_autogen_adapters'):
-            self._autogen_adapters: Dict[str, Callable] = {}
         if not callable(adapter):
             raise ValueError(f"AutoGen adapter for {tool_type_name} must be callable")
         with self._lock:
+            if not hasattr(self, '_autogen_adapters'):
+                self._autogen_adapters: Dict[str, Callable] = {}
             self._autogen_adapters[tool_type_name] = adapter
         logger.debug(f"Registered AutoGen adapter: {tool_type_name} (deprecated)")
     
@@ -122,15 +123,16 @@ class ToolRegistry:
         logger.debug(f"Registered {len(registered)} functions from module: {registered}")
         return registered
     
-    def register_builtin_autogen_adapters(self) -> None:
+    def register_builtin_autogen_adapters(self, _suppress_deprecation_warning: bool = False) -> None:
         """Deprecated: AutoGen adapters moved to framework_adapters.autogen module."""
-        import warnings
-        warnings.warn(
-            "ToolRegistry.register_builtin_autogen_adapters is deprecated. "
-            "AutoGen-specific logic has been moved to framework_adapters.autogen module.",
-            DeprecationWarning,
-            stacklevel=2
-        )
+        if not _suppress_deprecation_warning:
+            import warnings
+            warnings.warn(
+                "ToolRegistry.register_builtin_autogen_adapters is deprecated. "
+                "AutoGen-specific logic has been moved to framework_adapters.autogen module.",
+                DeprecationWarning,
+                stacklevel=2
+            )
         # For backward compatibility, attempt old logic but warn
         try:
             from .inbuilt_tools import _get_autogen_tools
@@ -141,7 +143,7 @@ class ToolRegistry:
                         adapter = getattr(tools_module, attr_name)
                         if callable(adapter):
                             tool_type_name = attr_name.replace('autogen_', '')
-                            self.register_autogen_adapter(tool_type_name, adapter)
+                            self.register_autogen_adapter(tool_type_name, adapter, _suppress_deprecation_warning=True)
         except ImportError as e:
             logger.warning(f"Could not register builtin AutoGen adapters: {e}")
         except Exception as e:
