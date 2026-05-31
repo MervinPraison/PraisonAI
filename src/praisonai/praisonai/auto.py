@@ -65,37 +65,7 @@ def _load_optional(key: str, loader):
 # Availability checks now delegated to centralized module
 from ._framework_availability import is_available
 
-def _check_crewai_available() -> bool:
-    """Check if crewai is available (cached, thread-safe)."""
-    return is_available("crewai")
-
-def _check_autogen_available() -> bool:
-    """Check if autogen v0.2 is available (cached, thread-safe)."""
-    return is_available("autogen")
-
-def _check_autogen_v4_available() -> bool:
-    """Check if autogen v0.4 is available (cached, thread-safe)."""
-    return is_available("autogen_v4")
-
-def _check_ag2_available() -> bool:
-    """Check if AG2 (community fork of AutoGen) is available (cached, thread-safe)."""
-    return is_available("ag2")
-
-def _check_praisonai_available() -> bool:
-    """Check if praisonaiagents is available (cached, thread-safe)."""
-    return is_available("praisonaiagents")
-
-def _check_praisonai_tools_available() -> bool:
-    """Check if praisonai_tools is available (cached, thread-safe)."""
-    return is_available("praisonai_tools")
-
-def _check_litellm_available() -> bool:
-    """Check if litellm is available (cached, thread-safe)."""
-    return is_available("litellm")
-
-def _check_openai_available() -> bool:
-    """Check if openai is available (cached, thread-safe)."""
-    return is_available("openai")
+# Redundant wrapper functions removed - use is_available() directly
 
 
 def _get_crewai():
@@ -504,7 +474,7 @@ class BaseAutoGenerator:
         model_name = self.config_list[0]['model']
         
         # Try LiteLLM first (preferred - supports 100+ providers)
-        if _check_litellm_available():
+        if is_available("litellm"):
             litellm = _get_litellm()
             response = litellm.completion(
                 model=model_name,
@@ -516,7 +486,7 @@ class BaseAutoGenerator:
             return response_model.model_validate_json(content)
         
         # Fallback to OpenAI SDK (uses beta.chat.completions.parse)
-        if _check_openai_available():
+        if is_available("openai"):
             client = self._get_openai_client()
             response = client.beta.chat.completions.parse(
                 model=model_name,
@@ -554,7 +524,7 @@ class BaseAutoGenerator:
         model_name = self.config_list[0]['model']
         
         # Try LiteLLM async first (preferred - supports 100+ providers)
-        if _check_litellm_available():
+        if is_available("litellm"):
             litellm = _get_litellm()
             response = await litellm.acompletion(
                 model=model_name,
@@ -566,7 +536,7 @@ class BaseAutoGenerator:
             return response_model.model_validate_json(content)
         
         # Fallback to OpenAI AsyncSDK (uses beta.chat.completions.parse)
-        if _check_openai_available():
+        if is_available("openai"):
             if self._async_openai_client is None:
                 with self._client_lock:
                     if self._async_openai_client is None:
@@ -728,7 +698,7 @@ class AutoGenerator(BaseAutoGenerator):
             raise ImportError(f"{adapter.name} is not installed. Please install with:\n    {install_hint}")
         
         # Check tools availability if required by this framework
-        if requires_tools_extra and not _check_praisonai_tools_available():
+        if requires_tools_extra and not is_available("praisonai_tools"):
             logger.warning(f"Tools are not available for {framework}. To use tools, install:\n    {install_hint}")
 
         self.topic = topic
