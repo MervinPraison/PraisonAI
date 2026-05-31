@@ -117,6 +117,26 @@ class TestHierarchicalSessionStore:
             assert len(history) == 2
             assert history[1]["content"] == "second"
 
+    def test_set_title_does_not_drop_messages_after_external_write(self):
+        """set_title must reload from disk so it cannot wipe newer messages."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = HierarchicalSessionStore(session_dir=tmpdir)
+            reader = HierarchicalSessionStore(session_dir=tmpdir)
+
+            session_id = writer.create_session(title="Original")
+            writer.add_message(session_id, "user", "Message 1")
+            writer.add_message(session_id, "assistant", "Response 1")
+
+            reader.get_extended_session(session_id)
+            writer.add_message(session_id, "user", "Message 2")
+            writer.add_message(session_id, "assistant", "Response 2")
+
+            assert reader.set_title(session_id, "Updated Title")
+
+            session = writer.get_extended_session(session_id)
+            assert session.title == "Updated Title"
+            assert len(session.messages) == 4
+
     def test_update_session_metadata_preserves_extended_fields(self):
         """Metadata updates must not strip parent_id, snapshots, etc."""
         session_id = self.store.create_session(title="Parent")
