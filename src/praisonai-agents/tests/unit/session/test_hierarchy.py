@@ -132,29 +132,28 @@ class TestHierarchicalSessionStore:
             assert session.messages[1].content == "second"
 
     def test_stale_cache_write_preserves_concurrent_updates(self):
-        """Metadata writes must not overwrite concurrent message additions."""
+        """Metadata writes must not truncate messages written by other processes."""
         with tempfile.TemporaryDirectory() as tmpdir:
             writer = HierarchicalSessionStore(session_dir=tmpdir)
             reader = HierarchicalSessionStore(session_dir=tmpdir)
-
-            # Writer creates session and adds initial message
-            session_id = writer.create_session(title="Test")
-            writer.add_user_message(session_id, "first")
             
-            # Reader loads (warms cache)
-            reader.get_extended_session(session_id)
+            # Create session and warm reader's cache
+            writer.create_session("session-1", title="Original")
+            reader.get_extended_session("session-1")  # Warms cache
             
-            # Writer adds another message
-            writer.add_user_message(session_id, "second")
+            # Writer adds messages, reader has stale cache
+            writer.add_user_message("session-1", "first message")
+            writer.add_assistant_message("session-1", "first response")
             
-            # Reader calls set_title (metadata write) - should not lose "second" message
-            reader.set_title(session_id, "Updated Title")
+            # Reader performs metadata-only write with stale cache
+            reader.set_title("session-1", "Updated Title")
             
-            # Verify both messages preserved
-            final_session = writer.get_extended_session(session_id)
-            assert len(final_session.messages) == 2
-            assert final_session.messages[1].content == "second"
-            assert final_session.title == "Updated Title"
+            # Verify messages are preserved
+            session = writer.get_extended_session("session-1")
+            assert session.title == "Updated Title"
+            assert len(session.messages) == 2
+            assert session.messages[0].content == "first message"
+            assert session.messages[1].content == "first response"
 
     def test_update_session_metadata_preserves_extended_fields(self):
         """Metadata updates must not strip parent_id, snapshots, etc."""

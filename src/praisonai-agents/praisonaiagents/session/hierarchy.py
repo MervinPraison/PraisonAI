@@ -331,13 +331,11 @@ class HierarchicalSessionStore(DefaultSessionStore):
         
         # Update parent's children list without clobbering concurrent message writes
         if parent_id:
-            def _link_child(parent: SessionData) -> None:
-                if sid not in parent.children_ids:
-                    parent.children_ids.append(sid)
-
-            self._modify_session_locked(
-                parent_id, _link_child, error_label="link child session"
-            )
+            def _apply(parent_session: SessionData) -> None:
+                assert isinstance(parent_session, ExtendedSessionData)
+                if sid not in parent_session.children_ids:
+                    parent_session.children_ids.append(sid)
+            self._modify_session_locked(parent_id, _apply, error_label="update parent children")
         
         self._save_extended_session(session)
         return sid
@@ -478,28 +476,30 @@ class HierarchicalSessionStore(DefaultSessionStore):
         Returns:
             True if successful
         """
-        # Read-only lookup to find snapshot without triggering unnecessary writes
-        session = self._read_session_fresh(session_id)
-        snapshot = None
-        for s in session.snapshots:
-            if s.id == snapshot_id:
-                snapshot = s
-                break
-        
-        if snapshot is None:
-            logger.warning(f"Snapshot {snapshot_id} not found")
-            return False
-
-        # Now perform the actual revert in a single locked operation
-        def _revert(session: SessionData) -> None:
+        def _apply(session: SessionData) -> None:
+            assert isinstance(session, ExtendedSessionData)
+            
+            # Find the snapshot
+            snapshot = None
+            for s in session.snapshots:
+                if s.id == snapshot_id:
+                    snapshot = s
+                    break
+            
+            if snapshot is None:
+                logger.warning(f"Snapshot {snapshot_id} not found")
+                raise ValueError(f"Snapshot {snapshot_id} not found")
+            
+            # Revert messages
             if snapshot.message_index >= 0:
-                session.messages = session.messages[: snapshot.message_index + 1]
+                session.messages = session.messages[:snapshot.message_index + 1]
             else:
                 session.messages = []
-
-        return self._modify_session_locked(
-            session_id, _revert, error_label="revert to snapshot"
-        )
+                
+        try:
+            return self._modify_session_locked(session_id, _apply, error_label="revert to snapshot")
+        except ValueError:
+            return False
     
     def revert_to_message(self, session_id: str, message_index: int) -> bool:
         """
@@ -512,37 +512,33 @@ class HierarchicalSessionStore(DefaultSessionStore):
         Returns:
             True if successful
         """
-        # Validate message index before writing
-        session = self._read_session_fresh(session_id)
-        if message_index < 0 or message_index >= len(session.messages):
-            logger.warning(f"Invalid message index {message_index}")
+        def _apply(session: SessionData) -> None:
+            assert isinstance(session, ExtendedSessionData)
+            
+            if message_index < 0 or message_index >= len(session.messages):
+                logger.warning(f"Invalid message index {message_index}")
+                raise ValueError(f"Invalid message index {message_index}")
+            
+            session.messages = session.messages[:message_index + 1]
+            
+        try:
+            return self._modify_session_locked(session_id, _apply, error_label="revert to message")
+        except ValueError:
             return False
-
-        # Valid index, proceed with locked revert
-        def _revert(session: SessionData) -> None:
-            session.messages = session.messages[: message_index + 1]
-
-        return self._modify_session_locked(
-            session_id, _revert, error_label="revert to message"
-        )
     
     def share_session(self, session_id: str) -> bool:
         """Mark a session as shared."""
-        def _share(session: SessionData) -> None:
+        def _apply(session: SessionData) -> None:
+            assert isinstance(session, ExtendedSessionData)
             session.is_shared = True
-
-        return self._modify_session_locked(
-            session_id, _share, error_label="share session"
-        )
+        return self._modify_session_locked(session_id, _apply, error_label="share session")
     
     def unshare_session(self, session_id: str) -> bool:
         """Mark a session as not shared."""
-        def _unshare(session: SessionData) -> None:
+        def _apply(session: SessionData) -> None:
+            assert isinstance(session, ExtendedSessionData)
             session.is_shared = False
-
-        return self._modify_session_locked(
-            session_id, _unshare, error_label="unshare session"
-        )
+        return self._modify_session_locked(session_id, _apply, error_label="unshare session")
     
     def is_shared(self, session_id: str) -> bool:
         """Check if a session is shared."""
@@ -551,12 +547,10 @@ class HierarchicalSessionStore(DefaultSessionStore):
     
     def set_title(self, session_id: str, title: str) -> bool:
         """Set session title."""
-        def _set_title(session: SessionData) -> None:
+        def _apply(session: SessionData) -> None:
+            assert isinstance(session, ExtendedSessionData)
             session.title = title
-
-        return self._modify_session_locked(
-            session_id, _set_title, error_label="set session title"
-        )
+        return self._modify_session_locked(session_id, _apply, error_label="set session title")
     
     async def auto_title(self, session_id: str) -> bool:
         """Generate and set title automatically from first exchange.
@@ -611,17 +605,18 @@ class HierarchicalSessionStore(DefaultSessionStore):
             title = await generate_title_async(user_msg, assistant_msg)
             
             if title and title.strip():
-                # Use atomic read-modify-write to avoid overwriting concurrent updates
-                def _apply_title(session: SessionData) -> None:
-                    # Only set title if it's still empty (another process might have set it)
-                    if not session.title or not session.title.strip():
-                        session.title = title.strip()
-                
+                # Use locked read-modify-write to avoid overwriting concurrent updates
+                def _apply(fresh_session: SessionData) -> None:
+                    assert isinstance(fresh_session, ExtendedSessionData)
+                    # Only set title if it's still empty
+                    if not fresh_session.title or not fresh_session.title.strip():
+                        fresh_session.title = title.strip()
+                        
                 return await asyncio.to_thread(
                     self._modify_session_locked, 
                     session_id, 
-                    _apply_title, 
-                    error_label="auto-generate session title"
+                    _apply, 
+                    error_label="auto-title session"
                 )
                 
         except Exception as e:
