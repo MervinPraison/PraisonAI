@@ -39,6 +39,7 @@ def create_valkey_client(
     config = GlideClientConfiguration(
         addresses=addresses,
         credentials=creds,
+        client_name="praisonai_valkey_client",
         database_id=db,
     )
     return GlideClientSync.create(config)
