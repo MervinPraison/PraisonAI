@@ -146,6 +146,7 @@ class HierarchicalSessionStore(DefaultSessionStore):
         self._extended_cache: Dict[str, ExtendedSessionData] = {}
         self._cache_mtimes: Dict[str, float] = {}  # Track file modification times
 
+
     def _load_session_from_disk(self, session_id: str, filepath: str) -> ExtendedSessionData:
         """Load extended session JSON from disk (caller must hold FileLock)."""
         if os.path.exists(filepath):
@@ -610,12 +611,18 @@ class HierarchicalSessionStore(DefaultSessionStore):
             title = await generate_title_async(user_msg, assistant_msg)
             
             if title and title.strip():
-                # Reload session to avoid overwriting concurrent updates
-                fresh_session = await asyncio.to_thread(self._load_extended_session, session_id)
-                # Only set title if it's still empty
-                if not fresh_session.title or not fresh_session.title.strip():
-                    fresh_session.title = title.strip()
-                    return await asyncio.to_thread(self._save_extended_session, fresh_session)
+                # Use atomic read-modify-write to avoid overwriting concurrent updates
+                def _apply_title(session: SessionData) -> None:
+                    # Only set title if it's still empty (another process might have set it)
+                    if not session.title or not session.title.strip():
+                        session.title = title.strip()
+                
+                return await asyncio.to_thread(
+                    self._modify_session_locked, 
+                    session_id, 
+                    _apply_title, 
+                    error_label="auto-generate session title"
+                )
                 
         except Exception as e:
             # Title generation failed - log with context instead of silent failure
@@ -626,8 +633,18 @@ class HierarchicalSessionStore(DefaultSessionStore):
         return False
     
     def get_extended_session(self, session_id: str) -> ExtendedSessionData:
-        """Get extended session data with smart caching."""
-        return self._load_extended_session(session_id, force_reload=False)
+        """Get extended session data."""
+        return self._read_session_fresh(session_id)
+
+    def invalidate_cache(self, session_id: Optional[str] = None) -> None:
+        """Invalidate base and extended in-memory caches atomically."""
+        with self._lock:
+            if session_id:
+                self._cache.pop(session_id, None)
+                self._extended_cache.pop(session_id, None)
+            else:
+                self._cache.clear()
+                self._extended_cache.clear()
     
     def export_session(self, session_id: str) -> Dict[str, Any]:
         """

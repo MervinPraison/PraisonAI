@@ -117,50 +117,44 @@ class TestHierarchicalSessionStore:
             assert len(history) == 2
             assert history[1]["content"] == "second"
 
-    def test_fork_session_preserves_concurrent_messages(self):
-        """Registering a fork must not clobber messages added on the parent."""
-        import threading
-        import time
-        
+    def test_get_extended_session_sees_writes_from_other_store(self):
+        """Extended reads must reload from disk, not stale _extended_cache."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Use two separate store instances to simulate concurrent processes
-            store1 = HierarchicalSessionStore(session_dir=tmpdir)
-            store2 = HierarchicalSessionStore(session_dir=tmpdir)
+            writer = HierarchicalSessionStore(session_dir=tmpdir)
+            reader = HierarchicalSessionStore(session_dir=tmpdir)
+
+            writer.add_user_message("session-1", "first")
+            reader._load_extended_session("session-1")
+            writer.add_user_message("session-1", "second")
+
+            session = reader.get_extended_session("session-1")
+            assert len(session.messages) == 2
+            assert session.messages[1].content == "second"
+
+    def test_stale_cache_write_preserves_concurrent_updates(self):
+        """Metadata writes must not overwrite concurrent message additions."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = HierarchicalSessionStore(session_dir=tmpdir)
+            reader = HierarchicalSessionStore(session_dir=tmpdir)
+
+            # Writer creates session and adds initial message
+            session_id = writer.create_session(title="Test")
+            writer.add_user_message(session_id, "first")
             
-            # Create session and add initial message
-            session_id = store1.create_session(title="Parent")
-            store1.add_user_message(session_id, "first")
+            # Reader loads (warms cache)
+            reader.get_extended_session(session_id)
             
-            # Use threading to create deterministic interleaving
-            fork_started = threading.Event()
-            fork_completed = threading.Event()
+            # Writer adds another message
+            writer.add_user_message(session_id, "second")
             
-            def concurrent_fork():
-                # Signal that fork has started
-                fork_started.set()
-                # Small delay to allow message to be added
-                time.sleep(0.05)
-                fork_id = store1.fork_session(session_id)
-                assert fork_id
-                fork_completed.set()
-                return fork_id
+            # Reader calls set_title (metadata write) - should not lose "second" message
+            reader.set_title(session_id, "Updated Title")
             
-            # Start fork operation in background thread
-            fork_thread = threading.Thread(target=concurrent_fork)
-            fork_thread.start()
-            
-            # Wait for fork to start, then add concurrent message
-            fork_started.wait()
-            store2.add_user_message(session_id, "concurrent_message")
-            
-            # Wait for fork to complete
-            fork_thread.join()
-            fork_completed.wait()
-            
-            # Both messages should be preserved
-            history = store1.get_chat_history(session_id)
-            assert len(history) == 2
-            assert any(msg["content"] == "concurrent_message" for msg in history)
+            # Verify both messages preserved
+            final_session = writer.get_extended_session(session_id)
+            assert len(final_session.messages) == 2
+            assert final_session.messages[1].content == "second"
+            assert final_session.title == "Updated Title"
 
     def test_update_session_metadata_preserves_extended_fields(self):
         """Metadata updates must not strip parent_id, snapshots, etc."""
