@@ -587,7 +587,6 @@ class AsyncAgentScheduler:
             
             async def astart(self, task: str) -> Any:
                 # Run recipe execution in thread to avoid blocking async loop
-                import asyncio
                 loop = asyncio.get_running_loop()
                 return await loop.run_in_executor(
                     None, lambda: execute_resolved_recipe(self.resolved)
