@@ -52,6 +52,7 @@ class ValkeyStateStore(StateStore):
                 port=self.port,
                 password=self.password,
                 db=self.db,
+                client_name="praisonai_state_store",
             )
         return self._client
 

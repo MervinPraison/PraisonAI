@@ -30,16 +30,22 @@ def create_valkey_client(
     port: int = 6379,
     password: Optional[str] = None,
     db: int = 0,
+    client_name: Optional[str] = "praisonai_valkey_client",
 ):
     """Create and return a GlideClientSync instance."""
     if GlideClientSync is None:
         raise ImportError(_MISSING_MSG)
     addresses = [NodeAddress(host, port)]
     creds = ServerCredentials(password=password) if password else None
-    config = GlideClientConfiguration(
-        addresses=addresses,
-        credentials=creds,
-        client_name="praisonai_valkey_client",
-        database_id=db,
-    )
+    
+    # Build configuration, only include client_name if provided
+    config_kwargs = {
+        "addresses": addresses,
+        "credentials": creds,
+        "database_id": db,
+    }
+    if client_name is not None:
+        config_kwargs["client_name"] = client_name
+    
+    config = GlideClientConfiguration(**config_kwargs)
     return GlideClientSync.create(config)
