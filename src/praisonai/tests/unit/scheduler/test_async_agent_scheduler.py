@@ -239,6 +239,22 @@ class TestRunScheduleFinally:
 
         assert scheduler.is_running is False
 
+    @pytest.mark.asyncio
+    async def test_execute_with_retry_budget_limit_sets_stop_event_without_stop_call(self):
+        scheduler = _make_scheduler()
+        scheduler.is_running = True
+        scheduler.max_cost = 0.0001
+        scheduler._total_cost = 0.0001
+        scheduler._ensure_async_primitives()
+
+        with patch.object(scheduler, "stop", new=AsyncMock()) as stop_mock:
+            await scheduler._execute_with_retry(max_retries=1)
+
+        assert scheduler._stop_event.is_set()
+        assert scheduler.is_running is False
+        stop_mock.assert_not_called()
+        scheduler.agent.astart.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Full lifecycle
