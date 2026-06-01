@@ -172,7 +172,7 @@ class AsyncAgentScheduler:
             logger.info(f"Schedule: {schedule_expr} ({interval}s interval)")
             if self.timeout:
                 logger.info(f"Timeout per execution: {self.timeout}s")
-            if self.max_cost:
+            if self.max_cost is not None:
                 logger.info(f"Budget limit: ${self.max_cost}")
             
             # Run immediately if requested
@@ -298,7 +298,7 @@ class AsyncAgentScheduler:
             "failed_executions": failed,
             "success_rate": (success / execs * 100) if execs > 0 else 0,
             "total_cost_usd": round(total_cost, 4),
-            "remaining_budget": round(self.max_cost - total_cost, 4) if self.max_cost else None,
+            "remaining_budget": round(self.max_cost - total_cost, 4) if self.max_cost is not None else None,
         }
     
     def get_stats_sync(self) -> Dict[str, Any]:
@@ -315,6 +315,8 @@ class AsyncAgentScheduler:
             "successful_executions": self._success_count,
             "failed_executions": self._failure_count,
             "success_rate": (self._success_count / self._execution_count * 100) if self._execution_count > 0 else 0,
+            "total_cost_usd": round(self._total_cost, 4),
+            "remaining_budget": round(self.max_cost - self._total_cost, 4) if self.max_cost is not None else None,
         }
     
     async def _run_schedule(self, interval: int, max_retries: int):
@@ -350,7 +352,7 @@ class AsyncAgentScheduler:
             self._execution_count += 1
         
         # Check budget limit before execution
-        if self.max_cost and self._total_cost >= self.max_cost:
+        if self.max_cost is not None and self._total_cost >= self.max_cost:
             logger.warning(f"Budget limit reached: ${self._total_cost:.4f} >= ${self.max_cost}")
             if self._stop_event is not None:
                 self._stop_event.set()
@@ -456,7 +458,7 @@ class AsyncAgentScheduler:
             Configured AsyncAgentScheduler instance
             
         Example:
-            scheduler = await AsyncAgentScheduler.from_yaml("agents.yaml")
+            scheduler = AsyncAgentScheduler.from_yaml("agents.yaml")
             await scheduler.start("hourly")
         """
         from .yaml_loader import load_agent_yaml_with_schedule, create_agent_from_config
