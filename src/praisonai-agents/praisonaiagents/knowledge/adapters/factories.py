@@ -174,7 +174,14 @@ class ChromaKnowledgeAdapter:
             
             # Add where filter if any conditions specified
             if where_filter:
-                query_kwargs["where"] = where_filter
+                # ChromaDB validation expects exactly one condition in the where clause
+                # When multiple conditions exist, use $and operator to combine them
+                if len(where_filter) == 1:
+                    query_kwargs["where"] = where_filter
+                else:
+                    # Convert multiple conditions to ChromaDB's $and format
+                    and_conditions = [{k: v} for k, v in where_filter.items()]
+                    query_kwargs["where"] = {"$and": and_conditions}
             
             response = self.collection.query(**query_kwargs)
             
@@ -197,6 +204,10 @@ class ChromaKnowledgeAdapter:
             return SearchResult(results=items)
             
         except Exception as e:
+            # Log ChromaDB query errors for better debugging
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"ChromaDB search failed: {e}")
             return SearchResult(results=[])
     
     def add(self, content: Any, *, user_id: Optional[str] = None, agent_id: Optional[str] = None,

@@ -1609,25 +1609,25 @@ class AgentTeam:
             original_on_task_start = self.on_task_start
             original_on_task_complete = self.on_task_complete
             
-            def composed_on_task_start(task):
+            def composed_on_task_start(task, task_id):
                 try:
-                    verbose_task_start_callback(task)
+                    verbose_task_start_callback(task, task_id)
                 except Exception as e:
                     logging.debug(f"Error in verbose task start callback: {e}")
                 if original_on_task_start:
                     try:
-                        original_on_task_start(task)
+                        original_on_task_start(task, task_id)
                     except Exception as e:
                         logging.debug(f"Error in original task start callback: {e}")
             
-            def composed_on_task_complete(task):
+            def composed_on_task_complete(task, task_output):
                 try:
-                    verbose_task_complete_callback(task)
+                    verbose_task_complete_callback(task, task_output)
                 except Exception as e:
                     logging.debug(f"Error in verbose task complete callback: {e}")
                 if original_on_task_complete:
                     try:
-                        original_on_task_complete(task)
+                        original_on_task_complete(task, task_output)
                     except Exception as e:
                         logging.debug(f"Error in original task complete callback: {e}")
             

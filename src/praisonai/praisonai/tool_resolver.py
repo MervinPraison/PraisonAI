@@ -64,7 +64,9 @@ class ToolResolver:
             tools_py_path: Optional path to tools.py. If None, uses ./tools.py
             registry: Optional ToolRegistry to include in resolution chain
         """
-        self._tools_py_path = tools_py_path or "tools.py"
+        from pathlib import Path
+        # Resolve path eagerly in constructor to make binding explicit and inspectable
+        self._tools_py_path = str(Path(tools_py_path or "tools.py").resolve())
         self._local_tools_cache: Mapping[str, Callable] = MappingProxyType({})
         self._local_tools_loaded: bool = False
         self._praisonai_tools_available: Optional[bool] = None
@@ -454,59 +456,99 @@ class ToolResolver:
             module = load_user_module(self._tools_py_path, name="tools_module")
             if module is None:
                 return {}
-            
-            # Import the necessary classes (matching agents_generator.py logic)
-            BaseTool = None
-            PRAISONAI_TOOLS_AVAILABLE = False
-            try:
-                from praisonai_tools import BaseTool
-                PRAISONAI_TOOLS_AVAILABLE = True
-            except ImportError:
-                try:
-                    from praisonai.tools import BaseTool
-                    PRAISONAI_TOOLS_AVAILABLE = True
-                except ImportError:
-                    pass
-            
-            result = {}
-            for name, obj in inspect.getmembers(module, 
-                lambda x: inspect.isclass(x) and (
-                    x.__module__.startswith('langchain_community.tools') or 
-                    (PRAISONAI_TOOLS_AVAILABLE and BaseTool and issubclass(x, BaseTool))
-                ) and x is not BaseTool):
-                try:
-                    result[name] = obj()
-                    logger.debug(f"Loaded local tool class: {name}")
-                except Exception as e:
-                    logger.warning(f"Error instantiating tool class {name}: {e}")
-                    continue
-            
-            return result
+            return self._extract_tool_classes(module)
         except Exception as e:
             logger.warning(f"Error loading tool classes from {self._tools_py_path}: {e}")
             return {}
 
+    def get_local_tool_classes_from_dir(self, tools_dir: "os.PathLike|str") -> Dict[str, Any]:
+        """Load BaseTool/langchain classes from every *.py in a tools/ directory.
+        
+        Args:
+            tools_dir: Path to the tools directory
+            
+        Returns:
+            Dictionary mapping class names to instantiated tool objects
+        """
+        from pathlib import Path
+        from ._safe_loader import load_user_module
+        
+        classes: Dict[str, Any] = {}
+        for py_file in Path(tools_dir).glob("*.py"):
+            if py_file.name.startswith("__"):
+                continue
+            try:
+                module = load_user_module(py_file, name=f"tools_{py_file.stem}")
+                if module is not None:
+                    classes.update(self._extract_tool_classes(module))
+            except Exception as e:
+                logger.warning(f"Error loading tool classes from file {py_file}: {e}")
+        return classes
 
-# Process-level lazy singleton for performance (matches profiler.py pattern)
-_default_resolver: Optional[ToolResolver] = None
-_default_resolver_lock = threading.Lock()
+    def _extract_tool_classes(self, module):
+        """Extract tool classes from a loaded module that inherit from BaseTool 
+        or are part of langchain_community.tools package.
+        """
+        # Import the necessary classes (matching agents_generator.py logic)
+        BaseTool = None
+        PRAISONAI_TOOLS_AVAILABLE = False
+        try:
+            from praisonai_tools import BaseTool
+            PRAISONAI_TOOLS_AVAILABLE = True
+        except ImportError:
+            try:
+                from praisonai.tools import BaseTool
+                PRAISONAI_TOOLS_AVAILABLE = True
+            except ImportError:
+                pass
+        
+        result = {}
+        for name, obj in inspect.getmembers(module, 
+            lambda x: inspect.isclass(x) and (
+                x.__module__.startswith('langchain_community.tools') or 
+                (PRAISONAI_TOOLS_AVAILABLE and BaseTool and issubclass(x, BaseTool))
+            ) and x is not BaseTool):
+            try:
+                result[name] = obj()
+                logger.debug(f"Loaded tool class: {name}")
+            except Exception as e:
+                logger.warning(f"Error instantiating tool class {name}: {e}")
+                continue
+        
+        return result
+
+
+# Context-local resolver for multi-project safety
+import contextvars
+
+_resolver_var: contextvars.ContextVar[Optional[ToolResolver]] = contextvars.ContextVar(
+    "tool_resolver", default=None,
+)
 
 def _get_default_resolver() -> ToolResolver:
-    """Process-default ToolResolver (double-checked lazy init).
+    """Per-context resolver. Falls back to a fresh ToolResolver per context,
+    so changing CWD between agents / requests is honoured.
     
-    Returns cached ToolResolver that is anchored to the working directory
-    at first call. Local tools.py resolution is CWD-dependent and cached
-    for the lifetime of the process.
+    Each context (agent/task/request) gets its own resolver anchored to the
+    working directory at the time of first use in that context. This prevents
+    the singleton bug where the first caller locks in their CWD for the entire process.
     
     For test isolation or multi-project CLIs, create explicit resolver
     instances instead of using this cached default.
     """
-    global _default_resolver
-    if _default_resolver is None:
-        with _default_resolver_lock:
-            if _default_resolver is None:
-                _default_resolver = ToolResolver()
-    return _default_resolver
+    resolver = _resolver_var.get()
+    if resolver is None:
+        resolver = ToolResolver()
+        _resolver_var.set(resolver)
+    return resolver
+
+def reset_default_resolver() -> None:
+    """Explicit invalidation hook for daemons / IDE plugins switching projects.
+    
+    Call this when changing working directories or switching between projects
+    to ensure the next tool resolution uses the new CWD.
+    """
+    _resolver_var.set(None)
 
 
 # Convenience functions that use cached default resolver for performance
@@ -521,8 +563,8 @@ def resolve_tool(name: str, resolver: Optional[ToolResolver] = None) -> Optional
         Callable if found, None otherwise
         
     Note:
-        When resolver=None, uses a process-level cached resolver that is anchored
-        to the working directory at first call. For test isolation or multi-project
+        When resolver=None, uses a context-local cached resolver anchored to the
+        working directory for that context. For test isolation or multi-project
         CLIs, pass an explicit resolver instance.
     """
     return (resolver or _get_default_resolver()).resolve(name)
@@ -577,3 +619,5 @@ def validate_yaml_tools(yaml_config: Dict[str, Any], resolver: Optional[ToolReso
         List of missing tool names
     """
     return (resolver or _get_default_resolver()).validate_yaml_tools(yaml_config)
+
+

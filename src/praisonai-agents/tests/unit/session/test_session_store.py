@@ -327,6 +327,20 @@ class TestDefaultSessionStore:
             assert session.agent_name == "TestBot"
             assert session.user_id == "u-1"
 
+    def test_get_chat_history_sees_writes_from_other_store(self, temp_store):
+        """Reads must reload from disk, not a stale in-memory cache."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = DefaultSessionStore(session_dir=tmpdir)
+            reader = DefaultSessionStore(session_dir=tmpdir)
+
+            writer.add_user_message("session-1", "first")
+            reader._load_session("session-1")
+            writer.add_user_message("session-1", "second")
+
+            history = reader.get_chat_history("session-1")
+            assert len(history) == 2
+            assert history[1]["content"] == "second"
+
     def test_clear_session_preserves_new_messages(self, temp_store):
         """Clear must reload from disk so concurrent adds are not lost."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -394,7 +408,7 @@ class TestDefaultSessionStore:
         assert history == []
     
     def test_invalidate_cache(self, temp_store):
-        """Test cache invalidation."""
+        """Test that reads always see latest disk state."""
         temp_store.add_user_message("session-1", "Hello")
         
         # Modify file directly
@@ -405,16 +419,16 @@ class TestDefaultSessionStore:
         with open(filepath, "w") as f:
             json.dump(data, f)
         
-        # Reads reload from disk when the session file exists
+        # Reads always reload from disk (no stale cache)
         history = temp_store.get_chat_history("session-1")
         assert len(history) == 2
 
-        # invalidate_cache still clears in-memory state for non-existent files
+        # invalidate_cache still clears in-memory state when a file is missing
         temp_store.invalidate_cache("session-1")
         history = temp_store.get_chat_history("session-1")
         assert len(history) == 2
 
-    def test_get_chat_history_sees_other_store_instance(self, temp_store):
+    def test_get_chat_history_sees_other_store_instance(self):
         """Another store on the same session_dir must see new messages without invalidate_cache."""
         with tempfile.TemporaryDirectory() as tmpdir:
             writer = DefaultSessionStore(session_dir=tmpdir)
