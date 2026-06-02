@@ -599,9 +599,11 @@ class LocalManagedAgent:
                 subprocess.run(cmd, check=True, capture_output=True, timeout=120)
                 logger.info("[local_managed] host pip install completed")
             except subprocess.CalledProcessError as e:
-                logger.warning("[local_managed] pip install failed: %s", e.stderr)
-            except subprocess.TimeoutExpired:
-                logger.warning("[local_managed] pip install timed out")
+                raise RuntimeError(
+                    f"pip install failed for {pip_pkgs}: {e.stderr.decode(errors='replace')}"
+                ) from e
+            except subprocess.TimeoutExpired as e:
+                raise RuntimeError(f"pip install timed out after 120s for {pip_pkgs}") from e
         else:
             # Sandbox installation via compute provider
             self._install_packages_in_compute(pip_pkgs)
@@ -629,10 +631,14 @@ class LocalManagedAgent:
             if result.get("exit_code", 0) == 0:
                 logger.info("[local_managed] compute pip install completed")
             else:
-                logger.warning("[local_managed] compute pip install failed: %s", result.get("stderr", ""))
+                raise RuntimeError(
+                    f"pip install failed in compute for {pip_pkgs}: {result.get('stderr', '')}"
+                )
                 
         except Exception as e:
-            logger.warning("[local_managed] compute pip install error: %s", e)
+            if "pip install failed in compute" in str(e):
+                raise  # Re-raise RuntimeError from above
+            raise RuntimeError(f"pip install error in compute for {pip_pkgs}: {e}") from e
 
     def _ensure_agent(self) -> Any:
         """Create or return the inner PraisonAI Agent."""
