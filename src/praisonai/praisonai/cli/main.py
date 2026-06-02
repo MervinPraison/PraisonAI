@@ -4117,6 +4117,16 @@ Do NOT add any explanations or formatting."""
         planning_tools = getattr(self.args, 'planning_tools', None)
         if planning_tools:
             cli_config['planning_tools'] = planning_tools
+
+        # Extract --planning flag
+        if getattr(self.args, 'planning', False):
+            cli_config['planning'] = True
+
+        # Extract web flags
+        if getattr(self.args, 'web', False):
+            cli_config['web'] = True
+        if getattr(self.args, 'web_fetch', False):
+            cli_config['web_fetch'] = True
             
         # Extract --acp flag
         if getattr(self.args, 'acp', False):
@@ -4154,6 +4164,31 @@ Do NOT add any explanations or formatting."""
             cli_config['stream'] = stream or stream_metrics
             if stream_metrics:
                 cli_config['stream_metrics'] = True
+
+        # Extract handoff configuration for YAML CLI parity
+        handoff = getattr(self.args, 'handoff', None)
+        if handoff:
+            cli_config['handoff'] = handoff
+
+        handoff_policy = getattr(self.args, 'handoff_policy', None)
+        if handoff_policy is not None:
+            cli_config['handoff_policy'] = handoff_policy
+
+        handoff_timeout = getattr(self.args, 'handoff_timeout', None)
+        if handoff_timeout is not None:
+            cli_config['handoff_timeout'] = handoff_timeout
+
+        handoff_max_depth = getattr(self.args, 'handoff_max_depth', None)
+        if handoff_max_depth is not None:
+            cli_config['handoff_max_depth'] = handoff_max_depth
+
+        handoff_max_concurrent = getattr(self.args, 'handoff_max_concurrent', None)
+        if handoff_max_concurrent is not None:
+            cli_config['handoff_max_concurrent'] = handoff_max_concurrent
+
+        handoff_detect_cycles = getattr(self.args, 'handoff_detect_cycles', None)
+        if handoff_detect_cycles is not None:
+            cli_config['handoff_detect_cycles'] = handoff_detect_cycles
             
         return cli_config
 

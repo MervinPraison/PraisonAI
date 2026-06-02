@@ -39,6 +39,12 @@ def __getattr__(name):
     elif name == 'create_deployment_scheduler':
         from .deployment import create_deployment_scheduler
         return create_deployment_scheduler
+    elif name == 'AsyncAgentScheduler':
+        from .async_agent_scheduler import AsyncAgentScheduler
+        return AsyncAgentScheduler
+    elif name == 'create_async_agent_scheduler':
+        from .async_agent_scheduler import create_async_agent_scheduler
+        return create_async_agent_scheduler
     elif name in ('ScheduledAgentExecutor', 'JobResult'):
         from .executor import ScheduledAgentExecutor, JobResult
         return ScheduledAgentExecutor if name == 'ScheduledAgentExecutor' else JobResult

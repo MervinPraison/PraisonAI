@@ -1952,6 +1952,129 @@ Your Goal: {self.goal}
         # Sandbox configuration - initialize SandboxMixin
         super().__init__(sandbox=sandbox)
 
+    def __deepcopy__(self, memo: dict) -> "Agent":
+        """Custom deepcopy that creates fresh threading primitives.
+
+        threading.RLock (self.__cache_lock) and threading.Lock (self._cost_lock)
+        cannot be deep-copied on CPython < 3.13.  This hook deep-copies every
+        other attribute normally and replaces the locks with new instances so
+        that copy.deepcopy(agent) works in any Python version.
+        """
+        import copy
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        for k, v in self.__dict__.items():
+            if k in ("_Agent__cache_lock",):
+                object.__setattr__(result, k, threading.RLock())
+            elif k == "_cost_lock":
+                object.__setattr__(result, k, threading.Lock())
+            else:
+                object.__setattr__(result, k, copy.deepcopy(v, memo))
+        return result
+
+    def clone_for_channel(self) -> "Agent":
+        """Return a fully independent copy of this agent for a gateway channel.
+        
+        This method safely clones an agent for use in multi-channel scenarios
+        by avoiding deepcopy issues with tools/handoffs and creating fresh
+        instances of mutable objects like interrupt_controller.
+        
+        Returns:
+            Agent: A new Agent instance with copied configuration but fresh
+                  locks, interrupt controller, and shallow-copied tools.
+        """
+        import copy
+        from ..tools.base import BaseTool
+        
+        # Build kwargs for new Agent instance, copying core attributes
+        clone_kwargs = {
+            # Core identity
+            'name': self.name,
+            'role': self.role, 
+            'goal': self.goal,
+            'backstory': self.backstory,
+            'instructions': self.instructions,
+            
+            # LLM configuration 
+            'llm': self.llm,
+            'base_url': getattr(self, 'base_url', None),
+            'api_key': getattr(self, 'api_key', None),
+            'auth': getattr(self, 'auth', None),
+            
+            # Shallow copy tools to avoid deepcopy issues with nested objects
+            'tools': list(self.tools) if self.tools else None,
+            
+            # Skip handoffs entirely - they shouldn't be shared across channels
+            # and can contain nested Agent instances that cause RLock issues
+            'handoffs': None,
+            
+            # Feature configurations - check for actual stored config objects
+            'memory': getattr(self, '_memory_config', None),
+            'knowledge': getattr(self, '_knowledge_config', None), 
+            'planning': getattr(self, '_planning_config', None),
+            'reflection': getattr(self, '_reflection_config', None),
+            'guardrails': getattr(self, '_guardrails_config', None),
+            'web': getattr(self, '_web_config', None),
+            'context': getattr(self, '_context_config', None),
+            'autonomy': getattr(self, '_autonomy_config', None),
+            'output': getattr(self, '_output_config', None),
+            'execution': getattr(self, '_execution_config', None),
+            'templates': getattr(self, '_template_config', None),
+            'caching': getattr(self, '_caching_config', None),
+            'hooks': getattr(self, '_hooks_config', None),
+            'skills': getattr(self, '_skills_config', None),
+            'approval': getattr(self, '_approval_config', None),
+            'learn': getattr(self, '_learn_config', None),
+            
+            # Tool configuration
+            'tool_timeout': getattr(self, '_tool_timeout', None),
+            'parallel_tool_calls': getattr(self, 'parallel_tool_calls', False),
+            
+            # CLI backend
+            'cli_backend': getattr(self, '_cli_backend', None),
+            
+            # Create fresh interrupt controller to avoid shared state
+            'interrupt_controller': None,  # Let new instance create its own
+            
+            # Sandbox config
+            'sandbox': getattr(self, '_sandbox_config', None),
+        }
+        
+        # Handle deprecated parameters for backward compatibility
+        import warnings
+        
+        # Check for deprecated standalone attributes and emit warnings
+        deprecated_attrs = [
+            ('allow_code_execution', 'execution'),
+            ('code_execution_mode', 'execution'), 
+            ('auto_save', 'memory'),
+            ('rate_limiter', 'execution'),
+            ('allow_delegation', 'handoffs'),
+            ('verification_hooks', 'autonomy')
+        ]
+        
+        for old_attr, new_param in deprecated_attrs:
+            if hasattr(self, old_attr):
+                value = getattr(self, old_attr)
+                if value is not None and value != False:  # Skip None/False defaults
+                    warnings.warn(
+                        f"Deprecated attribute '{old_attr}' found in agent clone. "
+                        f"Use '{new_param}=' parameter instead.",
+                        DeprecationWarning,
+                        stacklevel=2
+                    )
+                    # For basic compatibility, include in clone_kwargs if not already set
+                    if old_attr == 'allow_code_execution' and clone_kwargs['execution'] is None:
+                        from ..config.execution import ExecutionConfig
+                        clone_kwargs['execution'] = ExecutionConfig(code_execution=value)
+                    elif old_attr == 'auto_save' and clone_kwargs['memory'] is None:
+                        from ..config.memory import MemoryConfig  
+                        clone_kwargs['memory'] = MemoryConfig(auto_save=value)
+        
+        # Create new Agent instance
+        return self.__class__(**{k: v for k, v in clone_kwargs.items() if v is not None})
+
     @property
     def _telemetry(self):
         """Lazy-loaded telemetry instance for performance."""

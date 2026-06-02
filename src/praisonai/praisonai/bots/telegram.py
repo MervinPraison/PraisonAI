@@ -33,6 +33,7 @@ from ._debounce import InboundDebouncer
 from ._ack import AckReactor
 from ._unknown_user import UnknownUserHandler, BotContext
 from ._pairing_ui import PairingUIBuilder, PairingCallbackHandler
+from ..gateway.unicode_utils import safe_error_message, safe_log_message, extract_root_cause_from_error
 from ..gateway.pairing import PairingStore
 
 logger = logging.getLogger(__name__)
@@ -222,9 +223,6 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     logger.error(f"Message handler error: {e}")
             
             if self._agent and not message.is_command:
-                if self.config.typing_indicator:
-                    await update.message.chat.send_action("typing")
-                
                 # Ack reaction
                 ack_ctx = None
                 if self._ack.enabled:
@@ -255,11 +253,28 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 ) if update.message.from_user else ""
                 try:
                     message_text = await self._debouncer.debounce(user_id, message_text)
-                    response = await self._session.chat(
-                        self._agent, user_id, message_text,
-                        chat_id=str(update.message.chat_id) if update.message.chat_id else "",
-                        user_name=user_name,
-                    )
+                    
+                    # Show typing indicator with renewal during long operation
+                    if self.config.typing_indicator:
+                        from ._typing_indicator import with_typing_renewal
+                        
+                        async def _typing_action():
+                            await update.message.chat.send_action("typing")
+                        
+                        response = await with_typing_renewal(
+                            typing_func=_typing_action,
+                            operation_coro=self._session.chat(
+                                self._agent, user_id, message_text,
+                                chat_id=str(update.message.chat_id) if update.message.chat_id else "",
+                                user_name=user_name,
+                            )
+                        )
+                    else:
+                        response = await self._session.chat(
+                            self._agent, user_id, message_text,
+                            chat_id=str(update.message.chat_id) if update.message.chat_id else "",
+                            user_name=user_name,
+                        )
                     send_result = self.fire_message_sending(
                         str(update.message.chat_id), str(response),
                         reply_to=str(update.message.message_id),
@@ -278,8 +293,9 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     if ack_ctx:
                         await self._ack.done(ack_ctx, react_fn=_tg_react, unreact_fn=_tg_unreact)
                 except Exception as e:
-                    logger.error(f"Agent error: {e}")
-                    await update.message.reply_text(f"Error: {str(e)}")
+                    logger.error(f"Agent error: {safe_log_message(e)}")
+                    user_error = extract_root_cause_from_error(str(e))
+                    await update.message.reply_text(f"Error: {safe_error_message(user_error)}")
         
         async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             """Handle voice messages."""
