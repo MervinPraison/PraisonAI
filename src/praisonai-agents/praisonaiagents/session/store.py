@@ -162,7 +162,7 @@ class FileLock:
                     if _HAS_FCNTL:
                         fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                     else:
-                        # Warn once about degraded locking
+                        # Warn once about degraded locking on non-Windows platforms without fcntl
                         global _WARNED_NO_FCNTL
                         if not _WARNED_NO_FCNTL:
                             logger.warning(
