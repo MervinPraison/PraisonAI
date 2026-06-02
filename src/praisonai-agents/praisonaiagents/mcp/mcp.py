@@ -526,12 +526,10 @@ class MCP:
                 # Skip tools that don't have a clear name
                 continue
         
-        # Apply include filter first (takes precedence)
+        # Include wins over exclude - apply allowlist exclusively if provided
         if self.allowed_tools:
             tool_defs = filter_tools_by_allowlist(tool_defs, self.allowed_tools)
-        
-        # Apply exclude filter 
-        if self.disabled_tools:
+        elif self.disabled_tools:
             tool_defs = filter_disabled_tools(tool_defs, self.disabled_tools)
         
         # Convert back to original format
@@ -570,6 +568,8 @@ class MCP:
         # Platform-specific safe variables
         if platform.system() == 'Windows':
             safe_baseline.update({
+                'SYSTEMROOT': os.environ.get('SYSTEMROOT', ''),
+                'COMSPEC': os.environ.get('COMSPEC', ''),
                 'USERNAME': os.environ.get('USERNAME', ''),
                 'USERPROFILE': os.environ.get('USERPROFILE', ''),
                 'APPDATA': os.environ.get('APPDATA', ''),

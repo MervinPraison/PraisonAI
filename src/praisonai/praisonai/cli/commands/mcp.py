@@ -192,6 +192,9 @@ def mcp_test(
             else:
                 output.print_error("httpx package not available. Install with: pip install httpx")
                 raise typer.Exit(1)
+        except typer.Exit:
+            # Let typer.Exit propagate, don't catch it
+            raise
         except Exception as e:
             if output.is_json_mode:
                 output.print_json({"name": name, "status": "error", "message": str(e)})
@@ -209,7 +212,11 @@ def mcp_test(
         
         try:
             cmd = [server.command] + server.args
-            env = dict(**server.env) if server.env else None
+            # Fix environment inheritance - merge with current env instead of replacing
+            env = None
+            if server.env:
+                import os
+                env = {**os.environ, **server.env}
             
             # Start process
             proc = subprocess.Popen(
@@ -240,19 +247,19 @@ def mcp_test(
                 else:
                     output.print_error(f"Server exited immediately: {stderr}")
                     raise typer.Exit(1)
-    
-    except FileNotFoundError:
-        if output.is_json_mode:
-            output.print_json({"name": name, "status": "error", "message": f"Command not found: {server.command}"})
-        else:
-            output.print_error(f"Command not found: {server.command}")
-            raise typer.Exit(1)
-    except Exception as e:
-        if output.is_json_mode:
-            output.print_json({"name": name, "status": "error", "message": str(e)})
-        else:
-            output.print_error(f"Test failed: {e}")
-            raise typer.Exit(1)
+        
+        except FileNotFoundError:
+            if output.is_json_mode:
+                output.print_json({"name": name, "status": "error", "message": f"Command not found: {server.command}"})
+            else:
+                output.print_error(f"Command not found: {server.command}")
+                raise typer.Exit(1)
+        except Exception as e:
+            if output.is_json_mode:
+                output.print_json({"name": name, "status": "error", "message": str(e)})
+            else:
+                output.print_error(f"Test failed: {e}")
+                raise typer.Exit(1)
 
 
 @app.command("sync")

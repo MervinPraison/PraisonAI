@@ -63,3 +63,48 @@ class MCPClientProtocol(Protocol):
         subprocesses, and release any held resources.
         """
         ...
+
+    async def async_list_tools(self) -> List[Dict[str, Any]]:
+        """
+        Asynchronously list available tools from the MCP server.
+        
+        Returns:
+            List of tool definitions from the server
+        """
+        ...
+
+    async def async_get_tools(self) -> List[Dict[str, Any]]:
+        """
+        Asynchronously get available tools from the MCP server.
+        
+        Alias for async_list_tools() to maintain backward compatibility.
+        
+        Returns:
+            List of tool definitions from the server
+        """
+        ...
+
+    async def async_call_tool(self, name: str, args: Dict[str, Any]) -> Any:
+        """
+        Asynchronously call a tool on the MCP server.
+        
+        Args:
+            name: Tool name to call
+            args: Tool arguments
+            
+        Returns:
+            Tool execution result
+            
+        Raises:
+            Exception: If tool call fails
+        """
+        ...
+
+    async def async_shutdown(self) -> None:
+        """
+        Asynchronously shutdown the MCP client and clean up resources.
+        
+        This should gracefully close connections, terminate
+        subprocesses, and release any held resources.
+        """
+        ...

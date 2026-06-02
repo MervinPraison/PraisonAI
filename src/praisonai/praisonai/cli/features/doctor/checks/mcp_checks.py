@@ -38,6 +38,7 @@ def _find_mcp_config() -> dict:
     except ImportError:
         # Fallback to legacy paths if praisonaiagents not available
         locations = [
+            Path.cwd() / ".praisonai" / "mcp" / "config.json",
             Path.cwd() / ".praison" / "mcp.json",
             Path.cwd() / ".praison" / "mcp" / "config.json", 
             Path.home() / ".praison" / "mcp.json",

@@ -28,7 +28,8 @@ def load_mcp_tools(
         names: Specific config names to load (None = all enabled)
         configs: Optional injected configs from wrapper TOML loader
         prefix_tools: Whether to prefix tool names when multiple servers
-            are loaded to avoid collisions (default: True)
+            are loaded to avoid collisions (default: True).
+            NOTE: Currently not implemented - collisions possible with multiple servers.
     
     Returns:
         List of MCP client instances ready for agent use
@@ -81,8 +82,9 @@ def load_mcp_tools(
             if prefix_tools and len(target_configs) > 1:
                 # Sanitize server name for use as prefix
                 server_name = config.name.replace('-', '_').replace(' ', '_')
-                # TODO: Apply prefix to tool names when MCP supports it
-                # For now, this is handled at the Agent level
+                # TODO: Tool name prefixing not yet implemented
+                # Need to modify tool names in MCP instance to avoid collisions
+                # e.g., "read_file" -> "filesystem_read_file"
                 pass
             
             mcp_clients.append(mcp)

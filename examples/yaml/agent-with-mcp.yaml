@@ -17,6 +17,7 @@ agent:
 mcp:
   servers:
     filesystem:
+      # Filesystem access for the agent
       command: npx
       args:
         - "-y"
@@ -24,24 +25,16 @@ mcp:
         - "."
       env: {}
       enabled: true
-      description: "Filesystem access for the agent"
     
     time:
+      # Time and date utilities
       command: npx
       args:
         - "-y" 
         - "@modelcontextprotocol/server-time"
       env: {}
       enabled: true
-      description: "Time and date utilities"
 
-# Optional: Tool filtering per server
-# mcp:
-#   servers:
-#     filesystem:
-#       command: npx
-#       args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
-#       tools:
-#         include: ["read_file", "write_file", "list_directory"]
-#         # exclude: ["delete_file"]
-#       enabled: true
+# NOTE: Per-server tool filtering (tools.include/exclude) is not yet supported
+# by the MCP server config schema. Tool filtering should be applied after
+# calling mcp.get_tools() in your application code.
