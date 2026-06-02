@@ -556,6 +556,7 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
         backend: Optional[Any] = None,  # External managed agent backend (e.g., ManagedAgentIntegration)
         cli_backend: Optional[Union[str, Any]] = None,  # CLI backend for delegating turns (e.g., "claude-code")
         interrupt_controller: Optional['InterruptController'] = None,  # G2: Cooperative cancellation
+        tool_search: Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']] = False,  # Progressive tool disclosure
         sandbox: Optional[Union[bool, 'SandboxConfig']] = None,  # Sandbox for safe code execution
     ):
         """Initialize an Agent instance.
@@ -660,6 +661,14 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
                 When provided, agent delegates entire conversation turns to the CLI tool
                 instead of using the built-in LLM. Enables session continuity and 
                 tool integration through external AI coding assistants.
+            tool_search: Progressive tool disclosure configuration. Accepts:
+                - bool: False=disabled (default), True=auto mode
+                - str: Mode ("auto", "on", "off")  
+                - Dict[str, Any]: Config overrides (e.g. {"threshold_pct": 15})
+                - ToolSearchConfig: Custom configuration
+                When enabled, replaces large tool schemas with bridge tools (tool_search,
+                tool_describe, tool_call) to save context. Core SDK tools never defer.
+                Auto mode activates based on token threshold. Opt-in feature.
 
         Raises:
             ValueError: If all of name, role, goal, backstory, and instructions are None.
@@ -1430,6 +1439,34 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
             web_search = False
             web_fetch = False
         
+        # ─────────────────────────────────────────────────────────────────────
+        # Resolve TOOL_SEARCH param
+        # ─────────────────────────────────────────────────────────────────────
+        # Fast path: None/False -> disabled (zero overhead)
+        if tool_search is None or tool_search is False:
+            self._tool_search_config = None
+        elif tool_search is True:
+            # True -> auto mode with defaults
+            from ..tools.tool_search import ToolSearchConfig as _ToolSearchConfig
+            self._tool_search_config = _ToolSearchConfig(enabled="auto")
+        elif isinstance(tool_search, str):
+            # String mode ("auto", "on", "off")
+            from ..tools.tool_search import ToolSearchConfig as _ToolSearchConfig
+            self._tool_search_config = _ToolSearchConfig.from_raw(tool_search)
+        elif isinstance(tool_search, dict):
+            # Dict -> config overrides
+            from ..tools.tool_search import ToolSearchConfig as _ToolSearchConfig
+            self._tool_search_config = _ToolSearchConfig(**tool_search)
+        else:
+            from ..tools.tool_search import ToolSearchConfig as _ToolSearchConfig
+            if isinstance(tool_search, _ToolSearchConfig):
+                self._tool_search_config = tool_search
+            else:
+                raise TypeError(
+                    "tool_search must be False/None, True, a mode string, "
+                    "a dict of ToolSearchConfig fields, or ToolSearchConfig"
+                )
+        
         # ============================================================
         # END CONSOLIDATED PARAMS EXTRACTION
         # ============================================================
@@ -2026,6 +2063,7 @@ Your Goal: {self.goal}
             'skills': getattr(self, '_skills_config', None),
             'approval': getattr(self, '_approval_config', None),
             'learn': getattr(self, '_learn_config', None),
+            'tool_search': getattr(self, '_tool_search_config', None),
             
             # Tool configuration
             'tool_timeout': getattr(self, '_tool_timeout', None),
