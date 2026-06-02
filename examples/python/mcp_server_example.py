@@ -49,13 +49,18 @@ def calculate(expression: str) -> Dict[str, Any]:
         The result of the calculation
     """
     try:
-        # Safe evaluation of mathematical expressions
-        # In production, use a proper math parser
-        allowed_chars = set("0123456789+-*/.() ")
-        if not all(c in allowed_chars for c in expression):
-            return {"error": "Invalid characters in expression"}
-        
-        result = eval(expression)  # Note: Use safer alternative in production
+        import ast, operator
+        _OPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
+                ast.Div: operator.truediv, ast.FloorDiv: operator.floordiv,
+                ast.Mod: operator.mod, ast.Pow: operator.pow,
+                ast.USub: operator.neg, ast.UAdd: operator.pos}
+        def _ev(n):
+            if isinstance(n, ast.Expression): return _ev(n.body)
+            if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)): return n.value
+            if isinstance(n, ast.UnaryOp) and type(n.op) in _OPS: return _OPS[type(n.op)](_ev(n.operand))
+            if isinstance(n, ast.BinOp) and type(n.op) in _OPS: return _OPS[type(n.op)](_ev(n.left), _ev(n.right))
+            raise ValueError(f"Unsupported: {ast.dump(n)}")
+        result = _ev(ast.parse(expression, mode="eval"))
         return {"expression": expression, "result": result}
     except Exception as e:
         return {"error": str(e)}
