@@ -76,7 +76,12 @@ class AsyncAgentScheduler:
     - YAML/recipe constructors
     
     Example:
-        scheduler = AsyncAgentScheduler(agent, task="Check news")
+        scheduler = AsyncAgentScheduler(
+            agent, 
+            task="Check news",
+            timeout=30,  # 30 second timeout per execution
+            max_cost=1.00  # $1.00 budget limit
+        )
         await scheduler.start(schedule_expr="hourly")
         await asyncio.sleep(3600)  # Let it run
         await scheduler.stop()
@@ -339,14 +344,15 @@ class AsyncAgentScheduler:
             self.is_running = False
     
     async def _execute_with_retry(self, max_retries: int):
-        """Execute agent with retry logic.
-        
-        TODO: Port missing features from sync version:
-        - Timeout support per execution
-        - Budget tracking and limits
-        - Daemon state updates (_update_state_if_daemon)
-        """
+        """Execute agent with retry logic."""
         self._ensure_async_primitives()  # guarantees _stats_lock is bound to current loop
+
+        # Check budget limit before incrementing execution count
+        if self.max_cost and self._total_cost >= self.max_cost:
+            logger.warning(f"Budget limit reached: ${self._total_cost:.4f} >= ${self.max_cost}")
+            logger.warning("Stopping scheduler to prevent additional costs")
+            self._stop_event.set()  # Actually stop the scheduler
+            return
 
         async with self._stats_lock:
             self._execution_count += 1
@@ -627,7 +633,11 @@ class AsyncAgentScheduler:
 def create_async_agent_scheduler(
     agent,
     task: str,
-    config: Optional[Dict[str, Any]] = None
+    config: Optional[Dict[str, Any]] = None,
+    on_success: Optional[Callable] = None,
+    on_failure: Optional[Callable] = None,
+    timeout: Optional[int] = None,
+    max_cost: Optional[float] = 1.00
 ) -> AsyncAgentScheduler:
     """
     Factory function to create async agent scheduler.
@@ -636,8 +646,20 @@ def create_async_agent_scheduler(
         agent: PraisonAI Agent instance
         task: Task description
         config: Optional configuration
+        on_success: Callback function on successful execution
+        on_failure: Callback function on failed execution
+        timeout: Maximum execution time per run in seconds (None = no limit)
+        max_cost: Maximum total cost in USD (default: $1.00 for safety)
         
     Returns:
         Configured AsyncAgentScheduler instance
     """
-    return AsyncAgentScheduler(agent, task, config)
+    return AsyncAgentScheduler(
+        agent,
+        task,
+        config=config,
+        on_success=on_success,
+        on_failure=on_failure,
+        timeout=timeout,
+        max_cost=max_cost
+    )

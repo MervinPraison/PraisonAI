@@ -283,11 +283,7 @@ class JobExecutor:
         await self._notify_progress(job)
         
         # Execute the recipe
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,
-            lambda: execute_resolved_recipe(resolved)
-        )
+        result = await asyncio.to_thread(execute_resolved_recipe, resolved)
         
         # Update progress
         job.update_progress(percentage=90.0, step="Finalizing")
@@ -323,11 +319,7 @@ class JobExecutor:
         await self._notify_progress(job)
         
         # Run the agent
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None,
-            lambda: agent.start(job.prompt)
-        )
+        result = await asyncio.to_thread(agent.start, job.prompt)
         
         # Update progress
         job.update_progress(percentage=90.0, step="Finalizing")
@@ -360,8 +352,7 @@ class JobExecutor:
         await self._notify_progress(job)
         
         # Run in executor (blocking call)
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(None, praisonai.run)
+        result = await asyncio.to_thread(praisonai.run)
         
         # Update progress
         job.update_progress(percentage=90.0, step="Finalizing")
