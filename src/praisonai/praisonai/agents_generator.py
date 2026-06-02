@@ -674,24 +674,139 @@ class AgentsGenerator:
             print("Empty or invalid configuration")
             return
 
-        # Handle workflow mode async
-        if config.get('process') == 'workflow':
+        # Apply CLI configuration overrides to YAML config
+        if self.cli_config:
+            # Use the same merge method as sync path
+            self._merge_cli_config(config, self.cli_config)
+
+        # Check if this is a workflow-mode YAML (process: workflow or has steps section)
+        process_type = config.get('process', 'sequential')
+        has_steps = 'steps' in config
+        has_workflow_config = 'workflow' in config
+        
+        if process_type == 'workflow' or (has_steps and has_workflow_config):
+            # Route to YAMLWorkflowParser for advanced workflow patterns
             return await self._arun_yaml_workflow(config)
 
-        # Merge CLI config if provided
-        if hasattr(self, 'cli_config') and self.cli_config:
-            config = {**config, **self.cli_config}
+        # Canonical format conversion: 'agents' -> 'roles', 'instructions' -> 'backstory'
+        # This ensures backward compatibility while supporting the new canonical format
+        if 'agents' in config and 'roles' not in config:
+            config['roles'] = {}
+            for agent_name, agent_config in config['agents'].items():
+                role_config = dict(agent_config) if agent_config else {}
+                # Convert 'instructions' to 'backstory' if present
+                # Note: preserve 'instructions' key for framework adapters
+                if 'instructions' in role_config and 'backstory' not in role_config:
+                    role_config['backstory'] = role_config['instructions']
+                # Ensure required fields have defaults
+                if 'role' not in role_config:
+                    role_config['role'] = agent_name.replace('_', ' ').title()
+                if 'goal' not in role_config:
+                    role_config['goal'] = role_config.get('backstory', 'Complete the assigned task')
+                if 'backstory' not in role_config:
+                    role_config['backstory'] = f'You are a {role_config["role"]}'
+                config['roles'][agent_name] = role_config
 
-        # Pre-create tools dict
-        tools_dict = None
-        if self.tools:
-            tools_dict = ToolRegistry.build_all_tools(self.tools, agent_tools=True)
+        # Get workflow input: 'input' is canonical, 'topic' is alias for backward compatibility
+        topic = config.get('input', config.get('topic', ''))
+        
+        # Validate agents configuration for typos in field names
+        self._validate_agents_config(config)
+        
+        tools_dict = {}
+        
+        # Demand-driven tool resolution - only resolve tools actually used in YAML
+        if CREWAI_AVAILABLE or AUTOGEN_AVAILABLE or PRAISONAI_AVAILABLE or AG2_AVAILABLE:
+            try:
+                # Collect all tool names mentioned in the YAML config
+                needed_tools: set[str] = set()
+                for role_cfg in config.get('roles', {}).values():
+                    for t in role_cfg.get('tools') or []:
+                        if isinstance(t, str) and t.strip():
+                            needed_tools.add(t.strip())
+                    for task_cfg in (role_cfg.get('tasks') or {}).values():
+                        if not isinstance(task_cfg, dict):
+                            continue
+                        for t in task_cfg.get('tools') or []:
+                            if isinstance(t, str) and t.strip():
+                                needed_tools.add(t.strip())
 
-        # Get topic from tasks and validate
-        topic = self._extract_topic(config)
+                # Resolve only the tools actually referenced in YAML
+                for tool_name in needed_tools:
+                    try:
+                        resolved_tool = self.tool_resolver.resolve(tool_name)
+                        if resolved_tool is None:
+                            self.logger.warning(f"Tool '{tool_name}' not found")
+                            continue
+                        tools_dict[tool_name] = (
+                            resolved_tool() if inspect.isclass(resolved_tool) else resolved_tool
+                        )
+                    except Exception as e:
+                        self.logger.warning(f"Failed to initialize tool '{tool_name}': {e}")
+                        continue
+                            
+            except Exception as e:
+                self.logger.warning(f"Error collecting YAML tool references: {e}")
+            
+            # Add tools from class names
+            for tool_class in self.tools:
+                if isinstance(tool_class, type) and BaseTool and issubclass(tool_class, BaseTool):
+                    tool_name = tool_class.__name__
+                    tools_dict[tool_name] = tool_class()
+                    self.logger.debug(f"Added tool: {tool_name}")
 
-        # Choose and validate framework
-        framework = self.framework
+        root_directory = os.getcwd()
+        tools_py_path = os.path.join(root_directory, 'tools.py')
+        tools_dir_path = Path(root_directory) / 'tools'
+        
+        # Use consolidated ToolResolver for tools.py loading
+        tools_dict.update(self.tool_resolver.get_local_tool_classes())
+        if os.path.isfile(tools_py_path):
+            self.logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
+        elif tools_dir_path.is_dir():
+            from ._safe_loader import load_user_module
+            for py_file in tools_dir_path.glob("*.py"):
+                if py_file.name.startswith("__"):
+                    continue
+                module = load_user_module(py_file, name=f"tools_{py_file.stem}")
+                if module is not None:
+                    tools_dict.update(self._extract_tool_classes(module))
+            if tools_dict:
+                self.logger.debug("tools folder exists in the root directory")
+
+        framework = self.framework or config.get('framework', 'crewai')
+
+        # Determine AutoGen version if needed (keeping compatibility logic)
+        if framework == "autogen":
+            autogen_version = os.environ.get("AUTOGEN_VERSION", "auto").lower()
+            autogen_v4_adapter = self._get_framework_adapter("autogen_v4")
+            autogen_v2_adapter = self._get_framework_adapter("autogen")
+            
+            use_v4 = False
+            if autogen_version == "v0.4" and autogen_v4_adapter.is_available():
+                use_v4 = True
+            elif autogen_version == "v0.2" and autogen_v2_adapter.is_available():
+                use_v4 = False
+            elif autogen_version == "auto":
+                use_v4 = autogen_v4_adapter.is_available()
+            else:
+                use_v4 = autogen_v4_adapter.is_available() and not autogen_v2_adapter.is_available()
+            
+            framework = "autogen_v4" if use_v4 else "autogen"
+            
+        # Initialize AgentOps if available
+        try:
+            import agentops
+            agentops_api_key = os.getenv("AGENTOPS_API_KEY")
+            if agentops_api_key:
+                agentops.init(agentops_api_key, default_tags=[framework])
+        except ImportError:
+            pass
+            
+        # Update framework adapter if framework changed (e.g., AutoGen version selection)
+        if framework != self.framework:
+            self.framework = framework
+            self.framework_adapter = self._get_framework_adapter(framework)
         
         # Validate framework availability for non-CLI callers
         from .framework_adapters.validators import assert_framework_available
@@ -721,23 +836,46 @@ class AgentsGenerator:
         Returns:
             str: Workflow execution result
         """
-        from .cli.features.workflow import YAMLWorkflowParser
+        if not PRAISONAI_AVAILABLE:
+            raise ImportError("PraisonAI is not installed. Please install it with 'pip install praisonaiagents'")
         
-        # Use default topic if not specified
-        topic = config.get('topic', 'Complete the workflow')
+        try:
+            from praisonaiagents.workflows import YAMLWorkflowParser
+        except ImportError:
+            raise ImportError("YAMLWorkflowParser not available. Please update praisonaiagents.")
         
-        workflow_parser = YAMLWorkflowParser(config)
-        workflow = workflow_parser.parse()
+        # Ensure name is present
+        if 'name' not in config:
+            config['name'] = config.get('topic', 'Workflow')
         
-        self.logger.info(f"Starting async YAML workflow with topic: {topic}")
+        # Pass model from config_list to workflow as default_llm
+        if self.config_list and self.config_list[0].get('model'):
+            model_from_cli = self.config_list[0]['model']
+            if 'workflow' not in config:
+                config['workflow'] = {}
+            if 'default_llm' not in config['workflow']:
+                config['workflow']['default_llm'] = model_from_cli
         
-        # Use workflow.astart() for async execution if available
+        import yaml as yaml_module
+        yaml_content = yaml_module.dump(config, default_flow_style=False)
+        
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        input_data = config.get('input', config.get('topic', ''))
+        
+        self.logger.info(f"Starting async YAML workflow with topic: {input_data}")
+        
         if hasattr(workflow, 'astart'):
-            return await workflow.astart(topic)
+            result = await workflow.astart(input_data)
         else:
-            # Fall back to thread-offloaded sync execution
             import asyncio
-            return await asyncio.to_thread(workflow.start, topic)
+            result = await asyncio.to_thread(workflow.start, input_data)
+            
+        if result.get("status") == "completed":
+            return result.get("output", "Workflow completed successfully")
+        else:
+            return f"Workflow failed: {result.get('error', 'Unknown error')}"
 
     def _run_yaml_workflow(self, config):
         """
@@ -794,3 +932,27 @@ class AgentsGenerator:
             return result.get("output", "Workflow completed successfully")
         else:
             return f"Workflow failed: {result.get('error', 'Unknown error')}"
+
+
+# Standalone function for backward compatibility with tests
+def safe_format(template, **kwargs):
+    """
+    Safe string formatting that preserves JSON/dict literals while substituting variables.
+    
+    This function only substitutes placeholders that look like identifiers (e.g., {topic})
+    while preserving JSON structures like {"level": 2}.
+    
+    Args:
+        template (str): Template string with placeholders
+        **kwargs: Values to substitute
+        
+    Returns:
+        str: Formatted string with safe substitutions
+    """
+    # Use the same regex-based substitution logic as BaseFrameworkAdapter._format_template
+    def replace_placeholder(match):
+        placeholder = match.group(1)
+        return str(kwargs.get(placeholder, match.group(0)))
+    
+    # Only replace placeholders that look like identifiers
+    return re.sub(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', replace_placeholder, template)
