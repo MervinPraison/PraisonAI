@@ -5,6 +5,7 @@ Provides lazy-loaded integration with AutoGen v0.2, AutoGen v0.4, and AG2 framew
 """
 
 import logging
+import os
 from typing import Dict, List, Any, Optional, Callable
 from .base import BaseFrameworkAdapter
 
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class AutoGenAdapter(BaseFrameworkAdapter):
-    """Adapter for AutoGen v0.2 framework."""
+    """Adapter for AutoGen v0.2 framework with version resolution."""
     
     name = "autogen"
     install_hint = 'pip install "praisonai[autogen]"'  # v0.2 only
@@ -22,6 +23,37 @@ class AutoGenAdapter(BaseFrameworkAdapter):
         """Check if AutoGen v0.2 is available for import."""
         from .._framework_availability import is_available
         return is_available("autogen")
+    
+    def resolve(self) -> "BaseFrameworkAdapter":
+        """Pick the concrete AutoGen adapter variant based on environment and availability."""
+        autogen_version = os.environ.get("AUTOGEN_VERSION", "auto").lower()
+        
+        # Import the specific adapters
+        v4_adapter = AutoGenV4Adapter()
+        v2_adapter = self  # Current instance is v0.2
+        
+        if autogen_version == "v0.4" and v4_adapter.is_available():
+            logger.info("AutoGen version resolution: Using v0.4 (explicitly requested)")
+            return v4_adapter
+        elif autogen_version == "v0.2" and v2_adapter.is_available():
+            logger.info("AutoGen version resolution: Using v0.2 (explicitly requested)")
+            return v2_adapter
+        elif autogen_version == "auto":
+            # Auto-detect: prefer v0.4 if available, fallback to v0.2
+            if v4_adapter.is_available():
+                logger.info("AutoGen version resolution: Using v0.4 (auto-detected)")
+                return v4_adapter
+            else:
+                logger.info("AutoGen version resolution: Using v0.2 (auto-detected fallback)")
+                return v2_adapter
+        else:
+            # Invalid version or neither available, try both
+            if v4_adapter.is_available() and not v2_adapter.is_available():
+                logger.info("AutoGen version resolution: Using v0.4 (only available version)")
+                return v4_adapter
+            else:
+                logger.info("AutoGen version resolution: Using v0.2 (default fallback)")
+                return v2_adapter
     
     def run(
         self,

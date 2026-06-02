@@ -235,3 +235,58 @@ class PluginRegistry(Generic[T]):
         """
         with self._lock:
             return sorted(list(self._loaders.keys()) + list(self._aliases.keys()))
+    
+    def get_by_attr(self, module_name: str, attr_name: str) -> Type[T]:
+        """Get a plugin by attribute name for __getattr__ dispatch.
+        
+        Args:
+            module_name: Module name requesting the attribute (for error messages)
+            attr_name: Attribute name to resolve
+            
+        Returns:
+            Plugin class
+            
+        Raises:
+            AttributeError: If plugin is not found
+        """
+        try:
+            return self.resolve(attr_name)
+        except ValueError:
+            raise AttributeError(f"module {module_name!r} has no attribute {attr_name!r}")
+
+
+def create_lazy_getattr(registry: PluginRegistry[T]) -> Callable[[str], T]:
+    """Create a __getattr__ function backed by a PluginRegistry.
+    
+    This replaces manual if/elif ladders in __init__.py files with a data-driven
+    approach using the plugin registry.
+    
+    Args:
+        registry: The plugin registry to use for resolution
+        
+    Returns:
+        Function that can be used as __getattr__ in a module
+        
+    Example:
+        # In __init__.py:
+        from ._registry import create_lazy_getattr
+        
+        # Assuming you have a registry instance
+        __getattr__ = create_lazy_getattr(my_registry)
+    """
+    def __getattr__(name: str) -> T:
+        try:
+            plugin_class = registry.resolve(name)
+            return plugin_class
+        except ValueError:
+            # Get the calling module name for error context
+            import inspect
+            frame = inspect.currentframe()
+            if frame and frame.f_back:
+                module_name = frame.f_back.f_globals.get('__name__', 'unknown')
+            else:
+                module_name = 'unknown'
+            
+            raise AttributeError(f"module {module_name!r} has no attribute {name!r}")
+    
+    return __getattr__

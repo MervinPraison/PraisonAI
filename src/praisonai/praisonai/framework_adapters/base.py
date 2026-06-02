@@ -20,6 +20,22 @@ class FrameworkAdapter(Protocol):
         """Check if the framework is available for import."""
         ...
     
+    def resolve(self) -> "FrameworkAdapter":
+        """Pick the concrete adapter variant (e.g. autogen v0.2 vs v0.4).
+        
+        Returns:
+            The resolved adapter instance (self or a different adapter)
+        """
+        ...
+    
+    def setup(self, *, framework_tag: str) -> None:
+        """Framework-specific pre-run hooks (observability, sdk init, etc.).
+        
+        Args:
+            framework_tag: Framework name for observability tagging
+        """
+        ...
+    
     def run(
         self,
         config: Dict[str, Any],
@@ -115,6 +131,14 @@ class BaseFrameworkAdapter:
             logger.warning("Template formatting error: %s; returning original template", e)
             return template
     
+    def resolve(self) -> "FrameworkAdapter":
+        """Default implementation returns self."""
+        return self
+    
+    def setup(self, *, framework_tag: str) -> None:
+        """Default implementation does nothing."""
+        pass
+    
     async def arun(
         self,
         config: Dict[str, Any],
@@ -138,7 +162,6 @@ class BaseFrameworkAdapter:
             task_callback=task_callback,
             cli_config=cli_config
         )
-
     def cleanup(self) -> None:
         """Clean up resources - default implementation does nothing."""
         pass
