@@ -781,20 +781,30 @@ class LocalManagedAgent:
         q: queue.Queue[Optional[str]] = queue.Queue()
 
         def _producer():
+            full = ""
             try:
                 agent = self._ensure_agent()
                 self._ensure_session()
+                self._persist_message("user", prompt)
                 gen = agent.chat(prompt, stream=True)
                 if hasattr(gen, '__iter__'):
                     for chunk in gen:
                         if chunk:
-                            q.put(str(chunk))
+                            text = str(chunk)
+                            q.put(text)
+                            full += text
                 else:
                     if gen:
-                        q.put(str(gen))
+                        text = str(gen)
+                        q.put(text)
+                        full = text
             except Exception as e:
                 logger.error("[local_managed] stream error: %s", e)
             finally:
+                if full:
+                    self._persist_message("assistant", full)
+                self._sync_usage()
+                self._persist_state()
                 q.put(None)
 
         thread = threading.Thread(target=_producer, daemon=True)

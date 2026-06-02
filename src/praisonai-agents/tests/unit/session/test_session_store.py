@@ -327,6 +327,21 @@ class TestDefaultSessionStore:
             assert session.agent_name == "TestBot"
             assert session.user_id == "u-1"
 
+    def test_set_chat_history_replaces_under_lock(self, temp_store):
+        """History replace is a single locked write (not clear + N adds)."""
+        temp_store.add_user_message("session-1", "old")
+        assert temp_store.set_chat_history(
+            "session-1",
+            [
+                {"role": "user", "content": "new"},
+                {"role": "assistant", "content": "reply"},
+            ],
+        )
+        assert temp_store.get_chat_history("session-1") == [
+            {"role": "user", "content": "new"},
+            {"role": "assistant", "content": "reply"},
+        ]
+
     def test_get_chat_history_sees_writes_from_other_store(self, temp_store):
         """Reads must reload from disk, not a stale in-memory cache."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -336,9 +351,9 @@ class TestDefaultSessionStore:
             writer.add_user_message("session-1", "first")
             reader._load_session("session-1")
             writer.add_user_message("session-1", "second")
-
             history = reader.get_chat_history("session-1")
             assert len(history) == 2
+            assert history[1]["content"] == "second"
             assert history[1]["content"] == "second"
 
     def test_clear_session_preserves_new_messages(self, temp_store):
