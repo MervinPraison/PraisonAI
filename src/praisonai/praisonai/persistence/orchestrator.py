@@ -9,6 +9,7 @@ import logging
 import time
 import threading
 import uuid
+import inspect
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
@@ -240,6 +241,164 @@ class PersistenceOrchestrator:
             if metadata:
                 session.metadata = {**(session.metadata or {}), **metadata}
             self.conversation.update_session(session)
+            # Update cache with the modified session
+            self._cache_put(session)
+            logger.debug(f"Updated session metadata: {session_id}")
+    
+    # =========================================================================
+    # Async Agent Lifecycle Hooks
+    # =========================================================================
+    
+    async def aon_agent_start(
+        self,
+        agent: Any,
+        session_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        resume: bool = True,
+    ) -> List[ConversationMessage]:
+        """
+        Async version of on_agent_start.
+        
+        Args:
+            agent: The agent instance
+            session_id: Session ID (generated if not provided)
+            user_id: User ID for session
+            resume: Whether to load existing session history
+        
+        Returns:
+            List of previous messages if resuming, empty list otherwise
+        """
+        if not session_id:
+            session_id = str(uuid.uuid4())
+        
+        if not self.conversation:
+            logger.debug("No conversation store configured, skipping session load")
+            return []
+        
+        # Try to load existing session
+        session = None
+        if resume:
+            getter = getattr(self.conversation, 'async_get_session', self.conversation.get_session)
+            if inspect.iscoroutinefunction(getter):
+                session = await getter(session_id)
+            else:
+                session = getter(session_id)
+        
+        if session:
+            logger.info(f"Resuming session: {session_id}")
+            self._current_session = session
+            self._cache_put(session)
+            
+            # Load previous messages
+            msg_getter = getattr(self.conversation, 'async_get_messages', self.conversation.get_messages)
+            if inspect.iscoroutinefunction(msg_getter):
+                messages = await msg_getter(session_id)
+            else:
+                messages = msg_getter(session_id)
+            return messages
+        else:
+            # Create new session
+            agent_id = getattr(agent, "name", None) or getattr(agent, "agent_id", None)
+            session = ConversationSession(
+                session_id=session_id,
+                user_id=user_id,
+                agent_id=agent_id,
+                name=f"Session {session_id[:8]}",
+                metadata={"agent_type": type(agent).__name__},
+            )
+            
+            creator = getattr(self.conversation, 'async_create_session', self.conversation.create_session)
+            if inspect.iscoroutinefunction(creator):
+                await creator(session)
+            else:
+                creator(session)
+                
+            logger.info(f"Created new session: {session_id}")
+            self._current_session = session
+            self._cache_put(session)
+            return []
+    
+    async def aon_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        tool_calls: Optional[List[Dict]] = None,
+        tool_call_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[ConversationMessage]:
+        """
+        Async version of on_message.
+        
+        Args:
+            session_id: Session ID
+            role: Message role (user, assistant, system, tool)
+            content: Message content
+            tool_calls: Tool calls (for assistant messages)
+            tool_call_id: Tool call ID (for tool response messages)
+            metadata: Additional metadata
+        
+        Returns:
+            The persisted message, or None if no store configured
+        """
+        if not self.conversation:
+            return None
+        
+        message = ConversationMessage(
+            id=str(uuid.uuid4()),
+            session_id=session_id,
+            role=role,
+            content=content,
+            tool_calls=tool_calls,
+            tool_call_id=tool_call_id,
+            metadata=metadata,
+        )
+        
+        adder = getattr(self.conversation, 'async_add_message', self.conversation.add_message)
+        if inspect.iscoroutinefunction(adder):
+            await adder(session_id, message)
+        else:
+            adder(session_id, message)
+            
+        logger.debug(f"Persisted {role} message to session {session_id}")
+        return message
+    
+    async def aon_agent_end(
+        self,
+        agent: Any,
+        session_id: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Async version of on_agent_end.
+        
+        Args:
+            agent: The agent instance
+            session_id: Session ID
+            metadata: Additional metadata to store
+        """
+        if not self.conversation:
+            return
+        
+        session = self._cache_get(session_id)
+        if not session:
+            getter = getattr(self.conversation, 'async_get_session', self.conversation.get_session)
+            if inspect.iscoroutinefunction(getter):
+                session = await getter(session_id)
+            else:
+                session = getter(session_id)
+                
+        if session:
+            session.updated_at = time.time()
+            if metadata:
+                session.metadata = {**(session.metadata or {}), **metadata}
+                
+            updater = getattr(self.conversation, 'async_update_session', self.conversation.update_session)
+            if inspect.iscoroutinefunction(updater):
+                await updater(session)
+            else:
+                updater(session)
+                
             # Update cache with the modified session
             self._cache_put(session)
             logger.debug(f"Updated session metadata: {session_id}")
