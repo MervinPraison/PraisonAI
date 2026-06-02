@@ -109,7 +109,7 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
         """
         try:
             adapter = self.create(name)
-        except ValueError:
+        except (ValueError, TypeError):
             return False
         
         try:

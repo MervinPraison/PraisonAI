@@ -171,18 +171,18 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
             return sanitized[:50]
 
         async def run_autogen_v4_async():
-            # Create model client for v0.4
-            model_config = llm_config[0] if llm_config else {}
-            model_client = OpenAIChatCompletionClient(
-                model=model_config.get('model', 'gpt-4o-mini'),
-                api_key=model_config.get('api_key', os.environ.get("OPENAI_API_KEY")),
-                base_url=model_config.get('base_url', "https://api.openai.com/v1")
-            )
-            
+            model_client = None
             agents = []
             combined_tasks = []
             
             try:
+                # Create model client for v0.4
+                model_config = llm_config[0] if llm_config else {}
+                model_client = OpenAIChatCompletionClient(
+                    model=model_config.get('model', 'gpt-4o-mini'),
+                    api_key=model_config.get('api_key', os.environ.get("OPENAI_API_KEY")),
+                    base_url=model_config.get('base_url', "https://api.openai.com/v1")
+                )
                 # Create agents from config
                 for role, details in config.get('roles', {}).items():
                     # For AutoGen v0.4, ensure agent name is a valid Python identifier
@@ -254,7 +254,8 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
             
             finally:
                 # Close the model client
-                await model_client.close()
+                if model_client is not None:
+                    await model_client.close()
         
         # Run the async function using safe bridge
         logger.info("Starting AutoGen v0.4 execution...")
@@ -383,7 +384,7 @@ class AG2Adapter(BaseFrameworkAdapter):
 
                     def make_tool_fn(f, name):
                         def tool_fn(**kwargs):
-                            return f(**kwargs) if callable(f) else str(f)
+                            return f(**kwargs)
                         tool_fn.__name__ = name
                         return tool_fn
 
