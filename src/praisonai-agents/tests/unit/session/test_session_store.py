@@ -9,8 +9,11 @@ import os
 import tempfile
 import threading
 import time
+import builtins
+import importlib
 import pytest
 from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import patch
 
 from praisonaiagents.session.store import (
     DefaultSessionStore,
@@ -159,6 +162,26 @@ class TestFileLock:
                         other_start = results.index(f"start-{j}")
                         if start_idx < other_start < end_idx:
                             pytest.fail(f"Lock interleaving detected: {results}")
+
+    def test_import_without_fcntl(self):
+        """Test module import succeeds when fcntl is unavailable."""
+        import praisonaiagents.session.store as store_module
+        import importlib.util
+        original_import = builtins.__import__
+
+        def import_without_fcntl(name, *args, **kwargs):
+            if name == "fcntl":
+                raise ImportError("fcntl unavailable")
+            return original_import(name, *args, **kwargs)
+
+        try:
+            with patch("builtins.__import__", side_effect=import_without_fcntl):
+                reloaded_module = importlib.reload(store_module)
+                assert reloaded_module._HAS_FCNTL is False
+        finally:
+            restored_module = importlib.reload(store_module)
+        
+        assert restored_module._HAS_FCNTL is (importlib.util.find_spec("fcntl") is not None)
 
 
 class TestDefaultSessionStore:
