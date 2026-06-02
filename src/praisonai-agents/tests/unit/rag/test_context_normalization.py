@@ -8,6 +8,7 @@ from praisonaiagents.rag.context import (
     deduplicate_chunks,
     build_context,
 )
+from praisonaiagents.knowledge.models import SearchResultItem
 
 
 class TestDeduplicateChunksNormalization:
@@ -122,3 +123,25 @@ class TestEdgeCases:
         context, used = build_context(results)
         assert len(used) == 1
         assert "valid content" in context
+
+
+class TestSearchResultItemCompatibility:
+    """Tests for SearchResultItem object compatibility."""
+
+    def test_deduplicate_uses_source_attribute_fallback(self):
+        """Different source attributes should produce unique chunks."""
+        results = [
+            SearchResultItem(text="same content", source="a.pdf"),
+            SearchResultItem(text="same content", source="b.pdf"),
+        ]
+        deduped = deduplicate_chunks(results)
+        assert len(deduped) == 2
+
+    def test_build_context_uses_filename_attribute_fallback(self):
+        """Source label should use object filename/source attributes."""
+        results = [
+            SearchResultItem(text="chunk", filename="doc.md"),
+        ]
+        context, used = build_context(results, include_source=True)
+        assert len(used) == 1
+        assert "doc.md" in context

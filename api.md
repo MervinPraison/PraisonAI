@@ -40,6 +40,7 @@ Methods:
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">chat_with_context</a>(message: str, context: 'ContextPack', **kwargs) -> str</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">checkpoints</a>() -> Optional[bool]</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">checkpoints</a>(value: Optional[bool]) -> None</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">clone_for_channel</a>() -> 'Agent'</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">close</a>() -> None</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">console</a>() -> Optional[Any]</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">context_manager</a>() -> Optional[Any]</code>
@@ -767,7 +768,7 @@ Methods:
 
 Types:
 ```python
-from praisonai import Agent, AgentApp, AgentOS, AnthropicManagedAgent, CloudProvider, DB, Deploy, DeployConfig, DeployType, HostedAgent, HostedAgentConfig, LocalAgent, LocalAgentConfig, LocalManagedAgent, LocalManagedConfig, ManagedAgent, ManagedConfig, PraisonAI, __version__, arun, run
+from praisonai import Agent, AgentApp, AgentOS, AnthropicManagedAgent, CloudProvider, DB, Deploy, DeployConfig, DeployType, HostedAgent, HostedAgentConfig, LocalAgent, LocalAgentConfig, LocalManagedAgent, LocalManagedConfig, ManagedAgent, ManagedConfig, PraisonAI, __version__, arun, run, run_integrated_gateway
 ```
 
 # CLI
@@ -904,11 +905,24 @@ Methods:
 * <code title="cli">praisonai gateway send <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway start <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway status <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
+* <code title="cli">praisonai gateway stop <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway uninstall <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai github triage <a href="./src/praisonai/praisonai/cli/commands/github.py">--help</a></code>
 * <code title="cli">praisonai hooks add <a href="./src/praisonai/praisonai/cli/commands/hooks.py">--help</a></code>
 * <code title="cli">praisonai hooks list <a href="./src/praisonai/praisonai/cli/commands/hooks.py">--help</a></code>
 * <code title="cli">praisonai hooks remove <a href="./src/praisonai/praisonai/cli/commands/hooks.py">--help</a></code>
+* <code title="cli">praisonai kanban block <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban boards <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban comment <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban complete <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban create <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban dispatch <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban link <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban list <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban move <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban reclaim <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban show <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban unblock <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
 * <code title="cli">praisonai knowledge add <a href="./src/praisonai/praisonai/cli/commands/knowledge.py">--help</a></code>
 * <code title="cli">praisonai knowledge index <a href="./src/praisonai/praisonai/cli/commands/knowledge.py">--help</a></code>
 * <code title="cli">praisonai knowledge list <a href="./src/praisonai/praisonai/cli/commands/knowledge.py">--help</a></code>
@@ -1066,6 +1080,7 @@ Methods:
 * <code title="cli">praisonai serve status <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai serve stop <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai serve ui <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
+* <code title="cli">praisonai serve ui-gateway <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai serve unified <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai session delete <a href="./src/praisonai/praisonai/cli/commands/session.py">--help</a></code>
 * <code title="cli">praisonai session export <a href="./src/praisonai/praisonai/cli/commands/session.py">--help</a></code>

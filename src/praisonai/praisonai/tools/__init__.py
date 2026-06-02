@@ -13,6 +13,8 @@ __all__ = [
     "stt_tool",
     "create_tts_tool",
     "create_stt_tool",
+    "get_kanban_tools",
+    "KANBAN_TOOLS",
 ]
 
 _lazy_cache = {}
@@ -57,5 +59,15 @@ def __getattr__(name: str):
         from .audio import create_stt_tool
         _lazy_cache[name] = create_stt_tool
         return create_stt_tool
+    
+    if name == "get_kanban_tools":
+        from .kanban_tools import get_kanban_tools
+        _lazy_cache[name] = get_kanban_tools
+        return get_kanban_tools
+    
+    if name == "KANBAN_TOOLS":
+        from .kanban_tools import KANBAN_TOOLS
+        _lazy_cache[name] = KANBAN_TOOLS
+        return KANBAN_TOOLS
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

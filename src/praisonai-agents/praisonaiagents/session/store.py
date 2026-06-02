@@ -303,6 +303,15 @@ class DefaultSessionStore:
                 pass
         return SessionData(session_id=session_id)
 
+    def _read_session_fresh(self, session_id: str) -> SessionData:
+        """Reload session from disk and refresh the in-process cache."""
+        filepath = self._get_session_path(session_id)
+        with FileLock(filepath, self.lock_timeout):
+            session = self._load_session_from_disk(session_id, filepath)
+        with self._lock:
+            self._cache[session_id] = session
+        return session
+
     def _modify_session_locked(
         self,
         session_id: str,
@@ -497,13 +506,13 @@ class DefaultSessionStore:
         Returns:
             List of {"role": "user/assistant", "content": "..."} dicts.
         """
-        session = self._load_session(session_id)
+        session = self._read_session_fresh(session_id)
         limit = max_messages or self.max_messages
         return session.get_chat_history(limit)
     
     def get_session(self, session_id: str) -> SessionData:
         """Get full session data."""
-        return self._load_session(session_id)
+        return self._read_session_fresh(session_id)
     
     def set_agent_info(
         self,
@@ -646,7 +655,7 @@ class DefaultSessionStore:
             List of SessionData objects for the specified agent
         """
         session_ids = self.list_sessions_by_agent(agent_name, limit)
-        return [self._load_session(sid) for sid in session_ids]
+        return [self._read_session_fresh(sid) for sid in session_ids]
     
     def get_agent_chat_history(
         self,

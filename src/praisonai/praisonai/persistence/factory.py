@@ -48,6 +48,10 @@ def create_conversation_store(
         )
     """
     
+    # Validate mode parameter
+    if mode not in ("sync", "async", "auto"):
+        raise ValueError(f"Invalid conversation mode: {mode}. Expected sync|async|auto")
+    
     # Handle sync/async mode routing
     if mode == "sync" and backend in ("sqlite", "postgres", "mysql"):
         backend_name = f"sync_{backend}"

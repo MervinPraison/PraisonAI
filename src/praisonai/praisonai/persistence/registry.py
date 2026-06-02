@@ -123,7 +123,10 @@ def _register_builtin_conversation_stores(registry: StoreRegistry):
     
     def _sync_sqlite(url=None, path=None, **kwargs):
         from .conversation.sync_sqlite import SyncSQLiteConversationStore
-        return SyncSQLiteConversationStore(path=url or path, **kwargs)
+        resolved_path = url or path
+        if resolved_path is None:
+            return SyncSQLiteConversationStore(**kwargs)
+        return SyncSQLiteConversationStore(path=resolved_path, **kwargs)
     
     def _async_sqlite(url=None, path=None, **kwargs):
         from .conversation.async_sqlite import AsyncSQLiteConversationStore

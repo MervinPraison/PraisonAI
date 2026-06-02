@@ -54,6 +54,7 @@ class SyncSQLiteConversationStore(ConversationStore):
                 return
             
             conn = sqlite3.connect(self.path)
+            conn.execute("PRAGMA foreign_keys = ON")
             conn.row_factory = sqlite3.Row
             
             try:
@@ -105,6 +106,7 @@ class SyncSQLiteConversationStore(ConversationStore):
             self.init()
         
         conn = sqlite3.connect(self.path)
+        conn.execute("PRAGMA foreign_keys = ON")
         conn.row_factory = sqlite3.Row
         return conn
     
@@ -220,11 +222,18 @@ class SyncSQLiteConversationStore(ConversationStore):
                 params.append(agent_id)
             
             where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+            
+            # Handle pagination - SQLite requires LIMIT when OFFSET is used
             if limit is not None:
                 params.append(limit)
                 limit_clause = " LIMIT ?"
+            elif offset is not None:
+                # When offset is provided without limit, use -1 for unbounded
+                params.append(-1)
+                limit_clause = " LIMIT ?"
             else:
                 limit_clause = ""
+                
             if offset is not None:
                 params.append(offset)
                 offset_clause = " OFFSET ?"
@@ -288,11 +297,18 @@ class SyncSQLiteConversationStore(ConversationStore):
         try:
             table = f"{self.table_prefix}messages"
             params: list = [session_id]
+            
+            # Handle pagination - SQLite requires LIMIT when OFFSET is used
             if limit is not None:
                 params.append(limit)
                 limit_clause = " LIMIT ?"
+            elif offset is not None:
+                # When offset is provided without limit, use -1 for unbounded
+                params.append(-1)
+                limit_clause = " LIMIT ?"
             else:
                 limit_clause = ""
+                
             if offset is not None:
                 params.append(offset)
                 offset_clause = " OFFSET ?"
@@ -344,3 +360,7 @@ class SyncSQLiteConversationStore(ConversationStore):
     def clear_session(self, session_id: str) -> bool:
         """Clear all messages from a session (keep session metadata)."""
         return self.delete_messages(session_id) > 0
+    
+    def close(self) -> None:
+        """No persistent connection is held; method exists for protocol compliance."""
+        return None

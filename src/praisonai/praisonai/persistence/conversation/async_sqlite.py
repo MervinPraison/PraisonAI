@@ -14,6 +14,11 @@ from typing import List, Optional
 from .base import ConversationStore, ConversationSession, ConversationMessage, validate_identifier
 # Note: This store is async-only. For sync operations, use sync_sqlite.SyncSQLiteConversationStore
 
+try:
+    import aiosqlite
+except ImportError:
+    aiosqlite = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,6 +32,43 @@ class AsyncSQLiteConversationStore(ConversationStore):
         store = AsyncSQLiteConversationStore(path="./conversations.db")
         await store.init()
     """
+    
+    # Sync method stubs - this store is async-only
+    def create_session(self, session) -> None:
+        """This store is async-only; use async_create_session or the sync_sqlite store."""
+        raise RuntimeError("This store is async-only; use async_create_session() or the sync_sqlite store")
+    
+    def get_session(self, session_id: str) -> None:
+        """This store is async-only; use async_get_session or the sync_sqlite store."""
+        raise RuntimeError("This store is async-only; use async_get_session() or the sync_sqlite store")
+    
+    def update_session(self, session) -> None:
+        """This store is async-only; use async_update_session or the sync_sqlite store."""
+        raise RuntimeError("This store is async-only; use async_update_session() or the sync_sqlite store")
+    
+    def delete_session(self, session_id: str) -> None:
+        """This store is async-only; use async_delete_session or the sync_sqlite store."""
+        raise RuntimeError("This store is async-only; use async_delete_session() or the sync_sqlite store")
+    
+    def list_sessions(self, **kwargs) -> None:
+        """This store is async-only; use async_list_sessions or the sync_sqlite store."""
+        raise RuntimeError("This store is async-only; use async_list_sessions() or the sync_sqlite store")
+    
+    def add_message(self, message) -> None:
+        """This store is async-only; use async_add_message or the sync_sqlite store."""
+        raise RuntimeError("This store is async-only; use async_add_message() or the sync_sqlite store")
+    
+    def get_messages(self, session_id: str, **kwargs) -> None:
+        """This store is async-only; use async_get_messages or the sync_sqlite store."""
+        raise RuntimeError("This store is async-only; use async_get_messages() or the sync_sqlite store")
+    
+    def delete_messages(self, session_id: str, **kwargs) -> None:
+        """This store is async-only; use async_delete_messages or the sync_sqlite store."""
+        raise RuntimeError("This store is async-only; use async_delete_messages() or the sync_sqlite store")
+    
+    def close(self) -> None:
+        """This store is async-only; use async_close or the sync_sqlite store."""
+        raise RuntimeError("This store is async-only; use async_close() or the sync_sqlite store")
     
     def __init__(
         self,
@@ -51,9 +93,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
         if self._initialized:
             return
         
-        try:
-            import aiosqlite
-        except ImportError:
+        if aiosqlite is None:
             raise ImportError(
                 "aiosqlite is required for async SQLite support. "
                 "Install with: pip install aiosqlite"

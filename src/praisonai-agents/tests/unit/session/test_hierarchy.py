@@ -103,6 +103,35 @@ class TestHierarchicalSessionStore:
         """Clean up test fixtures."""
         shutil.rmtree(self.temp_dir, ignore_errors=True)
     
+    def test_add_message_preserves_concurrent_writes(self):
+        """Concurrent add_message must not lose messages (same as DefaultSessionStore)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = HierarchicalSessionStore(session_dir=tmpdir)
+            reader = HierarchicalSessionStore(session_dir=tmpdir)
+
+            writer.add_user_message("session-1", "first")
+            reader._load_session("session-1")
+            writer.add_user_message("session-1", "second")
+
+            history = writer.get_chat_history("session-1")
+            assert len(history) == 2
+            assert history[1]["content"] == "second"
+
+    def test_update_session_metadata_preserves_extended_fields(self):
+        """Metadata updates must not strip parent_id, snapshots, etc."""
+        session_id = self.store.create_session(title="Parent")
+        self.store.add_message(session_id, "user", "hello")
+        parent_id = self.store.create_session(title="Child", parent_id=session_id)
+        snapshot_id = self.store.create_snapshot(session_id, label="checkpoint")
+
+        assert self.store.update_session_metadata(session_id, model="gpt-4o-mini")
+
+        session = self.store.get_extended_session(session_id)
+        assert session.metadata.get("model") == "gpt-4o-mini"
+        assert session.title == "Parent"
+        assert parent_id in session.children_ids
+        assert any(s.id == snapshot_id for s in session.snapshots)
+
     def test_create_session(self):
         """Test creating a session."""
         session_id = self.store.create_session(title="Test Session")

@@ -244,3 +244,39 @@ class TestThreadSafety:
         assert main_mod._typer_commands_cache is None, (
             "Cache must remain None after failure to allow retries"
         )
+
+    async def test_aclose_releases_both_sync_and_async_clients(self):
+        """aclose() should close both client types for mixed-mode usage."""
+        import praisonai.auto as auto
+
+        class DummyOpenAI:
+            def __init__(self):
+                self.closed = False
+
+            def close(self):
+                self.closed = True
+
+        class DummyAsyncOpenAI:
+            def __init__(self):
+                self.closed = False
+
+            async def close(self):
+                self.closed = True
+
+        generator = auto.BaseAutoGenerator(config_list=[{
+            "model": "gpt-4o-mini",
+            "api_key": "test-key",
+            "base_url": None,
+        }])
+
+        sync_client = DummyOpenAI()
+        async_client = DummyAsyncOpenAI()
+        generator._openai_client = sync_client
+        generator._async_openai_client = async_client
+
+        await generator.aclose()
+
+        assert sync_client.closed is True
+        assert async_client.closed is True
+        assert generator._openai_client is None
+        assert generator._async_openai_client is None
