@@ -187,7 +187,8 @@ class MCP:
         ```
     """
     
-    def __init__(self, command_or_string=None, args=None, *, command=None, timeout=60, debug=False, **kwargs):
+    def __init__(self, command_or_string=None, args=None, *, command=None, timeout=60, debug=False, 
+                 allowed_tools: Optional[List[str]] = None, disabled_tools: Optional[List[str]] = None, **kwargs):
         """
         Initialize the MCP connection and get tools.
         
@@ -201,7 +202,13 @@ class MCP:
             command: Alternative parameter name for backward compatibility
             timeout: Timeout in seconds for MCP server initialization and tool calls (default: 60)
             debug: Enable debug logging for MCP operations (default: False)
+            allowed_tools: Include whitelist - only these tools will be available (default: None = all tools)
+            disabled_tools: Exclude blacklist - these tools will be filtered out (default: None = no exclusions)
             **kwargs: Additional parameters for StdioServerParameters
+            
+        Note:
+            If both allowed_tools and disabled_tools are specified, allowed_tools takes precedence
+            (include wins over exclude).
         """
         # Check if MCP is available
         if not MCP_AVAILABLE:
@@ -240,6 +247,8 @@ class MCP:
         # Store additional parameters
         self.timeout = timeout
         self.debug = debug
+        self.allowed_tools = allowed_tools
+        self.disabled_tools = disabled_tools
         
         # Check if this is a WebSocket URL (ws:// or wss://)
         if isinstance(command_or_string, str) and re.match(r'^wss?://', command_or_string):
@@ -254,7 +263,7 @@ class MCP:
                 auth_token=auth_token,
                 options=kwargs
             )
-            self._tools = list(self.websocket_client.tools)
+            self._tools = self._apply_tool_filters(list(self.websocket_client.tools))
             self.is_sse = False
             self.is_http_stream = False
             self.is_websocket = True
@@ -268,7 +277,7 @@ class MCP:
                 # Legacy SSE URL - use SSE transport for backward compatibility
                 from .mcp_sse import SSEMCPClient
                 self.sse_client = SSEMCPClient(command_or_string, debug=debug, timeout=timeout)
-                self._tools = list(self.sse_client.tools)
+                self._tools = self._apply_tool_filters(list(self.sse_client.tools))
                 self.is_sse = True
                 self.is_http_stream = False
                 self.is_npx = False
@@ -295,7 +304,7 @@ class MCP:
                     timeout=timeout,
                     options=transport_options
                 )
-                self._tools = list(self.http_stream_client.tools)
+                self._tools = self._apply_tool_filters(list(self.http_stream_client.tools))
                 self.is_sse = False
                 self.is_http_stream = True
                 self.is_npx = False
@@ -325,20 +334,10 @@ class MCP:
         self.is_sse = False
         self.is_http_stream = False
         
-        # Ensure UTF-8 encoding in environment for Docker compatibility
-        env = kwargs.get('env', {})
-        if not env:
-            env = os.environ.copy()
-        
-        # Always set Python encoding
-        env['PYTHONIOENCODING'] = 'utf-8'
-        
-        # Only set locale variables on Unix systems
-        if platform.system() != 'Windows':
-            env.update({
-                'LC_ALL': 'C.UTF-8',
-                'LANG': 'C.UTF-8'
-            })
+        # Build safe environment for stdio MCP servers
+        # Use safe baseline + explicit env from config (B5 security policy)
+        custom_env = kwargs.get('env', {})
+        env = self._build_safe_env(custom_env)
         
         kwargs['env'] = env
         
@@ -369,7 +368,7 @@ class MCP:
             self._initialize_npx_mcp_tools(cmd, arguments)
         else:
             # Generate tool functions immediately and store them
-            self._tools = self._generate_tool_functions()
+            self._tools = self._apply_tool_filters(self._generate_tool_functions())
     
     def _generate_tool_functions(self) -> List[Callable]:
         """
@@ -489,7 +488,7 @@ class MCP:
                 logging.debug(f"Initializing NPX MCP tools with command: {cmd} {' '.join(arguments)}")
             
             # Generate tool functions using the regular MCP approach
-            self._tools = self._generate_tool_functions()
+            self._tools = self._apply_tool_filters(self._generate_tool_functions())
             
             if self.debug:
                 logging.debug(f"Generated {len(self._tools)} NPX MCP tools")
@@ -499,6 +498,100 @@ class MCP:
                 logging.error(f"Failed to initialize NPX MCP tools: {e}")
             raise RuntimeError(f"Failed to initialize NPX MCP tools: {e}")
     
+    def _apply_tool_filters(self, raw_tools: List[Any]) -> List[Any]:
+        """
+        Apply tool filtering based on allowed_tools and disabled_tools.
+        
+        Args:
+            raw_tools: Unfiltered tool list
+            
+        Returns:
+            Filtered tool list
+        """
+        if not self.allowed_tools and not self.disabled_tools:
+            return raw_tools
+            
+        # Import filter functions
+        from .mcp_utils import filter_tools_by_allowlist, filter_disabled_tools
+        
+        # Convert tools to the format expected by filter functions (list of dicts with 'name')
+        # Raw tools might be function objects, so we need to extract names
+        tool_defs = []
+        for tool in raw_tools:
+            if hasattr(tool, '__name__'):
+                tool_defs.append({"name": tool.__name__, "_tool_obj": tool})
+            elif isinstance(tool, dict) and 'name' in tool:
+                tool_defs.append(tool)
+            else:
+                # Skip tools that don't have a clear name
+                continue
+        
+        # Include wins over exclude - apply allowlist exclusively if provided
+        if self.allowed_tools:
+            tool_defs = filter_tools_by_allowlist(tool_defs, self.allowed_tools)
+        elif self.disabled_tools:
+            tool_defs = filter_disabled_tools(tool_defs, self.disabled_tools)
+        
+        # Convert back to original format
+        filtered_tools = []
+        for tool_def in tool_defs:
+            if "_tool_obj" in tool_def:
+                filtered_tools.append(tool_def["_tool_obj"])
+            else:
+                filtered_tools.append(tool_def)
+        
+        return filtered_tools
+    
+    def _build_safe_env(self, custom_env: Optional[dict] = None) -> dict:
+        """
+        Build a safe environment for stdio MCP servers.
+        
+        Merges only safe baseline environment variables with explicit custom ones,
+        following the security policy outlined in AGENTS.md.
+        
+        Args:
+            custom_env: Optional custom environment variables from config
+            
+        Returns:
+            Safe environment dictionary
+        """
+        # Safe baseline environment variables
+        safe_baseline = {
+            'PATH': os.environ.get('PATH', ''),
+            'HOME': os.environ.get('HOME', os.path.expanduser('~')),
+            'USER': os.environ.get('USER', ''),
+            'LANG': os.environ.get('LANG', 'C.UTF-8'),
+            'LC_ALL': os.environ.get('LC_ALL', 'C.UTF-8'),
+            'PYTHONIOENCODING': 'utf-8',
+        }
+        
+        # Platform-specific safe variables
+        if platform.system() == 'Windows':
+            safe_baseline.update({
+                'SYSTEMROOT': os.environ.get('SYSTEMROOT', ''),
+                'COMSPEC': os.environ.get('COMSPEC', ''),
+                'USERNAME': os.environ.get('USERNAME', ''),
+                'USERPROFILE': os.environ.get('USERPROFILE', ''),
+                'APPDATA': os.environ.get('APPDATA', ''),
+                'LOCALAPPDATA': os.environ.get('LOCALAPPDATA', ''),
+                'TEMP': os.environ.get('TEMP', ''),
+                'TMP': os.environ.get('TMP', ''),
+            })
+        else:
+            safe_baseline.update({
+                'TMPDIR': os.environ.get('TMPDIR', '/tmp'),
+                'SHELL': os.environ.get('SHELL', '/bin/sh'),
+            })
+        
+        # Start with safe baseline
+        env = {k: v for k, v in safe_baseline.items() if v}  # Only include non-empty values
+        
+        # Add explicit custom environment variables from config
+        if custom_env:
+            env.update(custom_env)
+        
+        return env
+
     def __iter__(self) -> Iterable[Callable]:
         """
         Allow the MCP instance to be used directly as an iterable of tools.
