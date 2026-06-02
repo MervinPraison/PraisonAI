@@ -12,7 +12,7 @@ dependencies = [
     "rich>=13.7",
     "markdown>=3.5",
     "pyparsing>=3.0.0",
-    "praisonaiagents>=1.6.46",
+    "praisonaiagents>=1.6.50",
     "python-dotenv>=0.19.0",
     "litellm>=1.83.14,<2",
     "PyYAML>=6.0",
@@ -28,7 +28,7 @@ praisonai-call = "praisonai.api.call:main"
 
 [project.optional-dependencies]
 ui = [
-    "aiui>=0.3.100",
+    "aiui>=0.3.121,<0.4",
 ]
 gradio = ["gradio>=4.26.0"]
 api = [
@@ -47,14 +47,14 @@ agentops = ["agentops>=0.3.12"]
 langfuse = ["langfuse>=3.0.0"]
 langextract = ["langextract>=1.0.0"]
 chat = [
-    "aiui>=0.3.100",
+    "aiui>=0.3.121,<0.4",
     "tavily-python==0.5.0",
     "crawl4ai>=0.7.0",
     "playwright>=1.47.0",
     "rich"
 ]
 code = [
-    "aiui>=0.3.100",
+    "aiui>=0.3.121,<0.4",
     "tavily-python==0.5.0",
     "crawl4ai>=0.7.0",
     "playwright>=1.47.0"
@@ -73,7 +73,7 @@ daytona = [
     # Install via: pip install git+https://github.com/daytonaio/daytona-python
 ]
 realtime = [
-    "aiui>=0.3.100",
+    "aiui>=0.3.121,<0.4",
     "tavily-python==0.5.0",
     "crawl4ai>=0.7.0",
     "playwright>=1.47.0",    # required by crawl4ai — browsers still need: playwright install chromium
@@ -135,7 +135,7 @@ all = [
     "slack-bolt>=1.18.0",
     "brotlicffi>=1.0.0",
     "aiohttp>=3.8.0",
-    "aiui>=0.3.100",  # PraisonAI UI — dashboard + chat for onboarded bots
+    "aiui>=0.3.121,<0.4",  # PraisonAI UI — dashboard + chat for onboarded bots
     # Storage backends
     "redis>=5.0.0",
     "pymongo>=4.6.0",
@@ -158,7 +158,7 @@ bot = [
     "slack-bolt>=1.18.0",
     "brotlicffi>=1.0.0",
     "aiohttp>=3.8.0",
-    "aiui>=0.3.100",  # PraisonAI UI — dashboard + chat for onboarded bots
+    "aiui>=0.3.121,<0.4",  # PraisonAI UI — dashboard + chat for onboarded bots
     "ddgs>=9.0.0",  # DuckDuckGo search for agent web tools
     "psutil>=5.9.0",  # Shell tools (execute_command, list_processes, get_system_info)
 ]
@@ -199,7 +199,7 @@ xata = [
 claw = [
     # PraisonAI 🦞 — Full dashboard + bots + memory + knowledge + gateway
     # Install: pip install "praisonai[claw]"
-    "aiui[all]>=0.3.100",
+    "aiui[all]>=0.3.121,<0.4",
     "praisonaiagents[all]>=1.5.40",
     # UI + persistence
     "flask>=3.0.0",

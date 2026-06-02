@@ -26,24 +26,35 @@ from .tool_registry import ToolRegistry
 # Compatibility imports - now handled by centralized detection
 # (inbuilt_tools still defines these but they're read-only compatibility)
 
-# Import BaseTool for tools handling
-BaseTool = None
-try:
-    from praisonai_tools import BaseTool
-except ImportError:
-    try:
-        from praisonai.tools import BaseTool
-    except ImportError:
-        pass
+# BaseTool import is now handled centrally by ToolResolver
 
-# Check for additional framework availability using centralized detection
+# Framework availability detection (lazy via __getattr__)
 from ._framework_availability import is_available
-PRAISONAI_TOOLS_AVAILABLE = is_available("praisonai_tools")
-CREWAI_AVAILABLE          = is_available("crewai")
-AUTOGEN_AVAILABLE         = is_available("autogen")
-AG2_AVAILABLE             = is_available("ag2")
-PRAISONAI_AVAILABLE       = is_available("praisonaiagents")
-AGENTOPS_AVAILABLE        = is_available("agentops")
+
+# Lazy constants mapping for backward compatibility
+_AVAIL = {
+    "PRAISONAI_TOOLS_AVAILABLE": "praisonai_tools",
+    "CREWAI_AVAILABLE": "crewai",
+    "AUTOGEN_AVAILABLE": "autogen",
+    "AG2_AVAILABLE": "ag2",
+    "PRAISONAI_AVAILABLE": "praisonaiagents",
+    "AGENTOPS_AVAILABLE": "agentops",
+}
+
+__all__ = list(_AVAIL.keys())
+
+def __getattr__(name):
+    """Lazy attribute access for framework availability constants.
+    
+    This allows backward compatibility while avoiding import-time probing.
+    Only probes the framework when the constant is actually accessed.
+    """
+    if name in _AVAIL:
+        return is_available(_AVAIL[name])
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
+def __dir__():
+    return sorted(set(globals()) | set(_AVAIL))
 
 # Framework adapter registry - now uses proper registry pattern
 # This replaces the hardcoded FRAMEWORK_ADAPTERS dict
@@ -290,7 +301,7 @@ class AgentsGenerator:
         
         # Keep tool registry for backward compatibility with autogen adapters
         self.tool_registry = ToolRegistry()
-        self.tool_registry.register_builtin_autogen_adapters()
+        self.tool_registry.register_builtin_autogen_adapters(_suppress_deprecation_warning=True)
         
         # Initialize tool resolver with the registry wired in (single source of truth for tool resolution)
         from .tool_resolver import ToolResolver
@@ -346,8 +357,30 @@ class AgentsGenerator:
                 self.logger.debug(f"CLI override: lsp = {cli_config['lsp']}")
         
         # Handle agent-level overrides using unified approach
-        agent_level_fields = ['tool_timeout', 'planning_tools', 'autonomy']
+        agent_level_fields = ['tool_timeout', 'planning_tools', 'autonomy', 'planning', 'web', 'web_fetch']
         agent_overrides = {k: v for k, v in cli_config.items() if k in agent_level_fields}
+        
+        # Handle handoff configuration - convert CLI flags into handoff dict
+        handoff_fields = ['handoff', 'handoff_policy', 'handoff_timeout', 'handoff_max_depth', 'handoff_max_concurrent', 'handoff_detect_cycles']
+        if any(field in cli_config for field in handoff_fields):
+            handoff_config = {}
+            if 'handoff' in cli_config:
+                # Convert comma-separated roles to list
+                handoff_roles = [role.strip() for role in cli_config['handoff'].split(',') if role.strip()]
+                handoff_config['to'] = handoff_roles
+            if 'handoff_policy' in cli_config:
+                handoff_config['policy'] = cli_config['handoff_policy']
+            if 'handoff_timeout' in cli_config:
+                handoff_config['timeout'] = cli_config['handoff_timeout']
+            if 'handoff_max_depth' in cli_config:
+                handoff_config['max_depth'] = cli_config['handoff_max_depth']
+            if 'handoff_max_concurrent' in cli_config:
+                handoff_config['max_concurrent'] = cli_config['handoff_max_concurrent']
+            if 'handoff_detect_cycles' in cli_config:
+                handoff_config['detect_cycles'] = cli_config['handoff_detect_cycles'].lower() == 'true'
+            
+            if handoff_config:
+                agent_overrides['handoff'] = handoff_config
         
         # Handle approval configuration using unified spec
         approval_fields = ['trust', 'approval', 'approve_all_tools', 'approval_timeout', 'approve_level']
@@ -399,7 +432,7 @@ class AgentsGenerator:
             'max_execution_time', 'verbose', 'cache', 'system_template',
             'prompt_template', 'response_template', 'tool_timeout', 'planning_tools',
             'planning', 'autonomy', 'guardrails', 'streaming', 'stream',
-            'approval', 'skills', 'cli_backend', 'reflection'
+            'approval', 'skills', 'cli_backend', 'reflection', 'handoff', 'web', 'web_fetch'
         }
 
         for section_name in ('agents', 'roles'):
@@ -456,24 +489,6 @@ class AgentsGenerator:
             return {}
         return {name: obj for name, obj in inspect.getmembers(module, self.is_function_or_decorated)}
     
-    def _extract_tool_classes(self, module):
-        """
-        Extract tool classes from a loaded module that inherit from BaseTool 
-        or are part of langchain_community.tools package.
-        """
-        result = {}
-        for name, obj in inspect.getmembers(module, 
-            lambda x: inspect.isclass(x) and (
-                x.__module__.startswith('langchain_community.tools') or 
-                (PRAISONAI_TOOLS_AVAILABLE and BaseTool and issubclass(x, BaseTool))
-            ) and x is not BaseTool):
-            try:
-                result[name] = obj()
-            except Exception as e:
-                self.logger.warning(f"Error instantiating tool class {name}: {e}")
-                continue
-        return result
-    
     def load_tools_from_module_class(self, module_path):
         """
         Load BaseTool / langchain tool classes from a user-supplied module (gated by PRAISONAI_ALLOW_LOCAL_TOOLS).
@@ -482,7 +497,7 @@ class AgentsGenerator:
         module = load_user_module(module_path, name="tools_module")
         if module is None:
             return {}
-        return self._extract_tool_classes(module)
+        return self.tool_resolver._extract_tool_classes(module)
 
     def load_tools_from_package(self, package_path):
         """
@@ -559,7 +574,7 @@ class AgentsGenerator:
             for agent_name, agent_config in config['agents'].items():
                 role_config = dict(agent_config) if agent_config else {}
                 # Convert 'instructions' to 'backstory' if present
-                # Note: preserve 'instructions' key for framework adapters
+                # Note: preserve 'instructions' key for adapters that pass it to PraisonAgent
                 if 'instructions' in role_config and 'backstory' not in role_config:
                     role_config['backstory'] = role_config['instructions']
                 # Ensure required fields have defaults
@@ -580,7 +595,7 @@ class AgentsGenerator:
         tools_dict = {}
         
         # Demand-driven tool resolution - only resolve tools actually used in YAML
-        if CREWAI_AVAILABLE or AUTOGEN_AVAILABLE or PRAISONAI_AVAILABLE or AG2_AVAILABLE:
+        if is_available("crewai") or is_available("autogen") or is_available("praisonaiagents") or is_available("ag2"):
             try:
                 # Collect all tool names mentioned in the YAML config
                 needed_tools: set[str] = set()
@@ -612,12 +627,17 @@ class AgentsGenerator:
             except Exception as e:
                 self.logger.warning(f"Error collecting YAML tool references: {e}")
             
-            # Add tools from class names
+            # Add tools from class names - use tool_resolver to check tool validity
             for tool_class in self.tools:
-                if isinstance(tool_class, type) and BaseTool and issubclass(tool_class, BaseTool):
-                    tool_name = tool_class.__name__
-                    tools_dict[tool_name] = tool_class()
-                    self.logger.debug(f"Added tool: {tool_name}")
+                if isinstance(tool_class, type):
+                    try:
+                        # Try to instantiate the tool to validate it
+                        tool_instance = tool_class()
+                        tool_name = tool_class.__name__
+                        tools_dict[tool_name] = tool_instance
+                        self.logger.debug(f"Added tool: {tool_name}")
+                    except Exception as e:
+                        self.logger.warning(f"Failed to instantiate tool class {tool_class.__name__}: {e}")
 
         root_directory = os.getcwd()
         tools_py_path = os.path.join(root_directory, 'tools.py')
@@ -628,25 +648,168 @@ class AgentsGenerator:
         if os.path.isfile(tools_py_path):
             self.logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
         elif tools_dir_path.is_dir():
-            from ._safe_loader import load_user_module
-            for py_file in tools_dir_path.glob("*.py"):
-                if py_file.name.startswith("__"):
-                    continue
-                module = load_user_module(py_file, name=f"tools_{py_file.stem}")
-                if module is not None:
-                    tools_dict.update(self._extract_tool_classes(module))
+            tools_dict.update(self.tool_resolver.get_local_tool_classes_from_dir(tools_dir_path))
             if tools_dict:
                 self.logger.debug("tools folder exists in the root directory")
 
         framework = self.framework or config.get('framework', 'crewai')
+        
+        # Get initial adapter and resolve to concrete variant
+        initial_adapter = self._get_framework_adapter(framework)
+        adapter = initial_adapter.resolve()
+        
+        # Validate framework availability early
+        from .framework_adapters.validators import assert_framework_available
+        assert_framework_available(adapter.name)
+        
+        # Initialize observability hooks
+        from .observability.hooks import init_observability
+        init_observability(adapter.name)
+        
+        # Run adapter setup hooks
+        adapter.setup(framework_tag=adapter.name)
+        
+        # Update framework reference if resolution changed it
+        self.framework = adapter.name
+        self.framework_adapter = adapter
+        
+        self.logger.info(f"Using framework: {adapter.name}")
+        return adapter.run(
+            config,
+            self.config_list,
+            topic,
+            tools_dict=tools_dict,
+            agent_callback=getattr(self, 'agent_callback', None),
+            task_callback=getattr(self, 'task_callback', None),
+            cli_config=getattr(self, 'cli_config', None),
+        )
 
-        # Determine AutoGen version if needed (keeping compatibility logic)
+    async def agenerate_crew_and_kickoff(self):
+        """
+        Async version of generate_crew_and_kickoff.
+        Generates a crew of agents and initiates tasks based on the provided configuration.
+        """
+        if self.agent_yaml:
+            config = yaml.safe_load(self.agent_yaml)
+        else:
+            if self.agent_file == '/app/api:app' or self.agent_file == 'api:app':
+                self.agent_file = 'agents.yaml'
+            try:
+                with open(self.agent_file, 'r') as f:
+                    config = yaml.safe_load(f)
+            except FileNotFoundError:
+                print(f"File not found: {self.agent_file}")
+                return
+
+        # Apply CLI configuration overrides to YAML config
+        if self.cli_config:
+            # Merge CLI configuration with YAML config
+            self._merge_cli_config(config, self.cli_config)
+
+        # Check if this is a workflow-mode YAML (process: workflow or has steps section)
+        process_type = config.get('process', 'sequential')
+        has_steps = 'steps' in config
+        has_workflow_config = 'workflow' in config
+        
+        if process_type == 'workflow' or (has_steps and has_workflow_config):
+            return await self._arun_yaml_workflow(config)
+        else:
+            return await self._arun_framework(config)
+
+    async def _arun_framework(self, config):
+        """Async version of _run_framework with shared preparation logic."""
+        # Canonical format conversion: 'agents' -> 'roles', 'instructions' -> 'backstory'
+        if 'agents' in config and 'roles' not in config:
+            config['roles'] = {}
+            for agent_name, agent_config in config['agents'].items():
+                role_config = dict(agent_config) if agent_config else {}
+                if 'instructions' in role_config and 'backstory' not in role_config:
+                    role_config['backstory'] = role_config['instructions']
+                if 'role' not in role_config:
+                    role_config['role'] = agent_name.replace('_', ' ').title()
+                if 'goal' not in role_config:
+                    role_config['goal'] = role_config.get('backstory', 'Complete the assigned task')
+                if 'backstory' not in role_config:
+                    role_config['backstory'] = f'You are a {role_config["role"]}'
+                config['roles'][agent_name] = role_config
+
+        # Get workflow input: 'input' is canonical, 'topic' is alias for backward compatibility
+        topic = config.get('input', config.get('topic', ''))
+        
+        # Validate agents configuration for typos in field names
+        self._validate_agents_config(config)
+        
+        tools_dict = {}
+        
+        # Demand-driven tool resolution - only resolve tools actually used in YAML
+        if is_available("crewai") or is_available("autogen") or is_available("praisonaiagents") or is_available("ag2"):
+            try:
+                # Collect all tool names mentioned in the YAML config
+                needed_tools: set[str] = set()
+                for role_cfg in config.get('roles', {}).values():
+                    for t in role_cfg.get('tools') or []:
+                        if isinstance(t, str) and t.strip():
+                            needed_tools.add(t.strip())
+                    for task_cfg in (role_cfg.get('tasks') or {}).values():
+                        if not isinstance(task_cfg, dict):
+                            continue
+                        for t in task_cfg.get('tools') or []:
+                            if isinstance(t, str) and t.strip():
+                                needed_tools.add(t.strip())
+
+                # Resolve only the tools actually referenced in YAML
+                for tool_name in needed_tools:
+                    try:
+                        resolved_tool = self.tool_resolver.resolve(tool_name)
+                        if resolved_tool is None:
+                            self.logger.warning(f"Tool '{tool_name}' not found")
+                            continue
+                        tools_dict[tool_name] = (
+                            resolved_tool() if inspect.isclass(resolved_tool) else resolved_tool
+                        )
+                    except Exception as e:
+                        self.logger.warning(f"Failed to initialize tool '{tool_name}': {e}")
+                        continue
+
+            except Exception as e:
+                self.logger.warning(f"Error collecting YAML tool references: {e}")
+
+            # Add tools from class names - use tool_resolver to check tool validity
+            for tool_class in self.tools:
+                if isinstance(tool_class, type):
+                    try:
+                        tool_instance = tool_class()
+                        tool_name = tool_class.__name__
+                        tools_dict[tool_name] = tool_instance
+                        self.logger.debug(f"Added tool: {tool_name}")
+                    except Exception as e:
+                        self.logger.warning(f"Failed to instantiate tool class {tool_class.__name__}: {e}")
+
+        root_directory = os.getcwd()
+        tools_py_path = os.path.join(root_directory, 'tools.py')
+        tools_dir_path = Path(root_directory) / 'tools'
+
+        # Use consolidated ToolResolver for tools.py loading
+        tools_dict.update(self.tool_resolver.get_local_tool_classes())
+        if os.path.isfile(tools_py_path):
+            self.logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
+        elif tools_dir_path.is_dir():
+            tools_dict.update(self.tool_resolver.get_local_tool_classes_from_dir(tools_dir_path))
+            if tools_dict:
+                self.logger.debug("tools folder exists in the root directory")
+
+        framework = self.framework or config.get('framework', 'crewai')
+        
+        # AutoGen version selection logic
         if framework == "autogen":
-            autogen_version = os.environ.get("AUTOGEN_VERSION", "auto").lower()
             autogen_v4_adapter = self._get_framework_adapter("autogen_v4")
             autogen_v2_adapter = self._get_framework_adapter("autogen")
             
+            autogen_version = str(
+                config.get('autogen_version', os.environ.get("AUTOGEN_VERSION", "auto"))
+            ).lower()
             use_v4 = False
+            
             if autogen_version == "v0.4" and autogen_v4_adapter.is_available():
                 use_v4 = True
             elif autogen_version == "v0.2" and autogen_v2_adapter.is_available():
@@ -657,27 +820,27 @@ class AgentsGenerator:
                 use_v4 = autogen_v4_adapter.is_available() and not autogen_v2_adapter.is_available()
             
             framework = "autogen_v4" if use_v4 else "autogen"
-            
-        # Initialize AgentOps if available
-        try:
-            import agentops
-            agentops_api_key = os.getenv("AGENTOPS_API_KEY")
-            if agentops_api_key:
+
+        # Initialize AgentOps if configured
+        agentops_api_key = os.getenv("AGENTOPS_API_KEY")
+        if agentops_api_key:
+            try:
+                import agentops
                 agentops.init(agentops_api_key, default_tags=[framework])
-        except ImportError:
-            pass
-            
-        # Update framework adapter if framework changed (e.g., AutoGen version selection)
+            except ImportError:
+                pass
+                
+        # Update framework adapter if framework changed
         if framework != self.framework:
             self.framework = framework
             self.framework_adapter = self._get_framework_adapter(framework)
             
-        # Validate framework availability for non-CLI callers
+        # Validate framework availability
         from .framework_adapters.validators import assert_framework_available
         assert_framework_available(framework)
         
         self.logger.info(f"Using framework: {framework}")
-        return self.framework_adapter.run(
+        return await self.framework_adapter.arun(
             config,
             self.config_list,
             topic,
@@ -686,6 +849,12 @@ class AgentsGenerator:
             task_callback=getattr(self, 'task_callback', None),
             cli_config=getattr(self, 'cli_config', None),
         )
+
+    async def _arun_yaml_workflow(self, config):
+        """Async placeholder for workflow mode - currently delegates to sync version."""
+        # For now, delegate to sync version using asyncio.to_thread
+        import asyncio
+        return await asyncio.to_thread(self._run_yaml_workflow, config)
 
     def _run_yaml_workflow(self, config):
         """
@@ -701,7 +870,7 @@ class AgentsGenerator:
         Returns:
             str: Result of the workflow execution
         """
-        if not PRAISONAI_AVAILABLE:
+        if not is_available("praisonaiagents"):
             raise ImportError("PraisonAI is not installed. Please install it with 'pip install praisonaiagents'")
         
         try:

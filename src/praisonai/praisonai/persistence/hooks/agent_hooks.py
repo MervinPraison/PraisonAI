@@ -5,6 +5,7 @@ Provides wrapper functions to add persistence capabilities to PraisonAI agents
 without modifying the core SDK.
 """
 
+import asyncio
 import time
 import uuid
 import logging
@@ -60,15 +61,13 @@ def wrap_agent_with_persistence(
     session_id = session_id or f"session-{uuid.uuid4().hex[:8]}"
     user_id = user_id or getattr(agent, 'user_id', 'default')
     
-    # Store original chat method
+    # Store original methods
     original_chat = agent.chat
+    original_achat = getattr(agent, 'achat', None)
     _session_initialized = [False]  # Use list to allow mutation in closure
     
-    @wraps(original_chat)
-    def chat_with_persistence(prompt, *args, **kwargs):
-        nonlocal _session_initialized
-        
-        # Initialize session on first call
+    def _ensure_session_sync():
+        """Ensure session is initialized (sync version)."""
         if not _session_initialized[0]:
             history = orchestrator.on_agent_start(
                 agent, 
@@ -86,6 +85,31 @@ def wrap_agent_with_persistence(
                 logger.info(f"Resumed session {session_id} with {len(history)} messages")
             
             _session_initialized[0] = True
+    
+    async def _ensure_session_async():
+        """Ensure session is initialized (async version)."""
+        if not _session_initialized[0]:
+            history = await orchestrator.aon_agent_start(
+                agent, 
+                session_id=session_id, 
+                user_id=user_id,
+                resume=auto_resume
+            )
+            
+            # Inject history into agent's chat_history if resuming
+            if auto_resume and history:
+                agent.chat_history = [
+                    {"role": msg.role, "content": msg.content}
+                    for msg in history
+                ]
+                logger.info(f"Resumed session {session_id} with {len(history)} messages")
+            
+            _session_initialized[0] = True
+    
+    @wraps(original_chat)
+    def chat_with_persistence(prompt, *args, **kwargs):
+        # Initialize session on first call
+        _ensure_session_sync()
         
         # Persist user message
         orchestrator.on_message(session_id, "user", prompt if isinstance(prompt, str) else str(prompt))
@@ -101,6 +125,27 @@ def wrap_agent_with_persistence(
     
     # Replace chat method
     agent.chat = chat_with_persistence
+    
+    # Replace achat method if it exists
+    if original_achat is not None:
+        @wraps(original_achat)
+        async def achat_with_persistence(prompt, *args, **kwargs):
+            # Initialize session on first call
+            await _ensure_session_async()
+            
+            # Persist user message
+            await orchestrator.aon_message(session_id, "user", prompt if isinstance(prompt, str) else str(prompt))
+            
+            # Call original achat
+            response = await original_achat(prompt, *args, **kwargs)
+            
+            # Persist assistant response
+            if response:
+                await orchestrator.aon_message(session_id, "assistant", response)
+            
+            return response
+        
+        agent.achat = achat_with_persistence
     
     # Add persistence-related methods to agent
     agent._persistence_orchestrator = orchestrator
@@ -118,9 +163,14 @@ def wrap_agent_with_persistence(
         """End the current session."""
         orchestrator.on_agent_end(agent, session_id)
     
+    async def aend_session():
+        """End the current session (async version)."""
+        await orchestrator.aon_agent_end(agent, session_id)
+    
     agent.get_session = get_session
     agent.get_messages = get_messages
     agent.end_session = end_session
+    agent.aend_session = aend_session
     
     return agent
 
@@ -164,9 +214,28 @@ class PersistentAgent:
         return getattr(self._agent, name)
     
     def _ensure_session(self):
-        """Ensure session is initialized."""
+        """Ensure session is initialized (sync version)."""
         if not self._session_initialized:
             history = self._orchestrator.on_agent_start(
+                self._agent,
+                session_id=self._session_id,
+                user_id=self._user_id,
+                resume=self._auto_resume
+            )
+            
+            if self._auto_resume and history:
+                self._agent.chat_history = [
+                    {"role": msg.role, "content": msg.content}
+                    for msg in history
+                ]
+                logger.info(f"Resumed session {self._session_id} with {len(history)} messages")
+            
+            self._session_initialized = True
+    
+    async def _ensure_session_async(self):
+        """Ensure session is initialized (async version)."""
+        if not self._session_initialized:
+            history = await self._orchestrator.aon_agent_start(
                 self._agent,
                 session_id=self._session_id,
                 user_id=self._user_id,
@@ -201,6 +270,29 @@ class PersistentAgent:
         
         return response
     
+    async def achat(self, prompt, *args, **kwargs):
+        """Async chat with automatic persistence."""
+        await self._ensure_session_async()
+        
+        # Persist user message
+        await self._orchestrator.aon_message(
+            self._session_id, "user", 
+            prompt if isinstance(prompt, str) else str(prompt)
+        )
+        
+        # Call agent achat
+        if hasattr(self._agent, 'achat'):
+            response = await self._agent.achat(prompt, *args, **kwargs)
+        else:
+            # Fallback to sync chat if achat is not available - use asyncio.to_thread to avoid blocking
+            response = await asyncio.to_thread(self._agent.chat, prompt, *args, **kwargs)
+        
+        # Persist assistant response
+        if response:
+            await self._orchestrator.aon_message(self._session_id, "assistant", response)
+        
+        return response
+    
     def get_session(self) -> Optional[ConversationSession]:
         """Get the current session."""
         return self._orchestrator.get_session(self._session_id)
@@ -212,6 +304,10 @@ class PersistentAgent:
     def end_session(self):
         """End the current session."""
         self._orchestrator.on_agent_end(self._agent, self._session_id)
+    
+    async def aend_session(self):
+        """End the current session (async version)."""
+        await self._orchestrator.aon_agent_end(self._agent, self._session_id)
     
     @property
     def session_id(self) -> str:

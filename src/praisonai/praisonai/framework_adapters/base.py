@@ -20,6 +20,22 @@ class FrameworkAdapter(Protocol):
         """Check if the framework is available for import."""
         ...
     
+    def resolve(self) -> "FrameworkAdapter":
+        """Pick the concrete adapter variant (e.g. autogen v0.2 vs v0.4).
+        
+        Returns:
+            The resolved adapter instance (self or a different adapter)
+        """
+        ...
+    
+    def setup(self, *, framework_tag: str) -> None:
+        """Framework-specific pre-run hooks (observability, sdk init, etc.).
+        
+        Args:
+            framework_tag: Framework name for observability tagging
+        """
+        ...
+    
     def run(
         self,
         config: Dict[str, Any],
@@ -33,6 +49,34 @@ class FrameworkAdapter(Protocol):
     ) -> str:
         """
         Run the framework with given configuration.
+        
+        Args:
+            config: Framework configuration
+            llm_config: LLM configuration list
+            topic: Topic for the tasks
+            tools_dict: Available tools dictionary
+            agent_callback: Callback for agent events
+            task_callback: Callback for task events
+            cli_config: CLI configuration
+            
+        Returns:
+            Execution result as string
+        """
+        ...
+
+    async def arun(
+        self,
+        config: Dict[str, Any],
+        llm_config: List[Dict],
+        topic: str,
+        *,
+        tools_dict: Optional[Dict[str, Any]] = None,
+        agent_callback: Optional[Callable] = None,
+        task_callback: Optional[Callable] = None,
+        cli_config: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Async-native execution. Default = offload sync run() to a thread.
         
         Args:
             config: Framework configuration
@@ -87,6 +131,37 @@ class BaseFrameworkAdapter:
             logger.warning("Template formatting error: %s; returning original template", e)
             return template
     
+    def resolve(self) -> "FrameworkAdapter":
+        """Default implementation returns self."""
+        return self
+    
+    def setup(self, *, framework_tag: str) -> None:
+        """Default implementation does nothing."""
+        pass
+    
+    async def arun(
+        self,
+        config: Dict[str, Any],
+        llm_config: List[Dict],
+        topic: str,
+        *,
+        tools_dict: Optional[Dict[str, Any]] = None,
+        agent_callback: Optional[Callable] = None,
+        task_callback: Optional[Callable] = None,
+        cli_config: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Safe default for sync-only adapters (crewai, autogen v0.2):
+        run the sync implementation in a worker thread, freeing the loop.
+        """
+        import asyncio
+        return await asyncio.to_thread(
+            self.run, config, llm_config, topic,
+            tools_dict=tools_dict,
+            agent_callback=agent_callback,
+            task_callback=task_callback,
+            cli_config=cli_config
+        )
     def cleanup(self) -> None:
         """Clean up resources - default implementation does nothing."""
         pass

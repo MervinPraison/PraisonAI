@@ -113,6 +113,7 @@ Start any PraisonAI server with: praisonai serve <type>
 [bold]Server Types:[/bold]
   [green]agents[/green]      HTTP REST API for agents (port 8000)
   [green]gateway[/green]     WebSocket multi-agent coordination (port 8765)
+  [green]ui-gateway[/green]  Integrated UI-Gateway (Pattern C) (port 8765)
   [green]mcp[/green]         MCP server for Claude/Cursor (port 8080)
   [green]acp[/green]         Agent Client Protocol for IDEs (STDIO)
   [green]lsp[/green]         Language Server Protocol (STDIO)
@@ -367,6 +368,42 @@ def serve_ui(
         output.print_error(f"UI module not available: {e}")
         output.print("Install with: pip install praisonai[ui]")
         raise typer.Exit(4)
+
+
+@app.command("ui-gateway")
+def serve_ui_gateway(
+    host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host to bind to"),
+    port: int = typer.Option(8765, "--port", "-p", help="Port to bind to"),
+    title: str = typer.Option("PraisonAI", "--title", "-t", help="Application title"),
+    style: str = typer.Option("dashboard", "--style", "-s", help="UI style: dashboard, chat"),
+    agents_file: Optional[str] = typer.Option(None, "--agents", "-a", help="Agents YAML file"),
+):
+    """Start integrated UI-Gateway (Pattern C) - aiui with backend bridges.
+    
+    Combines PraisonAI host integration with AIUIGateway for unified dashboard + chat.
+    
+    Examples:
+        praisonai serve ui-gateway
+        praisonai serve ui-gateway --style chat --port 8765
+        praisonai serve ui-gateway --agents agents.yaml --title "My App"
+    """
+    output = get_output_controller()
+    
+    try:
+        from ...integration.gateway_host import run_integrated_gateway
+        run_integrated_gateway(
+            host=host,
+            port=port,
+            title=title,
+            style=style
+        )
+    except ImportError as e:
+        output.print_error(f"UI-Gateway module not available: {e}")
+        output.print("Install with: pip install praisonai[ui]")
+        raise typer.Exit(4)
+    except Exception as e:
+        output.print_error(f"Failed to start UI-Gateway: {e}")
+        raise typer.Exit(1)
 
 
 @app.command("rag")

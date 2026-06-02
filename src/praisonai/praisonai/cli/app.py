@@ -305,6 +305,7 @@ def register_commands():
     from .commands.mcp import app as mcp_app
     from .commands.serve import app as serve_app
     from .commands.schedule import app as schedule_app
+    from .commands.kanban import app as kanban_app
     from .commands.run import app as run_app
     from .commands.profile import app as profile_app
     from .commands.benchmark import app as benchmark_app
@@ -387,6 +388,7 @@ def register_commands():
     app.add_typer(mcp_app, name="mcp", help="MCP server management")
     app.add_typer(serve_app, name="serve", help="API server management")
     app.add_typer(schedule_app, name="schedule", help="Scheduler management")
+    app.add_typer(kanban_app, name="kanban", help="Kanban task management")
     app.add_typer(run_app, name="run", help="Run agents")
     app.add_typer(profile_app, name="profile", help="Performance profiling and diagnostics")
     app.add_typer(benchmark_app, name="benchmark", help="Comprehensive performance benchmarking")

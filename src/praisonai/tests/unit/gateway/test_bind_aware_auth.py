@@ -13,6 +13,22 @@ from praisonaiagents.gateway.config import GatewayConfig
 from praisonai.gateway.auth import assert_external_bind_safe, GatewayStartupError
 
 
+class TestGatewayAuthTokenEnvSync:
+    """Test gateway auth token env synchronization."""
+
+    def test_config_token_overrides_stale_env_token(self, monkeypatch):
+        """Gateway should export configured token for all auth paths."""
+        from praisonai.gateway.server import WebSocketGateway
+
+        monkeypatch.setenv("GATEWAY_AUTH_TOKEN", "stale-token")
+        config = GatewayConfig(bind_host="127.0.0.1", auth_token="fresh-token")
+
+        gateway = WebSocketGateway(config=config)
+
+        assert gateway.config.auth_token == "fresh-token"
+        assert os.environ["GATEWAY_AUTH_TOKEN"] == "fresh-token"
+
+
 class TestLoopbackDetection:
     """Test loopback interface detection."""
     

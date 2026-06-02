@@ -6,6 +6,7 @@ Provides FastAPI application setup and server startup.
 
 import logging
 import os
+import threading
 from typing import Optional
 from contextlib import asynccontextmanager
 
@@ -21,13 +22,17 @@ logger = logging.getLogger(__name__)
 # Global instances (for single-process deployment)
 _store: Optional[JobStore] = None
 _executor: Optional[JobExecutor] = None
+_store_lock = threading.Lock()
+_executor_lock = threading.Lock()
 
 
 def get_store() -> JobStore:
     """Get or create the job store."""
     global _store
     if _store is None:
-        _store = InMemoryJobStore(max_jobs=1000)
+        with _store_lock:
+            if _store is None:
+                _store = InMemoryJobStore(max_jobs=1000)
     return _store
 
 
@@ -35,11 +40,13 @@ def get_executor() -> JobExecutor:
     """Get or create the job executor."""
     global _executor
     if _executor is None:
-        _executor = JobExecutor(
-            store=get_store(),
-            max_concurrent=int(os.environ.get("PRAISONAI_MAX_CONCURRENT_JOBS", "10")),
-            default_timeout=int(os.environ.get("PRAISONAI_JOB_TIMEOUT", "3600"))
-        )
+        with _executor_lock:
+            if _executor is None:
+                _executor = JobExecutor(
+                    store=get_store(),
+                    max_concurrent=int(os.environ.get("PRAISONAI_MAX_CONCURRENT_JOBS", "10")),
+                    default_timeout=int(os.environ.get("PRAISONAI_JOB_TIMEOUT", "3600"))
+                )
     return _executor
 
 

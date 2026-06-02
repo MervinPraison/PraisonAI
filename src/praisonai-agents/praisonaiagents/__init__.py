@@ -384,6 +384,7 @@ _LAZY_IMPORTS = {
     'MultiAgentExecutionConfig': ('praisonaiagents.config.feature_configs', 'MultiAgentExecutionConfig'),
     'MultiAgentPlanningConfig': ('praisonaiagents.config.feature_configs', 'MultiAgentPlanningConfig'),
     'MultiAgentMemoryConfig': ('praisonaiagents.config.feature_configs', 'MultiAgentMemoryConfig'),
+    'ToolSearchConfig': ('praisonaiagents.config.feature_configs', 'ToolSearchConfig'),
     
     # Parameter resolver
     'resolve': ('praisonaiagents.config.param_resolver', 'resolve'),
