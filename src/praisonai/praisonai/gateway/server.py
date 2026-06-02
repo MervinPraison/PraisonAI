@@ -1844,7 +1844,7 @@ class WebSocketGateway:
             if not message:
                 return  # Message was dropped by security checks
 
-            user_id = str(update.message.from_user.id) if update.message.from_user else "unknown"
+            user_id = message.sender.user_id if message.sender else "unknown"
             message_text = message.content
 
             # Determine routing context

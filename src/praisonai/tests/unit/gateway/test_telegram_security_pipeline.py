@@ -11,10 +11,9 @@ used by both standalone and gateway paths to ensure identical security enforceme
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
-from praisonaiagents import Agent
 from praisonaiagents.bots import BotConfig, BotUser
 from praisonai.bots.telegram import TelegramBot, process_inbound_telegram_message
-from praisonai.bots._unknown_user import BotContext, UnknownUserHandler
+from praisonai.bots._unknown_user import UnknownUserHandler
 
 
 def create_mock_telegram_update(user_id: str = "12345", chat_id: str = "-100123456789", text: str = "test message", chat_type: str = "group"):
@@ -79,13 +78,13 @@ async def test_user_allowlist_enforcement():
     # Bot with restricted user allowlist
     bot = create_test_bot(allowed_users=["42"])
     
-    # Message from allowed user in private chat
+    # Message from allowed user
     allowed_update = create_mock_telegram_update(user_id="42", text="hello", chat_type="private")
     allowed_message = await process_inbound_telegram_message(allowed_update, bot)
     assert allowed_message is not None, "Message from allowed user should pass"
     assert allowed_message.sender.user_id == "42"
     
-    # Message from disallowed user in private chat
+    # Message from disallowed user
     disallowed_update = create_mock_telegram_update(user_id="99", text="hello", chat_type="private")
     disallowed_message = await process_inbound_telegram_message(disallowed_update, bot)
     assert disallowed_message is None, "Message from disallowed user should be blocked"
@@ -98,13 +97,13 @@ async def test_channel_allowlist_enforcement():
     # Bot with restricted channel allowlist
     bot = create_test_bot(allowed_channels=["-100123456789"])
     
-    # Message from allowed channel in private chat
+    # Message from allowed channel
     allowed_update = create_mock_telegram_update(chat_id="-100123456789", text="hello", chat_type="private")
     allowed_message = await process_inbound_telegram_message(allowed_update, bot)
     assert allowed_message is not None, "Message from allowed channel should pass"
     assert allowed_message.channel.channel_id == "-100123456789"
     
-    # Message from disallowed channel in private chat
+    # Message from disallowed channel
     disallowed_update = create_mock_telegram_update(chat_id="-100999999999", text="hello", chat_type="private")
     disallowed_message = await process_inbound_telegram_message(disallowed_update, bot)
     assert disallowed_message is None, "Message from disallowed channel should be blocked"
@@ -116,6 +115,7 @@ async def test_group_policy_mention_enforcement():
     
     # Bot with mention_only group policy
     bot = create_test_bot(group_policy="mention_only")
+    bot._bot_user.username = "Test_Bot"
     
     # Group message with bot mention - should pass
     mention_update = create_mock_telegram_update(
@@ -159,6 +159,20 @@ async def test_dm_messages_bypass_group_policies():
 
 
 @pytest.mark.asyncio
+async def test_group_policy_command_only_enforcement():
+    """Test that command_only only allows commands in groups."""
+    bot = create_test_bot(group_policy="command_only")
+
+    message_update = create_mock_telegram_update(chat_type="group", text="hello everyone")
+    message = await process_inbound_telegram_message(message_update, bot)
+    assert message is None, "Non-command group messages should be blocked in command_only mode"
+
+    command_update = create_mock_telegram_update(chat_type="group", text="/help")
+    command_message = await process_inbound_telegram_message(command_update, bot)
+    assert command_message is not None, "Commands should pass in command_only mode"
+
+
+@pytest.mark.asyncio
 @patch.object(UnknownUserHandler, 'handle')
 async def test_pairing_system_integration(mock_unknown_handler):
     """Test that pairing system is properly integrated."""
@@ -166,8 +180,8 @@ async def test_pairing_system_integration(mock_unknown_handler):
     # Mock the UnknownUserHandler to simulate pairing rejection
     mock_unknown_handler.return_value = False  # User not approved
     
-    # Bot with empty allowlist (no users explicitly allowed)
-    bot = create_test_bot(allowed_users=[])
+    # Bot with explicit allowlist that does not include unknown user
+    bot = create_test_bot(allowed_users=["42"])
     
     # Message from unknown user
     unknown_update = create_mock_telegram_update(user_id="12345", text="hello")
@@ -187,7 +201,7 @@ async def test_empty_allowlists_allow_all():
     # Bot with no restrictions
     bot = create_test_bot(allowed_users=[], allowed_channels=[])
     
-    # Message from any user in private chat
+    # Message from any user in any channel
     update = create_mock_telegram_update(user_id="99999", chat_id="-999999999", text="hello", chat_type="private")
     message = await process_inbound_telegram_message(update, bot)
     assert message is not None, "Empty allowlists should allow all users and channels"
@@ -202,7 +216,7 @@ async def test_audio_message_transcription():
     # Mock the transcribe_audio method
     bot._transcribe_audio = AsyncMock(return_value="[Voice message]: transcribed text")
     
-    # Create update with voice message in private chat
+    # Create update with voice message
     update = create_mock_telegram_update(text=None, chat_type="private")
     update.message.text = None
     update.message.voice = MagicMock()  # Simulate voice message

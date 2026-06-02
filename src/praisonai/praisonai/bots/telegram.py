@@ -883,9 +883,13 @@ async def process_inbound_telegram_message(
         group_policy = getattr(bot.config, 'group_policy', 'mention_only')
         mention_required = getattr(bot.config, 'mention_required', True)
         
-        if group_policy == "mention_only" or mention_required:
+        if group_policy == "command_only":
+            if message.message_type != MessageType.COMMAND:
+                logger.debug(f"Message dropped: non-command in command_only group {channel_id}")
+                return None
+        elif group_policy == "mention_only" or mention_required:
             # Check if bot was mentioned in the message
-            bot_username = bot._bot_user.username if bot._bot_user else ""
+            bot_username = bot._bot_user.username.lower() if bot._bot_user and bot._bot_user.username else ""
             bot_mentioned = (
                 bot_username and f"@{bot_username.lower()}" in message.content.lower()
             ) or message.message_type == MessageType.COMMAND  # Commands are always allowed
@@ -897,4 +901,3 @@ async def process_inbound_telegram_message(
     # All security checks passed
     logger.debug(f"Message security checks passed for user {user_id} in channel {channel_id}")
     return message
-
