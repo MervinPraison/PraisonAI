@@ -11,6 +11,8 @@ content = scrape_page("https://example.com")
 """
 
 import logging
+import ipaddress
+import socket
 from typing import List, Dict, Union, Optional, Any
 from importlib import util
 import json
@@ -19,6 +21,48 @@ import re
 import os
 import hashlib
 import time
+
+
+def _host_is_blocked(hostname: str) -> bool:
+    """Return True when hostname resolves to loopback/private/internal targets."""
+    if not hostname:
+        return True
+    host = hostname.lower().rstrip(".")
+    if host in ("localhost", "0.0.0.0", "::1") or host.endswith(".localhost"):
+        return True
+    if host in ("169.254.169.254", "metadata.google.internal"):
+        return True
+    if any(host.endswith(suffix) for suffix in (".local", ".internal", ".localdomain")):
+        return True
+
+    def _ip_blocked(ip: ipaddress._BaseAddress) -> bool:
+        return bool(
+            ip.is_private or ip.is_loopback or ip.is_reserved or ip.is_link_local
+        )
+
+    if host.isdigit():
+        try:
+            return _ip_blocked(ipaddress.ip_address(int(host)))
+        except (ValueError, OverflowError):
+            return True
+
+    if host.startswith("0x"):
+        try:
+            return _ip_blocked(ipaddress.ip_address(int(host, 16)))
+        except (ValueError, OverflowError):
+            return True
+
+    try:
+        return _ip_blocked(ipaddress.ip_address(host))
+    except ValueError:
+        pass
+
+    try:
+        return _ip_blocked(ipaddress.ip_address(socket.inet_aton(host)))
+    except OSError:
+        pass
+
+    return False
 
 class SpiderTools:
     """Tools for web scraping and crawling."""
@@ -38,6 +82,17 @@ class SpiderTools:
             bool: True if URL is safe, False otherwise
         """
         try:
+            # Reject URLs containing characters that cause urlparse and the
+            # underlying HTTP client (e.g. requests) to disagree on the
+            # destination host. Backslashes and ASCII control characters in
+            # the authority portion can be used to smuggle a private host
+            # past hostname-based SSRF checks (e.g. ``http://127.0.0.1:6666\@1.1.1.1``
+            # parses as host ``1.1.1.1`` but is dispatched to ``127.0.0.1``).
+            if not isinstance(url, str):
+                return False
+            if "\\" in url or any(ord(c) < 0x20 or ord(c) == 0x7f for c in url):
+                return False
+
             parsed = urlparse(url)
             
             # Only allow http/https protocols
@@ -48,31 +103,9 @@ class SpiderTools:
             if not parsed.hostname:
                 return False
             
-            # Reject local/internal addresses
-            hostname = parsed.hostname.lower()
-            
-            # Block localhost and loopback
-            if hostname in ['localhost', '127.0.0.1', '0.0.0.0', '::1']:
+            if _host_is_blocked(parsed.hostname):
                 return False
-            
-            # Block private IP ranges
-            import ipaddress
-            try:
-                ip = ipaddress.ip_address(hostname)
-                if ip.is_private or ip.is_reserved or ip.is_loopback or ip.is_link_local:
-                    return False
-            except ValueError:
-                # Not an IP address, continue with domain validation
-                pass
-            
-            # Block common internal domains
-            if any(hostname.endswith(domain) for domain in ['.local', '.internal', '.localdomain']):
-                return False
-            
-            # Block metadata service endpoints
-            if hostname in ['169.254.169.254', 'metadata.google.internal']:
-                return False
-            
+
             return True
             
         except Exception:

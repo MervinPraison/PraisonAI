@@ -6,12 +6,13 @@ at regular intervals, enabling 24/7 autonomous agent operations.
 """
 
 import threading
-import time
 import logging
 from datetime import datetime
 from typing import Optional, Dict, Any, Callable
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
 from .base import ScheduleParser, PraisonAgentExecutor
+from .shared import backoff_delay
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ class AgentScheduler:
         self._failure_count = 0
         self._total_cost = 0.0
         self._start_time = None
+        self._stats_lock = threading.Lock()
         
     def start(
         self,
@@ -160,17 +162,18 @@ class AgentScheduler:
         Returns:
             Dictionary with execution stats including cost
         """
-        runtime = (datetime.now() - self._start_time).total_seconds() if self._start_time else 0
-        return {
-            "is_running": self.is_running,
-            "total_executions": self._execution_count,
-            "successful_executions": self._success_count,
-            "failed_executions": self._failure_count,
-            "success_rate": (self._success_count / self._execution_count * 100) if self._execution_count > 0 else 0,
-            "total_cost_usd": round(self._total_cost, 4),
-            "runtime_seconds": round(runtime, 1),
-            "cost_per_execution": round(self._total_cost / self._execution_count, 4) if self._execution_count > 0 else 0
-        }
+        with self._stats_lock:
+            runtime = (datetime.now() - self._start_time).total_seconds() if self._start_time else 0
+            return {
+                "is_running": self.is_running,
+                "total_executions": self._execution_count,
+                "successful_executions": self._success_count,
+                "failed_executions": self._failure_count,
+                "success_rate": (self._success_count / self._execution_count * 100) if self._execution_count > 0 else 0,
+                "total_cost_usd": round(self._total_cost, 4),
+                "runtime_seconds": round(runtime, 1),
+                "cost_per_execution": round(self._total_cost / self._execution_count, 4) if self._execution_count > 0 else 0
+            }
     
     def _update_state_if_daemon(self):
         """Update state file with execution stats if running as daemon."""
@@ -232,7 +235,8 @@ class AgentScheduler:
     
     def _execute_with_retry(self, max_retries: int):
         """Execute agent with retry logic and timeout."""
-        self._execution_count += 1
+        with self._stats_lock:
+            self._execution_count += 1
         success = False
         result = None
         
@@ -242,21 +246,16 @@ class AgentScheduler:
                 
                 # Execute with timeout if specified
                 if self.timeout:
-                    import signal
-                    
-                    def timeout_handler(signum, frame):
-                        raise TimeoutError(f"Execution exceeded {self.timeout}s timeout")
-                    
-                    # Set timeout alarm (Unix only)
+                    executor = ThreadPoolExecutor(max_workers=1)
+                    future = executor.submit(self._executor.execute, self.task)
                     try:
-                        signal.signal(signal.SIGALRM, timeout_handler)
-                        signal.alarm(self.timeout)
-                        result = self._executor.execute(self.task)
-                        signal.alarm(0)  # Cancel alarm
-                    except AttributeError:
-                        # Windows doesn't support SIGALRM, use threading.Timer fallback
-                        logger.warning("Timeout not supported on this platform, executing without timeout")
-                        result = self._executor.execute(self.task)
+                        result = future.result(timeout=self.timeout)
+                    except FuturesTimeout as e:
+                        future.cancel()
+                        executor.shutdown(wait=False, cancel_futures=True)
+                        raise TimeoutError(f"Execution exceeded {self.timeout}s timeout") from e
+                    else:
+                        executor.shutdown(wait=False, cancel_futures=True)
                 else:
                     result = self._executor.execute(self.task)
                 
@@ -268,10 +267,10 @@ class AgentScheduler:
                 
                 # Estimate cost (rough: ~$0.0001 per execution for gpt-4o-mini)
                 estimated_cost = 0.0001  # Base cost estimate
-                self._total_cost += estimated_cost
+                with self._stats_lock:
+                    self._total_cost += estimated_cost
+                    self._success_count += 1
                 logger.debug(f"Estimated cost this run: ${estimated_cost:.4f}, Total: ${self._total_cost:.4f}")
-                
-                self._success_count += 1
                 success = True
                 
                 if self.on_success:
@@ -292,12 +291,15 @@ class AgentScheduler:
                 logger.error(f"Agent execution failed on attempt {attempt + 1}: {e}")
                 
                 if attempt < max_retries - 1:
-                    wait_time = 30 * (attempt + 1)  # Exponential backoff
+                    wait_time = backoff_delay(attempt, initial=30.0, cap=300.0)
                     logger.debug(f"Waiting {wait_time}s before retry...")
-                    time.sleep(wait_time)
+                    if self._stop_event.wait(wait_time):
+                        # stop() was called during backoff — exit immediately
+                        return
         
         if not success:
-            self._failure_count += 1
+            with self._stats_lock:
+                self._failure_count += 1
             logger.error(f"Agent execution failed after {max_retries} attempts")
             
             if self.on_failure:

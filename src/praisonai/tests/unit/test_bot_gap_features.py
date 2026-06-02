@@ -289,6 +289,28 @@ class TestConfigSchema:
         with pytest.raises(ValueError, match="Unknown channel"):
             validate_bot_config({"channels": {"signal": {"token": "x"}}})
 
+    def test_multi_channel_custom_keys_with_platform(self, monkeypatch):
+        """Onboard multi-telegram YAML uses telegram_<role> keys plus platform field."""
+        from praisonai.bots._config_schema import validate_bot_config
+
+        monkeypatch.setenv("_TEST_CFO_TOKEN", "cfo-token")
+        raw = {
+            "channels": {
+                "telegram_cfo": {
+                    "platform": "telegram",
+                    "token": "${_TEST_CFO_TOKEN}",
+                    "group_policy": "mention_only",
+                },
+                "telegram_ops": {
+                    "platform": "telegram",
+                    "token": "${_TEST_CFO_TOKEN}",
+                },
+            }
+        }
+        result = validate_bot_config(raw)
+        assert result.channels["telegram_cfo"].platform == "telegram"
+        assert result.channels["telegram_cfo"].token == "cfo-token"
+
     def test_invalid_group_policy(self):
         from praisonai.bots._config_schema import validate_bot_config
         with pytest.raises(ValueError, match="group_policy"):

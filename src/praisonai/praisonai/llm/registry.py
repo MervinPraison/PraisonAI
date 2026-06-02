@@ -21,6 +21,8 @@ Example:
 """
 
 from typing import Any, Callable, Dict, List, Optional, Type, Union
+import threading
+from .._registry import PluginRegistry
 
 
 # Type aliases
@@ -29,133 +31,46 @@ ProviderFactory = Callable[[str, Optional[Dict[str, Any]]], Any]
 ProviderType = Union[ProviderClass, ProviderFactory]
 
 
-class LLMProviderRegistry:
+class LLMProviderRegistry(PluginRegistry[ProviderType]):
     """
     Registry for LLM providers.
     
     Manages registration and resolution of LLM providers by name.
     Supports lazy loading, aliases, and isolated instances.
+    Thread-safe for concurrent operations.
+    
+    Now inherits from PluginRegistry to eliminate duplication.
     """
     
     def __init__(self):
-        """Initialize an empty registry."""
-        self._providers: Dict[str, ProviderType] = {}
-        self._aliases: Dict[str, str] = {}  # alias -> canonical name
+        """Initialize LLM provider registry."""
+        # Get built-in provider loaders
+        builtins = _get_builtin_provider_loaders()
+        
+        # Initialize parent with entry points and builtins
+        super().__init__(
+            entry_point_group="praisonai.llm_providers",
+            builtins=builtins
+        )
+        
+        # Register aliases for built-in providers
+        self._register_builtin_aliases()
     
-    def register(
-        self,
-        name: str,
-        provider: ProviderType,
-        *,
-        override: bool = False,
-        aliases: Optional[List[str]] = None
-    ) -> None:
-        """
-        Register a provider by name.
+    def _register_builtin_aliases(self) -> None:
+        """Register aliases for built-in providers."""
+        aliases_map = [
+            ("openai", ("oai",)),
+            ("anthropic", ("claude",)),
+            ("google", ("gemini", "google_genai")),
+        ]
         
-        Args:
-            name: Provider name (e.g., 'cloudflare', 'ollama')
-            provider: Provider class or factory function
-            override: Allow overwriting existing registration
-            aliases: Additional names that resolve to this provider
-            
-        Raises:
-            ValueError: If name is already registered (unless override=True)
-        """
-        normalized_name = name.lower()
-        
-        # Check for existing registration
-        if normalized_name in self._providers and not override:
-            raise ValueError(
-                f"Provider '{name}' is already registered. "
-                f"Use override=True to replace it."
-            )
-        
-        self._providers[normalized_name] = provider
-        
-        # Register aliases
-        if aliases:
-            for alias in aliases:
-                normalized_alias = alias.lower()
-                # Check collision with existing provider name
-                if normalized_alias in self._providers and not override:
-                    raise ValueError(
-                        f"Alias '{alias}' conflicts with existing provider name. "
-                        f"Use override=True to replace it."
-                    )
-                # Check collision with existing alias
-                if normalized_alias in self._aliases and not override:
-                    existing_target = self._aliases[normalized_alias]
-                    raise ValueError(
-                        f"Alias '{alias}' is already registered (points to '{existing_target}'). "
-                        f"Use override=True to replace it."
-                    )
-                self._aliases[normalized_alias] = normalized_name
+        with self._lock:
+            for name, aliases in aliases_map:
+                if name in self._items:  # Only add aliases if the provider loaded
+                    for alias in aliases:
+                        self._aliases[alias.lower()] = name.lower()
     
-    def unregister(self, name: str) -> bool:
-        """
-        Unregister a provider by name.
-        
-        Args:
-            name: Provider name to unregister
-            
-        Returns:
-            True if provider was unregistered, False if not found
-        """
-        normalized_name = name.lower()
-        
-        # Check if it's an alias
-        if normalized_name in self._aliases:
-            del self._aliases[normalized_name]
-            return True
-        
-        # Check if it's a canonical name
-        if normalized_name in self._providers:
-            # Remove all aliases pointing to this provider
-            aliases_to_remove = [
-                alias for alias, canonical in self._aliases.items()
-                if canonical == normalized_name
-            ]
-            for alias in aliases_to_remove:
-                del self._aliases[alias]
-            
-            del self._providers[normalized_name]
-            return True
-        
-        return False
-    
-    def has(self, name: str) -> bool:
-        """
-        Check if a provider is registered.
-        
-        Args:
-            name: Provider name to check
-            
-        Returns:
-            True if provider is registered
-        """
-        normalized_name = name.lower()
-        return normalized_name in self._providers or normalized_name in self._aliases
-    
-    def list(self) -> List[str]:
-        """
-        List all registered provider names (canonical names only).
-        
-        Returns:
-            List of provider names
-        """
-        return list(self._providers.keys())
-    
-    def list_all(self) -> List[str]:
-        """
-        List all names including aliases.
-        
-        Returns:
-            List of all registered names and aliases
-        """
-        return list(self._providers.keys()) + list(self._aliases.keys())
-    
-    def resolve(
+    def resolve_provider(
         self,
         name: str,
         model_id: str,
@@ -175,22 +90,69 @@ class LLMProviderRegistry:
         Raises:
             ValueError: If provider not found
         """
-        normalized_name = name.lower()
+        provider_cls = self.resolve(name)
+        # Create instance outside the lock
+        return provider_cls(model_id, config)
+
+    def register_provider(
+        self,
+        name: str,
+        provider: ProviderType,
+        *,
+        override: bool = False,
+        aliases: Optional[List[str]] = None
+    ) -> None:
+        """
+        Register a provider by name with override validation.
         
-        # Resolve alias to canonical name
-        canonical_name = self._aliases.get(normalized_name, normalized_name)
-        
-        provider = self._providers.get(canonical_name)
-        if provider is None:
-            available = self.list()
+        Args:
+            name: Provider name (e.g., 'cloudflare', 'ollama')
+            provider: Provider class or factory function
+            override: Allow overwriting existing registration
+            aliases: Additional names that resolve to this provider
+            
+        Raises:
+            ValueError: If name is already registered (unless override=True)
+        """
+        # Check for existing registration if override is False
+        if not override and self.is_available(name):
             raise ValueError(
-                f"Unknown provider: '{name}'. "
-                f"Available providers: {', '.join(available) if available else 'none'}. "
-                f"Register a custom provider with register_llm_provider('{name}', YourProviderClass)."
+                f"Provider '{name}' is already registered. "
+                f"Use override=True to replace it."
             )
         
-        # Create instance
-        return provider(model_id, config)
+        # Check alias conflicts if override is False
+        if not override and aliases:
+            for alias in aliases:
+                if self.is_available(alias):
+                    raise ValueError(
+                        f"Alias '{alias}' is already registered. "
+                        f"Use override=True to replace it."
+                    )
+        
+        # If override=True, unregister existing entries first
+        if override:
+            self.unregister(name)
+            if aliases:
+                for alias in aliases:
+                    self.unregister(alias)
+        
+        # Use parent class registration
+        self.register(name, provider, aliases=aliases)
+    
+    # Inherit unregister, is_available, list_names from parent
+    # Add backwards compatibility aliases
+    def has(self, name: str) -> bool:
+        """Check if a provider is registered (alias for is_available)."""
+        return self.is_available(name)
+    
+    def list(self) -> List[str]:
+        """List provider names (alias for list_names)."""
+        return self.list_names()
+    
+    def list_all(self) -> List[str]:
+        """List all names including aliases (alias for list_all_names)."""
+        return self.list_all_names()
     
     def get(self, name: str) -> Optional[ProviderType]:
         """
@@ -202,42 +164,114 @@ class LLMProviderRegistry:
         Returns:
             Provider class/factory or None
         """
-        normalized_name = name.lower()
-        canonical_name = self._aliases.get(normalized_name, normalized_name)
-        return self._providers.get(canonical_name)
+        try:
+            return self.resolve(name)
+        except ValueError:
+            return None
 
 
 # ============================================================================
-# Default Registry Singleton
+# Default Registry Instance (No Singleton)
 # ============================================================================
 
-_default_registry: Optional[LLMProviderRegistry] = None
-
+# Default module-level registry instance
+_default_llm_registry: Optional[LLMProviderRegistry] = None
+_default_llm_lock = threading.Lock()
 
 def get_default_llm_registry() -> LLMProviderRegistry:
     """
     Get the default global LLM provider registry.
     
     This is the registry used by create_llm_provider() when no custom registry
-    is specified.
+    is specified. Uses lazy initialization pattern.
     """
-    global _default_registry
-    if _default_registry is None:
-        _default_registry = LLMProviderRegistry()
-        _register_builtin_providers(_default_registry)
-    return _default_registry
+    global _default_llm_registry
+    if _default_llm_registry is None:
+        with _default_llm_lock:
+            if _default_llm_registry is None:
+                _default_llm_registry = LLMProviderRegistry()
+    return _default_llm_registry
 
 
-def _register_builtin_providers(registry: LLMProviderRegistry) -> None:
+def _get_builtin_provider_loaders() -> Dict[str, Callable[[], ProviderType]]:
     """
-    Register built-in providers to a registry.
+    Get built-in provider loaders.
     
+    Returns a dict of name -> loader function that creates provider factories.
     Uses lazy loading to avoid importing heavy dependencies at module load time.
     """
-    # Note: In Python, the actual LLM providers are in praisonaiagents.llm
-    # which uses LiteLLM. This registry is for custom provider extensions.
-    # Built-in providers are handled by LiteLLM automatically.
-    pass
+    # Built-in adapter that wraps LiteLLM so create_llm_provider works out of the box.
+    class _LiteLLMProvider:
+        """Generic LiteLLM-backed provider used for openai/anthropic/google/etc."""
+        def __init__(self, model_id: str, config: Optional[Dict[str, Any]] = None):
+            self.provider_id = "litellm"
+            self.model_id = model_id
+            self.config = config or {}
+
+        def _resolve_model_and_kwargs(self, prompt: str, **kwargs):
+            """Helper to resolve model and kwargs for both sync and async methods."""
+            try:
+                import litellm  # lazy
+            except ImportError as err:
+                raise ImportError(
+                    "LiteLLM is required for built-in providers. "
+                    "Install with: pip install litellm"
+                ) from err
+            
+            provider_prefix = self.config.get("provider", "")
+            full_model = f"{provider_prefix}/{self.model_id}".strip("/") if provider_prefix else self.model_id
+            completion_kwargs = {
+                k: v for k, v in {**self.config, **kwargs}.items() if k != "provider"
+            }
+            messages = [{"role": "user", "content": prompt}]
+            return litellm, full_model, messages, completion_kwargs
+
+        def generate(self, prompt: str, **kwargs):
+            """Sync variant — uses litellm.completion()."""
+            litellm, full_model, messages, completion_kwargs = self._resolve_model_and_kwargs(prompt, **kwargs)
+            return litellm.completion(
+                model=full_model,
+                messages=messages,
+                **completion_kwargs,
+            )
+
+        async def generate_async(self, prompt: str, **kwargs):
+            """Async variant — uses litellm.acompletion() to avoid blocking the event loop.
+            
+            generate() calls litellm.completion() which is a blocking network call.
+            Calling it from an async context would stall the entire event loop.
+            generate_async() uses litellm.acompletion() — the native async variant.
+            """
+            litellm, full_model, messages, completion_kwargs = self._resolve_model_and_kwargs(prompt, **kwargs)
+            return await litellm.acompletion(
+                model=full_model,
+                messages=messages,
+                **completion_kwargs,
+            )
+
+    def _make_litellm_factory(provider_prefix: str):
+        def factory(model_id, config=None):
+            cfg = dict(config or {})
+            cfg.setdefault("provider", provider_prefix)
+            return _LiteLLMProvider(model_id, cfg)
+        return factory
+
+    # Build loader dict for the canonical PluginRegistry
+    loaders: Dict[str, Callable[[], ProviderType]] = {}
+    
+    # Cover the providers parse_model_string() already special-cases.
+    for name, aliases in [
+        ("openai",    ("oai",)),
+        ("anthropic", ("claude",)),
+        ("google",    ("gemini", "google_genai")),
+    ]:
+        # Use local function to capture name correctly in closure
+        def make_loader(provider_name):
+            return lambda: _make_litellm_factory(provider_name)
+        loaders[name] = make_loader(name)
+        # Note: aliases will be registered separately via PluginRegistry.register()
+    
+    return loaders
 
 
 def register_llm_provider(
@@ -261,7 +295,7 @@ def register_llm_provider(
         
         register_llm_provider("cloudflare", CloudflareProvider)
     """
-    get_default_llm_registry().register(name, provider, override=override, aliases=aliases)
+    get_default_llm_registry().register_provider(name, provider, override=override, aliases=aliases)
 
 
 def unregister_llm_provider(name: str) -> bool:
@@ -363,12 +397,12 @@ def create_llm_provider(
         name = input_value["name"]
         model_id = input_value.get("model_id", "default")
         provider_config = input_value.get("config") or config
-        return reg.resolve(name, model_id, provider_config)
+        return reg.resolve_provider(name, model_id, provider_config)
     
     # Case 3: String - parse and resolve
     if isinstance(input_value, str):
         parsed = parse_model_string(input_value)
-        return reg.resolve(parsed["provider_id"], parsed["model_id"], config)
+        return reg.resolve_provider(parsed["provider_id"], parsed["model_id"], config)
     
     raise ValueError(
         f"Invalid provider input. Expected string, provider instance, or spec dict. "
@@ -378,5 +412,6 @@ def create_llm_provider(
 
 def _reset_default_registry() -> None:
     """Reset the default registry (mainly for testing)."""
-    global _default_registry
-    _default_registry = None
+    global _default_llm_registry
+    with _default_llm_lock:
+        _default_llm_registry = None

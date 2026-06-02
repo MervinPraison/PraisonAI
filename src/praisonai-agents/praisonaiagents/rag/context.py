@@ -6,7 +6,13 @@ No heavy imports - only stdlib.
 """
 
 import hashlib
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
+
+if TYPE_CHECKING:
+    from ..knowledge.models import SearchResultItem
+
+
+ResultItem = Union[Dict[str, Any], "SearchResultItem"]
 
 
 def _estimate_tokens(text: str) -> int:
@@ -17,6 +23,39 @@ def _estimate_tokens(text: str) -> int:
     This avoids importing tokenizers for lightweight operation.
     """
     return len(text) // 4 + 1
+
+
+def _extract_value(item: ResultItem, key: str, default: Any = None) -> Any:
+    """
+    Extract value from either dict or object (e.g., SearchResultItem).
+    
+    Args:
+        item: Dictionary or object with attributes
+        key: Key/attribute name to extract
+        default: Default value if key not found
+        
+    Returns:
+        Extracted value or default
+    """
+    if isinstance(item, dict):
+        return item.get(key, default)
+    else:
+        return getattr(item, key, default)
+
+
+def _extract_metadata_value(
+    item: ResultItem,
+    metadata: Dict[str, Any],
+    key: str,
+    default: Any = "",
+) -> Any:
+    """
+    Extract metadata value with fallback to top-level item attribute.
+    """
+    value = metadata.get(key)
+    if value is None:
+        return _extract_value(item, key, default)
+    return value
 
 
 def _chunk_hash(text: str, source: Optional[str] = None) -> str:
@@ -35,31 +74,38 @@ def _chunk_hash(text: str, source: Optional[str] = None) -> str:
 
 
 def deduplicate_chunks(
-    results: List[Dict[str, Any]],
+    results: List[ResultItem],
     similarity_threshold: float = 0.9,
-) -> List[Dict[str, Any]]:
+) -> List[ResultItem]:
     """
     Deduplicate chunks by content hash.
     
+    Handles both dict format and SearchResultItem objects.
+    
     Args:
-        results: List of search results with 'text' or 'memory' key
+        results: List of search results (dicts or SearchResultItem objects)
         similarity_threshold: Not used currently (hash-based dedup)
         
     Returns:
         Deduplicated list of results
     """
     seen_hashes: Set[str] = set()
-    unique_results: List[Dict[str, Any]] = []
+    unique_results: List[ResultItem] = []
     
     for result in results:
         # Skip None results
         if result is None:
             continue
-        # Handle different result formats
-        text = result.get("text") or result.get("memory", "")
+        
+        # Handle different result formats (dict or SearchResultItem)
+        text = _extract_value(result, "text") or _extract_value(result, "memory", "")
+        
         # CRITICAL: Handle metadata=None from mem0 - ensure always dict
-        metadata = result.get("metadata") or {}
-        source = metadata.get("source", "")
+        metadata = _extract_value(result, "metadata") or {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        
+        source = _extract_metadata_value(result, metadata, "source", "")
         
         chunk_id = _chunk_hash(text, source)
         
@@ -106,17 +152,19 @@ def truncate_context(
 
 
 def build_context(
-    results: List[Dict[str, Any]],
+    results: List[ResultItem],
     max_tokens: int = 4000,
     deduplicate: bool = True,
     separator: str = "\n\n---\n\n",
     include_source: bool = True,
-) -> Tuple[str, List[Dict[str, Any]]]:
+) -> Tuple[str, List[ResultItem]]:
     """
     Build context string from retrieval results.
     
+    Handles both dict format and SearchResultItem objects.
+    
     Args:
-        results: List of search results
+        results: List of search results (dicts or SearchResultItem objects)
         max_tokens: Maximum tokens for context
         deduplicate: Whether to deduplicate chunks
         separator: Separator between chunks
@@ -133,7 +181,7 @@ def build_context(
         results = deduplicate_chunks(results)
     
     context_parts: List[str] = []
-    used_results: List[Dict[str, Any]] = []
+    used_results: List[ResultItem] = []
     current_tokens = 0
     separator_tokens = _estimate_tokens(separator)
     
@@ -141,17 +189,21 @@ def build_context(
         # Skip None results
         if result is None:
             continue
-        # Handle different result formats
-        text = result.get("text") or result.get("memory", "")
+        
+        # Handle different result formats (dict or SearchResultItem)
+        text = _extract_value(result, "text") or _extract_value(result, "memory", "")
         if not text:
             continue
         
         # Build chunk text with optional source
         if include_source:
             # CRITICAL: Handle metadata=None from mem0 - ensure always dict
-            metadata = result.get("metadata") or {}
-            source = metadata.get("source", "")
-            filename = metadata.get("filename", "")
+            metadata = _extract_value(result, "metadata") or {}
+            if not isinstance(metadata, dict):
+                metadata = {}
+            
+            source = _extract_metadata_value(result, metadata, "source", "")
+            filename = _extract_metadata_value(result, metadata, "filename", "")
             source_label = filename or source or f"Source {i + 1}"
             chunk_text = f"[{source_label}]\n{text}"
         else:
@@ -194,11 +246,14 @@ class DefaultContextBuilder:
     
     def build(
         self,
-        results: List[Dict[str, Any]],
+        results: List[ResultItem],
         max_tokens: int = 4000,
         deduplicate: bool = True,
     ) -> str:
-        """Build context string from results."""
+        """Build context string from results.
+        
+        Handles both dict format and SearchResultItem objects.
+        """
         context, _ = build_context(
             results=results,
             max_tokens=max_tokens,

@@ -193,23 +193,32 @@ def _load_basic_tools() -> Dict[str, Callable]:
     return tools
 
 
-# ── Shared runtime singleton ────────────────────────────────────────────────
-# ACP and LSP tools share ONE InteractiveRuntime to avoid duplicate LSP servers.
-_shared_runtime = None
-_shared_agent_tools = None
+# ── Context-local runtime for multi-agent safety ──────────────────────────
+# Each agent/task/request gets its own runtime context to avoid config conflicts and race conditions.
+import contextvars
+
+_runtime_var: contextvars.ContextVar = contextvars.ContextVar("interactive_runtime", default=None)
 
 
 def _get_shared_runtime(config: ToolConfig):
-    """Get or create a shared InteractiveRuntime instance.
+    """Get or create a context-local InteractiveRuntime instance.
+    
+    Each context (agent/task/request) gets its own runtime with the config provided.
+    This prevents race conditions and config capture issues from global singletons.
+    
+    First-caller-wins policy: Once a runtime is created for a context with specific
+    config, subsequent calls in the same context will return the cached runtime and
+    ignore any different config parameters.
     
     Returns (runtime, all_tools) — the runtime and the full list of
     agent-centric tool functions created from it.
     """
-    global _shared_runtime, _shared_agent_tools
-    
-    if _shared_runtime is not None and _shared_agent_tools is not None:
-        return _shared_runtime, _shared_agent_tools
-    
+    bundle = _runtime_var.get()
+    if bundle is not None:
+        # Return cached runtime (first-caller-wins for this context)
+        return bundle
+        
+    # Create new runtime for this context
     from .interactive_runtime import InteractiveRuntime, RuntimeConfig
     from .agent_tools import create_agent_centric_tools
     
@@ -220,37 +229,41 @@ def _get_shared_runtime(config: ToolConfig):
         approval_mode=config.approval_mode,
     )
     
-    _shared_runtime = InteractiveRuntime(runtime_config)
-    _shared_agent_tools = create_agent_centric_tools(_shared_runtime)
+    runtime = InteractiveRuntime(runtime_config)
+    agent_tools = create_agent_centric_tools(runtime)
+    bundle = (runtime, agent_tools)
+    _runtime_var.set(bundle)
+    logger.debug("Created context-local InteractiveRuntime")
     
-    logger.debug("Created shared InteractiveRuntime")
-    return _shared_runtime, _shared_agent_tools
+    return bundle
 
 
 def cleanup_runtime():
-    """Stop the shared InteractiveRuntime (LSP server, ACP session).
+    """Stop the context-local InteractiveRuntime (LSP server, ACP session).
     
     Call this when the agent finishes to release resources.
-    Safe to call multiple times or when no runtime exists.
+    Safe to call multiple times or when no runtime exists in this context.
     """
-    global _shared_runtime, _shared_agent_tools
-    
-    if _shared_runtime is not None:
-        import asyncio
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    pool.submit(asyncio.run, _shared_runtime.stop()).result(timeout=5)
-            else:
-                loop.run_until_complete(_shared_runtime.stop())
-        except Exception as e:
-            logger.debug(f"Runtime cleanup: {e}")
+    bundle = _runtime_var.get()
+    if bundle is None:
+        return
         
-        _shared_runtime = None
-        _shared_agent_tools = None
-        logger.debug("Shared InteractiveRuntime stopped")
+    runtime, _ = bundle
+    
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                pool.submit(asyncio.run, runtime.stop()).result(timeout=5)
+        else:
+            loop.run_until_complete(runtime.stop())
+    except Exception as e:
+        logger.debug(f"Runtime cleanup: {e}")
+    
+    _runtime_var.set(None)
+    logger.debug("Context-local InteractiveRuntime stopped")
 
 
 def _load_acp_tools(config: ToolConfig) -> Dict[str, Callable]:

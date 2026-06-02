@@ -7,10 +7,30 @@ Supports runtime tool registration with context manager pattern.
 
 import ast
 import importlib.util
+import logging
+import os
 import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional
+
+logger = logging.getLogger(__name__)
+
+
+def _autoload_tools_enabled() -> bool:
+    """Return True when implicit ``tools.py`` autoload is opted in.
+
+    Loading and executing arbitrary ``tools.py`` files from a recipe
+    template directory or the current working directory is unsafe whenever
+    the recipe source is not fully trusted (e.g. when it was fetched from
+    a remote registry such as GitHub). We therefore disable the implicit
+    autoload by default and require explicit opt-in.
+
+    The env var ``PRAISONAI_ALLOW_TEMPLATE_TOOLS`` is honored to keep
+    legacy local workflows working without a code change.
+    """
+    val = os.environ.get("PRAISONAI_ALLOW_TEMPLATE_TOOLS", "").strip().lower()
+    return val in ("1", "true", "yes", "on")
 
 
 class SecurityError(Exception):
@@ -329,24 +349,41 @@ def create_tool_registry_with_overrides(
                 except Exception:
                     pass
     
-    # 4.5. Current working directory tools.py (if exists)
-    cwd_tools_py = Path.cwd() / "tools.py"
-    if cwd_tools_py.exists():
-        try:
-            tools = loader.load_from_file(str(cwd_tools_py))
-            registry.update(tools)
-        except Exception:
-            pass
-    
-    # 4. Template-local tools.py
-    if template_dir:
-        tools_py = Path(template_dir) / "tools.py"
-        if tools_py.exists():
+    # 4.5/4. Implicit ``tools.py`` autoload is only honored when the operator
+    # explicitly opts in via the ``PRAISONAI_ALLOW_TEMPLATE_TOOLS`` environment
+    # variable. This prevents arbitrary code execution when recipes are
+    # fetched from remote registries (e.g. GitHub) where ``tools.py`` cannot
+    # be considered trusted. Explicit ``override_files`` / ``override_dirs``
+    # / ``tools_sources`` continue to work and are the supported way to load
+    # custom tool modules.
+    if _autoload_tools_enabled():
+        # 4.5. Current working directory tools.py (if exists)
+        cwd_tools_py = Path.cwd() / "tools.py"
+        if cwd_tools_py.exists():
             try:
-                tools = loader.load_from_file(str(tools_py))
+                tools = loader.load_from_file(str(cwd_tools_py))
                 registry.update(tools)
             except Exception:
-                pass
+                # Skip-on-error is the documented contract here, but log
+                # at debug level so opt-in users can troubleshoot a
+                # broken cwd ``tools.py`` without us going silent.
+                logger.debug(
+                    "failed to autoload cwd tools.py at %s", cwd_tools_py,
+                    exc_info=True,
+                )
+
+        # 4. Template-local tools.py
+        if template_dir:
+            tools_py = Path(template_dir) / "tools.py"
+            if tools_py.exists():
+                try:
+                    tools = loader.load_from_file(str(tools_py))
+                    registry.update(tools)
+                except Exception:
+                    logger.debug(
+                        "failed to autoload template tools.py at %s", tools_py,
+                        exc_info=True,
+                    )
     
     # 3. Template tools_sources (from TEMPLATE.yaml)
     if tools_sources:
@@ -424,8 +461,10 @@ def resolve_tools(
     if registry is None:
         registry = create_tool_registry_with_overrides(include_defaults=True)
     
-    # Load template-local tools.py if exists
-    if template_dir:
+    # Load template-local tools.py if exists. Gated behind the same opt-in
+    # flag as create_tool_registry_with_overrides() to prevent implicit code
+    # execution from untrusted (e.g. remotely fetched) recipe directories.
+    if template_dir and _autoload_tools_enabled():
         loader = ToolOverrideLoader()
         tools_py = Path(template_dir) / "tools.py"
         if tools_py.exists():
@@ -433,7 +472,10 @@ def resolve_tools(
                 local_tools = loader.load_from_file(str(tools_py))
                 registry.update(local_tools)
             except Exception:
-                pass
+                logger.debug(
+                    "failed to autoload template tools.py at %s", tools_py,
+                    exc_info=True,
+                )
     
     for tool in tool_names:
         if callable(tool):

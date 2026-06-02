@@ -247,7 +247,11 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                     
                     async def _send_agent_response():
                         text_to_send = await self._debouncer.debounce(user_id, bot_message.text)
-                        response = await self._session.chat(self._agent, user_id, text_to_send)
+                        response = await self._session.chat(
+                            self._agent, user_id, text_to_send,
+                            chat_id=str(message.channel.id),
+                            user_name=str(getattr(message.author, "name", "")),
+                        )
                         send_result = self.fire_message_sending(
                             str(message.channel.id), str(response),
                         )

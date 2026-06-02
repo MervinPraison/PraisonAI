@@ -26,6 +26,21 @@ if TYPE_CHECKING:
 class ToolExecutionMixin:
     """Mixin providing toolexecution methods for the Agent class."""
 
+    def _get_existing_stream_emitter(self):
+        """Return an already-initialized stream emitter without creating one."""
+        emitter = getattr(self, "_stream_emitter", None)
+        if emitter is not None:
+            return emitter
+
+        # Support name-mangled private attributes across class renames/inheritance.
+        for cls in type(self).mro():
+            mangled = f"_{cls.__name__}__stream_emitter"
+            if hasattr(self, mangled):
+                emitter = getattr(self, mangled, None)
+                if emitter is not None:
+                    return emitter
+        return None
+
     def _resolve_tool_names(self, tool_names):
         """Resolve tool names to actual tool instances from registry.
         
@@ -120,6 +135,12 @@ class ToolExecutionMixin:
         """
         logging.debug(f"{self.name} executing tool {function_name} with arguments: {arguments}")
         
+        # Handle bridge tool unwrapping BEFORE trace/stream/hooks (design invariant #6)
+        # Only intercept when tool_search is active; otherwise fall through to real tool execution
+        if (getattr(self, '_tool_search_config', None) is not None and
+                function_name in ("tool_search", "tool_describe", "tool_call")):
+            return self._handle_bridge_tool_call(function_name, arguments, tool_call_id)
+        
         # NOTE: tool_call callback is triggered by display_tool_call in openai_client.py
         # Do NOT call it here to avoid duplicate output
         
@@ -160,8 +181,9 @@ class ToolExecutionMixin:
         
         # Emit TOOL_CALL_START to stream_emitter (for AIUI/AG-UI consumers)
         # Zero overhead when no callbacks registered
-        if hasattr(self, '_Agent__stream_emitter') and getattr(self, "_Agent__stream_emitter", None) is not None and getattr(self, "_Agent__stream_emitter", None).has_callbacks:
-            getattr(self, "_Agent__stream_emitter", None).emit(StreamEvent(
+        _stream_emitter = self._get_existing_stream_emitter()
+        if _stream_emitter is not None and _stream_emitter.has_callbacks:
+            _stream_emitter.emit(StreamEvent(
                 type=StreamEventType.TOOL_CALL_START,
                 timestamp=_tool_start_perf,
                 tool_call={
@@ -194,6 +216,21 @@ class ToolExecutionMixin:
                 if res.output and res.output.modified_data:
                     arguments.update(res.output.modified_data)
 
+            # C4 — optional tool-argument validation via ToolValidatorProtocol.
+            # Zero overhead when not set. Users wire via `agent._tool_validator = MyValidator()`.
+            _validator = getattr(self, '_tool_validator', None)
+            if _validator is not None:
+                try:
+                    _vres = _validator.validate_args(function_name, arguments)
+                    if _vres is not None and not getattr(_vres, 'valid', True):
+                        _errs = "; ".join(getattr(_vres, 'errors', []) or ["validation failed"])
+                        logging.warning(
+                            f"Tool {function_name} args rejected by validator: {_errs}"
+                        )
+                        return f"Tool arguments rejected: {_errs}"
+                except Exception as _ve:  # noqa: BLE001 — never break tool exec on validator bug
+                    logging.debug(f"Tool validator raised; skipping validation: {_ve}")
+
             # P8/G11: Apply tool timeout if configured
             tool_timeout = getattr(self, '_tool_timeout', None)
             if tool_timeout and tool_timeout > 0:
@@ -202,7 +239,7 @@ class ToolExecutionMixin:
                 
                 def execute_with_context():
                     with with_injection_context(state):
-                        return self._execute_tool_impl(function_name, arguments)
+                        return self._execute_tool_with_circuit_breaker(function_name, arguments)
                 
                 # Use reusable executor to prevent resource leaks
                 if not hasattr(self, '_tool_executor'):
@@ -219,7 +256,7 @@ class ToolExecutionMixin:
                     result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True}
             else:
                 with with_injection_context(state):
-                    result = self._execute_tool_impl(function_name, arguments)
+                    result = self._execute_tool_with_circuit_breaker(function_name, arguments)
             
             # Apply tool output truncation to prevent context overflow
             # Uses context manager budget if enabled, otherwise applies default limit
@@ -260,10 +297,10 @@ class ToolExecutionMixin:
             
             # Emit TOOL_CALL_RESULT to stream_emitter (for AIUI/AG-UI consumers)
             # Zero overhead when no callbacks registered
-            if hasattr(self, '_Agent__stream_emitter') and getattr(self, "_Agent__stream_emitter", None) is not None and getattr(self, "_Agent__stream_emitter", None).has_callbacks:
+            if _stream_emitter is not None and _stream_emitter.has_callbacks:
                 # Truncate result for stream event (keep it reasonable for UI display)
                 result_summary = str(result)[:500] if result else None
-                getattr(self, "_Agent__stream_emitter", None).emit(StreamEvent(
+                _stream_emitter.emit(StreamEvent(
                     type=StreamEventType.TOOL_CALL_RESULT,
                     timestamp=_time.perf_counter(),
                     tool_call={
@@ -271,6 +308,18 @@ class ToolExecutionMixin:
                         "arguments": arguments,
                         "result": result_summary,
                         "id": tool_call_id,  # Now properly threaded through
+                    },
+                    agent_id=self.name,
+                    metadata={"duration_ms": _duration_ms},
+                ))
+                _stream_emitter.emit(StreamEvent(
+                    type=StreamEventType.TOOL_CALL_END,
+                    timestamp=_time.perf_counter(),
+                    tool_call={
+                        "name": function_name,
+                        "arguments": arguments,
+                        "result": result_summary,
+                        "id": tool_call_id,
                     },
                     agent_id=self.name,
                     metadata={"duration_ms": _duration_ms},
@@ -594,6 +643,73 @@ class ToolExecutionMixin:
             logging.info(f"Using modified arguments: {arguments}")
         return None, arguments
 
+    def _execute_tool_with_circuit_breaker(self, function_name, arguments):
+        """Execute tool with circuit breaker protection.
+        
+        Args:
+            function_name: Name of the tool to execute
+            arguments: Arguments for the tool
+            
+        Returns:
+            Tool execution result or circuit breaker error
+        """
+        # Import circuit breaker components first (lazy import for performance)
+        try:
+            from ..tools.circuit_breaker import get_circuit_breaker, CircuitBreakerConfig, CircuitBreakerException
+        except ImportError:
+            # Circuit breaker not available - fallback to direct execution
+            logging.debug("Circuit breaker not available, falling back to direct tool execution")
+            return self._execute_tool_impl(function_name, arguments)
+
+        try:
+            
+            # Get or create circuit breaker for this tool
+            breaker_name = f"tool_{function_name}"
+            config = CircuitBreakerConfig(
+                failure_threshold=5,        # Open after 5 failures
+                recovery_timeout=60.0,      # Wait 60s before trying half-open
+                timeout=30.0,               # Tool call timeout
+                graceful_degradation=True   # Return error instead of raising exception
+            )
+            breaker = get_circuit_breaker(breaker_name, config)
+            
+            # Execute tool through circuit breaker with failure detection wrapper
+            def _tool_wrapper():
+                result = self._execute_tool_impl(function_name, arguments)
+                # Convert error dicts to exceptions so circuit breaker can detect failures
+                # Don't treat approval/permission denials as circuit breaker failures
+                if isinstance(result, dict) and result.get("error") and \
+                   not result.get("approval_denied") and \
+                   not result.get("permission_denied") and \
+                   not result.get("approval_error"):
+                    # Create a sentinel exception to register failure with circuit breaker
+                    class _ToolFailure(Exception):
+                        def __init__(self, error_dict):
+                            self.error_dict = error_dict
+                            super().__init__(error_dict.get("error", "Tool execution failed"))
+                    raise _ToolFailure(result)
+                return result
+            
+            try:
+                return breaker.call(_tool_wrapper)
+            except Exception as e:
+                # Check if this is our sentinel exception
+                if hasattr(e, 'error_dict'):
+                    return e.error_dict  # Return the original error dict
+                else:
+                    raise  # Re-raise other exceptions
+            
+        except CircuitBreakerException as e:
+            # Circuit breaker is open - return error dict instead of raising
+            logging.warning(f"Tool '{function_name}' circuit breaker open: {e}")
+            return {
+                "error": f"Tool '{function_name}' circuit breaker open - too many recent failures",
+                "circuit_open": True,
+                "agent_name": getattr(self, "name", None),
+                "session_id": getattr(self, "_session_id", None),
+                "remediation": "Wait for recovery_timeout (60s) or investigate recent tool failures.",
+            }
+
     def _execute_tool_impl(self, function_name, arguments):
         """Internal tool execution implementation."""
 
@@ -691,11 +807,9 @@ class ToolExecutionMixin:
                 pass
         
         if func is None:
-            # If not found in tools or registry, try globals and main
-            func = globals().get(function_name)
-            if not func:
-                import __main__
-                func = getattr(__main__, function_name, None)
+            # Tool not found in declared tools or registry — do not fall back to
+            # globals() or __main__ as that allows undeclared callables to execute.
+            pass
 
         if func:
             try:
@@ -760,12 +874,18 @@ class ToolExecutionMixin:
 
         tracking_id = str(uuid.uuid4())[:8]
         task = asyncio.ensure_future(backend.request_approval(request))
-        self._pending_approvals[tracking_id] = {
-            "task": task,
-            "function_name": function_name,
-            "arguments": arguments,
-            "request": request,
-        }
+        
+        # Make defensive copy to prevent TOCTOU mutations
+        import copy
+        frozen_args = copy.deepcopy(arguments)
+        
+        async with self._approvals_lock:
+            self._pending_approvals[tracking_id] = {
+                "task": task,
+                "function_name": function_name,
+                "arguments": frozen_args,
+                "request": request,
+            }
         logging.info(f"Approval request submitted: {tracking_id} for {function_name}")
         return tracking_id
 
@@ -777,44 +897,160 @@ class ToolExecutionMixin:
         and their results included.
         """
         results = {}
-        completed_ids = []
+        # Collect completed items under the lock, then execute tools outside the lock
+        # to avoid holding it during potentially slow async tool execution.
+        approved_items = []
+        denied_items = []
+        error_items = []
 
-        for tid, info in self._pending_approvals.items():
-            task = info["task"]
-            if task.done():
-                completed_ids.append(tid)
-                try:
-                    decision = task.result()
-                    if decision.approved:
-                        # Auto-execute the approved tool
-                        tool_result = await self.execute_tool_async(
-                            info["function_name"], info["arguments"],
-                        )
-                        results[tid] = {
-                            "status": "approved_and_executed",
-                            "tool_name": info["function_name"],
-                            "decision": decision,
-                            "result": tool_result,
-                        }
-                    else:
-                        results[tid] = {
-                            "status": "denied",
-                            "tool_name": info["function_name"],
-                            "decision": decision,
-                        }
-                except Exception as e:
-                    results[tid] = {
-                        "status": "error",
-                        "tool_name": info["function_name"],
-                        "error": str(e),
-                    }
+        async with self._approvals_lock:
+            completed_ids = []
+            for tid, info in list(self._pending_approvals.items()):
+                task = info["task"]
+                if task.done():
+                    completed_ids.append(tid)
+                    try:
+                        decision = task.result()
+                        if decision.approved:
+                            approved_items.append((tid, info, decision))
+                        else:
+                            denied_items.append((tid, info, decision))
+                    except Exception as e:
+                        error_items.append((tid, info, e))
 
-        for tid in completed_ids:
-            del self._pending_approvals[tid]
+            # Remove completed entries while still holding the lock
+            for tid in completed_ids:
+                del self._pending_approvals[tid]
+
+        # Execute approved tools outside the lock to avoid long lock hold
+        for tid, info, decision in approved_items:
+            try:
+                tool_result = await self.execute_tool_async(
+                    info["function_name"], info["arguments"],
+                )
+                results[tid] = {
+                    "status": "approved_and_executed",
+                    "tool_name": info["function_name"],
+                    "decision": decision,
+                    "result": tool_result,
+                }
+            except Exception as e:
+                results[tid] = {
+                    "status": "error",
+                    "tool_name": info["function_name"],
+                    "error": str(e),
+                }
+
+        for tid, info, decision in denied_items:
+            results[tid] = {
+                "status": "denied",
+                "tool_name": info["function_name"],
+                "decision": decision,
+            }
+
+        for tid, info, exc in error_items:
+            results[tid] = {
+                "status": "error",
+                "tool_name": info["function_name"],
+                "error": str(exc),
+            }
 
         return results
 
     def pending_approval_count(self) -> int:
         """Number of approval requests still waiting."""
         return len(self._pending_approvals)
-
+    
+    def _handle_bridge_tool_call(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None) -> Any:
+        """
+        Handle bridge tool calls (tool_search, tool_describe, tool_call).
+        
+        This implements the tool search unwrapping logic before trace/stream/hooks
+        as required by design invariant #6.
+        
+        Args:
+            function_name: Bridge tool name
+            arguments: Arguments passed to bridge tool
+            tool_call_id: Optional tool call ID
+            
+        Returns:
+            Result of bridge tool execution or unwrapped real tool call
+        """
+        # Ensure tool search metadata is available
+        if not hasattr(self, '_tool_search_metadata') or self._tool_search_metadata is None:
+            return "Tool search not available or not in bridge mode"
+        
+        metadata = self._tool_search_metadata
+        
+        # Check if we're in bridge mode
+        if not metadata.get("bridge_mode", False):
+            return "Tool search not in bridge mode"
+        
+        # Get deferrable tools from metadata
+        deferrable_tools = metadata.get("deferrable_tools", [])
+        
+        if function_name == "tool_search":
+            # Handle tool_search bridge call
+            try:
+                from ..tools.tool_search import dispatch_tool_search
+                query = arguments.get("query", "")
+                limit = arguments.get("limit", None)
+                
+                result = dispatch_tool_search(
+                    query=query,
+                    limit=limit, 
+                    deferrable_tools=deferrable_tools,
+                    config=self._tool_search_config
+                )
+                return json.dumps(result, indent=2)
+            except ImportError:
+                return "Tool search module not available"
+            except Exception as e:
+                logging.error(f"Error in tool_search: {e}")
+                return f"Error searching tools: {e}"
+        
+        elif function_name == "tool_describe":
+            # Handle tool_describe bridge call
+            try:
+                from ..tools.tool_search import dispatch_tool_describe
+                tool_name = arguments.get("tool_name", "")
+                
+                result = dispatch_tool_describe(
+                    tool_name=tool_name,
+                    deferrable_tools=deferrable_tools
+                )
+                return json.dumps(result, indent=2)
+            except ImportError:
+                return "Tool search module not available"
+            except Exception as e:
+                logging.error(f"Error in tool_describe: {e}")
+                return f"Error describing tool: {e}"
+        
+        elif function_name == "tool_call":
+            # Handle tool_call bridge - unwrap and recurse with real tool
+            try:
+                from ..tools.tool_search import resolve_underlying_call
+                
+                # Unwrap the real tool call
+                real_function_name, real_arguments = resolve_underlying_call(function_name, arguments)
+                
+                # Validate that the real tool is in our deferrable set (security check)
+                deferrable_names = {
+                    tool_def.get("function", {}).get("name", "") 
+                    for tool_def in deferrable_tools
+                }
+                
+                if real_function_name not in deferrable_names:
+                    return f"Tool '{real_function_name}' is not available for execution"
+                
+                # Recursively execute the real tool (this will go through normal execution path)
+                return self.execute_tool(real_function_name, real_arguments, tool_call_id)
+                
+            except ImportError:
+                return "Tool search module not available"
+            except Exception as e:
+                logging.error(f"Error in tool_call unwrap: {e}")
+                return f"Error executing tool: {e}"
+        
+        else:
+            return f"Unknown bridge tool: {function_name}"

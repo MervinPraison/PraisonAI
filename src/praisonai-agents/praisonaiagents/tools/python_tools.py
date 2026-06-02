@@ -36,6 +36,30 @@ def _safe_getattr(obj, name, *default):
     return getattr(obj, name, *default) if default else getattr(obj, name)
 
 
+_SANDBOX_BLOCKED_ATTRS = frozenset({
+    '__subclasses__', '__bases__', '__mro__', '__globals__',
+    '__code__', '__class__', '__dict__', '__builtins__',
+    '__import__', '__loader__', '__spec__', '__init_subclass__',
+    '__set_name__', '__reduce__', '__reduce_ex__',
+    '__traceback__', '__qualname__', '__module__',
+    '__wrapped__', '__closure__', '__annotations__',
+    '__self__',  # C builtins leak real builtins module (GHSA-4mr5-g6f9-cfrh)
+    # Frame/code object introspection
+    'gi_frame', 'gi_code', 'cr_frame', 'cr_code',
+    'ag_frame', 'ag_code', 'tb_frame', 'tb_next',
+    'f_globals', 'f_locals', 'f_builtins', 'f_code',
+    'co_consts', 'co_names',
+    '__getattribute__', '__getattr__', '__setattr__', '__delattr__',
+    '__dir__', '__get__', '__set__', '__delete__',
+})
+
+_SANDBOX_BLOCKED_CALLS = frozenset({
+    'exec', 'eval', 'compile', '__import__',
+    'open', 'input', 'breakpoint',
+    'setattr', 'delattr', 'dir', 'vars',
+})
+
+
 def _validate_code_ast(code: str):
     """Validate code using AST — catches attacks that bypass text checks.
 
@@ -48,23 +72,6 @@ def _validate_code_ast(code: str):
     except SyntaxError:
         return None  # let compile() handle syntax errors later
 
-    # Dangerous dunder attributes attackers use for sandbox escape
-    _blocked_attrs = frozenset({
-        '__subclasses__', '__bases__', '__mro__', '__globals__',
-        '__code__', '__class__', '__dict__', '__builtins__',
-        '__import__', '__loader__', '__spec__', '__init_subclass__',
-        '__set_name__', '__reduce__', '__reduce_ex__',
-        '__traceback__', '__qualname__', '__module__',
-        '__wrapped__', '__closure__', '__annotations__',
-        # Frame/code object introspection
-        'gi_frame', 'gi_code', 'cr_frame', 'cr_code',
-        'ag_frame', 'ag_code', 'tb_frame', 'tb_next',
-        'f_globals', 'f_locals', 'f_builtins', 'f_code',
-        'co_consts', 'co_names',
-        '__getattribute__', '__getattr__', '__setattr__', '__delattr__',
-        '__dir__', '__get__', '__set__', '__delete__',
-    })
-
     for node in ast.walk(tree):
         # Block import statements
         if isinstance(node, (ast.Import, ast.ImportFrom)):
@@ -72,28 +79,26 @@ def _validate_code_ast(code: str):
 
         # Block attribute access to dangerous dunders
         if isinstance(node, ast.Attribute):
-            if node.attr in _blocked_attrs:
+            if node.attr in _SANDBOX_BLOCKED_ATTRS:
                 return (
                     f"Access to attribute '{node.attr}' is restricted"
                 )
 
-        # Block calls to dangerous builtins by name
+        # Block calls to dangerous builtins (bare name or attribute access)
         if isinstance(node, ast.Call):
             func = node.func
-            if isinstance(func, ast.Name) and func.id in (
-                'exec', 'eval', 'compile', '__import__',
-                'open', 'input', 'breakpoint',
-                'setattr', 'delattr', 'dir',
-            ):
+            if isinstance(func, ast.Name) and func.id in _SANDBOX_BLOCKED_CALLS:
                 return f"Call to '{func.id}' is not allowed"
+            if isinstance(func, ast.Attribute) and func.attr in _SANDBOX_BLOCKED_CALLS:
+                return f"Call to '{func.attr}' is not allowed"
                 
         # Block dangerous constants (strings containing dunders)
         # Fallback for Python 3.7 ast.Str
         if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if any(attr in node.value for attr in _blocked_attrs):
+            if any(attr in node.value for attr in _SANDBOX_BLOCKED_ATTRS):
                 return f"String constant contains restricted attribute name"
         elif type(node).__name__ == 'Str':
-            if any(attr in getattr(node, 's', '') for attr in _blocked_attrs):
+            if any(attr in getattr(node, 's', '') for attr in _SANDBOX_BLOCKED_ATTRS):
                 return f"String constant contains restricted attribute name"
 
     return None
@@ -112,7 +117,16 @@ def _execute_code_sandboxed(
     """
     if limits is None:
         limits = ResourceLimits.minimal()
-    
+
+    ast_error = _validate_code_ast(code)
+    if ast_error:
+        return {
+            'result': None,
+            'stdout': '',
+            'stderr': f'Security Error: {ast_error}',
+            'success': False,
+        }
+
     try:
         # Create temporary file for the code
         with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
@@ -151,21 +165,8 @@ def safe_execute():
             }}
         
         # Block dangerous patterns
-        blocked_attrs = {{
-            '__subclasses__', '__bases__', '__mro__', '__globals__',
-            '__code__', '__class__', '__dict__', '__builtins__',
-            '__import__', '__loader__', '__spec__', '__init_subclass__',
-            '__set_name__', '__reduce__', '__reduce_ex__',
-            '__traceback__', '__qualname__', '__module__',
-            '__wrapped__', '__closure__', '__annotations__',
-            # Frame/code object introspection
-            'gi_frame', 'gi_code', 'cr_frame', 'cr_code',
-            'ag_frame', 'ag_code', 'tb_frame', 'tb_next',
-            'f_globals', 'f_locals', 'f_builtins', 'f_code',
-            'co_consts', 'co_names',
-            '__getattribute__', '__getattr__', '__setattr__', '__delattr__',
-            '__dir__', '__get__', '__set__', '__delete__',
-        }}
+        blocked_attrs = {set(_SANDBOX_BLOCKED_ATTRS)!r}
+        blocked_calls = {set(_SANDBOX_BLOCKED_CALLS)!r}
         
         for node in ast.walk(tree):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
@@ -182,14 +183,20 @@ def safe_execute():
                     "stderr": f"Access to attribute '{{node.attr}}' is restricted",
                     "success": False
                 }}
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-                if node.func.id in ('exec', 'eval', 'compile', '__import__',
-                                     'open', 'input', 'breakpoint',
-                                     'setattr', 'delattr', 'dir'):
+            if isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Name) and func.id in blocked_calls:
                     return {{
                         "result": None,
                         "stdout": "",
-                        "stderr": f"Call to '{{node.func.id}}' is not allowed",
+                        "stderr": f"Call to '{{func.id}}' is not allowed",
+                        "success": False
+                    }}
+                if isinstance(func, ast.Attribute) and func.attr in blocked_calls:
+                    return {{
+                        "result": None,
+                        "stdout": "",
+                        "stderr": f"Call to '{{func.attr}}' is not allowed",
                         "success": False
                     }}
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -481,7 +488,7 @@ def _execute_code_direct(
             '__import__', 'import ', 'from ', 'exec', 'eval',
             'compile', 'open(', 'file(', 'input(', 'raw_input',
             '__subclasses__', '__bases__', '__globals__', '__code__',
-            '__class__', 'globals(', 'locals(', 'vars('
+            '__class__', '__self__', 'globals(', 'locals(', 'vars('
         ]
 
         code_lower = code.lower()

@@ -30,6 +30,7 @@ Usage::
 import asyncio
 import logging
 import os
+import warnings
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Callable, Dict, Any, Optional, List, Union
 from enum import Enum
@@ -1074,48 +1075,72 @@ def ManagedAgent(
     provider: Optional[str] = None,
     **kwargs,
 ):
-    """Factory that returns the appropriate managed agent backend.
-
-    Provider auto-detection:
-        - ``ANTHROPIC_API_KEY`` set → ``AnthropicManagedAgent``
-        - Otherwise → ``LocalManagedAgent``
-
-    Explicit providers:
-        - ``"anthropic"`` → ``AnthropicManagedAgent``
-        - ``"local"``     → ``LocalManagedAgent`` (any LLM via litellm)
-        - ``"openai"``    → ``LocalManagedAgent`` with OpenAI model
-        - ``"ollama"``    → ``LocalManagedAgent`` with Ollama prefix
-        - ``"gemini"``    → ``LocalManagedAgent`` with Gemini prefix
-
-    Examples::
-
-        # Auto-detect (Anthropic if key set, local otherwise)
-        managed = ManagedAgent()
-
-        # Explicit Anthropic
-        managed = ManagedAgent(provider="anthropic", config=ManagedConfig(...))
-
-        # Explicit local with OpenAI
-        managed = ManagedAgent(provider="openai", config=LocalManagedConfig(model="gpt-4o"))
-
-        # Ollama
-        managed = ManagedAgent(provider="ollama", config=LocalManagedConfig(model="llama3"))
-
+    """Deprecated factory. Use HostedAgent or LocalAgent explicitly.
+    
+    DEPRECATION NOTICE: This factory conflates hosted-runtime vs LLM-routing.
+    
+    New canonical usage:
+    - For hosted runtimes: HostedAgent(provider="anthropic", ...)  
+    - For local loops: LocalAgent(config=LocalAgentConfig(model="gpt-4o-mini"), ...)
+    
+    Legacy behavior (deprecated):
+    - provider="anthropic" → HostedAgent(provider="anthropic", ...)
+    - provider in {"openai","gemini","ollama","local"} → LocalAgent(...)
+      (DeprecationWarning: "use LocalAgent directly; put LLM name in model=")
+    - provider in {"e2b","modal","flyio","daytona","docker"} → raise ValueError
+      ("Cloud compute belongs on LocalAgent(compute=...). Hosted runtimes for
+       these providers are not yet available.")
+    
     Returns:
         An instance satisfying ``ManagedBackendProtocol``.
+        
+    Raises:
+        ValueError: For compute-provider names that should use LocalAgent(compute=).
     """
-    if provider is None:
+    # Track if provider was auto-detected to avoid spurious deprecation warnings
+    auto_detected = provider is None
+    if auto_detected:
         # Auto-detect
         if os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"):
             provider = "anthropic"
         else:
             provider = "local"
 
+    # Hosted runtime provider
     if provider == "anthropic":
         return AnthropicManagedAgent(provider=provider, **kwargs)
-    else:
+    
+    # Compute provider names - maintain backward compatibility by passing to LocalManagedAgent
+    elif provider in {"e2b", "modal", "flyio", "daytona", "docker"}:
+        warnings.warn(
+            f"ManagedAgent(provider='{provider}') for compute providers is deprecated. "
+            f"Use LocalAgent(compute='{provider}', config=LocalAgentConfig(...)) instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        from .managed_local import LocalManagedAgent
+        return LocalManagedAgent(provider="local", compute=provider, **kwargs)
+    
+    # LLM routing hints (deprecated usage) - only warn if explicitly passed by user
+    elif provider in {"openai", "gemini", "ollama", "local"}:
+        if not auto_detected:
+            warnings.warn(
+                f"ManagedAgent(provider='{provider}') is deprecated. "
+                f"Use LocalAgent directly with model= instead: "
+                f"LocalAgent(config=LocalAgentConfig(model='gpt-4o-mini'))",
+                DeprecationWarning,
+                stacklevel=2
+            )
         from .managed_local import LocalManagedAgent
         return LocalManagedAgent(provider=provider, **kwargs)
+    
+    # Unknown provider
+    else:
+        raise ValueError(
+            f"Unknown provider '{provider}'. "
+            f"Supported: 'anthropic' for hosted runtime, "
+            f"or use LocalAgent(config=LocalAgentConfig(model='your-model')) for local execution."
+        )
 
 
 # ── Backward-compatible aliases ──

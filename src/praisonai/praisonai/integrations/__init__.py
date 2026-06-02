@@ -43,6 +43,11 @@ __all__ = [
     'SandboxedAgentConfig',        # new honest name
     'ManagedAgentIntegration',     # backward compat alias
     'ManagedBackendConfig',        # backward compat alias
+    # New canonical agent backends
+    'HostedAgent',
+    'HostedAgentConfig', 
+    'LocalAgent',
+    'LocalAgentConfig',
     'get_available_integrations',
     'ExternalAgentRegistry',
     'get_registry',
@@ -107,4 +112,17 @@ def __getattr__(name):
     elif name == 'create_integration':
         from .registry import create_integration
         return create_integration
+    # New canonical agent backends
+    elif name == 'HostedAgent':
+        from .hosted_agent import HostedAgent
+        return HostedAgent
+    elif name == 'HostedAgentConfig':
+        from .hosted_agent import HostedAgentConfig
+        return HostedAgentConfig
+    elif name == 'LocalAgent':
+        from .local_agent import LocalAgent
+        return LocalAgent
+    elif name == 'LocalAgentConfig':
+        from .local_agent import LocalAgentConfig
+        return LocalAgentConfig
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

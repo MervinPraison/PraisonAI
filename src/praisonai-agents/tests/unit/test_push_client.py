@@ -76,6 +76,10 @@ def mock_transport():
 def client(mock_transport):
     c = PushClient("ws://test:8765/ws", auto_reconnect=False)
     c._transport = mock_transport
+    # ``PushClient._send`` checks ``self._transport.is_connected`` (not the
+    # internal ``_connected`` flag), so the mock transport must report itself
+    # as connected for send-paths to succeed.
+    mock_transport.connected = True
     c._connected = True
     return c
 

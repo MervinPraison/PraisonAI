@@ -29,6 +29,8 @@ from praisonaiagents.gateway import (
 
 logger = logging.getLogger(__name__)
 
+from .unicode_utils import safe_error_message, safe_log_message, extract_root_cause_from_error
+
 
 @dataclass
 class GatewaySession:
@@ -159,7 +161,7 @@ class WebSocketGateway:
             logger.warning(f"Config file not found: {config_path}, using defaults")
             return cls()
         
-        with open(config_path, "r") as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             raw = yaml.safe_load(f) or {}
         
         gateway_config = raw.get(section, {})
@@ -235,6 +237,10 @@ class WebSocketGateway:
                     except Exception as e:
                         logger.debug(f"Could not save auth token to .env: {e}")
         
+        # Ensure single source of truth: export resolved token so all auth paths use the same secret
+        if self.config.auth_token:
+            os.environ["GATEWAY_AUTH_TOKEN"] = self.config.auth_token
+        
         # Load allowed origins from environment if not set
         if hasattr(self.config, 'allowed_origins') and not self.config.allowed_origins:
             env_origins = os.environ.get("GATEWAY_ALLOWED_ORIGINS", "").strip()
@@ -269,6 +275,9 @@ class WebSocketGateway:
         
         # Scheduler tick background task
         self._scheduler_task: Optional[asyncio.Task] = None
+        
+        # PID lock for single-instance enforcement
+        self._pid_lock: Optional[Any] = None
     
     @property
     def is_running(self) -> bool:
@@ -287,6 +296,30 @@ class WebSocketGateway:
         if self._is_running:
             logger.warning("Gateway already running")
             return
+        
+        # Preflight port collision check
+        from .port_utils import check_port_available, GatewayPIDLock, format_collision_error
+        
+        pid_lock = GatewayPIDLock(host=self._host, port=self._port)
+        
+        # Check if port is available
+        port_available, pid_using_port = check_port_available(self._host, self._port)
+        if not port_available:
+            # Check if we have a PID lock
+            lock_info = pid_lock.get_lock_info()
+            error_msg = format_collision_error(self._host, self._port, lock_info)
+            logger.error("Gateway startup failed due to port collision")
+            raise RuntimeError(error_msg)
+        
+        # Try to acquire PID lock
+        if not pid_lock.acquire_lock(self._host, self._port):
+            lock_info = pid_lock.get_lock_info()
+            error_msg = format_collision_error(self._host, self._port, lock_info)
+            logger.error("Gateway startup failed - another instance is running")
+            raise RuntimeError(error_msg)
+        
+        # Store PID lock for cleanup
+        self._pid_lock = pid_lock
         
         # Validate bind-aware auth configuration before starting
         from .auth import assert_external_bind_safe
@@ -713,7 +746,15 @@ class WebSocketGateway:
         
         logger.info(f"Gateway started on ws://{self._host}:{self._port}")
         
-        await self._server.serve()
+        try:
+            await self._server.serve()
+        except Exception as e:
+            # Clean up PID lock on any startup failure
+            if hasattr(self, '_pid_lock') and self._pid_lock:
+                self._pid_lock.release_lock()
+                self._pid_lock = None
+            # Re-raise the original exception
+            raise
     
     async def stop(self) -> None:
         """Stop the gateway server."""
@@ -736,6 +777,10 @@ class WebSocketGateway:
         
         if self._server:
             self._server.should_exit = True
+        
+        # Release PID lock
+        if hasattr(self, '_pid_lock'):
+            self._pid_lock.release_lock()
         
         logger.info("Gateway stopped")
     
@@ -880,13 +925,10 @@ class WebSocketGateway:
     def _make_stream_relay(
         self, client_id: str, session: "GatewaySession"
     ) -> Callable:
-        """Create a StreamCallback that relays events to a WS client.
-        
-        The callback is synchronous (called from the LLM streaming thread)
-        and uses asyncio.run_coroutine_threadsafe to push events into the
-        gateway's event loop for WS delivery.
-        """
+        """Create a StreamCallback that relays events to a WS client."""
         gateway = self
+        # Capture the running loop while we are still on it.
+        loop = asyncio.get_running_loop()
 
         def _relay(event) -> None:
             try:
@@ -922,15 +964,13 @@ class WebSocketGateway:
                     target=client_id,
                 )
                 
-                # Thread-safe async send
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    asyncio.run_coroutine_threadsafe(
-                        gateway._send_to_client(client_id, gw_event.to_dict()),
-                        loop,
-                    )
-            except Exception as e:
-                logger.debug(f"Stream relay error (non-fatal): {e}")
+                # No get_event_loop() in the threaded callback.
+                asyncio.run_coroutine_threadsafe(
+                    gateway._send_to_client(client_id, gw_event.to_dict()),
+                    loop,
+                )
+            except Exception:
+                logger.warning("Stream relay error (non-fatal)", exc_info=True)
 
         return _relay
     
@@ -1313,7 +1353,7 @@ class WebSocketGateway:
         if not os.path.exists(config_path):
             raise FileNotFoundError(f"Gateway config not found: {config_path}")
 
-        with open(config_path, "r") as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             raw = yaml.safe_load(f)
 
         if not raw or not isinstance(raw, dict):
@@ -1654,8 +1694,8 @@ class WebSocketGateway:
     ) -> Any:
         """Create a bot instance for the given channel type."""
         # Clone agent to prevent channel-specific settings from leaking between channels
-        import copy
-        agent = copy.deepcopy(agent)
+        # Use clone_for_channel() instead of copy.deepcopy() to avoid RLock issues (fixes #1746)
+        agent = agent.clone_for_channel()
         
         # Apply smart defaults to agent (same logic as Bot() wrapper)
         from praisonai.bots._defaults import apply_bot_smart_defaults
@@ -1693,6 +1733,16 @@ class WebSocketGateway:
                 webhook_port=int(ch_cfg.get("webhook_port", 8080)),
                 mode=wa_mode,
                 creds_dir=ch_cfg.get("creds_dir"),
+            )
+        elif channel_type == "linear":
+            from praisonai.bots import LinearBot
+            linear_token = token or os.environ.get("LINEAR_OAUTH_TOKEN", "") or os.environ.get("LINEAR_API_KEY", "")
+            return LinearBot(
+                token=linear_token,
+                agent=agent,
+                config=config,
+                signing_secret=ch_cfg.get("signing_secret", "") or os.environ.get("LINEAR_WEBHOOK_SECRET", ""),
+                webhook_port=int(ch_cfg.get("webhook_port", 8080)),
             )
         elif channel_type == "email":
             from praisonai.bots import EmailBot
@@ -1736,8 +1786,8 @@ class WebSocketGateway:
                 # Use the lower-level API instead.
                 if self._is_telegram_bot(bot):
                     await self._start_telegram_bot_polling(name, bot)
-                elif type(bot).__name__ == "WhatsAppBot":
-                    # WhatsApp runs its own aiohttp webhook server
+                elif type(bot).__name__ in ("WhatsAppBot", "LinearBot"):
+                    # WhatsApp/Linear run their own aiohttp webhook servers
                     self._inject_routing_handler(name, bot)
                     await bot.start()
                 else:
@@ -1849,10 +1899,6 @@ class WebSocketGateway:
             if not agent:
                 agent = bot._agent  # fallback to default
 
-            # Show typing indicator
-            if bot.config.typing_indicator:
-                await update.message.chat.send_action("typing")
-
             # Ack reaction — show processing indicator
             ack_ctx = None
             if bot._ack.enabled:
@@ -1879,7 +1925,20 @@ class WebSocketGateway:
 
             try:
                 message_text = await bot._debouncer.debounce(user_id, message_text)
-                response = await bot._session.chat(agent, user_id, message_text)
+                
+                # Show typing indicator with renewal during long operation
+                if bot.config.typing_indicator:
+                    from praisonai.bots._typing_indicator import with_typing_renewal
+                    
+                    async def _typing_action():
+                        await update.message.chat.send_action("typing")
+                    
+                    response = await with_typing_renewal(
+                        typing_func=_typing_action,
+                        operation_coro=bot._session.chat(agent, user_id, message_text)
+                    )
+                else:
+                    response = await bot._session.chat(agent, user_id, message_text)
                 if hasattr(bot, '_send_response_with_media'):
                     await bot._send_response_with_media(
                         update.message.chat_id,
@@ -1892,8 +1951,9 @@ class WebSocketGateway:
                 if ack_ctx:
                     await bot._ack.done(ack_ctx, react_fn=_tg_react, unreact_fn=_tg_unreact)
             except Exception as e:
-                logger.error(f"Agent error in {name}: {e}")
-                await update.message.reply_text(f"Error: {str(e)}")
+                logger.error(f"Agent error in {name}: {safe_log_message(e)}")
+                user_error = extract_root_cause_from_error(str(e))
+                await update.message.reply_text(f"Error: {safe_error_message(user_error)}")
 
         async def handle_voice(update: Update, context: Any):
             await handle_message(update, context)

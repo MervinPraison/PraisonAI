@@ -69,10 +69,14 @@ class BotOS:
         agent: Optional[Any] = None,
         platforms: Optional[List[str]] = None,
         config: Optional[Any] = None,
+        identity_resolver: Optional[Any] = None,
     ):
         self._bots: Dict[str, Bot] = {}
         self._is_running = False
         self._config = config
+        # W1: shared identity resolver applied to every managed bot —
+        # gives cross-platform unified-user sessions out of the box.
+        self._identity_resolver = identity_resolver
         self._tasks: List[asyncio.Task] = []
 
         # Register explicit bots
@@ -84,7 +88,13 @@ class BotOS:
         if agent and platforms:
             for plat in platforms:
                 if plat not in self._bots:
-                    self.add_bot(Bot(plat, agent=agent))
+                    self.add_bot(
+                        Bot(
+                            plat,
+                            agent=agent,
+                            identity_resolver=self._identity_resolver,
+                        )
+                    )
 
     # ── Properties ──────────────────────────────────────────────────
 
@@ -100,6 +110,14 @@ class BotOS:
         Args:
             bot: A Bot instance.
         """
+        # W1: propagate the BotOS-level resolver to bots that don't
+        # already have one, so cross-platform unification works whether
+        # the user uses the shortcut API or constructs Bots manually.
+        if (
+            self._identity_resolver is not None
+            and getattr(bot, "_identity_resolver", None) is None
+        ):
+            bot._identity_resolver = self._identity_resolver
         self._bots[bot.platform] = bot
 
     def list_bots(self) -> List[str]:

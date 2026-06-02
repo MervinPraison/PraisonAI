@@ -113,6 +113,10 @@ class AuthService:
 
     def _issue_token(self, user: User) -> str:
         """Issue a JWT for a user."""
+        if JWT_SECRET == _DEFAULT_SECRET and os.environ.get("PLATFORM_ENV", "dev") != "dev":
+            raise RuntimeError(
+                "Refusing to issue JWT with default PLATFORM_JWT_SECRET outside dev"
+            )
         now = datetime.now(timezone.utc)
         payload = {
             "sub": user.id,

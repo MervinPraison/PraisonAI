@@ -9,9 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from praisonaiagents.auth import AuthIdentity
 
-from ..deps import get_db, require_workspace_member
-from ..schemas import DependencyCreate, DependencyResponse
+from ..deps import get_db, require_issue_in_workspace, require_workspace_member
 from ...services.dependency_service import DependencyService
+from ..schemas import DependencyCreate, DependencyResponse
 
 router = APIRouter(
     prefix="/workspaces/{workspace_id}/issues/{issue_id}/dependencies",
@@ -27,6 +27,10 @@ async def create_dependency(
     user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
+    await require_issue_in_workspace(workspace_id, issue_id, session)
+    await require_issue_in_workspace(
+        workspace_id, body.depends_on_issue_id, session
+    )
     svc = DependencyService(session)
     dep = await svc.create(issue_id, body.depends_on_issue_id, body.type)
     return DependencyResponse.model_validate(dep)
@@ -39,6 +43,7 @@ async def list_dependencies(
     user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
+    await require_issue_in_workspace(workspace_id, issue_id, session)
     svc = DependencyService(session)
     deps = await svc.list_for_issue(issue_id)
     return [DependencyResponse.model_validate(d) for d in deps]
@@ -52,7 +57,13 @@ async def delete_dependency(
     user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
+    await require_issue_in_workspace(workspace_id, issue_id, session)
     svc = DependencyService(session)
+    dep = await svc.get(dep_id)
+    if dep is None:
+        raise HTTPException(status_code=404, detail="Dependency not found")
+    if dep.issue_id != issue_id and dep.depends_on_issue_id != issue_id:
+        raise HTTPException(status_code=404, detail="Dependency not found")
     deleted = await svc.delete(dep_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Dependency not found")

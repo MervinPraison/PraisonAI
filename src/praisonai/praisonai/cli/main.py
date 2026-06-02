@@ -6,41 +6,55 @@ import warnings
 import os
 import json
 
-# Suppress Pydantic serialization warnings from LiteLLM BEFORE any imports
-# These warnings occur when LiteLLM's response objects have field mismatches
-# Using both filterwarnings AND patching warnings.warn for complete suppression
+# Warning filter support - now opt-in only (no global mutation at import)
+import atexit
 
-warnings.filterwarnings("ignore", message=".*Pydantic serializer warnings.*")
-warnings.filterwarnings("ignore", message=".*PydanticSerializationUnexpectedValue.*")
-warnings.filterwarnings("ignore", message=".*Expected \\d+ fields but got.*")
-warnings.filterwarnings("ignore", message=".*Expected `StreamingChoices`.*")
-warnings.filterwarnings("ignore", message=".*Expected `Message`.*")
-warnings.filterwarnings("ignore", message=".*serialized value may not be as expected.*")
-warnings.filterwarnings("ignore", category=UserWarning, module="pydantic.*")
-
-# Patch warnings.showwarning to intercept ALL warnings including those from crewai's patched warn
-# This is the final output function that actually displays warnings
-_SUPPRESSED_PATTERNS = [
+_SUPPRESSED_PATTERNS = (
     "Pydantic serializer warnings",
     "PydanticSerializationUnexpectedValue",
-    "Expected",  # Catches "Expected N fields but got M"
+    "Expected ",  # Narrowed from just "Expected" to avoid false positives
     "StreamingChoices",
     "serialized value may not be as expected",
-    "duckduckgo_search",  # Suppress duckduckgo rename warning
-]
+    "duckduckgo_search",
+)
 
-_original_showwarning = warnings.showwarning
+_installed = False
+_original_showwarning = None
+_original_filters = None
 
-def _patched_showwarning(message, category, filename, lineno, file=None, line=None):
-    msg_str = str(message)
-    for pattern in _SUPPRESSED_PATTERNS:
-        if pattern in msg_str:
-            return
-    if category is UserWarning and "pydantic" in filename.lower():
+def install_warning_filters() -> None:
+    """Install PraisonAI's noise filters. Idempotent. CLI-only."""
+    global _installed, _original_showwarning, _original_filters
+    if _installed:
         return
-    _original_showwarning(message, category, filename, lineno, file, line)
+    _original_showwarning = warnings.showwarning
+    _original_filters = list(warnings.filters)
 
-warnings.showwarning = _patched_showwarning
+    # Install filterwarnings for common patterns
+    for pattern in _SUPPRESSED_PATTERNS:
+        warnings.filterwarnings("ignore", message=f".*{pattern}.*")
+    warnings.filterwarnings("ignore", category=UserWarning, module="pydantic.*")
+
+    def _filtered_showwarning(message, category, filename, lineno, file=None, line=None):
+        msg_str = str(message)
+        if any(pattern in msg_str for pattern in _SUPPRESSED_PATTERNS):
+            return
+        if category is UserWarning and "pydantic" in filename.lower():
+            return
+        _original_showwarning(message, category, filename, lineno, file, line)
+
+    warnings.showwarning = _filtered_showwarning
+    atexit.register(_uninstall_warning_filters)
+    _installed = True
+
+def _uninstall_warning_filters() -> None:
+    """Restore original warnings behavior on exit."""
+    global _installed, _original_filters, _original_showwarning
+    if _installed and _original_showwarning is not None:
+        warnings.showwarning = _original_showwarning
+        if _original_filters is not None:
+            warnings.filters[:] = _original_filters
+        _installed = False
 
 # Suppress crewai RuntimeWarning about module loading order (only in non-debug mode)
 # This warning is harmless and occurs when running as `python -m praisonai.cli.main`
@@ -56,7 +70,6 @@ import yaml
 import time
 from rich import print
 from dotenv import load_dotenv
-load_dotenv()
 import shutil
 import subprocess
 import logging
@@ -94,6 +107,11 @@ _BLOCKED_ENV_KEYS = frozenset({
 
 # Pre-compute uppercase lookup set once at module load (avoids rebuilding per call)
 _BLOCKED_ENV_KEYS_UPPER = frozenset(k.upper() for k in _BLOCKED_ENV_KEYS)
+
+
+def _load_env_once():
+    """Load environment variables from .env file once at CLI startup."""
+    load_dotenv()
 
 
 def _validate_env_key(key) -> None:
@@ -148,17 +166,19 @@ AUTOGEN_AVAILABLE = False
 PRAISONAI_AVAILABLE = False
 TRAIN_AVAILABLE = False
 
-# Use find_spec for fast availability checks (no actual import)
-import importlib.util
-GRADIO_AVAILABLE = importlib.util.find_spec("gradio") is not None
+# Use centralized availability detection
+from .._framework_availability import is_available
+
+GRADIO_AVAILABLE = is_available("gradio")
 try:
+    import importlib.util
     CALL_MODULE_AVAILABLE = importlib.util.find_spec("praisonai.api.call") is not None
 except (ModuleNotFoundError, AttributeError):
     CALL_MODULE_AVAILABLE = False
-CREWAI_AVAILABLE = importlib.util.find_spec("crewai") is not None
-AUTOGEN_AVAILABLE = importlib.util.find_spec("autogen") is not None
-PRAISONAI_AVAILABLE = importlib.util.find_spec("praisonaiagents") is not None
-TRAIN_AVAILABLE = importlib.util.find_spec("unsloth") is not None
+CREWAI_AVAILABLE = is_available("crewai")
+AUTOGEN_AVAILABLE = is_available("autogen")
+PRAISONAI_AVAILABLE = is_available("praisonaiagents")
+TRAIN_AVAILABLE = is_available("unsloth")
 
 # Lazy import helpers for optional dependencies (defined after availability flags)
 def _get_call_module():
@@ -248,32 +268,32 @@ class PraisonAI:
         """
         Initialize the PraisonAI object with default parameters.
         """
+        # Initialize telemetry defaults (moved from lazy __getattr__ hook)
+        from praisonai import _ensure_telemetry_defaults
+        _ensure_telemetry_defaults()
         self.agent_yaml = agent_yaml
         self._interactive_mode = False  # Flag for interactive TUI mode
         # Create config_list with AutoGen compatibility
-        # Support multiple environment variable patterns for better compatibility
-        # Priority order: MODEL_NAME > OPENAI_MODEL_NAME for model selection
-        model_name = os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini")
+        # Resolve LLM endpoint configuration from environment variables
+        from praisonai.llm.env import resolve_llm_endpoint
+        ep = resolve_llm_endpoint()
         
-        # Priority order for base_url: OPENAI_BASE_URL > OPENAI_API_BASE > OLLAMA_API_BASE
-        # OPENAI_BASE_URL is the standard OpenAI SDK environment variable
-        base_url = (
-            os.environ.get("OPENAI_BASE_URL") or 
-            os.environ.get("OPENAI_API_BASE") or
-            os.environ.get("OLLAMA_API_BASE", "https://api.openai.com/v1")
-        )
-        
-        api_key = os.environ.get("OPENAI_API_KEY")
         self.config_list = [
             {
-                'model': model_name,
-                'base_url': base_url,
-                'api_key': api_key,
+                'model': ep.model,
+                'base_url': ep.base_url,
+                'api_key': ep.api_key,
                 'api_type': 'openai'        # AutoGen expects this field
             }
         ]
         self.agent_file = agent_file
         self.framework = framework
+        
+        # Validate framework availability early to fail fast
+        if self.framework:
+            from praisonai.framework_adapters.validators import assert_framework_available
+            assert_framework_available(self.framework)
+        
         self.auto = auto
         self.init = init
         self.tools = tools or []  # Store tool class names as a list
@@ -331,9 +351,12 @@ class PraisonAI:
         initializes the necessary attributes, and then calls the appropriate methods based on the
         provided arguments.
         """
-        # Set OpenTelemetry SDK to disabled to prevent telemetry collection
-        # Moved from agents_generator.py to CLI entry point per architecture requirements
-        os.environ.setdefault("OTEL_SDK_DISABLED", "true")
+        # Load environment variables from .env file
+        _load_env_once()
+        
+        # Warning filters now installed via Typer callback for CLI-only usage
+        
+        # Telemetry defaults now handled in PraisonAI.__init__ with Langfuse awareness
         
         # Store the original agent_file from constructor
         original_agent_file = self.agent_file
@@ -358,6 +381,11 @@ class PraisonAI:
             args.command = None
 
         self.framework = args.framework or self.framework
+        
+        # Validate framework availability early to fail fast
+        if self.framework:
+            from praisonai.framework_adapters.validators import assert_framework_available
+            assert_framework_available(self.framework)
         
         # Update config_list model if --model flag is provided
         if getattr(args, 'model', None):
@@ -1922,16 +1950,16 @@ class PraisonAI:
                     # Load from file
                     try:
                         import inspect
-                        import importlib.util
-                        spec = importlib.util.spec_from_file_location("rewrite_tools_module", rewrite_tools)
-                        if spec and spec.loader:
-                            module = importlib.util.module_from_spec(spec)
-                            spec.loader.exec_module(module)
+                        from .._safe_loader import load_user_module
+                        module = load_user_module(rewrite_tools, name="rewrite_tools_module")
+                        if module is not None:
                             for name, obj in inspect.getmembers(module):
                                 if inspect.isfunction(obj) and not name.startswith('_'):
                                     rewrite_tools_list.append(obj)
                             if rewrite_tools_list:
                                 print(f"[cyan]Loaded {len(rewrite_tools_list)} tools for query rewriter[/cyan]")
+                        else:
+                            print(f"[yellow]Warning: Rewrite tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.[/yellow]")
                     except Exception as e:
                         print(f"[yellow]Warning: Failed to load rewrite tools: {e}[/yellow]")
                 else:
@@ -2014,16 +2042,16 @@ class PraisonAI:
                     # Load from file
                     try:
                         import inspect
-                        import importlib.util
-                        spec = importlib.util.spec_from_file_location("expand_tools_module", expand_tools)
-                        if spec and spec.loader:
-                            module = importlib.util.module_from_spec(spec)
-                            spec.loader.exec_module(module)
+                        from .._safe_loader import load_user_module
+                        module = load_user_module(expand_tools, name="expand_tools_module")
+                        if module is not None:
                             for name, obj in inspect.getmembers(module):
                                 if inspect.isfunction(obj) and not name.startswith('_'):
                                     expand_tools_list.append(obj)
                             if expand_tools_list:
                                 print(f"[cyan]Loaded {len(expand_tools_list)} tools for prompt expander[/cyan]")
+                        else:
+                            print(f"[yellow]Warning: Expand tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.[/yellow]")
                     except Exception as e:
                         print(f"[yellow]Warning: Failed to load expand tools: {e}[/yellow]")
                 else:
@@ -2099,15 +2127,16 @@ class PraisonAI:
             # Load from file
             try:
                 import inspect
-                spec = importlib.util.spec_from_file_location("tools_module", tools_path)
-                if spec and spec.loader:
-                    module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(module)
+                from .._safe_loader import load_user_module
+                module = load_user_module(tools_path, name="tools_module")
+                if module is not None:
                     for name, obj in inspect.getmembers(module):
                         if inspect.isfunction(obj) and not name.startswith('_'):
                             tools_list.append(obj)
                     if tools_list:
                         print(f"[cyan]Loaded {len(tools_list)} tools from {tools_path}[/cyan]")
+                else:
+                    print(f"[yellow]Warning: Tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.[/yellow]")
             except Exception as e:
                 print(f"[yellow]Warning: Failed to load tools from {tools_path}: {e}[/yellow]")
         else:
@@ -2735,14 +2764,16 @@ class PraisonAI:
             
             if tools_file.exists():
                 try:
-                    spec = importlib.util.spec_from_file_location("recipe_tools", str(tools_file))
-                    tools_module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(tools_module)
-                    
-                    # Build registry from public callable functions
-                    for name, obj in vars(tools_module).items():
-                        if callable(obj) and not name.startswith('_'):
-                            tool_registry[name] = obj
+                    from .._safe_loader import load_user_module
+                    tools_module = load_user_module(str(tools_file), name="recipe_tools")
+                    if tools_module is not None:
+                        import inspect
+                        # Build registry from public functions only
+                        for name, obj in vars(tools_module).items():
+                            if inspect.isfunction(obj) and not name.startswith('_') and inspect.getmodule(obj) is tools_module:
+                                tool_registry[name] = obj
+                    else:
+                        logging.getLogger(__name__).warning("Recipe tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.")
                     
                     if tool_registry:
                         print(f"[cyan]Loaded {len(tool_registry)} tools from tools.py: {', '.join(tool_registry.keys())}[/cyan]")
@@ -4036,6 +4067,31 @@ Do NOT add any explanations or formatting."""
         
         return results[-1].get("output", "") if results else ""
 
+    def _execute_agent_with_budget_handling(self, agent, method_name, *args, **kwargs):
+        """Run ``agent.<method_name>(*args, **kwargs)`` with a graceful
+        BudgetExceededError handler.
+
+        Wrapper-only fix (no core SDK changes). Users configure budgets via
+        ``execution=ExecutionConfig(max_budget=...)`` on the Agent — per
+        AGENTS.md §5.3 there is NO top-level ``max_budget=`` parameter on
+        Agent.__init__ (avoids parameter bloat).
+
+        When the budget is hit this prints a single-line actionable error
+        message and exits with code 1 instead of leaking a raw traceback.
+        Any other exception is re-raised unchanged.
+        """
+        from praisonaiagents.errors import BudgetExceededError
+        try:
+            return getattr(agent, method_name)(*args, **kwargs)
+        except BudgetExceededError as e:
+            from rich import print as rich_print
+            rich_print(
+                f"[red]Budget limit exceeded: {e!s}. "
+                "Hint: set budget via "
+                "execution=ExecutionConfig(max_budget=1.00) on your Agent.[/red]"
+            )
+            sys.exit(1)
+
     def _extract_cli_config_for_yaml(self):
         """
         Extract CLI configuration that should be passed to YAML processing.
@@ -4061,6 +4117,16 @@ Do NOT add any explanations or formatting."""
         planning_tools = getattr(self.args, 'planning_tools', None)
         if planning_tools:
             cli_config['planning_tools'] = planning_tools
+
+        # Extract --planning flag
+        if getattr(self.args, 'planning', False):
+            cli_config['planning'] = True
+
+        # Extract web flags
+        if getattr(self.args, 'web', False):
+            cli_config['web'] = True
+        if getattr(self.args, 'web_fetch', False):
+            cli_config['web_fetch'] = True
             
         # Extract --acp flag
         if getattr(self.args, 'acp', False):
@@ -4098,6 +4164,31 @@ Do NOT add any explanations or formatting."""
             cli_config['stream'] = stream or stream_metrics
             if stream_metrics:
                 cli_config['stream_metrics'] = True
+
+        # Extract handoff configuration for YAML CLI parity
+        handoff = getattr(self.args, 'handoff', None)
+        if handoff:
+            cli_config['handoff'] = handoff
+
+        handoff_policy = getattr(self.args, 'handoff_policy', None)
+        if handoff_policy is not None:
+            cli_config['handoff_policy'] = handoff_policy
+
+        handoff_timeout = getattr(self.args, 'handoff_timeout', None)
+        if handoff_timeout is not None:
+            cli_config['handoff_timeout'] = handoff_timeout
+
+        handoff_max_depth = getattr(self.args, 'handoff_max_depth', None)
+        if handoff_max_depth is not None:
+            cli_config['handoff_max_depth'] = handoff_max_depth
+
+        handoff_max_concurrent = getattr(self.args, 'handoff_max_concurrent', None)
+        if handoff_max_concurrent is not None:
+            cli_config['handoff_max_concurrent'] = handoff_max_concurrent
+
+        handoff_detect_cycles = getattr(self.args, 'handoff_detect_cycles', None)
+        if handoff_detect_cycles is not None:
+            cli_config['handoff_detect_cycles'] = handoff_detect_cycles
             
         return cli_config
 
@@ -4582,9 +4673,9 @@ Do NOT add any explanations or formatting."""
                     from rich.panel import Panel
                     
                     with Live(Panel(Spinner("dots", text="Generating..."), border_style="cyan"), refresh_per_second=10, transient=True):
-                        result = auto_rag.chat(prompt)
+                        result = self._execute_agent_with_budget_handling(auto_rag, 'chat', prompt)
                 else:
-                    result = auto_rag.chat(prompt)
+                    result = self._execute_agent_with_budget_handling(auto_rag, 'chat', prompt)
             else:
                 # Resolve display mode from CLI flags
                 display_mode = self._resolve_display_mode()
@@ -4592,16 +4683,16 @@ Do NOT add any explanations or formatting."""
                 if display_mode == 'silent':
                     # -qq: No output at all, exit code only
                     if hasattr(agent, 'start'):
-                        result = agent.start(prompt)
+                        result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                     else:
-                        result = agent.chat(prompt)
+                        result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                 
                 elif display_mode == 'quiet':
                     # -q: Result only, no spinners or status
                     if hasattr(agent, 'start'):
-                        result = agent.start(prompt)
+                        result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                     else:
-                        result = agent.chat(prompt)
+                        result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                     if result is not None:
                         output = getattr(result, 'output', None) or (str(result) if result else None)
                         if output:
@@ -4613,15 +4704,15 @@ Do NOT add any explanations or formatting."""
                         from praisonaiagents.output.status import enable_status_output, disable_status_output
                         enable_status_output(show_timestamps=True, show_metrics=True)
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                         disable_status_output()
                     except ImportError:
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                 
                 elif display_mode == 'debug':
                     # -vv: SDK TraceOutput with markdown rendering
@@ -4629,15 +4720,15 @@ Do NOT add any explanations or formatting."""
                         from praisonaiagents.output.trace import enable_trace_output, disable_trace_output
                         enable_trace_output(use_markdown=True)
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                         disable_trace_output()
                     except ImportError:
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                 
                 elif display_mode == 'jsonl':
                     # --output jsonl: JSONL structured output for CI/CD
@@ -4659,9 +4750,9 @@ Do NOT add any explanations or formatting."""
                     
                     start_time = time.time()
                     if hasattr(agent, 'start'):
-                        result = agent.start(prompt)
+                        result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                     else:
-                        result = agent.chat(prompt)
+                        result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                     
                     # Emit final result
                     reason = getattr(result, 'completion_reason', None) if hasattr(result, 'completion_reason') else 'complete'
@@ -4680,9 +4771,9 @@ Do NOT add any explanations or formatting."""
                     import json as json_mod
                     start_time = time.time()
                     if hasattr(agent, 'start'):
-                        result = agent.start(prompt)
+                        result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                     else:
-                        result = agent.chat(prompt)
+                        result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                     
                     output = result.output if hasattr(result, 'output') else str(result)
                     envelope = {
@@ -4703,15 +4794,15 @@ Do NOT add any explanations or formatting."""
                         flow = track_workflow()
                         flow.start()
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                         flow.stop()
                     except ImportError:
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                 
                 elif display_mode == 'editor':
                     # --output editor: User-friendly step-by-step format
@@ -4721,9 +4812,9 @@ Do NOT add any explanations or formatting."""
                     
                     # Run agent
                     if hasattr(agent, 'start'):
-                        result = agent.start(prompt)
+                        result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                     else:
-                        result = agent.chat(prompt)
+                        result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                     
                     # SDK callbacks (interaction, llm_content) handle display —
                     # no explicit editor.output() needed here.
@@ -4745,15 +4836,15 @@ Do NOT add any explanations or formatting."""
                         from praisonaiagents.output.status import enable_status_output, disable_status_output
                         enable_status_output(show_timestamps=False, show_metrics=False)
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
                         disable_status_output()
                     except ImportError:
                         if hasattr(agent, 'start'):
-                            result = agent.start(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'start', prompt)
                         else:
-                            result = agent.chat(prompt)
+                            result = self._execute_agent_with_budget_handling(agent, 'chat', prompt)
             
             # ===== POST-PROCESSING WITH NEW FEATURES =====
             
@@ -5364,16 +5455,17 @@ Now, {final_instruction.lower()}:"""
                     # Load from file
                     try:
                         import inspect
-                        spec = importlib.util.spec_from_file_location("tools_module", tools_path)
-                        if spec and spec.loader:
-                            module = importlib.util.module_from_spec(spec)
-                            spec.loader.exec_module(module)
+                        from .._safe_loader import load_user_module
+                        module = load_user_module(tools_path, name="tools_module")
+                        if module is not None:
                             # Get all callable functions from the module
                             for name, obj in inspect.getmembers(module):
                                 if inspect.isfunction(obj) and not name.startswith('_'):
                                     tools_list.append(obj)
                             if tools_list:
                                 print(f"[cyan]Loaded {len(tools_list)} tools from {tools_path}[/cyan]")
+                        else:
+                            print(f"[yellow]Warning: Tools loading disabled. Set PRAISONAI_ALLOW_LOCAL_TOOLS=true to enable.[/yellow]")
                     except Exception as e:
                         print(f"[yellow]Warning: Failed to load tools from {tools_path}: {e}[/yellow]")
                 else:
@@ -6778,5 +6870,7 @@ Provide a concise summary (max 200 words):"""
                 logging.getLogger(logger_name).setLevel(level)
 
 if __name__ == "__main__":
+    # Install warning filters when run as script
+    install_warning_filters()
     praison_ai = PraisonAI()
     praison_ai.main()

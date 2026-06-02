@@ -129,7 +129,12 @@ def temp_directory(tmp_path):
 
 @pytest.fixture(autouse=True)
 def setup_test_environment(request):
-    """Setup test environment before each test."""
+    """Setup test environment before each test.
+
+    For non-live unit/mock tests, fills missing provider API keys with placeholders
+    so imports and guardrails do not crash. Keys already present in the environment
+    (e.g. from ~/.bashrc or CI secrets) are never overwritten.
+    """
     # Only set test API keys for non-real tests
     # Real tests (marked with @pytest.mark.real) should use actual environment variables
     is_real_test = False
@@ -155,19 +160,22 @@ def setup_test_environment(request):
     original_values = {}
     
     if not is_real_test:
-        # Set test environment variables only for mock tests
+        # Placeholder keys only where unset — preserves keys from the parent shell
+        # (e.g. ~/.bashrc / ~/.zshrc) so local agentic unit tests can call real APIs.
         test_keys = {
             'OPENAI_API_KEY': 'test-key',
-            'ANTHROPIC_API_KEY': 'test-key', 
+            'ANTHROPIC_API_KEY': 'test-key',
             'GOOGLE_API_KEY': 'test-key',
             'XAI_API_KEY': 'test-key',
             'GROQ_API_KEY': 'test-key',
             'COHERE_API_KEY': 'test-key',
         }
-        
+
         for key, value in test_keys.items():
             original_values[key] = os.environ.get(key)
-            os.environ[key] = value
+            # Only set placeholder when the key is absent (preserves explicit empty strings)
+            if key not in os.environ:
+                os.environ[key] = value
     
     yield
     

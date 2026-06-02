@@ -42,7 +42,8 @@ def __getattr__(name: str):
 
 def _check_acp_available() -> bool:
     """Check if agent-client-protocol package is installed."""
-    return importlib.util.find_spec("acp") is not None
+    from .._framework_availability import is_available
+    return is_available("acp")
 
 
 def _get_install_instructions() -> str:

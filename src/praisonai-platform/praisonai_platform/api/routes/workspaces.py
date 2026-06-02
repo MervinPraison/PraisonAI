@@ -9,7 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from praisonaiagents.auth import AuthIdentity
 
-from ..deps import get_current_user, get_db, require_workspace_member
+from ..deps import (
+    get_current_user,
+    get_db,
+    require_workspace_admin,
+    require_workspace_member,
+    require_workspace_owner,
+)
 from ..schemas import (
     MemberAdd,
     MemberResponse,
@@ -64,7 +70,7 @@ async def get_workspace(
 async def update_workspace(
     workspace_id: str,
     body: WorkspaceUpdate,
-    user: AuthIdentity = Depends(require_workspace_member),
+    user: AuthIdentity = Depends(require_workspace_admin),
     session: AsyncSession = Depends(get_db),
 ):
     ws_svc = WorkspaceService(session)
@@ -77,7 +83,7 @@ async def update_workspace(
 @router.delete("/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_workspace(
     workspace_id: str,
-    user: AuthIdentity = Depends(require_workspace_member),
+    user: AuthIdentity = Depends(require_workspace_owner),
     session: AsyncSession = Depends(get_db),
 ):
     ws_svc = WorkspaceService(session)
@@ -93,10 +99,16 @@ async def delete_workspace(
 async def add_member(
     workspace_id: str,
     body: MemberAdd,
-    user: AuthIdentity = Depends(require_workspace_member),
+    user: AuthIdentity = Depends(require_workspace_admin),
     session: AsyncSession = Depends(get_db),
 ):
     member_svc = MemberService(session)
+    if body.role in ("owner", "admin"):
+        if not await member_svc.has_role(workspace_id, user.id, "owner"):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only owners can add admin or owner roles",
+            )
     member = await member_svc.add(workspace_id, body.user_id, body.role)
     return MemberResponse.model_validate(member)
 
@@ -117,10 +129,32 @@ async def update_member_role(
     workspace_id: str,
     user_id: str,
     body: MemberUpdate,
-    user: AuthIdentity = Depends(require_workspace_member),
+    user: AuthIdentity = Depends(require_workspace_admin),
     session: AsyncSession = Depends(get_db),
 ):
     member_svc = MemberService(session)
+    target = await member_svc.get(workspace_id, user_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+    if user_id == user.id and body.role != target.role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot change your own role",
+        )
+    if body.role in ("owner", "admin") and not await member_svc.has_role(
+        workspace_id, user.id, "owner"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only owners can assign admin or owner roles",
+        )
+    if target.role == "owner" and not await member_svc.has_role(
+        workspace_id, user.id, "owner"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only owners can change an owner's role",
+        )
     member = await member_svc.update_role(workspace_id, user_id, body.role)
     if member is None:
         raise HTTPException(status_code=404, detail="Member not found")
@@ -131,10 +165,25 @@ async def update_member_role(
 async def remove_member(
     workspace_id: str,
     user_id: str,
-    user: AuthIdentity = Depends(require_workspace_member),
+    user: AuthIdentity = Depends(require_workspace_admin),
     session: AsyncSession = Depends(get_db),
 ):
     member_svc = MemberService(session)
+    if user_id == user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot remove yourself from the workspace",
+        )
+    target = await member_svc.get(workspace_id, user_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Member not found")
+    if target.role == "owner" and not await member_svc.has_role(
+        workspace_id, user.id, "owner"
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only owners can remove an owner",
+        )
     removed = await member_svc.remove(workspace_id, user_id)
     if not removed:
         raise HTTPException(status_code=404, detail="Member not found")

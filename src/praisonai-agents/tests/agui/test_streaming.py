@@ -98,6 +98,61 @@ class TestToolCallStreaming:
         assert event.content == "Search results..."
 
 
+class TestStreamEventBridge:
+    """Test PraisonAI stream_emitter → AG-UI event conversion."""
+
+    def test_delta_text_to_agui(self):
+        from praisonaiagents.streaming.events import StreamEvent, StreamEventType
+        from praisonaiagents.ui.agui.streaming import EventBuffer, stream_event_to_agui_events
+
+        buffer = EventBuffer()
+        event = StreamEvent(type=StreamEventType.DELTA_TEXT, content="Hello")
+        agui_events = stream_event_to_agui_events(event, "msg-1", buffer)
+
+        assert len(agui_events) == 2
+        assert agui_events[0].type == "TEXT_MESSAGE_START"
+        assert agui_events[1].type == "TEXT_MESSAGE_CONTENT"
+        assert agui_events[1].delta == "Hello"
+
+    def test_tool_call_start_to_agui(self):
+        from praisonaiagents.streaming.events import StreamEvent, StreamEventType
+        from praisonaiagents.ui.agui.streaming import EventBuffer, stream_event_to_agui_events
+
+        buffer = EventBuffer()
+        event = StreamEvent(
+            type=StreamEventType.TOOL_CALL_START,
+            tool_call={"id": "tc-1", "name": "search", "arguments": {"q": "test"}},
+        )
+        agui_events = stream_event_to_agui_events(event, "msg-1", buffer)
+
+        assert len(agui_events) == 3
+        assert agui_events[0].type == "TOOL_CALL_START"
+        assert agui_events[0].tool_call_name == "search"
+
+    def test_tool_call_result_a2ui_emits_custom_event(self):
+        from praisonaiagents.streaming.events import StreamEvent, StreamEventType
+        from praisonaiagents.ui.agui.streaming import EventBuffer, stream_event_to_agui_events
+        from praisonaiagents.ui.protocols import A2UI_MIME_TYPE
+
+        buffer = EventBuffer()
+        a2ui_result = {
+            "mime_type": A2UI_MIME_TYPE,
+            "messages": [{"createSurface": {"surfaceId": "panel-1"}}],
+        }
+        event = StreamEvent(
+            type=StreamEventType.TOOL_CALL_RESULT,
+            tool_call={"id": "tc-a2ui", "name": "send_a2ui_messages", "result": a2ui_result},
+        )
+        agui_events = stream_event_to_agui_events(event, "msg-1", buffer)
+
+        assert len(agui_events) == 2
+        assert agui_events[0].type == "TOOL_CALL_RESULT"
+        assert agui_events[1].type == "CUSTOM"
+        assert agui_events[1].name == "a2ui"
+        assert agui_events[1].value["surface_id"] == "panel-1"
+        assert agui_events[1].value["messages"] == a2ui_result["messages"]
+
+
 class TestRunLifecycleEvents:
     """Test run lifecycle events."""
     

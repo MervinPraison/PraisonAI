@@ -407,7 +407,7 @@ def _get_bg_loop() -> asyncio.AbstractEventLoop:
     """Return a running event loop on a background daemon thread.
 
     Created once on first call; reused thereafter.  The thread is a
-    daemon so it won't prevent process exit.
+    daemon so it won't prevent process exit, but includes graceful shutdown.
     """
     global _bg_loop
     if _bg_loop is not None and _bg_loop.is_running():
@@ -424,3 +424,31 @@ def _get_bg_loop() -> asyncio.AbstractEventLoop:
         t.start()
 
     return _bg_loop
+
+
+def _shutdown_bg_loop():
+    """Gracefully shutdown the background event loop."""
+    global _bg_loop
+    if _bg_loop is None or not _bg_loop.is_running():
+        return
+
+    async def _cancel_pending():
+        current = asyncio.current_task()
+        pending = [t for t in asyncio.all_tasks() if t is not current]
+        for t in pending:
+            t.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    try:
+        fut = asyncio.run_coroutine_threadsafe(_cancel_pending(), _bg_loop)
+        fut.result(timeout=2)
+    except Exception:
+        pass
+    finally:
+        _bg_loop.call_soon_threadsafe(_bg_loop.stop)
+
+
+# Register cleanup on process exit
+import atexit
+atexit.register(_shutdown_bg_loop)

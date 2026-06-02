@@ -1,22 +1,23 @@
 {
   "version": "1.5.87",
-  "lastUpdated": "2026-04-24",
+  "lastUpdated": "2026-06-02",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 334,
+    "pythonCoreFeatures": 336,
     "pythonWrapperFeatures": 99,
     "typescriptFeatures": 1192,
-    "gapCount": 42,
+    "gapCount": 44,
     "priorityP0": 1,
     "priorityP1": 0,
     "priorityP2": 0,
-    "priorityP3": 41
+    "priorityP3": 43
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
     "exports": [
       "A2A",
+      "A2UI",
       "AGUI",
       "AUTONOMY_PRESETS",
       "Agent",
@@ -248,6 +249,7 @@
       "ToolPluginProtocol",
       "ToolRegistry",
       "ToolResult",
+      "ToolSearchConfig",
       "ToolUseEvent",
       "ToolValidationError",
       "Tools",
@@ -474,6 +476,7 @@
         "ReflectionConfig",
         "SkillsConfig",
         "TemplateConfig",
+        "ToolSearchConfig",
         "WEB_PRESETS",
         "WebConfig",
         "WebSearchProvider",
@@ -727,6 +730,7 @@
       ],
       "ui": [
         "A2A",
+        "A2UI",
         "AGUI"
       ],
       "workflows": [
@@ -3912,6 +3916,15 @@
         "category": "ui"
       },
       {
+        "feature": "A2UI",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "ui"
+      },
+      {
         "feature": "AGUI",
         "python": true,
         "typescript": true,
@@ -5242,6 +5255,15 @@
         "effort": "medium",
         "status": "DONE",
         "category": "plugins"
+      },
+      {
+        "feature": "ToolSearchConfig",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "config"
       },
       {
         "feature": "ToolUseEvent",

@@ -2,14 +2,16 @@ import yaml
 import os
 from rich import print
 from dotenv import load_dotenv
-from crewai import Agent, Task, Crew
 load_dotenv()
-import autogen
+
+from praisonai.llm.env import resolve_llm_endpoint
+
+ep = resolve_llm_endpoint()
 config_list = [
     {
-        'model': os.environ.get("OPENAI_MODEL_NAME", "gpt-4o-mini"),
-        'base_url': os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1"),
-        'api_key': os.environ.get("OPENAI_API_KEY")
+        'model': ep.model,
+        'base_url': ep.base_url,
+        'api_key': ep.api_key
     }
 ]
 
@@ -33,6 +35,9 @@ def generate_crew_and_kickoff(agent_file):
     agents = {}
     tasks = []
     if framework == "autogen":
+        # Lazy load autogen only when needed
+        import autogen
+        
         # Load the LLM configuration dynamically
         print(config_list)
         llm_config = {"config_list": config_list}
@@ -74,6 +79,9 @@ def generate_crew_and_kickoff(agent_file):
         response = user.initiate_chats(tasks)
         result = "### Output ###\n"+response[-1].summary if hasattr(response[-1], 'summary') else ""
     else:
+        # Lazy load crewai only when needed
+        from crewai import Agent, Task, Crew
+        
         for role, details in config['roles'].items():
             role_filled = details['role'].format(topic=topic)
             goal_filled = details['goal'].format(topic=topic)

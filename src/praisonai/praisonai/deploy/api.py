@@ -30,23 +30,36 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from praisonai import PraisonAI
 import os
+import secrets
+import sys
 
 app = Flask(__name__)
 
 # CORS configuration
 {"CORS(app)" if config.cors_enabled else "# CORS disabled"}
 
-# Authentication
-AUTH_ENABLED = {config.auth_enabled}
-AUTH_TOKEN = {repr(config.auth_token)}
+# Authentication. Defaults are taken from the deploy config but can be
+# overridden at runtime via env vars so operators can rotate the bearer
+# token without regenerating this file.
+AUTH_ENABLED = os.environ.get("PRAISONAI_API_AUTH", "{'enabled' if config.auth_enabled else 'disabled'}").strip().lower() != "disabled"
+AUTH_TOKEN = os.environ.get("PRAISONAI_API_TOKEN") or {repr(config.auth_token)}
+
+if AUTH_ENABLED and not AUTH_TOKEN:
+    AUTH_TOKEN = secrets.token_urlsafe(32)
+    print(
+        f"[praisonai-api] generated API token (set PRAISONAI_API_TOKEN to override): {{AUTH_TOKEN}}",
+        file=sys.stderr,
+        flush=True,
+    )
 
 def check_auth():
-    """Check authentication if enabled."""
+    """Check authentication if enabled (constant-time compare)."""
     if not AUTH_ENABLED:
         return True
-    
-    token = request.headers.get('Authorization', '').replace('Bearer ', '')
-    return token == AUTH_TOKEN
+    if not AUTH_TOKEN:
+        return False
+    token = request.headers.get('Authorization', '').replace('Bearer ', '', 1)
+    return secrets.compare_digest(token, AUTH_TOKEN)
 
 @app.route('/health', methods=['GET'])
 def health():

@@ -178,19 +178,14 @@ class WebhookApproval:
                 )
 
     def request_approval_sync(self, request) -> Any:
-        """Synchronous wrapper — runs async method in a new event loop."""
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-
-        if loop and loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(asyncio.run, self.request_approval(request))
-                return future.result(timeout=self._timeout + 10)
-        else:
-            return asyncio.run(self.request_approval(request))
+        """Synchronous wrapper — delegates to the shared async bridge."""
+        from .._async_bridge import run_sync
+        # run_sync raises RuntimeError if called from a running loop, so callers
+        # in async contexts get a clear error instead of a silent thread cold-start.
+        return run_sync(
+            self.request_approval(request),
+            timeout=self._timeout + 10,
+        )
 
     # ── Polling ─────────────────────────────────────────────────────────
 

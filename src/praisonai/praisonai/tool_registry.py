@@ -7,6 +7,7 @@ for both builtin and user tools.
 """
 
 import logging
+import threading
 from typing import Dict, Callable, List, Optional, Any
 import inspect
 
@@ -18,46 +19,87 @@ class ToolRegistry:
     
     def __init__(self):
         self._functions: Dict[str, Callable] = {}
-        self._autogen_adapters: Dict[str, Callable] = {}
+        self._lock = threading.Lock()
+        # Note: AutoGen-specific adapters moved to framework_adapters.autogen
         
     def register_function(self, name: str, func: Callable) -> None:
         """Register a function tool."""
         if not callable(func):
             raise ValueError(f"Tool {name} must be callable")
-        self._functions[name] = func
+        with self._lock:
+            self._functions[name] = func
         logger.debug(f"Registered function tool: {name}")
     
-    def register_autogen_adapter(self, tool_type_name: str, adapter: Callable) -> None:
-        """Register an AutoGen-specific tool adapter."""
+    def register_autogen_adapter(self, tool_type_name: str, adapter: Callable, _suppress_deprecation_warning: bool = False) -> None:
+        """Deprecated: AutoGen adapters moved to framework_adapters.autogen module."""
+        if not _suppress_deprecation_warning:
+            import warnings
+            warnings.warn(
+                "ToolRegistry.register_autogen_adapter is deprecated. "
+                "AutoGen-specific logic has been moved to framework_adapters.autogen module.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+        # For backward compatibility, still store but warn
         if not callable(adapter):
             raise ValueError(f"AutoGen adapter for {tool_type_name} must be callable")
-        self._autogen_adapters[tool_type_name] = adapter
-        logger.debug(f"Registered AutoGen adapter: {tool_type_name}")
+        with self._lock:
+            if not hasattr(self, '_autogen_adapters'):
+                self._autogen_adapters: Dict[str, Callable] = {}
+            self._autogen_adapters[tool_type_name] = adapter
+        logger.debug(f"Registered AutoGen adapter: {tool_type_name} (deprecated)")
     
     def get_function(self, name: str) -> Optional[Callable]:
         """Get a function tool by name."""
-        return self._functions.get(name)
+        with self._lock:
+            return self._functions.get(name)
     
     def get_autogen_adapter(self, tool_type_name: str) -> Optional[Callable]:
-        """Get an AutoGen adapter by tool type name."""
-        return self._autogen_adapters.get(tool_type_name)
+        """Deprecated: AutoGen adapters moved to framework_adapters.autogen module."""
+        import warnings
+        warnings.warn(
+            "ToolRegistry.get_autogen_adapter is deprecated. "
+            "AutoGen-specific logic has been moved to framework_adapters.autogen module.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        # For backward compatibility
+        if hasattr(self, '_autogen_adapters'):
+            with self._lock:
+                return self._autogen_adapters.get(tool_type_name)
+        return None
     
     def list_functions(self) -> List[str]:
         """List all registered function tool names."""
-        return list(self._functions.keys())
+        with self._lock:
+            return list(self._functions.keys())
     
     def list_autogen_adapters(self) -> List[str]:
-        """List all registered AutoGen adapter names."""
-        return list(self._autogen_adapters.keys())
+        """Deprecated: AutoGen adapters moved to framework_adapters.autogen module."""
+        import warnings
+        warnings.warn(
+            "ToolRegistry.list_autogen_adapters is deprecated. "
+            "AutoGen-specific logic has been moved to framework_adapters.autogen module.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        # For backward compatibility
+        if hasattr(self, '_autogen_adapters'):
+            with self._lock:
+                return list(self._autogen_adapters.keys())
+        return []
     
     def get_functions_dict(self) -> Dict[str, Callable]:
         """Get a copy of all registered functions."""
-        return dict(self._functions)
+        with self._lock:
+            return dict(self._functions)
     
     def clear(self) -> None:
         """Clear all registered tools."""
-        self._functions.clear()
-        self._autogen_adapters.clear()
+        with self._lock:
+            self._functions.clear()
+            if hasattr(self, '_autogen_adapters'):
+                self._autogen_adapters.clear()
         logger.debug("Cleared tool registry")
     
     def register_from_module(self, module: Any) -> List[str]:
@@ -75,31 +117,33 @@ class ToolRegistry:
             if (not name.startswith('_') and 
                 callable(obj) and 
                 not inspect.isclass(obj)):
-                self.register_function(name, obj)
+                self.register_function(name, obj)  # This already acquires the lock
                 registered.append(name)
         
         logger.debug(f"Registered {len(registered)} functions from module: {registered}")
         return registered
     
-    def register_builtin_autogen_adapters(self) -> None:
-        """Register builtin AutoGen adapters from inbuilt_tools."""
+    def register_builtin_autogen_adapters(self, _suppress_deprecation_warning: bool = False) -> None:
+        """Deprecated: AutoGen adapters moved to framework_adapters.autogen module."""
+        if not _suppress_deprecation_warning:
+            import warnings
+            warnings.warn(
+                "ToolRegistry.register_builtin_autogen_adapters is deprecated. "
+                "AutoGen-specific logic has been moved to framework_adapters.autogen module.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+        # For backward compatibility, attempt old logic but warn
         try:
-            # Lazy import to avoid circular dependencies
             from .inbuilt_tools import _get_autogen_tools
-            
-            # Get the autogen_tools module
             tools_module = _get_autogen_tools()
             if tools_module:
-                # Register adapters based on the pattern in the original code
                 for attr_name in dir(tools_module):
                     if attr_name.startswith('autogen_') and not attr_name.startswith('__'):
                         adapter = getattr(tools_module, attr_name)
                         if callable(adapter):
-                            # Extract tool type name from adapter function name
-                            # e.g., 'autogen_CodeDocsSearchTool' -> 'CodeDocsSearchTool'
                             tool_type_name = attr_name.replace('autogen_', '')
-                            self.register_autogen_adapter(tool_type_name, adapter)
-                            
+                            self.register_autogen_adapter(tool_type_name, adapter, _suppress_deprecation_warning=True)
         except ImportError as e:
             logger.warning(f"Could not register builtin AutoGen adapters: {e}")
         except Exception as e:
@@ -107,8 +151,11 @@ class ToolRegistry:
     
     def __len__(self) -> int:
         """Return total number of registered tools."""
-        return len(self._functions) + len(self._autogen_adapters)
+        with self._lock:
+            autogen_count = len(self._autogen_adapters) if hasattr(self, '_autogen_adapters') else 0
+            return len(self._functions) + autogen_count
     
     def __contains__(self, name: str) -> bool:
         """Check if a tool function is registered."""
-        return name in self._functions
+        with self._lock:
+            return name in self._functions

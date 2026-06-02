@@ -20,6 +20,8 @@ class ActivityService:
         self,
         workspace_id: str,
         action: str,
+        entity_type: str,
+        entity_id: str,
         actor_type: Optional[str] = None,
         actor_id: Optional[str] = None,
         issue_id: Optional[str] = None,
@@ -28,6 +30,8 @@ class ActivityService:
         """Record an activity."""
         entry = ActivityLog(
             workspace_id=workspace_id,
+            entity_type=entity_type,
+            entity_id=entity_id,
             action=action,
             actor_type=actor_type,
             actor_id=actor_id,

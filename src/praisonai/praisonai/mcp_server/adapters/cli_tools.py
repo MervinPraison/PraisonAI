@@ -21,6 +21,31 @@ from ..registry import register_tool
 logger = logging.getLogger(__name__)
 
 
+def _resolve_cwd_yaml_path(file_path: str) -> "Path":
+    """Resolve a YAML path strictly inside the current working directory."""
+    from pathlib import Path
+
+    if not isinstance(file_path, str) or not file_path:
+        raise ValueError("file_path must be a non-empty string")
+    if (
+        "/" in file_path
+        or "\\" in file_path
+        or "\x00" in file_path
+        or file_path.startswith(".")
+        or file_path in ("..", ".")
+    ):
+        raise ValueError(f"invalid file_path: {file_path!r}")
+    if not file_path.endswith((".yaml", ".yml")):
+        raise ValueError("file_path must be a .yaml or .yml file")
+    base = Path.cwd().resolve()
+    candidate = (base / file_path).resolve()
+    try:
+        candidate.relative_to(base)
+    except ValueError as exc:
+        raise ValueError(f"invalid file_path: {file_path!r}") from exc
+    return candidate
+
+
 def register_cli_tools() -> None:
     """Register CLI-based MCP tools."""
     
@@ -44,7 +69,8 @@ def register_cli_tools() -> None:
         """Validate a workflow YAML file."""
         try:
             import yaml
-            with open(file_path, 'r') as f:
+            yaml_path = _resolve_cwd_yaml_path(file_path)
+            with open(yaml_path, 'r') as f:
                 config = yaml.safe_load(f)
             
             required = ["framework", "topic"]
@@ -64,9 +90,10 @@ def register_cli_tools() -> None:
     def workflow_show(file_path: str) -> str:
         """Show workflow configuration."""
         try:
-            with open(file_path, 'r') as f:
-                content = f.read()
-            return content
+            yaml_path = _resolve_cwd_yaml_path(file_path)
+            return yaml_path.read_text()
+        except ValueError as e:
+            return f"Error: {e}"
         except FileNotFoundError:
             return f"File not found: {file_path}"
         except Exception as e:
@@ -86,6 +113,41 @@ def register_cli_tools() -> None:
             return f"Error: {e}"
     
     # Rules tools
+    def _resolve_rule_path(rule_name: str):
+        """Resolve a rule_name to a path strictly inside ``~/.praison/rules``.
+
+        ``rule_name`` is treated as a single filename (no separators, no
+        traversal, no leading dot). The fully-resolved path must remain
+        within the rules directory; otherwise the input is rejected. This
+        prevents arbitrary file write/read/delete (e.g. dropping a
+        ``.pth`` file in user site-packages) when an untrusted MCP caller
+        invokes ``praisonai.rules.*``.
+        """
+        import os
+        from pathlib import Path
+        if not isinstance(rule_name, str) or not rule_name:
+            raise ValueError("rule_name must be a non-empty string")
+        # Reject any directory separator, traversal token, NUL byte, or
+        # leading dot (which would target hidden files / parent dirs).
+        if (
+            "/" in rule_name
+            or "\\" in rule_name
+            or "\x00" in rule_name
+            or rule_name.startswith(".")
+            or rule_name in ("..", ".")
+            or os.path.sep in rule_name
+            or (os.path.altsep and os.path.altsep in rule_name)
+        ):
+            raise ValueError(f"invalid rule_name: {rule_name!r}")
+        rules_dir = Path(os.path.expanduser("~/.praison/rules")).resolve()
+        candidate = (rules_dir / rule_name).resolve()
+        # Ensure no symlink-or-traversal escape from rules_dir.
+        try:
+            candidate.relative_to(rules_dir)
+        except ValueError as exc:
+            raise ValueError(f"invalid rule_name: {rule_name!r}") from exc
+        return rules_dir, candidate
+
     @register_tool("praisonai.rules.list")
     def rules_list() -> str:
         """List active rules."""
@@ -103,13 +165,12 @@ def register_cli_tools() -> None:
     def rules_show(rule_name: str) -> str:
         """Show a specific rule."""
         try:
-            import os
-            rule_path = os.path.expanduser(f"~/.praison/rules/{rule_name}")
-            if not os.path.exists(rule_path):
+            _, rule_path = _resolve_rule_path(rule_name)
+            if not rule_path.exists():
                 return f"Rule not found: {rule_name}"
-            with open(rule_path, 'r') as f:
-                content = f.read()
-            return content
+            return rule_path.read_text()
+        except ValueError as e:
+            return f"Error: {e}"
         except Exception as e:
             return f"Error: {e}"
     
@@ -117,13 +178,12 @@ def register_cli_tools() -> None:
     def rules_create(rule_name: str, content: str) -> str:
         """Create a new rule."""
         try:
-            import os
-            rules_dir = os.path.expanduser("~/.praison/rules")
-            os.makedirs(rules_dir, exist_ok=True)
-            rule_path = os.path.join(rules_dir, rule_name)
-            with open(rule_path, 'w') as f:
-                f.write(content)
+            rules_dir, rule_path = _resolve_rule_path(rule_name)
+            rules_dir.mkdir(parents=True, exist_ok=True)
+            rule_path.write_text(content)
             return f"Rule created: {rule_name}"
+        except ValueError as e:
+            return f"Error: {e}"
         except Exception as e:
             return f"Error: {e}"
     
@@ -131,12 +191,13 @@ def register_cli_tools() -> None:
     def rules_delete(rule_name: str) -> str:
         """Delete a rule."""
         try:
-            import os
-            rule_path = os.path.expanduser(f"~/.praison/rules/{rule_name}")
-            if not os.path.exists(rule_path):
+            _, rule_path = _resolve_rule_path(rule_name)
+            if not rule_path.exists():
                 return f"Rule not found: {rule_name}"
-            os.remove(rule_path)
+            rule_path.unlink()
             return f"Rule deleted: {rule_name}"
+        except ValueError as e:
+            return f"Error: {e}"
         except Exception as e:
             return f"Error: {e}"
     
@@ -344,12 +405,10 @@ def register_cli_tools() -> None:
     def schedule_list() -> str:
         """List scheduled tasks."""
         try:
-            from praisonai.agent_scheduler import AgentScheduler
-            scheduler = AgentScheduler()
-            tasks = scheduler.list_tasks()
-            return str(tasks)
+            from praisonaiagents.tools.schedule_tools import schedule_list as _schedule_list
+            return _schedule_list()
         except ImportError:
-            return "Error: Scheduler not available"
+            return "Error: Schedule tools not available"
         except Exception as e:
             return f"Error: {e}"
     
@@ -361,12 +420,10 @@ def register_cli_tools() -> None:
     ) -> str:
         """Add a scheduled task."""
         try:
-            from praisonai.agent_scheduler import AgentScheduler
-            scheduler = AgentScheduler()
-            scheduler.add_task(task_name, cron, workflow_path)
-            return f"Task scheduled: {task_name}"
+            from praisonaiagents.tools.schedule_tools import schedule_add as _schedule_add
+            return _schedule_add(task_name, cron, workflow_path)
         except ImportError:
-            return "Error: Scheduler not available"
+            return "Error: Schedule tools not available"
         except Exception as e:
             return f"Error: {e}"
     
@@ -374,12 +431,10 @@ def register_cli_tools() -> None:
     def schedule_remove(task_name: str) -> str:
         """Remove a scheduled task."""
         try:
-            from praisonai.agent_scheduler import AgentScheduler
-            scheduler = AgentScheduler()
-            scheduler.remove_task(task_name)
-            return f"Task removed: {task_name}"
+            from praisonaiagents.tools.schedule_tools import schedule_remove as _schedule_remove
+            return _schedule_remove(task_name)
         except ImportError:
-            return "Error: Scheduler not available"
+            return "Error: Schedule tools not available"
         except Exception as e:
             return f"Error: {e}"
     
@@ -389,7 +444,8 @@ def register_cli_tools() -> None:
         """Validate deployment configuration."""
         try:
             import yaml
-            with open(config_path, 'r') as f:
+            yaml_path = _resolve_cwd_yaml_path(config_path)
+            with open(yaml_path, 'r') as f:
                 config = yaml.safe_load(f)
             
             required = ["name", "type"]

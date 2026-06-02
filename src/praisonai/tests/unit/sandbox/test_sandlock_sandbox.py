@@ -212,10 +212,14 @@ class TestSandlockSandbox:
         result = sandbox._safe_sandbox_path("../../etc/passwd")
         assert result is None
 
-        # A normal relative path should resolve inside the sandbox
+        # A normal relative path should resolve inside the sandbox.
+        # Compare via ``os.path.realpath`` so the assertion works on macOS
+        # where ``/var/folders`` is a symlink to ``/private/var/folders`` —
+        # ``_safe_sandbox_path`` returns the realpath form while
+        # ``sandbox._temp_dir`` holds the unresolved ``mkdtemp`` output.
         normal = sandbox._safe_sandbox_path("subdir/file.txt")
         assert normal is not None
-        assert normal.startswith(sandbox._temp_dir)
+        assert normal.startswith(os.path.realpath(sandbox._temp_dir) + os.sep)
 
         await sandbox.stop()
 

@@ -15,9 +15,9 @@ from enum import Enum
 
 # Import token tracking
 try:
-    from ..telemetry.token_collector import _token_collector
+    from ..telemetry.token_collector import get_token_collector
 except ImportError:
-    _token_collector = None
+    get_token_collector = None
 
 # Import async utility for hot-path usage
 try:
@@ -126,7 +126,24 @@ class _AgentServerRegistry:
         
         thread = threading.Thread(target=run_server, daemon=True)
         thread.start()
-        ready_event.wait(timeout=5.0)  # Deterministic wait instead of sleep(0.5)
+        
+        # Check for configurable timeout via environment variable
+        try:
+            timeout = float(os.environ.get("PRAISONAI_SERVER_READY_TIMEOUT", "5.0"))
+        except ValueError:
+            logger.warning("Invalid PRAISONAI_SERVER_READY_TIMEOUT value. Using default 5.0s.")
+            timeout = 5.0
+        became_ready = ready_event.wait(timeout=timeout)
+        
+        if not became_ready:
+            logger.warning(
+                "Agent server on port %s did not become ready within %.1fs. "
+                "Proceeding, but some features may not work correctly. "
+                "Check server logs for startup errors.",
+                port,
+                timeout,
+            )
+        
         return True
 
 
@@ -1010,8 +1027,10 @@ class AgentTeam:
             logger.info(f"Task with ID {task_id} is already completed")
             return
 
+        # Use per-task max_retries if available
+        task_max = getattr(task, "max_retries", self.max_retries)
         retries = 0
-        while task.status != "completed" and retries < self.max_retries:
+        while task.status != "completed" and retries < task_max:
             logger.debug(f"Attempt {retries+1} for task {task_id}")
             if task.status in ["not started", "in progress"]:
                 task_output = await self.aexecute_task(task_id)
@@ -1038,6 +1057,11 @@ class AgentTeam:
                                 if isinstance(guardrail_result.result, str):
                                     # Update the task output with the modified result
                                     task_output.raw = guardrail_result.result
+                                    # Clear structured fields to avoid stale cache
+                                    if hasattr(task_output, 'json_dict'):
+                                        task_output.json_dict = None
+                                    if hasattr(task_output, 'pydantic'):
+                                        task_output.pydantic = None
                                     task.result = task_output
                                 elif hasattr(guardrail_result.result, 'raw'):
                                     # Replace with the new task output
@@ -1047,7 +1071,17 @@ class AgentTeam:
                             logger.info(f"Task {task_id}: Guardrail validation passed")
                         except Exception as e:
                             logger.error(f"Task {task_id}: Error in guardrail processing: {e}")
-                            # Continue execution even if guardrail fails to avoid breaking the task
+                            # Handle guardrail failure with retry logic
+                            if task.retry_count >= task.max_retries:
+                                raise Exception(
+                                    f"Task failed due to guardrail processing error after {task.max_retries} retries. "
+                                    f"Last error: {e}"
+                                ) from e
+                            task.retry_count += 1
+                            task.status = "in progress"
+                            logger.warning(f"Task {task_id}: Guardrail processing error (retry {task.retry_count}/{task.max_retries}): {e}")
+                            retries += 1
+                            continue  # Retry the task
                     
                     task.status = "completed"
                     # Run execute_callback for memory operations
@@ -1056,6 +1090,11 @@ class AgentTeam:
                     except Exception as e:
                         logger.error(f"Error executing memory callback for task {task_id}: {e}")
                         logger.exception(e)
+                        # Respect task failure policies - re-raise if configured
+                        if hasattr(task, 'fail_on_callback_error') and task.fail_on_callback_error:
+                            raise
+                        if hasattr(task, 'fail_on_memory_error') and task.fail_on_memory_error:
+                            raise
                     
                     # Run task callback if exists
                     if task.callback:
@@ -1078,7 +1117,11 @@ class AgentTeam:
                     task.status = "in progress"
                     if self.verbose >= 1:
                         logger.info(f"Task {task_id} not completed, retrying")
-                    await asyncio.sleep(1)
+                    # Use task's retry policy instead of hardcoded sleep (with cap)
+                    delay = getattr(task, 'retry_delay', 1)
+                    max_delay = getattr(task, 'max_retry_delay', 300)  # 5 min cap
+                    actual_delay = min(delay * (2 ** retries), max_delay)
+                    await asyncio.sleep(actual_delay)
                     retries += 1
             else:
                 if task.status == "failed":
@@ -1088,8 +1131,9 @@ class AgentTeam:
                     logger.info("Invalid Task status")
                     break
 
-        if retries == self.max_retries and task.status != "completed":
-            logger.info(f"Task {task_id} failed after {self.max_retries} retries.")
+        if retries == task_max and task.status != "completed":
+            task.status = "failed"  # Set failed status to match sync behavior
+            logger.info(f"Task {task_id} failed after {task_max} retries.")
 
     async def arun_all_tasks(self):
         """Async version of run_all_tasks method"""
@@ -1271,12 +1315,61 @@ class AgentTeam:
         if self.variables and not getattr(task, 'variables', None):
             task.variables = self.variables
         
+        # Use per-task max_retries if available
+        task_max = getattr(task, "max_retries", self.max_retries)
         retries = 0
-        while task.status != "completed" and retries < self.max_retries:
+        while task.status != "completed" and retries < task_max:
             logger.debug(f"Attempt {retries+1} for task {task_id}")
             if task.status in ["not started", "in progress"]:
                 task_output = self.execute_task(task_id)
                 if task_output and self.completion_checker(task, task_output.raw):
+                    # Add guardrail validation (matches arun_task logic)
+                    if task._guardrail_fn:
+                        try:
+                            guardrail_result = task._process_guardrail(task_output)
+                            if not guardrail_result.success:
+                                if task.retry_count >= task.max_retries:
+                                    raise Exception(
+                                        f"Task failed guardrail validation after {task.max_retries} retries. "
+                                        f"Last error: {guardrail_result.error}"
+                                    )
+                                task.retry_count += 1
+                                task.status = "in progress"  # Keep task in progress for retry
+                                logger.warning(f"Task {task_id}: Guardrail validation failed (retry {task.retry_count}/{task.max_retries}): {guardrail_result.error}")
+                                retries += 1
+                                continue  # Retry the task
+                            
+                            # If guardrail passed and returned a modified result
+                            if guardrail_result.result is not None:
+                                if isinstance(guardrail_result.result, str):
+                                    # Update the task output with the modified result
+                                    task_output.raw = guardrail_result.result
+                                    # Clear structured fields to avoid stale cache
+                                    if hasattr(task_output, 'json_dict'):
+                                        task_output.json_dict = None
+                                    if hasattr(task_output, 'pydantic'):
+                                        task_output.pydantic = None
+                                    task.result = task_output
+                                elif hasattr(guardrail_result.result, 'raw'):
+                                    # Replace with the new task output
+                                    task_output = guardrail_result.result
+                                    task.result = task_output
+                            
+                            logger.info(f"Task {task_id}: Guardrail validation passed")
+                        except Exception as e:
+                            logger.error(f"Task {task_id}: Error in guardrail processing: {e}")
+                            # Handle guardrail failure with retry logic
+                            if task.retry_count >= task.max_retries:
+                                raise Exception(
+                                    f"Task failed due to guardrail processing error after {task.max_retries} retries. "
+                                    f"Last error: {e}"
+                                ) from e
+                            task.retry_count += 1
+                            task.status = "in progress"
+                            logger.warning(f"Task {task_id}: Guardrail processing error (retry {task.retry_count}/{task.max_retries}): {e}")
+                            retries += 1
+                            continue  # Retry the task
+                    
                     task.status = "completed"
                     # Run execute_callback for memory operations
                     try:
@@ -1315,7 +1408,11 @@ class AgentTeam:
                     task.status = "in progress"
                     if self.verbose >= 1:
                         logger.info(f"Task {task_id} not completed, retrying")
-                    time.sleep(1)
+                    # Use task's retry policy instead of hardcoded sleep (with cap)
+                    delay = getattr(task, 'retry_delay', 1)
+                    max_delay = getattr(task, 'max_retry_delay', 300)  # 5 min cap
+                    actual_delay = min(delay * (2 ** retries), max_delay)
+                    time.sleep(actual_delay)
                     retries += 1
             else:
                 if task.status == "failed":
@@ -1325,8 +1422,9 @@ class AgentTeam:
                     logger.info("Invalid Task status")
                     break
 
-        if retries == self.max_retries and task.status != "completed":
-            logger.info(f"Task {task_id} failed after {self.max_retries} retries.")
+        if retries == task_max and task.status != "completed":
+            task.status = "failed"  # Set failed status
+            logger.info(f"Task {task_id} failed after {task_max} retries.")
 
     def run_all_tasks(self):
         """Synchronous version of run_all_tasks method"""
@@ -1449,56 +1547,103 @@ class AgentTeam:
             ))
             console.print()
             
-            # Execute tasks with verbose output
+            # Use callbacks for verbose display while maintaining process orchestration
             total_agents = len(self.agents)
             workflow_start_time = time_module.time()
+            task_times = {}
+            task_idx = {}
             
-            for idx, (task_id, task) in enumerate(self.tasks.items(), 1):
-                agent = task.agent
-                agent_name = agent.display_name if agent else "Unknown"
-                agent_model = getattr(agent, 'llm', 'gpt-4o-mini') if agent else "unknown"
-                
-                # Show agent task panel with model info
-                task_desc = task.description[:100] + "..." if len(task.description) > 100 else task.description
-                panel_content = f"[bold {PRAISON_COLORS['task_text']}]📋 Task:[/] {task_desc}\n"
-                panel_content += f"[dim]🤖 Model: {agent_model}[/dim]"
-                console.print(Panel.fit(
-                    panel_content,
-                    title=f"[bold]Agent [{idx}/{total_agents}]: {agent_name}[/]",
-                    border_style=PRAISON_COLORS["task"]
-                ))
-                
-                # Execute with timing and status
-                start_time = time_module.time()
-                
-                # Show working spinner
-                with console.status(
-                    f"[bold yellow]Working...[/]  {agent_name} generating response...",
-                    spinner="dots",
-                    spinner_style="yellow"
-                ):
-                    # Run the task
-                    if self.planning:
-                        self._run_with_planning()
-                        break  # Planning mode handles all tasks
-                    else:
-                        self.run_task(task_id)
-                
-                elapsed = time_module.time() - start_time
-                
-                # Show response panel - FULL response, no truncation
-                result = self.get_task_result(task_id)
-                if result:
-                    response_text = str(result.raw)
-                    # No truncation - show full response in verbose mode
-                    from rich.markdown import Markdown
-                    console.print(Panel(
-                        Markdown(response_text),
-                        title=f"[bold]Agent [{idx}/{total_agents}] Complete ({elapsed:.1f}s)[/]",
-                        border_style=PRAISON_COLORS["response"],
-                        padding=(1, 2)
+            # Set up index mapping for tasks
+            for idx, task_id in enumerate(self.tasks.keys(), 1):
+                task_idx[task_id] = idx
+            
+            # Define callbacks to display progress while using proper orchestration
+            def verbose_task_start_callback(task, task_id):
+                try:
+                    agent = task.agent
+                    agent_name = agent.display_name if agent else "Unknown"
+                    agent_model = getattr(agent, 'llm', 'gpt-4o-mini') if agent else "unknown"
+                    idx = task_idx.get(task_id, 0)
+                    
+                    # Show agent task panel with model info
+                    task_desc = task.description[:100] + "..." if len(task.description) > 100 else task.description
+                    panel_content = f"[bold {PRAISON_COLORS['task_text']}]📋 Task:[/] {task_desc}\n"
+                    panel_content += f"[dim]🤖 Model: {agent_model}[/dim]"
+                    console.print(Panel.fit(
+                        panel_content,
+                        title=f"[bold]Agent [{idx}/{total_agents}]: {agent_name}[/]",
+                        border_style=PRAISON_COLORS["task"]
                     ))
-                console.print()
+                    
+                    # Store start time for this task
+                    task_times[task_id] = time_module.time()
+                    
+                    # Show working spinner
+                    console.print(f"[bold yellow]Working...[/]  {agent_name} generating response...")
+                except Exception as e:
+                    logging.debug(f"Error in verbose task start callback: {e}")
+            
+            def verbose_task_complete_callback(task, task_output):
+                try:
+                    task_id = getattr(task, 'id', 'unknown')
+                    start_time = task_times.get(task_id, time_module.time())
+                    elapsed = time_module.time() - start_time
+                    idx = task_idx.get(task_id, 0)
+                    
+                    # Show response panel - FULL response, no truncation
+                    if task_output:
+                        response_text = str(task_output.raw)
+                        # No truncation - show full response in verbose mode
+                        from rich.markdown import Markdown
+                        console.print(Panel(
+                            Markdown(response_text),
+                            title=f"[bold]Agent [{idx}/{total_agents}] Complete ({elapsed:.1f}s)[/]",
+                            border_style=PRAISON_COLORS["response"],
+                            padding=(1, 2)
+                        ))
+                    console.print()
+                except Exception as e:
+                    logging.debug(f"Error in verbose task complete callback: {e}")
+            
+            # Set callbacks for verbose display (compose with existing callbacks)
+            original_on_task_start = self.on_task_start
+            original_on_task_complete = self.on_task_complete
+            
+            def composed_on_task_start(task, task_id):
+                try:
+                    verbose_task_start_callback(task, task_id)
+                except Exception as e:
+                    logging.debug(f"Error in verbose task start callback: {e}")
+                if original_on_task_start:
+                    try:
+                        original_on_task_start(task, task_id)
+                    except Exception as e:
+                        logging.debug(f"Error in original task start callback: {e}")
+            
+            def composed_on_task_complete(task, task_output):
+                try:
+                    verbose_task_complete_callback(task, task_output)
+                except Exception as e:
+                    logging.debug(f"Error in verbose task complete callback: {e}")
+                if original_on_task_complete:
+                    try:
+                        original_on_task_complete(task, task_output)
+                    except Exception as e:
+                        logging.debug(f"Error in original task complete callback: {e}")
+            
+            self.on_task_start = composed_on_task_start
+            self.on_task_complete = composed_on_task_complete
+            
+            # Use proper process orchestration with verbose callbacks
+            try:
+                if self.planning:
+                    self._run_with_planning()
+                else:
+                    self.run_all_tasks()
+            finally:
+                # Restore original callbacks
+                self.on_task_start = original_on_task_start
+                self.on_task_complete = original_on_task_complete
             
             # Workflow summary panel
             total_elapsed = time_module.time() - workflow_start_time
@@ -1681,18 +1826,19 @@ class AgentTeam:
 
     def get_token_usage_summary(self) -> Dict[str, Any]:
         """Get a summary of token usage across all agents and tasks."""
-        if not _token_collector:
+        if not get_token_collector:
             return {"error": "Token tracking not available"}
         
-        return _token_collector.get_session_summary()
+        return get_token_collector().get_session_summary()
     
     def get_detailed_token_report(self) -> Dict[str, Any]:
         """Get a detailed token usage report."""
-        if not _token_collector:
+        if not get_token_collector:
             return {"error": "Token tracking not available"}
         
-        summary = _token_collector.get_session_summary()
-        recent = _token_collector.get_recent_interactions(limit=20)
+        collector = get_token_collector()
+        summary = collector.get_session_summary()
+        recent = collector.get_recent_interactions(limit=20)
         
         # Calculate cost estimates (example rates)
         cost_per_1k_input = 0.0005  # $0.0005 per 1K input tokens
@@ -1716,11 +1862,11 @@ class AgentTeam:
     
     def display_token_usage(self):
         """Display token usage in a formatted table."""
-        if not _token_collector:
+        if not get_token_collector:
             print("Token tracking not available")
             return
         
-        summary = _token_collector.get_session_summary()
+        summary = get_token_collector().get_session_summary()
         
         print("\n" + "="*50)
         print("TOKEN USAGE SUMMARY")

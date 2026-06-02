@@ -174,8 +174,25 @@ def _safe_extractall(tar: tarfile.TarFile, dest_dir: Path) -> None:
             raise RegistryError(
                 f"Refusing to extract path escaping target directory: {member.name}"
             )
+        # Reject symlinks and hardlinks — their linkname may point outside dest_dir
+        # and would not be caught by the member.name checks above.
+        if member.issym() or member.islnk():
+            linkname = member.linkname or ""
+            if linkname.startswith("/"):
+                raise RegistryError(
+                    f"Refusing to extract link with absolute target: {member.name} -> {linkname}"
+                )
+            link_target = (dest_resolved / member_path.parent / linkname).resolve()
+            if not str(link_target).startswith(str(dest_resolved) + os.sep) and link_target != dest_resolved:
+                raise RegistryError(
+                    f"Refusing to extract link escaping target directory: {member.name} -> {linkname}"
+                )
     # All members validated — safe to extract
-    tar.extractall(dest_dir)
+    try:
+        tar.extractall(dest_dir, filter="data")
+    except TypeError:
+        # filter keyword not supported on Python < 3.12; validation above already covers safety
+        tar.extractall(dest_dir)
 
 
 def _atomic_write(file_path: Path, data: bytes) -> None:

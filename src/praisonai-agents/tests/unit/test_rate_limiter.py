@@ -250,16 +250,21 @@ class TestRateLimiterDeterministic:
         from praisonaiagents.llm import RateLimiter
         
         sleep_calls = []
+        current_time = [0.0]  # Use list to allow modification from lambda
+        
+        def mock_sleep(duration):
+            sleep_calls.append(duration)
+            current_time[0] += duration  # Advance time when sleep is called
         
         limiter = RateLimiter(requests_per_minute=60)
-        limiter._sleep = lambda s: sleep_calls.append(s)
+        limiter._sleep = mock_sleep
+        limiter._get_time = lambda: current_time[0]
         
         # Force a wait scenario
-        limiter._get_time = lambda: 0.0
         limiter._tokens = 0  # No tokens available
         limiter._last_update = 0.0
         
         limiter.acquire()
         
-        # Should have called our mock sleep
-        # (actual behavior depends on implementation)
+        # Should have called our mock sleep at least once
+        assert len(sleep_calls) > 0

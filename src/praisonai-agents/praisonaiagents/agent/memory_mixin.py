@@ -9,7 +9,6 @@ for maintainability.
 import os
 import logging
 from typing import Optional
-from praisonaiagents._logging import get_logger
 
 # Fallback helpers to avoid circular imports
 def _get_console():
@@ -42,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 import contextlib
-from typing import List, Optional, Any, Dict, Generator, TYPE_CHECKING
+from typing import Optional, Dict, Generator, TYPE_CHECKING
 from collections import OrderedDict
 
 if TYPE_CHECKING:
@@ -82,7 +81,7 @@ class MemoryMixin:
         with self._history_lock:
             self.chat_history.append({"role": role, "content": content})
 
-    def _add_to_chat_history_if_not_duplicate(self, role, content):
+    def _add_to_chat_history_if_not_duplicate(self, role, content) -> bool:
         """Thread-safe method to add messages to chat history only if not duplicate.
         
         Atomically checks for duplicate and adds message under the same lock to prevent TOCTOU races.
@@ -404,8 +403,32 @@ class MemoryMixin:
                     self._session_store.add_user_message(self._session_id, content)
                 elif role == "assistant":
                     self._session_store.add_assistant_message(self._session_id, content)
+                self._persist_session_stats()
             except Exception as e:
                 logging.warning(f"Failed to persist message to session store: {e}")
+
+    def _persist_session_stats(self):
+        """Flush agent cost/token stats into session JSON metadata."""
+        store = getattr(self, "_session_store", None)
+        session_id = getattr(self, "_session_id", None)
+        if store is None or session_id is None:
+            return
+        if not hasattr(store, "update_session_metadata"):
+            return
+        try:
+            summary = getattr(self, "cost_summary", {}) or {}
+            llm = getattr(self, "llm", None)
+            model = str(llm) if llm is not None else None
+            store.update_session_metadata(
+                session_id,
+                model=model,
+                total_tokens=summary.get("tokens_in", 0) + summary.get("tokens_out", 0),
+                cost=summary.get("cost", 0),
+                source=getattr(self, "_session_source", "chat"),
+                agent_id=getattr(self, "agent_id", None) or getattr(self, "_agent_id", None),
+            )
+        except Exception as e:
+            logging.debug(f"Session stats persist skipped: {e}")
 
     def session_id(self) -> Optional[str]:
         """Get the current session ID."""

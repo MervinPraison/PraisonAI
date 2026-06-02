@@ -363,6 +363,74 @@ def bot_whatsapp(
     )
 
 
+@app.command("linear")
+def bot_linear(
+    token: Optional[str] = typer.Option(None, "--token", "-t", help="Linear OAuth token", envvar="LINEAR_OAUTH_TOKEN"),
+    signing_secret: Optional[str] = typer.Option(None, "--signing-secret", help="Linear webhook signing secret", envvar="LINEAR_WEBHOOK_SECRET"),
+    port: int = typer.Option(8080, "--port", "-p", help="Webhook server port"),
+    agent: Optional[str] = typer.Option(None, "--agent", "-a", help="Agent YAML configuration file"),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model to use"),
+    browser: bool = typer.Option(False, "--browser", help="Enable browser control"),
+    browser_profile: str = typer.Option("default", "--browser-profile", help="Browser profile name"),
+    browser_headless: bool = typer.Option(False, "--browser-headless", help="Run browser headless"),
+    tools: Optional[List[str]] = typer.Option(None, "--tools", help="Tools to enable"),
+    skills: Optional[List[str]] = typer.Option(None, "--skills", help="Skills to enable"),
+    skills_dir: Optional[str] = typer.Option(None, "--skills-dir", help="Custom skills directory"),
+    memory: bool = typer.Option(False, "--memory", help="Enable memory"),
+    memory_provider: str = typer.Option("default", "--memory-provider", help="Memory provider"),
+    knowledge: bool = typer.Option(False, "--knowledge", help="Enable knowledge/RAG"),
+    knowledge_sources: Optional[List[str]] = typer.Option(None, "--knowledge-sources", help="Knowledge sources"),
+    web_search: bool = typer.Option(False, "--web", "--web-search", help="Enable web search"),
+    web_provider: str = typer.Option("duckduckgo", "--web-provider", help="Web search provider"),
+    sandbox: bool = typer.Option(False, "--sandbox", help="Enable sandbox mode"),
+    exec_enabled: bool = typer.Option(False, "--exec", help="Enable exec tool"),
+    auto_approve: bool = typer.Option(False, "--auto-approve", help="Auto-approve all tool executions"),
+    session_id: Optional[str] = typer.Option(None, "--session-id", help="Session ID"),
+    user_id: Optional[str] = typer.Option(None, "--user-id", help="User ID for memory isolation"),
+    thinking: Optional[str] = typer.Option(None, "--thinking", help="Thinking mode (off, minimal, low, medium, high)"),
+):
+    """Start a Linear bot with full agent capabilities.
+    
+    Handles Linear AgentSession webhooks for issue mentions and assignments.
+    
+    Examples:
+        praisonai bot linear --token $LINEAR_OAUTH_TOKEN --signing-secret $LINEAR_WEBHOOK_SECRET
+        praisonai bot linear --agent agents.yaml --memory --web --tools linear_tools
+    """
+    from ..features.bots_cli import BotHandler, BotCapabilities
+    
+    capabilities = BotCapabilities(
+        model=model,
+        browser=browser,
+        browser_profile=browser_profile,
+        browser_headless=browser_headless,
+        tools=tools or [],
+        skills=skills or [],
+        skills_dir=skills_dir,
+        memory=memory,
+        memory_provider=memory_provider,
+        knowledge=knowledge,
+        knowledge_sources=knowledge_sources or [],
+        web_search=web_search,
+        web_search_provider=web_provider,
+        sandbox=sandbox,
+        exec_enabled=exec_enabled,
+        auto_approve=auto_approve,
+        session_id=session_id,
+        user_id=user_id,
+        thinking=thinking,
+    )
+    
+    handler = BotHandler()
+    handler.start_linear(
+        token=token,
+        signing_secret=signing_secret,
+        webhook_port=port,
+        agent_file=agent,
+        capabilities=capabilities,
+    )
+
+
 @app.command("email")
 def bot_email(
     token: Optional[str] = typer.Option(None, "--token", "-t", help="Email app password", envvar="EMAIL_APP_PASSWORD"),
@@ -488,6 +556,123 @@ def bot_install_daemon(
         raise typer.Exit(1)
 
 
+# ── N4: Inbound DLQ subcommand group ─────────────────────────────────
+dlq_app = typer.Typer(
+    help="Inspect / replay / purge the inbound dead-letter queue.",
+    no_args_is_help=True,
+)
+app.add_typer(dlq_app, name="dlq")
+
+
+def _resolve_dlq_path(path: Optional[str]) -> str:
+    import os
+    if path:
+        return os.path.expanduser(path)
+    return os.path.expanduser(
+        os.environ.get("PRAISONAI_DLQ_PATH", "~/.praisonai/dlq.sqlite")
+    )
+
+
+@dlq_app.command("list")
+def dlq_list(
+    path: Optional[str] = typer.Option(
+        None, "--path", "-p", help="Path to DLQ sqlite file."
+    ),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max entries to show."),
+):
+    """List entries in the inbound DLQ (newest first)."""
+    from praisonai.bots import InboundDLQ
+
+    dlq = InboundDLQ(path=_resolve_dlq_path(path))
+    entries = dlq.list(limit=limit)
+    if not entries:
+        typer.echo(f"DLQ empty (path={dlq.path})")
+        raise typer.Exit(0)
+
+    typer.echo(f"DLQ {dlq.path} — {dlq.size()} entries (showing {len(entries)}):")
+    for e in entries:
+        prompt_preview = (e.prompt[:60] + "…") if len(e.prompt) > 60 else e.prompt
+        typer.echo(
+            f"  [{e.id:>5}] {e.platform:<10} user={e.user_id:<16} "
+            f"attempts={e.attempts}  err={e.error[:50]}  prompt={prompt_preview!r}"
+        )
+
+
+@dlq_app.command("purge")
+def dlq_purge(
+    path: Optional[str] = typer.Option(None, "--path", "-p"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation."),
+):
+    """Delete all entries from the DLQ."""
+    from praisonai.bots import InboundDLQ
+
+    dlq = InboundDLQ(path=_resolve_dlq_path(path))
+    n = dlq.size()
+    if n == 0:
+        typer.echo("DLQ already empty.")
+        raise typer.Exit(0)
+
+    if not yes:
+        confirm = typer.confirm(f"Delete all {n} entries from {dlq.path}?")
+        if not confirm:
+            raise typer.Exit(0)
+
+    removed = dlq.purge()
+    typer.echo(f"Purged {removed} entries.")
+
+
+@dlq_app.command("replay")
+def dlq_replay(
+    config: str = typer.Option(
+        ..., "--config", "-c",
+        help="Path to bot YAML config (provides agent + platform).",
+    ),
+    path: Optional[str] = typer.Option(None, "--path", "-p"),
+    limit: int = typer.Option(50, "--limit", "-n"),
+):
+    """Replay DLQ entries through the configured agent.
+
+    Loads the bot YAML, instantiates the agent, and re-runs each entry
+    through ``BotSessionManager.chat()``. Successful entries are removed;
+    failed entries are kept for the next attempt.
+    """
+    import asyncio
+    from praisonai.bots import InboundDLQ, BotSessionManager
+    from praisonai.cli.features.bots_cli import _load_bot_config, _build_agent
+
+    cfg = _load_bot_config(config)
+    agent = _build_agent(cfg)
+    platform = cfg.get("platform", "")
+
+    dlq = InboundDLQ(path=_resolve_dlq_path(path))
+    if dlq.size() == 0:
+        typer.echo("DLQ empty — nothing to replay.")
+        raise typer.Exit(0)
+
+    mgr = BotSessionManager(platform=platform)
+
+    async def replayer(entry):
+        try:
+            await mgr.chat(
+                agent, entry.user_id, entry.prompt,
+                chat_id=entry.chat_id,
+                thread_id=entry.thread_id,
+                user_name=entry.user_name,
+            )
+            return True
+        except Exception as e:
+            typer.echo(f"  entry {entry.id} failed: {e}")
+            return False
+
+    succeeded, failed = asyncio.run(dlq.replay(replayer, limit=limit))
+    typer.echo(f"Replay done: succeeded={succeeded}, failed={failed}, "
+               f"remaining={dlq.size()}")
+    
+    # Return non-zero exit code if any failures occurred and entries remain
+    if failed > 0 and dlq.size() > 0:
+        raise typer.Exit(1)
+
+
 @app.callback(invoke_without_command=True)
 def bot_callback(ctx: typer.Context):
     """Show bot help if no subcommand provided."""
@@ -502,6 +687,7 @@ Start a bot on any platform with: praisonai bot <platform>
   [green]discord[/green]     Discord Bot API  
   [green]slack[/green]       Slack Socket Mode
   [green]whatsapp[/green]    WhatsApp Cloud API or Web mode (QR scan)
+  [green]linear[/green]      Linear AgentSession webhooks
   [green]email[/green]       Email via IMAP/SMTP
   [green]agentmail[/green]   AgentMail API (API-first email for AI agents)
 
@@ -531,6 +717,7 @@ Start a bot on any platform with: praisonai bot <platform>
   praisonai bot discord --tools DuckDuckGoTool --memory --model gpt-4o
   praisonai bot whatsapp --token $WHATSAPP_ACCESS_TOKEN --phone-id $WHATSAPP_PHONE_NUMBER_ID
   praisonai bot whatsapp --mode web
+  praisonai bot linear --token $LINEAR_OAUTH_TOKEN --signing-secret $LINEAR_WEBHOOK_SECRET
 """
         try:
             from rich import print as rprint

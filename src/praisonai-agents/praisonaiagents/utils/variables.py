@@ -269,15 +269,21 @@ def substitute_variables(text: str, variables: Dict[str, Any]) -> str:
     def replace(match):
         var_name = match.group(1).strip()
         
-        # First check dynamic providers
-        if provider_registry.has(var_name):
+        # First check dynamic providers (only simple names, not dot notation)
+        if "." not in var_name and provider_registry.has(var_name):
             return str(provider_registry.resolve(var_name))
         
-        # Then check static variables
-        if var_name in variables:
-            return str(variables[var_name])
-        
-        # Keep original if not found
-        return match.group(0)
+        # Then check static variables with dot notation traversal
+        # e.g. {{user.name}} -> variables["user"]["name"]
+        parts = var_name.split(".")
+        value = variables
+        for part in parts:
+            if isinstance(value, dict) and part in value:
+                value = value[part]
+            else:
+                # Keep original if any segment is not found
+                return match.group(0)
+        return str(value)
     
-    return re.sub(r'\{\{(\w+)\}\}', replace, text)
+    # Support both {{var}} and {{var.property}} patterns  
+    return re.sub(r'\{\{([\w.]+)\}\}', replace, text)

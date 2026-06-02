@@ -1,18 +1,19 @@
 {
   "version": "1.5.87",
-  "lastUpdated": "2026-04-24",
+  "lastUpdated": "2026-06-02",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 334,
+    "pythonCoreFeatures": 336,
     "rustFeatures": 667,
-    "gapCount": 55,
-    "parityPercentage": 199.7
+    "gapCount": 57,
+    "parityPercentage": 198.5
   },
   "pythonCoreSDK": {
     "exports": [
       "A2A",
+      "A2UI",
       "AGUI",
       "AUTONOMY_PRESETS",
       "Agent",
@@ -244,6 +245,7 @@
       "ToolPluginProtocol",
       "ToolRegistry",
       "ToolResult",
+      "ToolSearchConfig",
       "ToolUseEvent",
       "ToolValidationError",
       "Tools",
@@ -1104,6 +1106,7 @@
         "WebSearchProvider"
       ],
       "config_loader": [
+        "AutoRagConfig",
         "SessionConfig"
       ],
       "context": [
@@ -1725,6 +1728,7 @@
       "planning": [],
       "plugins": [
         "PluginRegistry",
+        "ToolDefinition",
         "disable_plugins",
         "enable_plugins",
         "get_plugin_manager",
@@ -1738,9 +1742,6 @@
       "sandbox": [],
       "session": [],
       "skills": [],
-      "specialized": [
-        "AutoRagConfig"
-      ],
       "specialized_agents": [],
       "streaming": [],
       "task": [],
@@ -1749,7 +1750,6 @@
       "tools": [
         "FunctionTool",
         "Tool",
-        "ToolDefinition",
         "ToolRegistry",
         "ToolResult"
       ],
@@ -2819,6 +2819,15 @@
         "priority": "P3",
         "effort": "low",
         "status": "DONE",
+        "category": "ui"
+      },
+      {
+        "feature": "A2UI",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
         "category": "ui"
       },
       {
@@ -4152,6 +4161,15 @@
         "effort": "medium",
         "status": "DONE",
         "category": "plugins"
+      },
+      {
+        "feature": "ToolSearchConfig",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "config"
       },
       {
         "feature": "ToolUseEvent",

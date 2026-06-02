@@ -99,7 +99,7 @@ class UnifiedExecutionMixin:
                 )
             # Apply rate limiter if configured (before any LLM call)
             if hasattr(self, '_rate_limiter') and self._rate_limiter is not None:
-                self._rate_limiter.acquire()
+                await self._rate_limiter.acquire_async()
             
             # Process ephemeral attachments (DRY - builds multimodal prompt)
             # IMPORTANT: Original text 'prompt' is stored in history, attachments are NOT

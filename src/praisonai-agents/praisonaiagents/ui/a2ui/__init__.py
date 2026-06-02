@@ -1,126 +1,44 @@
 """
-A2UI (Agent-to-User Interface) Protocol Integration for PraisonAI Agents
+A2UI integration via Google's a2ui-agent-sdk (optional).
 
-This module provides A2UI protocol support, enabling PraisonAI Agents
-to generate rich, interactive UIs declaratively via JSON.
-
-A2UI is Google's open standard that allows agents to "speak UI" by sending
-declarative JSON describing UI components, which clients then render natively.
-
-Usage:
-    from praisonaiagents.ui.a2ui import (
-        # Message types
-        CreateSurfaceMessage,
-        UpdateComponentsMessage,
-        UpdateDataModelMessage,
-        DeleteSurfaceMessage,
-        # Component types
-        TextComponent,
-        ImageComponent,
-        ButtonComponent,
-        CardComponent,
-        RowComponent,
-        ColumnComponent,
-        # Extension helpers
-        create_a2ui_part,
-        is_a2ui_part,
-    )
+Declarative agent UI uses the official SDK — not reimplemented in PraisonAI core.
+Install: pip install praisonaiagents[a2ui]
 """
 
-from praisonaiagents.ui.a2ui.types import (
-    # Data binding
-    PathBinding,
-    resolve_string_or_path,
-    # Action types
-    ActionContext,
-    Action,
-    # Children types
-    ChildrenTemplate,
-    # Component types
-    TextComponent,
-    ImageComponent,
-    IconComponent,
-    ButtonComponent,
-    CardComponent,
-    RowComponent,
-    ColumnComponent,
-    ListComponent,
-    TextFieldComponent,
-    CheckBoxComponent,
-    SliderComponent,
-    DateTimeInputComponent,
-    # Message types
-    CreateSurfaceMessage,
-    UpdateComponentsMessage,
-    UpdateDataModelMessage,
-    DeleteSurfaceMessage,
-    # Data part
-    A2UIDataPart,
-)
-
-from praisonaiagents.ui.a2ui.extension import (
-    A2UI_MIME_TYPE,
-    A2UI_EXTENSION_URI,
-    STANDARD_CATALOG_ID,
+from praisonaiagents.ui.a2ui.adapter import (
     create_a2ui_part,
+    generate_a2ui_system_prompt,
+    get_schema_manager,
     is_a2ui_part,
-    get_a2ui_agent_extension,
-    AgentExtension,
+    parse_a2ui_response,
 )
-
-from praisonaiagents.ui.a2ui.surface import Surface
-from praisonaiagents.ui.a2ui.agent import A2UIAgent
-from praisonaiagents.ui.a2ui.templates import (
-    ChatTemplate,
-    ListTemplate,
-    FormTemplate,
-    DashboardTemplate,
-)
+from praisonaiagents.ui.protocols import A2UI_MIME_TYPE, A2UIToolResultProtocol
 
 __all__ = [
-    # Data binding
-    "PathBinding",
-    "resolve_string_or_path",
-    # Action types
-    "ActionContext",
-    "Action",
-    # Children types
-    "ChildrenTemplate",
-    # Component types
-    "TextComponent",
-    "ImageComponent",
-    "IconComponent",
-    "ButtonComponent",
-    "CardComponent",
-    "RowComponent",
-    "ColumnComponent",
-    "ListComponent",
-    "TextFieldComponent",
-    "CheckBoxComponent",
-    "SliderComponent",
-    "DateTimeInputComponent",
-    # Message types
-    "CreateSurfaceMessage",
-    "UpdateComponentsMessage",
-    "UpdateDataModelMessage",
-    "DeleteSurfaceMessage",
-    # Data part
-    "A2UIDataPart",
-    # Extension
+    "A2UI",
     "A2UI_MIME_TYPE",
-    "A2UI_EXTENSION_URI",
-    "STANDARD_CATALOG_ID",
+    "A2UIToolResultProtocol",
     "create_a2ui_part",
+    "generate_a2ui_system_prompt",
+    "get_schema_manager",
     "is_a2ui_part",
-    "get_a2ui_agent_extension",
-    "AgentExtension",
-    # Surface builder
-    "Surface",
-    # Agent wrapper
-    "A2UIAgent",
-    # Templates
-    "ChatTemplate",
-    "ListTemplate",
-    "FormTemplate",
-    "DashboardTemplate",
+    "parse_a2ui_response",
 ]
+
+
+class A2UI:
+    """
+    Optional A2UI facade (lazy — imports a2ui-agent-sdk on first use).
+
+    Example:
+        from praisonaiagents.ui import A2UI
+
+        part = A2UI.create_part({"createSurface": {...}})
+        prompt = A2UI.system_prompt("You are a helpful assistant.")
+    """
+
+    create_part = staticmethod(create_a2ui_part)
+    is_part = staticmethod(is_a2ui_part)
+    parse_response = staticmethod(parse_a2ui_response)
+    schema_manager = staticmethod(get_schema_manager)
+    system_prompt = staticmethod(generate_a2ui_system_prompt)

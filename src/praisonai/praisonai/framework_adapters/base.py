@@ -5,7 +5,7 @@ This module defines the protocol that all framework adapters must implement,
 enabling lazy-loaded, protocol-driven framework support.
 """
 
-from typing import Protocol, Dict, List, Any, Optional
+from typing import Protocol, Dict, List, Any, Optional, Callable
 from contextlib import contextmanager
 
 
@@ -13,12 +13,24 @@ class FrameworkAdapter(Protocol):
     """Protocol for framework adapters."""
     
     name: str
+    install_hint: str
+    requires_tools_extra: bool
     
     def is_available(self) -> bool:
         """Check if the framework is available for import."""
         ...
     
-    def run(self, config: Dict[str, Any], llm_config: List[Dict], topic: str) -> str:
+    def run(
+        self,
+        config: Dict[str, Any],
+        llm_config: List[Dict],
+        topic: str,
+        *,
+        tools_dict: Optional[Dict[str, Any]] = None,
+        agent_callback: Optional[Callable] = None,
+        task_callback: Optional[Callable] = None,
+        cli_config: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """
         Run the framework with given configuration.
         
@@ -26,6 +38,38 @@ class FrameworkAdapter(Protocol):
             config: Framework configuration
             llm_config: LLM configuration list
             topic: Topic for the tasks
+            tools_dict: Available tools dictionary
+            agent_callback: Callback for agent events
+            task_callback: Callback for task events
+            cli_config: CLI configuration
+            
+        Returns:
+            Execution result as string
+        """
+        ...
+
+    async def arun(
+        self,
+        config: Dict[str, Any],
+        llm_config: List[Dict],
+        topic: str,
+        *,
+        tools_dict: Optional[Dict[str, Any]] = None,
+        agent_callback: Optional[Callable] = None,
+        task_callback: Optional[Callable] = None,
+        cli_config: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Async-native execution. Default = offload sync run() to a thread.
+        
+        Args:
+            config: Framework configuration
+            llm_config: LLM configuration list
+            topic: Topic for the tasks
+            tools_dict: Available tools dictionary
+            agent_callback: Callback for agent events
+            task_callback: Callback for task events
+            cli_config: CLI configuration
             
         Returns:
             Execution result as string
@@ -55,6 +99,46 @@ class BaseFrameworkAdapter:
         """List all registered tool names."""
         return list(self._tool_registry.keys())
     
+    def _format_template(self, template: str, **kwargs) -> str:
+        """Safely format template string with given kwargs."""
+        try:
+            return template.format(**kwargs)
+        except KeyError as e:
+            # Import logger here to avoid circular imports
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning("Template formatting failed for key %s; returning original template", e)
+            return template
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning("Template formatting error: %s; returning original template", e)
+            return template
+    
+    async def arun(
+        self,
+        config: Dict[str, Any],
+        llm_config: List[Dict],
+        topic: str,
+        *,
+        tools_dict: Optional[Dict[str, Any]] = None,
+        agent_callback: Optional[Callable] = None,
+        task_callback: Optional[Callable] = None,
+        cli_config: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Safe default for sync-only adapters (crewai, autogen v0.2):
+        run the sync implementation in a worker thread, freeing the loop.
+        """
+        import asyncio
+        return await asyncio.to_thread(
+            self.run, config, llm_config, topic,
+            tools_dict=tools_dict,
+            agent_callback=agent_callback,
+            task_callback=task_callback,
+            cli_config=cli_config
+        )
+
     def cleanup(self) -> None:
         """Clean up resources - default implementation does nothing."""
         pass

@@ -89,6 +89,12 @@ def create_pairing_routes(pairing_store: PairingStore, auth_checker: callable, r
                 status_code=404,
             )
 
+        try:
+            from praisonaiagents.bus import get_default_bus, Event
+            get_default_bus().publish_event(Event(type="pairing_approved", data={"channel": channel, "code": code}))
+        except Exception as _bus_exc:
+            logger.debug("EventBus emit skipped: %s", _bus_exc)
+
         return JSONResponse({
             "approved": True,
             "channel": channel,

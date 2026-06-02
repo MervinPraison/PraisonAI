@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -85,7 +85,7 @@ class SuiteResult:
     startup_cold_ms: float = 0.0
     startup_warm_ms: float = 0.0
     import_analysis: List[Dict[str, Any]] = field(default_factory=list)
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     metadata: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -182,7 +182,7 @@ class ProfileSuiteRunner:
             "python_version": platform.python_version(),
             "platform": platform.platform(),
             "praisonai_version": praisonai_version,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     
     def _measure_startup(self) -> tuple:

@@ -28,6 +28,7 @@ from typing import (
 )
 
 if TYPE_CHECKING:
+    from praisonai.gateway.pairing import PairedChannel
     from ..agent import Agent
 
 
@@ -758,3 +759,148 @@ def resolve_auth_mode(bind_host: str, configured: Optional[AuthMode] = None) -> 
         return configured
     
     return "local" if is_loopback(bind_host) else "token"
+
+
+# ---------------------------------------------------------------------------
+# Auth, Pairing, and Session Binding Protocols (Issue #1588 Gap 3)
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class AuthProtocol(Protocol):
+    """Protocol for authentication implementations.
+    
+    Enables structural typing for different authentication strategies
+    (token-based, local loopback, trusted proxy, etc.).
+    """
+    
+    def check(self, request: Any) -> Dict[str, Any]:
+        """Check authentication for a request.
+        
+        Args:
+            request: The request object to authenticate
+            
+        Returns:
+            Authentication decision with metadata:
+            - success: bool - whether authentication succeeded
+            - user_id: Optional[str] - authenticated user ID
+            - role: Optional[str] - user role/permissions
+            - metadata: Dict[str, Any] - additional auth context
+        """
+        ...
+
+
+@runtime_checkable  
+class PairingProtocol(Protocol):
+    """Protocol for channel pairing implementations.
+    
+    Manages the authorization of external channels (Telegram, Slack, UI)
+    to communicate with the gateway through signed codes.
+    """
+    
+    def generate_code(
+        self, 
+        channel_type: str = "unknown", 
+        channel_id: Optional[str] = None
+    ) -> str:
+        """Generate a new pairing code for a channel.
+        
+        Args:
+            channel_type: Type of channel (e.g., "telegram", "slack", "ui")
+            channel_id: Optional channel identifier
+            
+        Returns:
+            The generated pairing code
+        """
+        ...
+    
+    def approve(
+        self, 
+        channel_type: str,
+        code: str,
+        user_id: str = "",
+        user_name: str = ""
+    ) -> bool:
+        """Approve a pairing code, authorizing the channel.
+        
+        Args:
+            channel_type: Type of channel
+            code: The pairing code to approve
+            user_id: User identifier (optional, defaults to empty string)
+            user_name: Human-readable username (optional, defaults to empty string)
+            
+        Returns:
+            True if approval successful, False if code invalid/expired
+        """
+        ...
+    
+    def is_paired(self, channel_id: str, channel_type: str) -> bool:
+        """Check if a channel is authorized.
+        
+        Args:
+            channel_id: Channel identifier
+            channel_type: Type of channel
+            
+        Returns:
+            True if channel is paired/authorized
+        """
+        ...
+    
+    def list_paired(self) -> List["PairedChannel"]:
+        """List all authorized channels.
+        
+        Returns:
+            List of paired channel information
+        """
+        ...
+    
+    def revoke(self, channel_id: str, channel_type: str) -> bool:
+        """Revoke authorization for a channel.
+        
+        Args:
+            channel_id: Channel identifier
+            channel_type: Type of channel
+            
+        Returns:
+            True if revocation successful, False if not found
+        """
+        ...
+    
+    def list_pending(self, channel_type: Optional[str] = None) -> List[Dict[str, any]]:
+        """List pending pairing requests.
+        
+        Args:
+            channel_type: Optional filter by channel type
+            
+        Returns:
+            List of pending requests with channel, code, user info, and age
+        """
+        ...
+
+
+@runtime_checkable
+class SessionBindingProtocol(Protocol):
+    """Protocol for session binding implementations.
+    
+    Manages the association between sessions and authenticated principals
+    (users, agents, etc.) for state tracking and authorization.
+    """
+    
+    def bind(self, session_id: str, principal: Dict[str, Any]) -> None:
+        """Bind a session to an authenticated principal.
+        
+        Args:
+            session_id: Unique session identifier
+            principal: Principal information (user_id, roles, metadata, etc.)
+        """
+        ...
+    
+    def lookup(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Look up the principal bound to a session.
+        
+        Args:
+            session_id: Session identifier to look up
+            
+        Returns:
+            Principal information if found, None otherwise
+        """
+        ...

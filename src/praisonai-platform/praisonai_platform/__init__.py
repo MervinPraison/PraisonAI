@@ -19,8 +19,21 @@ Quick start::
 
 __version__ = "0.1.0"
 
-from .api.app import create_app
-from .client.platform_client import PlatformClient
+
+def __getattr__(name: str):
+    """Lazy import for platform components."""
+    if name == "create_app":
+        from .api.app import create_app
+        return create_app
+    elif name == "PlatformClient":
+        from .client.platform_client import PlatformClient
+        return PlatformClient
+    raise AttributeError(f"module 'praisonai_platform' has no attribute '{name}'")
+
+
+def __dir__() -> list[str]:
+    return sorted(list(globals().keys()) + ["create_app", "PlatformClient"])
+
 
 __all__ = [
     "__version__",

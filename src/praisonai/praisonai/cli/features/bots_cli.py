@@ -557,6 +557,74 @@ class BotHandler:
             except Exception:
                 pass  # neonize Go threads may already be gone
 
+    def start_linear(
+        self,
+        token: Optional[str] = None,
+        signing_secret: Optional[str] = None,
+        webhook_port: int = 8080,
+        agent_file: Optional[str] = None,
+        capabilities: Optional[BotCapabilities] = None,
+        agent_config_dict: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Start a Linear bot.
+        
+        Args:
+            token: Linear OAuth token (or LINEAR_OAUTH_TOKEN env var)
+            signing_secret: Webhook signing secret (or LINEAR_WEBHOOK_SECRET env var)
+            webhook_port: Port for webhook server (default 8080)
+            agent_file: Optional path to agent configuration file
+            capabilities: Optional capabilities configuration
+            agent_config_dict: Optional agent config dict from bot YAML
+        """
+        self._load_dotenv()
+        
+        # Environment variable fallbacks
+        token = token or os.environ.get("LINEAR_OAUTH_TOKEN") or os.environ.get("LINEAR_API_KEY")
+        signing_secret = signing_secret or os.environ.get("LINEAR_WEBHOOK_SECRET", "")
+        
+        if not token:
+            print("Error: Linear token required")
+            print("Provide via --token or LINEAR_OAUTH_TOKEN environment variable")
+            print("For personal API key, set LINEAR_API_KEY instead")
+            return
+        
+        if not signing_secret:
+            print("Warning: LINEAR_WEBHOOK_SECRET not set - webhook signatures will not be verified")
+        
+        # Set auto-approve if enabled
+        if capabilities and capabilities.auto_approve:
+            os.environ["PRAISONAI_AUTO_APPROVE"] = "true"
+            logger.info("Auto-approve enabled for all tool executions")
+        
+        try:
+            from praisonai.bots import LinearBot
+        except ImportError as e:
+            print(f"Error: LinearBot import failed. {e}")
+            print("Install with: pip install aiohttp")
+            return
+        
+        agent = self._load_agent(agent_file, capabilities, agent_config_dict=agent_config_dict)
+        bot = LinearBot(
+            token=token,
+            agent=agent,
+            signing_secret=signing_secret,
+            webhook_port=webhook_port,
+        )
+        
+        self._print_startup_info("Linear", capabilities)
+        print(f"Webhook server on port {webhook_port}")
+        print(f"Webhook endpoint: http://0.0.0.0:{webhook_port}/webhook")
+        if signing_secret:
+            print("Webhook signature verification: enabled")
+        else:
+            print("Webhook signature verification: disabled (set LINEAR_WEBHOOK_SECRET)")
+        
+        try:
+            asyncio.run(bot.start())
+        except KeyboardInterrupt:
+            print("\nStopping bot...")
+            asyncio.run(bot.stop())
+
     def start_email(
         self,
         token: Optional[str] = None,

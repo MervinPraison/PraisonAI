@@ -236,6 +236,10 @@ def main_callback(
     else:
         mode = OutputMode.TEXT
     
+    # Install warning filters for CLI usage only
+    from .main import install_warning_filters
+    install_warning_filters()
+    
     # Create run context
     context = create_context()
     
@@ -273,11 +277,16 @@ def get_output_controller() -> OutputController:
 _commands_registered = False
 
 def register_commands():
-    """Register all command groups (idempotent)."""
+    """Register all command groups (idempotent).
+
+    The ``_commands_registered`` sentinel is intentionally flipped only after
+    every import and ``app.add_typer`` call has succeeded. Setting it before
+    would poison the registry on partial failure: a later caller would
+    short-circuit and dispatch against an incomplete command tree.
+    """
     global _commands_registered
     if _commands_registered:
         return
-    _commands_registered = True
     # Import command modules - Core commands
     from .commands.config import app as config_app
     from .commands.traces import app as traces_app
@@ -296,6 +305,7 @@ def register_commands():
     from .commands.mcp import app as mcp_app
     from .commands.serve import app as serve_app
     from .commands.schedule import app as schedule_app
+    from .commands.kanban import app as kanban_app
     from .commands.run import app as run_app
     from .commands.profile import app as profile_app
     from .commands.benchmark import app as benchmark_app
@@ -378,6 +388,7 @@ def register_commands():
     app.add_typer(mcp_app, name="mcp", help="MCP server management")
     app.add_typer(serve_app, name="serve", help="API server management")
     app.add_typer(schedule_app, name="schedule", help="Scheduler management")
+    app.add_typer(kanban_app, name="kanban", help="Kanban task management")
     app.add_typer(run_app, name="run", help="Run agents")
     app.add_typer(profile_app, name="profile", help="Performance profiling and diagnostics")
     app.add_typer(benchmark_app, name="benchmark", help="Comprehensive performance benchmarking")
@@ -662,6 +673,12 @@ def register_commands():
         app.add_typer(tui_app, name="tui", help="Interactive TUI and simulation")
     if queue_app:
         app.add_typer(queue_app, name="queue", help="Queue management")
+
+    # Mark registration complete only after every import + add_typer above
+    # has succeeded. If anything raised, this line is skipped and the next
+    # caller will retry from scratch instead of dispatching against a
+    # half-built command tree.
+    _commands_registered = True
 
 
 # Register commands on import

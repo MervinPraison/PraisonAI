@@ -617,15 +617,17 @@ class Session:
         if self.is_remote:
             return  # No cleanup needed for remote sessions
         
-        # Clear memory
+        # Properly cleanup memory
         if self._memory:
             try:
-                # Clear short-term and long-term memory for this session
-                # Note: This is a basic implementation - specific memory backends
-                # might need more sophisticated cleanup
+                # Call close_connections to properly cleanup memory adapters
+                if hasattr(self._memory, 'close_connections'):
+                    self._memory.close_connections()
+            except Exception as e:
+                import logging
+                logging.warning(f"Memory cleanup failed: {e}")
+            finally:
                 self._memory = None
-            except Exception:
-                pass  # Ignore cleanup errors
         
         # Clear knowledge
         if self._knowledge:

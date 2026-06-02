@@ -339,26 +339,8 @@ def get_available_integrations() -> Dict[str, bool]:
     # Import here to avoid circular imports
     try:
         from .registry import get_registry
-        import asyncio
-        
-        registry = get_registry()
-        
-        # Handle async call in sync context
-        try:
-            # Try to get existing event loop
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # We're in an async context, use create_task
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(asyncio.run, registry.get_available())
-                    return future.result()
-            else:
-                # No running loop, safe to use asyncio.run
-                return asyncio.run(registry.get_available())
-        except RuntimeError:
-            # No event loop, safe to use asyncio.run
-            return asyncio.run(registry.get_available())
+        from .._async_bridge import run_sync
+        return run_sync(get_registry().get_available())
     
     except ImportError:
         # Fallback to original implementation

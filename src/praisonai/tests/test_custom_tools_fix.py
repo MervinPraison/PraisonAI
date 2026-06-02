@@ -48,7 +48,7 @@ def get_weather(location: str) -> str:
     Returns:
         Weather information
     """
-    return f"Weather in {location}: Sunny, 25°C"
+    return f"Weather in {location}: Sunny, 25 deg C"
 
 def calculate(expression: str) -> str:
     """Perform a calculation.

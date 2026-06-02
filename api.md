@@ -40,6 +40,7 @@ Methods:
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">chat_with_context</a>(message: str, context: 'ContextPack', **kwargs) -> str</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">checkpoints</a>() -> Optional[bool]</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">checkpoints</a>(value: Optional[bool]) -> None</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">clone_for_channel</a>() -> 'Agent'</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">close</a>() -> None</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">console</a>() -> Optional[Any]</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">context_manager</a>() -> Optional[Any]</code>
@@ -171,6 +172,7 @@ Methods:
 * <code title="class BaseTool">BaseTool.<a href="./src/praisonai-agents/praisonaiagents/tools/base.py">safe_run</a>(**kwargs) -> ToolResult</code>
 * <code title="class BaseTool">BaseTool.<a href="./src/praisonai-agents/praisonaiagents/tools/base.py">validate</a>() -> bool</code>
 * <code title="class BaseTool">BaseTool.<a href="./src/praisonai-agents/praisonaiagents/tools/base.py">validate_class</a>() -> bool</code>
+* <code title="class BaseTool">BaseTool.<a href="./src/praisonai-agents/praisonaiagents/tools/base.py">validate_schema_roundtrip</a>() -> bool</code>
 * <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">__call__</a>(*args, **kwargs) -> Any</code>
 * <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">check_availability</a>() -> tuple[bool, str]</code>
 * <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">injected_params</a>() -> Dict[str, Any]</code>
@@ -183,6 +185,7 @@ Methods:
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_available_tools</a>(context: Optional[Dict[str, Any]] = None) -> List[Union[BaseTool, Callable]]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_base_tools</a>() -> List[BaseTool]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_tools</a>() -> List[str]</code>
+* <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_tools_with_allowed_filter</a>(context: Optional[Dict[str, Any]] = None) -> List[str]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">register</a>(tool: Union[BaseTool, Callable], name: Optional[str] = None, overwrite: bool = False) -> None</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">unregister</a>(name: str) -> bool</code>
 * <code title="class Tools">Tools.<a href="./src/praisonai-agents/praisonaiagents/tools/tools.py">internet_search</a>(*args, **kwargs)</code>
@@ -213,7 +216,7 @@ Methods:
 * <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">store_in_memory</a>(content: str, agent_name: str = None, task_id: str = None)</code>
 * <code title="class Task">Task.<a href="./src/praisonai-agents/praisonaiagents/task/task.py">to_dict</a>() -> Dict[str, Any]</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">loop</a>(step: Any = None, steps: Optional[List[Any]] = None, over: Optional[str] = None, from_csv: Optional[str] = None, from_file: Optional[str] = None, var_name: str = 'item', parallel: bool = False, max_workers: Optional[int] = None, output_variable: Optional[str] = None) -> Loop</code>
-* <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">parallel</a>(steps: List, max_workers: Optional[int] = None) -> Parallel</code>
+* <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">parallel</a>(steps: List, max_workers: Optional[int] = None, on_failure: str = 'partial_ok') -> Parallel</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">repeat</a>(step: Any, until: Optional[Callable[[WorkflowContext], bool]] = None, max_iterations: int = 10) -> Repeat</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">route</a>(routes: Dict[str, List], default: Optional[List] = None) -> Route</code>
 
@@ -476,8 +479,10 @@ Methods:
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">edit_skill</a>(name: str, content: str) -> dict</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_allowed_tools</a>(name: str) -> List[str]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_available_skills</a>() -> List[SkillMetadata]</code>
+* <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_available_skills_by_state</a>(state: SkillState) -> List[LoadedSkill]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_instructions</a>(name: str) -> Optional[str]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_skill</a>(name: str) -> Optional[LoadedSkill]</code>
+* <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_skills_diagnostics</a>() -> Dict[str, ValidationResult]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">get_user_invocable_skills</a>() -> List[LoadedSkill]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">invoke</a>(name: str, raw_args: str = '', session_id: Optional[str] = None, shell_exec: bool = False) -> Optional[str]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">load_resources</a>(name: str) -> bool</code>
@@ -486,6 +491,7 @@ Methods:
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">skill_names</a>() -> List[str]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">skills</a>() -> List[LoadedSkill]</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">to_prompt</a>() -> str</code>
+* <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">validate_skill_capabilities</a>(skill_name: str, force_refresh: bool = False) -> ValidationResult</code>
 * <code title="class SkillManager">SkillManager.<a href="./src/praisonai-agents/praisonaiagents/skills/manager.py">write_skill_file</a>(name: str, file_path: str, file_content: str) -> dict</code>
 * <code title="class SkillMetadata">SkillMetadata.<a href="./src/praisonai-agents/praisonaiagents/skills/models.py">from_properties</a>(props: SkillProperties) -> 'SkillMetadata'</code>
 * <code title="class SkillProperties">SkillProperties.<a href="./src/praisonai-agents/praisonaiagents/skills/models.py">to_dict</a>() -> dict</code>
@@ -600,6 +606,13 @@ Methods:
 * <code title="class ContextManager">ContextManager.<a href="./src/praisonai-agents/praisonaiagents/context/manager.py">reset</a>() -> None</code>
 * <code title="class ContextManager">ContextManager.<a href="./src/praisonai-agents/praisonaiagents/context/manager.py">set_tool_budget</a>(tool_name: str, max_tokens: int, protected: bool = False) -> None</code>
 * <code title="class ContextManager">ContextManager.<a href="./src/praisonai-agents/praisonaiagents/context/manager.py">truncate_tool_output</a>(tool_name: str, output: str) -> str</code>
+
+# UI
+
+Types:
+```python
+from praisonaiagents import A2UI
+```
 
 # Config
 
@@ -755,7 +768,7 @@ Methods:
 
 Types:
 ```python
-from praisonai import Agent, AgentApp, AgentOS, AnthropicManagedAgent, CloudProvider, DB, Deploy, DeployConfig, DeployType, LocalManagedAgent, LocalManagedConfig, ManagedAgent, ManagedConfig, PraisonAI, __version__
+from praisonai import Agent, AgentApp, AgentOS, AnthropicManagedAgent, CloudProvider, DB, Deploy, DeployConfig, DeployType, HostedAgent, HostedAgentConfig, LocalAgent, LocalAgentConfig, LocalManagedAgent, LocalManagedConfig, ManagedAgent, ManagedConfig, PraisonAI, __version__, arun, run, run_integrated_gateway
 ```
 
 # CLI
@@ -786,6 +799,10 @@ Methods:
 * <code title="cli">praisonai bot discord <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
 * <code title="cli">praisonai bot email <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
 * <code title="cli">praisonai bot install-daemon <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
+* <code title="cli">praisonai bot linear <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
+* <code title="cli">praisonai bot list <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
+* <code title="cli">praisonai bot purge <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
+* <code title="cli">praisonai bot replay <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
 * <code title="cli">praisonai bot slack <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
 * <code title="cli">praisonai bot start <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
 * <code title="cli">praisonai bot telegram <a href="./src/praisonai/praisonai/cli/commands/bot.py">--help</a></code>
@@ -853,8 +870,10 @@ Methods:
 * <code title="cli">praisonai doctor env <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor mcp <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor network <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
+* <code title="cli">praisonai doctor packaging <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor performance <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor selftest <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
+* <code title="cli">praisonai doctor skills <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor tools <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor troubleshoot <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai endpoints list <a href="./src/praisonai/praisonai/cli/commands/endpoints.py">--help</a></code>
@@ -886,11 +905,24 @@ Methods:
 * <code title="cli">praisonai gateway send <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway start <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway status <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
+* <code title="cli">praisonai gateway stop <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway uninstall <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai github triage <a href="./src/praisonai/praisonai/cli/commands/github.py">--help</a></code>
 * <code title="cli">praisonai hooks add <a href="./src/praisonai/praisonai/cli/commands/hooks.py">--help</a></code>
 * <code title="cli">praisonai hooks list <a href="./src/praisonai/praisonai/cli/commands/hooks.py">--help</a></code>
 * <code title="cli">praisonai hooks remove <a href="./src/praisonai/praisonai/cli/commands/hooks.py">--help</a></code>
+* <code title="cli">praisonai kanban block <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban boards <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban comment <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban complete <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban create <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban dispatch <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban link <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban list <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban move <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban reclaim <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban show <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
+* <code title="cli">praisonai kanban unblock <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
 * <code title="cli">praisonai knowledge add <a href="./src/praisonai/praisonai/cli/commands/knowledge.py">--help</a></code>
 * <code title="cli">praisonai knowledge index <a href="./src/praisonai/praisonai/cli/commands/knowledge.py">--help</a></code>
 * <code title="cli">praisonai knowledge list <a href="./src/praisonai/praisonai/cli/commands/knowledge.py">--help</a></code>
@@ -1048,6 +1080,7 @@ Methods:
 * <code title="cli">praisonai serve status <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai serve stop <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai serve ui <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
+* <code title="cli">praisonai serve ui-gateway <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai serve unified <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai session delete <a href="./src/praisonai/praisonai/cli/commands/session.py">--help</a></code>
 * <code title="cli">praisonai session export <a href="./src/praisonai/praisonai/cli/commands/session.py">--help</a></code>

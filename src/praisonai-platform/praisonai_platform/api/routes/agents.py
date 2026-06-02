@@ -58,7 +58,7 @@ async def get_agent(
     session: AsyncSession = Depends(get_db),
 ):
     svc = AgentService(session)
-    agent = await svc.get(agent_id)
+    agent = await svc.get(agent_id, workspace_id=workspace_id)
     if agent is None:
         raise HTTPException(status_code=404, detail="Agent not found")
     return AgentResponse.model_validate(agent)
@@ -75,6 +75,7 @@ async def update_agent(
     svc = AgentService(session)
     agent = await svc.update(
         agent_id,
+        workspace_id=workspace_id,
         name=body.name,
         status=body.status,
         instructions=body.instructions,
@@ -95,6 +96,6 @@ async def delete_agent(
     session: AsyncSession = Depends(get_db),
 ):
     svc = AgentService(session)
-    deleted = await svc.delete(agent_id)
+    deleted = await svc.delete(agent_id, workspace_id=workspace_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Agent not found")

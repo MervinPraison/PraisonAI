@@ -1701,10 +1701,19 @@ author: override-author
         assert template.version == "3.0.0"
         assert template.author == "override-author"
     
-    def test_tools_py_loaded(self, temp_simplified_recipe):
-        """Test that tools.py is loaded and custom tools are available."""
+    def test_tools_py_loaded(self, temp_simplified_recipe, monkeypatch):
+        """Test that tools.py is loaded when the operator opts in via
+        ``PRAISONAI_ALLOW_TEMPLATE_TOOLS``.
+
+        Implicit ``tools.py`` autoload is disabled by default to prevent
+        arbitrary code execution from untrusted (e.g. remotely fetched)
+        recipe directories. Legacy local workflows continue to work by
+        setting the env var.
+        """
         from praisonai.templates.tool_override import create_tool_registry_with_overrides
-        
+
+        monkeypatch.setenv("PRAISONAI_ALLOW_TEMPLATE_TOOLS", "1")
+
         registry = create_tool_registry_with_overrides(
             template_dir=str(temp_simplified_recipe)
         )

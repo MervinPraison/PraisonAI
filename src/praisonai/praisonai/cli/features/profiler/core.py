@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -113,7 +113,7 @@ class ProfilerResult:
     callees: Dict[str, List[str]] = field(default_factory=dict)
     import_times: List[Tuple[str, float]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat() + "Z")
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -304,7 +304,7 @@ class QueryProfiler:
             "platform": platform.platform(),
             "praisonai_version": praisonai_version,
             "model": model or "default",
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     
     def _extract_function_stats(self) -> List[FunctionStats]:

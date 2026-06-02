@@ -16,7 +16,7 @@ import pstats
 import time
 import platform
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from .request import ExecutionRequest
@@ -409,7 +409,7 @@ class ProfileReport:
     def __post_init__(self):
         """Set timestamp if not provided."""
         if not self.timestamp:
-            self.timestamp = datetime.utcnow().isoformat() + "Z"
+            self.timestamp = datetime.now(timezone.utc).isoformat()
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
