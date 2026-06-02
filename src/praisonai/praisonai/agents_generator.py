@@ -28,14 +28,33 @@ from .tool_registry import ToolRegistry
 
 # BaseTool import is now handled centrally by ToolResolver
 
-# Check for additional framework availability using centralized detection
+# Framework availability detection (lazy via __getattr__)
 from ._framework_availability import is_available
-PRAISONAI_TOOLS_AVAILABLE = is_available("praisonai_tools")
-CREWAI_AVAILABLE          = is_available("crewai")
-AUTOGEN_AVAILABLE         = is_available("autogen")
-AG2_AVAILABLE             = is_available("ag2")
-PRAISONAI_AVAILABLE       = is_available("praisonaiagents")
-AGENTOPS_AVAILABLE        = is_available("agentops")
+
+# Lazy constants mapping for backward compatibility
+_AVAIL = {
+    "PRAISONAI_TOOLS_AVAILABLE": "praisonai_tools",
+    "CREWAI_AVAILABLE": "crewai",
+    "AUTOGEN_AVAILABLE": "autogen",
+    "AG2_AVAILABLE": "ag2",
+    "PRAISONAI_AVAILABLE": "praisonaiagents",
+    "AGENTOPS_AVAILABLE": "agentops",
+}
+
+__all__ = list(_AVAIL.keys())
+
+def __getattr__(name):
+    """Lazy attribute access for framework availability constants.
+    
+    This allows backward compatibility while avoiding import-time probing.
+    Only probes the framework when the constant is actually accessed.
+    """
+    if name in _AVAIL:
+        return is_available(_AVAIL[name])
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
+def __dir__():
+    return sorted(set(globals()) | set(_AVAIL))
 
 # Framework adapter registry - now uses proper registry pattern
 # This replaces the hardcoded FRAMEWORK_ADAPTERS dict
@@ -282,7 +301,7 @@ class AgentsGenerator:
         
         # Keep tool registry for backward compatibility with autogen adapters
         self.tool_registry = ToolRegistry()
-        self.tool_registry.register_builtin_autogen_adapters()
+        self.tool_registry.register_builtin_autogen_adapters(_suppress_deprecation_warning=True)
         
         # Initialize tool resolver with the registry wired in (single source of truth for tool resolution)
         from .tool_resolver import ToolResolver
@@ -576,7 +595,7 @@ class AgentsGenerator:
         tools_dict = {}
         
         # Demand-driven tool resolution - only resolve tools actually used in YAML
-        if CREWAI_AVAILABLE or AUTOGEN_AVAILABLE or PRAISONAI_AVAILABLE or AG2_AVAILABLE:
+        if is_available("crewai") or is_available("autogen") or is_available("praisonaiagents") or is_available("ag2"):
             try:
                 # Collect all tool names mentioned in the YAML config
                 needed_tools: set[str] = set()
@@ -696,7 +715,7 @@ class AgentsGenerator:
         Returns:
             str: Result of the workflow execution
         """
-        if not PRAISONAI_AVAILABLE:
+        if not is_available("praisonaiagents"):
             raise ImportError("PraisonAI is not installed. Please install it with 'pip install praisonaiagents'")
         
         try:
