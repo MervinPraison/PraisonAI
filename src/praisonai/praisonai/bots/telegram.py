@@ -890,8 +890,9 @@ async def process_inbound_telegram_message(
         elif group_policy == "mention_only" or mention_required:
             # Check if bot was mentioned in the message
             bot_username = bot._bot_user.username.lower() if bot._bot_user and bot._bot_user.username else ""
+            mention_handle = f"@{bot_username}" if bot_username else ""
             bot_mentioned = (
-                bot_username and f"@{bot_username.lower()}" in message.content.lower()
+                mention_handle and mention_handle in message.content.lower()
             ) or message.message_type == MessageType.COMMAND  # Commands are always allowed
             
             if not bot_mentioned:

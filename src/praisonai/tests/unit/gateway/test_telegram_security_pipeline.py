@@ -89,6 +89,11 @@ async def test_user_allowlist_enforcement():
     disallowed_message = await process_inbound_telegram_message(disallowed_update, bot)
     assert disallowed_message is None, "Message from disallowed user should be blocked"
 
+    # Group message from allowed user should still pass allowlist checks
+    allowed_group_update = create_mock_telegram_update(user_id="42", text="@test_bot hello", chat_type="group")
+    allowed_group_message = await process_inbound_telegram_message(allowed_group_update, bot)
+    assert allowed_group_message is not None, "Allowlisted users should pass in group chats too"
+
 
 @pytest.mark.asyncio
 async def test_channel_allowlist_enforcement():
@@ -98,13 +103,13 @@ async def test_channel_allowlist_enforcement():
     bot = create_test_bot(allowed_channels=["-100123456789"])
     
     # Message from allowed channel
-    allowed_update = create_mock_telegram_update(chat_id="-100123456789", text="hello", chat_type="private")
+    allowed_update = create_mock_telegram_update(chat_id="-100123456789", text="@test_bot hello", chat_type="supergroup")
     allowed_message = await process_inbound_telegram_message(allowed_update, bot)
     assert allowed_message is not None, "Message from allowed channel should pass"
     assert allowed_message.channel.channel_id == "-100123456789"
     
     # Message from disallowed channel
-    disallowed_update = create_mock_telegram_update(chat_id="-100999999999", text="hello", chat_type="private")
+    disallowed_update = create_mock_telegram_update(chat_id="-100999999999", text="@test_bot hello", chat_type="supergroup")
     disallowed_message = await process_inbound_telegram_message(disallowed_update, bot)
     assert disallowed_message is None, "Message from disallowed channel should be blocked"
 
