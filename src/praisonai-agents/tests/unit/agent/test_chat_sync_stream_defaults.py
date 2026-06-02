@@ -37,12 +37,12 @@ def get_chat_mixin_stream_parameter_default(function_name: str):
     raise AssertionError(f"Function '{function_name}' or stream parameter not found")
 
 
-def test_chat_completion_stream_default_is_false():
-    assert get_chat_mixin_stream_parameter_default("_chat_completion") is False
+def test_chat_completion_stream_default_is_none():
+    assert get_chat_mixin_stream_parameter_default("_chat_completion") is None
 
 
-def test_execute_unified_chat_completion_stream_default_is_false():
+def test_execute_unified_chat_completion_stream_default_is_none():
     assert (
         get_chat_mixin_stream_parameter_default("_execute_unified_chat_completion")
-        is False
+        is None
     )
