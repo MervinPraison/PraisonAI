@@ -265,32 +265,22 @@ class DefaultSessionStore:
     def _load_session(self, session_id: str) -> SessionData:
         """Load session from disk with file locking."""
         filepath = self._get_session_path(session_id)
-        
-        # Check cache first
-        with self._lock:
-            if session_id in self._cache:
-                return self._cache[session_id]
-        
-        # Load from disk
-        if not os.path.exists(filepath):
-            session = SessionData(session_id=session_id)
+
+        # When a session file exists, always reload under FileLock so reads
+        # from another DefaultSessionStore instance (or process) are visible.
+        if os.path.exists(filepath):
+            with FileLock(filepath, self.lock_timeout):
+                session = self._load_session_from_disk(session_id, filepath)
             with self._lock:
                 self._cache[session_id] = session
             return session
-        
-        with FileLock(filepath, self.lock_timeout):
-            try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                session = SessionData.from_dict(data)
-            except (json.JSONDecodeError, IOError) as e:
-                logger.warning(f"Failed to load session {session_id}: {e}")
-                session = SessionData(session_id=session_id)
-        
+
         with self._lock:
+            if session_id in self._cache:
+                return self._cache[session_id]
+            session = SessionData(session_id=session_id)
             self._cache[session_id] = session
-        
-        return session
+            return session
 
     def _load_session_from_disk(self, session_id: str, filepath: str) -> SessionData:
         """Load session JSON from disk (caller must hold FileLock)."""
