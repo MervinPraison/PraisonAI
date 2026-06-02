@@ -146,9 +146,6 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
         # Availability already validated at CLI entry
         
         logger.info("Starting AutoGen v0.4 execution...")
-        import asyncio
-        import os
-        import re
         
         # Sync entry now goes via the async method via run_sync bridge
         try:
@@ -192,7 +189,6 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
         
         logger.info("Starting AutoGen v0.4 async execution...")
         import os
-        import re
         
         from autogen_agentchat.agents import AssistantAgent
         from autogen_ext.models.openai import OpenAIChatCompletionClient
@@ -200,7 +196,6 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
         from autogen_agentchat.conditions import TextMentionTermination, MaxMessageTermination
         
         # Create model client for v0.4
-        import os
         model_config = llm_config[0] if llm_config else {}
         model_client = OpenAIChatCompletionClient(
             model=model_config.get('model', 'gpt-4o-mini'),

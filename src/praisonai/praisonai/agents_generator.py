@@ -777,24 +777,52 @@ class AgentsGenerator:
                 # Resolve only the tools actually referenced in YAML
                 for tool_name in needed_tools:
                     try:
-                        tool_instance = self._get_tool_by_name(tool_name)
-                        if tool_instance:
-                            tools_dict[tool_name] = tool_instance
+                        resolved_tool = self.tool_resolver.resolve(tool_name)
+                        if resolved_tool is None:
+                            self.logger.warning(f"Tool '{tool_name}' not found")
+                            continue
+                        tools_dict[tool_name] = (
+                            resolved_tool() if inspect.isclass(resolved_tool) else resolved_tool
+                        )
                     except Exception as e:
-                        self.logger.error(f"Failed to load tool {tool_name}: {e}")
+                        self.logger.warning(f"Failed to initialize tool '{tool_name}': {e}")
+                        continue
 
             except Exception as e:
-                self.logger.error(f"Error during tool resolution: {e}")
+                self.logger.warning(f"Error collecting YAML tool references: {e}")
 
-        # Framework selection logic similar to sync version
-        framework = self.framework
+            # Add tools from class names - use tool_resolver to check tool validity
+            for tool_class in self.tools:
+                if isinstance(tool_class, type):
+                    try:
+                        tool_instance = tool_class()
+                        tool_name = tool_class.__name__
+                        tools_dict[tool_name] = tool_instance
+                        self.logger.debug(f"Added tool: {tool_name}")
+                    except Exception as e:
+                        self.logger.warning(f"Failed to instantiate tool class {tool_class.__name__}: {e}")
+
+        root_directory = os.getcwd()
+        tools_py_path = os.path.join(root_directory, 'tools.py')
+        tools_dir_path = Path(root_directory) / 'tools'
+
+        # Use consolidated ToolResolver for tools.py loading
+        tools_dict.update(self.tool_resolver.get_local_tool_classes())
+        if os.path.isfile(tools_py_path):
+            self.logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
+        elif tools_dir_path.is_dir():
+            tools_dict.update(self.tool_resolver.get_local_tool_classes_from_dir(tools_dir_path))
+            if tools_dict:
+                self.logger.debug("tools folder exists in the root directory")
+
+        framework = self.framework or config.get('framework', 'crewai')
         
         # AutoGen version selection logic
         if framework == "autogen":
             autogen_v4_adapter = self._get_framework_adapter("autogen_v4")
             autogen_v2_adapter = self._get_framework_adapter("autogen")
             
-            autogen_version = config.get('autogen_version', 'auto')
+            autogen_version = os.environ.get("AUTOGEN_VERSION", "auto").lower()
             use_v4 = False
             
             if autogen_version == "v0.4" and autogen_v4_adapter.is_available():
