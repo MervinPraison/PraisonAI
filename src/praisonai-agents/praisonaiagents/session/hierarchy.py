@@ -144,6 +144,7 @@ class HierarchicalSessionStore(DefaultSessionStore):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._extended_cache: Dict[str, ExtendedSessionData] = {}
+        self._cache_mtimes: Dict[str, float] = {}  # Track file modification times
 
     def _load_session_from_disk(self, session_id: str, filepath: str) -> ExtendedSessionData:
         """Load extended session JSON from disk (caller must hold FileLock)."""
@@ -174,6 +175,22 @@ class HierarchicalSessionStore(DefaultSessionStore):
                     self._extended_cache[session_id] = cached
         return result
 
+    def _is_cache_valid(self, session_id: str) -> bool:
+        """Check if cached session is still valid based on file mtime."""
+        if session_id not in self._extended_cache:
+            return False
+        
+        filepath = self._get_session_path(session_id)
+        if not os.path.exists(filepath):
+            return False
+        
+        try:
+            current_mtime = os.path.getmtime(filepath)
+            cached_mtime = self._cache_mtimes.get(session_id, 0)
+            return current_mtime <= cached_mtime
+        except (OSError, IOError):
+            return False
+    
     def _read_session_fresh(self, session_id: str) -> ExtendedSessionData:
         """Reload from disk and keep _cache and _extended_cache in sync."""
         session = super()._read_session_fresh(session_id)
@@ -181,8 +198,18 @@ class HierarchicalSessionStore(DefaultSessionStore):
             session = ExtendedSessionData.from_session_data(session)
             with self._lock:
                 self._cache[session_id] = session
+        
+        # Update cache with fresh file mtime
+        filepath = self._get_session_path(session_id)
+        try:
+            mtime = os.path.getmtime(filepath) if os.path.exists(filepath) else time.time()
+        except (OSError, IOError):
+            mtime = time.time()
+        
         with self._lock:
             self._extended_cache[session_id] = session
+            self._cache_mtimes[session_id] = mtime
+        
         return session
     
     def add_message(
@@ -215,8 +242,14 @@ class HierarchicalSessionStore(DefaultSessionStore):
         )
     
     def _load_extended_session(self, session_id: str, force_reload: bool = False) -> ExtendedSessionData:
-        """Load extended session from disk (always reloads; force_reload kept for callers)."""
-        return self._read_session_fresh(session_id)
+        """Load extended session with smart caching based on file modification time."""
+        # Force reload bypasses cache validation
+        if force_reload or not self._is_cache_valid(session_id):
+            return self._read_session_fresh(session_id)
+        
+        # Cache is valid, return cached version
+        with self._lock:
+            return self._extended_cache[session_id]
     
     def _save_extended_session(self, session: ExtendedSessionData) -> bool:
         """Save extended session to disk."""
@@ -244,8 +277,15 @@ class HierarchicalSessionStore(DefaultSessionStore):
                 
                 os.replace(temp_path, filepath)
                 
+                # Update cache with current file mtime after successful write
+                try:
+                    mtime = os.path.getmtime(filepath)
+                except (OSError, IOError):
+                    mtime = time.time()
+                
                 with self._lock:
                     self._extended_cache[session.session_id] = session
+                    self._cache_mtimes[session.session_id] = mtime
                 
                 return True
             except (IOError, OSError) as e:
@@ -586,8 +626,8 @@ class HierarchicalSessionStore(DefaultSessionStore):
         return False
     
     def get_extended_session(self, session_id: str) -> ExtendedSessionData:
-        """Get extended session data."""
-        return self._read_session_fresh(session_id)
+        """Get extended session data with smart caching."""
+        return self._load_extended_session(session_id, force_reload=False)
     
     def export_session(self, session_id: str) -> Dict[str, Any]:
         """
