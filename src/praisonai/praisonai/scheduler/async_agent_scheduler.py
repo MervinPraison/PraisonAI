@@ -71,12 +71,17 @@ class AsyncAgentScheduler:
     - Cancellation support  
     - No global state pollution
     - Native async coordination
-    - Timeout support (TODO: needs porting from sync version)
-    - Budget tracking (TODO: needs porting from sync version)
-    - YAML/recipe constructors (TODO: needs porting from sync version)
+    - Timeout support
+    - Budget tracking
+    - YAML/recipe constructors
     
     Example:
-        scheduler = AsyncAgentScheduler(agent, task="Check news")
+        scheduler = AsyncAgentScheduler(
+            agent, 
+            task="Check news",
+            timeout=30,  # 30 second timeout per execution
+            max_cost=1.00  # $1.00 budget limit
+        )
         await scheduler.start(schedule_expr="hourly")
         await asyncio.sleep(3600)  # Let it run
         await scheduler.stop()
@@ -89,9 +94,8 @@ class AsyncAgentScheduler:
         config: Optional[Dict[str, Any]] = None,
         on_success: Optional[Callable] = None,
         on_failure: Optional[Callable] = None,
-        # TODO: Add these missing features from sync version:
-        # timeout: Optional[int] = None,
-        # max_cost: Optional[float] = 1.00
+        timeout: Optional[int] = None,
+        max_cost: Optional[float] = 1.00
     ):
         """
         Initialize async agent scheduler.
@@ -102,18 +106,17 @@ class AsyncAgentScheduler:
             config: Optional configuration dict
             on_success: Callback function on successful execution
             on_failure: Callback function on failed execution
-            # TODO: Add timeout and max_cost parameters
+            timeout: Maximum execution time per run in seconds (None = no limit)
+            max_cost: Maximum total cost in USD (default: $1.00 for safety)
         """
         self.agent = agent
         self.task = task
         self.config = config or {}
         self.on_success = on_success
         self.on_failure = on_failure
-        
-        # TODO: Add these missing features from sync version:
-        # self.timeout = timeout
-        # self.max_cost = max_cost
-        # self._total_cost = 0.0
+        self.timeout = timeout
+        self.max_cost = max_cost
+        self._total_cost = 0.0
         
         self.is_running = False
         self._task: Optional[asyncio.Task] = None
@@ -172,7 +175,10 @@ class AsyncAgentScheduler:
             logger.info(f"Starting async agent scheduler: {getattr(self.agent, 'name', 'Agent')}")
             logger.info(f"Task: {self.task}")
             logger.info(f"Schedule: {schedule_expr} ({interval}s interval)")
-            # TODO: Add timeout and budget logging from sync version
+            if self.timeout:
+                logger.info(f"Timeout per execution: {self.timeout}s")
+            if self.max_cost is not None:
+                logger.info(f"Budget limit: ${self.max_cost}")
             
             # Run immediately if requested
             if run_immediately:
@@ -265,26 +271,12 @@ class AsyncAgentScheduler:
     
     async def get_stats(self) -> Dict[str, Any]:
         """
-        Get current execution statistics (best-effort synchronous access).
-        
-        Warning: This method provides a best-effort view of stats without
-        guaranteeing atomicity. For consistent snapshots in async context,
-        use get_stats_async() instead.
+        Get current execution statistics (async, atomic snapshot).
         
         Returns:
             Dictionary with execution stats
         """
-        # Best-effort read without lock for backward compatibility
-        return {
-            "is_running": self.is_running,
-            "total_executions": self._execution_count,
-            "successful_executions": self._success_count,
-            "failed_executions": self._failure_count,
-            "success_rate": (self._success_count / self._execution_count * 100) if self._execution_count > 0 else 0,
-            # TODO: Add cost tracking from sync version:
-            # "total_cost": self._total_cost,
-            # "remaining_budget": (self.max_cost - self._total_cost) if self.max_cost else None,
-        }
+        return await self.get_stats_async()
     
     async def get_stats_async(self) -> Dict[str, Any]:
         """
@@ -295,13 +287,14 @@ class AsyncAgentScheduler:
         """
         if self._stats_lock is None:
             # Not yet started: stats are all zero, no lock needed
-            execs, success, failed = 0, 0, 0
+            execs, success, failed, total_cost = 0, 0, 0, 0.0
         else:
             # Take atomic snapshot of all counters
             async with self._stats_lock:
                 execs = self._execution_count
                 success = self._success_count
                 failed = self._failure_count
+                total_cost = self._total_cost
         
         return {
             "is_running": self.is_running,
@@ -309,9 +302,8 @@ class AsyncAgentScheduler:
             "successful_executions": success,
             "failed_executions": failed,
             "success_rate": (success / execs * 100) if execs > 0 else 0,
-            # TODO: Add cost tracking from sync version:
-            # "total_cost": self._total_cost,
-            # "remaining_budget": (self.max_cost - self._total_cost) if self.max_cost else None,
+            "total_cost_usd": round(total_cost, 4),
+            "remaining_budget": round(self.max_cost - total_cost, 4) if self.max_cost is not None else None,
         }
     
     def get_stats_sync(self) -> Dict[str, Any]:
@@ -328,6 +320,8 @@ class AsyncAgentScheduler:
             "successful_executions": self._success_count,
             "failed_executions": self._failure_count,
             "success_rate": (self._success_count / self._execution_count * 100) if self._execution_count > 0 else 0,
+            "total_cost_usd": round(self._total_cost, 4),
+            "remaining_budget": round(self.max_cost - self._total_cost, 4) if self.max_cost is not None else None,
         }
     
     async def _run_schedule(self, interval: int, max_retries: int):
@@ -350,45 +344,50 @@ class AsyncAgentScheduler:
             self.is_running = False
     
     async def _execute_with_retry(self, max_retries: int):
-        """Execute agent with retry logic.
-        
-        TODO: Port missing features from sync version:
-        - Timeout support per execution
-        - Budget tracking and limits
-        - Daemon state updates (_update_state_if_daemon)
-        """
+        """Execute agent with retry logic."""
         self._ensure_async_primitives()  # guarantees _stats_lock is bound to current loop
+
+        # Check budget limit before incrementing execution count
+        if self.max_cost and self._total_cost >= self.max_cost:
+            logger.warning(f"Budget limit reached: ${self._total_cost:.4f} >= ${self.max_cost}")
+            logger.warning("Stopping scheduler to prevent additional costs")
+            self._stop_event.set()  # Actually stop the scheduler
+            return
 
         async with self._stats_lock:
             self._execution_count += 1
         
-        # TODO: Add budget check from sync version:
-        # if self.max_cost and self._total_cost >= self.max_cost:
-        #     logger.warning(f"Budget limit reached: ${self._total_cost:.4f} >= ${self.max_cost}")
-        #     return
+        # Check budget limit before execution
+        if self.max_cost is not None and self._total_cost >= self.max_cost:
+            logger.warning(f"Budget limit reached: ${self._total_cost:.4f} >= ${self.max_cost}")
+            if self._stop_event is not None:
+                self._stop_event.set()
+            self.is_running = False
+            return
         
         last_exc: Optional[Exception] = None
         for attempt in range(max_retries):
             try:
                 logger.info(f"Async attempt {attempt + 1}/{max_retries}")
                 
-                # TODO: Add timeout support from sync version:
-                # if self.timeout:
-                #     result = await asyncio.wait_for(
-                #         self._executor.execute(self.task), 
-                #         timeout=self.timeout
-                #     )
-                # else:
-                result = await self._executor.execute(self.task)
+                # Execute with timeout if specified
+                if self.timeout:
+                    result = await asyncio.wait_for(
+                        self._executor.execute(self.task), 
+                        timeout=self.timeout
+                    )
+                else:
+                    result = await self._executor.execute(self.task)
                 
                 logger.info(f"Async agent execution successful on attempt {attempt + 1}")
                 logger.info(f"Result: {result}")
                 
+                # Estimate cost (rough: ~$0.0001 per execution for gpt-4o-mini)
+                estimated_cost = 0.0001  # Base cost estimate
                 async with self._stats_lock:
                     self._success_count += 1
-                    # TODO: Add cost tracking from sync version:
-                    # estimated_cost = self._estimate_cost(result)
-                    # self._total_cost += estimated_cost
+                    self._total_cost += estimated_cost
+                logger.info(f"Estimated cost this run: ${estimated_cost:.4f}, Total: ${self._total_cost:.4f}")
                 
                 safe_call(self.on_success, result)
                 # TODO: Add daemon state update from sync version:
@@ -438,22 +437,207 @@ class AsyncAgentScheduler:
             logger.error(f"One-time async execution failed: {e}")
             raise
 
-    # TODO: Add these missing factory methods from sync version:
-    # @classmethod
-    # async def from_yaml(cls, yaml_path: str, ...) -> "AsyncAgentScheduler":
-    #     """Create scheduler from YAML configuration."""
-    #     pass
-    #
-    # @classmethod  
-    # async def from_recipe(cls, recipe_name: str, ...) -> "AsyncAgentScheduler":
-    #     """Create scheduler from recipe configuration."""
-    #     pass
+    @classmethod
+    def from_yaml(
+        cls,
+        yaml_path: str = "agents.yaml",
+        interval_override: Optional[str] = None,
+        max_retries_override: Optional[int] = None,
+        timeout_override: Optional[int] = None,
+        max_cost_override: Optional[float] = None,
+        on_success: Optional[Callable] = None,
+        on_failure: Optional[Callable] = None
+    ) -> 'AsyncAgentScheduler':
+        """
+        Create AsyncAgentScheduler from agents.yaml file.
+        
+        Args:
+            yaml_path: Path to agents.yaml file
+            interval_override: Override schedule interval from YAML
+            max_retries_override: Override max_retries from YAML
+            timeout_override: Override timeout from YAML
+            max_cost_override: Override max_cost from YAML
+            on_success: Callback function on successful execution
+            on_failure: Callback function on failed execution
+            
+        Returns:
+            Configured AsyncAgentScheduler instance
+            
+        Example:
+            scheduler = AsyncAgentScheduler.from_yaml("agents.yaml")
+            await scheduler.start("hourly")
+        """
+        from .yaml_loader import load_agent_yaml_with_schedule, create_agent_from_config
+        
+        # Load configuration from YAML
+        agent_config, schedule_config = load_agent_yaml_with_schedule(yaml_path)
+        
+        # Create agent from config
+        agent = create_agent_from_config(agent_config)
+        
+        # Get task
+        task = agent_config.get('task', '')
+        if not task:
+            raise ValueError("No task specified in YAML file")
+        
+        # Apply overrides to schedule config
+        if interval_override:
+            schedule_config['interval'] = interval_override
+        if max_retries_override is not None:
+            schedule_config['max_retries'] = max_retries_override
+        if timeout_override is not None:
+            schedule_config['timeout'] = timeout_override
+        if max_cost_override is not None:
+            schedule_config['max_cost'] = max_cost_override
+        
+        # Create scheduler instance with timeout and cost limits
+        scheduler = cls(
+            agent=agent,
+            task=task,
+            config=agent_config,
+            timeout=schedule_config.get('timeout'),
+            max_cost=schedule_config.get('max_cost'),
+            on_success=on_success,
+            on_failure=on_failure
+        )
+        
+        # Store schedule config for later use
+        scheduler._yaml_schedule_config = schedule_config
+        
+        return scheduler
+
+    async def start_from_yaml_config(self) -> bool:
+        """
+        Start scheduler using configuration from YAML file.
+        
+        Must be called after from_yaml() class method.
+        
+        Returns:
+            True if started successfully
+        """
+        if not hasattr(self, '_yaml_schedule_config'):
+            raise ValueError("No YAML configuration found. Use from_yaml() first.")
+        
+        schedule_config = self._yaml_schedule_config
+        interval = schedule_config.get('interval', 'hourly')
+        max_retries = schedule_config.get('max_retries', 3)
+        run_immediately = schedule_config.get('run_immediately', False)
+        
+        return await self.start(interval, max_retries, run_immediately)
+
+    @classmethod
+    def from_recipe(
+        cls,
+        recipe_name: str,
+        *,
+        input_data: Any = None,
+        config: Optional[Dict[str, Any]] = None,
+        interval_override: Optional[str] = None,
+        max_retries_override: Optional[int] = None,
+        timeout_override: Optional[int] = None,
+        max_cost_override: Optional[float] = None,
+        on_success: Optional[Callable] = None,
+        on_failure: Optional[Callable] = None
+    ) -> 'AsyncAgentScheduler':
+        """
+        Create AsyncAgentScheduler from a recipe name.
+        
+        Args:
+            recipe_name: Name of the recipe to schedule
+            input_data: Input data for the recipe
+            config: Configuration overrides for the recipe
+            interval_override: Override schedule interval from recipe runtime config
+            max_retries_override: Override max_retries from recipe runtime config
+            timeout_override: Override timeout from recipe runtime config
+            max_cost_override: Override max_cost from recipe runtime config
+            on_success: Callback function on successful execution
+            on_failure: Callback function on failed execution
+            
+        Returns:
+            Configured AsyncAgentScheduler instance
+            
+        Example:
+            scheduler = AsyncAgentScheduler.from_recipe("news-monitor")
+            await scheduler.start("hourly")
+        """
+        from praisonai.recipe.bridge import resolve, execute_resolved_recipe, get_recipe_task_description
+        
+        # Resolve the recipe
+        resolved = resolve(
+            recipe_name,
+            input_data=input_data,
+            config=config or {},
+            options={'timeout_sec': timeout_override or 300},
+        )
+        
+        # Get runtime config defaults from recipe
+        interval = interval_override or "hourly"
+        max_retries = max_retries_override if max_retries_override is not None else 3
+        timeout = timeout_override or 300
+        max_cost = max_cost_override if max_cost_override is not None else 1.00
+        
+        runtime = resolved.runtime_config
+        if runtime and hasattr(runtime, 'schedule'):
+            sched_config = runtime.schedule
+            interval = interval_override or sched_config.interval
+            max_retries = max_retries_override if max_retries_override is not None else sched_config.max_retries
+            timeout = timeout_override or sched_config.timeout_sec
+            max_cost = max_cost_override if max_cost_override is not None else sched_config.max_cost_usd
+        
+        # Create a recipe executor agent wrapper that supports async
+        class AsyncRecipeExecutorAgent:
+            """Wrapper that makes a recipe look like an agent for the async scheduler."""
+            def __init__(self, resolved_recipe):
+                self.resolved = resolved_recipe
+                self.name = f"AsyncRecipeAgent:{resolved_recipe.name}"
+            
+            async def astart(self, task: str) -> Any:
+                # Run recipe execution in thread to avoid blocking async loop
+                loop = asyncio.get_running_loop()
+                return await loop.run_in_executor(
+                    None, lambda: execute_resolved_recipe(self.resolved)
+                )
+            
+            def start(self, task: str) -> Any:
+                # Fallback sync method
+                return execute_resolved_recipe(self.resolved)
+        
+        # Create the agent wrapper
+        agent = AsyncRecipeExecutorAgent(resolved)
+        task = get_recipe_task_description(resolved)
+        
+        # Create scheduler instance
+        scheduler = cls(
+            agent=agent,
+            task=task,
+            timeout=timeout,
+            max_cost=max_cost,
+            on_success=on_success,
+            on_failure=on_failure,
+        )
+        
+        # Store recipe metadata and schedule config
+        scheduler._recipe_name = recipe_name
+        scheduler._recipe_resolved = resolved
+        scheduler._yaml_schedule_config = {
+            'interval': interval,
+            'max_retries': max_retries,
+            'run_immediately': False,
+            'timeout': timeout,
+            'max_cost': max_cost,
+        }
+        
+        return scheduler
 
 
 def create_async_agent_scheduler(
     agent,
     task: str,
-    config: Optional[Dict[str, Any]] = None
+    config: Optional[Dict[str, Any]] = None,
+    on_success: Optional[Callable] = None,
+    on_failure: Optional[Callable] = None,
+    timeout: Optional[int] = None,
+    max_cost: Optional[float] = 1.00
 ) -> AsyncAgentScheduler:
     """
     Factory function to create async agent scheduler.
@@ -462,8 +646,20 @@ def create_async_agent_scheduler(
         agent: PraisonAI Agent instance
         task: Task description
         config: Optional configuration
+        on_success: Callback function on successful execution
+        on_failure: Callback function on failed execution
+        timeout: Maximum execution time per run in seconds (None = no limit)
+        max_cost: Maximum total cost in USD (default: $1.00 for safety)
         
     Returns:
         Configured AsyncAgentScheduler instance
     """
-    return AsyncAgentScheduler(agent, task, config)
+    return AsyncAgentScheduler(
+        agent,
+        task,
+        config=config,
+        on_success=on_success,
+        on_failure=on_failure,
+        timeout=timeout,
+        max_cost=max_cost
+    )

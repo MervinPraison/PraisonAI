@@ -149,15 +149,17 @@ class BotSessionManager:
         if self._store is not None:
             key = self._session_key(user_id)
             try:
-                # Clear existing and re-write (atomic update)
-                self._store.clear_session(key)
-                for msg in history:
-                    self._store.add_message(
-                        key,
-                        msg.get("role", "user"),
-                        msg.get("content", ""),
-                        msg.get("metadata"),
-                    )
+                if hasattr(self._store, "set_chat_history"):
+                    self._store.set_chat_history(key, history)
+                else:
+                    self._store.clear_session(key)
+                    for msg in history:
+                        self._store.add_message(
+                            key,
+                            msg.get("role", "user"),
+                            msg.get("content", ""),
+                            msg.get("metadata"),
+                        )
             except Exception as e:
                 logger.warning("Failed to persist session to store: %s", e)
 

@@ -1,14 +1,14 @@
 {
   "version": "1.5.87",
-  "lastUpdated": "2026-05-30",
+  "lastUpdated": "2026-06-02",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 335,
+    "pythonCoreFeatures": 336,
     "rustFeatures": 667,
-    "gapCount": 56,
-    "parityPercentage": 199.1
+    "gapCount": 57,
+    "parityPercentage": 198.5
   },
   "pythonCoreSDK": {
     "exports": [
@@ -245,6 +245,7 @@
       "ToolPluginProtocol",
       "ToolRegistry",
       "ToolResult",
+      "ToolSearchConfig",
       "ToolUseEvent",
       "ToolValidationError",
       "Tools",
@@ -4160,6 +4161,15 @@
         "effort": "medium",
         "status": "DONE",
         "category": "plugins"
+      },
+      {
+        "feature": "ToolSearchConfig",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "config"
       },
       {
         "feature": "ToolUseEvent",

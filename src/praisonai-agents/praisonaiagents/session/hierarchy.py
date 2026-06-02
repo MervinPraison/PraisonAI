@@ -288,12 +288,15 @@ class HierarchicalSessionStore(DefaultSessionStore):
             metadata=metadata or {},
         )
         
-        # Update parent's children list
+        # Update parent's children list without clobbering concurrent message writes
         if parent_id:
-            parent = self._load_extended_session(parent_id)
-            if sid not in parent.children_ids:
-                parent.children_ids.append(sid)
-                self._save_extended_session(parent)
+            def _link_child(parent: SessionData) -> None:
+                if sid not in parent.children_ids:
+                    parent.children_ids.append(sid)
+
+            self._modify_session_locked(
+                parent_id, _link_child, error_label="link child session"
+            )
         
         self._save_extended_session(session)
         return sid
@@ -340,11 +343,15 @@ class HierarchicalSessionStore(DefaultSessionStore):
             metadata=copy.deepcopy(parent.metadata),
         )
         
-        # Update parent's children list
-        parent.children_ids.append(new_id)
-        
         self._save_extended_session(forked)
-        self._save_extended_session(parent)
+
+        def _register_fork(parent: SessionData) -> None:
+            if new_id not in parent.children_ids:
+                parent.children_ids.append(new_id)
+
+        self._modify_session_locked(
+            session_id, _register_fork, error_label="register forked session"
+        )
         
         return new_id
     
@@ -395,18 +402,22 @@ class HierarchicalSessionStore(DefaultSessionStore):
         Returns:
             The snapshot ID
         """
-        # Force reload to get latest messages
-        session = self._load_extended_session(session_id, force_reload=True)
-        
         snapshot = SessionSnapshot(
             session_id=session_id,
-            message_index=len(session.messages) - 1 if session.messages else -1,
+            message_index=-1,  # Set from fresh session inside locked write
             label=label,
             metadata=metadata or {},
         )
-        
-        session.snapshots.append(snapshot)
-        self._save_extended_session(session)
+
+        def _record_snapshot(session: SessionData) -> None:
+            snapshot.message_index = (
+                len(session.messages) - 1 if session.messages else -1
+            )
+            session.snapshots.append(snapshot)
+
+        self._modify_session_locked(
+            session_id, _record_snapshot, error_label="create snapshot"
+        )
         
         return snapshot.id
     
@@ -426,9 +437,8 @@ class HierarchicalSessionStore(DefaultSessionStore):
         Returns:
             True if successful
         """
-        session = self._load_extended_session(session_id)
-        
-        # Find the snapshot
+        # Read-only lookup to find snapshot without triggering unnecessary writes
+        session = self._read_session_fresh(session_id)
         snapshot = None
         for s in session.snapshots:
             if s.id == snapshot_id:
@@ -438,14 +448,17 @@ class HierarchicalSessionStore(DefaultSessionStore):
         if snapshot is None:
             logger.warning(f"Snapshot {snapshot_id} not found")
             return False
-        
-        # Revert messages
-        if snapshot.message_index >= 0:
-            session.messages = session.messages[:snapshot.message_index + 1]
-        else:
-            session.messages = []
-        
-        return self._save_extended_session(session)
+
+        # Now perform the actual revert in a single locked operation
+        def _revert(session: SessionData) -> None:
+            if snapshot.message_index >= 0:
+                session.messages = session.messages[: snapshot.message_index + 1]
+            else:
+                session.messages = []
+
+        return self._modify_session_locked(
+            session_id, _revert, error_label="revert to snapshot"
+        )
     
     def revert_to_message(self, session_id: str, message_index: int) -> bool:
         """
@@ -458,27 +471,37 @@ class HierarchicalSessionStore(DefaultSessionStore):
         Returns:
             True if successful
         """
-        # Force reload to get latest messages
-        session = self._load_extended_session(session_id, force_reload=True)
-        
+        # Validate message index before writing
+        session = self._read_session_fresh(session_id)
         if message_index < 0 or message_index >= len(session.messages):
             logger.warning(f"Invalid message index {message_index}")
             return False
-        
-        session.messages = session.messages[:message_index + 1]
-        return self._save_extended_session(session)
+
+        # Valid index, proceed with locked revert
+        def _revert(session: SessionData) -> None:
+            session.messages = session.messages[: message_index + 1]
+
+        return self._modify_session_locked(
+            session_id, _revert, error_label="revert to message"
+        )
     
     def share_session(self, session_id: str) -> bool:
         """Mark a session as shared."""
-        session = self._load_extended_session(session_id)
-        session.is_shared = True
-        return self._save_extended_session(session)
+        def _share(session: SessionData) -> None:
+            session.is_shared = True
+
+        return self._modify_session_locked(
+            session_id, _share, error_label="share session"
+        )
     
     def unshare_session(self, session_id: str) -> bool:
         """Mark a session as not shared."""
-        session = self._load_extended_session(session_id)
-        session.is_shared = False
-        return self._save_extended_session(session)
+        def _unshare(session: SessionData) -> None:
+            session.is_shared = False
+
+        return self._modify_session_locked(
+            session_id, _unshare, error_label="unshare session"
+        )
     
     def is_shared(self, session_id: str) -> bool:
         """Check if a session is shared."""
@@ -487,9 +510,12 @@ class HierarchicalSessionStore(DefaultSessionStore):
     
     def set_title(self, session_id: str, title: str) -> bool:
         """Set session title."""
-        session = self._load_extended_session(session_id)
-        session.title = title
-        return self._save_extended_session(session)
+        def _set_title(session: SessionData) -> None:
+            session.title = title
+
+        return self._modify_session_locked(
+            session_id, _set_title, error_label="set session title"
+        )
     
     async def auto_title(self, session_id: str) -> bool:
         """Generate and set title automatically from first exchange.

@@ -121,7 +121,8 @@ class SSEMCPTool:
                 "name": self.name,
                 "description": self.description,
                 "parameters": fixed_schema
-            }
+            },
+            "__praisonai_deferrable__": True  # Mark MCP tools as deferrable for tool search
         }
 
 class SSEMCPClient:

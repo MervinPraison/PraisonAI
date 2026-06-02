@@ -272,6 +272,12 @@ class DbSessionAdapter:
                 self.metadata = meta
         return _SessionProxy(session_id, self.get_metadata(session_id))
 
-    def update_session_metadata(self, session_id: str, metadata: Dict[str, Any]) -> None:
-        """Update session metadata (alias for set_metadata)."""
-        self.set_metadata(session_id, metadata)
+    def update_session_metadata(self, session_id: str, **fields: Any) -> None:
+        """Update session metadata fields (DefaultSessionStore-compatible)."""
+        if not fields:
+            return
+        if session_id not in self._metadata:
+            self._metadata[session_id] = {}
+        for key, value in fields.items():
+            if value is not None:
+                self._metadata[session_id][key] = value

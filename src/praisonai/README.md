@@ -382,7 +382,7 @@ praisonai flow
 
 Open **http://localhost:7861** — use the **Agent** and **Agent Team** components to create sequential or parallel workflows. Connect Chat Input → Agent Team → Chat Output for instant multi-agent pipelines.
 
-> 📖 [Full Flow docs](https://docs.praison.ai/docs/concepts/flow) — visual agent building, component reference, and deployment
+> 📖 [Full Flow docs](https://docs.praison.ai/docs/concepts/agentflow) — visual agent building, component reference, and deployment
 
 ### 8. PraisonAI UI 🤖 (Clean Chat)
 
