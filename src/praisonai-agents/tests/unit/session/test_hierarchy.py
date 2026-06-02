@@ -117,6 +117,25 @@ class TestHierarchicalSessionStore:
             assert len(history) == 2
             assert history[1]["content"] == "second"
 
+    def test_fork_session_preserves_concurrent_messages(self):
+        """Registering a fork must not clobber messages added on the parent."""
+        session_id = self.store.create_session(title="Parent")
+        self.store.add_user_message(session_id, "first")
+
+        # Stale in-memory parent (old fork_session saved this whole object)
+        self.store._load_extended_session(session_id, force_reload=True)
+        self.store.add_user_message(session_id, "second")
+
+        fork_id = self.store.fork_session(session_id)
+        assert fork_id
+
+        history = self.store.get_chat_history(session_id)
+        assert len(history) == 2
+        assert history[1]["content"] == "second"
+
+        parent = self.store.get_extended_session(session_id)
+        assert fork_id in parent.children_ids
+
     def test_update_session_metadata_preserves_extended_fields(self):
         """Metadata updates must not strip parent_id, snapshots, etc."""
         session_id = self.store.create_session(title="Parent")
