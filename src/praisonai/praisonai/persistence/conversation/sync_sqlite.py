@@ -44,7 +44,7 @@ class SyncSQLiteConversationStore(ConversationStore):
         self.path = path
         validate_identifier(table_prefix, "table_prefix")
         self.table_prefix = table_prefix
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._initialized = False
     
     def init(self):
@@ -262,18 +262,22 @@ class SyncSQLiteConversationStore(ConversationStore):
         finally:
             conn.close()
     
-    def add_message(self, message: ConversationMessage) -> ConversationMessage:
+    def add_message(self, session_id: str, message: ConversationMessage) -> ConversationMessage:
         """Add a message to the conversation."""
         with self._lock:
             conn = self._get_connection()
             try:
                 table = f"{self.table_prefix}messages"
+                # Use the provided session_id, falling back to message.session_id if needed
+                actual_session_id = session_id or message.session_id
+                message.session_id = actual_session_id  # Ensure message object is consistent
+                
                 conn.execute(f"""
                     INSERT INTO {table} (id, session_id, role, content, tool_calls, tool_call_id, metadata, created_at)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     message.id,
-                    message.session_id,
+                    actual_session_id,
                     message.role,
                     message.content,
                     json.dumps(message.tool_calls) if message.tool_calls else None,
@@ -290,34 +294,38 @@ class SyncSQLiteConversationStore(ConversationStore):
         self,
         session_id: str,
         limit: Optional[int] = None,
-        offset: Optional[int] = None
+        before: Optional[float] = None,
+        after: Optional[float] = None
     ) -> List[ConversationMessage]:
         """Get messages for a session."""
         conn = self._get_connection()
         try:
             table = f"{self.table_prefix}messages"
             params: list = [session_id]
+            conditions = []
             
-            # Handle pagination - SQLite requires LIMIT when OFFSET is used
+            # Handle timestamp filtering
+            if before is not None:
+                conditions.append("created_at < ?")
+                params.append(before)
+                
+            if after is not None:
+                conditions.append("created_at > ?")
+                params.append(after)
+            
+            # Build where clause
+            timestamp_filter = " AND " + " AND ".join(conditions) if conditions else ""
+            
+            # Handle limit
             if limit is not None:
                 params.append(limit)
                 limit_clause = " LIMIT ?"
-            elif offset is not None:
-                # When offset is provided without limit, use -1 for unbounded
-                params.append(-1)
-                limit_clause = " LIMIT ?"
             else:
                 limit_clause = ""
-                
-            if offset is not None:
-                params.append(offset)
-                offset_clause = " OFFSET ?"
-            else:
-                offset_clause = ""
             
             cursor = conn.execute(f"""
-                SELECT * FROM {table} WHERE session_id = ?
-                ORDER BY created_at{limit_clause}{offset_clause}
+                SELECT * FROM {table} WHERE session_id = ?{timestamp_filter}
+                ORDER BY created_at{limit_clause}
             """, params)
             
             messages = []

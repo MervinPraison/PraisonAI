@@ -21,11 +21,8 @@ class AutoGenAdapter(BaseFrameworkAdapter):
     
     def is_available(self) -> bool:
         """Check if AutoGen v0.2 is available for import."""
-        try:
-            import autogen  # noqa: F401
-            return True
-        except ImportError:
-            return False
+        from .._framework_availability import is_available
+        return is_available("autogen")
     
     def resolve(self) -> "BaseFrameworkAdapter":
         """Pick the concrete AutoGen adapter variant based on environment and availability."""
@@ -181,111 +178,144 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
         # Availability already validated at CLI entry
         
         logger.info("Starting AutoGen v0.4 execution...")
-        import asyncio
-        import os
-        import re
         
-        async def run_autogen_v4_async():
-            from autogen_agentchat.agents import AssistantAgent
-            from autogen_ext.models.openai import OpenAIChatCompletionClient
-            from autogen_agentchat.teams import RoundRobinGroupChat
-            from autogen_agentchat.conditions import TextMentionTermination, MaxMessageTermination
-            
-            # Create model client for v0.4
-            model_config = llm_config[0] if llm_config else {}
-            model_client = OpenAIChatCompletionClient(
-                model=model_config.get('model', 'gpt-4o-mini'),
-                api_key=model_config.get('api_key', os.environ.get("OPENAI_API_KEY")),
-                base_url=model_config.get('base_url', "https://api.openai.com/v1")
-            )
-            
-            agents = []
-            combined_tasks = []
-            
-            try:
-                # Create agents from config
-                for role, details in config['roles'].items():
-                    # For AutoGen v0.4, ensure agent name is a valid Python identifier
-                    agent_name = self._format_template(details['role'], topic=topic)
-                    agent_name = self._sanitize_agent_name_for_autogen_v4(agent_name)
-                    backstory = self._format_template(details['backstory'], topic=topic)
-                    
-                    # Convert tools for v0.4 - simplified tool passing
-                    agent_tools = []
-                    for tool_name in details.get('tools', []):
-                        if tools_dict and tool_name in tools_dict:
-                            tool_instance = tools_dict[tool_name]
-                            # For v0.4, we can pass the tool's run method directly if it's callable
-                            if hasattr(tool_instance, 'run') and callable(tool_instance.run):
-                                agent_tools.append(tool_instance.run)
-                    
-                    # Create v0.4 AssistantAgent
-                    assistant = AssistantAgent(
-                        name=agent_name,
-                        system_message=backstory + ". Must reply with 'TERMINATE' when the task is complete.",
-                        model_client=model_client,
-                        tools=agent_tools,
-                        reflect_on_tool_use=True
-                    )
-                    
-                    agents.append(assistant)
-                    
-                    # Collect all task descriptions for sequential execution
-                    for task_name, task_details in details.get('tasks', {}).items():
-                        description_filled = self._format_template(task_details['description'], topic=topic)
-                        combined_tasks.append(description_filled)
-                
-                if not agents:
-                    return "No agents created from configuration"
-                
-                # Create termination conditions
-                text_termination = TextMentionTermination("TERMINATE")
-                max_messages_termination = MaxMessageTermination(max_messages=20)
-                termination_condition = text_termination | max_messages_termination
-                
-                # Create RoundRobinGroupChat for parallel/sequential execution
-                group_chat = RoundRobinGroupChat(
-                    agents,
-                    termination_condition=termination_condition,
-                    max_turns=len(agents) * 3  # Allow multiple rounds
-                )
-                
-                # Combine all tasks into a single task description
-                task_description = f"Topic: {topic}\n\nTasks to complete:\n" + "\n".join(
-                    f"{i+1}. {task}" for i, task in enumerate(combined_tasks)
-                )
-                
-                # Run the group chat
-                result = await group_chat.run(task=task_description)
-                
-                # Extract the final message content
-                if result.messages:
-                    final_message = result.messages[-1]
-                    if hasattr(final_message, 'content'):
-                        return f"### AutoGen v0.4 Output ###\n{final_message.content}"
-                    else:
-                        return f"### AutoGen v0.4 Output ###\n{str(final_message)}"
-                else:
-                    return "### AutoGen v0.4 Output ###\nNo messages generated"
-                    
-            except Exception as e:
-                logger.error(f"Error in AutoGen v0.4 execution: {str(e)}")
-                return f"### AutoGen v0.4 Error ###\n{str(e)}"
-            
-            finally:
-                # Close the model client
-                await model_client.close()
-        
-        # Run the async function using safe bridge
+        # Sync entry now goes via the async method via run_sync bridge
         try:
             from .._async_bridge import run_sync
-            return run_sync(run_autogen_v4_async())
+            return run_sync(self.arun(
+                config, llm_config, topic,
+                tools_dict=tools_dict,
+                agent_callback=agent_callback,
+                task_callback=task_callback,
+                cli_config=cli_config
+            ))
         except ImportError:
-            # Fallback if _async_bridge is not available
-            return asyncio.run(run_autogen_v4_async())
+            # Fallback if _async_bridge is not available  
+            import asyncio
+            return asyncio.run(self.arun(
+                config, llm_config, topic,
+                tools_dict=tools_dict,
+                agent_callback=agent_callback,
+                task_callback=task_callback,
+                cli_config=cli_config
+            ))
+        except RuntimeError as e:
+            # Re-raise run_sync event loop errors so users get clear guidance
+            if "running event loop" in str(e):
+                raise
+            logger.error(f"AutoGen v0.4 runtime error: {str(e)}")
+            return f"### AutoGen v0.4 Runtime Error ###\n{str(e)}"
         except Exception as e:
             logger.error(f"Error running AutoGen v0.4: {str(e)}")
             return f"### AutoGen v0.4 Error ###\n{str(e)}"
+
+    async def arun(
+        self,
+        config: Dict[str, Any],
+        llm_config: List[Dict],
+        topic: str,
+        *,
+        tools_dict: Optional[Dict[str, Any]] = None,
+        agent_callback: Optional[Callable] = None,
+        task_callback: Optional[Callable] = None,
+        cli_config: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Async-native AutoGen v0.4 execution without run_sync wrapper.
+        """
+        # Availability already validated at CLI entry
+        
+        logger.info("Starting AutoGen v0.4 async execution...")
+        
+        from autogen_agentchat.agents import AssistantAgent
+        from autogen_ext.models.openai import OpenAIChatCompletionClient
+        from autogen_agentchat.teams import RoundRobinGroupChat
+        from autogen_agentchat.conditions import TextMentionTermination, MaxMessageTermination
+        
+        # Create model client for v0.4
+        model_config = llm_config[0] if llm_config else {}
+        model_client = OpenAIChatCompletionClient(
+            model=model_config.get('model', 'gpt-4o-mini'),
+            api_key=model_config.get('api_key', os.environ.get("OPENAI_API_KEY")),
+            base_url=model_config.get('base_url', "https://api.openai.com/v1")
+        )
+        
+        agents = []
+        combined_tasks = []
+        
+        try:
+            # Create agents from config
+            for role, details in config['roles'].items():
+                # For AutoGen v0.4, ensure agent name is a valid Python identifier
+                agent_name = self._format_template(details['role'], topic=topic)
+                agent_name = self._sanitize_agent_name_for_autogen_v4(agent_name)
+                backstory = self._format_template(details['backstory'], topic=topic)
+                
+                # Convert tools for v0.4 - simplified tool passing
+                agent_tools = []
+                for tool_name in details.get('tools', []):
+                    if tools_dict and tool_name in tools_dict:
+                        tool_instance = tools_dict[tool_name]
+                        # For v0.4, we can pass the tool's run method directly if it's callable
+                        if hasattr(tool_instance, 'run') and callable(tool_instance.run):
+                            agent_tools.append(tool_instance.run)
+                
+                # Create v0.4 AssistantAgent
+                assistant = AssistantAgent(
+                    name=agent_name,
+                    system_message=backstory + ". Must reply with 'TERMINATE' when the task is complete.",
+                    model_client=model_client,
+                    tools=agent_tools,
+                    reflect_on_tool_use=True
+                )
+                
+                agents.append(assistant)
+                
+                # Collect all task descriptions for sequential execution
+                for task_name, task_details in details.get('tasks', {}).items():
+                    description_filled = self._format_template(task_details['description'], topic=topic)
+                    combined_tasks.append(description_filled)
+            
+            if not agents:
+                return "No agents created from configuration"
+            
+            # Create termination conditions
+            text_termination = TextMentionTermination("TERMINATE")
+            max_messages_termination = MaxMessageTermination(max_messages=20)
+            termination_condition = text_termination | max_messages_termination
+            
+            # Create RoundRobinGroupChat for parallel/sequential execution
+            group_chat = RoundRobinGroupChat(
+                agents,
+                termination_condition=termination_condition,
+                max_turns=len(agents) * 3  # Allow multiple rounds
+            )
+            
+            # Combine all tasks into a single task description
+            task_description = f"Topic: {topic}\n\nTasks to complete:\n" + "\n".join(
+                f"{i+1}. {task}" for i, task in enumerate(combined_tasks)
+            )
+            
+            # Run the group chat
+            result = await group_chat.run(task=task_description)
+            
+            # Extract the final message content
+            if result.messages:
+                final_message = result.messages[-1]
+                if hasattr(final_message, 'content'):
+                    return f"### AutoGen v0.4 Output ###\n{final_message.content}"
+                else:
+                    return f"### AutoGen v0.4 Output ###\n{str(final_message)}"
+            else:
+                return "### AutoGen v0.4 Output ###\nNo messages generated"
+                
+        except Exception as e:
+            logger.error(f"Error in AutoGen v0.4 async execution: {str(e)}")
+            return f"### AutoGen v0.4 Error ###\n{str(e)}"
+        
+        finally:
+            # Close the model client
+            await model_client.close()
     
     def _sanitize_agent_name_for_autogen_v4(self, name):
         """

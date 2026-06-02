@@ -5,7 +5,7 @@ Demonstrates using should_run to conditionally execute agent steps
 based on input or previous results.
 """
 
-from praisonaiagents import Agent, Workflow, Task
+from praisonaiagents import Agent, AgentFlow, Task
 
 # Condition functions
 def is_technical(ctx) -> bool:

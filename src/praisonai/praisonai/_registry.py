@@ -287,6 +287,6 @@ def create_lazy_getattr(registry: PluginRegistry[T]) -> Callable[[str], T]:
             else:
                 module_name = 'unknown'
             
-            raise AttributeError(f"module {module_name!r} has no attribute {attr_name!r}")
+            raise AttributeError(f"module {module_name!r} has no attribute {name!r}")
     
     return __getattr__

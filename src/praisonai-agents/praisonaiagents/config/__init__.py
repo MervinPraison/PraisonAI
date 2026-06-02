@@ -39,6 +39,7 @@ __all__ = [
     "CachingConfig",
     "HooksConfig",
     "SkillsConfig",
+    "ToolSearchConfig",
     # Type aliases
     "MemoryParam",
     "KnowledgeParam",
@@ -122,6 +123,7 @@ _MODULE_MAP = {
     "CachingConfig": "feature_configs",
     "HooksConfig": "feature_configs",
     "SkillsConfig": "feature_configs",
+    "ToolSearchConfig": "feature_configs",
     "MemoryParam": "feature_configs",
     "KnowledgeParam": "feature_configs",
     "PlanningParam": "feature_configs",

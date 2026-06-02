@@ -54,7 +54,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
         """This store is async-only; use async_list_sessions or the sync_sqlite store."""
         raise RuntimeError("This store is async-only; use async_list_sessions() or the sync_sqlite store")
     
-    def add_message(self, message) -> None:
+    def add_message(self, session_id: str, message) -> None:
         """This store is async-only; use async_add_message or the sync_sqlite store."""
         raise RuntimeError("This store is async-only; use async_add_message() or the sync_sqlite store")
     

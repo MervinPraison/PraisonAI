@@ -925,13 +925,10 @@ class WebSocketGateway:
     def _make_stream_relay(
         self, client_id: str, session: "GatewaySession"
     ) -> Callable:
-        """Create a StreamCallback that relays events to a WS client.
-        
-        The callback is synchronous (called from the LLM streaming thread)
-        and uses asyncio.run_coroutine_threadsafe to push events into the
-        gateway's event loop for WS delivery.
-        """
+        """Create a StreamCallback that relays events to a WS client."""
         gateway = self
+        # Capture the running loop while we are still on it.
+        loop = asyncio.get_running_loop()
 
         def _relay(event) -> None:
             try:
@@ -967,15 +964,13 @@ class WebSocketGateway:
                     target=client_id,
                 )
                 
-                # Thread-safe async send
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    asyncio.run_coroutine_threadsafe(
-                        gateway._send_to_client(client_id, gw_event.to_dict()),
-                        loop,
-                    )
-            except Exception as e:
-                logger.debug(f"Stream relay error (non-fatal): {e}")
+                # No get_event_loop() in the threaded callback.
+                asyncio.run_coroutine_threadsafe(
+                    gateway._send_to_client(client_id, gw_event.to_dict()),
+                    loop,
+                )
+            except Exception:
+                logger.warning("Stream relay error (non-fatal)", exc_info=True)
 
         return _relay
     

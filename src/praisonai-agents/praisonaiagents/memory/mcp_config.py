@@ -81,7 +81,7 @@ class MCPConfig:
             MCP instance ready for use with agents
         """
         try:
-            from praisonaiagents.tools.mcp import MCP
+            from praisonaiagents.mcp import MCP
             
             # Resolve environment variables
             resolved_env = {}

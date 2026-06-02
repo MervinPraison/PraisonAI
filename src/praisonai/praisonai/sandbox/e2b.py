@@ -100,9 +100,7 @@ class E2BSandbox:
         
         if self._sandbox:
             try:
-                await asyncio.get_event_loop().run_in_executor(
-                    None, self._sandbox.kill
-                )
+                await asyncio.to_thread(self._sandbox.kill)
             except Exception as e:
                 logger.warning(f"Failed to kill E2B sandbox: {e}")
             self._sandbox = None
@@ -161,9 +159,8 @@ class E2BSandbox:
         """Execute Python code using E2B code interpreter."""
         try:
             # Run in executor to avoid blocking the event loop
-            execution = await asyncio.get_event_loop().run_in_executor(
-                None, 
-                lambda: self._sandbox.run_code(code, timeout=limits.timeout_seconds)
+            execution = await asyncio.to_thread(
+                self._sandbox.run_code, code, timeout=limits.timeout_seconds
             )
             
             # Extract results from E2B execution
@@ -219,23 +216,20 @@ class E2BSandbox:
             if env:
                 import shlex
                 for key, value in env.items():
-                    await asyncio.get_event_loop().run_in_executor(
-                        None,
-                        lambda k=key, v=value: self._sandbox.commands.run(f"export {shlex.quote(k)}={shlex.quote(v)}", timeout=5)
+                    await asyncio.to_thread(
+                        self._sandbox.commands.run, f"export {shlex.quote(key)}={shlex.quote(value)}", timeout=5
                     )
             
             # Change directory if needed
             if working_dir:
                 import shlex
-                await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: self._sandbox.commands.run(f"cd {shlex.quote(working_dir)}", timeout=5)
+                await asyncio.to_thread(
+                    self._sandbox.commands.run, f"cd {shlex.quote(working_dir)}", timeout=5
                 )
             
             # Execute the command
-            result = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self._sandbox.commands.run(command, timeout=limits.timeout_seconds)
+            result = await asyncio.to_thread(
+                self._sandbox.commands.run, command, timeout=limits.timeout_seconds
             )
             
             return SandboxResult(
@@ -318,10 +312,7 @@ class E2BSandbox:
             if isinstance(content, bytes):
                 content = content.decode("utf-8")
             
-            await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self._sandbox.files.write(path, content)
-            )
+            await asyncio.to_thread(self._sandbox.files.write, path, content)
             return True
         except Exception as e:
             logger.error(f"Failed to write file {path}: {e}")
@@ -336,10 +327,7 @@ class E2BSandbox:
             await self.start()
         
         try:
-            content = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self._sandbox.files.read(path)
-            )
+            content = await asyncio.to_thread(self._sandbox.files.read, path)
             return content
         except Exception as e:
             logger.warning(f"Failed to read file {path}: {e}")
