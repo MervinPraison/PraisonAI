@@ -1,0 +1,71 @@
+# Tool Search Example Configuration
+# This demonstrates using tool_search progressive disclosure for managing large tool sets
+
+framework: praisonai
+topic: Research AI trends and write a comprehensive report
+
+# Agents with tool search configuration
+agents:
+  researcher:
+    role: Research Analyst
+    instructions: |
+      You are a skilled research analyst with expertise in technology trends.
+      Use available tools to research topics thoroughly.
+    goal: Research topics thoroughly and provide insights
+    tools:
+      - internet_search
+      - web_fetch
+      - read_file
+      - write_file
+    # Tool search configuration - can be false/true/auto or object
+    tool_search: auto
+    
+  writer:
+    role: Content Writer
+    instructions: |
+      You are a creative writer who can make complex topics engaging.
+      You write in a clear, accessible style.
+    goal: Create engaging content from research
+    tools:
+      - read_file
+      - write_file
+      - list_files
+    # Advanced tool search configuration
+    tool_search:
+      enabled: "on"
+      threshold_pct: 15
+      search_default_limit: 10
+    
+  analyst:
+    role: Data Analyst
+    instructions: |
+      You analyze data and create visualizations.
+      You work with structured data sources.
+    goal: Analyze data trends
+    tools:
+      - read_csv
+      - write_csv
+      - analyze_csv
+    # Tool search disabled
+    tool_search: false
+
+# Tasks
+tasks:
+  research_task:
+    description: Research current AI trends and emerging technologies
+    expected_output: A comprehensive research report with latest AI trends
+    agent: researcher
+    
+  writing_task:
+    description: Transform research into an engaging article
+    expected_output: A well-written article about AI trends
+    agent: writer
+    
+  analysis_task:
+    description: Analyze trends data if available
+    expected_output: Data analysis summary
+    agent: analyst
+
+# Process configuration
+process: sequential
+verbose: true

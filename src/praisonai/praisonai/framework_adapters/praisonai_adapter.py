@@ -121,6 +121,9 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                     agent_tools = details.get('tools', [])
                     agent_tool_list = [tools_dict[t] for t in agent_tools if t in tools_dict]
                 
+                # Parse tool_search configuration
+                tool_search_config = details.get('tool_search', None)
+                
                 # Create basic agent
                 agent = PraisonAgent(
                     name=role_filled,
@@ -131,6 +134,7 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                     llm=model_name,
                     allow_delegation=details.get('allow_delegation', False),
                     tools=agent_tool_list,
+                    tool_search=tool_search_config,
                 )
                 
                 if agent_callback:

@@ -926,7 +926,7 @@ class PraisonAI:
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'recipe', 'endpoints', 'audio', 'embed', 'embedding', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor', 'registry', 'package', 'install', 'uninstall', 'acp', 'debug', 'lsp', 'diag', 'browser', 'replay', 'bot', 'gateway', 'sandbox', 'wizard', 'migrate', 'security', 'persistence', 'paths', 'claw', 'github', 'managed', 'flow', 'dashboard', 'backends']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agent', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'recipe', 'endpoints', 'audio', 'embed', 'embedding', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor', 'registry', 'package', 'install', 'uninstall', 'acp', 'debug', 'lsp', 'diag', 'browser', 'replay', 'bot', 'gateway', 'sandbox', 'wizard', 'migrate', 'security', 'persistence', 'paths', 'claw', 'github', 'managed', 'flow', 'dashboard', 'backends']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -1587,6 +1587,24 @@ class PraisonAI:
                 # Serve command - launch PraisonAI servers
                 from .features.serve import handle_serve_command
                 exit_code = handle_serve_command(unknown_args)
+                sys.exit(exit_code)
+            
+            elif args.command == 'agent':
+                # Agent command - run a single agent with tool search support
+                if not PRAISONAI_AVAILABLE:
+                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
+                    print("\npip install praisonaiagents\n")
+                    sys.exit(1)
+                
+                from .features.agent import handle_agent_command, add_agent_parser
+                
+                # Create a parser for agent command
+                agent_parser = argparse.ArgumentParser(prog="praisonai agent")
+                agent_subparsers = agent_parser.add_subparsers(dest='agent_command', help='Agent commands')
+                add_agent_parser(agent_subparsers)
+                agent_args = agent_parser.parse_args(unknown_args)
+                
+                exit_code = handle_agent_command(agent_args)
                 sys.exit(exit_code)
             
             elif args.command == 'agents':
