@@ -167,6 +167,12 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
                 task_callback=task_callback,
                 cli_config=cli_config
             ))
+        except RuntimeError as e:
+            # Re-raise run_sync event loop errors so users get clear guidance
+            if "running event loop" in str(e):
+                raise
+            logger.error(f"AutoGen v0.4 runtime error: {str(e)}")
+            return f"### AutoGen v0.4 Runtime Error ###\n{str(e)}"
         except Exception as e:
             logger.error(f"Error running AutoGen v0.4: {str(e)}")
             return f"### AutoGen v0.4 Error ###\n{str(e)}"
@@ -188,7 +194,6 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
         # Availability already validated at CLI entry
         
         logger.info("Starting AutoGen v0.4 async execution...")
-        import os
         
         from autogen_agentchat.agents import AssistantAgent
         from autogen_ext.models.openai import OpenAIChatCompletionClient

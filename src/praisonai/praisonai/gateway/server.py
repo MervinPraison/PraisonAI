@@ -969,8 +969,8 @@ class WebSocketGateway:
                     gateway._send_to_client(client_id, gw_event.to_dict()),
                     loop,
                 )
-            except Exception as e:
-                logger.warning(f"Stream relay error (non-fatal): {e}")
+            except Exception:
+                logger.warning("Stream relay error (non-fatal)", exc_info=True)
 
         return _relay
     

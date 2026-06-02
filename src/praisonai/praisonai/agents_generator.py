@@ -822,7 +822,9 @@ class AgentsGenerator:
             autogen_v4_adapter = self._get_framework_adapter("autogen_v4")
             autogen_v2_adapter = self._get_framework_adapter("autogen")
             
-            autogen_version = os.environ.get("AUTOGEN_VERSION", "auto").lower()
+            autogen_version = str(
+                config.get('autogen_version', os.environ.get("AUTOGEN_VERSION", "auto"))
+            ).lower()
             use_v4 = False
             
             if autogen_version == "v0.4" and autogen_v4_adapter.is_available():
