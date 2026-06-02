@@ -15,10 +15,10 @@ import threading
 import time
 
 # fcntl is Unix-only; on Windows, use msvcrt for file locking
-if sys.platform != 'win32':
+try:
     import fcntl
     _HAS_FCNTL = True
-else:
+except ImportError:
     _HAS_FCNTL = False
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -162,11 +162,11 @@ class FileLock:
                     if _HAS_FCNTL:
                         fcntl.flock(self._lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                     else:
-                        # Warn once about degraded locking (should never happen with current platform detection)
+                        # Warn once about degraded locking
                         global _WARNED_NO_FCNTL
                         if not _WARNED_NO_FCNTL:
                             logger.warning(
-                                "File locking unavailable on this platform (no fcntl/msvcrt); "
+                                "File locking unavailable on this platform (no fcntl); "
                                 "concurrent writers may corrupt session files."
                             )
                             _WARNED_NO_FCNTL = True
