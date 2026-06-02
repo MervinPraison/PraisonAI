@@ -177,7 +177,8 @@ class TestFileLock:
             reloaded_module = importlib.reload(store_module)
             assert reloaded_module._HAS_FCNTL is False
 
-        importlib.reload(store_module)
+        restored_module = importlib.reload(store_module)
+        assert restored_module._HAS_FCNTL is (importlib.util.find_spec("fcntl") is not None)
 
 
 class TestDefaultSessionStore:
