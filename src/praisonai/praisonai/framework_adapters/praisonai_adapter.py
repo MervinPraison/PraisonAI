@@ -182,6 +182,27 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                     
                     tasks.append(task)
         
+        # Store tasks by name for context linking
+        tasks_dict = {}
+        
+        # Build tasks_dict for context dependencies
+        task_index = 0
+        for role, details in config.get('roles', {}).items():
+            for task_name, task_details in details.get('tasks', {}).items():
+                if task_index < len(tasks):
+                    tasks_dict[task_name] = tasks[task_index]
+                    task_index += 1
+        
+        # Set up task context dependencies - second pass to link dependencies
+        for role, details in config.get('roles', {}).items():
+            for task_name, task_details in details.get('tasks', {}).items():
+                if 'context' in task_details and task_name in tasks_dict:
+                    task = tasks_dict[task_name]
+                    context_tasks = [tasks_dict[ctx] for ctx in task_details['context'] 
+                                   if ctx in tasks_dict]
+                    if hasattr(task, 'context'):
+                        task.context = context_tasks
+        
         # Create and run the team
         memory = config.get('memory', False)
         

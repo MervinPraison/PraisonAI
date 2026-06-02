@@ -18,6 +18,12 @@ class CrewAIAdapter(BaseFrameworkAdapter):
     install_hint = 'pip install "praisonai[crewai]"'
     requires_tools_extra = True
     
+    def _resolve_task_tools(self, tool_names: List[str], tools_dict: Optional[Dict[str, Any]]) -> List:
+        """Resolve task tool names to tool objects via tools_dict."""
+        if not tools_dict:
+            return []
+        return [tools_dict[tool_name] for tool_name in tool_names if tool_name in tools_dict]
+    
     def is_available(self) -> bool:
         """Check if CrewAI is available for import."""
         try:
@@ -112,7 +118,7 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                         description=self._format_template(task_details['description'], topic=topic),
                         expected_output=self._format_template(task_details['expected_output'], topic=topic),
                         agent=agents[agent_name],
-                        tools=task_details.get('tools', []),
+                        tools=self._resolve_task_tools(task_details.get('tools', []), tools_dict),
                         async_execution=task_details.get('async_execution', False),
                         config=task_details.get('config', {}),
                         output_json=task_details.get('output_json'),
@@ -128,7 +134,7 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                     tasks_dict[task_name] = task
             
             # Set up task contexts - second pass to link dependencies
-            for agent_name, agent_details in config.get('roles', {}).items():
+            for agent_details in config.get('roles', {}).values():
                 for task_name, task_details in agent_details.get('tasks', {}).items():
                     if 'context' in task_details:
                         task = tasks_dict[task_name]
