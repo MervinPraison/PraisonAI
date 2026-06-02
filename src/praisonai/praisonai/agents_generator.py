@@ -701,6 +701,148 @@ class AgentsGenerator:
             cli_config=getattr(self, 'cli_config', None),
         )
 
+    async def agenerate_crew_and_kickoff(self):
+        """
+        Async version of generate_crew_and_kickoff.
+        Generates a crew of agents and initiates tasks based on the provided configuration.
+        """
+        if self.agent_yaml:
+            config = yaml.safe_load(self.agent_yaml)
+        else:
+            if self.agent_file == '/app/api:app' or self.agent_file == 'api:app':
+                self.agent_file = 'agents.yaml'
+            try:
+                with open(self.agent_file, 'r') as f:
+                    config = yaml.safe_load(f)
+            except FileNotFoundError:
+                print(f"File not found: {self.agent_file}")
+                return
+
+        # Apply CLI configuration overrides to YAML config
+        if self.cli_config:
+            # Merge CLI configuration with YAML config
+            self._merge_cli_config(config, self.cli_config)
+
+        # Check if this is a workflow-mode YAML (process: workflow or has steps section)
+        process_type = config.get('process', 'sequential')
+        has_steps = 'steps' in config
+        has_workflow_config = 'workflow' in config
+        
+        if process_type == 'workflow' or (has_steps and has_workflow_config):
+            return await self._arun_yaml_workflow(config)
+        else:
+            return await self._arun_framework(config)
+
+    async def _arun_framework(self, config):
+        """Async version of _run_framework with shared preparation logic."""
+        # Canonical format conversion: 'agents' -> 'roles', 'instructions' -> 'backstory'
+        if 'agents' in config and 'roles' not in config:
+            config['roles'] = {}
+            for agent_name, agent_config in config['agents'].items():
+                role_config = dict(agent_config) if agent_config else {}
+                if 'instructions' in role_config and 'backstory' not in role_config:
+                    role_config['backstory'] = role_config['instructions']
+                if 'role' not in role_config:
+                    role_config['role'] = agent_name.replace('_', ' ').title()
+                if 'goal' not in role_config:
+                    role_config['goal'] = role_config.get('backstory', 'Complete the assigned task')
+                if 'backstory' not in role_config:
+                    role_config['backstory'] = f'You are a {role_config["role"]}'
+                config['roles'][agent_name] = role_config
+
+        # Get workflow input: 'input' is canonical, 'topic' is alias for backward compatibility
+        topic = config.get('input', config.get('topic', ''))
+        
+        # Validate agents configuration for typos in field names
+        self._validate_agents_config(config)
+        
+        tools_dict = {}
+        
+        # Demand-driven tool resolution - only resolve tools actually used in YAML
+        if is_available("crewai") or is_available("autogen") or is_available("praisonaiagents") or is_available("ag2"):
+            try:
+                # Collect all tool names mentioned in the YAML config
+                needed_tools: set[str] = set()
+                for role_cfg in config.get('roles', {}).values():
+                    for t in role_cfg.get('tools') or []:
+                        if isinstance(t, str) and t.strip():
+                            needed_tools.add(t.strip())
+                    for task_cfg in (role_cfg.get('tasks') or {}).values():
+                        if not isinstance(task_cfg, dict):
+                            continue
+                        for t in task_cfg.get('tools') or []:
+                            if isinstance(t, str) and t.strip():
+                                needed_tools.add(t.strip())
+
+                # Resolve only the tools actually referenced in YAML
+                for tool_name in needed_tools:
+                    try:
+                        tool_instance = self._get_tool_by_name(tool_name)
+                        if tool_instance:
+                            tools_dict[tool_name] = tool_instance
+                    except Exception as e:
+                        self.logger.error(f"Failed to load tool {tool_name}: {e}")
+
+            except Exception as e:
+                self.logger.error(f"Error during tool resolution: {e}")
+
+        # Framework selection logic similar to sync version
+        framework = self.framework
+        
+        # AutoGen version selection logic
+        if framework == "autogen":
+            autogen_v4_adapter = self._get_framework_adapter("autogen_v4")
+            autogen_v2_adapter = self._get_framework_adapter("autogen")
+            
+            autogen_version = config.get('autogen_version', 'auto')
+            use_v4 = False
+            
+            if autogen_version == "v0.4" and autogen_v4_adapter.is_available():
+                use_v4 = True
+            elif autogen_version == "v0.2" and autogen_v2_adapter.is_available():
+                use_v4 = False
+            elif autogen_version == "auto":
+                use_v4 = autogen_v4_adapter.is_available()
+            else:
+                use_v4 = autogen_v4_adapter.is_available() and not autogen_v2_adapter.is_available()
+            
+            framework = "autogen_v4" if use_v4 else "autogen"
+
+        # Initialize AgentOps if configured
+        agentops_api_key = os.getenv("AGENTOPS_API_KEY")
+        if agentops_api_key:
+            try:
+                import agentops
+                agentops.init(agentops_api_key, default_tags=[framework])
+            except ImportError:
+                pass
+                
+        # Update framework adapter if framework changed
+        if framework != self.framework:
+            self.framework = framework
+            self.framework_adapter = self._get_framework_adapter(framework)
+            
+        # Validate framework availability
+        from .framework_adapters.validators import assert_framework_available
+        assert_framework_available(framework)
+        
+        self.logger.info(f"Using framework: {framework}")
+        return await self.framework_adapter.arun(
+            config,
+            self.config_list,
+            topic,
+            tools_dict=tools_dict,
+            agent_callback=getattr(self, 'agent_callback', None),
+            task_callback=getattr(self, 'task_callback', None),
+            cli_config=getattr(self, 'cli_config', None),
+        )
+
+    async def _arun_yaml_workflow(self, config):
+        """Async placeholder for workflow mode - currently delegates to sync version."""
+        # For now, delegate to sync version using asyncio.to_thread
+        import asyncio
+        return await asyncio.to_thread(self._run_yaml_workflow, config)
+
     def _run_yaml_workflow(self, config):
         """
         Run a YAML workflow using the YAMLWorkflowParser.
