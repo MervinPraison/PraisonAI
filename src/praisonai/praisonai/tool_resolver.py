@@ -103,8 +103,7 @@ class ToolResolver:
                 cache: Dict[str, Callable] = {}
                 for name, obj in inspect.getmembers(module):
                     if (not name.startswith('_') and 
-                        callable(obj) and 
-                        not inspect.isclass(obj)):
+                        callable(obj)):
                         cache[name] = obj
                         logger.debug(f"Loaded local tool: {name}")
                 

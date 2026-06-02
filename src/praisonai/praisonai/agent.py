@@ -40,7 +40,7 @@ class Agent(CoreAgent):
     
     def _is_protocol_instance(self, obj) -> bool:
         """Check if object appears to be a protocol instance (duck typing)."""
-        return hasattr(obj, '__call__') or hasattr(obj, 'process_turn')
+        return callable(obj) or hasattr(obj, 'process_turn')
 
 
 # Export the wrapper Agent as the default for import from praisonai

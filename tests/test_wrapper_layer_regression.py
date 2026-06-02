@@ -56,18 +56,16 @@ class TestInteractiveRuntimeLifecycle:
             try:
                 result = generator.run_generation(config)
             except Exception as e:
-                # Expected to fail due to missing framework adapter, but that's OK for lifecycle test
+                # Expected to fail due to missing framework adapter or mocked dependencies
+                # Lifecycle test only cares that runtime.start() was called without premature stop()
                 pass
             
             # Verify runtime.start() was called but stop() was NOT called during setup
             mock_loop.run_until_complete.assert_any_call(mock_runtime.start())
             
             # Should NOT have been stopped during the setup phase
-            stop_calls = [call for call in mock_loop.run_until_complete.call_args_list 
-                         if call[0][0] == mock_runtime.stop()]
-            
-            # Stop should only be called once (in cleanup), not during setup
-            assert len(stop_calls) <= 1, "Runtime should not be stopped prematurely"
+            # Since we expect failure before reaching agents.run(), stop() should not be called at all
+            mock_runtime.stop.assert_not_called()
 
 
 class TestToolResolutionConsistency:
@@ -98,11 +96,11 @@ class TestToolResolutionConsistency:
 
     def test_bots_cli_uses_tool_resolver(self):
         """Test that bots_cli._resolve_tool_by_name uses ToolResolver"""
-        from praisonai.praisonai.cli.features.bots_cli import Bots
+        from praisonai.praisonai.cli.features.bots_cli import BotHandler
         
-        bots = Bots()
+        bots = BotHandler()
         
-        with patch('praisonai.praisonai.cli.features.bots_cli.ToolResolver') as MockResolver:
+        with patch('praisonai.tool_resolver.ToolResolver') as MockResolver:
             mock_resolver = MockResolver.return_value
             mock_resolver.resolve.return_value = MagicMock()
             
@@ -114,15 +112,15 @@ class TestToolResolutionConsistency:
 
     def test_job_workflow_uses_tool_resolver(self):
         """Test that job_workflow uses ToolResolver for tool resolution"""
-        from praisonai.praisonai.cli.features.job_workflow import JobWorkflowParser
+        from praisonai.praisonai.cli.features.job_workflow import JobWorkflowExecutor
         
-        parser = JobWorkflowParser({})
+        executor = JobWorkflowExecutor({}, "dummy_path.yaml")
         
-        with patch('praisonai.praisonai.cli.features.job_workflow.ToolResolver') as MockResolver:
+        with patch('praisonai.tool_resolver.ToolResolver') as MockResolver:
             mock_resolver = MockResolver.return_value
             mock_resolver.resolve.return_value = lambda: "resolved_tool"
             
-            result = parser._resolve_agent_tools(['test_tool'])
+            result = executor._resolve_agent_tools(['test_tool'])
             
             # Verify ToolResolver was used
             MockResolver.assert_called_once()
@@ -135,17 +133,17 @@ class TestCliBackendValidation:
     
     def test_cli_backend_config_resolver(self):
         """Test the unified CLI backend config resolver"""
-        from praisonai.cli_backends import resolve_cli_backend_config
+        from praisonai.praisonai.cli_backends import resolve_cli_backend_config
         
         # Test string input
-        with patch('praisonai.cli_backends.registry.resolve_cli_backend') as mock_resolve:
+        with patch('praisonai.praisonai.cli_backends.registry.resolve_cli_backend') as mock_resolve:
             mock_resolve.return_value = MagicMock()
             
             result = resolve_cli_backend_config("claude-code")
             mock_resolve.assert_called_once_with("claude-code")
         
         # Test dict input
-        with patch('praisonai.cli_backends.registry.resolve_cli_backend') as mock_resolve:
+        with patch('praisonai.praisonai.cli_backends.registry.resolve_cli_backend') as mock_resolve:
             mock_resolve.return_value = MagicMock()
             
             config = {"id": "claude-code", "overrides": {"timeout": 30}}
@@ -187,14 +185,14 @@ class TestCliBackendValidation:
         from praisonai.praisonai.agent import Agent
         
         # Test that string cli_backend is resolved
-        with patch('praisonai.praisonai.agent.resolve_cli_backend_config') as mock_resolve:
+        with patch('praisonai.praisonai.cli_backends.resolve_cli_backend_config') as mock_resolve:
             mock_resolve.return_value = MagicMock()
             
             agent = Agent(name="test", cli_backend="claude-code")
             mock_resolve.assert_called_once_with("claude-code")
         
         # Test that dict cli_backend is resolved
-        with patch('praisonai.praisonai.agent.resolve_cli_backend_config') as mock_resolve:
+        with patch('praisonai.praisonai.cli_backends.resolve_cli_backend_config') as mock_resolve:
             mock_resolve.return_value = MagicMock()
             
             config = {"id": "claude-code", "overrides": {"timeout": 30}}
@@ -205,7 +203,7 @@ class TestCliBackendValidation:
         mock_instance = MagicMock()
         mock_instance.process_turn = MagicMock()  # Duck typing for protocol
         
-        with patch('praisonai.praisonai.agent.resolve_cli_backend_config') as mock_resolve:
+        with patch('praisonai.praisonai.cli_backends.resolve_cli_backend_config') as mock_resolve:
             agent = Agent(name="test", cli_backend=mock_instance)
             # Should not call resolver for already-resolved instances
             mock_resolve.assert_not_called()

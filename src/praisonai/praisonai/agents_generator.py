@@ -139,13 +139,8 @@ def _resolve_yaml_cli_backend(cli_backend_config, logger):
     """Resolve a YAML ``cli_backend`` field to a CliBackendProtocol instance.
     Deprecated wrapper. Use praisonai.cli_backends.resolve_cli_backend_config directly.
     """
-    try:
-        from praisonai.cli_backends import resolve_cli_backend_config
-        return resolve_cli_backend_config(cli_backend_config, logger)
-    except Exception as e:
-        if logger:
-            logger.warning(f"Failed to resolve CLI backend: {e}")
-        return None
+    from praisonai.cli_backends import resolve_cli_backend_config
+    return resolve_cli_backend_config(cli_backend_config)
 
 
 class AgentsGenerator:
@@ -296,9 +291,14 @@ class AgentsGenerator:
 
     def _validate_cli_backend_compatibility(self, config, framework):
         """Validate that cli_backend is only used with compatible frameworks."""
-        # Check if any agent defines cli_backend
+        # Check if any agent/role defines cli_backend (support both key names)
+        all_entities = {
+            **config.get('roles', {}),
+            **config.get('agents', {}),
+        }
         has_cli_backend = any(
-            details.get('cli_backend') for details in config.get('roles', {}).values()
+            isinstance(details, dict) and details.get('cli_backend')
+            for details in all_entities.values()
         )
         
         if has_cli_backend and framework != 'praisonai':
@@ -542,9 +542,12 @@ class AgentsGenerator:
                 
                 # Resolve all available tools through ToolResolver with instantiation
                 for tool_name in available_tools:
-                    resolved_tool = self.tool_resolver.resolve(tool_name, instantiate=True)
-                    if resolved_tool is not None:
-                        tools_dict[tool_name] = resolved_tool
+                    try:
+                        resolved_tool = self.tool_resolver.resolve(tool_name, instantiate=True)
+                        if resolved_tool is not None:
+                            tools_dict[tool_name] = resolved_tool
+                    except Exception as e:
+                        self.logger.debug(f"Failed to resolve or instantiate tool '{tool_name}': {e}")
                             
             except Exception as e:
                 self.logger.debug(f"Error resolving praisonai_tools: {e}")
