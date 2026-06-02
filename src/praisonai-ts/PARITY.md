@@ -1,20 +1,20 @@
 # Feature Parity Tracker
 
-> **Version:** 1.5.87 | **Last Updated:** 2026-05-30
+> **Version:** 1.5.87 | **Last Updated:** 2026-06-02
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 335 |
+| Python Core Features | 336 |
 | Python Wrapper Features | 99 |
 | TypeScript Features | 1192 |
-| **Gap Count** | **43** |
+| **Gap Count** | **44** |
 | P0 (Critical) | 1 |
 | P1 (High) | 0 |
 | P2 (Medium) | 0 |
-| P3 (Low) | 42 |
+| P3 (Low) | 43 |
 
 ## Gap Matrix
 
@@ -147,7 +147,7 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (179 done, 42 todo)
+### P3_Advanced (179 done, 43 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -189,6 +189,7 @@
 | `StopReason` | ✅ | ❌ | high | ⏳ TODO |
 | `StructuredFormatter` | ✅ | ❌ | high | ⏳ TODO |
 | `ToolExecutionError` | ✅ | ❌ | low | ⏳ TODO |
+| `ToolSearchConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `ToolUseEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `ValidationError` | ✅ | ❌ | low | ⏳ TODO |
 | `configure\_structured\_logging` | ✅ | ❌ | low | ⏳ TODO |
@@ -423,7 +424,7 @@ from praisonaiagents import ConditionProtocol, DictCondition, ExpressionConditio
 </details>
 
 <details>
-<summary><strong>config</strong> (75 exports)</summary>
+<summary><strong>config</strong> (76 exports)</summary>
 
 ```python
 from praisonaiagents import AUTONOMY_PRESETS, ArrayMode, AutonomyLevel, CACHING_PRESETS, CONTEXT_PRESETS, CachingConfig, ChunkingStrategy, ConfigValidationError, DefaultsConfig, EXECUTION_PRESETS...
