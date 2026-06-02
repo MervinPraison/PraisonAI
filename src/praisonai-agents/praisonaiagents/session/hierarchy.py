@@ -453,22 +453,19 @@ class HierarchicalSessionStore(DefaultSessionStore):
         Returns:
             True if successful
         """
-        snapshot_holder: List[Optional[SessionSnapshot]] = [None]
-
-        def _find_snapshot(session: SessionData) -> None:
-            for s in session.snapshots:
-                if s.id == snapshot_id:
-                    snapshot_holder[0] = s
-                    return
-
-        self._modify_session_locked(
-            session_id, _find_snapshot, error_label="load snapshot"
-        )
-        snapshot = snapshot_holder[0]
+        # Read-only lookup to find snapshot without triggering unnecessary writes
+        session = self._read_session_fresh(session_id)
+        snapshot = None
+        for s in session.snapshots:
+            if s.id == snapshot_id:
+                snapshot = s
+                break
+        
         if snapshot is None:
             logger.warning(f"Snapshot {snapshot_id} not found")
             return False
 
+        # Now perform the actual revert in a single locked operation
         def _revert(session: SessionData) -> None:
             if snapshot.message_index >= 0:
                 session.messages = session.messages[: snapshot.message_index + 1]
@@ -490,21 +487,19 @@ class HierarchicalSessionStore(DefaultSessionStore):
         Returns:
             True if successful
         """
-        invalid_index = [False]
-
-        def _revert(session: SessionData) -> None:
-            if message_index < 0 or message_index >= len(session.messages):
-                invalid_index[0] = True
-                return
-            session.messages = session.messages[: message_index + 1]
-
-        result = self._modify_session_locked(
-            session_id, _revert, error_label="revert to message"
-        )
-        if invalid_index[0]:
+        # Validate message index before writing
+        session = self._read_session_fresh(session_id)
+        if message_index < 0 or message_index >= len(session.messages):
             logger.warning(f"Invalid message index {message_index}")
             return False
-        return result
+
+        # Valid index, proceed with locked revert
+        def _revert(session: SessionData) -> None:
+            session.messages = session.messages[: message_index + 1]
+
+        return self._modify_session_locked(
+            session_id, _revert, error_label="revert to message"
+        )
     
     def share_session(self, session_id: str) -> bool:
         """Mark a session as shared."""
