@@ -49,6 +49,7 @@ class ToolRegistry:
     def __init__(self):
         self._tools: Dict[str, BaseTool] = {}
         self._functions: Dict[str, Callable] = {}  # For backward compat with plain functions
+        self._trust_levels: Dict[str, str] = {}  # Tool name -> trust level mapping
         self._discovered: bool = False
         self._lock = threading.RLock()  # Thread-safe operations for multi-agent scenarios
     
@@ -56,7 +57,8 @@ class ToolRegistry:
         self,
         tool: Union[BaseTool, Callable],
         name: Optional[str] = None,
-        overwrite: bool = False
+        overwrite: bool = False,
+        trust_level: Optional[str] = None
     ) -> None:
         """Register a tool with the registry.
         
@@ -66,6 +68,7 @@ class ToolRegistry:
             tool: BaseTool instance or callable function
             name: Override name (default: tool.name or function.__name__)
             overwrite: If True, overwrite existing tool with same name
+            trust_level: Trust level for the tool ("trusted" or "external")
         
         Raises:
             ValueError: If tool with same name exists and overwrite=False
@@ -78,6 +81,9 @@ class ToolRegistry:
                     logging.debug(f"Tool '{tool_name}' already registered, skipping")
                     return
                 self._tools[tool_name] = tool
+                # Store trust level if provided
+                if trust_level is not None:
+                    self._trust_levels[tool_name] = trust_level
                 logging.debug(f"Registered tool: {tool_name}")
                 return
             
@@ -88,6 +94,9 @@ class ToolRegistry:
                     logging.debug(f"Function '{tool_name}' already registered, skipping")
                     return
                 self._functions[tool_name] = tool
+                # Store trust level if provided
+                if trust_level is not None:
+                    self._trust_levels[tool_name] = trust_level
                 logging.debug(f"Registered function: {tool_name}")
                 return
             
@@ -105,13 +114,17 @@ class ToolRegistry:
             True if tool was removed, False if not found
         """
         with self._lock:
+            removed = False
             if name in self._tools:
                 del self._tools[name]
-                return True
+                removed = True
             if name in self._functions:
                 del self._functions[name]
-                return True
-            return False
+                removed = True
+            # Also remove trust level if it exists
+            if name in self._trust_levels:
+                del self._trust_levels[name]
+            return removed
     
     def get(self, name: str) -> Optional[Union[BaseTool, Callable]]:
         """Get a tool by name.
@@ -298,11 +311,24 @@ class ToolRegistry:
             logging.warning(f"Error discovering single-file plugins: {e}")
             return 0
     
+    def get_trust_level(self, name: str) -> Optional[str]:
+        """Get the trust level for a tool.
+        
+        Args:
+            name: Tool name
+            
+        Returns:
+            Trust level string or None if not set
+        """
+        with self._lock:
+            return self._trust_levels.get(name)
+
     def clear(self) -> None:
         """Clear all registered tools. Thread-safe."""
         with self._lock:
             self._tools.clear()
             self._functions.clear()
+            self._trust_levels.clear()
             self._discovered = False
     
     def __contains__(self, name: str) -> bool:
