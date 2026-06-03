@@ -1099,6 +1099,66 @@ class AutonomyLevel(str, Enum):
     AUTO_EDIT = "auto_edit"
     FULL_AUTO = "full_auto"
 
+
+@dataclass
+class ToolRetryConfig:
+    """
+    Configuration for automatic retry with exponential backoff on tool failures.
+    
+    Provides structured retry/backoff for transient tool failures like network 
+    timeouts, rate limits, and external service errors. When enabled, retryable 
+    ToolExecutionErrors will automatically retry with configurable exponential 
+    backoff before surfacing to the model.
+    
+    Usage:
+        # Simple enable with defaults
+        agent = Agent(tool_retry_config=ToolRetryConfig())
+        
+        # Custom configuration 
+        agent = Agent(
+            tool_retry_config=ToolRetryConfig(
+                max_attempts=5,
+                initial_delay_s=2.0,
+                max_delay_s=60.0,
+                factor=3.0,
+                jitter=0.2,
+                retryable_on=["network", "timeout", "rate_limit"],
+            )
+        )
+        
+        # Disable (default)
+        agent = Agent(tool_retry_config=None)
+    """
+    # Maximum retry attempts (including initial attempt)
+    max_attempts: int = 3
+    
+    # Initial delay in seconds before first retry
+    initial_delay_s: float = 1.0
+    
+    # Maximum delay cap in seconds
+    max_delay_s: float = 30.0
+    
+    # Exponential backoff factor
+    factor: float = 2.0
+    
+    # Random jitter factor (0-1) to avoid thundering herd
+    jitter: float = 0.1
+    
+    # Error categories to retry on (maps to ToolExecutionError.error_category)
+    retryable_on: List[str] = field(default_factory=lambda: ["network", "timeout", "rate_limit"])
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "max_attempts": self.max_attempts,
+            "initial_delay_s": self.initial_delay_s,
+            "max_delay_s": self.max_delay_s,
+            "factor": self.factor,
+            "jitter": self.jitter,
+            "retryable_on": self.retryable_on,
+        }
+
+
 # Type aliases for Union types used in Agent.__init__
 MemoryParam = Union[bool, MemoryConfig, Any]  # Any = MemoryManager instance
 KnowledgeParam = Union[bool, List[str], KnowledgeConfig, Any]  # Any = KnowledgeBase instance
@@ -1406,6 +1466,7 @@ __all__ = [
     "SkillsConfig",
     "AutonomyConfig",
     "ToolSearchConfig",
+    "ToolRetryConfig",
     # Config classes (Multi-Agent)
     "MultiAgentHooksConfig",
     "MultiAgentOutputConfig",

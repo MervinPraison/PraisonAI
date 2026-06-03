@@ -557,6 +557,7 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
         cli_backend: Optional[Union[str, Any]] = None,  # CLI backend for delegating turns (e.g., "claude-code")
         interrupt_controller: Optional['InterruptController'] = None,  # G2: Cooperative cancellation
         tool_search: Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']] = False,  # Progressive tool disclosure
+        tool_retry_config: Optional['ToolRetryConfig'] = None,  # Automatic retry/backoff for tool failures
         sandbox: Optional[Union[bool, 'SandboxConfig']] = None,  # Sandbox for safe code execution
     ):
         """Initialize an Agent instance.
@@ -669,6 +670,10 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
                 When enabled, replaces large tool schemas with bridge tools (tool_search,
                 tool_describe, tool_call) to save context. Core SDK tools never defer.
                 Auto mode activates based on token threshold. Opt-in feature.
+            tool_retry_config: Automatic retry with exponential backoff for transient tool failures.
+                When configured, retryable ToolExecutionErrors (network timeouts, rate limits,
+                external service errors) will automatically retry before surfacing to the model.
+                Default: None (no retry, preserves current behavior). Accepts ToolRetryConfig instance.
 
         Raises:
             ValueError: If all of name, role, goal, backstory, and instructions are None.
@@ -1466,6 +1471,20 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
                     "tool_search must be False/None, True, a mode string, "
                     "a dict of ToolSearchConfig fields, or ToolSearchConfig"
                 )
+
+        # ─────────────────────────────────────────────────────────────────────
+        # Resolve TOOL_RETRY_CONFIG param  
+        # ─────────────────────────────────────────────────────────────────────
+        # Backward-compatible default: None = no retry (preserves current behavior)
+        if tool_retry_config is None:
+            self.tool_retry_config = None
+        else:
+            # Validate it's a ToolRetryConfig instance
+            from ..config import ToolRetryConfig
+            if isinstance(tool_retry_config, ToolRetryConfig):
+                self.tool_retry_config = tool_retry_config
+            else:
+                raise TypeError("tool_retry_config must be None or ToolRetryConfig instance")
         
         # ============================================================
         # END CONSOLIDATED PARAMS EXTRACTION

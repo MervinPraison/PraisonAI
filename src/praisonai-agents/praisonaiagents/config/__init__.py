@@ -40,6 +40,7 @@ __all__ = [
     "HooksConfig",
     "SkillsConfig",
     "ToolSearchConfig",
+    "ToolRetryConfig",
     # Type aliases
     "MemoryParam",
     "KnowledgeParam",
@@ -124,6 +125,7 @@ _MODULE_MAP = {
     "HooksConfig": "feature_configs",
     "SkillsConfig": "feature_configs",
     "ToolSearchConfig": "feature_configs",
+    "ToolRetryConfig": "feature_configs",
     "MemoryParam": "feature_configs",
     "KnowledgeParam": "feature_configs",
     "PlanningParam": "feature_configs",

@@ -14,6 +14,7 @@ import asyncio
 import inspect
 import contextvars
 import concurrent.futures
+import random
 from typing import List, Optional, Any, Dict, Union, TYPE_CHECKING
 from ..errors import ToolExecutionError
 
@@ -239,7 +240,7 @@ class ToolExecutionMixin:
                 
                 def execute_with_context():
                     with with_injection_context(state):
-                        return self._execute_tool_with_circuit_breaker(function_name, arguments)
+                        return self._execute_tool_with_retry_support(function_name, arguments, _tool_start_time)
                 
                 # Use reusable executor to prevent resource leaks
                 if not hasattr(self, '_tool_executor'):
@@ -256,7 +257,7 @@ class ToolExecutionMixin:
                     result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True}
             else:
                 with with_injection_context(state):
-                    result = self._execute_tool_with_circuit_breaker(function_name, arguments)
+                    result = self._execute_tool_with_retry_support(function_name, arguments, _tool_start_time)
             
             # Apply tool output truncation to prevent context overflow
             # Uses context manager budget if enabled, otherwise applies default limit
@@ -642,6 +643,116 @@ class ToolExecutionMixin:
             arguments = decision.modified_args
             logging.info(f"Using modified arguments: {arguments}")
         return None, arguments
+
+    def _execute_tool_with_retry_support(self, function_name, arguments, tool_start_time):
+        """Execute tool with retry and exponential backoff for transient failures.
+        
+        Args:
+            function_name: Name of the tool to execute
+            arguments: Arguments for the tool
+            tool_start_time: Start time for tool execution timing
+            
+        Returns:
+            Tool execution result
+            
+        Raises:
+            ToolExecutionError: If all retry attempts fail
+        """
+        # Get retry configuration
+        retry_config = getattr(self, 'tool_retry_config', None)
+        max_attempts = retry_config.max_attempts if retry_config else 1
+        
+        last_error = None
+        for attempt in range(max_attempts):
+            try:
+                # Call the actual tool execution
+                result = self._execute_tool_with_circuit_breaker(function_name, arguments)
+                return result
+                
+            except Exception as e:
+                last_error = e
+                
+                # Determine if error is retryable
+                is_retryable = not isinstance(e, (ValueError, TypeError, AttributeError))
+                if isinstance(e, ToolExecutionError):
+                    # Already wrapped - use its retryable flag and error category
+                    is_retryable = e.is_retryable
+                    error_category = getattr(e, 'error_category', 'tool')
+                else:
+                    # Classify the error category for raw exceptions
+                    if 'timeout' in str(e).lower():
+                        error_category = 'timeout'
+                    elif 'network' in str(e).lower() or 'connection' in str(e).lower():
+                        error_category = 'network'
+                    elif 'rate limit' in str(e).lower() or 'too many requests' in str(e).lower():
+                        error_category = 'rate_limit'
+                    else:
+                        error_category = 'tool'
+                
+                # Check if we should retry
+                should_retry = (
+                    retry_config is not None
+                    and is_retryable
+                    and attempt < max_attempts - 1
+                    and error_category in retry_config.retryable_on
+                )
+                
+                if not should_retry:
+                    # No retry - wrap and raise
+                    if isinstance(e, ToolExecutionError):
+                        raise
+                    else:
+                        raise ToolExecutionError(
+                            f"Tool '{function_name}' failed: {e}",
+                            tool_name=function_name,
+                            agent_id=self.name,
+                            is_retryable=is_retryable,
+                        ) from e
+                
+                # Calculate delay with exponential backoff and jitter
+                delay = min(
+                    retry_config.initial_delay_s * (retry_config.factor ** attempt) + 
+                    random.uniform(0, retry_config.jitter * retry_config.initial_delay_s),
+                    retry_config.max_delay_s,
+                )
+                
+                logging.warning(f"Tool '{function_name}' failed on attempt {attempt + 1}/{max_attempts}: {e}. "
+                              f"Retrying in {delay:.2f}s...")
+                
+                # Emit ON_RETRY hook
+                try:
+                    from ..hooks import HookEvent, OnRetryInput
+                    retry_input = OnRetryInput(
+                        session_id=getattr(self, '_session_id', 'default'),
+                        cwd=os.getcwd(),
+                        event_name=HookEvent.ON_RETRY,
+                        timestamp=str(time.time()),
+                        agent_name=self.name,
+                        attempt=attempt + 1,
+                        max_attempts=max_attempts,
+                        error=str(e),
+                        retry_delay_seconds=delay,
+                        operation="tool_call"
+                    )
+                    if hasattr(self, '_hook_runner'):
+                        self._hook_runner.execute_sync(HookEvent.ON_RETRY, retry_input)
+                except Exception as hook_error:
+                    # Don't fail retry on hook errors
+                    logging.debug(f"ON_RETRY hook failed: {hook_error}")
+                
+                # Wait before retry
+                time.sleep(delay)
+        
+        # All retries exhausted - raise the last error
+        if isinstance(last_error, ToolExecutionError):
+            raise last_error
+        else:
+            raise ToolExecutionError(
+                f"Tool '{function_name}' failed after {max_attempts} attempts: {last_error}",
+                tool_name=function_name,
+                agent_id=self.name,
+                is_retryable=True,
+            ) from last_error
 
     def _execute_tool_with_circuit_breaker(self, function_name, arguments):
         """Execute tool with circuit breaker protection.
