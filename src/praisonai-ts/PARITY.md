@@ -1,20 +1,20 @@
 # Feature Parity Tracker
 
-> **Version:** 1.5.87 | **Last Updated:** 2026-05-09
+> **Version:** 1.5.87 | **Last Updated:** 2026-06-02
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 334 |
+| Python Core Features | 336 |
 | Python Wrapper Features | 99 |
 | TypeScript Features | 1192 |
-| **Gap Count** | **42** |
+| **Gap Count** | **44** |
 | P0 (Critical) | 1 |
 | P1 (High) | 0 |
 | P2 (Medium) | 0 |
-| P3 (Low) | 41 |
+| P3 (Low) | 43 |
 
 ## Gap Matrix
 
@@ -147,10 +147,11 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (179 done, 41 todo)
+### P3_Advanced (179 done, 43 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
+| `A2UI` | ✅ | ❌ | low | ⏳ TODO |
 | `AgentMessageEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `AsyncLearnProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `AutoApproveBackend` | ✅ | ❌ | high | ⏳ TODO |
@@ -188,6 +189,7 @@
 | `StopReason` | ✅ | ❌ | high | ⏳ TODO |
 | `StructuredFormatter` | ✅ | ❌ | high | ⏳ TODO |
 | `ToolExecutionError` | ✅ | ❌ | low | ⏳ TODO |
+| `ToolSearchConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `ToolUseEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `ValidationError` | ✅ | ❌ | low | ⏳ TODO |
 | `configure\_structured\_logging` | ✅ | ❌ | low | ⏳ TODO |
@@ -422,7 +424,7 @@ from praisonaiagents import ConditionProtocol, DictCondition, ExpressionConditio
 </details>
 
 <details>
-<summary><strong>config</strong> (75 exports)</summary>
+<summary><strong>config</strong> (76 exports)</summary>
 
 ```python
 from praisonaiagents import AUTONOMY_PRESETS, ArrayMode, AutonomyLevel, CACHING_PRESETS, CONTEXT_PRESETS, CachingConfig, ChunkingStrategy, ConfigValidationError, DefaultsConfig, EXECUTION_PRESETS...
@@ -629,10 +631,10 @@ from praisonaiagents import ContextEvent, ContextEventType, ContextListSink, Con
 </details>
 
 <details>
-<summary><strong>ui</strong> (2 exports)</summary>
+<summary><strong>ui</strong> (3 exports)</summary>
 
 ```python
-from praisonaiagents import A2A, AGUI
+from praisonaiagents import A2A, A2UI, AGUI
 ```
 
 </details>

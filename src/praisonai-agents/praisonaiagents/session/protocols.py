@@ -129,3 +129,16 @@ class SessionStoreProtocol(Protocol):
             True if the session exists.
         """
         ...
+
+
+@runtime_checkable
+class CheckpointQueryProtocol(Protocol):
+    """Read path for session checkpoints / rollback snapshots."""
+
+    def list_checkpoints(self, session_id: str) -> List[Dict[str, Any]]:
+        """Return checkpoint metadata for a session."""
+        ...
+
+    def get_checkpoint(self, session_id: str, checkpoint_id: str) -> Optional[Dict[str, Any]]:
+        """Return a single checkpoint payload."""
+        ...

@@ -151,6 +151,8 @@ def mcp_test(
     timeout: float = typer.Option(10.0, "--timeout", "-t", help="Timeout in seconds"),
 ):
     """Test an MCP server connection."""
+    from ..configuration.schema import MCPLocalConfig, MCPRemoteConfig
+    
     output = get_output_controller()
     loader = get_config_loader()
     
@@ -161,59 +163,103 @@ def mcp_test(
     
     server = config.mcp.servers[name]
     
-    output.print_info(f"Testing MCP server: {name}")
-    output.print(f"  Command: {server.command} {' '.join(server.args)}")
-    
-    # Try to start the server and check if it responds
-    import subprocess
-    import time
-    
-    try:
-        cmd = [server.command] + server.args
-        env = dict(**server.env) if server.env else None
+    if isinstance(server, MCPRemoteConfig):
+        # Test remote server
+        output.print_info(f"Testing remote MCP server: {name}")
+        output.print(f"  URL: {server.url}")
         
-        # Start process
-        proc = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=env,
-        )
-        
-        # Wait briefly and check if it's running
-        time.sleep(0.5)
-        
-        if proc.poll() is None:
-            # Process is running
-            proc.terminate()
-            proc.wait(timeout=2)
+        try:
+            import httpx
             
+            # Simple HTTP probe to check if server is reachable
+            with httpx.Client(timeout=timeout) as client:
+                response = client.get(server.url)
+                
+                if response.status_code == 200:
+                    if output.is_json_mode:
+                        output.print_json({"name": name, "status": "ok", "message": "Remote server reachable"})
+                    else:
+                        output.print_success(f"Remote server '{name}' is reachable")
+                else:
+                    if output.is_json_mode:
+                        output.print_json({"name": name, "status": "error", "message": f"HTTP {response.status_code}"})
+                    else:
+                        output.print_error(f"Remote server returned HTTP {response.status_code}")
+                        raise typer.Exit(1)
+        except ImportError:
             if output.is_json_mode:
-                output.print_json({"name": name, "status": "ok", "message": "Server started successfully"})
+                output.print_json({"name": name, "status": "error", "message": "httpx not available for remote testing"})
             else:
-                output.print_success(f"Server '{name}' started successfully")
-        else:
-            # Process exited
-            stderr = proc.stderr.read().decode() if proc.stderr else ""
-            if output.is_json_mode:
-                output.print_json({"name": name, "status": "error", "message": stderr or "Server exited immediately"})
-            else:
-                output.print_error(f"Server exited immediately: {stderr}")
+                output.print_error("httpx package not available. Install with: pip install httpx")
                 raise typer.Exit(1)
-    
-    except FileNotFoundError:
-        if output.is_json_mode:
-            output.print_json({"name": name, "status": "error", "message": f"Command not found: {server.command}"})
-        else:
-            output.print_error(f"Command not found: {server.command}")
-            raise typer.Exit(1)
-    except Exception as e:
-        if output.is_json_mode:
-            output.print_json({"name": name, "status": "error", "message": str(e)})
-        else:
-            output.print_error(f"Test failed: {e}")
-            raise typer.Exit(1)
+        except typer.Exit:
+            # Let typer.Exit propagate, don't catch it
+            raise
+        except Exception as e:
+            if output.is_json_mode:
+                output.print_json({"name": name, "status": "error", "message": str(e)})
+            else:
+                output.print_error(f"Failed to connect to remote server: {e}")
+                raise typer.Exit(1)
+    else:
+        # Test local server
+        output.print_info(f"Testing local MCP server: {name}")
+        output.print(f"  Command: {server.command} {' '.join(server.args)}")
+        
+        # Try to start the server and check if it responds
+        import subprocess
+        import time
+        
+        try:
+            cmd = [server.command] + server.args
+            # Fix environment inheritance - merge with current env instead of replacing
+            env = None
+            if server.env:
+                import os
+                env = {**os.environ, **server.env}
+            
+            # Start process
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
+            
+            # Wait briefly and check if it's running
+            time.sleep(0.5)
+            
+            if proc.poll() is None:
+                # Process is running
+                proc.terminate()
+                proc.wait(timeout=2)
+                
+                if output.is_json_mode:
+                    output.print_json({"name": name, "status": "ok", "message": "Server started successfully"})
+                else:
+                    output.print_success(f"Server '{name}' started successfully")
+            else:
+                # Process exited
+                stderr = proc.stderr.read().decode() if proc.stderr else ""
+                if output.is_json_mode:
+                    output.print_json({"name": name, "status": "error", "message": stderr or "Server exited immediately"})
+                else:
+                    output.print_error(f"Server exited immediately: {stderr}")
+                    raise typer.Exit(1)
+        
+        except FileNotFoundError:
+            if output.is_json_mode:
+                output.print_json({"name": name, "status": "error", "message": f"Command not found: {server.command}"})
+            else:
+                output.print_error(f"Command not found: {server.command}")
+                raise typer.Exit(1)
+        except Exception as e:
+            if output.is_json_mode:
+                output.print_json({"name": name, "status": "error", "message": str(e)})
+            else:
+                output.print_error(f"Test failed: {e}")
+                raise typer.Exit(1)
 
 
 @app.command("sync")
@@ -248,15 +294,28 @@ def mcp_sync(
         srv_config = config.mcp.servers[srv]
         
         try:
+            # Import schema types for checking
+            from ..configuration.schema import MCPLocalConfig, MCPRemoteConfig
             # Actually connect to MCP server and fetch tools
             from praisonaiagents.mcp import MCP
             
-            # Build command string
-            cmd_parts = [srv_config.command] + srv_config.args
-            cmd_string = " ".join(cmd_parts)
-            
-            # Create MCP instance with env vars
-            mcp = MCP(cmd_string, timeout=int(timeout), env=srv_config.env or {})
+            # Handle different server types
+            if isinstance(srv_config, MCPRemoteConfig):
+                # Remote server - connect via URL
+                if not srv_config.url:
+                    output.print_error(f"  Remote server {srv} has no URL configured")
+                    failed_servers.append(srv)
+                    continue
+                    
+                # Create MCP instance for remote server
+                mcp = MCP(srv_config.url, timeout=int(timeout))
+            else:
+                # Local server - use command
+                cmd_parts = [srv_config.command] + srv_config.args
+                cmd_string = " ".join(cmd_parts)
+                
+                # Create MCP instance with env vars
+                mcp = MCP(cmd_string, timeout=int(timeout), env=srv_config.env or {})
             
             # Get tools
             tools = mcp.get_tools()
@@ -524,7 +583,11 @@ def mcp_auth(
     name: str = typer.Argument(..., help="Server name to authenticate"),
     timeout: float = typer.Option(300.0, "--timeout", "-t", help="Timeout for OAuth flow in seconds"),
 ):
-    """Authenticate with an OAuth-enabled MCP server.
+    """[EXPERIMENTAL] Authenticate with an OAuth-enabled MCP server.
+    
+    WARNING: OAuth implementation is currently experimental and stores
+    placeholder tokens only. Real token exchange is not yet implemented.
+    Use headers/API key authentication for production use.
     
     This command initiates the OAuth 2.1 authorization flow for a remote
     MCP server. It will open your browser for authentication and wait

@@ -173,7 +173,16 @@ install_python_macos() {
         if [[ "$DRY_RUN" == "1" ]]; then
             log_info "[DRY RUN] Would install Homebrew"
         else
-            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            # Download and verify Homebrew installer
+            HOMEBREW_INSTALLER="/tmp/homebrew-install.sh"
+            curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "$HOMEBREW_INSTALLER"
+            if [[ -f "$HOMEBREW_INSTALLER" ]]; then
+                /bin/bash "$HOMEBREW_INSTALLER"
+                rm -f "$HOMEBREW_INSTALLER"
+            else
+                log_error "Failed to download Homebrew installer"
+                exit 1
+            fi
             
             # Add Homebrew to PATH for this session
             if [[ -f "/opt/homebrew/bin/brew" ]]; then

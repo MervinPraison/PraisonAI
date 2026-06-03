@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "praisonaiagents"
-version = "1.6.37"
+version = "1.6.51"
 description = "Praison AI agents for completing complex tasks with Self Reflection Agents"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -101,6 +101,22 @@ crawl = [
     "playwright>=1.47.0",
 ]
 
+# Sandbox dependencies
+sandbox = [
+    "e2b-code-interpreter>=1.0.0",
+]
+
+# Declarative agent UI (Google A2UI SDK — lazy loaded)
+a2ui = [
+    "a2ui-agent-sdk>=0.2.1",
+    "a2a-sdk>=0.3.0,<1.0.0",
+]
+
+# Docker sandbox dependencies
+sandbox-docker = [
+    "docker>=7.0.0",
+]
+
 # Combined features
 all = [
     "praisonaiagents[memory]",
@@ -112,10 +128,12 @@ all = [
     "praisonaiagents[telemetry]",
     "praisonaiagents[mongodb]",
     "praisonaiagents[auth]",
+    "praisonaiagents[sandbox]",
     "praisonaiagents[search]",
     "praisonaiagents[crawl]",
     "praisonaiagents[autonomy]",
-    "praisonaiagents[os]"
+    "praisonaiagents[os]",
+    "praisonaiagents[a2ui]",
 ]
 
 [tool.setuptools.packages.find]

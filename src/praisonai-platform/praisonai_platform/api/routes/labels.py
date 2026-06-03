@@ -9,7 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from praisonaiagents.auth import AuthIdentity
 
-from ..deps import get_db, require_workspace_member
+from ..deps import (
+    ensure_resource_in_workspace,
+    get_db,
+    require_issue_in_workspace,
+    require_workspace_member,
+)
 from ..schemas import LabelCreate, LabelResponse, LabelUpdate
 from ...services.label_service import LabelService
 
@@ -48,6 +53,10 @@ async def update_label(
     session: AsyncSession = Depends(get_db),
 ):
     svc = LabelService(session)
+    label = await svc.get(label_id)
+    if label is None:
+        raise HTTPException(status_code=404, detail="Label not found")
+    ensure_resource_in_workspace(label.workspace_id, workspace_id, label="Label")
     label = await svc.update(label_id, body.name, body.color)
     if label is None:
         raise HTTPException(status_code=404, detail="Label not found")
@@ -62,6 +71,10 @@ async def delete_label(
     session: AsyncSession = Depends(get_db),
 ):
     svc = LabelService(session)
+    label = await svc.get(label_id)
+    if label is None:
+        raise HTTPException(status_code=404, detail="Label not found")
+    ensure_resource_in_workspace(label.workspace_id, workspace_id, label="Label")
     deleted = await svc.delete(label_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Label not found")
@@ -78,7 +91,12 @@ async def add_label_to_issue(
     user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
+    await require_issue_in_workspace(workspace_id, issue_id, session)
     svc = LabelService(session)
+    label = await svc.get(label_id)
+    if label is None:
+        raise HTTPException(status_code=404, detail="Label not found")
+    ensure_resource_in_workspace(label.workspace_id, workspace_id, label="Label")
     await svc.add_to_issue(issue_id, label_id)
 
 
@@ -90,7 +108,12 @@ async def remove_label_from_issue(
     user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
+    await require_issue_in_workspace(workspace_id, issue_id, session)
     svc = LabelService(session)
+    label = await svc.get(label_id)
+    if label is None:
+        raise HTTPException(status_code=404, detail="Label not found")
+    ensure_resource_in_workspace(label.workspace_id, workspace_id, label="Label")
     await svc.remove_from_issue(issue_id, label_id)
 
 
@@ -101,6 +124,7 @@ async def list_issue_labels(
     user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
+    await require_issue_in_workspace(workspace_id, issue_id, session)
     svc = LabelService(session)
     labels = await svc.list_for_issue(issue_id)
     return [LabelResponse.model_validate(l) for l in labels]

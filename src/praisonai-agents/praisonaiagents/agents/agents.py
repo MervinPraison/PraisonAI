@@ -15,9 +15,9 @@ from enum import Enum
 
 # Import token tracking
 try:
-    from ..telemetry.token_collector import _token_collector
+    from ..telemetry.token_collector import get_token_collector
 except ImportError:
-    _token_collector = None
+    get_token_collector = None
 
 # Import async utility for hot-path usage
 try:
@@ -126,7 +126,24 @@ class _AgentServerRegistry:
         
         thread = threading.Thread(target=run_server, daemon=True)
         thread.start()
-        ready_event.wait(timeout=5.0)  # Deterministic wait instead of sleep(0.5)
+        
+        # Check for configurable timeout via environment variable
+        try:
+            timeout = float(os.environ.get("PRAISONAI_SERVER_READY_TIMEOUT", "5.0"))
+        except ValueError:
+            logger.warning("Invalid PRAISONAI_SERVER_READY_TIMEOUT value. Using default 5.0s.")
+            timeout = 5.0
+        became_ready = ready_event.wait(timeout=timeout)
+        
+        if not became_ready:
+            logger.warning(
+                "Agent server on port %s did not become ready within %.1fs. "
+                "Proceeding, but some features may not work correctly. "
+                "Check server logs for startup errors.",
+                port,
+                timeout,
+            )
+        
         return True
 
 
@@ -1592,25 +1609,25 @@ class AgentTeam:
             original_on_task_start = self.on_task_start
             original_on_task_complete = self.on_task_complete
             
-            def composed_on_task_start(task):
+            def composed_on_task_start(task, task_id):
                 try:
-                    verbose_task_start_callback(task)
+                    verbose_task_start_callback(task, task_id)
                 except Exception as e:
                     logging.debug(f"Error in verbose task start callback: {e}")
                 if original_on_task_start:
                     try:
-                        original_on_task_start(task)
+                        original_on_task_start(task, task_id)
                     except Exception as e:
                         logging.debug(f"Error in original task start callback: {e}")
             
-            def composed_on_task_complete(task):
+            def composed_on_task_complete(task, task_output):
                 try:
-                    verbose_task_complete_callback(task)
+                    verbose_task_complete_callback(task, task_output)
                 except Exception as e:
                     logging.debug(f"Error in verbose task complete callback: {e}")
                 if original_on_task_complete:
                     try:
-                        original_on_task_complete(task)
+                        original_on_task_complete(task, task_output)
                     except Exception as e:
                         logging.debug(f"Error in original task complete callback: {e}")
             
@@ -1809,18 +1826,19 @@ class AgentTeam:
 
     def get_token_usage_summary(self) -> Dict[str, Any]:
         """Get a summary of token usage across all agents and tasks."""
-        if not _token_collector:
+        if not get_token_collector:
             return {"error": "Token tracking not available"}
         
-        return _token_collector.get_session_summary()
+        return get_token_collector().get_session_summary()
     
     def get_detailed_token_report(self) -> Dict[str, Any]:
         """Get a detailed token usage report."""
-        if not _token_collector:
+        if not get_token_collector:
             return {"error": "Token tracking not available"}
         
-        summary = _token_collector.get_session_summary()
-        recent = _token_collector.get_recent_interactions(limit=20)
+        collector = get_token_collector()
+        summary = collector.get_session_summary()
+        recent = collector.get_recent_interactions(limit=20)
         
         # Calculate cost estimates (example rates)
         cost_per_1k_input = 0.0005  # $0.0005 per 1K input tokens
@@ -1844,11 +1862,11 @@ class AgentTeam:
     
     def display_token_usage(self):
         """Display token usage in a formatted table."""
-        if not _token_collector:
+        if not get_token_collector:
             print("Token tracking not available")
             return
         
-        summary = _token_collector.get_session_summary()
+        summary = get_token_collector().get_session_summary()
         
         print("\n" + "="*50)
         print("TOKEN USAGE SUMMARY")

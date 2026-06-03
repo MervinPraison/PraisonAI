@@ -21,6 +21,16 @@ import pytest
 from unittest.mock import MagicMock
 
 
+def _unregister_bot_platform(name: str) -> None:
+    """Remove a runtime-registered bot platform (tests only)."""
+    from praisonai.bots._registry import get_default_bot_registry
+
+    try:
+        get_default_bot_registry().unregister(name.lower())
+    except (KeyError, ValueError):
+        pass
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Helper: Mock adapter that simulates a platform bot
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -59,9 +69,10 @@ class TestBotWithMockAdapter:
     """Integration tests for Bot class with a mock platform adapter."""
 
     def setup_method(self):
-        from praisonai.bots._registry import register_platform, _custom_platforms
+        from praisonai.bots._registry import register_platform
+
         register_platform("mockbot", MockPlatformAdapter)
-        self._cleanup = lambda: _custom_platforms.pop("mockbot", None)
+        self._cleanup = lambda: _unregister_bot_platform("mockbot")
 
     def teardown_method(self):
         self._cleanup()
@@ -148,10 +159,14 @@ class TestBotOSLifecycle:
     """Integration tests for BotOS multi-bot orchestration."""
 
     def setup_method(self):
-        from praisonai.bots._registry import register_platform, _custom_platforms
+        from praisonai.bots._registry import register_platform
+
         register_platform("mock1", MockPlatformAdapter)
         register_platform("mock2", MockPlatformAdapter)
-        self._cleanup = lambda: (_custom_platforms.pop("mock1", None), _custom_platforms.pop("mock2", None))
+        self._cleanup = lambda: (
+            _unregister_bot_platform("mock1"),
+            _unregister_bot_platform("mock2"),
+        )
 
     def teardown_method(self):
         self._cleanup()
@@ -212,9 +227,10 @@ class TestRealAgentInBot:
     """Tests with a real praisonaiagents.Agent inside Bot."""
 
     def setup_method(self):
-        from praisonai.bots._registry import register_platform, _custom_platforms
+        from praisonai.bots._registry import register_platform
+
         register_platform("mockbot", MockPlatformAdapter)
-        self._cleanup = lambda: _custom_platforms.pop("mockbot", None)
+        self._cleanup = lambda: _unregister_bot_platform("mockbot")
 
     def teardown_method(self):
         self._cleanup()
@@ -246,9 +262,10 @@ class TestAgentTeamInBotOS:
     """AgentTeam (multi-agent) inside Bot and BotOS."""
 
     def setup_method(self):
-        from praisonai.bots._registry import register_platform, _custom_platforms
+        from praisonai.bots._registry import register_platform
+
         register_platform("mockbot", MockPlatformAdapter)
-        self._cleanup = lambda: _custom_platforms.pop("mockbot", None)
+        self._cleanup = lambda: _unregister_bot_platform("mockbot")
 
     def teardown_method(self):
         self._cleanup()
@@ -300,9 +317,10 @@ class TestAgentFlowInBotOS:
     """AgentFlow (deterministic workflow) inside Bot and BotOS."""
 
     def setup_method(self):
-        from praisonai.bots._registry import register_platform, _custom_platforms
+        from praisonai.bots._registry import register_platform
+
         register_platform("mockbot", MockPlatformAdapter)
-        self._cleanup = lambda: _custom_platforms.pop("mockbot", None)
+        self._cleanup = lambda: _unregister_bot_platform("mockbot")
 
     def teardown_method(self):
         self._cleanup()
@@ -355,9 +373,8 @@ class TestPlatformExtensibility:
     """Third-party platform registration and usage."""
 
     def teardown_method(self):
-        from praisonai.bots._registry import _custom_platforms
-        _custom_platforms.pop("custom_chat", None)
-        _custom_platforms.pop("my_platform", None)
+        _unregister_bot_platform("custom_chat")
+        _unregister_bot_platform("my_platform")
 
     def test_register_and_use_custom_platform(self):
         from praisonai.bots._registry import register_platform, resolve_adapter
@@ -389,7 +406,7 @@ class TestPlatformExtensibility:
 
     def test_resolve_unknown_platform_raises(self):
         from praisonai.bots._registry import resolve_adapter
-        with pytest.raises(ValueError, match="Unknown platform"):
+        with pytest.raises(ValueError, match=r"Unknown .*plugin"):
             resolve_adapter("nonexistent_xyz")
 
 
@@ -401,9 +418,10 @@ class TestBotOSFromConfig:
     """BotOS.from_config() YAML config loading."""
 
     def setup_method(self):
-        from praisonai.bots._registry import register_platform, _custom_platforms
+        from praisonai.bots._registry import register_platform
+
         register_platform("mockbot", MockPlatformAdapter)
-        self._cleanup = lambda: _custom_platforms.pop("mockbot", None)
+        self._cleanup = lambda: _unregister_bot_platform("mockbot")
 
     def teardown_method(self):
         self._cleanup()
@@ -459,7 +477,8 @@ platforms:
 
     def test_from_config_multi_platform(self):
         from praisonai.bots import BotOS
-        from praisonai.bots._registry import register_platform, _custom_platforms
+        from praisonai.bots._registry import register_platform
+
         register_platform("mock2", MockPlatformAdapter)
 
         yaml_content = """\
@@ -484,7 +503,7 @@ platforms:
             assert "mock2" in botos.list_bots()
         finally:
             os.unlink(path)
-            _custom_platforms.pop("mock2", None)
+            _unregister_bot_platform("mock2")
 
     def test_from_config_invalid_raises(self):
         from praisonai.bots import BotOS

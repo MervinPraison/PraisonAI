@@ -361,3 +361,11 @@ class TestProfileExports:
         from praisonaiagents.tools import AUTONOMY_PROFILE
         
         assert AUTONOMY_PROFILE is not None
+
+    def test_import_execute_code_uses_module_function(self):
+        """execute_code should resolve to python_tools.execute_code function."""
+        from praisonaiagents.tools import execute_code
+        from praisonaiagents.tools.python_tools import execute_code as execute_code_impl
+
+        assert callable(execute_code)
+        assert execute_code is execute_code_impl

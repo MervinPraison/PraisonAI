@@ -133,6 +133,13 @@ class StateSnapshotEvent(BaseEvent):
     snapshot: Dict[str, Any]
 
 
+class CustomEvent(BaseEvent):
+    """Custom extension event (e.g. structured A2UI payloads)."""
+    type: Literal["CUSTOM"] = "CUSTOM"
+    name: str
+    value: Any
+
+
 # Message Types
 class FunctionCall(BaseModel):
     """Function call in a tool call."""
@@ -175,6 +182,7 @@ Event = Union[
     ToolCallEndEvent,
     ToolCallResultEvent,
     StateSnapshotEvent,
+    CustomEvent,
     RunStartedEvent,
     RunFinishedEvent,
     RunErrorEvent,

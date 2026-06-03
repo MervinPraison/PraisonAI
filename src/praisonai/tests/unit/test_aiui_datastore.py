@@ -10,10 +10,13 @@ class TestPraisonAISessionDataStore:
 
     def test_init_with_default_store(self):
         """Test initialization with default hierarchical store."""
-        with patch('praisonai.ui._aiui_datastore.get_hierarchical_session_store') as mock_get_store:
+        import praisonai.ui._aiui_datastore as _ds
+
+        with patch("praisonaiagents.session.get_hierarchical_session_store") as mock_get_store, \
+             patch.object(_ds, "_impl_cls", None):
             mock_store = Mock()
             mock_get_store.return_value = mock_store
-            
+
             adapter = PraisonAISessionDataStore()
             
             assert adapter._store == mock_store

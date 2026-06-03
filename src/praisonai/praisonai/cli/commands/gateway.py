@@ -17,7 +17,7 @@ app = typer.Typer(
 @app.command("start")
 def gateway_start(
     host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
-    port: int = typer.Option(8765, "--port", help="Port to listen on"),
+    port: Optional[int] = typer.Option(None, "--port", help="Port to listen on"),
     agents: Optional[str] = typer.Option(None, "--agents", help="Path to agent configuration file"),
     config: Optional[str] = typer.Option(None, "--config", help="Path to gateway.yaml for multi-bot mode"),
 ):
@@ -27,17 +27,54 @@ def gateway_start(
         praisonai gateway start
         praisonai gateway start --config gateway.yaml
         praisonai gateway start --agents agents.yaml --port 9000
+        GATEWAY_PORT=9000 praisonai gateway start
     """
+    import os
     from ..features.gateway import GatewayHandler
+
+    # Check for GATEWAY_PORT environment variable if port not specified
+    if port is None:
+        try:
+            port = int(os.environ.get("GATEWAY_PORT", "8765"))
+        except ValueError:
+            port = 8765
 
     handler = GatewayHandler()
     handler.start(host=host, port=port, agent_file=agents, config_file=config)
 
 
+@app.command("stop")
+def gateway_stop(
+    host: str = typer.Option("127.0.0.1", "--host", help="Gateway host"),
+    port: Optional[int] = typer.Option(None, "--port", help="Gateway port"),
+    force: bool = typer.Option(False, "--force", help="Force stop (kill process)"),
+):
+    """Stop a running gateway instance.
+
+    Examples:
+        praisonai gateway stop
+        praisonai gateway stop --port 9000
+        praisonai gateway stop --force
+    """
+    import os
+    from ..features.gateway import GatewayHandler
+    from ..output.console import get_output_controller
+    
+    # Check for GATEWAY_PORT environment variable if port not specified
+    if port is None:
+        try:
+            port = int(os.environ.get("GATEWAY_PORT", "8765"))
+        except ValueError:
+            port = 8765
+    
+    handler = GatewayHandler()
+    handler.stop(host=host, port=port, force=force)
+
+
 @app.command("status")
 def gateway_status(
     host: str = typer.Option("127.0.0.1", "--host", help="Gateway host"),
-    port: int = typer.Option(8765, "--port", help="Gateway port"),
+    port: Optional[int] = typer.Option(None, "--port", help="Gateway port"),
     daemon_only: bool = typer.Option(False, "--daemon-only", help="Show only daemon status"),
 ):
     """Check gateway status and daemon service status.
@@ -47,9 +84,17 @@ def gateway_status(
         praisonai gateway status --port 9000
         praisonai gateway status --daemon-only
     """
+    import os
     from ..features.gateway import GatewayHandler
     from praisonai.daemon import get_daemon_status
     from ..output.console import get_output_controller
+    
+    # Check for GATEWAY_PORT environment variable if port not specified
+    if port is None:
+        try:
+            port = int(os.environ.get("GATEWAY_PORT", "8765"))
+        except ValueError:
+            port = 8765
     
     output = get_output_controller()
     
@@ -394,6 +439,7 @@ Manage the gateway server: praisonai gateway <command>
 
 [bold]Commands:[/bold]
   [green]start[/green]       Start the gateway server
+  [green]stop[/green]        Stop a running gateway instance
   [green]status[/green]      Check gateway and daemon status
   [green]channels[/green]    List channels from gateway.yaml
   [green]send[/green]        Send a test message to a channel

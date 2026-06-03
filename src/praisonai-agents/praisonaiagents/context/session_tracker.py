@@ -7,7 +7,7 @@ Inspired by Agno's SessionContextStore pattern.
 
 from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import logging
 from praisonaiagents._logging import get_logger
@@ -97,8 +97,8 @@ class SessionContextTracker:
         
         self._state = SessionState(
             session_id=self.session_id,
-            created_at=datetime.utcnow().isoformat() + "Z",
-            updated_at=datetime.utcnow().isoformat() + "Z",
+            created_at=datetime.now(timezone.utc).isoformat(),
+            updated_at=datetime.now(timezone.utc).isoformat(),
         )
     
     def _generate_session_id(self) -> str:
@@ -163,7 +163,7 @@ class SessionContextTracker:
     
     def _mark_updated(self) -> None:
         """Update the updated_at timestamp."""
-        self._state.updated_at = datetime.utcnow().isoformat() + "Z"
+        self._state.updated_at = datetime.now(timezone.utc).isoformat()
         self._state.turn_count += 1
     
     def to_context_string(self) -> str:
@@ -257,7 +257,7 @@ Current messages take precedence if there's any conflict with this summary.
         self._state = SessionState(
             session_id=self.session_id,
             created_at=self._state.created_at,
-            updated_at=datetime.utcnow().isoformat() + "Z",
+            updated_at=datetime.now(timezone.utc).isoformat(),
         )
     
     def to_dict(self) -> Dict[str, Any]:

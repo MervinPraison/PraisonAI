@@ -286,3 +286,54 @@ Body.
                 assert False, "Should have raised ValidationError"
             except ValidationError as e:
                 assert "description" in str(e).lower()
+    
+    def test_read_properties_utf8_encoding(self):
+        """Test reading UTF-8 encoded SKILL.md files.
+        
+        Regression test for Windows encoding issues (Issue #1695).
+        Verifies that skills with non-ASCII characters load correctly.
+        """
+        from praisonaiagents.skills.parser import read_properties
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skill_dir = Path(tmpdir) / "utf8-skill"
+            skill_dir.mkdir()
+            
+            # Create SKILL.md with various UTF-8 characters
+            utf8_content = """---
+name: utf8-test
+description: UTF-8 encoding test — quality — verification
+license: MIT
+compatibility: Supports café files → résumé processing
+metadata:
+  author: "José María"
+  notes: "Handles naïve input with émphasis"
+---
+
+# UTF-8 Test Skill
+
+This skill demonstrates UTF-8 character handling:
+- Em dash: —
+- Smart quotes: "hello" and 'world' 
+- Arrow: →
+- Accented chars: café, naïve, résumé
+- Emoji: 🔥 📝 ✨
+
+Works with internationalization!
+"""
+            
+            # Explicitly write as UTF-8 to simulate real-world scenario
+            with open(skill_dir / "SKILL.md", 'w', encoding='utf-8') as f:
+                f.write(utf8_content)
+            
+            # Test that parsing works without UnicodeDecodeError
+            props = read_properties(skill_dir)
+            
+            # Verify UTF-8 characters are preserved correctly
+            assert props.name == "utf8-test"
+            assert "—" in props.description  # em dash
+            assert "café" in props.compatibility  # accented character
+            assert "résumé" in props.compatibility  # accented character
+            assert "José María" in props.metadata["author"]  # accented characters
+            assert "naïve" in props.metadata["notes"]  # accented character
+            assert "émphasis" in props.metadata["notes"]  # accented character

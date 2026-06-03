@@ -73,48 +73,52 @@ def _get_process_using_port(port: int) -> Optional[Dict]:
         elif sys.platform == "win32":
             # Use netstat on Windows
             result = subprocess.run(
-                ["netstat", "-ano", "|", "findstr", f":{port}"],
+                ["netstat", "-ano"],
                 capture_output=True,
                 text=True,
-                shell=True,
-                timeout=5
+                timeout=10
             )
             
             if result.returncode != 0 or not result.stdout:
                 return None
             
-            # Parse netstat output
+            # Parse netstat output and filter by exact port
             lines = result.stdout.strip().split("\n")
             for line in lines:
-                if f":{port}" in line and "LISTENING" in line:
-                    parts = line.split()
-                    if len(parts) >= 5:
-                        pid = parts[-1]
-                        # Get process name from PID
-                        try:
-                            proc_result = subprocess.run(
-                                ["tasklist", "/FI", f"PID eq {pid}"],
-                                capture_output=True,
-                                text=True,
-                                timeout=5
-                            )
-                            name = "unknown"
-                            if proc_result.returncode == 0:
-                                proc_lines = proc_result.stdout.strip().split("\n")
-                                if len(proc_lines) >= 2:
-                                    name = proc_lines[1].split()[0]
-                            
-                            return {
-                                "name": name,
-                                "pid": pid,
-                                "user": "unknown",
-                                "type": "IPv4",
-                                "protocol": "TCP",
-                                "port": port,
-                                "raw": line
-                            }
-                        except Exception:
-                            pass
+                parts = line.split()
+                if len(parts) >= 5 and "LISTENING" in line:
+                    local_addr = parts[1]
+                    # Extract port from address, handle IPv6 format [::]:port and IPv4 format host:port
+                    port_match = re.search(r":(\d+)$", local_addr)
+                    if not port_match or int(port_match.group(1)) != port:
+                        continue
+                    
+                    pid = parts[-1]
+                    # Get process name from PID
+                    try:
+                        proc_result = subprocess.run(
+                            ["tasklist", "/FI", f"PID eq {pid}"],
+                            capture_output=True,
+                            text=True,
+                            timeout=5
+                        )
+                        name = "unknown"
+                        if proc_result.returncode == 0:
+                            proc_lines = proc_result.stdout.strip().split("\n")
+                            if len(proc_lines) >= 2:
+                                name = proc_lines[1].split()[0]
+                        
+                        return {
+                            "name": name,
+                            "pid": pid,
+                            "user": "unknown",
+                            "type": "IPv4",
+                            "protocol": "TCP",
+                            "port": port,
+                            "raw": line
+                        }
+                    except Exception:
+                        pass
     
     except subprocess.TimeoutExpired:
         pass
@@ -166,7 +170,6 @@ def _get_all_ports() -> List[Dict]:
                 ["netstat", "-ano"],
                 capture_output=True,
                 text=True,
-                shell=True,
                 timeout=10
             )
             

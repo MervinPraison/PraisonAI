@@ -21,6 +21,7 @@ from .chat_handler import ChatHandlerMixin
 from .session_manager import SessionManagerMixin
 from .async_safety import AsyncSafeState
 from .unified_execution_mixin import UnifiedExecutionMixin
+from .sandbox_mixin import SandboxMixin
 
 # Module-level logger for thread safety errors and debugging
 logger = get_logger(__name__)
@@ -255,7 +256,7 @@ if TYPE_CHECKING:
 # Import structured error from central errors module
 from ..errors import BudgetExceededError
 
-class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin, AsyncMemoryMixin):
+class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin, AsyncMemoryMixin):
     # Class-level counter for generating unique display names for nameless agents
     _agent_counter = 0
     _agent_counter_lock = threading.Lock()
@@ -555,6 +556,8 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
         backend: Optional[Any] = None,  # External managed agent backend (e.g., ManagedAgentIntegration)
         cli_backend: Optional[Union[str, Any]] = None,  # CLI backend for delegating turns (e.g., "claude-code")
         interrupt_controller: Optional['InterruptController'] = None,  # G2: Cooperative cancellation
+        tool_search: Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']] = False,  # Progressive tool disclosure
+        sandbox: Optional[Union[bool, 'SandboxConfig']] = None,  # Sandbox for safe code execution
     ):
         """Initialize an Agent instance.
 
@@ -658,6 +661,14 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
                 When provided, agent delegates entire conversation turns to the CLI tool
                 instead of using the built-in LLM. Enables session continuity and 
                 tool integration through external AI coding assistants.
+            tool_search: Progressive tool disclosure configuration. Accepts:
+                - bool: False=disabled (default), True=auto mode
+                - str: Mode ("auto", "on", "off")  
+                - Dict[str, Any]: Config overrides (e.g. {"threshold_pct": 15})
+                - ToolSearchConfig: Custom configuration
+                When enabled, replaces large tool schemas with bridge tools (tool_search,
+                tool_describe, tool_call) to save context. Core SDK tools never defer.
+                Auto mode activates based on token threshold. Opt-in feature.
 
         Raises:
             ValueError: If all of name, role, goal, backstory, and instructions are None.
@@ -1428,6 +1439,34 @@ class Agent(UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, Session
             web_search = False
             web_fetch = False
         
+        # ─────────────────────────────────────────────────────────────────────
+        # Resolve TOOL_SEARCH param
+        # ─────────────────────────────────────────────────────────────────────
+        # Fast path: None/False -> disabled (zero overhead)
+        if tool_search is None or tool_search is False:
+            self._tool_search_config = None
+        elif tool_search is True:
+            # True -> auto mode with defaults
+            from ..tools.tool_search import ToolSearchConfig as _ToolSearchConfig
+            self._tool_search_config = _ToolSearchConfig(enabled="auto")
+        elif isinstance(tool_search, str):
+            # String mode ("auto", "on", "off")
+            from ..tools.tool_search import ToolSearchConfig as _ToolSearchConfig
+            self._tool_search_config = _ToolSearchConfig.from_raw(tool_search)
+        elif isinstance(tool_search, dict):
+            # Dict -> config overrides
+            from ..tools.tool_search import ToolSearchConfig as _ToolSearchConfig
+            self._tool_search_config = _ToolSearchConfig(**tool_search)
+        else:
+            from ..tools.tool_search import ToolSearchConfig as _ToolSearchConfig
+            if isinstance(tool_search, _ToolSearchConfig):
+                self._tool_search_config = tool_search
+            else:
+                raise TypeError(
+                    "tool_search must be False/None, True, a mode string, "
+                    "a dict of ToolSearchConfig fields, or ToolSearchConfig"
+                )
+        
         # ============================================================
         # END CONSOLIDATED PARAMS EXTRACTION
         # ============================================================
@@ -1946,6 +1985,133 @@ Your Goal: {self.goal}
         # Telemetry - lazy initialized via property for performance
         self.__telemetry = None
         self.__telemetry_initialized = False
+        
+        # Sandbox configuration - initialize SandboxMixin
+        super().__init__(sandbox=sandbox)
+
+    def __deepcopy__(self, memo: dict) -> "Agent":
+        """Custom deepcopy that creates fresh threading primitives.
+
+        threading.RLock (self.__cache_lock) and threading.Lock (self._cost_lock)
+        cannot be deep-copied on CPython < 3.13.  This hook deep-copies every
+        other attribute normally and replaces the locks with new instances so
+        that copy.deepcopy(agent) works in any Python version.
+        """
+        import copy
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        for k, v in self.__dict__.items():
+            if k in ("_Agent__cache_lock",):
+                object.__setattr__(result, k, threading.RLock())
+            elif k == "_cost_lock":
+                object.__setattr__(result, k, threading.Lock())
+            else:
+                object.__setattr__(result, k, copy.deepcopy(v, memo))
+        return result
+
+    def clone_for_channel(self) -> "Agent":
+        """Return a fully independent copy of this agent for a gateway channel.
+        
+        This method safely clones an agent for use in multi-channel scenarios
+        by avoiding deepcopy issues with tools/handoffs and creating fresh
+        instances of mutable objects like interrupt_controller.
+        
+        Returns:
+            Agent: A new Agent instance with copied configuration but fresh
+                  locks, interrupt controller, and shallow-copied tools.
+        """
+        import copy
+        from ..tools.base import BaseTool
+        
+        # Build kwargs for new Agent instance, copying core attributes
+        clone_kwargs = {
+            # Core identity
+            'name': self.name,
+            'role': self.role, 
+            'goal': self.goal,
+            'backstory': self.backstory,
+            'instructions': self.instructions,
+            
+            # LLM configuration 
+            'llm': self.llm,
+            'base_url': getattr(self, 'base_url', None),
+            'api_key': getattr(self, 'api_key', None),
+            'auth': getattr(self, 'auth', None),
+            
+            # Shallow copy tools to avoid deepcopy issues with nested objects
+            'tools': list(self.tools) if self.tools else None,
+            
+            # Skip handoffs entirely - they shouldn't be shared across channels
+            # and can contain nested Agent instances that cause RLock issues
+            'handoffs': None,
+            
+            # Feature configurations - check for actual stored config objects
+            'memory': getattr(self, '_memory_config', None),
+            'knowledge': getattr(self, '_knowledge_config', None), 
+            'planning': getattr(self, '_planning_config', None),
+            'reflection': getattr(self, '_reflection_config', None),
+            'guardrails': getattr(self, '_guardrails_config', None),
+            'web': getattr(self, '_web_config', None),
+            'context': getattr(self, '_context_config', None),
+            'autonomy': getattr(self, '_autonomy_config', None),
+            'output': getattr(self, '_output_config', None),
+            'execution': getattr(self, '_execution_config', None),
+            'templates': getattr(self, '_template_config', None),
+            'caching': getattr(self, '_caching_config', None),
+            'hooks': getattr(self, '_hooks_config', None),
+            'skills': getattr(self, '_skills_config', None),
+            'approval': getattr(self, '_approval_config', None),
+            'learn': getattr(self, '_learn_config', None),
+            'tool_search': getattr(self, '_tool_search_config', None),
+            
+            # Tool configuration
+            'tool_timeout': getattr(self, '_tool_timeout', None),
+            'parallel_tool_calls': getattr(self, 'parallel_tool_calls', False),
+            
+            # CLI backend
+            'cli_backend': getattr(self, '_cli_backend', None),
+            
+            # Create fresh interrupt controller to avoid shared state
+            'interrupt_controller': None,  # Let new instance create its own
+            
+            # Sandbox config
+            'sandbox': getattr(self, '_sandbox_config', None),
+        }
+        
+        # Handle deprecated parameters for backward compatibility
+        import warnings
+        
+        # Check for deprecated standalone attributes and emit warnings
+        deprecated_attrs = [
+            ('allow_code_execution', 'execution'),
+            ('code_execution_mode', 'execution'), 
+            ('auto_save', 'memory'),
+            ('rate_limiter', 'execution'),
+            ('allow_delegation', 'handoffs'),
+            ('verification_hooks', 'autonomy')
+        ]
+        
+        for old_attr, new_param in deprecated_attrs:
+            if hasattr(self, old_attr):
+                value = getattr(self, old_attr)
+                if value is not None and value != False:  # Skip None/False defaults
+                    warnings.warn(
+                        f"Deprecated attribute '{old_attr}' found in agent clone. "
+                        f"Use '{new_param}=' parameter instead.",
+                        DeprecationWarning,
+                        stacklevel=2
+                    )
+                    # For basic compatibility, include in clone_kwargs if not already set
+                    if old_attr == 'allow_code_execution' and clone_kwargs['execution'] is None:
+                        from ..config.execution import ExecutionConfig
+                        clone_kwargs['execution'] = ExecutionConfig(code_execution=value)
+                    elif old_attr == 'auto_save' and clone_kwargs['memory'] is None:
+                        from ..config.memory import MemoryConfig  
+                        clone_kwargs['memory'] = MemoryConfig(auto_save=value)
+        
+        # Create new Agent instance
+        return self.__class__(**{k: v for k, v in clone_kwargs.items() if v is not None})
 
     @property
     def _telemetry(self):
@@ -4611,60 +4777,57 @@ Answer:"""
                 error=f"Agent guardrail validation error: {str(e)}"
             )
 
-    def _apply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None):
-        """Apply guardrail validation with retry logic.
-        
-        Args:
-            response_text: The response to validate
-            prompt: Original prompt for regeneration if needed
-            temperature: Temperature for regeneration
-            tools: Tools for regeneration
-            
-        Returns:
-            str: The validated response text or None if validation fails after retries
-        """
+    def _validate_with_guardrail(self, response_text):
+        """Validate response with guardrail. Returns (success, result, error)."""
         if not self._guardrail_fn:
-            return response_text
+            return True, response_text, None
             
         from ..main import TaskOutput
         
+        task_output = TaskOutput(
+            description="Agent response output",
+            raw=response_text,
+            agent=self.name
+        )
+        
+        guardrail_result = self._process_guardrail(task_output)
+        
+        if guardrail_result.success:
+            # Return the potentially modified result
+            if guardrail_result.result and hasattr(guardrail_result.result, 'raw'):
+                return True, guardrail_result.result.raw, None
+            elif guardrail_result.result:
+                return True, str(guardrail_result.result), None
+            else:
+                return True, response_text, None
+        else:
+            return False, None, guardrail_result.error
+
+    def _apply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None):
+        """Apply guardrail validation with retry logic (sync version)."""
         retry_count = 0
         current_response = response_text
         
         while retry_count <= self.max_guardrail_retries:
-            # Create TaskOutput object
-            task_output = TaskOutput(
-                description="Agent response output",
-                raw=current_response,
-                agent=self.name
-            )
+            success, result, error = self._validate_with_guardrail(current_response)
             
-            # Process guardrail
-            guardrail_result = self._process_guardrail(task_output)
-            
-            if guardrail_result.success:
+            if success:
                 logging.info(f"Agent {self.name}: Guardrail validation passed")
-                # Return the potentially modified result
-                if guardrail_result.result and hasattr(guardrail_result.result, 'raw'):
-                    return guardrail_result.result.raw
-                elif guardrail_result.result:
-                    return str(guardrail_result.result)
-                else:
-                    return current_response
+                return result
             
             # Guardrail failed
             if retry_count >= self.max_guardrail_retries:
                 raise Exception(
                     f"Agent {self.name} response failed guardrail validation after {self.max_guardrail_retries} retries. "
-                    f"Last error: {guardrail_result.error}"
+                    f"Last error: {error}"
                 )
             
             retry_count += 1
-            logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {guardrail_result.error}")
+            logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {error}")
             
             # Regenerate response for retry
             try:
-                retry_prompt = f"{prompt}\n\nNote: Previous response failed validation due to: {guardrail_result.error}. Please provide an improved response."
+                retry_prompt = f"{prompt}\n\nNote: Previous response failed validation due to: {error}. Please provide an improved response."
                 response = self._chat_completion([{"role": "user", "content": retry_prompt}], temperature, tools, task_name=task_name, task_description=task_description, task_id=task_id)
                 if response and response.choices:
                     content = response.choices[0].message.content
@@ -4673,10 +4836,46 @@ Answer:"""
                     raise Exception("Failed to generate retry response")
             except Exception as e:
                 logging.error(f"Agent {self.name}: Error during guardrail retry: {e}")
-                # If we can't regenerate, fail the guardrail
+                raise Exception(f"Agent {self.name} guardrail retry failed: {e}")
+        
+        return current_response
+
+    async def _aapply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None):
+        """Apply guardrail validation with retry logic (async version)."""
+        retry_count = 0
+        current_response = response_text
+        
+        while retry_count <= self.max_guardrail_retries:
+            success, result, error = self._validate_with_guardrail(current_response)
+            
+            if success:
+                logging.info(f"Agent {self.name}: Guardrail validation passed")
+                return result
+            
+            # Guardrail failed
+            if retry_count >= self.max_guardrail_retries:
                 raise Exception(
-                    f"Agent {self.name} guardrail retry failed: {e}"
+                    f"Agent {self.name} response failed guardrail validation after {self.max_guardrail_retries} retries. "
+                    f"Last error: {error}"
                 )
+            
+            retry_count += 1
+            logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {error}")
+            
+            # Regenerate response for retry (async version)
+            try:
+                retry_prompt = f"{prompt}\n\nNote: Previous response failed validation due to: {error}. Please provide an improved response."
+                response = await self._execute_unified_achat_completion([{"role": "user", "content": retry_prompt}], temperature, tools, task_name=task_name, task_description=task_description, task_id=task_id)
+                if response and hasattr(response, 'choices') and response.choices:
+                    content = response.choices[0].message.content
+                    current_response = content.strip() if content else ""
+                elif isinstance(response, str):
+                    current_response = response.strip()
+                else:
+                    raise Exception("Failed to generate retry response")
+            except Exception as e:
+                logging.error(f"Agent {self.name}: Error during guardrail retry: {e}")
+                raise Exception(f"Agent {self.name} guardrail retry failed: {e}")
         
         return current_response
     

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from praisonaiagents.auth import AuthIdentity
 
-from ..deps import get_db, require_workspace_member
+from ..deps import get_db, require_issue_in_workspace, require_workspace_member
 from ..schemas import ActivityLogResponse
 from ...services.activity_service import ActivityService
 
@@ -38,6 +38,7 @@ async def list_issue_activity(
     user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
+    await require_issue_in_workspace(workspace_id, issue_id, session)
     svc = ActivityService(session)
     logs = await svc.list_for_issue(issue_id, limit=limit, offset=offset)
     return [ActivityLogResponse.model_validate(log) for log in logs]

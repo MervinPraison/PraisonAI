@@ -12,7 +12,7 @@ import os
 import logging
 from praisonaiagents._logging import get_logger
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 logger = get_logger(__name__)
@@ -39,7 +39,7 @@ class GradeResult:
     input_text: str = ""
     output: str = ""
     expected_output: Optional[str] = None
-    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -55,7 +55,7 @@ class GradeResult:
             input_text=data.get("input_text", ""),
             output=data.get("output", ""),
             expected_output=data.get("expected_output"),
-            timestamp=data.get("timestamp", datetime.utcnow().isoformat()),
+            timestamp=data.get("timestamp", datetime.now(timezone.utc).isoformat()),
         )
 
 class BaseLLMGrader:

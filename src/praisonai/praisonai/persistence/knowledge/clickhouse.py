@@ -8,7 +8,7 @@ Install: pip install clickhouse-connect
 import logging
 from typing import Any, Dict, List, Optional
 
-from .base import KnowledgeStore, KnowledgeDocument
+from .base import KnowledgeStore, KnowledgeDocument, validate_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,7 @@ class ClickHouseKnowledgeStore(KnowledgeStore):
                 "clickhouse-connect is required for ClickHouse support. "
                 "Install with: pip install clickhouse-connect"
             )
+        validate_identifier(database, "database")
         
         self._client = clickhouse_connect.get_client(
             host=host,
@@ -56,6 +57,8 @@ class ClickHouseKnowledgeStore(KnowledgeStore):
         logger.info(f"Connected to ClickHouse database: {database}")
     
     def _table_name(self, collection: str) -> str:
+        # Validate collection name to prevent SQL injection
+        validate_identifier(collection, "collection")
         return f"{self.database}.praison_vec_{collection}"
     
     def create_collection(
@@ -195,7 +198,8 @@ class ClickHouseKnowledgeStore(KnowledgeStore):
         """Get documents by IDs."""
         table = self._table_name(collection)
         
-        id_list = ", ".join([f"'{i}'" for i in ids])
+        # Escape single quotes to prevent SQL injection
+        id_list = ", ".join([f"'{i.replace(chr(39), chr(39)+chr(39))}'" for i in ids])
         result = self._client.query(f"""
             SELECT id, content, content_hash, created_at, embedding
             FROM {table} WHERE id IN ({id_list})
@@ -225,7 +229,8 @@ class ClickHouseKnowledgeStore(KnowledgeStore):
         table = self._table_name(collection)
         
         if ids:
-            id_list = ", ".join([f"'{i}'" for i in ids])
+            # Escape single quotes to prevent SQL injection
+            id_list = ", ".join([f"'{i.replace(chr(39), chr(39)+chr(39))}'" for i in ids])
             self._client.command(f"ALTER TABLE {table} DELETE WHERE id IN ({id_list})")
             return len(ids)
         return 0

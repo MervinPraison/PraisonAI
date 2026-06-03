@@ -268,6 +268,11 @@ class MentionsParser:
     def _process_url_mention(self, url: str) -> Optional[str]:
         """Process @url:https://... mention."""
         try:
+            from praisonaiagents.tools.spider_tools import SpiderTools
+
+            if not SpiderTools()._validate_url(url):
+                return f"# URL: {url}\n[Blocked: URL is not allowed]"
+
             import urllib.request
             
             req = urllib.request.Request(

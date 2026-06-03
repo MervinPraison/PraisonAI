@@ -5,12 +5,13 @@ from typing import List, Optional, Dict
 
 logger = logging.getLogger(__name__)
 
-from .models import SkillMetadata
-from .discovery import discover_skills
+from .models import SkillMetadata, SkillState
+from .discovery import discover_skills, get_default_skill_dirs
 from .loader import SkillLoader, LoadedSkill
 from .prompt import generate_skills_xml
 from .substitution import render_skill_body
 from .shell_render import render_shell_blocks
+from .capability_validator import CapabilityValidator, EnforcementLevel, ValidationResult
 
 
 class SkillManager:
@@ -34,11 +35,21 @@ class SkillManager:
         manager.activate(skill)
     """
 
-    def __init__(self):
-        """Initialize the SkillManager."""
+    def __init__(self, enforcement_level: Optional[EnforcementLevel] = None):
+        """Initialize the SkillManager.
+        
+        Args:
+            enforcement_level: Capability enforcement level (defaults to environment-based)
+        """
         self._skills: Dict[str, LoadedSkill] = {}
         self._loader = SkillLoader()
         self._discovered = False
+        self._validation_cache: Dict[str, ValidationResult] = {}
+        
+        # Initialize capability validator
+        if enforcement_level is None:
+            enforcement_level = self._get_default_enforcement_level()
+        self._validator = CapabilityValidator(enforcement_level)
 
     @property
     def skills(self) -> List[LoadedSkill]:
@@ -126,15 +137,29 @@ class SkillManager:
     def get_available_skills(self) -> List[SkillMetadata]:
         """Get metadata for all available skills.
 
-        This is used for system prompt injection. Skills with
-        ``disable-model-invocation: true`` are omitted so the LLM never
-        sees them and cannot auto-trigger them.
+        This is used for system prompt injection. Skills are filtered by:
+        1. disable-model-invocation: true (excluded)
+        2. Capability enforcement (if strict mode, exclude UNAVAILABLE skills)
         """
-        return [
-            skill.metadata
-            for skill in self._skills.values()
-            if not getattr(skill.properties, "disable_model_invocation", False)
-        ]
+        available = []
+        for skill in self._skills.values():
+            # Skip if explicitly disabled for model invocation
+            if getattr(skill.properties, "disable_model_invocation", False):
+                continue
+                
+            # Check capability requirements if enforcement is strict
+            if self._validator.enforcement_level == EnforcementLevel.STRICT:
+                try:
+                    validation = self.validate_skill_capabilities(skill.properties.name)
+                    if validation.state == SkillState.UNAVAILABLE:
+                        continue  # Skip unavailable skills in strict mode
+                except Exception as e:
+                    logger.warning(f"Skipping skill '{skill.properties.name}' due to validation error: {e}")
+                    continue
+                    
+            available.append(skill.metadata)
+            
+        return available
 
     def get_user_invocable_skills(self) -> List[LoadedSkill]:
         """Return skills the *user* may invoke via slash-commands.
@@ -271,8 +296,7 @@ class SkillManager:
                 return {"success": False, "error": "Skill content exceeds maximum size (100KB)"}
             
             # Create skill directory
-            from .discovery import get_default_skill_directories
-            skill_dirs = get_default_skill_directories()
+            skill_dirs = get_default_skill_dirs()
             base_dir = skill_dirs[0] if skill_dirs else "~/.praisonai/skills"
             
             import os
@@ -567,9 +591,90 @@ author: agent
                 logger.debug("Failed to clean up temp file %s", temp_path, exc_info=True)
             raise
 
+    def validate_skill_capabilities(self, skill_name: str, force_refresh: bool = False) -> ValidationResult:
+        """Validate a skill's capability requirements.
+        
+        Args:
+            skill_name: Name of the skill to validate
+            force_refresh: If True, bypass cache and re-validate
+            
+        Returns:
+            ValidationResult with capability status
+            
+        Raises:
+            ValueError: If skill not found
+        """
+        skill = self.get_skill(skill_name)
+        if skill is None:
+            raise ValueError(f"Skill '{skill_name}' not found")
+            
+        # Check cache first
+        if not force_refresh and skill_name in self._validation_cache:
+            return self._validation_cache[skill_name]
+            
+        # Perform validation
+        result = self._validator.validate_skill(skill.properties)
+        self._validation_cache[skill_name] = result
+        return result
+    
+    def get_available_skills_by_state(self, state: SkillState) -> List[LoadedSkill]:
+        """Get skills filtered by their capability validation state.
+        
+        Args:
+            state: Desired skill state
+            
+        Returns:
+            List of skills in the specified state
+        """
+        matching = []
+        for skill in self._skills.values():
+            try:
+                result = self.validate_skill_capabilities(skill.properties.name)
+                if result.state == state:
+                    matching.append(skill)
+            except Exception as e:
+                logger.warning(f"Failed to validate skill '{skill.properties.name}': {e}")
+                continue
+        return matching
+    
+    def get_skills_diagnostics(self) -> Dict[str, ValidationResult]:
+        """Get capability diagnostics for all skills.
+        
+        Returns:
+            Dict mapping skill names to their validation results
+        """
+        diagnostics = {}
+        for skill_name in self.skill_names:
+            try:
+                diagnostics[skill_name] = self.validate_skill_capabilities(skill_name)
+            except Exception as e:
+                logger.error(f"Failed to validate skill '{skill_name}': {e}")
+        return diagnostics
+    
+    def _get_default_enforcement_level(self) -> EnforcementLevel:
+        """Get default enforcement level from environment."""
+        import os
+        level_str = os.getenv('SKILL_CAPABILITY_ENFORCEMENT', 'warn').lower()
+        
+        level_map = {
+            'disabled': EnforcementLevel.DISABLED,
+            'off': EnforcementLevel.DISABLED,
+            'telemetry': EnforcementLevel.TELEMETRY,
+            'log': EnforcementLevel.TELEMETRY,
+            'warn': EnforcementLevel.WARN,
+            'warning': EnforcementLevel.WARN,
+            'strict': EnforcementLevel.STRICT,
+            'hard': EnforcementLevel.STRICT,
+            'fail': EnforcementLevel.STRICT,
+        }
+        
+        return level_map.get(level_str, EnforcementLevel.WARN)
+    
     def clear(self) -> None:
         """Clear all loaded skills."""
         self._skills.clear()
+        self._validation_cache.clear()
+        self._validator.clear_cache()
         self._discovered = False
 
     def __len__(self) -> int:
