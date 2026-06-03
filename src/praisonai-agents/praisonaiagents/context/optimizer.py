@@ -640,8 +640,19 @@ class LLMContextCompressorOptimizer(BaseOptimizer):
             )
         
         try:
-            # Use sync compression for compatibility
-            result = self._sync_compress(messages, target_tokens)
+            # Use configured compressor with LLM (if available)
+            import asyncio
+            try:
+                # Try async compression with configured LLM
+                result = asyncio.run(self.compressor.compress(
+                    messages=messages,
+                    target_tokens=target_tokens,
+                    summary_target_tokens=self.summary_target_tokens,
+                    protect_last_n_tokens=self.protect_last_n_tokens,
+                ))
+            except:
+                # Fallback to sync compression if async fails
+                result = self._sync_compress(messages, target_tokens)
             
             optimized_tokens = estimate_messages_tokens(result.messages)
             
@@ -682,12 +693,6 @@ class LLMContextCompressorOptimizer(BaseOptimizer):
             summary_msg = {
                 "role": "system",
                 "content": f"[Context Summary]\n{summary_text}",
-                "_compression_metadata": {
-                    "original_message_count": len(middle),
-                    "compression_type": "deterministic_enhanced",
-                    "protected_head": len(head),
-                    "protected_tail": len(tail),
-                }
             }
             compressed_messages = head + [summary_msg] + tail
         else:
@@ -758,12 +763,12 @@ class LLMContextCompressorOptimizer(BaseOptimizer):
         summary_parts.append(f"**Conversation Summary** ({len(messages)} messages compressed)")
         
         if tasks_completed:
-            summary_parts.append(f"**Completed Tasks:**")
+            summary_parts.append("**Completed Tasks:**")
             for i, task in enumerate(tasks_completed[:3], 1):  # Limit to 3
                 summary_parts.append(f"  {i}. {task}")
         
         if tasks_in_progress:
-            summary_parts.append(f"**In Progress:**")
+            summary_parts.append("**In Progress:**")
             for task in tasks_in_progress[:2]:  # Limit to 2
                 summary_parts.append(f"  • {task}")
         
@@ -778,7 +783,7 @@ class LLMContextCompressorOptimizer(BaseOptimizer):
             summary_parts.append(f"**Files:** {', '.join(files_summary)}")
         
         if key_decisions:
-            summary_parts.append(f"**Key Decisions:**")
+            summary_parts.append("**Key Decisions:**")
             for decision in key_decisions[:2]:  # Limit to 2
                 summary_parts.append(f"  • {decision}")
         

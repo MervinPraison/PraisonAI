@@ -112,6 +112,7 @@ class ContextCompressor:
         protect_last_n_tokens: int = 20_000,
         summary_target_tokens: int = 750,
         auxiliary_model: Optional[str] = None,
+        parent_session_id: Optional[str] = None,
     ) -> CompressResult:
         """
         Compress messages using LLM-driven summarization.
@@ -121,6 +122,7 @@ class ContextCompressor:
             protect_last_n_tokens: Tokens to preserve at end (recent context)
             summary_target_tokens: Target token count for summary
             auxiliary_model: Override model for summarization
+            parent_session_id: Parent session ID for lineage tracking
             
         Returns:
             CompressResult with compressed messages and metadata
@@ -140,11 +142,8 @@ class ContextCompressor:
         
         # Create session tracking
         session_id = None
-        parent_session_id = None
         if self.enable_session_tracking:
             session_id = str(uuid.uuid4())
-            # In a real implementation, you might pass in the current session ID as parent
-            parent_session_id = None  # Could be passed in as parameter
         
         # Compress middle section
         if middle:
@@ -158,27 +157,15 @@ class ContextCompressor:
                 summary_msg = {
                     "role": "system", 
                     "content": f"[Context Summary]\n{summary_text}",
-                    "_compression_metadata": {
-                        "original_message_count": len(middle),
-                        "summary_tokens": self._count_tokens([{"content": summary_text}]),
-                        "compressed_at": datetime.utcnow().isoformat(),
-                        "session_id": session_id,
-                        "parent_session_id": parent_session_id,
-                    }
                 }
                 compressed_messages = head + [summary_msg] + tail
             else:
                 # Fallback: use deterministic summary
                 fallback_summary = self._create_fallback_summary(middle)
+                summary_text = fallback_summary  # Store for session tracking
                 summary_msg = {
                     "role": "system",
                     "content": f"[Fallback Summary]\n{fallback_summary}",
-                    "_compression_metadata": {
-                        "original_message_count": len(middle),
-                        "fallback": True,
-                        "compressed_at": datetime.utcnow().isoformat(),
-                        "session_id": session_id,
-                    }
                 }
                 compressed_messages = head + [summary_msg] + tail
         else:
@@ -348,7 +335,7 @@ class ContextCompressor:
 5. **Decisions Made**: Important choices or directions taken
 
 Conversation History:
-{chr(10).join(context_parts[:20])}  # Limit to prevent prompt overflow
+{chr(10).join(context_parts[:20])}
 
 Tool Calls Made: {", ".join(tool_calls) if tool_calls else "None"}
 Files Referenced: {", ".join(list(file_refs)[:10]) if file_refs else "None"}
@@ -365,9 +352,18 @@ Provide a concise summary under {max_tokens} tokens that preserves the essential
                 )
                 return response.get("content") or response.get("text")
             
+            elif hasattr(self.llm, 'achat'):
+                # Async chat completion method
+                response = await self.llm.achat(
+                    messages=[{"role": "user", "content": summary_prompt}],
+                    max_tokens=max_tokens,
+                    model=model
+                )
+                return response.get("content")
+            
             elif hasattr(self.llm, 'chat'):
-                # Chat completion method
-                response = await self.llm.chat(
+                # Sync chat method - use it directly (not await)
+                response = self.llm.chat(
                     messages=[{"role": "user", "content": summary_prompt}],
                     max_tokens=max_tokens,
                     model=model
@@ -375,13 +371,22 @@ Provide a concise summary under {max_tokens} tokens that preserves the essential
                 return response.get("content")
             
             else:
-                # Try common OpenAI-compatible interface
-                response = self.llm.chat.completions.create(
-                    model=model or "gpt-4o-mini",
-                    messages=[{"role": "user", "content": summary_prompt}],
-                    max_tokens=max_tokens,
-                    temperature=0.3,
-                )
+                # Try common OpenAI-compatible interface - check if async
+                if hasattr(self.llm.chat.completions, 'acreate'):
+                    response = await self.llm.chat.completions.acreate(
+                        model=model or "gpt-4o-mini",
+                        messages=[{"role": "user", "content": summary_prompt}],
+                        max_tokens=max_tokens,
+                        temperature=0.3,
+                    )
+                else:
+                    # Fallback to sync create (blocking in async context)
+                    response = self.llm.chat.completions.create(
+                        model=model or "gpt-4o-mini",
+                        messages=[{"role": "user", "content": summary_prompt}],
+                        max_tokens=max_tokens,
+                        temperature=0.3,
+                    )
                 return response.choices[0].message.content
                 
         except Exception as e:
@@ -425,10 +430,10 @@ Provide a concise summary under {max_tokens} tokens that preserves the essential
         ]
         
         if tool_calls:
-            summary_parts.append(f"Tools used: {', '.join(set(tool_calls))}")
+            summary_parts.append(f"Tools used: {', '.join(sorted(set(tool_calls)))}")
         
         if files_touched:
-            file_list = list(files_touched)[:5]  # Limit to 5 files
+            file_list = sorted(files_touched)[:5]  # Limit to 5 files, sorted for determinism
             more_indicator = f" (+{len(files_touched) - 5} more)" if len(files_touched) > 5 else ""
             summary_parts.append(f"Files referenced: {', '.join(file_list)}{more_indicator}")
         
