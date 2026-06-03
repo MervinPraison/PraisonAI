@@ -136,6 +136,15 @@ Your Goal: {self.goal}"""
                 system_prompt += f"\n\nYou have access to the following tools: {', '.join(tool_names)}. Use these tools when appropriate to help complete your tasks. Always use tools when they can help provide accurate information or perform actions."
                 system_prompt += "\n\nExplain Before Acting: Before calling a tool, provide a brief one-sentence explanation of what you are about to do and why. Skip explanations only for repetitive low-level operations where narration would be noisy. When performing a batch of similar operations (e.g. searching for multiple items), explain the group once rather than narrating each call individually."
         
+        # Add prompt injection protection instructions for external tool results
+        try:
+            from ..tools.trust import get_system_prompt_addition
+            trust_instructions = get_system_prompt_addition()
+            if trust_instructions:
+                system_prompt += f"\n\n## Security: {trust_instructions}"
+        except ImportError:
+            pass  # Trust module not available, skip security instructions
+        
         # Cache the generated system prompt (only if cache_key is set, i.e., memory not enabled)
         # Use LRU eviction to prevent unbounded growth
         if cache_key:

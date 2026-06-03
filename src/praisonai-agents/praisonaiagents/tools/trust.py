@@ -63,7 +63,15 @@ def wrap_if_external(tool_name: str, result: Union[str, dict, list, None]) -> Un
     Returns:
         Original result for trusted tools, wrapped result for external tools
     """
-    # Fast path: skip non-string results
+    # Handle structured data from external sources by serializing to JSON
+    if isinstance(result, (dict, list, tuple)):
+        if _is_tool_external(tool_name):
+            import json
+            result = json.dumps(result, ensure_ascii=False, separators=(',', ':'))
+        else:
+            return result
+    
+    # Fast path: skip non-string results that can't contain injection
     if not isinstance(result, str):
         return result
     
@@ -76,8 +84,14 @@ def wrap_if_external(tool_name: str, result: Union[str, dict, list, None]) -> Un
     if len(result) < MIN_CONTENT_LENGTH_FOR_WRAPPING:
         return result
     
+    # Escape fence markers in the result to prevent injection breakout
+    safe_result = (
+        result.replace(EXTERNAL_CONTENT_FENCE_OPEN, "&lt;external_tool_result&gt;")
+              .replace(EXTERNAL_CONTENT_FENCE_CLOSE, "&lt;/external_tool_result&gt;")
+    )
+    
     # Wrap external content with security markers
-    return f"{EXTERNAL_CONTENT_FENCE_OPEN}\n{result}\n{EXTERNAL_CONTENT_FENCE_CLOSE}"
+    return f"{EXTERNAL_CONTENT_FENCE_OPEN}\n{safe_result}\n{EXTERNAL_CONTENT_FENCE_CLOSE}"
 
 
 def _is_tool_external(tool_name: str) -> bool:
@@ -102,8 +116,8 @@ def _is_tool_external(tool_name: str) -> bool:
         registry = get_registry()
         trust_level = registry.get_trust_level(tool_name)
         return trust_level == ToolTrustLevel.EXTERNAL
-    except ImportError:
-        # Registry not available, fall back to hardcoded list only
+    except Exception:
+        # Registry not available or raised, fall back to hardcoded list only
         return False
 
 

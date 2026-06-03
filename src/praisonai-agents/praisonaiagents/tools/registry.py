@@ -74,6 +74,18 @@ class ToolRegistry:
             ValueError: If tool with same name exists and overwrite=False
         """
         with self._lock:
+            # Validate trust level if provided
+            if trust_level is not None:
+                from .trust import ToolTrustLevel
+                try:
+                    trust_level = ToolTrustLevel(trust_level).value
+                except ValueError as exc:
+                    tool_name = name or getattr(tool, "name", getattr(tool, "__name__", "<unknown>"))
+                    raise ValueError(
+                        f"Invalid trust_level {trust_level!r} for tool '{tool_name}'. "
+                        "Use 'trusted' or 'external'."
+                    ) from exc
+            
             # Handle BaseTool instances
             if isinstance(tool, BaseTool):
                 tool_name = name or tool.name
@@ -361,10 +373,11 @@ def get_registry() -> ToolRegistry:
 
 def register_tool(
     tool: Union[BaseTool, Callable],
-    name: Optional[str] = None
+    name: Optional[str] = None,
+    trust_level: Optional[str] = None
 ) -> None:
     """Convenience function to register a tool with the global registry."""
-    get_registry().register(tool, name=name)
+    get_registry().register(tool, name=name, trust_level=trust_level)
 
 
 def get_tool(name: str) -> Optional[Union[BaseTool, Callable]]:
@@ -375,15 +388,17 @@ def get_tool(name: str) -> Optional[Union[BaseTool, Callable]]:
 # Simplified alias for register_tool
 def add_tool(
     tool: Union[BaseTool, Callable],
-    name: Optional[str] = None
+    name: Optional[str] = None,
+    trust_level: Optional[str] = None
 ) -> None:
     """Register a tool. Simplified alias for register_tool().
     
     Args:
         tool: BaseTool instance or callable function
         name: Optional override name
+        trust_level: Optional trust level for the tool ("trusted" or "external")
     """
-    register_tool(tool, name=name)
+    register_tool(tool, name=name, trust_level=trust_level)
 
 
 def has_tool(name: str) -> bool:

@@ -250,9 +250,6 @@ class ToolExecutionMixin:
                 future = self._tool_executor.submit(ctx.run, execute_with_context)
                 try:
                     result = future.result(timeout=tool_timeout)
-                    # Apply prompt injection protection for external tools (timeout path)
-                    from ..tools.trust import wrap_if_external
-                    result = wrap_if_external(function_name, result)
                 except concurrent.futures.TimeoutError:
                     future.cancel()
                     logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
