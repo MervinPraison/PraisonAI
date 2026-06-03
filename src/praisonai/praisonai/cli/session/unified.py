@@ -152,21 +152,38 @@ class UnifiedSessionStore:
         session.updated_at = datetime.now().isoformat()
         
         try:
-            with open(path, 'w') as f:
+            # Open in r+b mode to avoid truncation before locking
+            # Create file if it doesn't exist
+            if not path.exists():
+                path.touch()
+            
+            with open(path, 'r+b') as f:
                 # Cross-platform file locking
                 if sys.platform == "win32":
-                    # Windows locking
+                    # Windows locking - ensure consistent file position
                     import msvcrt
-                    msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)  # Use blocking lock
                     try:
-                        json.dump(session.to_dict(), f, indent=2)
+                        f.seek(0)
+                        f.truncate()  # Clear file after acquiring lock
+                        json_data = json.dumps(session.to_dict(), indent=2).encode('utf-8')
+                        f.write(json_data)
+                        f.flush()
+                        os.fsync(f.fileno())  # Force data to disk before unlock
                     finally:
+                        f.seek(0)  # Return to start position for unlock
                         msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
                 elif _HAS_FCNTL:
                     # Unix locking
                     fcntl.flock(f.fileno(), fcntl.LOCK_EX)
                     try:
-                        json.dump(session.to_dict(), f, indent=2)
+                        f.seek(0)
+                        f.truncate()  # Clear file after acquiring lock
+                        json_data = json.dumps(session.to_dict(), indent=2).encode('utf-8')
+                        f.write(json_data)
+                        f.flush()
+                        os.fsync(f.fileno())  # Force data to disk before unlock
                     finally:
                         fcntl.flock(f.fileno(), fcntl.LOCK_UN)
                 else:
@@ -178,7 +195,10 @@ class UnifiedSessionStore:
                             "concurrent writers may corrupt session files."
                         )
                         _WARNED_NO_FCNTL = True
-                    json.dump(session.to_dict(), f, indent=2)
+                    f.seek(0)
+                    f.truncate()
+                    json_data = json.dumps(session.to_dict(), indent=2).encode('utf-8')
+                    f.write(json_data)
             
             # Update cache
             self._cache[session.session_id] = session
@@ -210,26 +230,31 @@ class UnifiedSessionStore:
             return None
         
         try:
-            with open(path, 'r') as f:
+            with open(path, 'rb') as f:
                 # Cross-platform file locking (shared lock for reading)
                 if sys.platform == "win32":
-                    # Windows shared locking (read-only)
+                    # Windows shared locking (read-only) - use blocking read lock
                     import msvcrt
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_RLCK, 1)  # Use shared/read lock
                     try:
-                        msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
-                        data = json.load(f)
+                        json_data = f.read().decode('utf-8')
+                        data = json.loads(json_data)
                     finally:
+                        f.seek(0)  # Return to start position for unlock
                         msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
                 elif _HAS_FCNTL:
                     # Unix shared locking
                     fcntl.flock(f.fileno(), fcntl.LOCK_SH)
                     try:
-                        data = json.load(f)
+                        json_data = f.read().decode('utf-8')
+                        data = json.loads(json_data)
                     finally:
                         fcntl.flock(f.fileno(), fcntl.LOCK_UN)
                 else:
                     # No locking available - just read
-                    data = json.load(f)
+                    json_data = f.read().decode('utf-8')
+                    data = json.loads(json_data)
             
             session = UnifiedSession.from_dict(data)
             self._cache[session_id] = session
