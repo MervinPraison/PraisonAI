@@ -54,7 +54,7 @@ def test_conversation_compaction():
         long_messages.append({"role": "assistant", "content": f"This is a longer assistant response {i} providing detailed information and guidance"})
     
     # Test compaction
-    result, compaction_context = compactor.compact_conversation(
+    result, _compaction_context = compactor.compact_conversation(
         messages=long_messages,
         target_tokens=200,  # Small target to force compaction
         preserve_recent=3

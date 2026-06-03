@@ -6,6 +6,7 @@ Provides strategies for reducing context size when approaching limits.
 
 from typing import Dict, List, Any, Optional
 from abc import ABC, abstractmethod
+import logging
 from .models import ContextLedger, OptimizerStrategy, OptimizationResult
 from .tokens import estimate_messages_tokens
 
@@ -591,6 +592,11 @@ class ConversationOptimizer(BaseOptimizer):
         llm_summarize_fn: Optional[callable] = None,
         min_compaction_ratio: float = 0.3,
         analyzer_strategy: str = "hybrid",
+        # Accept additional kwargs from ContextManager but ignore them
+        protected_tools: Optional[List[str]] = None,
+        smart_tool_summarize: bool = True,
+        tool_summarize_limits: Optional[Dict[str, int]] = None,
+        **kwargs
     ):
         """
         Initialize conversation optimizer.
@@ -601,6 +607,10 @@ class ConversationOptimizer(BaseOptimizer):
             llm_summarize_fn: Optional LLM function for summarization
             min_compaction_ratio: Minimum compression ratio (0.3 = 30% savings)
             analyzer_strategy: Conversation analyzer strategy
+            protected_tools: (Ignored) For compatibility with ContextManager
+            smart_tool_summarize: (Ignored) For compatibility with ContextManager
+            tool_summarize_limits: (Ignored) For compatibility with ContextManager
+            **kwargs: Additional arguments (ignored)
         """
         self.preserve_recent = preserve_recent
         self.llm_analyze_fn = llm_analyze_fn
@@ -685,9 +695,9 @@ class ConversationOptimizer(BaseOptimizer):
                         messages_removed=context.original_message_count - context.compacted_message_count,
                         summary_added=True,
                     )
-            except Exception:
+            except Exception as e:
                 # Fall back to summarization if conversation compaction fails
-                pass
+                logging.debug(f"Conversation compaction failed, falling back to summarization: {e}")
         
         # Fallback to basic summarization
         summarizer = SummarizeOptimizer(

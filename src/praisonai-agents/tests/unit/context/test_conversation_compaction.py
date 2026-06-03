@@ -156,7 +156,7 @@ class TestConversationCompactor:
             {"role": "assistant", "content": "Short answer"},
         ]
         
-        result, context = compactor.compact_conversation(
+        result, _context = compactor.compact_conversation(
             messages=messages,
             target_tokens=50,  # Force compaction attempt
         )

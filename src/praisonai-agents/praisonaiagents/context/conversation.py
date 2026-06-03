@@ -12,6 +12,7 @@ Implementation follows AGENTS.md protocol-driven design:
 
 import re
 import hashlib
+import logging
 from typing import Dict, List, Any, Optional, Tuple, Set
 from dataclasses import dataclass
 
@@ -43,9 +44,9 @@ class HybridConversationAnalyzer:
         if self.llm_analyze_fn:
             try:
                 return self._llm_analysis(messages)
-            except Exception:
+            except Exception as e:
                 # Fall back to rule-based analysis
-                pass
+                logging.debug(f"LLM analysis failed, falling back to rule-based analysis: {e}")
         
         return self._rule_based_analysis(messages)
     
@@ -222,10 +223,12 @@ class HybridConversationAnalyzer:
                     conversation_tone=analysis.get("conversation_tone", "professional"),
                     original_message_count=len(messages),
                 )
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
                 # Fall back to rule-based if JSON parsing fails
-                pass
-        except Exception:
+                logging.debug(f"Failed to parse LLM response as JSON: {e}, response: {response[:100]}")
+        except Exception as e:
+            # Fall back to rule-based analysis if LLM call fails
+            logging.debug(f"LLM analysis error: {e}")
             pass
         
         # Fallback to rule-based analysis
