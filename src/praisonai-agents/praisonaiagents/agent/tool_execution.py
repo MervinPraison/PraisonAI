@@ -216,6 +216,28 @@ class ToolExecutionMixin:
                 if res.output and res.output.modified_data:
                     arguments.update(res.output.modified_data)
 
+            # Loop guard check - prevent tool execution loops with graduated response
+            if hasattr(self, '_loop_guard') and self._loop_guard:
+                from ..escalation.loop_guard import GuardAction
+                decision = self._loop_guard.check(function_name, arguments)
+                
+                if decision.action == GuardAction.WARN:
+                    # Inject warning into tool result so LLM sees guidance
+                    logging.warning(f"Loop guard warning for {function_name}: {decision.message}")
+                elif decision.action == GuardAction.BLOCK:
+                    # Block tool execution and return error message
+                    logging.warning(f"Loop guard blocked {function_name}: {decision.message}")
+                    return {"error": f"[loop-guard] {decision.message}", "loop_blocked": True}
+                elif decision.action == GuardAction.HALT:
+                    # Halt execution with exception
+                    from ..errors import ToolExecutionError
+                    raise ToolExecutionError(
+                        f"[loop-guard] {decision.message}",
+                        tool_name=function_name,
+                        agent_id=self.name,
+                        is_retryable=False
+                    )
+
             # C4 — optional tool-argument validation via ToolValidatorProtocol.
             # Zero overhead when not set. Users wire via `agent._tool_validator = MyValidator()`.
             _validator = getattr(self, '_tool_validator', None)
@@ -346,6 +368,15 @@ class ToolExecutionMixin:
                 is_error = isinstance(result, dict) and result.get('error')
                 if not is_error:
                     self._doom_loop_tracker.mark_progress(f"tool:{function_name}")
+            
+            # Record tool execution in loop guard
+            if hasattr(self, '_loop_guard') and self._loop_guard:
+                is_success = result is not None and not (isinstance(result, dict) and result.get('error'))
+                self._loop_guard.record(function_name, arguments, is_success)
+                # Handle warning injection for WARN decisions
+                decision = self._loop_guard.check(function_name, arguments) 
+                if decision.action.value == "warn" and isinstance(result, str):
+                    result = f"{result}\n\n[loop-guard] {decision.message}"
             
             # Increment per-turn tool count for no-tool-call detection
             self._autonomy_turn_tool_count = getattr(self, '_autonomy_turn_tool_count', 0) + 1

@@ -77,6 +77,10 @@ class UnifiedExecutionMixin:
         _trace_emitter = get_context_emitter()
         _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
         
+        # Reset loop guard for new chat turn (always-on protection)
+        if hasattr(self, '_loop_guard') and self._loop_guard:
+            self._loop_guard.reset_turn()
+        
         try:
             # CLI Backend routing - delegate entire turn if configured
             if hasattr(self, '_cli_backend') and self._cli_backend is not None:
