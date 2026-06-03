@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 
 class PluginRegistry(Generic[T]):
+    # Guards creation of per-subclass default-instance locks
+    _default_locks_guard = threading.Lock()
     """Generic plugin registry: builtins + entry points + runtime register().
     
     This replaces the singleton pattern with dependency injection while maintaining
@@ -268,8 +270,8 @@ class PluginRegistry(Generic[T]):
         
         # Get or create lock in subclass __dict__ (not shared across inheritance hierarchy)
         if lock_key not in cls.__dict__:
-            # Thread-safe initialization of the lock itself
-            with threading.Lock():
+            # Thread-safe initialization of the per-subclass lock itself
+            with PluginRegistry._default_locks_guard:
                 if lock_key not in cls.__dict__:
                     # Store directly in the class __dict__ to avoid inheritance sharing
                     setattr(cls, lock_key, threading.Lock())

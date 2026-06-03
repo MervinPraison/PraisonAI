@@ -127,7 +127,7 @@ class MySQLConversationStore(_SQLConversationStoreBase):
         """Get a connection from the pool."""
         return self._pool.get_connection()
     
-    def _put_conn(self, conn: Any) -> None:
+    def _put_conn(self, conn: Any, close: bool = False) -> None:
         """Return a connection to the pool."""
         conn.close()
     

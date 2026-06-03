@@ -48,8 +48,13 @@ class _SQLConversationStoreBase(ConversationStore):
         raise NotImplementedError
     
     @abstractmethod
-    def _put_conn(self, conn: Any) -> None:
-        """Return connection to pool or close it."""
+    def _put_conn(self, conn: Any, close: bool = False) -> None:
+        """Return connection to pool or close it.
+        
+        Args:
+            conn: Connection to return or close
+            close: If True, close connection instead of returning to pool
+        """
         raise NotImplementedError
     
     @abstractmethod
@@ -130,10 +135,26 @@ class _SQLConversationStoreBase(ConversationStore):
             f"ON {self.messages_table}(created_at DESC)",
         ]
     
+    def _decode_json_value(self, value: Any) -> Any:
+        """Decode JSON value, handling both string and already-decoded objects."""
+        if value is None:
+            return None
+        return json.loads(value) if isinstance(value, str) else value
+
     # =========================================================================
     # Initialization
     # =========================================================================
     
+    @property
+    def sessions_table(self) -> str:
+        """Get sessions table name with prefix."""
+        return f"{self.table_prefix}sessions"
+    
+    @property 
+    def messages_table(self) -> str:
+        """Get messages table name with prefix."""
+        return f"{self.table_prefix}messages"
+
     def __init__(
         self,
         table_prefix: str = "praison_",
@@ -154,8 +175,6 @@ class _SQLConversationStoreBase(ConversationStore):
         """
         validate_identifier(table_prefix, "table_prefix")
         self.table_prefix = table_prefix
-        self.sessions_table = f"{table_prefix}sessions"
-        self.messages_table = f"{table_prefix}messages"
         
         # Serverless retry configuration
         self._max_retries = max_retries
@@ -226,19 +245,24 @@ class _SQLConversationStoreBase(ConversationStore):
     def _run_with_conn(self, operation: Callable) -> Any:
         """Run operation with connection management."""
         conn = self._get_conn()
+        conn_broken = False
         try:
             result = operation(conn)
             # Commit if the connection supports it
             if hasattr(conn, 'commit'):
                 conn.commit()
             return result
+        except self._transient_errors:
+            # Mark connection as broken for transient errors
+            conn_broken = True
+            raise
         except Exception:
             # Rollback if the connection supports it
             if hasattr(conn, 'rollback'):
                 conn.rollback()
             raise
         finally:
-            self._put_conn(conn)
+            self._put_conn(conn, close=conn_broken)
     
     # =========================================================================
     # Session Operations
@@ -258,8 +282,8 @@ class _SQLConversationStoreBase(ConversationStore):
                 session.user_id,
                 session.agent_id, 
                 session.name,
-                json.dumps(session.state) if session.state else None,
-                json.dumps(session.metadata) if session.metadata else None,
+                json.dumps(session.state) if session.state is not None else None,
+                json.dumps(session.metadata) if session.metadata is not None else None,
                 session.created_at,
                 session.updated_at
             )
@@ -281,8 +305,8 @@ class _SQLConversationStoreBase(ConversationStore):
                 user_id=row['user_id'],
                 agent_id=row['agent_id'],
                 name=row['name'],
-                state=json.loads(row['state']) if row['state'] else None,
-                metadata=json.loads(row['metadata']) if row['metadata'] else None,
+                state=self._decode_json_value(row['state']),
+                metadata=self._decode_json_value(row['metadata']),
                 created_at=row['created_at'],
                 updated_at=row['updated_at']
             )
@@ -302,8 +326,8 @@ class _SQLConversationStoreBase(ConversationStore):
                 session.user_id,
                 session.agent_id,
                 session.name,
-                json.dumps(session.state) if session.state else None,
-                json.dumps(session.metadata) if session.metadata else None,
+                json.dumps(session.state) if session.state is not None else None,
+                json.dumps(session.metadata) if session.metadata is not None else None,
                 session.updated_at,
                 session.session_id
             )
@@ -334,6 +358,12 @@ class _SQLConversationStoreBase(ConversationStore):
             conditions = []
             params = []
             
+            # Validate and add pagination params
+            safe_limit = int(limit)
+            safe_offset = int(offset) 
+            if safe_limit < 0 or safe_offset < 0:
+                raise ValueError("limit and offset must be non-negative")
+            
             if user_id:
                 conditions.append(f"user_id = {self._param}")
                 params.append(user_id)
@@ -346,9 +376,9 @@ class _SQLConversationStoreBase(ConversationStore):
                 SELECT * FROM {self.sessions_table} 
                 {where_clause}
                 ORDER BY updated_at DESC
-                LIMIT {limit} OFFSET {offset}
+                LIMIT {self._param} OFFSET {self._param}
             """
-            return self._fetchall(conn, sql, tuple(params))
+            return self._fetchall(conn, sql, tuple(params + [safe_limit, safe_offset]))
         
         rows = self._execute_with_retry(self._run_with_conn, fetch_sessions)
         return [
@@ -357,8 +387,8 @@ class _SQLConversationStoreBase(ConversationStore):
                 user_id=row['user_id'],
                 agent_id=row['agent_id'],
                 name=row['name'],
-                state=json.loads(row['state']) if row['state'] else None,
-                metadata=json.loads(row['metadata']) if row['metadata'] else None,
+                state=self._decode_json_value(row['state']),
+                metadata=self._decode_json_value(row['metadata']),
                 created_at=row['created_at'],
                 updated_at=row['updated_at']
             )
@@ -384,9 +414,9 @@ class _SQLConversationStoreBase(ConversationStore):
                 message.session_id,
                 message.role,
                 message.content,
-                json.dumps(message.tool_calls) if message.tool_calls else None,
+                json.dumps(message.tool_calls) if message.tool_calls is not None else None,
                 message.tool_call_id,
-                json.dumps(message.metadata) if message.metadata else None,
+                json.dumps(message.metadata) if message.metadata is not None else None,
                 message.created_at
             )
             self._execute(conn, sql, params)
@@ -414,7 +444,14 @@ class _SQLConversationStoreBase(ConversationStore):
                 params.append(after)
             
             where_clause = " WHERE " + " AND ".join(conditions)
-            limit_clause = f" LIMIT {limit}" if limit else ""
+            if limit is not None:
+                safe_limit = int(limit)
+                if safe_limit < 0:
+                    raise ValueError("limit must be non-negative")
+                limit_clause = f" LIMIT {self._param}"
+                params.append(safe_limit)
+            else:
+                limit_clause = ""
             
             sql = f"""
                 SELECT * FROM {self.messages_table}
@@ -431,9 +468,9 @@ class _SQLConversationStoreBase(ConversationStore):
                 session_id=row['session_id'],
                 role=row['role'],
                 content=row['content'],
-                tool_calls=json.loads(row['tool_calls']) if row['tool_calls'] else None,
+                tool_calls=self._decode_json_value(row['tool_calls']),
                 tool_call_id=row['tool_call_id'],
-                metadata=json.loads(row['metadata']) if row['metadata'] else None,
+                metadata=self._decode_json_value(row['metadata']),
                 created_at=row['created_at']
             )
             for row in rows
@@ -446,6 +483,8 @@ class _SQLConversationStoreBase(ConversationStore):
                 sql = f"DELETE FROM {self.messages_table} WHERE session_id = {self._param}"
                 params = (session_id,)
             else:
+                if not message_ids:
+                    return 0
                 placeholders = ", ".join([self._param] * len(message_ids))
                 sql = f"""
                     DELETE FROM {self.messages_table} 

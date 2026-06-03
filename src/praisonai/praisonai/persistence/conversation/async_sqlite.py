@@ -50,23 +50,28 @@ class AsyncSQLiteConversationStore(AsyncConversationStore):
         self.table_prefix = table_prefix
         self._conn = None
         self._initialized = False
+        self._init_lock = asyncio.Lock()
     
     async def init(self):
         """Initialize connection and create tables."""
         if self._initialized:
             return
         
-        if aiosqlite is None:
-            raise ImportError(
-                "aiosqlite is required for async SQLite support. "
-                "Install with: pip install aiosqlite"
-            )
-        
-        self._aiosqlite = aiosqlite
-        self._conn = await aiosqlite.connect(self.path)
-        self._conn.row_factory = aiosqlite.Row
-        await self._create_tables()
-        self._initialized = True
+        async with self._init_lock:
+            if self._initialized:
+                return
+            
+            if aiosqlite is None:
+                raise ImportError(
+                    "aiosqlite is required for async SQLite support. "
+                    "Install with: pip install aiosqlite"
+                )
+            
+            self._aiosqlite = aiosqlite
+            self._conn = await aiosqlite.connect(self.path)
+            self._conn.row_factory = aiosqlite.Row
+            await self._create_tables()
+            self._initialized = True
     
     async def _create_tables(self):
         """Create required tables if they don't exist."""

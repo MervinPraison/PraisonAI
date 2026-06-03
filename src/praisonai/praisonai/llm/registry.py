@@ -403,6 +403,6 @@ def create_llm_provider(
 
 def _reset_default_registry() -> None:
     """Reset the default registry (mainly for testing)."""
-    # Clear the cached default instance
-    if hasattr(LLMProviderRegistry, '_default_instance'):
+    # Clear the cached default instance (stored on the subclass __dict__ by default())
+    if '_default_instance' in LLMProviderRegistry.__dict__:
         delattr(LLMProviderRegistry, '_default_instance')

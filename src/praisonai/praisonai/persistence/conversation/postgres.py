@@ -132,9 +132,8 @@ class PostgresConversationStore(_SQLConversationStoreBase):
     
     @property
     def _sessions_ddl(self) -> str:
-        """Override to create schema first."""
+        """Sessions table DDL without schema creation."""
         return f"""
-            CREATE SCHEMA IF NOT EXISTS {self.schema};
             CREATE TABLE IF NOT EXISTS {self.sessions_table} (
                 session_id  {self._id_type} PRIMARY KEY,
                 user_id     {self._id_type},
@@ -146,6 +145,22 @@ class PostgresConversationStore(_SQLConversationStoreBase):
                 updated_at  {self._float_type}
             )
         """
+    
+    def _create_tables(self) -> None:
+        """Create schema and tables."""
+        def create_schema_and_tables(conn):
+            # Create schema first (separate statement)
+            self._execute(conn, f"CREATE SCHEMA IF NOT EXISTS {self.schema}")
+            
+            # Create tables
+            self._execute(conn, self._sessions_ddl)
+            self._execute(conn, self._messages_ddl)
+            
+            # Create indexes
+            for index_sql in self._session_indexes + self._message_indexes:
+                self._execute(conn, index_sql)
+        
+        self._execute_with_retry(self._run_with_conn, create_schema_and_tables)
     
     def _connect(self) -> Any:
         """Establish PostgreSQL connection pool."""
@@ -177,9 +192,9 @@ class PostgresConversationStore(_SQLConversationStoreBase):
         """Get a connection from the pool."""
         return self._pool.getconn()
     
-    def _put_conn(self, conn: Any) -> None:
-        """Return a connection to the pool."""
-        self._pool.putconn(conn)
+    def _put_conn(self, conn: Any, close: bool = False) -> None:
+        """Return a connection to the pool or close it."""
+        self._pool.putconn(conn, close=close)
     
     def _execute(self, conn: Any, sql: str, params: tuple = ()) -> Any:
         """Execute SQL statement."""
