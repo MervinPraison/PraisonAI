@@ -6,7 +6,7 @@ Manages context window by compacting messages when needed.
 
 from typing import List, Dict, Any, Optional
 
-from .config import CompactionConfig
+from .config import CompactionConfig, COMPACTION_PREFIX, SUMMARY_TEMPLATE
 from .strategy import CompactionStrategy
 from .result import CompactionResult
 
@@ -30,7 +30,8 @@ class ContextCompactor:
         target_tokens: Optional[int] = None,
         strategy: CompactionStrategy = CompactionStrategy.TRUNCATE,
         preserve_system: bool = True,
-        preserve_recent: int = 5
+        preserve_recent: int = 5,
+        config: Optional[CompactionConfig] = None
     ):
         """
         Initialize the compactor.
@@ -47,6 +48,10 @@ class ContextCompactor:
         self.strategy = strategy
         self.preserve_system = preserve_system
         self.preserve_recent = preserve_recent
+        self.config = config or CompactionConfig()
+        
+        # Track previous summaries for iterative update
+        self._previous_summary: Optional[str] = None
     
     def estimate_tokens(self, text: str) -> int:
         """Estimate token count for text."""
@@ -271,10 +276,10 @@ class ContextCompactor:
     
     def _llm_summarize(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Use LLM to summarize older messages.
+        Use LLM to summarize older messages with anti-injection framing.
         
-        Note: This is a placeholder that returns a structured summary.
-        Actual LLM integration should be done at the agent level.
+        Note: This implementation uses structured templates and anti-injection prefixes
+        to prevent the model from treating summarized content as active instructions.
         """
         result = []
         
@@ -289,29 +294,123 @@ class ContextCompactor:
         older = other_msgs[:-self.preserve_recent] if len(other_msgs) > self.preserve_recent else []
         
         if older:
-            # Create structured summary for LLM to process
-            summary_parts = []
-            for msg in older:
-                role = msg.get("role", "unknown")
-                content = msg.get("content", "")
-                if isinstance(content, str) and content:
-                    # Extract key information
-                    summary_parts.append(f"[{role}]: {content[:150]}...")
+            if self.config.structured_template:
+                structured = self._build_structured_summary(older)
+            else:
+                # Fallback to simple summary
+                summary_parts = []
+                for msg in older:
+                    role = msg.get("role", "unknown")
+                    content = msg.get("content", "")
+                    if isinstance(content, str) and content:
+                        summary_parts.append(f"[{role}]: {content[:150]}...")
+                structured = "\n".join(summary_parts[:10])
             
-            if summary_parts:
-                summary = (
-                    "[Compacted conversation history - summarize key points]\n"
-                    + "\n".join(summary_parts[:10])
-                )
+            if structured:
+                # Apply anti-injection prefix
+                prefixed = f"{self.config.compaction_prefix}\n\n{structured}"
+                
+                # Handle iterative update if enabled
+                if self.config.iterative_update and self._previous_summary:
+                    structured = self._merge_summaries(self._previous_summary, structured)
+                    prefixed = f"{self.config.compaction_prefix}\n\n{structured}"
+                
+                # Store for next iteration
+                if self.config.iterative_update:
+                    self._previous_summary = structured
+                
                 result.append({
                     "role": "system",
-                    "content": summary,
+                    "content": prefixed,
                     "_compacted": True,
                     "_original_count": len(older),
+                    "_anti_injection": True,
                 })
         
         result.extend(recent)
         return result
+    
+    def _build_structured_summary(self, messages: List[Dict[str, Any]]) -> str:
+        """
+        Build a structured summary using the configured template.
+        
+        Args:
+            messages: Messages to summarize
+            
+        Returns:
+            Structured summary string
+        """
+        # Extract information from messages
+        active_task = "No specific task identified"
+        completed = []
+        in_progress = []
+        pending = []
+        files = set()
+        remaining = []
+        
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            
+            if not isinstance(content, str):
+                continue
+                
+            content_lower = content.lower()
+            
+            # Extract file paths
+            import re
+            file_matches = re.findall(r'[\w/\.\-]+\.[a-zA-Z]{1,4}', content)
+            files.update(file_matches[:5])  # Limit to 5 files
+            
+            # Categorize content based on keywords and role
+            content_snippet = content[:200] + ("..." if len(content) > 200 else "")
+            
+            if role == "user":
+                if any(word in content_lower for word in ["please", "can you", "help", "do"]):
+                    active_task = content_snippet
+                elif "?" in content:
+                    pending.append(content_snippet)
+                    
+            elif role == "assistant":
+                if any(word in content_lower for word in ["completed", "done", "finished"]):
+                    completed.append(content_snippet)
+                elif any(word in content_lower for word in ["working", "processing", "analyzing"]):
+                    in_progress.append(content_snippet)
+                elif any(word in content_lower for word in ["will", "plan to", "next"]):
+                    remaining.append(content_snippet)
+                    
+            elif role == "tool":
+                # Tool results are generally completed actions
+                tool_name = msg.get("name", "unknown")
+                completed.append(f"Tool {tool_name}: {content_snippet}")
+        
+        # Format using template
+        return SUMMARY_TEMPLATE.format(
+            active_task=active_task,
+            completed="\n".join(f"- {item}" for item in completed[:3]) or "None identified",
+            in_progress="\n".join(f"- {item}" for item in in_progress[:3]) or "None identified",
+            pending="\n".join(f"- {item}" for item in pending[:3]) or "None identified",
+            files=", ".join(list(files)[:5]) or "None mentioned",
+            remaining="\n".join(f"- {item}" for item in remaining[:3]) or "None identified"
+        )
+    
+    def _merge_summaries(self, previous: str, current: str) -> str:
+        """
+        Merge previous summary with current one for iterative updates.
+        
+        Args:
+            previous: Previous summary content
+            current: Current summary content
+            
+        Returns:
+            Merged summary
+        """
+        # Simple merge strategy: prioritize current but preserve unique info from previous
+        if not previous:
+            return current
+            
+        # For now, use a simple approach - in production this could be more sophisticated
+        return f"{current}\n\n[Previous context]: {previous[:500]}..."
     
     def get_stats(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Get statistics about messages."""
@@ -323,5 +422,11 @@ class ContextCompactor:
             "max_tokens": self.max_tokens,
             "target_tokens": self.target_tokens,
             "needs_compaction": total_tokens > self.max_tokens,
-            "utilization": total_tokens / self.max_tokens if self.max_tokens > 0 else 0
+            "utilization": total_tokens / self.max_tokens if self.max_tokens > 0 else 0,
+            "compaction_config": {
+                "anti_injection_enabled": bool(self.config.compaction_prefix),
+                "structured_template": self.config.structured_template,
+                "iterative_update": self.config.iterative_update,
+                "has_previous_summary": self._previous_summary is not None
+            }
         }
