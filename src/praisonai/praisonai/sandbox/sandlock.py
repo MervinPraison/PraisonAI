@@ -77,8 +77,9 @@ class SandlockSandbox:
             )
 
         # Fail loud if Landlock isn't supported on this kernel.  sandlock
-        # requires a minimum Landlock ABI (currently v6, Linux 6.7+); query
-        # it rather than hard-coding so we track the SDK's own requirement.
+        # requires a minimum Landlock ABI (currently v6, which shipped in
+        # Linux 6.12); query it rather than hard-coding so we track the SDK's
+        # own requirement.
         try:
             abi = self._sandlock.landlock_abi_version()
             min_abi = self._sandlock.min_landlock_abi()
@@ -88,10 +89,11 @@ class SandlockSandbox:
             ) from e
         if abi < min_abi:
             raise RuntimeError(
-                "SandlockSandbox requires Landlock support (Linux kernel "
-                f">= 6.7 with CONFIG_SECURITY_LANDLOCK=y and ABI >= {min_abi}). "
-                f"This kernel reports Landlock ABI version {abi}.  Use "
-                "SubprocessSandbox explicitly if weaker isolation is acceptable."
+                "SandlockSandbox requires Landlock ABI >= "
+                f"{min_abi} (Linux kernel >= 6.12 with "
+                "CONFIG_SECURITY_LANDLOCK=y).  This kernel reports Landlock "
+                f"ABI version {abi}.  Use SubprocessSandbox explicitly if "
+                "weaker isolation is acceptable."
             )
 
     @property
@@ -160,8 +162,12 @@ class SandlockSandbox:
         ]
         allowed_read_paths = [p for p in _candidate_read_paths if os.path.isdir(p)]
         if extra_readable:
+            # extra_readable may name individual files (e.g. the single script
+            # passed to execute_file), so accept any path that exists — not
+            # just directories.  Landlock grants read on a named file without
+            # exposing its siblings.
             allowed_read_paths.extend(
-                p for p in extra_readable if os.path.isdir(p)
+                p for p in extra_readable if os.path.exists(p)
             )
 
         allowed_write_paths = []
@@ -384,9 +390,9 @@ class SandlockSandbox:
         """Execute a file in the sandbox.
 
         The script is passed to the interpreter by path rather than slurped
-        through ``-c``, so large scripts don't hit ARG_MAX.  The file's
-        parent directory is added to the Landlock read allowlist for this
-        run so the sandboxed process can actually open it.
+        through ``-c``, so large scripts don't hit ARG_MAX.  Only the script
+        file itself — not its parent directory — is added to the Landlock
+        read allowlist, so sibling files on the host are never exposed.
         """
         if not self._is_running:
             await self.start()
@@ -412,7 +418,7 @@ class SandlockSandbox:
             limits=limits,
             env=env,
             working_dir=self._temp_dir,
-            extra_readable=[os.path.dirname(abs_path)],
+            extra_readable=[abs_path],
         )
     
     async def run_command(

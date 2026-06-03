@@ -117,9 +117,11 @@ class TestSandlockSandbox:
         """Test successful code execution with sandlock."""
         mock_sandlock = Mock()
         mock_result = Mock()
+        mock_result.success = True
         mock_result.exit_code = 0
-        mock_result.stdout = "Hello, World!"
-        mock_result.stderr = ""
+        # Real sandlock returns bytes; exercise the _decode() byte path.
+        mock_result.stdout = b"Hello, World!"
+        mock_result.stderr = b""
 
         mock_sandlock.Sandbox.return_value = Mock(run=Mock(return_value=mock_result))
         mock_sandlock.landlock_abi_version.return_value = 6  # >= 6, so available
