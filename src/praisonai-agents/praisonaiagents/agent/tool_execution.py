@@ -219,15 +219,16 @@ class ToolExecutionMixin:
             # Loop guard check - prevent tool execution loops with graduated response
             if hasattr(self, '_loop_guard') and self._loop_guard:
                 from ..escalation.loop_guard import GuardAction
-                decision = self._loop_guard.check(function_name, arguments)
+                decision = self._loop_guard.check(function_name, arguments, is_pre_execution=True)
                 
                 if decision.action == GuardAction.WARN:
                     # Inject warning into tool result so LLM sees guidance
                     logging.warning(f"Loop guard warning for {function_name}: {decision.message}")
                 elif decision.action == GuardAction.BLOCK:
-                    # Block tool execution and return error message
+                    # Block tool execution but continue through teardown path
                     logging.warning(f"Loop guard blocked {function_name}: {decision.message}")
-                    return {"error": f"[loop-guard] {decision.message}", "loop_blocked": True}
+                    # Set flag to use blocked result instead of executing tool
+                    blocked_result = {"error": f"[loop-guard] {decision.message}", "loop_blocked": True}
                 elif decision.action == GuardAction.HALT:
                     # Halt execution with exception
                     from ..errors import ToolExecutionError
@@ -253,32 +254,37 @@ class ToolExecutionMixin:
                 except Exception as _ve:  # noqa: BLE001 — never break tool exec on validator bug
                     logging.debug(f"Tool validator raised; skipping validation: {_ve}")
 
-            # P8/G11: Apply tool timeout if configured
-            tool_timeout = getattr(self, '_tool_timeout', None)
-            if tool_timeout and tool_timeout > 0:
-                # Use copy_context to preserve injection context in executor thread
-                ctx = contextvars.copy_context()
-                
-                def execute_with_context():
-                    with with_injection_context(state):
-                        return self._execute_tool_with_circuit_breaker(function_name, arguments)
-                
-                # Use reusable executor to prevent resource leaks
-                if not hasattr(self, '_tool_executor'):
-                    self._tool_executor = concurrent.futures.ThreadPoolExecutor(
-                        max_workers=2, thread_name_prefix=f"tool-{self.name}"
-                    )
-                
-                future = self._tool_executor.submit(ctx.run, execute_with_context)
-                try:
-                    result = future.result(timeout=tool_timeout)
-                except concurrent.futures.TimeoutError:
-                    future.cancel()
-                    logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
-                    result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True}
+            # Check if loop guard blocked execution
+            blocked_result = locals().get('blocked_result')
+            if blocked_result is not None:
+                result = blocked_result
             else:
-                with with_injection_context(state):
-                    result = self._execute_tool_with_circuit_breaker(function_name, arguments)
+                # P8/G11: Apply tool timeout if configured
+                tool_timeout = getattr(self, '_tool_timeout', None)
+                if tool_timeout and tool_timeout > 0:
+                    # Use copy_context to preserve injection context in executor thread
+                    ctx = contextvars.copy_context()
+                    
+                    def execute_with_context():
+                        with with_injection_context(state):
+                            return self._execute_tool_with_circuit_breaker(function_name, arguments)
+                    
+                    # Use reusable executor to prevent resource leaks
+                    if not hasattr(self, '_tool_executor'):
+                        self._tool_executor = concurrent.futures.ThreadPoolExecutor(
+                            max_workers=2, thread_name_prefix=f"tool-{self.name}"
+                        )
+                    
+                    future = self._tool_executor.submit(ctx.run, execute_with_context)
+                    try:
+                        result = future.result(timeout=tool_timeout)
+                    except concurrent.futures.TimeoutError:
+                        future.cancel()
+                        logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
+                        result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True}
+                else:
+                    with with_injection_context(state):
+                        result = self._execute_tool_with_circuit_breaker(function_name, arguments)
             
             # Apply tool output truncation to prevent context overflow
             # Uses context manager budget if enabled, otherwise applies default limit
@@ -374,9 +380,19 @@ class ToolExecutionMixin:
                 is_success = result is not None and not (isinstance(result, dict) and result.get('error'))
                 self._loop_guard.record(function_name, arguments, is_success)
                 # Handle warning injection for WARN decisions
-                decision = self._loop_guard.check(function_name, arguments) 
-                if decision.action.value == "warn" and isinstance(result, str):
-                    result = f"{result}\n\n[loop-guard] {decision.message}"
+                decision = self._loop_guard.check(function_name, arguments, is_pre_execution=False) 
+                if decision.action.value == "warn":
+                    if isinstance(result, str):
+                        result = f"{result}\n\n[loop-guard] {decision.message}"
+                    elif isinstance(result, dict):
+                        # Inject warning into dict results
+                        result["_loop_guard"] = {"message": decision.message, "action": decision.action.value}
+                    elif isinstance(result, list):
+                        # Inject warning into list results  
+                        result = {"value": result, "_loop_guard": {"message": decision.message, "action": decision.action.value}}
+                    else:
+                        # Wrap non-string/dict/list results to preserve original data plus warning
+                        result = {"value": result, "_loop_guard": {"message": decision.message, "action": decision.action.value}}
             
             # Increment per-turn tool count for no-tool-call detection
             self._autonomy_turn_tool_count = getattr(self, '_autonomy_turn_tool_count', 0) + 1
@@ -386,6 +402,10 @@ class ToolExecutionMixin:
             # Emit tool call end with error
             _duration_ms = (_time.time() - _tool_start_time) * 1000
             _trace_emitter.tool_call_end(self.name, function_name, None, _duration_ms, str(e))
+            
+            # Preserve existing ToolExecutionError unchanged to maintain loop guard HALT behavior
+            if isinstance(e, ToolExecutionError):
+                raise
             
             # Gap 3a fix: Wrap exceptions in ToolExecutionError for better observability
             is_retryable = not isinstance(e, (ValueError, TypeError, AttributeError))

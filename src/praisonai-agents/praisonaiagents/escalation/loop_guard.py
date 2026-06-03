@@ -6,7 +6,7 @@ standard agent.chat() path, extending the existing DoomLoopDetector infrastructu
 """
 
 from dataclasses import dataclass
-from typing import Dict, Any, Literal, Optional, Set
+from typing import Dict, Any, Optional, Set
 from enum import Enum
 import time
 
@@ -136,7 +136,7 @@ class LoopGuard:
     
     Example:
         guard = LoopGuard()
-        guard.record("read_file", {"path": "test.py"}, "content", True)
+        guard.record("read_file", {"path": "test.py"}, True)
         decision = guard.check("read_file", {"path": "test.py"})
         if decision.should_block():
             return {"error": decision.message}
@@ -171,7 +171,9 @@ class LoopGuard:
         """Reset tracking for a new chat turn."""
         self._turn_start_time = time.time()
         self._tool_counts.clear()
-        self._last_progress_count = len(self.detector._progress_markers)
+        # Reset the underlying DoomLoopDetector to clear cross-turn state
+        self.detector.start_session()
+        self._last_progress_count = 0
         
     def record(self, tool_name: str, args: Dict[str, Any], success: bool) -> None:
         """Record a tool execution for loop detection."""
@@ -193,13 +195,14 @@ class LoopGuard:
         # Track per-turn counts
         self._tool_counts[tool_name] = self._tool_counts.get(tool_name, 0) + 1
         
-    def check(self, tool_name: str, args: Dict[str, Any]) -> LoopGuardDecision:
+    def check(self, tool_name: str, args: Dict[str, Any], is_pre_execution: bool = True) -> LoopGuardDecision:
         """
         Check if tool execution should be allowed, warned, blocked, or halted.
         
         Args:
             tool_name: Name of the tool to execute
             args: Arguments for the tool
+            is_pre_execution: True for pre-execution checks, False for post-execution
             
         Returns:
             LoopGuardDecision with action and message
@@ -228,6 +231,15 @@ class LoopGuard:
         # Get current count for this tool
         current_count = self._tool_counts.get(tool_name, 0)
         
+        # For pre-execution checks, account for the pending execution
+        if is_pre_execution:
+            current_count += 1
+        
+        # Check for no-progress patterns first
+        no_progress_decision = self._check_no_progress()
+        if no_progress_decision and no_progress_decision.action != GuardAction.ALLOW:
+            return no_progress_decision
+            
         # Classify tool and apply appropriate thresholds
         if self._is_idempotent_tool(tool_name):
             return self._check_idempotent_tool(tool_name, current_count, args)
