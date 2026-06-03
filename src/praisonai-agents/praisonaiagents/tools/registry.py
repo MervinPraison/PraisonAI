@@ -59,23 +59,21 @@ class ToolEntry:
         """Get the tool schema, applying dynamic overrides if present."""
         # Get base schema
         if hasattr(self.tool, 'get_schema'):
-            # If the tool already handles schema overrides (like FunctionTool), 
-            # just use its get_schema() method and don't apply override again
-            return self.tool.get_schema()
+            base_schema = self.tool.get_schema()
         else:
             # For plain functions, generate schema and apply override if present
             from .decorator import get_tool_schema
             base_schema = get_tool_schema(self.tool)
-            
-            # Apply dynamic override if present
-            if self.schema_override is not None:
-                try:
-                    return self.schema_override(base_schema)
-                except Exception as e:
-                    logging.warning(f"Dynamic schema override failed for tool '{self.name}': {e}")
-                    return base_schema
-            
-            return base_schema
+
+        # Apply entry-level dynamic override if present
+        if self.schema_override is not None:
+            try:
+                return self.schema_override(base_schema)
+            except Exception as e:
+                logging.warning(f"Dynamic schema override failed for tool '{self.name}': {e}")
+                return base_schema
+
+        return base_schema
 
 
 class ToolRegistry:

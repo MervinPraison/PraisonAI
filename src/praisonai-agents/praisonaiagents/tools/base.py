@@ -18,6 +18,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Type, get_type_hints
 import inspect
 import logging
+import copy
 
 
 class ToolValidationError(Exception):
@@ -212,7 +213,7 @@ class BaseTool(ABC):
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": self.parameters
+                "parameters": copy.deepcopy(self.parameters)
             }
         }
         

@@ -27,6 +27,7 @@ Usage:
 import inspect
 import functools
 import logging
+import copy
 from typing import Any, Callable, Dict, Optional, Union, get_type_hints
 
 from .base import BaseTool
@@ -167,7 +168,7 @@ class FunctionTool(BaseTool):
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": self.parameters
+                "parameters": copy.deepcopy(self.parameters)
             }
         }
         
@@ -256,7 +257,7 @@ def tool(
         try:
             logging.debug(f"Attempting to import registry for tool {tool_instance.name}")
             from praisonaiagents.tools.registry import get_registry
-            logging.debug(f"Successfully imported get_registry")
+            logging.debug("Successfully imported get_registry")
             registry = get_registry()
             logging.debug(f"Got registry: {registry}, type: {type(registry)}")
             if registry:
