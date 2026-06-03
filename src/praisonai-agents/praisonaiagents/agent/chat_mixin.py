@@ -1039,7 +1039,7 @@ Your Goal: {self.goal}"""
             try:
                 # First attempt: try with streaming enabled for better user experience
                 stream_callback = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
-                final_response = self._execute_unified_chat_completion(
+                final_response = self._chat_completion_with_retry(
                     messages=messages,
                     temperature=temperature,
                     tools=formatted_tools,
@@ -1071,7 +1071,7 @@ Your Goal: {self.goal}"""
             # UNIFIED: Single protocol-driven dispatch path (fixes DRY violation)
             # All LLM providers now go through unified dispatcher for consistency and maintainability
             stream_callback = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
-            final_response = self._execute_unified_chat_completion(
+            final_response = self._chat_completion_with_retry(
                 messages=messages,
                 temperature=temperature,
                 tools=formatted_tools,
@@ -2590,7 +2590,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if self._using_custom_llm or self._openai_client is None:
                                 # For custom LLMs, we need to handle reflection differently
                                 # Use non-streaming to get complete JSON response
-                                reflection_response = self._chat_completion(messages, temperature=temperature, tools=None, stream=False, reasoning_steps=False, task_name=task_name, task_description=task_description, task_id=task_id)
+                                reflection_response = self._chat_completion_with_retry(messages, temperature=temperature, tools=None, stream=False, reasoning_steps=False, task_name=task_name, task_description=task_description, task_id=task_id)
                                 
                                 if not reflection_response or not reflection_response.choices:
                                     raise Exception("No response from reflection request")
@@ -4058,3 +4058,155 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 raise
             logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
             return False
+
+    def _chat_completion_with_retry(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
+        """
+        Wrapper for _chat_completion that adds jittered exponential backoff retry logic.
+        
+        This method wraps the main _chat_completion call and adds retry capability for 
+        transient failures like rate limits, network errors, and service outages.
+        """
+        retry_config = getattr(self, '_retry_config', None)
+        if not retry_config:
+            return self._execute_unified_chat_completion(messages, temperature, tools, stream, reasoning_steps, 
+                                       task_name, task_description, task_id, response_format,
+                                       stream_callback=stream_callback, emit_events=emit_events)
+        
+        from .retry_utils import jittered_backoff
+        from ..hooks import HookEvent, OnRetryInput
+        import time
+        
+        max_attempts = retry_config.max_retries + 1
+        
+        for attempt in range(max_attempts):
+            try:
+                # Call the underlying unified chat completion directly to avoid infinite recursion
+                return self._execute_unified_chat_completion(messages, temperature, tools, stream, reasoning_steps, 
+                                           task_name, task_description, task_id, response_format,
+                                           stream_callback=stream_callback, emit_events=emit_events)
+            
+            except Exception as e:
+                from ..errors import LLMError
+                
+                # Only retry LLMErrors that are marked as retryable
+                if not isinstance(e, LLMError) or not e.is_retryable:
+                    raise  # Re-raise non-retryable errors immediately
+                
+                # If this is the last attempt, re-raise the error
+                if attempt >= max_attempts - 1:
+                    raise
+                
+                # Calculate delay for this retry attempt
+                delay = jittered_backoff(
+                    attempt,
+                    base_delay=retry_config.base_delay,
+                    max_delay=retry_config.max_delay,
+                    jitter_ratio=retry_config.jitter_ratio,
+                )
+                
+                # Fire OnRetry hook with delay information
+                retry_input = OnRetryInput(
+                    session_id=getattr(self, '_session_id', 'default'),
+                    cwd=os.getcwd(),
+                    event_name=HookEvent.ON_RETRY,
+                    timestamp=str(time.time()),
+                    agent_name=self.name,
+                    retry_count=attempt + 1,
+                    max_retries=retry_config.max_retries,
+                    error_message=str(e),
+                    operation="llm_request",
+                    delay_seconds=delay,
+                    attempt=attempt
+                )
+                self._hook_runner.execute_sync(HookEvent.ON_RETRY, retry_input)
+                
+                # Log retry attempt (buffered to avoid spam during transient failures)
+                logger.debug(f"[{self.name}] Retry {attempt + 1}/{max_attempts} after {delay:.1f}s: {str(e)[:100]}")
+                
+                # Sleep with interrupt awareness
+                interrupt_fn = getattr(self, '_is_interrupted', lambda: False)
+                sleep_start = time.time()
+                while time.time() - sleep_start < delay:
+                    if interrupt_fn():
+                        break
+                    time.sleep(min(0.2, delay - (time.time() - sleep_start)))
+        
+        # This should never be reached, but just in case
+        raise RuntimeError("Retry loop completed without returning or raising an exception")
+
+    async def _achat_completion_with_retry(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
+        """
+        Async wrapper for _execute_unified_achat_completion that adds jittered exponential backoff retry logic.
+        
+        This method wraps the async chat completion call and adds retry capability for 
+        transient failures like rate limits, network errors, and service outages.
+        """
+        retry_config = getattr(self, '_retry_config', None)
+        if not retry_config:
+            return await self._execute_unified_achat_completion(
+                messages, temperature, tools, stream, reasoning_steps, 
+                task_name, task_description, task_id, response_format,
+                stream_callback=stream_callback, emit_events=emit_events
+            )
+        
+        from .retry_utils import jittered_backoff, interruptible_sleep
+        from ..hooks import HookEvent, OnRetryInput
+        import time
+        import asyncio
+        
+        max_attempts = retry_config.max_retries + 1
+        
+        for attempt in range(max_attempts):
+            try:
+                # Call the underlying unified chat completion directly to avoid infinite recursion
+                return await self._execute_unified_achat_completion(
+                    messages, temperature, tools, stream, reasoning_steps,
+                    task_name, task_description, task_id, response_format,
+                    stream_callback=stream_callback, emit_events=emit_events
+                )
+            
+            except Exception as e:
+                from ..errors import LLMError
+                
+                # Only retry LLMErrors that are marked as retryable
+                if not isinstance(e, LLMError) or not e.is_retryable:
+                    raise  # Re-raise non-retryable errors immediately
+                
+                # If this is the last attempt, re-raise the error
+                if attempt >= max_attempts - 1:
+                    raise
+                
+                # Calculate delay for this retry attempt
+                delay = jittered_backoff(
+                    attempt,
+                    base_delay=retry_config.base_delay,
+                    max_delay=retry_config.max_delay,
+                    jitter_ratio=retry_config.jitter_ratio,
+                )
+                
+                # Fire OnRetry hook with delay information
+                retry_input = OnRetryInput(
+                    session_id=getattr(self, '_session_id', 'default'),
+                    cwd=os.getcwd(),
+                    event_name=HookEvent.ON_RETRY,
+                    timestamp=str(time.time()),
+                    agent_name=self.name,
+                    retry_count=attempt + 1,
+                    max_retries=retry_config.max_retries,
+                    error_message=str(e),
+                    operation="llm_request",
+                    delay_seconds=delay,
+                    attempt=attempt
+                )
+                await self._hook_runner.execute_async(HookEvent.ON_RETRY, retry_input)
+                
+                # Log retry attempt
+                logger.debug(f"[{self.name}] Async retry {attempt + 1}/{max_attempts} after {delay:.1f}s: {str(e)[:100]}")
+                
+                # Async sleep with interrupt awareness using the helper
+                interrupt_fn = getattr(self, '_is_interrupted', lambda: False)
+                if not await interruptible_sleep(delay, interrupt_fn=interrupt_fn):
+                    raise RuntimeError("Agent interrupted during retry backoff")
+        
+        # This should never be reached, but just in case
+        raise RuntimeError("Async retry loop completed without returning or raising an exception")
