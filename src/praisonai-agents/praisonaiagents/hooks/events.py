@@ -185,14 +185,50 @@ class OnRetryInput(HookInput):
     retry_delay_seconds: float = 0.0  # Calculated delay before next retry
     operation: str = ""  # operation type: tool_call, llm_request, etc.
     
+    # Backward compatibility properties for deprecated field names
+    @property
+    def retry_count(self) -> int:
+        """Deprecated: Use 'attempt' instead."""
+        return self.attempt
+    
+    @retry_count.setter
+    def retry_count(self, value: int) -> None:
+        """Deprecated: Use 'attempt' instead."""
+        self.attempt = value
+    
+    @property
+    def max_retries(self) -> int:
+        """Deprecated: Use 'max_attempts' instead."""
+        return self.max_attempts
+    
+    @max_retries.setter
+    def max_retries(self, value: int) -> None:
+        """Deprecated: Use 'max_attempts' instead."""
+        self.max_attempts = value
+    
+    @property
+    def error_message(self) -> str:
+        """Deprecated: Use 'error' instead."""
+        return self.error
+    
+    @error_message.setter
+    def error_message(self, value: str) -> None:
+        """Deprecated: Use 'error' instead."""
+        self.error = value
+    
     def to_dict(self) -> Dict[str, Any]:
         base = super().to_dict()
         base.update({
+            # New field names
             "attempt": self.attempt,
             "max_attempts": self.max_attempts,
             "error": self.error,
             "retry_delay_seconds": self.retry_delay_seconds,
-            "operation": self.operation
+            "operation": self.operation,
+            # Legacy field names for backward compatibility
+            "retry_count": self.attempt,
+            "max_retries": self.max_attempts,
+            "error_message": self.error,
         })
         return base
 

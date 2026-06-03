@@ -63,22 +63,43 @@ def test_only_imports():
         config = ToolRetryConfig()
         
         # Test OnRetryInput import  
-        from praisonaiagents.hooks import OnRetryInput
-        retry_input = OnRetryInput()
+        from praisonaiagents.hooks import OnRetryInput, HookEvent
+        retry_input = OnRetryInput(
+            session_id="test",
+            cwd="/tmp", 
+            event_name=HookEvent.ON_RETRY,
+            timestamp="123456789",
+            agent_name="test_agent"
+        )
         
         print("✅ All imports successful!")
         return True
-    except Exception as e:
+    except (ImportError, ModuleNotFoundError) as e:
         print(f"❌ Import failed: {e}")
         return False
 
 
 if __name__ == "__main__":
     print("Testing ToolRetryConfig implementation...")
-    
-    # Run the faster import-only test first
-    if test_only_imports():
-        print("\n🎉 All tests passed! Tool retry functionality has been successfully implemented.")
-    else:
-        print("\n❌ Tests failed!")
+
+    checks = [
+        ("imports", test_only_imports),
+        ("tool_retry_config", test_tool_retry_config_import),
+        ("agent_with_retry_config", test_agent_with_retry_config),
+    ]
+
+    failed = []
+    for name, fn in checks:
+        try:
+            ok = fn()
+        except Exception as exc:
+            print(f"❌ {name} failed with exception: {exc}")
+            ok = False
+        if not ok:
+            failed.append(name)
+
+    if failed:
+        print(f"\n❌ Tests failed: {', '.join(failed)}")
         sys.exit(1)
+
+    print("\n🎉 All tests passed! Tool retry functionality has been successfully implemented.")

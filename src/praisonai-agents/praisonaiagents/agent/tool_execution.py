@@ -239,8 +239,9 @@ class ToolExecutionMixin:
                 ctx = contextvars.copy_context()
                 
                 def execute_with_context():
+                    timeout_deadline = _tool_start_time + tool_timeout
                     with with_injection_context(state):
-                        return self._execute_tool_with_retry_support(function_name, arguments, _tool_start_time)
+                        return self._execute_tool_with_retry_support(function_name, arguments, timeout_deadline)
                 
                 # Use reusable executor to prevent resource leaks
                 if not hasattr(self, '_tool_executor'):
@@ -257,7 +258,7 @@ class ToolExecutionMixin:
                     result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True}
             else:
                 with with_injection_context(state):
-                    result = self._execute_tool_with_retry_support(function_name, arguments, _tool_start_time)
+                    result = self._execute_tool_with_retry_support(function_name, arguments)
             
             # Apply tool output truncation to prevent context overflow
             # Uses context manager budget if enabled, otherwise applies default limit
@@ -644,13 +645,13 @@ class ToolExecutionMixin:
             logging.info(f"Using modified arguments: {arguments}")
         return None, arguments
 
-    def _execute_tool_with_retry_support(self, function_name, arguments, tool_start_time):
+    def _execute_tool_with_retry_support(self, function_name, arguments, timeout_deadline=None):
         """Execute tool with retry and exponential backoff for transient failures.
         
         Args:
             function_name: Name of the tool to execute
             arguments: Arguments for the tool
-            tool_start_time: Start time for tool execution timing
+            timeout_deadline: Optional absolute deadline (time.time()) to respect overall timeout
             
         Returns:
             Tool execution result
@@ -658,28 +659,71 @@ class ToolExecutionMixin:
         Raises:
             ToolExecutionError: If all retry attempts fail
         """
+        import time
+        
         # Get retry configuration
         retry_config = getattr(self, 'tool_retry_config', None)
         max_attempts = retry_config.max_attempts if retry_config else 1
         
         last_error = None
         for attempt in range(max_attempts):
+            # Check timeout before each attempt
+            if timeout_deadline and time.time() >= timeout_deadline:
+                raise ToolExecutionError(
+                    f"Tool '{function_name}' timed out before retry attempt {attempt + 1}",
+                    tool_name=function_name,
+                    agent_id=self.name,
+                    is_retryable=False,
+                )
+            
             try:
                 # Call the actual tool execution
                 result = self._execute_tool_with_circuit_breaker(function_name, arguments)
+                
+                # Check if result is an error dict that should be retried
+                if (isinstance(result, dict) and result.get("error") and 
+                    not result.get("approval_denied") and 
+                    not result.get("permission_denied") and 
+                    not result.get("approval_error")):
+                    
+                    # Convert error dict to exception so retry mechanism can handle it
+                    error_msg = result["error"]
+                    is_retryable = True
+                    
+                    # Determine error category from the error dict or message
+                    if result.get("circuit_open"):
+                        error_category = "circuit_breaker"
+                    elif 'timeout' in error_msg.lower():
+                        error_category = 'timeout'
+                    elif 'network' in error_msg.lower() or 'connection' in error_msg.lower():
+                        error_category = 'network'
+                    elif 'rate limit' in error_msg.lower() or 'too many requests' in error_msg.lower():
+                        error_category = 'rate_limit'
+                    else:
+                        error_category = 'tool'
+                    
+                    # Create ToolExecutionError to trigger retry logic
+                    raise ToolExecutionError(
+                        error_msg,
+                        tool_name=function_name,
+                        agent_id=self.name,
+                        is_retryable=is_retryable,
+                        error_category=error_category
+                    )
+                
                 return result
                 
             except Exception as e:
                 last_error = e
                 
-                # Determine if error is retryable
-                is_retryable = not isinstance(e, (ValueError, TypeError, AttributeError))
+                # Determine if error is retryable and get error category
                 if isinstance(e, ToolExecutionError):
                     # Already wrapped - use its retryable flag and error category
                     is_retryable = e.is_retryable
                     error_category = getattr(e, 'error_category', 'tool')
                 else:
-                    # Classify the error category for raw exceptions
+                    # For raw exceptions, determine retryability and classify error category
+                    is_retryable = not isinstance(e, (ValueError, TypeError, AttributeError))
                     if 'timeout' in str(e).lower():
                         error_category = 'timeout'
                     elif 'network' in str(e).lower() or 'connection' in str(e).lower():
@@ -739,6 +783,19 @@ class ToolExecutionMixin:
                 except Exception as hook_error:
                     # Don't fail retry on hook errors
                     logging.debug(f"ON_RETRY hook failed: {hook_error}")
+                
+                # Check if we have time left for the delay
+                if timeout_deadline:
+                    time_remaining = timeout_deadline - time.time()
+                    if time_remaining <= 0:
+                        raise ToolExecutionError(
+                            f"Tool '{function_name}' timed out before retry delay",
+                            tool_name=function_name,
+                            agent_id=self.name,
+                            is_retryable=False,
+                        )
+                    # Adjust delay if it would exceed the deadline
+                    delay = min(delay, time_remaining)
                 
                 # Wait before retry
                 time.sleep(delay)

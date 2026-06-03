@@ -2083,6 +2083,7 @@ Your Goal: {self.goal}
             'approval': getattr(self, '_approval_config', None),
             'learn': getattr(self, '_learn_config', None),
             'tool_search': getattr(self, '_tool_search_config', None),
+            'tool_retry_config': getattr(self, 'tool_retry_config', None),
             
             # Tool configuration
             'tool_timeout': getattr(self, '_tool_timeout', None),

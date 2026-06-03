@@ -1100,6 +1100,11 @@ class AutonomyLevel(str, Enum):
     FULL_AUTO = "full_auto"
 
 
+def _default_retryable_on() -> List[str]:
+    """Default error categories to retry on."""
+    return ["network", "timeout", "rate_limit"]
+
+
 @dataclass
 class ToolRetryConfig:
     """
@@ -1145,7 +1150,26 @@ class ToolRetryConfig:
     jitter: float = 0.1
     
     # Error categories to retry on (maps to ToolExecutionError.error_category)
-    retryable_on: List[str] = field(default_factory=lambda: ["network", "timeout", "rate_limit"])
+    retryable_on: List[str] = field(default_factory=_default_retryable_on)
+    
+    def __post_init__(self) -> None:
+        """Validate retry configuration parameters."""
+        if self.max_attempts < 1:
+            raise ValueError("ToolRetryConfig.max_attempts must be at least 1")
+        if self.initial_delay_s <= 0:
+            raise ValueError("ToolRetryConfig.initial_delay_s must be positive")
+        if self.max_delay_s <= 0:
+            raise ValueError("ToolRetryConfig.max_delay_s must be positive")
+        if self.max_delay_s < self.initial_delay_s:
+            raise ValueError("ToolRetryConfig.max_delay_s must be >= initial_delay_s")
+        if self.factor < 1.0:
+            raise ValueError("ToolRetryConfig.factor must be >= 1.0 for exponential backoff")
+        if not (0.0 <= self.jitter <= 1.0):
+            raise ValueError("ToolRetryConfig.jitter must be between 0.0 and 1.0")
+        if not self.retryable_on:
+            raise ValueError("ToolRetryConfig.retryable_on must not be empty")
+        if not all(isinstance(cat, str) and cat.strip() for cat in self.retryable_on):
+            raise ValueError("ToolRetryConfig.retryable_on must contain non-empty strings")
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
