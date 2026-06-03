@@ -1280,6 +1280,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             return messages, None
         
         try:
+            # Call on_pre_compress hook before context management
+            if self._memory_instance and hasattr(self._memory_instance, 'on_pre_compress'):
+                try:
+                    summary = self._memory_instance.on_pre_compress(messages)
+                    if summary:
+                        logging.debug(f"[{self.name}] Memory provider extracted: {summary[:100]}...")
+                except Exception as e:
+                    logging.warning(f"[{self.name}] Memory on_pre_compress hook failed: {e}")
+            
             # Process through context manager
             result = self.context_manager.process(
                 messages=messages,

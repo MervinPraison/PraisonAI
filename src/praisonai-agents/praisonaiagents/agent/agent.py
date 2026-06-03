@@ -4257,6 +4257,14 @@ Summary:"""
         if not self._memory_instance:
             return
         
+        # Call on_memory_write hook before storing
+        if hasattr(self._memory_instance, 'on_memory_write'):
+            try:
+                metadata = kwargs.get('metadata', None)
+                self._memory_instance.on_memory_write("add", memory_type, content, metadata)
+            except Exception as e:
+                logging.warning(f"[{self.name}] Memory on_memory_write hook failed: {e}")
+        
         # Use protocol names first (store_*), fallback to legacy names (add_*)
         if memory_type == "short_term":
             if hasattr(self._memory_instance, 'store_short_term'):
