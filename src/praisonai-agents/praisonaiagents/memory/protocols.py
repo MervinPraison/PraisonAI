@@ -327,7 +327,16 @@ class AgentMemoryProtocol(Protocol):
         """Save a conversation session to memory."""
         ...
 
-    # ── New optional lifecycle hooks (default no-op) ──────────────────────
+
+@runtime_checkable
+class AgentMemoryLifecycleProtocol(Protocol):
+    """
+    Optional protocol for memory lifecycle hooks.
+    
+    Memory providers can implement these hooks to respond to agent lifecycle
+    events like context compression, session changes, and delegation.
+    All hooks are optional and have no-op defaults.
+    """
 
     def on_pre_compress(self, messages: List[Dict[str, Any]]) -> str:
         """Called before context compaction discards messages.
@@ -357,6 +366,9 @@ class AgentMemoryProtocol(Protocol):
         ``reset=True`` indicates a genuinely new conversation; ``False`` means
         a continuation lineage (post-compression rotation). Providers should
         update internal caches and route future writes to ``new_session_id``.
+        
+        NOTE: This hook is currently defined but not called anywhere in the 
+        codebase. Call sites need to be implemented for session rotation.
         
         Args:
             new_session_id: The new session identifier
@@ -406,6 +418,90 @@ class AgentMemoryProtocol(Protocol):
         """
         pass
 
+    # ── Async lifecycle hooks (for async contexts) ─────────────────────────
+
+    async def aon_pre_compress(self, messages: List[Dict[str, Any]]) -> str:
+        """Async version of on_pre_compress for async agent contexts.
+        
+        Called before context compaction discards messages in async flows.
+        Implementations should extract and persist any facts worth preserving
+        from ``messages``. The return value is a short text summary that the
+        compactor MAY include in the structured summary it generates.
+        
+        Args:
+            messages: List of message dictionaries about to be discarded
+            
+        Returns:
+            Short text summary of extracted facts (optional)
+        """
+        return ""
+
+    async def aon_session_switch(
+        self,
+        new_session_id: str,
+        *,
+        parent_session_id: str = "",
+        reset: bool = False,
+    ) -> None:
+        """Async version of on_session_switch for async agent contexts.
+
+        Called when the active session ID changes in async flows.
+        ``reset=True`` indicates a genuinely new conversation; ``False`` means
+        a continuation lineage (post-compression rotation). Providers should
+        update internal caches and route future writes to ``new_session_id``.
+        
+        Args:
+            new_session_id: The new session identifier
+            parent_session_id: The previous session identifier
+            reset: Whether this is a fresh conversation (True) or continuation (False)
+        """
+        pass
+
+    async def aon_memory_write(
+        self,
+        action: str,          # "add" | "replace" | "remove"
+        target: str,          # "short_term" | "long_term" | "entity"
+        content: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Async version of on_memory_write for async agent contexts.
+
+        Called when auto_memory or store_learning writes to built-in memory
+        in async flows. Allows external providers to mirror built-in memory 
+        writes for cross-system consistency.
+        
+        Args:
+            action: The type of operation ("add", "replace", "remove")
+            target: The memory type being written to
+            content: The content being stored
+            metadata: Optional metadata for the memory entry
+        """
+        pass
+
+    async def aon_delegation(
+        self,
+        task: str,
+        result: str,
+        *,
+        agent_name: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Async version of on_delegation for async agent contexts.
+
+        Called on the parent agent after a subagent completes a delegated task
+        in async flows. Allows memory backends to incorporate subagent work 
+        into the parent's knowledge store without waiting for the parent to 
+        explicitly call store_*.
+        
+        Args:
+            task: Description of the delegated task
+            result: Result returned by the subagent
+            agent_name: Name of the agent that performed the task
+            metadata: Optional metadata about the delegation
+        """
+        pass
+
+
 
 __all__ = [
     'MemoryProtocol',
@@ -415,5 +511,6 @@ __all__ = [
     'AsyncMemoryProtocol',
     'EntityMemoryProtocol',
     'AgentMemoryProtocol',
+    'AgentMemoryLifecycleProtocol',
 ]
 
