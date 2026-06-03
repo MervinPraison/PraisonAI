@@ -803,36 +803,92 @@ Your Goal: {self.goal}"""
                 response_content=str(e),  # Include error for context replay
             )
             
-            # Classify and raise structured error with improved transient failure detection
+            # Use structured error classification for intelligent recovery routing
+            from ..llm.error_classifier import classify_llm_error
+            from ..llm.retry_utils import jittered_backoff
+            import asyncio
+            import time
+            
             model_name = self.llm if isinstance(self.llm, str) else "unknown"
             session_id = getattr(self, '_session_id', 'unknown')
             
-            # Check for retryable errors (rate limits, transient network issues, provider errors)
-            retryable_indicators = [
-                "rate limit", "429", "too many requests",
-                "timeout", "connection reset", "connection error", "socket error",
-                "500", "502", "503", "504", "service unavailable", "internal server error",
-                "dns", "network", "connection refused"
-            ]
+            # Determine provider from model name or use default
+            provider = "openai"  # Default assumption
+            if "claude" in model_name.lower() or "anthropic" in model_name.lower():
+                provider = "anthropic"
+            elif "azure" in model_name.lower():
+                provider = "azure"
             
-            # Check for non-retryable errors (auth issues)
-            auth_indicators = ["401", "403", "authentication", "unauthorized", "invalid_api_key"]
+            # Get token counts for context-aware classification
+            prompt_tokens = 0
+            context_length = 0
+            try:
+                from ..context.tokens import estimate_messages_tokens
+                prompt_tokens = estimate_messages_tokens(messages)
+                context_length = prompt_tokens
+            except Exception:
+                pass  # Token estimation failed, continue without counts
             
-            if any(phrase in error_str.lower() for phrase in retryable_indicators):
-                is_retryable = True
-            elif any(phrase in error_str.lower() for phrase in auth_indicators):
-                is_retryable = False
-            else:
-                # Default to retryable for unknown errors to be more resilient
-                is_retryable = True
+            # Classify error with structured recovery hints
+            classification = classify_llm_error(
+                e,
+                provider=provider,
+                model=model_name,
+                prompt_tokens=prompt_tokens,
+                context_length=context_length,
+            )
             
-            # Create LLMError with contextual metadata
+            # Execute recovery actions based on classification
+            if classification.should_compress_context and self.context_manager:
+                try:
+                    from ..context.budgeter import get_model_limit
+                    model_limit = get_model_limit(model_name)
+                    target = int(model_limit * 0.7)  # Target 70% of limit for safety
+                    
+                    # Apply emergency truncation
+                    truncated_messages = self.context_manager.emergency_truncate(messages, target)
+                    
+                    logging.info(f"[{self.name}] {classification.user_message}")
+                    
+                    # Retry with compressed context (recursive call with depth limit)
+                    if _retry_depth < 2:
+                        return self._chat_completion(
+                            truncated_messages, temperature, tools, stream, 
+                            reasoning_steps, task_name, task_description, task_id, response_format, 
+                            _retry_depth=_retry_depth + 1
+                        )
+                except Exception as compression_error:
+                    logging.error(f"[{self.name}] Context compression failed: {compression_error}")
+            
+            if classification.should_rotate_credential:
+                # TODO: Implement credential rotation when available
+                logging.warning(f"[{self.name}] {classification.user_message} (credential rotation not yet implemented)")
+            
+            if classification.should_fallback_model:
+                # TODO: Implement model fallback when available
+                logging.warning(f"[{self.name}] {classification.user_message} (model fallback not yet implemented)")
+            
+            if classification.is_retryable and classification.backoff_seconds > 0:
+                if _retry_depth < 2:  # Limit retry attempts
+                    logging.info(f"[{self.name}] {classification.user_message} (waiting {classification.backoff_seconds:.1f}s)")
+                    time.sleep(classification.backoff_seconds)
+                    return self._chat_completion(
+                        messages, temperature, tools, stream, 
+                        reasoning_steps, task_name, task_description, task_id, response_format, 
+                        _retry_depth=_retry_depth + 1
+                    )
+            
+            # Create LLMError with classification context
             error = LLMError(
                 str(e),
                 model_name=model_name,
                 agent_id=self.name,
-                is_retryable=is_retryable,
-                context={"session_id": session_id},
+                is_retryable=classification.is_retryable,
+                context={
+                    "session_id": session_id,
+                    "error_category": classification.error_category,
+                    "user_message": classification.user_message,
+                },
             )
             
             # Call error hook if available for error interception

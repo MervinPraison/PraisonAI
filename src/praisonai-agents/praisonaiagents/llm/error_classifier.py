@@ -3,16 +3,22 @@ Error Classification - Multi-category error classifier for intelligent retry log
 
 Extends the existing single-category rate limit detection with comprehensive
 error classification for better handling of different failure modes.
+
+Provides both legacy API (classify_error) and new structured classification
+(classify_llm_error) with explicit recovery routing hints.
 """
 
 import re
 import random
+from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, Tuple, List, Optional
 
 __all__ = [
     "ErrorCategory",
+    "LLMErrorClassification", 
     "classify_error", 
+    "classify_llm_error",
     "should_retry", 
     "get_retry_delay",
     "extract_retry_after",
@@ -28,6 +34,23 @@ class ErrorCategory(str, Enum):
     INVALID_REQUEST = "invalid_request" # Malformed request, permanent
     TRANSIENT = "transient"            # Network/server issues, temporary
     PERMANENT = "permanent"            # Unrecoverable error
+
+
+@dataclass
+class LLMErrorClassification:
+    """
+    Structured result of LLM error classification with explicit recovery hints.
+    
+    This replaces the simple `is_retryable: bool` with actionable recovery routing
+    that allows the agent to take specific recovery actions beyond simple retry.
+    """
+    error_category: str           # "rate_limit" | "context_overflow" | "auth" | "overloaded" | ...
+    is_retryable: bool
+    should_compress_context: bool # True on context overflow → trigger compaction then retry
+    should_rotate_credential: bool
+    should_fallback_model: bool   # True when primary model is unavailable
+    backoff_seconds: float        # 0 = no wait; >0 = jittered delay before retry
+    user_message: str             # Human-readable hint for the end user
 
 
 # Error patterns for classification (case-insensitive)
@@ -96,6 +119,149 @@ _ERROR_PATTERNS: Dict[ErrorCategory, List[str]] = {
         r"retry.?after",
     ],
 }
+
+
+def classify_llm_error(
+    exc: Exception,
+    *,
+    provider: str,
+    model: str,
+    prompt_tokens: int = 0,
+    context_length: int = 0,
+) -> LLMErrorClassification:
+    """
+    Classify an LLM error and return structured recovery hints.
+    
+    This is the enhanced error classifier that provides explicit recovery routing
+    beyond simple retry/no-retry decisions.
+    
+    Args:
+        exc: The original exception from the LLM API call
+        provider: LLM provider name (e.g., "openai", "anthropic", "azure")
+        model: Model name (e.g., "gpt-4", "claude-3-sonnet")
+        prompt_tokens: Current prompt token count
+        context_length: Current context window usage
+        
+    Returns:
+        LLMErrorClassification with specific recovery routing
+    """
+    from .retry_utils import jittered_backoff
+    
+    error_str = str(exc).lower()
+    
+    # Use existing classification as base
+    category = classify_error(exc)
+    
+    # Rate limit classification
+    if category == ErrorCategory.RATE_LIMIT:
+        retry_after = extract_retry_after(exc)
+        backoff_time = retry_after if retry_after else _calculate_rate_limit_backoff(error_str, provider)
+        
+        return LLMErrorClassification(
+            error_category="rate_limit",
+            is_retryable=True,
+            should_compress_context=False,
+            should_rotate_credential=False,
+            should_fallback_model=False,
+            backoff_seconds=backoff_time,
+            user_message=f"Rate limit exceeded for {provider}. Retrying with exponential backoff.",
+        )
+    
+    # Context overflow classification  
+    if category == ErrorCategory.CONTEXT_LIMIT:
+        return LLMErrorClassification(
+            error_category="context_overflow",
+            is_retryable=True,
+            should_compress_context=True,
+            should_rotate_credential=False,
+            should_fallback_model=False,
+            backoff_seconds=0.0,
+            user_message=f"Context window exceeded for {model}. Compressing context and retrying.",
+        )
+    
+    # Authentication/authorization errors
+    if category == ErrorCategory.AUTH:
+        return LLMErrorClassification(
+            error_category="auth",
+            is_retryable=True,  # Can retry with credential rotation
+            should_compress_context=False,
+            should_rotate_credential=True,
+            should_fallback_model=False,
+            backoff_seconds=1.0,
+            user_message=f"Authentication failed for {provider}. Trying alternate credentials.",
+        )
+    
+    # Transient service errors (map to overloaded category for consistency with issue)
+    if category == ErrorCategory.TRANSIENT:
+        return LLMErrorClassification(
+            error_category="overloaded",
+            is_retryable=True,
+            should_compress_context=False,
+            should_rotate_credential=False,
+            should_fallback_model=True,
+            backoff_seconds=_calculate_service_backoff(error_str),
+            user_message=f"Service {provider} temporarily unavailable. Falling back to alternate model.",
+        )
+    
+    # Invalid request errors (generally not retryable)
+    if category == ErrorCategory.INVALID_REQUEST:
+        return LLMErrorClassification(
+            error_category="model_error",
+            is_retryable=False,
+            should_compress_context=False,
+            should_rotate_credential=False,
+            should_fallback_model=False,
+            backoff_seconds=0.0,
+            user_message=f"Model {model} returned an error. Check your request parameters.",
+        )
+    
+    # Permanent errors
+    if category == ErrorCategory.PERMANENT:
+        return LLMErrorClassification(
+            error_category="permanent",
+            is_retryable=False,
+            should_compress_context=False,
+            should_rotate_credential=False,
+            should_fallback_model=False,
+            backoff_seconds=0.0,
+            user_message="Permanent error occurred. Cannot retry.",
+        )
+    
+    # Unknown errors - default to retryable with minimal backoff
+    return LLMErrorClassification(
+        error_category="unknown",
+        is_retryable=True,
+        should_compress_context=False,
+        should_rotate_credential=False,
+        should_fallback_model=False,
+        backoff_seconds=jittered_backoff(1, base=2.0),
+        user_message="Unknown error occurred. Retrying with backoff.",
+    )
+
+
+def _calculate_rate_limit_backoff(error_str: str, provider: str) -> float:
+    """Extract or calculate appropriate backoff time for rate limits."""
+    # Provider-specific defaults
+    if provider == "openai":
+        return 60.0  # OpenAI rate limits are typically per minute
+    elif provider == "anthropic":
+        return 20.0  # Anthropic rate limits are often shorter
+    elif provider == "azure":
+        return 45.0  # Azure varies by deployment
+    
+    # Default backoff
+    return 30.0
+
+
+def _calculate_service_backoff(error_str: str) -> float:
+    """Calculate backoff time for service unavailable errors."""
+    # Look for any suggested retry time in error message
+    retry_match = re.search(r'retry[:\s]+(\d+)', error_str)
+    if retry_match:
+        return min(float(retry_match.group(1)), 120.0)  # Cap at 2 minutes
+    
+    # Default service unavailable backoff
+    return 15.0
 
 
 def classify_error(error: Exception) -> ErrorCategory:
