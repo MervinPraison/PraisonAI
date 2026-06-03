@@ -380,6 +380,7 @@ _LAZY_IMPORTS = {
     'CachingConfig': ('praisonaiagents.config.feature_configs', 'CachingConfig'),
     'HooksConfig': ('praisonaiagents.config.feature_configs', 'HooksConfig'),
     'SkillsConfig': ('praisonaiagents.config.feature_configs', 'SkillsConfig'),
+    'ToolRetryConfig': ('praisonaiagents.config.feature_configs', 'ToolRetryConfig'),
     'AutonomyConfig': ('praisonaiagents.agent.autonomy', 'AutonomyConfig'),
     'EscalationStage': ('praisonaiagents.escalation.types', 'EscalationStage'),
     'EscalationPipeline': ('praisonaiagents.escalation.pipeline', 'EscalationPipeline'),
