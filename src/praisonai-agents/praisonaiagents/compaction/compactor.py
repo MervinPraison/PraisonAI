@@ -4,6 +4,7 @@ Context Compactor for PraisonAI Agents.
 Manages context window by compacting messages when needed.
 """
 
+import re
 from typing import List, Dict, Any, Optional
 
 from .config import CompactionConfig, COMPACTION_PREFIX, SUMMARY_TEMPLATE
@@ -42,13 +43,24 @@ class ContextCompactor:
             strategy: Compaction strategy to use
             preserve_system: Keep system messages
             preserve_recent: Number of recent messages to preserve
+            config: Optional CompactionConfig to override defaults
         """
-        self.max_tokens = max_tokens
-        self.target_tokens = target_tokens or int(max_tokens * 0.75)
-        self.strategy = strategy
-        self.preserve_system = preserve_system
-        self.preserve_recent = preserve_recent
+        # Initialize config first
         self.config = config or CompactionConfig()
+        
+        # Use config values if config provided, otherwise use constructor args
+        if config is not None:
+            self.max_tokens = config.max_tokens
+            self.target_tokens = config.target_tokens
+            self.preserve_system = config.preserve_system
+            self.preserve_recent = config.preserve_recent
+        else:
+            self.max_tokens = max_tokens
+            self.target_tokens = target_tokens or int(max_tokens * 0.75)
+            self.preserve_system = preserve_system
+            self.preserve_recent = preserve_recent
+            
+        self.strategy = strategy
         
         # Track previous summaries for iterative update
         self._previous_summary: Optional[str] = None
@@ -283,8 +295,11 @@ class ContextCompactor:
         """
         result = []
         
-        # Keep system messages
-        system_msgs = [m for m in messages if m.get("role") == "system"]
+        # Keep system messages (excluding previous compacted summaries)
+        system_msgs = [
+            m for m in messages 
+            if m.get("role") == "system" and not m.get("_compacted")
+        ]
         other_msgs = [m for m in messages if m.get("role") != "system"]
         
         result.extend(system_msgs)
@@ -358,7 +373,6 @@ class ContextCompactor:
             content_lower = content.lower()
             
             # Extract file paths
-            import re
             file_matches = re.findall(r'[\w/\.\-]+\.[a-zA-Z]{1,4}', content)
             files.update(file_matches[:5])  # Limit to 5 files
             
@@ -366,7 +380,7 @@ class ContextCompactor:
             content_snippet = content[:200] + ("..." if len(content) > 200 else "")
             
             if role == "user":
-                if any(word in content_lower for word in ["please", "can you", "help", "do"]):
+                if any(word in content_lower for word in ["please", "can you", "help"]) or re.search(r'\bdo\b', content_lower):
                     active_task = content_snippet
                 elif "?" in content:
                     pending.append(content_snippet)
@@ -409,8 +423,13 @@ class ContextCompactor:
         if not previous:
             return current
             
-        # For now, use a simple approach - in production this could be more sophisticated
-        return f"{current}\n\n[Previous context]: {previous[:500]}..."
+        # Preserve context but avoid excessive growth
+        MAX_PREVIOUS_LENGTH = 500
+        if len(previous) > MAX_PREVIOUS_LENGTH:
+            truncated_previous = previous[:MAX_PREVIOUS_LENGTH]
+            return f"{current}\n\n[Previous context]: {truncated_previous}..."
+        else:
+            return f"{current}\n\n[Previous context]: {previous}"
     
     def get_stats(self, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Get statistics about messages."""
