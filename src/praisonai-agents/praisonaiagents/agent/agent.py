@@ -7,6 +7,7 @@ import asyncio
 import contextlib
 import threading
 import concurrent.futures
+import random
 from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Generator
 from collections import OrderedDict
 import inspect
@@ -4973,6 +4974,19 @@ Answer:"""
             retry_count += 1
             logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {error}")
             
+            # Add exponential backoff delay to avoid hammering the LLM
+            execution_config = getattr(self, 'execution_config', None)
+            if execution_config is not None:
+                delay = execution_config.retry_initial_delay * (execution_config.retry_backoff_factor ** (retry_count - 1))
+                jitter = random.uniform(0, execution_config.retry_jitter * delay)
+                total_delay = delay + jitter
+            else:
+                # Fall back to simple backoff if no execution config
+                total_delay = 1.0 * (2.0 ** (retry_count - 1))
+            
+            logging.info(f"Agent {self.name}: Waiting {total_delay:.2f}s before guardrail retry")
+            time.sleep(total_delay)
+            
             # Regenerate response for retry
             try:
                 retry_prompt = f"{prompt}\n\nNote: Previous response failed validation due to: {error}. Please provide an improved response."
@@ -5009,6 +5023,19 @@ Answer:"""
             
             retry_count += 1
             logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {error}")
+            
+            # Add exponential backoff delay to avoid hammering the LLM
+            execution_config = getattr(self, 'execution_config', None)
+            if execution_config is not None:
+                delay = execution_config.retry_initial_delay * (execution_config.retry_backoff_factor ** (retry_count - 1))
+                jitter = random.uniform(0, execution_config.retry_jitter * delay)
+                total_delay = delay + jitter
+            else:
+                # Fall back to simple backoff if no execution config
+                total_delay = 1.0 * (2.0 ** (retry_count - 1))
+            
+            logging.info(f"Agent {self.name}: Waiting {total_delay:.2f}s before guardrail retry")
+            await asyncio.sleep(total_delay)
             
             # Regenerate response for retry (async version)
             try:
