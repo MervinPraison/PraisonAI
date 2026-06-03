@@ -29,7 +29,7 @@ class BackoffPolicy:
     """Exponential backoff policy for tool retries."""
     
     @staticmethod
-    def delay(attempt: int, initial_delay: float, backoff_factor: float, jitter: float) -> float:
+    def delay(attempt: int, initial_delay: float, backoff_factor: float, jitter: float, max_delay: float = 60.0) -> float:
         """Calculate delay for a retry attempt.
         
         Args:
@@ -37,11 +37,14 @@ class BackoffPolicy:
             initial_delay: Initial delay in seconds
             backoff_factor: Exponential backoff multiplier
             jitter: Fraction of base delay to add as random jitter
+            max_delay: Maximum delay to cap exponential growth
             
         Returns:
             Delay in seconds
         """
         base = initial_delay * (backoff_factor ** (attempt - 1))
+        # Cap the base delay to prevent excessively long waits
+        base = min(base, max_delay)
         jitter_amount = random.uniform(0, jitter * base)
         return base + jitter_amount
 
