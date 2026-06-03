@@ -2085,6 +2085,9 @@ Your Goal: {self.goal}
             'tool_timeout': getattr(self, '_tool_timeout', None),
             'parallel_tool_calls': getattr(self, 'parallel_tool_calls', False),
             
+            # Retry configuration
+            'retry': getattr(self, '_retry_config', None),
+            
             # CLI backend
             'cli_backend': getattr(self, '_cli_backend', None),
             

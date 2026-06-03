@@ -625,7 +625,7 @@ Your Goal: {self.goal}"""
             try:
                 # First attempt: try with streaming enabled for better user experience
                 stream_callback = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
-                final_response = self._execute_unified_chat_completion(
+                final_response = self._chat_completion_with_retry(
                     messages=messages,
                     temperature=temperature,
                     tools=formatted_tools,
@@ -657,7 +657,7 @@ Your Goal: {self.goal}"""
             # UNIFIED: Single protocol-driven dispatch path (fixes DRY violation)
             # All LLM providers now go through unified dispatcher for consistency and maintainability
             stream_callback = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
-            final_response = self._execute_unified_chat_completion(
+            final_response = self._chat_completion_with_retry(
                 messages=messages,
                 temperature=temperature,
                 tools=formatted_tools,
@@ -2292,7 +2292,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             response_format = self._build_response_format(schema_model)
                         
                         # Use composition instead of runtime class mutation for safety
-                        response = await self._execute_unified_achat_completion(
+                        response = await self._achat_completion_with_retry(
                             messages=messages,
                             temperature=temperature,
                             tools=formatted_tools,
@@ -2464,7 +2464,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         {"role": "user", "content": "Now regenerate your response using the reflection you made"}
                                     ]
                                     
-                                    new_response = await self._execute_unified_achat_completion(
+                                    new_response = await self._achat_completion_with_retry(
                                         messages=regenerate_messages,
                                         temperature=temperature,
                                         tools=formatted_tools,
@@ -3169,8 +3169,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         for attempt in range(max_attempts):
             try:
                 # Call the original chat completion method
-                return self._chat_completion(messages, temperature, tools, stream, reasoning_steps, 
-                                           task_name, task_description, task_id, response_format, _retry_depth=1)
+                return self._chat_completion(
+                    messages,
+                    temperature,
+                    tools,
+                    stream,
+                    reasoning_steps,
+                    task_name,
+                    task_description,
+                    task_id,
+                    response_format,
+                )
             
             except Exception as e:
                 from ..errors import LLMError
@@ -3210,13 +3219,102 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # Log retry attempt (buffered to avoid spam during transient failures)
                 logging.debug(f"[{self.name}] Retry {attempt + 1}/{max_attempts} after {delay:.1f}s: {str(e)[:100]}")
                 
-                # Sleep with interrupt awareness
+                # Sleep with interrupt awareness - make interruption terminal
                 interrupt_fn = getattr(self, '_is_interrupted', lambda: False)
                 sleep_start = time.time()
                 while time.time() - sleep_start < delay:
                     if interrupt_fn():
-                        break
+                        # Interruption is terminal - stop retrying
+                        raise RuntimeError("Agent interrupted during retry backoff")
                     time.sleep(min(0.2, delay - (time.time() - sleep_start)))
         
         # This should never be reached, but just in case
         raise RuntimeError("Retry loop completed without returning or raising an exception")
+    
+    async def _achat_completion_with_retry(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None):
+        """
+        Async wrapper for chat completion that adds jittered exponential backoff retry logic.
+        
+        This method wraps async chat completion calls and adds retry capability for 
+        transient failures like rate limits, network errors, and service outages.
+        """
+        retry_config = getattr(self, '_retry_config', None)
+        if not retry_config:
+            return await self._execute_unified_achat_completion(messages, temperature, tools, stream, reasoning_steps, 
+                                       task_name, task_description, task_id, response_format)
+        
+        from .retry_utils import jittered_backoff
+        from ..hooks import HookEvent, OnRetryInput
+        import time
+        import asyncio
+        
+        max_attempts = retry_config.max_retries + 1
+        
+        for attempt in range(max_attempts):
+            try:
+                # Call the original async chat completion method
+                return await self._execute_unified_achat_completion(
+                    messages,
+                    temperature,
+                    tools,
+                    stream,
+                    reasoning_steps,
+                    task_name,
+                    task_description,
+                    task_id,
+                    response_format,
+                )
+            
+            except Exception as e:
+                from ..errors import LLMError
+                
+                # Only retry LLMErrors that are marked as retryable
+                if not isinstance(e, LLMError) or not e.is_retryable:
+                    raise  # Re-raise non-retryable errors immediately
+                
+                # If this is the last attempt, re-raise the error
+                if attempt >= max_attempts - 1:
+                    raise
+                
+                # Calculate delay for this retry attempt
+                delay = jittered_backoff(
+                    attempt,
+                    base_delay=retry_config.base_delay,
+                    max_delay=retry_config.max_delay,
+                    jitter_ratio=retry_config.jitter_ratio,
+                )
+                
+                # Fire OnRetry hook with delay information
+                retry_input = OnRetryInput(
+                    session_id=getattr(self, '_session_id', 'default'),
+                    cwd=os.getcwd(),
+                    event_name=HookEvent.ON_RETRY,
+                    timestamp=str(time.time()),
+                    agent_name=self.name,
+                    retry_count=attempt + 1,
+                    max_retries=retry_config.max_retries,
+                    error_message=str(e),
+                    operation="async_llm_request",
+                    delay_seconds=delay,
+                    attempt=attempt
+                )
+                await self._hook_runner.execute_async(HookEvent.ON_RETRY, retry_input)
+                
+                # Log retry attempt (buffered to avoid spam during transient failures)
+                logging.debug(f"[{self.name}] Async retry {attempt + 1}/{max_attempts} after {delay:.1f}s: {str(e)[:100]}")
+                
+                # Async sleep with interrupt awareness - make interruption terminal
+                interrupt_fn = getattr(self, '_is_interrupted', lambda: False)
+                elapsed = 0.0
+                check_interval = 0.2
+                while elapsed < delay:
+                    if interrupt_fn():
+                        # Interruption is terminal - stop retrying
+                        raise RuntimeError("Agent interrupted during retry backoff")
+                    
+                    sleep_time = min(check_interval, delay - elapsed)
+                    await asyncio.sleep(sleep_time)
+                    elapsed += sleep_time
+        
+        # This should never be reached, but just in case
+        raise RuntimeError("Async retry loop completed without returning or raising an exception")
