@@ -803,7 +803,7 @@ class AgentTeam(SpawnAnnounceProtocol):
         self._completion_callbacks: Dict[str, Callable[[SubAgentCompletionEvent], Any]] = {}
         self._completion_events: List[SubAgentCompletionEvent] = []
         self._event_bus: Optional[EventBus] = None
-        self._spawn_lock = threading.Lock()  # Thread-safe spawn operations
+        self._spawn_lock = threading.RLock()  # Thread-safe spawn operations (reentrant)
         self._team_id = str(uuid.uuid4())  # Unique team identifier
         
         # Check for manager_llm in environment variable if not provided
@@ -2755,9 +2755,13 @@ class AgentTeam(SpawnAnnounceProtocol):
         completion_callback: Optional[Callable[[SubAgentCompletionEvent], Any]] = None,
         metadata: Optional[Dict[str, Any]] = None
     ) -> SpawnedSubAgent:
-        """Spawn a sub-agent for non-blocking execution.
+        """Spawn a sub-agent for non-blocking execution (sync version).
         
         Implements the SpawnAnnounceProtocol for efficient parallel sub-agent workflows.
+        Uses threading.Thread for background execution.
+        
+        Note: For async contexts, use aspawn_sub_agent() which uses asyncio primitives.
+        This method is safe to call from sync contexts only.
         """
         with self._spawn_lock:
             # Create unique IDs
@@ -2833,7 +2837,10 @@ class AgentTeam(SpawnAnnounceProtocol):
         error: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None
     ) -> None:
-        """Announce sub-agent completion via event bus."""
+        """Announce sub-agent completion via event bus (sync version).
+        
+        Note: For async contexts, use aannounce_completion() to avoid blocking the event loop.
+        """
         with self._spawn_lock:
             # Create completion event
             completion_event = SubAgentCompletionEvent(
@@ -2881,7 +2888,11 @@ class AgentTeam(SpawnAnnounceProtocol):
         """Wait for sub-agent completions (optional blocking method)."""
         import time as time_module
         start_time = time_module.time()
-        target_agents = agent_ids or list(self._spawned_agents.keys())
+        
+        # Read target agents inside lock to avoid race condition
+        with self._spawn_lock:
+            target_agents = agent_ids or list(self._spawned_agents.keys())
+        
         completed_agents = set()
         
         while True:
@@ -2939,6 +2950,206 @@ class AgentTeam(SpawnAnnounceProtocol):
                 del self._spawned_agents[agent_id]
             if agent_id in self._completion_callbacks:
                 del self._completion_callbacks[agent_id]
+
+    # Async variants for asyncio-based orchestration (per AGENTS.md guidelines)
+    
+    async def aspawn_sub_agent(
+        self,
+        agent: Agent,
+        task: Any,
+        completion_callback: Optional[Callable[[SubAgentCompletionEvent], Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> SpawnedSubAgent:
+        """Async version of spawn_sub_agent using asyncio primitives."""
+        import asyncio
+        
+        # Use asyncio lock for async coordination
+        if not hasattr(self, '_async_spawn_lock'):
+            self._async_spawn_lock = asyncio.Lock()
+        
+        async with self._async_spawn_lock:
+            # Create unique IDs
+            agent_id = f"{self._team_id}_{str(uuid.uuid4())[:8]}"
+            task_id = f"task_{str(uuid.uuid4())[:8]}"
+            
+            # Ensure event bus is initialized
+            if self._event_bus is None:
+                self._event_bus = EventBus()
+                # Subscribe to completion events for this team
+                self._event_bus.subscribe(
+                    self._handle_sub_agent_completion, 
+                    [EventType.SUBAGENT_COMPLETED.value, EventType.SUBAGENT_ERROR.value]
+                )
+            
+            # Create spawned agent record
+            spawned = SpawnedSubAgent(
+                agent_id=agent_id,
+                task_id=task_id,
+                agent=agent,
+                task=task,
+                spawn_time=time.time(),
+                parent_id=self._team_id,
+                metadata=metadata or {}
+            )
+            
+            # Store spawn record and callback
+            self._spawned_agents[agent_id] = spawned
+            if completion_callback:
+                self._completion_callbacks[agent_id] = completion_callback
+            
+            # Publish spawn event
+            if self._event_bus:
+                self._event_bus.publish(
+                    EventType.SUBAGENT_SPAWNED,
+                    {
+                        "agent_id": agent_id,
+                        "task_id": task_id,
+                        "parent_id": self._team_id,
+                        "spawn_time": spawned.spawn_time,
+                        "metadata": spawned.metadata
+                    }
+                )
+        
+        # Execute sub-agent asynchronously using asyncio.create_task
+        async def _aexecute_sub_agent():
+            try:
+                # Use agent's async start method
+                result = await agent.astart(str(task))
+                await self.aannounce_completion(agent_id, task_id, result, success=True)
+            except Exception as e:
+                logger.warning(f"Sub-agent {agent_id} failed: {e}")
+                await self.aannounce_completion(agent_id, task_id, None, success=False, error=str(e))
+        
+        # Create task for background execution
+        asyncio.create_task(_aexecute_sub_agent())
+        
+        logger.debug(f"Async spawned sub-agent {agent_id} for task {task_id}")
+        return spawned
+
+    async def aannounce_completion(
+        self,
+        agent_id: str,
+        task_id: str,
+        result: Any,
+        success: bool = True,
+        error: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Async version of announce_completion."""
+        import asyncio
+        
+        if not hasattr(self, '_async_spawn_lock'):
+            self._async_spawn_lock = asyncio.Lock()
+        
+        async with self._async_spawn_lock:
+            # Create completion event
+            completion_event = SubAgentCompletionEvent(
+                agent_id=agent_id,
+                task_id=task_id,
+                result=result,
+                success=success,
+                error=error,
+                parent_id=self._team_id,
+                metadata=metadata or {}
+            )
+            
+            # Store the completion event
+            self._completion_events.append(completion_event)
+            
+            # Publish completion event via event bus (use async if available)
+            if self._event_bus:
+                event_type = EventType.SUBAGENT_COMPLETED.value if success else EventType.SUBAGENT_ERROR.value
+                if hasattr(self._event_bus, 'publish_async'):
+                    await self._event_bus.publish_async(
+                        event_type,
+                        {
+                            "agent_id": agent_id,
+                            "task_id": task_id,
+                            "parent_id": self._team_id,
+                            "result": result,
+                            "success": success,
+                            "error": error,
+                            "completion_time": completion_event.completion_time,
+                            "metadata": completion_event.metadata
+                        }
+                    )
+                else:
+                    # Fallback to sync publish
+                    self._event_bus.publish(
+                        event_type,
+                        {
+                            "agent_id": agent_id,
+                            "task_id": task_id,
+                            "parent_id": self._team_id,
+                            "result": result,
+                            "success": success,
+                            "error": error,
+                            "completion_time": completion_event.completion_time,
+                            "metadata": completion_event.metadata
+                        }
+                    )
+            
+            logger.debug(f"Async announced completion for sub-agent {agent_id}: {'success' if success else 'error'}")
+
+    async def await_for_completions(
+        self,
+        timeout: Optional[float] = None,
+        agent_ids: Optional[List[str]] = None
+    ) -> List[SubAgentCompletionEvent]:
+        """Async, event-driven version of wait_for_completions."""
+        import asyncio
+        
+        # Read target agents inside lock to avoid race condition
+        if not hasattr(self, '_async_spawn_lock'):
+            self._async_spawn_lock = asyncio.Lock()
+        
+        async with self._async_spawn_lock:
+            target_agents = agent_ids or list(self._spawned_agents.keys())
+        
+        if not target_agents:
+            # Return existing completions for the requested agents
+            async with self._async_spawn_lock:
+                return [e for e in self._completion_events if not agent_ids or e.agent_id in agent_ids]
+        
+        # Use asyncio.Event for efficient waiting
+        completion_event = asyncio.Event()
+        completed_agents = set()
+        
+        def check_completions():
+            for event in self._completion_events:
+                if event.agent_id in target_agents:
+                    completed_agents.add(event.agent_id)
+            
+            if completed_agents >= set(target_agents):
+                completion_event.set()
+        
+        # Check initial state
+        check_completions()
+        
+        if not completion_event.is_set():
+            # Subscribe to completion events temporarily
+            def completion_handler(event):
+                if event.data.get("parent_id") == self._team_id:
+                    check_completions()
+            
+            subscriber_id = self._event_bus.subscribe(
+                completion_handler,
+                [EventType.SUBAGENT_COMPLETED.value, EventType.SUBAGENT_ERROR.value]
+            ) if self._event_bus else None
+            
+            try:
+                # Wait for completion or timeout
+                await asyncio.wait_for(completion_event.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                pass
+            finally:
+                # Unsubscribe
+                if subscriber_id and self._event_bus:
+                    self._event_bus.unsubscribe(subscriber_id)
+        
+        # Return completed events
+        async with self._async_spawn_lock:
+            return [e for e in self._completion_events if e.agent_id in target_agents]
 
     def __enter__(self):
         """Context manager entry point for resource management."""
