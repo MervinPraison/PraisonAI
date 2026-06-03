@@ -256,6 +256,9 @@ if TYPE_CHECKING:
 # Import structured error from central errors module
 from ..errors import BudgetExceededError
 
+# Import retry configuration
+from .retry_utils import RetryBackoffConfig
+
 class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin, AsyncMemoryMixin):
     # Class-level counter for generating unique display names for nameless agents
     _agent_counter = 0
@@ -558,6 +561,7 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
         interrupt_controller: Optional['InterruptController'] = None,  # G2: Cooperative cancellation
         tool_search: Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']] = False,  # Progressive tool disclosure
         sandbox: Optional[Union[bool, 'SandboxConfig']] = None,  # Sandbox for safe code execution
+        retry: Optional[Union[bool, Dict[str, Any], 'RetryBackoffConfig']] = None,  # Retry configuration with exponential backoff
     ):
         """Initialize an Agent instance.
 
@@ -751,6 +755,8 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
         if autonomy is None:
             # AutonomyConfig is in agent/autonomy.py - use dict for config defaults
             autonomy = apply_config_defaults("autonomy", autonomy, None)
+        if retry is None:
+            retry = apply_config_defaults("retry", retry, RetryBackoffConfig)
 
         # ============================================================
         # DEPRECATION WARNINGS for params consolidated into configs
@@ -1874,6 +1880,16 @@ Your Goal: {self.goal}
         
         # P8/G11: Tool timeout - prevent slow tools from blocking
         self._tool_timeout = tool_timeout
+        
+        # Retry configuration with jittered exponential backoff
+        if isinstance(retry, RetryBackoffConfig):
+            self._retry_config = retry
+        elif isinstance(retry, dict):
+            self._retry_config = RetryBackoffConfig(**retry)
+        elif retry is True:
+            self._retry_config = RetryBackoffConfig()  # Use defaults
+        else:
+            self._retry_config = None  # No retry configuration
         
         # Cache for system prompts and formatted tools with eager thread-safe lock
         # Use OrderedDict for LRU behavior

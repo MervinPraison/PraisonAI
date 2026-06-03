@@ -1801,7 +1801,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     agent_tools=agent_tools
                                 )
 
-                        response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=stream, task_name=task_name, task_description=task_description, task_id=task_id, response_format=response_format)
+                        response = self._chat_completion_with_retry(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=stream, task_name=task_name, task_description=task_description, task_id=task_id, response_format=response_format)
                         if not response:
                             # Rollback chat history on response failure
                             self._truncate_chat_history(chat_history_length)
@@ -1876,7 +1876,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if self._using_custom_llm or self._openai_client is None:
                                 # For custom LLMs, we need to handle reflection differently
                                 # Use non-streaming to get complete JSON response
-                                reflection_response = self._chat_completion(messages, temperature=temperature, tools=None, stream=False, reasoning_steps=False, task_name=task_name, task_description=task_description, task_id=task_id)
+                                reflection_response = self._chat_completion_with_retry(messages, temperature=temperature, tools=None, stream=False, reasoning_steps=False, task_name=task_name, task_description=task_description, task_id=task_id)
                                 
                                 if not reflection_response or not reflection_response.choices:
                                     raise Exception("No response from reflection request")
@@ -1956,7 +1956,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             messages.append({"role": "user", "content": "Now regenerate your response using the reflection you made"})
                             # For custom LLMs during reflection, always use non-streaming to ensure complete responses
                             use_stream = self.stream if not self._using_custom_llm else False
-                            response = self._chat_completion(messages, temperature=temperature, tools=None, stream=use_stream, task_name=task_name, task_description=task_description, task_id=task_id)
+                            response = self._chat_completion_with_retry(messages, temperature=temperature, tools=None, stream=use_stream, task_name=task_name, task_description=task_description, task_id=task_id)
                             content = response.choices[0].message.content
                             response_text = content.strip() if content else ""
                             reflection_count += 1
@@ -3147,3 +3147,76 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             response = self.chat(prompt, **kwargs)
             if response:
                 yield response
+
+    def _chat_completion_with_retry(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None):
+        """
+        Wrapper for _chat_completion that adds jittered exponential backoff retry logic.
+        
+        This method wraps the main _chat_completion call and adds retry capability for 
+        transient failures like rate limits, network errors, and service outages.
+        """
+        retry_config = getattr(self, '_retry_config', None)
+        if not retry_config:
+            return self._chat_completion(messages, temperature, tools, stream, reasoning_steps, 
+                                       task_name, task_description, task_id, response_format)
+        
+        from .retry_utils import jittered_backoff
+        from ..hooks import HookEvent, OnRetryInput
+        import time
+        
+        max_attempts = retry_config.max_retries + 1
+        
+        for attempt in range(max_attempts):
+            try:
+                # Call the original chat completion method
+                return self._chat_completion(messages, temperature, tools, stream, reasoning_steps, 
+                                           task_name, task_description, task_id, response_format, _retry_depth=1)
+            
+            except Exception as e:
+                from ..errors import LLMError
+                
+                # Only retry LLMErrors that are marked as retryable
+                if not isinstance(e, LLMError) or not e.is_retryable:
+                    raise  # Re-raise non-retryable errors immediately
+                
+                # If this is the last attempt, re-raise the error
+                if attempt >= max_attempts - 1:
+                    raise
+                
+                # Calculate delay for this retry attempt
+                delay = jittered_backoff(
+                    attempt,
+                    base_delay=retry_config.base_delay,
+                    max_delay=retry_config.max_delay,
+                    jitter_ratio=retry_config.jitter_ratio,
+                )
+                
+                # Fire OnRetry hook with delay information
+                retry_input = OnRetryInput(
+                    session_id=getattr(self, '_session_id', 'default'),
+                    cwd=os.getcwd(),
+                    event_name=HookEvent.ON_RETRY,
+                    timestamp=str(time.time()),
+                    agent_name=self.name,
+                    retry_count=attempt + 1,
+                    max_retries=retry_config.max_retries,
+                    error_message=str(e),
+                    operation="llm_request",
+                    delay_seconds=delay,
+                    attempt=attempt
+                )
+                self._hook_runner.execute_sync(HookEvent.ON_RETRY, retry_input)
+                
+                # Log retry attempt (buffered to avoid spam during transient failures)
+                logging.debug(f"[{self.name}] Retry {attempt + 1}/{max_attempts} after {delay:.1f}s: {str(e)[:100]}")
+                
+                # Sleep with interrupt awareness
+                interrupt_fn = getattr(self, '_is_interrupted', lambda: False)
+                sleep_start = time.time()
+                while time.time() - sleep_start < delay:
+                    if interrupt_fn():
+                        break
+                    time.sleep(min(0.2, delay - (time.time() - sleep_start)))
+        
+        # This should never be reached, but just in case
+        raise RuntimeError("Retry loop completed without returning or raising an exception")
