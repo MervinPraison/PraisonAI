@@ -4,11 +4,14 @@ import json
 import logging
 import threading
 from praisonaiagents._logging import get_logger
-from typing import Any, Dict, Optional, List, Tuple
+from typing import Any, Dict, Optional, List, Tuple, Callable
 from ..main import display_error, TaskOutput
 from ..agent.agent import Agent
 from ..task.task import Task
 from ..process.process import Process
+from .protocols import SpawnAnnounceProtocol, SpawnedSubAgent, SubAgentCompletionEvent
+from ..bus.bus import EventBus
+from ..bus.event import EventType, Event
 import asyncio
 import uuid
 from enum import Enum
@@ -520,7 +523,7 @@ def process_task_context(context_item, verbose=0, user_id=None):
     else:
         return str(context_item)  # Fallback for unknown types
 
-class AgentTeam:
+class AgentTeam(SpawnAnnounceProtocol):
     """
     Multi-agent coordinator that manages and delegates work to multiple agents.
     
@@ -794,6 +797,14 @@ class AgentTeam:
         self.on_task_start = _on_task_start
         self.on_task_complete = _on_task_complete
         self.variables = variables if variables else {}
+        
+        # Spawn-announce pattern support
+        self._spawned_agents: Dict[str, SpawnedSubAgent] = {}
+        self._completion_callbacks: Dict[str, Callable[[SubAgentCompletionEvent], Any]] = {}
+        self._completion_events: List[SubAgentCompletionEvent] = []
+        self._event_bus: Optional[EventBus] = None
+        self._spawn_lock = threading.Lock()  # Thread-safe spawn operations
+        self._team_id = str(uuid.uuid4())  # Unique team identifier
         
         # Check for manager_llm in environment variable if not provided
         self.manager_llm = manager_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o-mini')
@@ -2735,6 +2746,199 @@ class AgentTeam:
                     logger.debug("Closed context manager resources")
             except Exception as e:
                 logger.warning(f"Context manager cleanup failed: {e}")
+
+    # Spawn-Announce Protocol Implementation
+    def spawn_sub_agent(
+        self,
+        agent: Agent,
+        task: Any,
+        completion_callback: Optional[Callable[[SubAgentCompletionEvent], Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> SpawnedSubAgent:
+        """Spawn a sub-agent for non-blocking execution.
+        
+        Implements the SpawnAnnounceProtocol for efficient parallel sub-agent workflows.
+        """
+        with self._spawn_lock:
+            # Create unique IDs
+            agent_id = f"{self._team_id}_{str(uuid.uuid4())[:8]}"
+            task_id = f"task_{str(uuid.uuid4())[:8]}"
+            
+            # Ensure event bus is initialized
+            if self._event_bus is None:
+                self._event_bus = EventBus()
+                # Subscribe to completion events for this team
+                self._event_bus.subscribe(
+                    self._handle_sub_agent_completion, 
+                    [EventType.SUBAGENT_COMPLETED.value, EventType.SUBAGENT_ERROR.value]
+                )
+            
+            # Create spawned agent record
+            spawned = SpawnedSubAgent(
+                agent_id=agent_id,
+                task_id=task_id,
+                agent=agent,
+                task=task,
+                spawn_time=time.time(),
+                parent_id=self._team_id,
+                metadata=metadata or {}
+            )
+            
+            # Store spawn record and callback
+            self._spawned_agents[agent_id] = spawned
+            if completion_callback:
+                self._completion_callbacks[agent_id] = completion_callback
+            
+            # Publish spawn event
+            self._event_bus.publish(
+                EventType.SUBAGENT_SPAWNED.value,
+                {
+                    "agent_id": agent_id,
+                    "task_id": task_id,
+                    "parent_id": self._team_id,
+                    "agent_name": getattr(agent, 'name', 'unknown'),
+                    "spawn_time": spawned.spawn_time,
+                    "metadata": spawned.metadata
+                }
+            )
+            
+            # Start the sub-agent asynchronously
+            import threading
+            def _execute_sub_agent():
+                try:
+                    # Execute the task with the sub-agent
+                    if hasattr(task, 'description'):
+                        result = agent.start(task.description)
+                    else:
+                        result = agent.start(str(task))
+                    
+                    # Announce successful completion
+                    self.announce_completion(agent_id, task_id, result, success=True)
+                except Exception as e:
+                    # Announce failure
+                    self.announce_completion(agent_id, task_id, None, success=False, error=str(e))
+            
+            spawn_thread = threading.Thread(target=_execute_sub_agent, daemon=True)
+            spawn_thread.start()
+            
+            logger.debug(f"Spawned sub-agent {agent_id} for task {task_id}")
+            return spawned
+    
+    def announce_completion(
+        self,
+        agent_id: str,
+        task_id: str,
+        result: Any,
+        success: bool = True,
+        error: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Announce sub-agent completion via event bus."""
+        with self._spawn_lock:
+            # Create completion event
+            completion_event = SubAgentCompletionEvent(
+                agent_id=agent_id,
+                task_id=task_id,
+                result=result,
+                success=success,
+                error=error,
+                parent_id=self._team_id,
+                metadata=metadata or {}
+            )
+            
+            # Store the completion event
+            self._completion_events.append(completion_event)
+            
+            # Publish completion event via event bus
+            if self._event_bus:
+                event_type = EventType.SUBAGENT_COMPLETED.value if success else EventType.SUBAGENT_ERROR.value
+                self._event_bus.publish(
+                    event_type,
+                    {
+                        "agent_id": agent_id,
+                        "task_id": task_id,
+                        "parent_id": self._team_id,
+                        "result": result,
+                        "success": success,
+                        "error": error,
+                        "completion_time": completion_event.completion_time,
+                        "metadata": completion_event.metadata
+                    }
+                )
+            
+            logger.debug(f"Announced completion for sub-agent {agent_id}: {'success' if success else 'error'}")
+    
+    def get_spawned_agents(self) -> List[SpawnedSubAgent]:
+        """Get list of currently spawned sub-agents."""
+        with self._spawn_lock:
+            return list(self._spawned_agents.values())
+    
+    def wait_for_completions(
+        self,
+        timeout: Optional[float] = None,
+        agent_ids: Optional[List[str]] = None
+    ) -> List[SubAgentCompletionEvent]:
+        """Wait for sub-agent completions (optional blocking method)."""
+        import time as time_module
+        start_time = time_module.time()
+        target_agents = agent_ids or list(self._spawned_agents.keys())
+        completed_agents = set()
+        
+        while True:
+            # Check for completed agents
+            with self._spawn_lock:
+                for event in self._completion_events:
+                    if event.agent_id in target_agents:
+                        completed_agents.add(event.agent_id)
+                
+                # Return if all target agents are completed
+                if completed_agents >= set(target_agents):
+                    return [e for e in self._completion_events if e.agent_id in target_agents]
+            
+            # Check timeout
+            if timeout and (time_module.time() - start_time) > timeout:
+                break
+                
+            # Brief sleep to avoid busy waiting
+            time_module.sleep(0.1)
+        
+        # Return whatever completions we have
+        with self._spawn_lock:
+            return [e for e in self._completion_events if e.agent_id in target_agents]
+    
+    def _handle_sub_agent_completion(self, event: Event) -> None:
+        """Internal handler for sub-agent completion events."""
+        if event.data.get("parent_id") != self._team_id:
+            return  # Not for this team
+        
+        agent_id = event.data.get("agent_id")
+        if not agent_id:
+            return
+        
+        # Call registered completion callback if any
+        with self._spawn_lock:
+            callback = self._completion_callbacks.get(agent_id)
+            if callback:
+                try:
+                    completion_event = SubAgentCompletionEvent(
+                        agent_id=agent_id,
+                        task_id=event.data.get("task_id", ""),
+                        result=event.data.get("result"),
+                        success=event.data.get("success", False),
+                        error=event.data.get("error"),
+                        completion_time=event.data.get("completion_time", time.time()),
+                        parent_id=event.data.get("parent_id"),
+                        metadata=event.data.get("metadata", {})
+                    )
+                    callback(completion_event)
+                except Exception as e:
+                    logger.warning(f"Completion callback failed for agent {agent_id}: {e}")
+            
+            # Clean up completed agent
+            if agent_id in self._spawned_agents:
+                del self._spawned_agents[agent_id]
+            if agent_id in self._completion_callbacks:
+                del self._completion_callbacks[agent_id]
 
     def __enter__(self):
         """Context manager entry point for resource management."""

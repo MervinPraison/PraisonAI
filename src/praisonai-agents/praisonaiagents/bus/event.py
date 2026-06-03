@@ -36,6 +36,11 @@ class EventType(str, Enum):
     AGENT_COMPLETED = "agent.completed"
     AGENT_ERROR = "agent.error"
     
+    # Sub-agent spawn-announce events
+    SUBAGENT_SPAWNED = "subagent.spawned"
+    SUBAGENT_COMPLETED = "subagent.completed"
+    SUBAGENT_ERROR = "subagent.error"
+    
     # Tool events
     TOOL_STARTED = "tool.started"
     TOOL_COMPLETED = "tool.completed"

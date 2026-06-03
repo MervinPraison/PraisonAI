@@ -1,5 +1,5 @@
 """Agent protocols for extensibility."""
-from typing import Any, Awaitable, Dict, List, Optional, Protocol, runtime_checkable
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, runtime_checkable
 from dataclasses import dataclass
 
 
@@ -181,5 +181,154 @@ class TaskExecutorProtocol(Protocol):
             
         Returns:
             TaskResult containing the output and execution status
+        """
+        ...
+
+
+@dataclass
+class SpawnedSubAgent:
+    """Information about a spawned sub-agent.
+    
+    Contains metadata needed for tracking and communicating with spawned sub-agents
+    in non-blocking orchestration patterns.
+    """
+    agent_id: str  # Unique identifier for the spawned agent
+    task_id: str   # Task identifier being executed
+    agent: Any     # Reference to the Agent instance
+    task: Any      # Reference to the Task instance
+    spawn_time: float
+    parent_id: Optional[str] = None  # Parent agent/team ID
+    metadata: Dict[str, Any] = None
+
+    def __post_init__(self):
+        if self.metadata is None:
+            self.metadata = {}
+
+
+@dataclass
+class SubAgentCompletionEvent:
+    """Event data for sub-agent completion announcements.
+    
+    Provides structured information when a sub-agent completes its task
+    in a spawn-announce pattern.
+    """
+    agent_id: str
+    task_id: str
+    result: Any
+    success: bool
+    error: Optional[str] = None
+    completion_time: float = None
+    parent_id: Optional[str] = None
+    metadata: Dict[str, Any] = None
+
+    def __post_init__(self):
+        if self.completion_time is None:
+            import time
+            self.completion_time = time.time()
+        if self.metadata is None:
+            self.metadata = {}
+
+
+@runtime_checkable
+class SpawnAnnounceProtocol(Protocol):
+    """Protocol for non-blocking spawn-and-announce multi-agent orchestration.
+    
+    Enables efficient parallel sub-agent workflows with push-based completion 
+    notifications instead of blocking wait patterns.
+    
+    Key capabilities:
+    - Non-blocking spawning: Spawn sub-agents and continue immediately
+    - Push-based completion: Sub-agents announce completion to parent
+    - Event-driven coordination: React to completion events rather than polling
+    - Parallel workflow efficiency: Enable true parallel orchestration patterns
+    
+    Example:
+        class NonBlockingTeam:
+            def spawn_sub_agent(self, agent, task, callback=None):
+                # Spawn agent, register completion callback
+                spawned = SpawnedSubAgent(...)
+                self.bus.subscribe(self._handle_completion, ["subagent.completed"])
+                return spawned
+                
+            def _handle_completion(self, event):
+                # React to completion announcement
+                print(f"Sub-agent {event.data.agent_id} completed")
+        
+        # Check protocol compliance
+        assert isinstance(NonBlockingTeam(), SpawnAnnounceProtocol)
+    """
+    
+    def spawn_sub_agent(
+        self,
+        agent: Any,
+        task: Any,
+        completion_callback: Optional[Callable[[SubAgentCompletionEvent], Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> SpawnedSubAgent:
+        """Spawn a sub-agent for non-blocking execution.
+        
+        Launches a sub-agent to execute a task without blocking the parent.
+        The sub-agent will announce completion via the event bus.
+        
+        Args:
+            agent: Agent instance to execute the task
+            task: Task instance to be executed
+            completion_callback: Optional callback for completion events
+            metadata: Optional metadata for the spawned agent
+            
+        Returns:
+            SpawnedSubAgent containing spawn information
+        """
+        ...
+    
+    def announce_completion(
+        self,
+        agent_id: str,
+        task_id: str,
+        result: Any,
+        success: bool = True,
+        error: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Announce sub-agent completion via event bus.
+        
+        Called by sub-agents to notify their parent of task completion.
+        This enables push-based coordination instead of polling.
+        
+        Args:
+            agent_id: Unique identifier of the completing agent
+            task_id: Task identifier that was completed
+            result: Task execution result
+            success: Whether the task completed successfully
+            error: Optional error message if task failed
+            metadata: Optional additional metadata
+        """
+        ...
+    
+    def get_spawned_agents(self) -> List[SpawnedSubAgent]:
+        """Get list of currently spawned sub-agents.
+        
+        Returns:
+            List of spawned sub-agents that are still active
+        """
+        ...
+    
+    def wait_for_completions(
+        self,
+        timeout: Optional[float] = None,
+        agent_ids: Optional[List[str]] = None
+    ) -> List[SubAgentCompletionEvent]:
+        """Wait for sub-agent completions (optional blocking method).
+        
+        Provides a way to optionally wait for completions when needed,
+        while maintaining the primary non-blocking spawn-announce pattern.
+        
+        Args:
+            timeout: Optional timeout in seconds
+            agent_ids: Optional list of specific agent IDs to wait for
+            
+            
+        Returns:
+            List of completion events received within timeout
         """
         ...
