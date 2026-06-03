@@ -31,12 +31,8 @@ class _BackgroundLoop:
         server processes should call :func:`shutdown` explicitly to cancel
         in-flight tasks before process exit.
         """
-        # Enforce the documented invariant. ``threading.Lock.locked()``
-        # is process-wide, not thread-local, but combined with the fact
-        # that the only callers are :py:meth:`get` and :py:meth:`get_unlocked`
-        # (the latter only invoked from inside ``run_sync`` while holding
-        # the lock), this catches the "forgot to hold the lock" mistake.
-        assert self._lock.locked(), "_spawn_locked() requires self._lock to be held"
+        # Create the loop+thread; caller must hold self._lock.
+        # The lock contract is now enforced structurally by submit() method.
         if self._loop is None or self._loop.is_closed():
             self._loop = asyncio.new_event_loop()
             self._thread = threading.Thread(
@@ -51,9 +47,11 @@ class _BackgroundLoop:
         with self._lock:
             return self._spawn_locked()
 
-    def get_unlocked(self) -> asyncio.AbstractEventLoop:
-        """Get loop assuming caller holds _lock. For run_sync() use only."""
-        return self._spawn_locked()
+    def submit(self, coro):
+        """Atomically (re)spawn loop if needed and submit coro. Returns concurrent.futures.Future."""
+        with self._lock:
+            loop = self._spawn_locked()
+            return asyncio.run_coroutine_threadsafe(coro, loop)
 
     def shutdown(self, timeout: float = 5.0) -> None:
         with self._lock:
@@ -77,7 +75,16 @@ class _BackgroundLoop:
                 self._loop = None
                 self._thread = None
 
-_BG = _BackgroundLoop()
+_BG: "_BackgroundLoop | None" = None
+_BG_LOCK = threading.Lock()
+
+def _get_bg() -> "_BackgroundLoop":
+    global _BG
+    if _BG is None:
+        with _BG_LOCK:
+            if _BG is None:
+                _BG = _BackgroundLoop()
+    return _BG
 
 
 def run_sync(coro: Awaitable[T], *, timeout: float | None = _DEFAULT_TIMEOUT) -> T:
@@ -109,10 +116,8 @@ def run_sync(coro: Awaitable[T], *, timeout: float | None = _DEFAULT_TIMEOUT) ->
             "await the coroutine directly instead."
         )
 
-    # Submit the coroutine inside the lock to prevent shutdown races
-    with _BG._lock:
-        loop = _BG.get_unlocked()
-        fut: Future = asyncio.run_coroutine_threadsafe(coro, loop)
+    # Submit the coroutine atomically
+    fut = _get_bg().submit(coro)
     
     try:
         return fut.result(timeout=timeout)
@@ -139,4 +144,6 @@ def run_sync(coro: Awaitable[T], *, timeout: float | None = _DEFAULT_TIMEOUT) ->
 
 def shutdown() -> None:
     """Public hook for long-running server processes to stop the bridge cleanly."""
-    _BG.shutdown()
+    bg = _BG
+    if bg is not None:
+        bg.shutdown()

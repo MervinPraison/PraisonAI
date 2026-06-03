@@ -200,3 +200,141 @@ def check_bot_security(config: DoctorConfig) -> CheckResult:
         )
 
 
+@register_check(
+    id="multi_channel_tokens",
+    title="Multi-Channel Token Configuration", 
+    description="Check for duplicate tokens across channels and validate multi-channel setup",
+    category=CheckCategory.BOTS,
+    severity=CheckSeverity.MEDIUM,
+)
+def check_multi_channel_tokens(config: DoctorConfig) -> CheckResult:
+    """Check multi-channel token configuration for duplicates and naming conventions."""
+    start = time.time()
+    from praisonai.cli._paths import resolve_bot_config_path
+    config_path = getattr(config, 'config_file', None) or resolve_bot_config_path("bot.yaml")
+    
+    # Check if bot.yaml exists
+    if not os.path.exists(config_path):
+        return CheckResult(
+            id="multi_channel_tokens",
+            title="Multi-Channel Token Configuration",
+            category=CheckCategory.BOTS,
+            status=CheckStatus.SKIP,
+            message=f"{config_path} not found - multi-channel check skipped",
+            duration_ms=(time.time() - start) * 1000,
+        )
+    
+    try:
+        from praisonai.bots._config_schema import load_and_validate_bot_yaml
+        config_data = load_and_validate_bot_yaml(config_path)
+        
+        warnings = []
+        errors = []
+        
+        # Extract token environment variables from channels
+        channel_tokens = {}  # env_var -> [channel_keys_using_it]
+        channel_platforms = {}  # platform -> [channel_keys]
+        
+        for channel_name, channel_config in config_data.channels.items():
+            platform = channel_config.platform
+            token_ref = channel_config.token
+            
+            # Track platforms
+            if platform not in channel_platforms:
+                channel_platforms[platform] = []
+            channel_platforms[platform].append(channel_name)
+            
+            # Extract environment variable from token reference like ${TELEGRAM_BOT_TOKEN}
+            if token_ref and token_ref.startswith("${") and token_ref.endswith("}"):
+                env_var = token_ref[2:-1]  # Remove ${ and }
+                if env_var not in channel_tokens:
+                    channel_tokens[env_var] = []
+                channel_tokens[env_var].append(channel_name)
+        
+        # Check for duplicate token usage by env var reference
+        for env_var, channels in channel_tokens.items():
+            if len(channels) > 1:
+                errors.append(f"Token {env_var} is used by multiple channels: {', '.join(channels)}")
+
+        # Also check duplicate token usage by resolved token value
+        token_value_to_channels = {}  # token_value -> [channel_keys]
+        for env_var, channels in channel_tokens.items():
+            token_value = os.environ.get(env_var)
+            if token_value:
+                token_value_to_channels.setdefault(token_value, []).extend(channels)
+
+        for _, channels in token_value_to_channels.items():
+            unique_channels = sorted(set(channels))
+            if len(unique_channels) > 1:
+                errors.append(
+                    f"Same bot token value is used by multiple channels: {', '.join(unique_channels)}"
+                )
+        
+        # Check for multi-platform channels with good naming conventions
+        for platform, channels in channel_platforms.items():
+            if len(channels) > 1:
+                # Multiple channels on same platform - check naming convention
+                for channel_name in channels:
+                    channel_config = config_data.channels[channel_name]
+                    token_ref = channel_config.token
+                    if token_ref and token_ref.startswith("${") and token_ref.endswith("}"):
+                        env_var = token_ref[2:-1]
+                        
+                        # Check if follows naming convention: PLATFORM_ROLE_BOT_TOKEN
+                        expected_pattern = f"{platform.upper()}_"
+                        if not env_var.startswith(expected_pattern) or not env_var.endswith("_BOT_TOKEN"):
+                            warnings.append(f"Channel '{channel_name}' token '{env_var}' doesn't follow naming convention '{platform.upper()}_<ROLE>_BOT_TOKEN'")
+        
+        # Check for missing tokens
+        missing_tokens = []
+        for env_var in channel_tokens.keys():
+            if not os.environ.get(env_var):
+                missing_tokens.append(env_var)
+        
+        # Determine status
+        if errors:
+            return CheckResult(
+                id="multi_channel_tokens",
+                title="Multi-Channel Token Configuration",
+                category=CheckCategory.BOTS,
+                status=CheckStatus.FAIL,
+                message=f"Token configuration errors: {len(errors)} duplicate(s) found",
+                details='\n'.join(errors + warnings),
+                remediation="Each channel must have a unique bot token. Create separate bots in @BotFather and use unique environment variables.",
+                duration_ms=(time.time() - start) * 1000,
+            )
+        elif warnings or missing_tokens:
+            all_issues = warnings + [f"Missing token: {token}" for token in missing_tokens]
+            return CheckResult(
+                id="multi_channel_tokens",
+                title="Multi-Channel Token Configuration",
+                category=CheckCategory.BOTS,
+                status=CheckStatus.WARN,
+                message=f"Multi-channel setup with {len(all_issues)} recommendation(s)",
+                details='\n'.join(all_issues),
+                remediation="Consider following the naming convention PLATFORM_ROLE_BOT_TOKEN for clarity.",
+                duration_ms=(time.time() - start) * 1000,
+            )
+        else:
+            channel_count = sum(len(channels) for channels in channel_platforms.values())
+            return CheckResult(
+                id="multi_channel_tokens",
+                title="Multi-Channel Token Configuration",
+                category=CheckCategory.BOTS,
+                status=CheckStatus.PASS,
+                message=f"Multi-channel configuration looks good ({channel_count} channels)",
+                duration_ms=(time.time() - start) * 1000,
+            )
+            
+    except Exception as e:
+        return CheckResult(
+            id="multi_channel_tokens",
+            title="Multi-Channel Token Configuration",
+            category=CheckCategory.BOTS,
+            status=CheckStatus.ERROR,
+            message=f"Error checking multi-channel config: {str(e)[:100]}",
+            remediation="Fix bot.yaml syntax errors first",
+            duration_ms=(time.time() - start) * 1000,
+        )
+
+

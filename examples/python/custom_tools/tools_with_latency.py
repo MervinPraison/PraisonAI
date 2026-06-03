@@ -49,7 +49,18 @@ def calculate_with_tracking(expression: str) -> str:
     time.sleep(0.05)
     
     try:
-        result = eval(expression)
+        import ast, operator
+        _OPS = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
+                ast.Div: operator.truediv, ast.FloorDiv: operator.floordiv,
+                ast.Mod: operator.mod, ast.Pow: operator.pow,
+                ast.USub: operator.neg, ast.UAdd: operator.pos}
+        def _ev(n):
+            if isinstance(n, ast.Expression): return _ev(n.body)
+            if isinstance(n, ast.Constant) and isinstance(n.value, (int, float)): return n.value
+            if isinstance(n, ast.UnaryOp) and type(n.op) in _OPS: return _OPS[type(n.op)](_ev(n.operand))
+            if isinstance(n, ast.BinOp) and type(n.op) in _OPS: return _OPS[type(n.op)](_ev(n.left), _ev(n.right))
+            raise ValueError(f"Unsupported: {ast.dump(n)}")
+        result = _ev(ast.parse(expression, mode="eval"))
         return f"Result: {result}"
     except Exception as e:
         return f"Error: {str(e)}"

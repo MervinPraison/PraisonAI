@@ -72,6 +72,8 @@ configure_host(
         "guardrails",
         "sessions",
         "usage",
+        "kanban",        # ADD
+        "jobs-board",    # ADD
         "config",
         "logs",
         "debug",

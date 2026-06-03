@@ -256,8 +256,11 @@ class DockerSandbox:
                 cmd_parts = shlex.split(command)
                 cmd_str = " ".join(shlex.quote(part) for part in cmd_parts)
         
+        # Generate container name for timeout cleanup
+        container_name = f"praisonai-{execution_id}"
+        
         docker_cmd = [
-            "docker", "run", "--rm",
+            "docker", "run", "--rm", "--name", container_name,
             "--memory", f"{limits.memory_mb}m",
             "--cpus", str(limits.cpu_percent / 100),
         ]
@@ -302,6 +305,17 @@ class DockerSandbox:
                     completed_at=completed_at,
                 )
             except asyncio.TimeoutError:
+                # Kill the container, not just the client
+                try:
+                    kill_proc = await asyncio.create_subprocess_exec(
+                        "docker", "kill", container_name,
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL
+                    )
+                    await kill_proc.wait()
+                except Exception:
+                    pass  # Container may already be gone
+                
                 proc.kill()
                 await proc.wait()
                 

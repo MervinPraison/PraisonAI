@@ -331,6 +331,7 @@ Your Goal: {self.goal}"""
         - Callable functions
         - String function names
         - Objects with to_openai_tool() method
+        - Tool Search progressive disclosure (if enabled)
         
         Args:
             tools: List of tools in various formats or None to use self.tools
@@ -344,10 +345,14 @@ Your Goal: {self.goal}"""
         if not tools:
             return []
         
-        # Check cache first
+        # Check cache first - include tool_search config in cache key for safety
         tools_key = self._get_tools_cache_key(tools)
-        cached_tools = self._cache_get(self._formatted_tools_cache, tools_key)
-        if cached_tools is not None:
+        tool_search_enabled = getattr(self, '_tool_search_config', None) is not None
+        cache_key = f"{tools_key}:tool_search={tool_search_enabled}"
+        cached_entry = self._cache_get(self._formatted_tools_cache, cache_key)
+        if cached_entry is not None:
+            cached_tools, cached_metadata = cached_entry
+            self._tool_search_metadata = cached_metadata
             return cached_tools
             
         formatted_tools = []
@@ -399,9 +404,46 @@ Your Goal: {self.goal}"""
                 logging.error(f"Tools are not JSON serializable: {e}")
                 return []
         
-        # Cache the formatted tools with LRU eviction
-        self._cache_put(self._formatted_tools_cache, tools_key, formatted_tools)
-        return formatted_tools
+        # Apply tool search assembly if enabled (after formatting, before caching)
+        if hasattr(self, '_tool_search_config') and self._tool_search_config is not None:
+            try:
+                from ..tools.tool_search import assemble_tool_defs
+                # Get context length from LLM config if available
+                context_length = getattr(self, '_context_window_size', None)
+                
+                # Assemble tools with bridge mode check
+                assembled_tools, metadata = assemble_tool_defs(
+                    tool_defs=formatted_tools,
+                    config=self._tool_search_config,
+                    context_length=context_length
+                )
+                
+                # Store metadata for bridge tool dispatch
+                self._tool_search_metadata = metadata
+                formatted_tools = assembled_tools
+                
+            except ImportError:
+                # Tool search module not available, continue with original tools
+                logging.warning("Tool search requested but tool_search module not available")
+        
+        # Strip __praisonai_deferrable__ from provider-facing tool payloads
+        # Keep the marker only for internal tool classification
+        cleaned_tools = []
+        for tool in formatted_tools:
+            if isinstance(tool, dict) and "__praisonai_deferrable__" in tool:
+                tool_copy = tool.copy()
+                tool_copy.pop("__praisonai_deferrable__", None)
+                cleaned_tools.append(tool_copy)
+            else:
+                cleaned_tools.append(tool)
+        
+        # Cache the formatted tools with LRU eviction, including tool search metadata
+        self._cache_put(
+            self._formatted_tools_cache,
+            cache_key,
+            (cleaned_tools, getattr(self, "_tool_search_metadata", None)),
+        )
+        return cleaned_tools
 
     def _build_multimodal_prompt(
         self, 
@@ -507,7 +549,7 @@ Your Goal: {self.goal}"""
             emit_events=True
         )
 
-    def _chat_completion(self, messages, temperature=1.0, tools=None, stream=True, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, _retry_depth=0):
+    def _chat_completion(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, _retry_depth=0):
         start_time = time.time()
 
         # --- Context compaction (opt-in via ExecutionConfig.context_compaction) ---
@@ -577,6 +619,39 @@ Your Goal: {self.goal}"""
         # Use the new _format_tools_for_completion helper method
         formatted_tools = self._format_tools_for_completion(tools)
 
+        # Smart fallback for streaming: try streaming first, fall back to non-streaming if unsupported
+        if stream is None:
+            # Auto-detect: prefer streaming for better UX, fallback if adapter doesn't support it
+            try:
+                # First attempt: try with streaming enabled for better user experience
+                stream_callback = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
+                final_response = self._execute_unified_chat_completion(
+                    messages=messages,
+                    temperature=temperature,
+                    tools=formatted_tools,
+                    stream=True,  # Try streaming first
+                    reasoning_steps=reasoning_steps,
+                    task_name=task_name,
+                    task_description=task_description,
+                    task_id=task_id,
+                    response_format=response_format,
+                    stream_callback=stream_callback,
+                    emit_events=True
+                )
+                return final_response
+            except ValueError as e:
+                if "Streaming is not supported" in str(e):
+                    # Fallback: retry with non-streaming for sync adapters
+                    logging.debug(f"{self.name}: Streaming not supported by adapter, falling back to non-streaming")
+                    stream = False  # Set for the main execution below
+                else:
+                    raise  # Re-raise if it's a different ValueError
+            except Exception:
+                # For any other exception, fall back to non-streaming
+                logging.debug(f"{self.name}: Streaming attempt failed, falling back to non-streaming")
+                stream = False  # Set for the main execution below
+        
+        # If stream was explicitly set or fallback occurred, use the specified/fallback value
         try:
             # NEW: Unified protocol dispatch path (Issue #1304, #1362)
             # UNIFIED: Single protocol-driven dispatch path (fixes DRY violation)
@@ -774,7 +849,7 @@ Your Goal: {self.goal}"""
         messages, 
         temperature=1.0, 
         tools=None, 
-        stream=True,
+        stream=None,
         reasoning_steps=False,
         task_name=None,
         task_description=None,
@@ -806,6 +881,47 @@ Your Goal: {self.goal}"""
             # Cache the dispatcher
             self._unified_dispatcher = dispatcher
         
+        # Smart fallback for streaming: try streaming first, fall back to non-streaming if unsupported
+        if stream is None:
+            # Auto-detect: prefer streaming for better UX, fallback if adapter doesn't support it
+            try:
+                # First attempt: try with streaming enabled for better user experience
+                if stream_callback is None and hasattr(self, 'stream_emitter'):
+                    stream_callback = getattr(self.stream_emitter, 'emit', None)
+                final_response = self._unified_dispatcher.chat_completion(
+                    messages=messages,
+                    tools=tools,
+                    tool_choice=getattr(self, 'tool_choice', None),
+                    temperature=temperature,
+                    max_tokens=getattr(self, 'max_tokens', None),
+                    stream=True,  # Try streaming first
+                    response_format=response_format,
+                    execute_tool_fn=getattr(self, 'execute_tool', None),
+                    console=self.console if (self.verbose or True) else None,  # Enable console for streaming
+                    display_fn=self._display_generating if self.verbose else None,
+                    stream_callback=stream_callback,
+                    emit_events=emit_events,
+                    verbose=self.verbose,
+                    max_iterations=10,
+                    reasoning_steps=reasoning_steps,
+                    task_name=task_name,
+                    task_description=task_description,
+                    task_id=task_id,
+                    agent_name=getattr(self, 'name', 'assistant')
+                )
+                return final_response
+            except ValueError as e:
+                if "Streaming is not supported" in str(e):
+                    # Fallback: retry with non-streaming for sync adapters
+                    logging.debug(f"Agent: Streaming not supported by adapter, falling back to non-streaming")
+                    stream = False  # Set for the main execution below
+                else:
+                    raise  # Re-raise if it's a different ValueError
+            except Exception:
+                # For any other exception, fall back to non-streaming
+                logging.debug(f"Agent: Streaming attempt failed, falling back to non-streaming")
+                stream = False  # Set for the main execution below
+
         # Execute unified dispatch with all necessary parameters
         # Includes all parameters from both legacy paths to ensure full compatibility
         try:
@@ -857,7 +973,7 @@ Your Goal: {self.goal}"""
         messages, 
         temperature=1.0, 
         tools=None, 
-        stream=True,
+        stream=True,  # Async methods keep stream=True default (async adapters support streaming vs sync smart fallback)
         reasoning_steps=False,
         task_name=None,
         task_description=None,
