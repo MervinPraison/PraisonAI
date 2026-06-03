@@ -755,6 +755,15 @@ class ExecutionConfig:
     # Default False preserves existing behavior for backward compatibility
     parallel_tool_calls: bool = False
 
+    def __post_init__(self) -> None:
+        """Validate retry configuration parameters."""
+        if self.retry_initial_delay <= 0:
+            raise ValueError("ExecutionConfig.retry_initial_delay must be positive.")
+        if self.retry_backoff_factor < 1.0:
+            raise ValueError("ExecutionConfig.retry_backoff_factor must be >= 1.0.")
+        if self.retry_jitter < 0:
+            raise ValueError("ExecutionConfig.retry_jitter must be non-negative.")
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {

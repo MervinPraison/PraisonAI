@@ -17,7 +17,7 @@ from .chat_mixin import ChatMixin
 from .execution_mixin import ExecutionMixin
 from .memory_mixin import MemoryMixin
 from .async_memory_mixin import AsyncMemoryMixin
-from .tool_execution import ToolExecutionMixin
+from .tool_execution import ToolExecutionMixin, BackoffPolicy
 from .chat_handler import ChatHandlerMixin
 from .session_manager import SessionManagerMixin
 from .async_safety import AsyncSafeState
@@ -985,6 +985,7 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
             max_iter, max_rpm, max_execution_time, max_retry_limit = 20, None, None, 2
             _max_budget = None
             _on_budget_exceeded = 'stop'
+            _exec_config = ExecutionConfig()  # Default config for non-execution case
             # Keep parallel_tool_calls parameter value when no ExecutionConfig provided
             # (already set from parameter, no need to override)
         
@@ -1715,6 +1716,8 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
         self.allow_code_execution = allow_code_execution
         self.max_retry_limit = max_retry_limit
         self.code_execution_mode = code_execution_mode
+        # Store execution config for guardrail retry backoff
+        self._execution_config = _exec_config
         self.embedder_config = embedder_config
         self.knowledge = knowledge
         self.use_system_prompt = use_system_prompt
@@ -4827,11 +4830,14 @@ Answer:"""
             logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {error}")
             
             # Add exponential backoff delay to avoid hammering the LLM
-            execution_config = getattr(self, 'execution_config', None)
+            execution_config = getattr(self, '_execution_config', None)
             if execution_config is not None:
-                delay = execution_config.retry_initial_delay * (execution_config.retry_backoff_factor ** (retry_count - 1))
-                jitter = random.uniform(0, execution_config.retry_jitter * delay)
-                total_delay = delay + jitter
+                total_delay = BackoffPolicy.delay(
+                    retry_count,
+                    execution_config.retry_initial_delay,
+                    execution_config.retry_backoff_factor,
+                    execution_config.retry_jitter
+                )
             else:
                 # Fall back to simple backoff if no execution config
                 total_delay = 1.0 * (2.0 ** (retry_count - 1))
@@ -4877,11 +4883,14 @@ Answer:"""
             logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {error}")
             
             # Add exponential backoff delay to avoid hammering the LLM
-            execution_config = getattr(self, 'execution_config', None)
+            execution_config = getattr(self, '_execution_config', None)
             if execution_config is not None:
-                delay = execution_config.retry_initial_delay * (execution_config.retry_backoff_factor ** (retry_count - 1))
-                jitter = random.uniform(0, execution_config.retry_jitter * delay)
-                total_delay = delay + jitter
+                total_delay = BackoffPolicy.delay(
+                    retry_count,
+                    execution_config.retry_initial_delay,
+                    execution_config.retry_backoff_factor,
+                    execution_config.retry_jitter
+                )
             else:
                 # Fall back to simple backoff if no execution config
                 total_delay = 1.0 * (2.0 ** (retry_count - 1))
