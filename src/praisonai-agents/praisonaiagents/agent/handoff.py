@@ -20,6 +20,8 @@ import asyncio
 import threading
 import time
 
+from ..run_outcome import AgentRunOutcome, RunStatus
+
 if TYPE_CHECKING:
     from .agent import Agent
 
@@ -147,7 +149,12 @@ class HandoffInputData:
 
 @dataclass 
 class HandoffResult:
-    """Result of a handoff operation."""
+    """
+    Result of a handoff operation.
+    
+    Now includes typed outcome information while maintaining backward
+    compatibility with the legacy boolean success field.
+    """
     success: bool
     response: Optional[str] = None
     target_agent: Optional[str] = None
@@ -155,6 +162,65 @@ class HandoffResult:
     duration_seconds: float = 0.0
     error: Optional[str] = None
     handoff_depth: int = 0
+    
+    # New typed outcome field
+    outcome: Optional[AgentRunOutcome] = None
+    
+    def __post_init__(self):
+        """Initialize outcome field if not provided."""
+        if self.outcome is None:
+            # Create outcome based on legacy success field
+            if self.success:
+                self.outcome = AgentRunOutcome.success(
+                    output=self.response or "",
+                    elapsed_s=self.duration_seconds,
+                    agent_name=self.target_agent,
+                    context={
+                        "source_agent": self.source_agent,
+                        "handoff_depth": self.handoff_depth,
+                    }
+                )
+            else:
+                # Determine status from error message
+                if self.error and any(keyword in self.error.lower() for keyword in ["timeout", "timed out"]):
+                    status = "timeout"
+                elif self.error and any(keyword in self.error.lower() for keyword in ["cycle", "circular"]):
+                    status = "failure"
+                elif self.error and any(keyword in self.error.lower() for keyword in ["depth", "maximum"]):
+                    status = "failure"
+                else:
+                    status = "failure"
+                
+                self.outcome = AgentRunOutcome(
+                    status=status,
+                    error=self.error or "Handoff failed",
+                    elapsed_s=self.duration_seconds,
+                    agent_name=self.target_agent,
+                    context={
+                        "source_agent": self.source_agent,
+                        "handoff_depth": self.handoff_depth,
+                    }
+                )
+    
+    @classmethod
+    def from_outcome(
+        cls,
+        outcome: AgentRunOutcome,
+        target_agent: Optional[str] = None,
+        source_agent: Optional[str] = None,
+        handoff_depth: int = 0,
+    ) -> "HandoffResult":
+        """Create HandoffResult from AgentRunOutcome."""
+        return cls(
+            success=outcome.is_success(),
+            response=outcome.output,
+            target_agent=target_agent or outcome.agent_name,
+            source_agent=source_agent,
+            duration_seconds=outcome.elapsed_s,
+            error=outcome.error,
+            handoff_depth=handoff_depth,
+            outcome=outcome,
+        )
     
     
 class Handoff:
