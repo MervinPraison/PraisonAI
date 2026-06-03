@@ -184,6 +184,69 @@ class TestFullFlow:
         assert stats["by_status"]["in_progress"] == 1
 
 
+class TestMemberAuthorization:
+    @pytest.mark.asyncio
+    async def test_member_cannot_add_owner_identity(self, client):
+        owner = await client.post("/api/v1/auth/register", json={
+            "email": "owner-authz@test.com",
+            "password": "testpass",
+            "name": "Owner",
+        })
+        assert owner.status_code == 201, owner.text
+        owner_headers = {"Authorization": f"Bearer {owner.json()['token']}"}
+
+        attacker = await client.post("/api/v1/auth/register", json={
+            "email": "member-authz@test.com",
+            "password": "testpass",
+            "name": "Member",
+        })
+        assert attacker.status_code == 201, attacker.text
+        attacker_token = attacker.json()["token"]
+        attacker_id = attacker.json()["user"]["id"]
+        attacker_headers = {"Authorization": f"Bearer {attacker_token}"}
+
+        planted_owner = await client.post("/api/v1/auth/register", json={
+            "email": "planted-owner@test.com",
+            "password": "testpass",
+            "name": "Planted Owner",
+        })
+        assert planted_owner.status_code == 201, planted_owner.text
+        planted_owner_id = planted_owner.json()["user"]["id"]
+
+        resp = await client.post(
+            "/api/v1/workspaces/",
+            json={"name": "Authz Workspace", "slug": "authz-workspace"},
+            headers=owner_headers,
+        )
+        assert resp.status_code == 201
+        ws_id = resp.json()["id"]
+
+        resp = await client.post(
+            f"/api/v1/workspaces/{ws_id}/members",
+            json={"user_id": attacker_id, "role": "member"},
+            headers=owner_headers,
+        )
+        assert resp.status_code == 201
+
+        resp = await client.post(
+            f"/api/v1/workspaces/{ws_id}/members",
+            json={"user_id": planted_owner_id, "role": "owner"},
+            headers=attacker_headers,
+        )
+        assert resp.status_code == 403
+
+        resp = await client.get(
+            f"/api/v1/workspaces/{ws_id}/members",
+            headers=owner_headers,
+        )
+        assert resp.status_code == 200
+        members = resp.json()
+        assert not any(
+            member["user_id"] == planted_owner_id and member["role"] == "owner"
+            for member in members
+        )
+
+
 class TestAuthErrors:
     @pytest.mark.asyncio
     async def test_missing_auth(self, client):
