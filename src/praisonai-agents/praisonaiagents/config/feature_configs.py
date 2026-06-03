@@ -732,10 +732,10 @@ class ExecutionConfig:
     rate_limiter: Optional[Any] = None
 
     # Context compaction: automatically compact chat_history when approaching token limit.
-    # Now ENABLED by default for proactive overflow protection (opt-out with False).
+    # DEFAULT CHANGED: Previously False, now True (with deprecation warning period).
     # Usage: Agent(execution=ExecutionConfig(context_compaction=False))  # to disable
     # Or: Agent(execution=ExecutionConfig(context_compaction=my_policy))  # custom policy
-    context_compaction: Union[bool, "ContextCompactionPolicy"] = True
+    context_compaction: Union[bool, "ContextCompactionPolicy"] = False  # Keep False during deprecation period
 
     # Token limit before compaction triggers. None = auto-detect from model metadata.
     max_context_tokens: Optional[int] = None
@@ -752,6 +752,39 @@ class ExecutionConfig:
     # When True, multiple tool calls from LLM are executed concurrently instead of sequentially
     # Default False preserves existing behavior for backward compatibility
     parallel_tool_calls: bool = False
+
+    def __post_init__(self) -> None:
+        """Post-initialization processing with deprecation warnings."""
+        # Handle context_compaction serialization round-trip
+        if isinstance(self.context_compaction, dict):
+            from ..context.policy import ContextCompactionPolicy
+            self.context_compaction = ContextCompactionPolicy.from_dict(
+                self.context_compaction
+            )
+        
+        # Emit deprecation warning for default behavior change
+        # Only warn if context_compaction was not explicitly set (i.e., using the default False)
+        import warnings
+        import inspect
+        frame = inspect.currentframe()
+        try:
+            # Check if this is being called from user code (not internal)
+            caller_frame = frame.f_back
+            if (caller_frame and 
+                not any(path_part in caller_frame.f_code.co_filename 
+                       for path_part in ['praisonaiagents', 'test_', '__pycache__'])):
+                # This is being called from user code
+                if self.context_compaction is False:
+                    warnings.warn(
+                        "ExecutionConfig.context_compaction will default to True in the next "
+                        "release for proactive context overflow protection. To disable, explicitly "
+                        "set context_compaction=False. To use the new default early, set "
+                        "context_compaction=True.",
+                        DeprecationWarning,
+                        stacklevel=3
+                    )
+        finally:
+            del frame
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""

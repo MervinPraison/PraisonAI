@@ -171,6 +171,7 @@ __all__ = [
     "generate_summary",
     # Context Compaction Policy
     "ContextCompactionPolicy",
+    "ContextCompactionPolicyProtocol",
     "CompactionRoute",
     "CompactionStrategy", 
     "ContextBudgetResult",
@@ -292,7 +293,7 @@ def __getattr__(name: str):
         return getattr(aggregator, name)
     
     # Context Compaction Policy
-    if name in ("ContextCompactionPolicy", "CompactionRoute", "CompactionStrategy",
+    if name in ("ContextCompactionPolicy", "ContextCompactionPolicyProtocol", "CompactionRoute", "CompactionStrategy",
                 "ContextBudgetResult", "get_default_policy", "CONSERVATIVE_POLICY", 
                 "BALANCED_POLICY", "AGGRESSIVE_POLICY"):
         from . import policy

@@ -388,6 +388,7 @@ _LAZY_IMPORTS = {
     
     # Context compaction policies
     'ContextCompactionPolicy': ('praisonaiagents.context.policy', 'ContextCompactionPolicy'),
+    'ContextCompactionPolicyProtocol': ('praisonaiagents.context.policy', 'ContextCompactionPolicyProtocol'),
     'CompactionRoute': ('praisonaiagents.context.policy', 'CompactionRoute'),
     'CompactionStrategy': ('praisonaiagents.context.policy', 'CompactionStrategy'),
     'ContextBudgetResult': ('praisonaiagents.context.policy', 'ContextBudgetResult'),

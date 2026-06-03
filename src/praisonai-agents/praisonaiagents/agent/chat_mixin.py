@@ -871,7 +871,7 @@ Your Goal: {self.goal}"""
             route, compacted_messages = self._compute_context_budget_and_route(
                 messages=messages, 
                 tools=tools,
-                system_prompt=self._build_system_prompt(tools)
+                system_prompt=None  # Already included in messages from _build_messages()
             )
             # Update messages in-place so callers see the changes
             messages[:] = compacted_messages
@@ -1938,11 +1938,29 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     self._persist_message("user", normalized_content)
                 
                 try:
-                    # Apply context management before LLM call (auto-compaction)
-                    # Zero overhead when context=False
+                    # --- Proactive Context Budget Management (sync custom LLM path) ---
                     system_prompt_for_llm = self._build_system_prompt(tools)
+                    
+                    # Apply proactive context budget analysis before any other processing
+                    try:
+                        route, compacted_history = self._compute_context_budget_and_route(
+                            messages=self.chat_history,
+                            tools=tool_param,
+                            system_prompt=None  # Already included in messages from _build_messages()
+                        )
+                        # Use compacted history for further processing
+                        working_history = compacted_history
+                    except Exception as _ce:
+                        # Fallback to original chat history if proactive handling fails
+                        if getattr(self, '_strict_hooks', False):
+                            raise
+                        logging.debug(f"[proactive-context-sync] fallback to original history: {_ce}")
+                        working_history = self.chat_history
+                    
+                    # Apply legacy context management on the (possibly compacted) history
+                    # Zero overhead when context=False
                     processed_history, context_result = self._apply_context_management(
-                        messages=self.chat_history,
+                        messages=working_history,
                         system_prompt=system_prompt_for_llm,
                         tools=tool_param,
                     )
@@ -2417,20 +2435,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     route, compacted_history = await self._compute_context_budget_and_route_async(
                         messages=self.chat_history,
                         tools=tools,
-                        system_prompt=self._build_system_prompt(tools)
+                        system_prompt=None  # Already included in messages from _build_messages()
                     )
-                    self._replace_chat_history(compacted_history)
+                    # Keep compacted history local until success - don't mutate shared state yet
+                    effective_history = compacted_history
                 except Exception as _ce:
                     if getattr(self, '_strict_hooks', False):
                         raise
                     logging.debug(f"[proactive-context-async] fallback: {_ce}")
+                    effective_history = self.chat_history
 
                 try:
                     # C1 — per-call seed forwarding (async path)  
                     llm_kwargs = {
                         'prompt': prompt,
                         'system_prompt': self._build_system_prompt(tools),
-                        'chat_history': self.chat_history,
+                        'chat_history': effective_history,
                         'temperature': temperature,
                         'tools': tools,
                         'output_json': output_json,
@@ -2463,6 +2483,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         raise InterruptedError(f"Agent chat cancelled: {reason}")
                     
                     response_text = await self.llm_instance.get_response_async(**llm_kwargs)
+
+                    # LLM call succeeded - now it's safe to commit any compacted history
+                    if effective_history is not self.chat_history:
+                        self._replace_chat_history(effective_history)
 
                     self._append_to_chat_history({"role": "assistant", "content": response_text})
 
@@ -2515,7 +2539,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 route, compacted_messages = await self._compute_context_budget_and_route_async(
                     messages=messages,
                     tools=tools,
-                    system_prompt=self._build_system_prompt(tools)
+                    system_prompt=None  # Already included in messages from _build_messages()
                 )
                 messages[:] = compacted_messages
             except Exception as _ce2:
