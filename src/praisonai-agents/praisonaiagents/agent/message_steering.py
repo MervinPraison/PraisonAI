@@ -56,7 +56,11 @@ class MessageSteering:
         )
         
         # Use existing message queue with priority mapping
-        queue_priority = min(priority, MessagePriority.URGENT.value)
+        # Special handling for INTERRUPT - give it maximum priority
+        if steering_priority == SteeringPriority.INTERRUPT:
+            queue_priority = MessagePriority.URGENT.value + 1  # Higher than URGENT
+        else:
+            queue_priority = min(priority, MessagePriority.URGENT.value)
         success = self._message_queue.enqueue(
             content=steering_msg,
             priority=queue_priority,
@@ -90,7 +94,8 @@ class MessageSteering:
         Process pending steering messages.
         
         This is called during agent execution to check for and process
-        any steering messages. Uses rate limiting to avoid excessive checking.
+        any steering messages. Uses rate limiting to avoid excessive checking,
+        but allows INTERRUPT priority messages to bypass rate limiting.
         
         Args:
             context: Execution context that can be updated with steering info
@@ -101,9 +106,17 @@ class MessageSteering:
         if not self._enabled:
             return False
             
-        # Rate limiting - only check every 100ms
+        # Check if we have high priority messages that bypass rate limiting
+        has_urgent_messages = False
+        all_messages = self._message_queue.get_all()
+        for msg in all_messages:
+            if isinstance(msg, SteeringMessage) and msg.priority.value >= SteeringPriority.HIGH.value:
+                has_urgent_messages = True
+                break
+        
+        # Rate limiting - only check every 100ms unless we have urgent messages
         current_time = time.time()
-        if current_time - self._last_check < self._check_interval:
+        if not has_urgent_messages and current_time - self._last_check < self._check_interval:
             return False
             
         self._last_check = current_time

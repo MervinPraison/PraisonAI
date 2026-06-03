@@ -109,6 +109,16 @@ class MessageSteeringProtocol(Protocol):
             True if messages are pending, False otherwise
         """
         ...
+    
+    @property
+    def enabled(self) -> bool:
+        """
+        Whether message steering is enabled.
+        
+        Returns:
+            True if steering is enabled, False otherwise
+        """
+        ...
 
 
 @runtime_checkable
