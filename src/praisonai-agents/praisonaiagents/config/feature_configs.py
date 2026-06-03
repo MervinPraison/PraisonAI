@@ -8,6 +8,7 @@ Provides dataclasses for consolidated feature configuration:
 - ReflectionConfig: Self-reflection settings
 - GuardrailConfig: Safety and validation
 - WebConfig: Web search and fetch
+- ToolSearchConfig: Progressive tool disclosure
 
 All configs follow the agent-centric pattern:
 - False: Feature disabled (zero overhead)
@@ -16,21 +17,22 @@ All configs follow the agent-centric pattern:
 - Instance: Pre-configured manager/engine
 
 Usage:
-    from praisonaiagents import Agent, MemoryConfig, KnowledgeConfig
+    from praisonaiagents import Agent, MemoryConfig, KnowledgeConfig, ToolSearchConfig
     
     # Simple enable
-    agent = Agent(instructions="...", memory=True)
+    agent = Agent(instructions="...", memory=True, tool_search=True)
     
     # With config
     agent = Agent(
         instructions="...",
         memory=MemoryConfig(backend="redis", user_id="user123"),
         knowledge=KnowledgeConfig(sources=["docs/"], rerank=True),
+        tool_search=ToolSearchConfig(enabled="auto", threshold_pct=15),
     )
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Any, Optional, Callable, Tuple, Union
+from typing import Dict, List, Any, Optional, Callable, Tuple, Union, FrozenSet
 from enum import Enum
 
 # Import AutonomyConfig from canonical location (no circular dep)
@@ -42,6 +44,7 @@ class MemoryBackend(str, Enum):
     FILE = "file"
     SQLITE = "sqlite"
     REDIS = "redis"
+    VALKEY = "valkey"
     POSTGRES = "postgres"
     MEM0 = "mem0"
     MONGODB = "mongodb"
@@ -1071,6 +1074,25 @@ class MultiAgentMemoryConfig:
         }
 
 
+# Import ToolSearchConfig from tools module to avoid duplication
+def __get_tool_search_config():
+    try:
+        from ..tools.tool_search import ToolSearchConfig as _ToolSearchConfig
+        return _ToolSearchConfig
+    except ImportError:
+        # Fallback minimal config if tools module not available
+        @dataclass
+        class FallbackToolSearchConfig:
+            enabled: Union[bool, str] = "auto"
+            threshold_pct: float = 10.0
+            search_default_limit: int = 5
+            max_search_limit: int = 20
+            core_tools: Optional[FrozenSet[str]] = None
+        return FallbackToolSearchConfig
+
+ToolSearchConfig = __get_tool_search_config()
+
+
 class AutonomyLevel(str, Enum):
     """Autonomy levels for agent behavior."""
     SUGGEST = "suggest"
@@ -1091,6 +1113,7 @@ CachingParam = Union[bool, CachingConfig]
 HooksParam = Union[List[Any], HooksConfig]
 SkillsParam = Union[List[str], SkillsConfig]
 AutonomyParam = Union[bool, Dict[str, Any], "AutonomyConfig"]
+ToolSearchParam = Union[bool, str, Dict[str, Any], ToolSearchConfig]
 
 
 # =============================================================================
@@ -1342,6 +1365,21 @@ def resolve_autonomy(value: AutonomyParam) -> Optional[AutonomyConfig]:
     return value
 
 
+def resolve_tool_search(value: ToolSearchParam) -> Optional[ToolSearchConfig]:
+    """Resolve tool_search= parameter following precedence ladder."""
+    if value is None or value is False:
+        return None
+    if value is True:
+        return ToolSearchConfig()
+    if isinstance(value, str):
+        return ToolSearchConfig(enabled=value)
+    if isinstance(value, dict):
+        return ToolSearchConfig(**value)
+    if isinstance(value, ToolSearchConfig):
+        return value
+    return value
+
+
 __all__ = [
     # Enums
     "MemoryBackend",
@@ -1367,6 +1405,7 @@ __all__ = [
     "HooksConfig",
     "SkillsConfig",
     "AutonomyConfig",
+    "ToolSearchConfig",
     # Config classes (Multi-Agent)
     "MultiAgentHooksConfig",
     "MultiAgentOutputConfig",
@@ -1387,6 +1426,7 @@ __all__ = [
     "HooksParam",
     "SkillsParam",
     "AutonomyParam",
+    "ToolSearchParam",
     # Precedence ladder resolvers
     "resolve_memory",
     "resolve_knowledge",
@@ -1398,4 +1438,5 @@ __all__ = [
     "resolve_execution",
     "resolve_caching",
     "resolve_autonomy",
+    "resolve_tool_search",
 ]

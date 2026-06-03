@@ -168,6 +168,82 @@ class GatewayHandler:
         except Exception as e:
             print(f"Error loading agents: {e}")
     
+    def stop(self, host: str = "127.0.0.1", port: int = 8765, force: bool = False) -> None:
+        """Stop a running gateway instance.
+        
+        Args:
+            host: Gateway host
+            port: Gateway port 
+            force: Force stop (kill process)
+        """
+        try:
+            from praisonai.gateway.port_utils import GatewayPIDLock
+        except ImportError as e:
+            print(f"Error: Gateway utilities not available. {e}")
+            return
+        
+        pid_lock = GatewayPIDLock(host=host, port=port)
+        lock_info = pid_lock.get_lock_info()
+        
+        if not lock_info:
+            print(f"No gateway PID lock found. Gateway may not be running on {host}:{port}")
+            return
+        
+        pid = lock_info['pid']
+        is_running = lock_info['is_running']
+        
+        if not is_running:
+            print(f"Gateway process (PID {pid}) is no longer running. Cleaning up stale lock.")
+            pid_lock.release_lock()
+            return
+        
+        if force:
+            self._force_kill_process(pid)
+        else:
+            self._graceful_stop_process(pid)
+        
+        # Clean up lock file
+        pid_lock.release_lock()
+        print(f"Gateway stopped (PID {pid})")
+    
+    def _graceful_stop_process(self, pid: int) -> None:
+        """Gracefully stop a process by sending SIGTERM."""
+        import signal
+        import time
+        import os
+        
+        try:
+            print(f"Sending stop signal to PID {pid}...")
+            os.kill(pid, signal.SIGTERM)
+            
+            # Wait up to 10 seconds for graceful shutdown
+            for _ in range(100):
+                try:
+                    os.kill(pid, 0)  # Check if process exists
+                    time.sleep(0.1)
+                except (OSError, ProcessLookupError):
+                    return  # Process has stopped
+            
+            print(f"Process {pid} did not stop gracefully, forcing...")
+            self._force_kill_process(pid)
+            
+        except (OSError, ProcessLookupError):
+            print(f"Process {pid} not found or already stopped")
+    
+    def _force_kill_process(self, pid: int) -> None:
+        """Force kill a process with SIGKILL (Windows: SIGTERM)."""
+        import signal
+        import os
+        import sys
+        
+        try:
+            print(f"Force killing PID {pid}...")
+            # Use SIGTERM on Windows since SIGKILL is not available
+            sig = signal.SIGTERM if sys.platform == "win32" else signal.SIGKILL
+            os.kill(pid, sig)
+        except (OSError, ProcessLookupError):
+            print(f"Process {pid} not found or already stopped")
+
     def status(self, host: str = "127.0.0.1", port: int = 8765) -> None:
         """Check gateway status.
         
@@ -178,6 +254,35 @@ class GatewayHandler:
         import urllib.request
         import json
         
+        # Check PID lock info first
+        try:
+            from praisonai.gateway.port_utils import GatewayPIDLock, is_port_in_use
+            pid_lock = GatewayPIDLock(host=host, port=port)
+            lock_info = pid_lock.get_lock_info()
+            
+            if lock_info:
+                pid = lock_info['pid']
+                is_running = lock_info['is_running']
+                lock_host = lock_info['host']
+                lock_port = lock_info['port']
+                
+                if is_running:
+                    print(f"Gateway PID lock: Process {pid} running ({lock_host}:{lock_port})")
+                else:
+                    print(f"Gateway PID lock: Stale lock (process {pid} not running)")
+            else:
+                print("Gateway PID lock: No lock file found")
+            
+            # Check if port is in use
+            if is_port_in_use(host, port):
+                print(f"Port {host}:{port}: In use")
+            else:
+                print(f"Port {host}:{port}: Available")
+                
+        except ImportError:
+            print("PID lock status: Utilities not available")
+        
+        # Try to connect to health endpoint
         url = f"http://{host}:{port}/health"
         
         try:

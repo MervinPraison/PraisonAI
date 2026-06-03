@@ -7,7 +7,7 @@ plugin bundle, enterprise policy) without touching the core.
 
 from __future__ import annotations
 
-from typing import Protocol, Iterable, Optional, runtime_checkable
+from typing import Protocol, Iterable, Optional, runtime_checkable, List, Dict, Any
 
 from .models import SkillProperties
 
@@ -45,7 +45,8 @@ class SkillMutatorProtocol(Protocol):
     """Agent-managed skill CRUD operations.
     
     Allows agents to create, edit, and manage their own skills at runtime.
-    Implementations should provide safe-by-default behavior (e.g., propose mode).
+    Implementations should provide safe-by-default behaviour: use ``propose=True``
+    (default) to stage mutations for human approval before writing to disk.
     """
 
     def create(self, name: str, content: str, category: Optional[str] = None,
@@ -163,3 +164,30 @@ class SkillMutatorProtocol(Protocol):
             Status message describing the action taken
         """
         ...
+
+
+@runtime_checkable
+class SkillsCatalogProtocol(Protocol):
+    """Metadata listing for skills — UI catalog pages."""
+
+    def list_skills(self) -> List[Dict[str, Any]]:
+        """Return skill metadata dicts (name, description, location)."""
+        ...
+
+
+def list_skills_for_api() -> List[Dict[str, Any]]:
+    """Default catalog adapter using SkillManager when available."""
+    try:
+        from .manager import SkillManager
+
+        manager = SkillManager()
+        return [
+            {
+                "name": s.name,
+                "description": s.description,
+                "location": getattr(s, "location", ""),
+            }
+            for s in manager.get_available_skills()
+        ]
+    except Exception:
+        return []

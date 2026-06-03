@@ -134,3 +134,37 @@ class TestTokenCollectorSinkIntegration:
         )
         assert sink.records[0]["task_id"] == "task-abc"
         assert sink.records[0]["agent_name"] == "researcher"
+
+
+class TestInMemoryUsageQuery:
+    """Test query adapter backed by in-memory sink records."""
+
+    def test_get_summary_uses_total_tokens_when_present(self):
+        from praisonaiagents.telemetry.protocols import InMemoryTokenUsageSink, InMemoryUsageQuery
+
+        sink = InMemoryTokenUsageSink()
+        sink.records.extend([
+            {
+                "task_id": "t1",
+                "agent_name": "a1",
+                "model": "m1",
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "total_tokens": 50,
+            },
+            {
+                "task_id": "t2",
+                "agent_name": "a1",
+                "model": "m2",
+                "input_tokens": 2,
+                "output_tokens": 3,
+            },
+        ])
+
+        summary = InMemoryUsageQuery(sink).get_summary()
+
+        assert summary["total_input_tokens"] == 12
+        assert summary["total_output_tokens"] == 8
+        assert summary["total_tokens"] == 55
+        assert summary["by_model"]["m1"]["total_tokens"] == 50
+        assert summary["by_model"]["m2"]["total_tokens"] == 5

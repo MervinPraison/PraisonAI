@@ -19,20 +19,43 @@ import os
 
 def calculate(expression: str) -> str:
     """
-    A simple calculator tool that evaluates mathematical expressions.
-    
+    A simple calculator tool that evaluates mathematical expressions safely.
+
     Args:
         expression: A mathematical expression to evaluate (e.g., "2 + 2")
-    
+
     Returns:
         The result of the calculation
     """
+    import ast
+    import operator
+
+    _OPS = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv,
+        ast.Mod: operator.mod,
+        ast.Pow: operator.pow,
+        ast.USub: operator.neg,
+        ast.UAdd: operator.pos,
+    }
+
+    def _safe_eval(node):
+        if isinstance(node, ast.Expression):
+            return _safe_eval(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        if isinstance(node, ast.UnaryOp) and type(node.op) in _OPS:
+            return _OPS[type(node.op)](_safe_eval(node.operand))
+        if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
+            return _OPS[type(node.op)](_safe_eval(node.left), _safe_eval(node.right))
+        raise ValueError(f"Unsupported expression: {ast.dump(node)}")
+
     try:
-        # Safe evaluation of mathematical expressions
-        allowed_chars = set("0123456789+-*/.() ")
-        if not all(c in allowed_chars for c in expression):
-            return "Error: Invalid characters in expression"
-        result = eval(expression)
+        tree = ast.parse(expression, mode="eval")
+        result = _safe_eval(tree)
         return f"Result: {result}"
     except Exception as e:
         return f"Error: {str(e)}"

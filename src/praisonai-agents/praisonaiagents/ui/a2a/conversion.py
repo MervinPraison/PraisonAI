@@ -16,6 +16,7 @@ from praisonaiagents.ui.a2a.types import (
     DataPart,
     Artifact,
 )
+from praisonaiagents.ui.protocols import A2UI_MIME_TYPE
 
 
 def a2a_to_praisonai_messages(messages: List[Message]) -> List[Dict[str, Any]]:
@@ -104,6 +105,75 @@ def praisonai_to_a2a_message(
         parts=[TextPart(text=response)],
         context_id=context_id,
         task_id=task_id,
+    )
+
+
+def find_a2ui_tool_result(
+    chat_history: Optional[List[Dict[str, Any]]],
+) -> Optional[Dict[str, Any]]:
+    """Return the last A2UI tool result dict from agent chat history, if any."""
+    if not chat_history:
+        return None
+    for msg in reversed(chat_history):
+        if msg.get("role") != "tool":
+            continue
+        content = msg.get("content")
+        if content is None:
+            continue
+        data: Any = content if isinstance(content, dict) else None
+        if data is None:
+            try:
+                data = json.loads(content)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        if isinstance(data, dict) and data.get("mime_type") == A2UI_MIME_TYPE:
+            return data
+    return None
+
+
+def create_a2ui_artifact(
+    result: Dict[str, Any],
+    artifact_id: Optional[str] = None,
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+) -> Artifact:
+    """Create an A2A Artifact with a DataPart for an A2UI tool result."""
+    art_id = artifact_id or f"art-{uuid.uuid4().hex[:12]}"
+    messages = result.get("messages") or []
+    a2ui_data = result.get("a2ui_part")
+    if not isinstance(a2ui_data, dict):
+        a2ui_data = {"messages": messages}
+    elif "messages" not in a2ui_data:
+        a2ui_data = {**a2ui_data, "messages": messages}
+
+    return Artifact(
+        artifact_id=art_id,
+        name=name,
+        description=description,
+        parts=[
+            DataPart(
+                data=a2ui_data,
+                metadata={"mimeType": result.get("mime_type", A2UI_MIME_TYPE)},
+            )
+        ],
+    )
+
+
+def create_response_artifact(
+    content: str,
+    chat_history: Optional[List[Dict[str, Any]]] = None,
+    artifact_id: Optional[str] = None,
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+) -> Artifact:
+    """Build artifact from response text, preferring A2UI DataPart when present in history."""
+    a2ui = find_a2ui_tool_result(chat_history)
+    if a2ui:
+        return create_a2ui_artifact(
+            a2ui, artifact_id=artifact_id, name=name, description=description
+        )
+    return create_artifact(
+        content, artifact_id=artifact_id, name=name, description=description
     )
 
 

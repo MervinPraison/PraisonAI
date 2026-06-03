@@ -26,6 +26,21 @@ if TYPE_CHECKING:
 class ToolExecutionMixin:
     """Mixin providing toolexecution methods for the Agent class."""
 
+    def _get_existing_stream_emitter(self):
+        """Return an already-initialized stream emitter without creating one."""
+        emitter = getattr(self, "_stream_emitter", None)
+        if emitter is not None:
+            return emitter
+
+        # Support name-mangled private attributes across class renames/inheritance.
+        for cls in type(self).mro():
+            mangled = f"_{cls.__name__}__stream_emitter"
+            if hasattr(self, mangled):
+                emitter = getattr(self, mangled, None)
+                if emitter is not None:
+                    return emitter
+        return None
+
     def _resolve_tool_names(self, tool_names):
         """Resolve tool names to actual tool instances from registry.
         
@@ -120,6 +135,12 @@ class ToolExecutionMixin:
         """
         logging.debug(f"{self.name} executing tool {function_name} with arguments: {arguments}")
         
+        # Handle bridge tool unwrapping BEFORE trace/stream/hooks (design invariant #6)
+        # Only intercept when tool_search is active; otherwise fall through to real tool execution
+        if (getattr(self, '_tool_search_config', None) is not None and
+                function_name in ("tool_search", "tool_describe", "tool_call")):
+            return self._handle_bridge_tool_call(function_name, arguments, tool_call_id)
+        
         # NOTE: tool_call callback is triggered by display_tool_call in openai_client.py
         # Do NOT call it here to avoid duplicate output
         
@@ -160,8 +181,9 @@ class ToolExecutionMixin:
         
         # Emit TOOL_CALL_START to stream_emitter (for AIUI/AG-UI consumers)
         # Zero overhead when no callbacks registered
-        if hasattr(self, '_Agent__stream_emitter') and getattr(self, "_Agent__stream_emitter", None) is not None and getattr(self, "_Agent__stream_emitter", None).has_callbacks:
-            getattr(self, "_Agent__stream_emitter", None).emit(StreamEvent(
+        _stream_emitter = self._get_existing_stream_emitter()
+        if _stream_emitter is not None and _stream_emitter.has_callbacks:
+            _stream_emitter.emit(StreamEvent(
                 type=StreamEventType.TOOL_CALL_START,
                 timestamp=_tool_start_perf,
                 tool_call={
@@ -275,10 +297,10 @@ class ToolExecutionMixin:
             
             # Emit TOOL_CALL_RESULT to stream_emitter (for AIUI/AG-UI consumers)
             # Zero overhead when no callbacks registered
-            if hasattr(self, '_Agent__stream_emitter') and getattr(self, "_Agent__stream_emitter", None) is not None and getattr(self, "_Agent__stream_emitter", None).has_callbacks:
+            if _stream_emitter is not None and _stream_emitter.has_callbacks:
                 # Truncate result for stream event (keep it reasonable for UI display)
                 result_summary = str(result)[:500] if result else None
-                getattr(self, "_Agent__stream_emitter", None).emit(StreamEvent(
+                _stream_emitter.emit(StreamEvent(
                     type=StreamEventType.TOOL_CALL_RESULT,
                     timestamp=_time.perf_counter(),
                     tool_call={
@@ -286,6 +308,18 @@ class ToolExecutionMixin:
                         "arguments": arguments,
                         "result": result_summary,
                         "id": tool_call_id,  # Now properly threaded through
+                    },
+                    agent_id=self.name,
+                    metadata={"duration_ms": _duration_ms},
+                ))
+                _stream_emitter.emit(StreamEvent(
+                    type=StreamEventType.TOOL_CALL_END,
+                    timestamp=_time.perf_counter(),
+                    tool_call={
+                        "name": function_name,
+                        "arguments": arguments,
+                        "result": result_summary,
+                        "id": tool_call_id,
                     },
                     agent_id=self.name,
                     metadata={"duration_ms": _duration_ms},
@@ -926,4 +960,97 @@ class ToolExecutionMixin:
     def pending_approval_count(self) -> int:
         """Number of approval requests still waiting."""
         return len(self._pending_approvals)
-
+    
+    def _handle_bridge_tool_call(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None) -> Any:
+        """
+        Handle bridge tool calls (tool_search, tool_describe, tool_call).
+        
+        This implements the tool search unwrapping logic before trace/stream/hooks
+        as required by design invariant #6.
+        
+        Args:
+            function_name: Bridge tool name
+            arguments: Arguments passed to bridge tool
+            tool_call_id: Optional tool call ID
+            
+        Returns:
+            Result of bridge tool execution or unwrapped real tool call
+        """
+        # Ensure tool search metadata is available
+        if not hasattr(self, '_tool_search_metadata') or self._tool_search_metadata is None:
+            return "Tool search not available or not in bridge mode"
+        
+        metadata = self._tool_search_metadata
+        
+        # Check if we're in bridge mode
+        if not metadata.get("bridge_mode", False):
+            return "Tool search not in bridge mode"
+        
+        # Get deferrable tools from metadata
+        deferrable_tools = metadata.get("deferrable_tools", [])
+        
+        if function_name == "tool_search":
+            # Handle tool_search bridge call
+            try:
+                from ..tools.tool_search import dispatch_tool_search
+                query = arguments.get("query", "")
+                limit = arguments.get("limit", None)
+                
+                result = dispatch_tool_search(
+                    query=query,
+                    limit=limit, 
+                    deferrable_tools=deferrable_tools,
+                    config=self._tool_search_config
+                )
+                return json.dumps(result, indent=2)
+            except ImportError:
+                return "Tool search module not available"
+            except Exception as e:
+                logging.error(f"Error in tool_search: {e}")
+                return f"Error searching tools: {e}"
+        
+        elif function_name == "tool_describe":
+            # Handle tool_describe bridge call
+            try:
+                from ..tools.tool_search import dispatch_tool_describe
+                tool_name = arguments.get("tool_name", "")
+                
+                result = dispatch_tool_describe(
+                    tool_name=tool_name,
+                    deferrable_tools=deferrable_tools
+                )
+                return json.dumps(result, indent=2)
+            except ImportError:
+                return "Tool search module not available"
+            except Exception as e:
+                logging.error(f"Error in tool_describe: {e}")
+                return f"Error describing tool: {e}"
+        
+        elif function_name == "tool_call":
+            # Handle tool_call bridge - unwrap and recurse with real tool
+            try:
+                from ..tools.tool_search import resolve_underlying_call
+                
+                # Unwrap the real tool call
+                real_function_name, real_arguments = resolve_underlying_call(function_name, arguments)
+                
+                # Validate that the real tool is in our deferrable set (security check)
+                deferrable_names = {
+                    tool_def.get("function", {}).get("name", "") 
+                    for tool_def in deferrable_tools
+                }
+                
+                if real_function_name not in deferrable_names:
+                    return f"Tool '{real_function_name}' is not available for execution"
+                
+                # Recursively execute the real tool (this will go through normal execution path)
+                return self.execute_tool(real_function_name, real_arguments, tool_call_id)
+                
+            except ImportError:
+                return "Tool search module not available"
+            except Exception as e:
+                logging.error(f"Error in tool_call unwrap: {e}")
+                return f"Error executing tool: {e}"
+        
+        else:
+            return f"Unknown bridge tool: {function_name}"

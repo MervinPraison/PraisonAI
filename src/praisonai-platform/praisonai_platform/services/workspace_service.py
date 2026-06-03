@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.models import Member, Workspace
@@ -98,10 +98,13 @@ class WorkspaceService:
         return ws
 
     async def delete(self, workspace_id: str) -> bool:
-        """Delete a workspace."""
+        """Delete a workspace and its memberships."""
         ws = await self.get(workspace_id)
         if ws is None:
             return False
+        await self._session.execute(
+            delete(Member).where(Member.workspace_id == workspace_id)
+        )
         await self._session.delete(ws)
         await self._session.flush()
         return True

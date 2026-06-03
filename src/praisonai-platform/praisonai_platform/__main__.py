@@ -7,12 +7,18 @@ Usage::
 """
 
 import argparse
+import os
 import sys
 
 
 def main() -> None:
+    default_host = os.environ.get("PLATFORM_HOST", "127.0.0.1")
     parser = argparse.ArgumentParser(description="PraisonAI Platform Server")
-    parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
+    parser.add_argument(
+        "--host",
+        default=default_host,
+        help="Bind host (default: 127.0.0.1, or PLATFORM_HOST env)",
+    )
     parser.add_argument("--port", type=int, default=8000, help="Bind port (default: 8000)")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload for development")
     args = parser.parse_args()

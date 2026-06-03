@@ -181,12 +181,15 @@ jobs:
 
       - name: Fetch PR branch and Setup Remote
         if: github.event.issue.pull_request
+        env:
+          PR_BRANCH: ${{ steps.check_fork.outputs.pr_branch }}
+          IS_FORK: ${{ steps.check_fork.outputs.is_fork }}
         run: |
           # Fetch PR head from base repo and put it into local branch
-          git fetch origin pull/${{ github.event.issue.number }}/head:${{ steps.check_fork.outputs.pr_branch }}
+          git fetch origin pull/${{ github.event.issue.number }}/head:"${PR_BRANCH}"
           
           # If it's a fork, make origin point to local to trick claude-code-action's `git fetch origin <branch>`
-          if [ "${{ steps.check_fork.outputs.is_fork }}" == "true" ]; then
+          if [ "${IS_FORK}" = "true" ]; then
             git remote set-url origin file://$(pwd)
           fi
 

@@ -7,7 +7,7 @@ Provides HTTP endpoints for job management.
 import asyncio
 import logging
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Header, Request, Query, Response
 from sse_starlette.sse import EventSourceResponse
@@ -304,7 +304,7 @@ def create_router(store: JobStore, executor: JobExecutor) -> APIRouter:
                         # Send heartbeat
                         yield {
                             "event": "heartbeat",
-                            "data": f'{{"timestamp": "{datetime.utcnow().isoformat()}"}}'
+                            "data": f'{{"timestamp": "{datetime.now(timezone.utc).isoformat()}"}}'
                         }
             finally:
                 executor.unregister_progress_callback(job_id)

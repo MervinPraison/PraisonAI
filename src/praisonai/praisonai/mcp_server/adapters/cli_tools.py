@@ -21,6 +21,31 @@ from ..registry import register_tool
 logger = logging.getLogger(__name__)
 
 
+def _resolve_cwd_yaml_path(file_path: str) -> "Path":
+    """Resolve a YAML path strictly inside the current working directory."""
+    from pathlib import Path
+
+    if not isinstance(file_path, str) or not file_path:
+        raise ValueError("file_path must be a non-empty string")
+    if (
+        "/" in file_path
+        or "\\" in file_path
+        or "\x00" in file_path
+        or file_path.startswith(".")
+        or file_path in ("..", ".")
+    ):
+        raise ValueError(f"invalid file_path: {file_path!r}")
+    if not file_path.endswith((".yaml", ".yml")):
+        raise ValueError("file_path must be a .yaml or .yml file")
+    base = Path.cwd().resolve()
+    candidate = (base / file_path).resolve()
+    try:
+        candidate.relative_to(base)
+    except ValueError as exc:
+        raise ValueError(f"invalid file_path: {file_path!r}") from exc
+    return candidate
+
+
 def register_cli_tools() -> None:
     """Register CLI-based MCP tools."""
     
@@ -44,7 +69,8 @@ def register_cli_tools() -> None:
         """Validate a workflow YAML file."""
         try:
             import yaml
-            with open(file_path, 'r') as f:
+            yaml_path = _resolve_cwd_yaml_path(file_path)
+            with open(yaml_path, 'r') as f:
                 config = yaml.safe_load(f)
             
             required = ["framework", "topic"]
@@ -64,9 +90,10 @@ def register_cli_tools() -> None:
     def workflow_show(file_path: str) -> str:
         """Show workflow configuration."""
         try:
-            with open(file_path, 'r') as f:
-                content = f.read()
-            return content
+            yaml_path = _resolve_cwd_yaml_path(file_path)
+            return yaml_path.read_text()
+        except ValueError as e:
+            return f"Error: {e}"
         except FileNotFoundError:
             return f"File not found: {file_path}"
         except Exception as e:
@@ -417,7 +444,8 @@ def register_cli_tools() -> None:
         """Validate deployment configuration."""
         try:
             import yaml
-            with open(config_path, 'r') as f:
+            yaml_path = _resolve_cwd_yaml_path(config_path)
+            with open(yaml_path, 'r') as f:
                 config = yaml.safe_load(f)
             
             required = ["name", "type"]

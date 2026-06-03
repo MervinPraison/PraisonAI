@@ -241,3 +241,89 @@ Body.
             loader.activate(skill)
             
             assert skill.is_activated is True
+    
+    def test_load_utf8_content(self):
+        """Test loading UTF-8 encoded skill content.
+        
+        Regression test for Windows encoding issues (Issue #1695).
+        Tests UTF-8 handling in SKILL.md body, scripts, and references.
+        """
+        from praisonaiagents.skills.loader import SkillLoader
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            skill_dir = Path(tmpdir) / "utf8-loader-test"
+            skill_dir.mkdir()
+            
+            # Create SKILL.md with UTF-8 characters
+            skill_content = """---
+name: utf8-loader-test
+description: Loader test with UTF-8 — em dashes — and more
+---
+
+# UTF-8 Instructions
+
+This skill handles UTF-8 content:
+- Smart quotes: "hello" and 'world'
+- Em dash: —
+- Arrows: → ← ↑ ↓
+- Accented: café, naïve, résumé
+- Emoji: 🔥 📝 ✨
+"""
+            
+            with open(skill_dir / "SKILL.md", 'w', encoding='utf-8') as f:
+                f.write(skill_content)
+            
+            # Create scripts directory with UTF-8 script
+            scripts_dir = skill_dir / "scripts"
+            scripts_dir.mkdir()
+            
+            script_content = """#!/bin/bash
+# Script with UTF-8: café processing → résumé generation
+echo "Processing naïve input with émphasis"
+"""
+            
+            with open(scripts_dir / "process.sh", 'w', encoding='utf-8') as f:
+                f.write(script_content)
+            
+            # Create references directory with UTF-8 content
+            refs_dir = skill_dir / "references"
+            refs_dir.mkdir()
+            
+            ref_content = """Reference with UTF-8:
+Café automation guide — step by step
+Arrow symbols: → ← ↑ ↓
+Special chars: "smart quotes" and émphasis
+"""
+            
+            with open(refs_dir / "readme.txt", 'w', encoding='utf-8') as f:
+                f.write(ref_content)
+            
+            # Test loading and activation
+            loader = SkillLoader()
+            skill = loader.load_metadata(str(skill_dir))
+            
+            assert skill is not None
+            assert "—" in skill.properties.description  # UTF-8 in metadata
+            
+            # Test activation (loads SKILL.md body)
+            success = loader.activate(skill)
+            assert success is True
+            assert "—" in skill.instructions  # UTF-8 in instructions
+            assert "café" in skill.instructions
+            assert "🔥" in skill.instructions  # Emoji
+            
+            # Test script loading
+            scripts = loader.load_scripts(skill)
+            assert "process.sh" in scripts
+            script_text = scripts["process.sh"]
+            assert "café" in script_text
+            assert "résumé" in script_text
+            assert "naïve" in script_text
+            
+            # Test references loading
+            refs = loader.load_references(skill)
+            assert "readme.txt" in refs
+            ref_text = refs["readme.txt"]
+            assert "Café" in ref_text
+            assert "—" in ref_text
+            assert "émphasis" in ref_text

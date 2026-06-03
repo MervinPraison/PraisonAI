@@ -233,6 +233,47 @@ class TestA2AJsonRpc:
         assert result["status"]["state"] == "completed"
         assert result["artifacts"] is not None
         assert len(result["artifacts"]) > 0
+
+    def test_post_a2a_message_send_a2ui_artifact(self):
+        """message/send with A2UI tool result in chat_history → DataPart artifact."""
+        import json
+
+        from fastapi.testclient import TestClient
+
+        from praisonaiagents.ui.protocols import A2UI_MIME_TYPE
+
+        app, a2a = _make_app()
+        a2ui_payload = {
+            "mime_type": A2UI_MIME_TYPE,
+            "messages": [{"createSurface": {"surfaceId": "main", "catalogId": "basic"}}],
+            "a2ui_part": {"messages": [{"createSurface": {"surfaceId": "main", "catalogId": "basic"}}]},
+        }
+        a2a.agent.chat = MagicMock(return_value="Surface ready.")
+        a2a.agent.chat_history = [
+            {"role": "tool", "content": json.dumps(a2ui_payload)},
+        ]
+
+        client = TestClient(app)
+        response = client.post("/a2a", json={
+            "jsonrpc": "2.0",
+            "method": "message/send",
+            "id": "a2ui-1",
+            "params": {
+                "message": {
+                    "messageId": "msg-a2ui",
+                    "role": "user",
+                    "parts": [{"text": "Show UI"}],
+                }
+            },
+        })
+
+        assert response.status_code == 200
+        result = response.json()["result"]
+        artifact = result["artifacts"][0]
+        parts = artifact["parts"]
+        data_parts = [p for p in parts if "data" in p]
+        assert data_parts, "Expected DataPart in artifact"
+        assert data_parts[0]["metadata"]["mimeType"] == A2UI_MIME_TYPE
     
     def test_post_a2a_message_send_creates_task_in_store(self):
         """message/send should create a task in TaskStore."""

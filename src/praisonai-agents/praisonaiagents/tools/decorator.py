@@ -214,6 +214,13 @@ def tool(
             availability=availability
         )
         
+        # Validate the tool at creation time for early error detection
+        try:
+            tool_instance.validate()
+            tool_instance.validate_schema_roundtrip()
+        except Exception as e:
+            logging.warning(f"Tool validation warning for {tool_instance.name}: {e}")
+        
         # Register with global registry if available
         try:
             from .registry import get_registry

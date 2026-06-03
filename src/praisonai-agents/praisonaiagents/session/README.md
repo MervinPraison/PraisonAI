@@ -32,7 +32,22 @@ When you provide a `session_id` to an Agent:
 
 ### Default Storage Location
 
-Sessions are stored in: `~/.praison/sessions/{session_id}.json`
+Sessions are stored in: `~/.praisonai/sessions/{session_id}.json`
+
+### Session metadata contract (Issue #48)
+
+List endpoints and UI dashboards may expose these optional root-level fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `model` | string | LLM model used in the session |
+| `total_tokens` | int | Cumulative input+output tokens |
+| `cost` | float | Estimated USD cost |
+| `agent_id` | string | Gateway or registry agent id |
+| `source` | string | Origin: `chat`, `gateway`, `cli`, `api` |
+| `agent_name` | string | Human-readable agent name |
+
+Fields are persisted in session JSON `metadata` and mirrored at root on save. Populated automatically after each assistant turn when using the default session store.
 
 ### Session File Format
 
@@ -45,7 +60,13 @@ Sessions are stored in: `~/.praison/sessions/{session_id}.json`
   ],
   "created_at": "2026-01-02T04:00:00+00:00",
   "updated_at": "2026-01-02T04:01:00+00:00",
-  "agent_name": "Assistant"
+  "agent_name": "Assistant",
+  "agent_id": "agent-abc",
+  "source": "chat",
+  "model": "gpt-4o-mini",
+  "total_tokens": 128,
+  "cost": 0.0004,
+  "metadata": {}
 }
 ```
 

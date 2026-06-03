@@ -8,10 +8,36 @@ Plugin registry for CLI backend implementations following AGENTS.md patterns:
 
 import threading
 from typing import Dict, Callable, Any, Optional, Union
+from .._registry import PluginRegistry
 
-# Thread-safe registry for CLI backend factories
-_REGISTRY: Dict[str, Callable[[], Any]] = {}
-_REGISTRY_LOCK = threading.Lock()
+# CLI Backend Registry using canonical PluginRegistry
+def _get_builtin_cli_backend_loaders() -> Dict[str, Callable[[], Any]]:
+    """Get built-in CLI backend loaders."""
+    def claude_loader():
+        def factory():
+            from .claude import ClaudeCodeBackend
+            return ClaudeCodeBackend()
+        return factory
+    
+    return {
+        "claude-code": claude_loader
+    }
+
+# Global CLI backend registry instance
+_cli_backend_registry: Optional[PluginRegistry] = None
+_registry_lock = threading.Lock()
+
+def _get_cli_backend_registry() -> PluginRegistry:
+    """Get the CLI backend registry instance."""
+    global _cli_backend_registry
+    if _cli_backend_registry is None:
+        with _registry_lock:
+            if _cli_backend_registry is None:
+                _cli_backend_registry = PluginRegistry(
+                    entry_point_group="praisonai.cli_backends",
+                    builtins=_get_builtin_cli_backend_loaders()
+                )
+    return _cli_backend_registry
 
 
 def register_cli_backend(backend_id: str, factory: Callable[[], Any]) -> None:
@@ -21,14 +47,18 @@ def register_cli_backend(backend_id: str, factory: Callable[[], Any]) -> None:
         backend_id: Unique identifier (e.g., "claude-code", "codex-cli") 
         factory: Factory function that returns a CliBackendProtocol instance
     """
-    with _REGISTRY_LOCK:
-        _REGISTRY[backend_id] = factory
+    # Wrap factory in a loader function for PluginRegistry
+    def factory_loader():
+        return factory
+    
+    registry = _get_cli_backend_registry()
+    registry.register(backend_id, factory_loader)
 
 
 def list_cli_backends() -> list[str]:
     """List all registered CLI backend IDs."""
-    with _REGISTRY_LOCK:
-        return list(_REGISTRY.keys())
+    registry = _get_cli_backend_registry()
+    return registry.list_names()
 
 
 def resolve_cli_backend(
@@ -47,12 +77,15 @@ def resolve_cli_backend(
     Raises:
         ValueError: If backend_id is not registered
     """
-    with _REGISTRY_LOCK:
-        if backend_id not in _REGISTRY:
-            available = list(_REGISTRY.keys())
-            raise ValueError(f"Unknown CLI backend: {backend_id}. Available: {available}")
-        
-        factory = _REGISTRY[backend_id]
+    registry = _get_cli_backend_registry()
+    
+    try:
+        # Get the factory loader and create the factory
+        factory_loader = registry.resolve(backend_id)
+        factory = factory_loader()
+    except ValueError:
+        available = registry.list_names()
+        raise ValueError(f"Unknown CLI backend: {backend_id}. Available: {available}")
     
     # Create instance with factory
     backend = factory()
@@ -77,24 +110,4 @@ def resolve_cli_backend(
     return backend
 
 
-def _register_builtin_backends() -> None:
-    """Register built-in CLI backends (lazy loaded)."""
-    # Only register if not already done
-    with _REGISTRY_LOCK:
-        if "claude-code" in _REGISTRY:
-            return
-    
-    def claude_factory():
-        from .claude import ClaudeCodeBackend
-        return ClaudeCodeBackend()
-    
-    register_cli_backend("claude-code", claude_factory)
-
-
-# Auto-register built-in backends on first access
-def __getattr__(name: str):
-    """Lazy registration trigger."""
-    _register_builtin_backends()
-    raise AttributeError(f"No attribute {name}")
-
-# Registration happens lazily via __getattr__ on first attribute access
+# Built-in backends are now registered via _get_builtin_cli_backend_loaders()

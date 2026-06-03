@@ -7,7 +7,7 @@ Provides persistence and resume functionality for sessions.
 import json
 import shutil
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
@@ -129,7 +129,7 @@ class SessionManager:
         session_dir = self._get_session_dir(session_id)
         session_dir.mkdir(parents=True, exist_ok=True)
         
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         metadata = SessionMetadata(
             session_id=session_id,
             run_id=context.run_id,
@@ -206,7 +206,7 @@ class SessionManager:
         metadata = self._load_metadata(session_id)
         if metadata:
             metadata.event_count += 1
-            metadata.updated_at = datetime.utcnow()
+            metadata.updated_at = datetime.now(timezone.utc)
             self._save_metadata(metadata)
     
     def get(self, session_id: str) -> Optional[SessionMetadata]:
@@ -365,7 +365,7 @@ class SessionManager:
         metadata = self._load_metadata(session_id)
         if metadata:
             metadata.status = status
-            metadata.updated_at = datetime.utcnow()
+            metadata.updated_at = datetime.now(timezone.utc)
             self._save_metadata(metadata)
 
 

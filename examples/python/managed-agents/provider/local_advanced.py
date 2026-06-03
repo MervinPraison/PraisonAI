@@ -23,12 +23,39 @@ print(f"[2] Updated to v{managed.agent_version}")
 result = agent.start("What is 123 + 456?", stream=True)
 
 # ── 3. Custom tool ──
+def _safe_calc(expr: str) -> str:
+    import ast
+    allowed = set("0123456789+-*/.() ")
+    if not all(c in allowed for c in expr):
+        return "error"
+    try:
+        tree = ast.parse(expr, mode="eval")
+        for node in ast.walk(tree):
+            if not isinstance(
+                node,
+                (
+                    ast.Expression,
+                    ast.BinOp,
+                    ast.UnaryOp,
+                    ast.Constant,
+                    ast.Add,
+                    ast.Sub,
+                    ast.Mult,
+                    ast.Div,
+                    ast.USub,
+                    ast.UAdd,
+                ),
+            ):
+                return "error"
+        val = eval(compile(tree, "<expr>", "eval"), {"__builtins__": {}})
+        return str(val)
+    except Exception:
+        return "error"
+
+
 def handle_calculator(tool_name, tool_input):
     expr = tool_input.get("expression", "0")
-    try:
-        val = eval(expr, {"__builtins__": {}})
-    except Exception:
-        val = "error"
+    val = _safe_calc(str(expr))
     print(f"  [Calculator: {expr} = {val}]")
     return str(val)
 

@@ -486,18 +486,21 @@ class LocalManagedAgent:
             store.set_metadata(self._session_id, state)
             return
 
-        # DefaultSessionStore path — write into SessionData.metadata
+        # DefaultSessionStore path — merge metadata under file lock (preserves messages)
         try:
-            session = store.get_session(self._session_id)
-            if session is not None:
-                if not isinstance(session.metadata, dict):
-                    session.metadata = {}
-                session.metadata.update(state)
-                store._save_session(session)
+            if hasattr(store, "update_session_metadata"):
+                store.update_session_metadata(self._session_id, **state)
             else:
-                from praisonaiagents.session.store import SessionData
-                new_session = SessionData(session_id=self._session_id, metadata=state)
-                store._save_session(new_session)
+                session = store.get_session(self._session_id)
+                if session is None:
+                    from praisonaiagents.session.store import SessionData
+
+                    store._save_session(SessionData(session_id=self._session_id, metadata=state))
+                else:
+                    if not isinstance(session.metadata, dict):
+                        session.metadata = {}
+                    session.metadata.update(state)
+                    store._save_session(session)
         except Exception as e:
             logger.debug("[local_managed] _persist_state failed: %s", e)
 
@@ -596,9 +599,11 @@ class LocalManagedAgent:
                 subprocess.run(cmd, check=True, capture_output=True, timeout=120)
                 logger.info("[local_managed] host pip install completed")
             except subprocess.CalledProcessError as e:
-                logger.warning("[local_managed] pip install failed: %s", e.stderr)
-            except subprocess.TimeoutExpired:
-                logger.warning("[local_managed] pip install timed out")
+                raise RuntimeError(
+                    f"pip install failed for {pip_pkgs}: {e.stderr.decode(errors='replace')}"
+                ) from e
+            except subprocess.TimeoutExpired as e:
+                raise RuntimeError(f"pip install timed out after 120s for {pip_pkgs}") from e
         else:
             # Sandbox installation via compute provider
             self._install_packages_in_compute(pip_pkgs)
@@ -626,10 +631,14 @@ class LocalManagedAgent:
             if result.get("exit_code", 0) == 0:
                 logger.info("[local_managed] compute pip install completed")
             else:
-                logger.warning("[local_managed] compute pip install failed: %s", result.get("stderr", ""))
+                raise RuntimeError(
+                    f"pip install failed in compute for {pip_pkgs}: {result.get('stderr', '')}"
+                )
                 
         except Exception as e:
-            logger.warning("[local_managed] compute pip install error: %s", e)
+            if "pip install failed in compute" in str(e):
+                raise  # Re-raise RuntimeError from above
+            raise RuntimeError(f"pip install error in compute for {pip_pkgs}: {e}") from e
 
     def _ensure_agent(self) -> Any:
         """Create or return the inner PraisonAI Agent."""
@@ -772,20 +781,30 @@ class LocalManagedAgent:
         q: queue.Queue[Optional[str]] = queue.Queue()
 
         def _producer():
+            full = ""
             try:
                 agent = self._ensure_agent()
                 self._ensure_session()
+                self._persist_message("user", prompt)
                 gen = agent.chat(prompt, stream=True)
                 if hasattr(gen, '__iter__'):
                     for chunk in gen:
                         if chunk:
-                            q.put(str(chunk))
+                            text = str(chunk)
+                            q.put(text)
+                            full += text
                 else:
                     if gen:
-                        q.put(str(gen))
+                        text = str(gen)
+                        q.put(text)
+                        full = text
             except Exception as e:
                 logger.error("[local_managed] stream error: %s", e)
             finally:
+                if full:
+                    self._persist_message("assistant", full)
+                self._sync_usage()
+                self._persist_state()
                 q.put(None)
 
         thread = threading.Thread(target=_producer, daemon=True)

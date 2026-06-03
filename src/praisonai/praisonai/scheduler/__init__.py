@@ -30,20 +30,21 @@ def __getattr__(name):
         from .agent_scheduler import create_agent_scheduler
         return create_agent_scheduler
     elif name == 'create_scheduler':
-        # Return a factory function that creates a mock scheduler for testing
-        def _create_scheduler(provider='gcp', **kwargs):
-            from .agent_scheduler import AgentScheduler
-            # Create a mock agent and task for testing
-            class MockAgent:
-                pass
-            return AgentScheduler(MockAgent(), "test task")
-        return _create_scheduler
+        # Return the real deployment scheduler factory
+        from .deployment import create_deployment_scheduler
+        return create_deployment_scheduler
     elif name == 'DeploymentScheduler':
-        from .agent_scheduler import AgentScheduler
-        return AgentScheduler
+        from .deployment import DeploymentScheduler
+        return DeploymentScheduler
     elif name == 'create_deployment_scheduler':
-        from .agent_scheduler import create_agent_scheduler
-        return create_agent_scheduler
+        from .deployment import create_deployment_scheduler
+        return create_deployment_scheduler
+    elif name == 'AsyncAgentScheduler':
+        from .async_agent_scheduler import AsyncAgentScheduler
+        return AsyncAgentScheduler
+    elif name == 'create_async_agent_scheduler':
+        from .async_agent_scheduler import create_async_agent_scheduler
+        return create_async_agent_scheduler
     elif name in ('ScheduledAgentExecutor', 'JobResult'):
         from .executor import ScheduledAgentExecutor, JobResult
         return ScheduledAgentExecutor if name == 'ScheduledAgentExecutor' else JobResult

@@ -285,12 +285,13 @@ PARAMETER top_p 0.9
 """
 
     def create_and_push_ollama_model(self):
+        from .train._ollama import create_and_push_ollama_model
         modelfile_content = self.prepare_modelfile_content()
-        with open("Modelfile", "w") as file:
-            file.write(modelfile_content)
-        subprocess.run(["ollama", "serve"])
-        subprocess.run(["ollama", "create", f"{self.config['ollama_model']}:{self.config['model_parameters']}", "-f", "Modelfile"])
-        subprocess.run(["ollama", "push", f"{self.config['ollama_model']}:{self.config['model_parameters']}"])
+        create_and_push_ollama_model(
+            self.config['ollama_model'], 
+            self.config['model_parameters'], 
+            modelfile_content
+        )
 
     def run(self):
         self.print_system_info()

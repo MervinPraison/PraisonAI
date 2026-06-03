@@ -20,12 +20,22 @@ if [[ -z "$EXPECTED_VERSION" ]]; then
   fi
 fi
 
-echo "==> Running official installer one-liner"
-if [[ -n "$EXTRAS" ]]; then
-  PRAISONAI_EXTRAS="$EXTRAS" curl -fsSL "$INSTALL_URL" | bash
-else
-  curl -fsSL "$INSTALL_URL" | bash
+echo "==> Running official installer"
+INSTALLER_SCRIPT="/tmp/praisonai-install.sh"
+curl -fsSL "$INSTALL_URL" -o "$INSTALLER_SCRIPT"
+
+if [[ ! -f "$INSTALLER_SCRIPT" ]]; then
+  echo "ERROR: Failed to download installer from $INSTALL_URL"
+  exit 1
 fi
+
+if [[ -n "$EXTRAS" ]]; then
+  PRAISONAI_EXTRAS="$EXTRAS" bash "$INSTALLER_SCRIPT"
+else
+  bash "$INSTALLER_SCRIPT"
+fi
+
+rm -f "$INSTALLER_SCRIPT"
 
 echo "==> Verify installation"
 
