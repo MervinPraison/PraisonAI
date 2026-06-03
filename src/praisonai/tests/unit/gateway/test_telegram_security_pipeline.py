@@ -240,6 +240,32 @@ def test_security_pipeline_exists():
 
 
 @pytest.mark.asyncio
+@patch.object(UnknownUserHandler, 'handle')
+async def test_command_handlers_respect_user_allowlist(mock_unknown_handler):
+    """Built-in commands must pass the same security pipeline as text messages."""
+    mock_unknown_handler.return_value = False
+
+    bot = create_test_bot(allowed_users=["42"])
+
+    for command_text in ("/help", "/status", "/new"):
+        update = create_mock_telegram_update(
+            user_id="99",
+            text=command_text,
+            chat_type="private",
+        )
+        message = await process_inbound_telegram_message(update, bot)
+        assert message is None, f"{command_text} from disallowed user should be blocked"
+
+    allowed_update = create_mock_telegram_update(
+        user_id="42",
+        text="/help",
+        chat_type="private",
+    )
+    allowed_message = await process_inbound_telegram_message(allowed_update, bot)
+    assert allowed_message is not None, "Commands from allowed users should pass"
+
+
+@pytest.mark.asyncio
 async def test_shared_pipeline_consistency():
     """Test that the shared pipeline provides consistent results."""
     
