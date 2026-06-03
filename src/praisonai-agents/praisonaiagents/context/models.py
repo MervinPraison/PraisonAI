@@ -202,6 +202,7 @@ class OptimizerStrategy(str, Enum):
     PRUNE_TOOLS = "prune_tools"
     NON_DESTRUCTIVE = "non_destructive"
     SMART = "smart"
+    CONVERSATION = "conversation"
 
 
 @dataclass
@@ -292,6 +293,11 @@ class ContextConfig:
     
     # Smart tool output summarization (summarize before truncating)
     smart_tool_summarize: bool = True  # Summarize large tool outputs using LLM before truncating
+    
+    # Conversation compaction with continuity preservation
+    conversation_compaction: bool = False  # Enable intelligent conversation compaction
+    conversation_analyzer_strategy: str = "hybrid"  # Strategy: hybrid, rule_based, llm_only  
+    conversation_min_compaction_ratio: float = 0.3  # Minimum compression ratio (30% savings)
     
     # Session tracking (Agno pattern)
     session_tracking: bool = False     # Enable goal/plan/progress tracking
