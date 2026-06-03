@@ -169,6 +169,15 @@ __all__ = [
     "TerminalLoggerProtocol",
     "compute_checksum",
     "generate_summary",
+    # Context Compaction Policy
+    "ContextCompactionPolicy",
+    "CompactionRoute",
+    "CompactionStrategy", 
+    "ContextBudgetResult",
+    "get_default_policy",
+    "CONSERVATIVE_POLICY",
+    "BALANCED_POLICY",
+    "AGGRESSIVE_POLICY",
 ]
 
 
@@ -281,5 +290,12 @@ def __getattr__(name: str):
     if name in ("ContextAggregator", "AggregatedContext", "create_aggregator_from_config"):
         from . import aggregator
         return getattr(aggregator, name)
+    
+    # Context Compaction Policy
+    if name in ("ContextCompactionPolicy", "CompactionRoute", "CompactionStrategy",
+                "ContextBudgetResult", "get_default_policy", "CONSERVATIVE_POLICY", 
+                "BALANCED_POLICY", "AGGRESSIVE_POLICY"):
+        from . import policy
+        return getattr(policy, name)
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

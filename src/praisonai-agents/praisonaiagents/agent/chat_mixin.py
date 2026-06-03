@@ -549,41 +549,337 @@ Your Goal: {self.goal}"""
             emit_events=True
         )
 
+    def _compute_context_budget_and_route(self, messages, tools=None, system_prompt=None):
+        """
+        Compute context budget and determine proactive route BEFORE LLM call.
+        
+        Replaces the old opt-in reactive approach with proactive budget checking.
+        
+        Returns:
+            tuple: (route, compacted_messages) where route is from CompactionRoute enum
+        """
+        from ..context.policy import get_default_policy, CompactionRoute
+        from ..compaction import ContextCompactor
+        from ..hooks import HookEvent as _HookEvent
+        import logging
+        
+        # Get execution config and policy
+        _execution_cfg = getattr(self, 'execution', None)
+        
+        # Determine if context compaction is enabled and what policy to use
+        context_compaction = True  # New default
+        policy = None
+        
+        if _execution_cfg:
+            compaction_setting = getattr(_execution_cfg, 'context_compaction', True)
+            if compaction_setting is False:
+                # Explicitly disabled - use old reactive approach
+                return CompactionRoute.FITS, messages
+            elif compaction_setting is True:
+                # Use default policy
+                policy = get_default_policy()
+            else:
+                # Custom policy provided
+                policy = compaction_setting
+        else:
+            # No execution config - use safe default
+            policy = get_default_policy()
+        
+        # Get model name for context window lookup
+        model_name = self.llm if isinstance(self.llm, str) else "gpt-4o-mini"
+        
+        # Compute budget using the policy
+        budget_result = policy.compute_context_budget(
+            messages=messages,
+            model=model_name,
+            tools=tools,
+            system_prompt=system_prompt
+        )
+        
+        # Log budget analysis if enabled
+        if getattr(self, '_verbose_context', False):
+            logging.info(
+                f"[context-budget] {self.name}: {budget_result.current_tokens} tokens, "
+                f"{budget_result.utilization:.1%} utilization, route: {budget_result.route.value}"
+            )
+        
+        # Handle the routing decision
+        if budget_result.route == CompactionRoute.FITS:
+            return CompactionRoute.FITS, messages
+        
+        # Need some form of compaction - get max tokens for compactor
+        max_tokens = getattr(_execution_cfg, 'max_context_tokens', None) if _execution_cfg else None
+        if max_tokens is None:
+            # Use 90% of available tokens as max to leave room for output
+            max_tokens = int(budget_result.available_tokens * 0.9)
+        
+        # Create compactor with policy-driven settings
+        compactor = ContextCompactor(
+            max_tokens=max_tokens,
+            target_tokens=int(max_tokens * policy.target_utilization),
+            preserve_recent=policy.preserve_last_n_turns
+        )
+        
+        # Apply compaction based on route
+        if budget_result.route == CompactionRoute.COMPACT_NEEDED:
+            return self._apply_compaction(messages, compactor, policy)
+        elif budget_result.route == CompactionRoute.TRUNCATE_TOOLS:
+            return self._apply_tool_truncation(messages, compactor, policy)
+        elif budget_result.route == CompactionRoute.COMPACT_THEN_TRUNCATE:
+            # First try compaction
+            route, compacted_messages = self._apply_compaction(messages, compactor, policy)
+            # If still over budget, also truncate tools
+            if compactor.needs_compaction(compacted_messages):
+                return self._apply_tool_truncation(compacted_messages, compactor, policy)
+            return route, compacted_messages
+        
+        return CompactionRoute.FITS, messages
+
+    def _apply_compaction(self, messages, compactor, policy):
+        """Apply standard context compaction."""
+        from ..compaction.strategy import CompactionStrategy as LegacyStrategy
+        from ..hooks import HookEvent as _HookEvent
+        import logging
+        
+        # Map policy strategy to compactor strategy
+        strategy_map = {
+            "truncate": LegacyStrategy.TRUNCATE,
+            "summarise": LegacyStrategy.SUMMARIZE,
+            "drop_oldest_tools": LegacyStrategy.PRUNE,
+            "sliding_window": LegacyStrategy.SLIDING,
+        }
+        
+        compactor.strategy = strategy_map.get(policy.strategy.value, LegacyStrategy.PRUNE)
+        
+        # Execute hooks
+        try:
+            self._hook_runner.execute_sync(_HookEvent.BEFORE_COMPACTION, None)
+        except Exception as e:
+            logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
+            if getattr(self, '_strict_hooks', False):
+                raise
+        
+        # Perform compaction
+        compacted_msgs, result = compactor.compact(messages)
+        
+        logging.info(
+            f"[proactive-compaction] {self.name}: {result.original_tokens}→{result.compacted_tokens} tokens "
+            f"({result.messages_removed} messages removed, strategy: {policy.strategy.value})"
+        )
+        
+        try:
+            self._hook_runner.execute_sync(_HookEvent.AFTER_COMPACTION, result)
+        except Exception as e:
+            logging.warning(f"AFTER_COMPACTION hook failed: {e}")
+            if getattr(self, '_strict_hooks', False):
+                raise
+        
+        from ..context.policy import CompactionRoute
+        return CompactionRoute.COMPACT_NEEDED, compacted_msgs
+
+    def _apply_tool_truncation(self, messages, compactor, policy):
+        """Apply targeted tool output truncation."""
+        from ..context.policy import CompactionRoute
+        import logging
+        
+        # Create a copy to avoid modifying original
+        truncated_msgs = []
+        
+        for msg in messages:
+            if msg.get("role") == "tool" or msg.get("tool_call_id"):
+                content = msg.get("content", "")
+                if isinstance(content, str) and len(content) > 1000:
+                    # Truncate large tool outputs
+                    truncated_msg = msg.copy()
+                    head = content[:300]
+                    tail = content[-200:] if len(content) > 500 else ""
+                    truncated_msg["content"] = f"{head}\n...[truncated {len(content):,} chars for context budget]...\n{tail}"
+                    truncated_msgs.append(truncated_msg)
+                    continue
+            
+            truncated_msgs.append(msg)
+        
+        original_tokens = compactor.count_total_tokens(messages)
+        new_tokens = compactor.count_total_tokens(truncated_msgs)
+        
+        logging.info(
+            f"[tool-truncation] {self.name}: {original_tokens}→{new_tokens} tokens "
+            f"(truncated large tool outputs)"
+        )
+        
+        return CompactionRoute.TRUNCATE_TOOLS, truncated_msgs
+
+    async def _compute_context_budget_and_route_async(self, messages, tools=None, system_prompt=None):
+        """Async version of _compute_context_budget_and_route."""
+        from ..context.policy import get_default_policy, CompactionRoute
+        from ..compaction import ContextCompactor
+        from ..hooks import HookEvent as _HookEvent
+        import logging
+        
+        # Get execution config and policy
+        _execution_cfg = getattr(self, 'execution', None)
+        
+        # Determine if context compaction is enabled and what policy to use
+        context_compaction = True  # New default
+        policy = None
+        
+        if _execution_cfg:
+            compaction_setting = getattr(_execution_cfg, 'context_compaction', True)
+            if compaction_setting is False:
+                # Explicitly disabled - use old reactive approach
+                return CompactionRoute.FITS, messages
+            elif compaction_setting is True:
+                # Use default policy
+                policy = get_default_policy()
+            else:
+                # Custom policy provided
+                policy = compaction_setting
+        else:
+            # No execution config - use safe default
+            policy = get_default_policy()
+        
+        # Get model name for context window lookup
+        model_name = self.llm if isinstance(self.llm, str) else "gpt-4o-mini"
+        
+        # Compute budget using the policy
+        budget_result = policy.compute_context_budget(
+            messages=messages,
+            model=model_name,
+            tools=tools,
+            system_prompt=system_prompt
+        )
+        
+        # Log budget analysis if enabled
+        if getattr(self, '_verbose_context', False):
+            logging.info(
+                f"[context-budget] {self.name}: {budget_result.current_tokens} tokens, "
+                f"{budget_result.utilization:.1%} utilization, route: {budget_result.route.value}"
+            )
+        
+        # Handle the routing decision
+        if budget_result.route == CompactionRoute.FITS:
+            return CompactionRoute.FITS, messages
+        
+        # Need some form of compaction - get max tokens for compactor
+        max_tokens = getattr(_execution_cfg, 'max_context_tokens', None) if _execution_cfg else None
+        if max_tokens is None:
+            # Use 90% of available tokens as max to leave room for output
+            max_tokens = int(budget_result.available_tokens * 0.9)
+        
+        # Create compactor with policy-driven settings
+        compactor = ContextCompactor(
+            max_tokens=max_tokens,
+            target_tokens=int(max_tokens * policy.target_utilization),
+            preserve_recent=policy.preserve_last_n_turns
+        )
+        
+        # Apply compaction based on route
+        if budget_result.route == CompactionRoute.COMPACT_NEEDED:
+            return await self._apply_compaction_async(messages, compactor, policy)
+        elif budget_result.route == CompactionRoute.TRUNCATE_TOOLS:
+            return await self._apply_tool_truncation_async(messages, compactor, policy)
+        elif budget_result.route == CompactionRoute.COMPACT_THEN_TRUNCATE:
+            # First try compaction
+            route, compacted_messages = await self._apply_compaction_async(messages, compactor, policy)
+            # If still over budget, also truncate tools
+            if compactor.needs_compaction(compacted_messages):
+                return await self._apply_tool_truncation_async(compacted_messages, compactor, policy)
+            return route, compacted_messages
+        
+        return CompactionRoute.FITS, messages
+
+    async def _apply_compaction_async(self, messages, compactor, policy):
+        """Async version of _apply_compaction."""
+        from ..compaction.strategy import CompactionStrategy as LegacyStrategy
+        from ..hooks import HookEvent as _HookEvent
+        import logging
+        
+        # Map policy strategy to compactor strategy
+        strategy_map = {
+            "truncate": LegacyStrategy.TRUNCATE,
+            "summarise": LegacyStrategy.SUMMARIZE,
+            "drop_oldest_tools": LegacyStrategy.PRUNE,
+            "sliding_window": LegacyStrategy.SLIDING,
+        }
+        
+        compactor.strategy = strategy_map.get(policy.strategy.value, LegacyStrategy.PRUNE)
+        
+        # Execute hooks
+        try:
+            await self._hook_runner.execute(_HookEvent.BEFORE_COMPACTION, None)
+        except Exception as e:
+            logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
+            if getattr(self, '_strict_hooks', False):
+                raise
+        
+        # Perform compaction
+        compacted_msgs, result = compactor.compact(messages)
+        
+        logging.info(
+            f"[proactive-compaction-async] {self.name}: {result.original_tokens}→{result.compacted_tokens} tokens "
+            f"({result.messages_removed} messages removed, strategy: {policy.strategy.value})"
+        )
+        
+        try:
+            await self._hook_runner.execute(_HookEvent.AFTER_COMPACTION, result)
+        except Exception as e:
+            logging.warning(f"AFTER_COMPACTION hook failed: {e}")
+            if getattr(self, '_strict_hooks', False):
+                raise
+        
+        from ..context.policy import CompactionRoute
+        return CompactionRoute.COMPACT_NEEDED, compacted_msgs
+
+    async def _apply_tool_truncation_async(self, messages, compactor, policy):
+        """Async version of _apply_tool_truncation."""
+        from ..context.policy import CompactionRoute
+        import logging
+        
+        # Create a copy to avoid modifying original
+        truncated_msgs = []
+        
+        for msg in messages:
+            if msg.get("role") == "tool" or msg.get("tool_call_id"):
+                content = msg.get("content", "")
+                if isinstance(content, str) and len(content) > 1000:
+                    # Truncate large tool outputs
+                    truncated_msg = msg.copy()
+                    head = content[:300]
+                    tail = content[-200:] if len(content) > 500 else ""
+                    truncated_msg["content"] = f"{head}\n...[truncated {len(content):,} chars for context budget]...\n{tail}"
+                    truncated_msgs.append(truncated_msg)
+                    continue
+            
+            truncated_msgs.append(msg)
+        
+        original_tokens = compactor.count_total_tokens(messages)
+        new_tokens = compactor.count_total_tokens(truncated_msgs)
+        
+        logging.info(
+            f"[tool-truncation-async] {self.name}: {original_tokens}→{new_tokens} tokens "
+            f"(truncated large tool outputs)"
+        )
+        
+        return CompactionRoute.TRUNCATE_TOOLS, truncated_msgs
+
     def _chat_completion(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, _retry_depth=0):
         start_time = time.time()
 
-        # --- Context compaction (opt-in via ExecutionConfig.context_compaction) ---
-        # Compacts message history before sending to LLM. Zero overhead when disabled.
-        _execution_cfg = getattr(self, 'execution', None)
-        if _execution_cfg and getattr(_execution_cfg, 'context_compaction', False):
-            try:
-                from ..compaction import ContextCompactor
-                from ..hooks import HookEvent as _HookEvent
-                _max_tok = getattr(_execution_cfg, 'max_context_tokens', None) or 8000
-                _compactor = ContextCompactor(max_tokens=_max_tok)
-                if _compactor.needs_compaction(messages):
-                    try:
-                        self._hook_runner.execute_sync(_HookEvent.BEFORE_COMPACTION, None)
-                    except Exception as e:
-                        logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
-                        if getattr(self, '_strict_hooks', False):
-                            raise
-                    compacted_msgs, _cr = _compactor.compact(messages)
-                    messages[:] = compacted_msgs  # in-place update so callers see the change
-                    logging.info(
-                        f"[compaction] {self.name}: {_cr.original_tokens}→{_cr.compacted_tokens} tokens "
-                        f"({_cr.messages_removed} messages removed)"
-                    )
-                    try:
-                        self._hook_runner.execute_sync(_HookEvent.AFTER_COMPACTION, None)
-                    except Exception as e:
-                        logging.warning(f"AFTER_COMPACTION hook failed: {e}")
-                        if getattr(self, '_strict_hooks', False):
-                            raise
-            except Exception as _ce:
-                if getattr(self, '_strict_hooks', False):
-                    raise
-                logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
+        # --- Proactive Context Budget Management (default-on) ---
+        # Analyzes token budget BEFORE LLM call and applies appropriate strategy
+        try:
+            route, compacted_messages = self._compute_context_budget_and_route(
+                messages=messages, 
+                tools=tools,
+                system_prompt=self._build_system_prompt(tools)
+            )
+            # Update messages in-place so callers see the changes
+            messages[:] = compacted_messages
+        except Exception as _ce:
+            # Fallback to original messages if proactive handling fails
+            if getattr(self, '_strict_hooks', False):
+                raise
+            logging.debug(f"[proactive-context] fallback to original messages: {_ce}")
 
         # Trigger BEFORE_LLM hook
         from ..hooks import HookEvent, BeforeLLMInput
@@ -2116,37 +2412,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # Add user message to chat history BEFORE LLM call so handoffs can access it
                     self._append_to_chat_history({"role": "user", "content": normalized_content})
 
-                # --- Context compaction (async custom LLM path) ---
-                _exec_cfg = getattr(self, 'execution', None)
-                if _exec_cfg and getattr(_exec_cfg, 'context_compaction', False):
-                    try:
-                        from ..compaction import ContextCompactor
-                        from ..hooks import HookEvent as _HE
-                        _mtok = getattr(_exec_cfg, 'max_context_tokens', None) or 8000
-                        _cw = ContextCompactor(max_tokens=_mtok)
-                        if _cw.needs_compaction(self.chat_history):
-                            try:
-                                await self._hook_runner.execute(_HE.BEFORE_COMPACTION, None)
-                            except Exception as e:
-                                logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
-                                if getattr(self, '_strict_hooks', False):
-                                    raise
-                            _ch, _cr = _cw.compact(self.chat_history)
-                            self._replace_chat_history(_ch)
-                            logging.info(
-                                f"[compaction] {self.name}: {_cr.original_tokens}→{_cr.compacted_tokens} tokens "
-                                f"({_cr.messages_removed} messages removed)"
-                            )
-                            try:
-                                await self._hook_runner.execute(_HE.AFTER_COMPACTION, None)
-                            except Exception as e:
-                                logging.warning(f"AFTER_COMPACTION hook failed: {e}")
-                                if getattr(self, '_strict_hooks', False):
-                                    raise
-                    except Exception as _ce:
-                        if getattr(self, '_strict_hooks', False):
-                            raise
-                        logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
+                # --- Proactive Context Budget Management (async custom LLM path) ---
+                try:
+                    route, compacted_history = await self._compute_context_budget_and_route_async(
+                        messages=self.chat_history,
+                        tools=tools,
+                        system_prompt=self._build_system_prompt(tools)
+                    )
+                    self._replace_chat_history(compacted_history)
+                except Exception as _ce:
+                    if getattr(self, '_strict_hooks', False):
+                        raise
+                    logging.debug(f"[proactive-context-async] fallback: {_ce}")
 
                 try:
                     # C1 — per-call seed forwarding (async path)  
@@ -2233,31 +2510,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # Add user message to chat history BEFORE LLM call so handoffs can access it
                 self._append_to_chat_history({"role": "user", "content": normalized_content})
 
-            # --- Context compaction (async standard OpenAI path) ---
-            _exec_cfg2 = getattr(self, 'execution', None)
-            if _exec_cfg2 and getattr(_exec_cfg2, 'context_compaction', False):
-                try:
-                    from ..compaction import ContextCompactor
-                    from ..hooks import HookEvent as _HE2
-                    _mtok2 = getattr(_exec_cfg2, 'max_context_tokens', None) or 8000
-                    _cw2 = ContextCompactor(max_tokens=_mtok2)
-                    if _cw2.needs_compaction(messages):
-                        try:
-                            await self._hook_runner.execute(_HE2.BEFORE_COMPACTION, None)
-                        except Exception:
-                            pass
-                        _cm2, _cr2 = _cw2.compact(messages)
-                        messages[:] = _cm2
-                        logging.info(
-                            f"[compaction] {self.name}: {_cr2.original_tokens}→{_cr2.compacted_tokens} tokens "
-                            f"({_cr2.messages_removed} messages removed)"
-                        )
-                        try:
-                            await self._hook_runner.execute(_HE2.AFTER_COMPACTION, None)
-                        except Exception:
-                            pass
-                except Exception as _ce2:
-                    logging.debug(f"[compaction] skipped (non-fatal): {_ce2}")
+            # --- Proactive Context Budget Management (async standard OpenAI path) ---
+            try:
+                route, compacted_messages = await self._compute_context_budget_and_route_async(
+                    messages=messages,
+                    tools=tools,
+                    system_prompt=self._build_system_prompt(tools)
+                )
+                messages[:] = compacted_messages
+            except Exception as _ce2:
+                if getattr(self, '_strict_hooks', False):
+                    raise
+                logging.debug(f"[proactive-context-async-standard] fallback: {_ce2}")
 
             reflection_count = 0
             start_time = time.time()

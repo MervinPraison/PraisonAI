@@ -732,9 +732,10 @@ class ExecutionConfig:
     rate_limiter: Optional[Any] = None
 
     # Context compaction: automatically compact chat_history when approaching token limit.
-    # Opt-in only (safe default: False). Uses existing praisonaiagents.compaction module.
-    # Usage: Agent(execution=ExecutionConfig(context_compaction=True, max_context_tokens=8000))
-    context_compaction: bool = False
+    # Now ENABLED by default for proactive overflow protection (opt-out with False).
+    # Usage: Agent(execution=ExecutionConfig(context_compaction=False))  # to disable
+    # Or: Agent(execution=ExecutionConfig(context_compaction=my_policy))  # custom policy
+    context_compaction: Union[bool, "ContextCompactionPolicy"] = True
 
     # Token limit before compaction triggers. None = auto-detect from model metadata.
     max_context_tokens: Optional[int] = None
@@ -762,7 +763,11 @@ class ExecutionConfig:
             "code_execution": self.code_execution,
             "code_mode": self.code_mode,
             "code_sandbox_mode": self.code_sandbox_mode,
-            "context_compaction": self.context_compaction,
+            "context_compaction": (
+                self.context_compaction.to_dict() 
+                if hasattr(self.context_compaction, 'to_dict') 
+                else self.context_compaction
+            ),
             "max_context_tokens": self.max_context_tokens,
             "max_budget": self.max_budget,
             "parallel_tool_calls": self.parallel_tool_calls,
