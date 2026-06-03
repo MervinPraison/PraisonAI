@@ -367,6 +367,16 @@ class HandoffTimeoutError(HandoffError):
         self.timeout = timeout_seconds
 
 
+class HandoffValidationError(HandoffError):
+    """Raised when a typed handoff payload does not satisfy the declared schema."""
+    
+    def __init__(self, message: str, validation_errors: Optional[list] = None, **kwargs):
+        super().__init__(message, is_retryable=False, **kwargs)  # Schema errors need code fixes
+        if validation_errors:
+            self.context["validation_errors"] = validation_errors
+        self.validation_errors = validation_errors
+
+
 # Export all error types for easy importing
 __all__ = [
     "ErrorContextProtocol",
@@ -380,5 +390,6 @@ __all__ = [
     "HandoffCycleError", 
     "HandoffDepthError", 
     "HandoffTimeoutError",
+    "HandoffValidationError",
     "PraisonAIConfigError"
 ]
