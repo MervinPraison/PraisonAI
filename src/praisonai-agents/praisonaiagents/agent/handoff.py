@@ -181,26 +181,25 @@ class HandoffResult:
                     }
                 )
             else:
-                # Determine status from error message
-                if self.error and any(keyword in self.error.lower() for keyword in ["timeout", "timed out"]):
-                    status = "timeout"
-                elif self.error and any(keyword in self.error.lower() for keyword in ["cycle", "circular"]):
-                    status = "failure"
-                elif self.error and any(keyword in self.error.lower() for keyword in ["depth", "maximum"]):
-                    status = "failure"
+                error_text = (self.error or "").lower()
+                context = {
+                    "source_agent": self.source_agent,
+                    "handoff_depth": self.handoff_depth,
+                }
+                if any(keyword in error_text for keyword in ["timeout", "timed out"]):
+                    self.outcome = AgentRunOutcome.timeout(
+                        error=self.error or "Handoff failed",
+                        elapsed_s=self.duration_seconds,
+                        agent_name=self.target_agent,
+                        context=context,
+                    )
                 else:
-                    status = "failure"
-                
-                self.outcome = AgentRunOutcome(
-                    status=status,
-                    error=self.error or "Handoff failed",
-                    elapsed_s=self.duration_seconds,
-                    agent_name=self.target_agent,
-                    context={
-                        "source_agent": self.source_agent,
-                        "handoff_depth": self.handoff_depth,
-                    }
-                )
+                    self.outcome = AgentRunOutcome.failure(
+                        error=self.error or "Handoff failed",
+                        elapsed_s=self.duration_seconds,
+                        agent_name=self.target_agent,
+                        context=context,
+                    )
     
     @classmethod
     def from_outcome(

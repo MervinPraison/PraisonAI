@@ -76,6 +76,15 @@ class AgentRunOutcome:
     
     context: Optional[Dict[str, Any]] = None
     """Additional structured metadata."""
+
+    _VALID_STATUSES = {"success", "failure", "timeout", "cancelled", "invalid_output"}
+
+    def __post_init__(self) -> None:
+        if self.status not in self._VALID_STATUSES:
+            raise ValueError(
+                f"Invalid status '{self.status}'. "
+                "Use one of: success, failure, timeout, cancelled, invalid_output."
+            )
     
     def is_success(self) -> bool:
         """Check if the outcome represents successful completion."""
@@ -232,6 +241,13 @@ def validate_decision_string(decision_str: str) -> RunStatus:
         >>> validate_decision_string("timeout")
         "timeout"
     """
+    if decision_str is None:
+        return "failure"
+    if not isinstance(decision_str, str):
+        raise TypeError(
+            f"decision_str must be str, got {type(decision_str).__name__}. "
+            "Pass the raw validator text output as a string."
+        )
     decision_lower = decision_str.lower().strip()
     
     # Map legacy validation decision strings to typed status

@@ -825,6 +825,9 @@ Subtask: {st.name}
                                 if decision_str in Process.VALIDATION_FAILURE_DECISIONS:
                                     if current_task and current_task.result:
                                         feedback = validation_outcome.to_dict()
+                                        # Flatten context fields to top level for legacy compatibility
+                                        if 'context' in feedback and feedback['context']:
+                                            feedback.update(feedback['context'])
                                         # Add legacy fields for backward compatibility
                                         feedback.update({
                                             'validation_response': decision_str,
@@ -1539,6 +1542,9 @@ Subtask: {st.name}
                                 if decision_str in Process.VALIDATION_FAILURE_DECISIONS:
                                     if current_task and current_task.result:
                                         feedback = validation_outcome.to_dict()
+                                        # Flatten context fields to top level for legacy compatibility
+                                        if 'context' in feedback and feedback['context']:
+                                            feedback.update(feedback['context'])
                                         # Add legacy fields for backward compatibility
                                         feedback.update({
                                             'validation_response': decision_str,
