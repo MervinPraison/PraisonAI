@@ -242,7 +242,7 @@ class TestMemberAuthorization:
         assert resp.status_code == 200
         members = resp.json()
         assert not any(
-            member["user_id"] == planted_owner_id and member["role"] == "owner"
+            member["user_id"] == planted_owner_id
             for member in members
         )
 
