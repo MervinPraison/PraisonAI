@@ -23,34 +23,38 @@ from .framework_adapters.registry import FrameworkAdapterRegistry, get_default_r
 from .tool_registry import ToolRegistry
 
 # Import availability flags
-try:
-    from .inbuilt_tools import PRAISONAI_TOOLS_AVAILABLE, CREWAI_AVAILABLE, AUTOGEN_AVAILABLE
-except ImportError:
-    PRAISONAI_TOOLS_AVAILABLE = False
-    CREWAI_AVAILABLE = False
-    AUTOGEN_AVAILABLE = False
+# Compatibility imports - now handled by centralized detection
+# (inbuilt_tools still defines these but they're read-only compatibility)
 
-# Import BaseTool for tools handling
-BaseTool = None
-try:
-    from praisonai_tools import BaseTool
-except ImportError:
-    try:
-        from praisonai.tools import BaseTool
-    except ImportError:
-        pass
+# BaseTool import is now handled centrally by ToolResolver
 
-# Check for additional framework availability
-AG2_AVAILABLE = False
-PRAISONAI_AVAILABLE = False
-AGENTOPS_AVAILABLE = False
-try:
-    import importlib.util
-    AG2_AVAILABLE = importlib.util.find_spec("ag2") is not None
-    PRAISONAI_AVAILABLE = importlib.util.find_spec("praisonaiagents") is not None
-    AGENTOPS_AVAILABLE = importlib.util.find_spec("agentops") is not None
-except ImportError:
-    pass
+# Framework availability detection (lazy via __getattr__)
+from ._framework_availability import is_available
+
+# Lazy constants mapping for backward compatibility
+_AVAIL = {
+    "PRAISONAI_TOOLS_AVAILABLE": "praisonai_tools",
+    "CREWAI_AVAILABLE": "crewai",
+    "AUTOGEN_AVAILABLE": "autogen",
+    "AG2_AVAILABLE": "ag2",
+    "PRAISONAI_AVAILABLE": "praisonaiagents",
+    "AGENTOPS_AVAILABLE": "agentops",
+}
+
+__all__ = list(_AVAIL.keys())
+
+def __getattr__(name):
+    """Lazy attribute access for framework availability constants.
+    
+    This allows backward compatibility while avoiding import-time probing.
+    Only probes the framework when the constant is actually accessed.
+    """
+    if name in _AVAIL:
+        return is_available(_AVAIL[name])
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
+def __dir__():
+    return sorted(set(globals()) | set(_AVAIL))
 
 # Framework adapter registry - now uses proper registry pattern
 # This replaces the hardcoded FRAMEWORK_ADAPTERS dict
@@ -96,6 +100,73 @@ def safe_format(template: str, **kwargs) -> str:
     pattern = r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}'
     
     return re.sub(pattern, replace_var, template)
+
+
+def _wrap_with_timeout(tool, timeout_seconds: float):
+    """Enforce per-call timeout on a tool, sync or async, without
+    leaking the worker thread/task on timeout.
+    """
+    if timeout_seconds is None or timeout_seconds <= 0 or not callable(tool):
+        return tool
+    
+    import asyncio
+    import functools
+    import inspect
+    import json
+    
+    if inspect.iscoroutinefunction(tool):
+        @functools.wraps(tool)
+        async def _async_wrapped(*args, **kwargs):
+            try:
+                return await asyncio.wait_for(tool(*args, **kwargs), timeout=timeout_seconds)
+            except asyncio.TimeoutError:
+                return json.dumps({
+                    "error": "tool_timeout",
+                    "tool": getattr(tool, "__name__", repr(tool)),
+                    "timeout_seconds": timeout_seconds,
+                })
+        return _async_wrapped
+
+    @functools.wraps(tool)
+    def _sync_wrapped(*args, **kwargs):
+        import queue
+        import threading
+
+        result_queue: queue.Queue[tuple[bool, object]] = queue.Queue(maxsize=1)
+
+        def _runner():
+            try:
+                result_queue.put((True, tool(*args, **kwargs)))
+            except BaseException as exc:
+                result_queue.put((False, exc))
+
+        # Daemon thread avoids blocking process shutdown if the tool call hangs.
+        worker = threading.Thread(target=_runner, daemon=True)
+        worker.start()
+        worker.join(timeout_seconds)
+
+        if worker.is_alive():
+            return json.dumps({
+                "error": "tool_timeout",
+                "tool": getattr(tool, "__name__", repr(tool)),
+                "timeout_seconds": timeout_seconds,
+            })
+
+        try:
+            success, payload = result_queue.get_nowait()
+        except queue.Empty:
+            # Defensive fallback: if the worker exits without publishing a result,
+            # avoid blocking indefinitely and surface an execution failure.
+            return json.dumps({
+                "error": "tool_execution_error",
+                "tool": getattr(tool, "__name__", repr(tool)),
+                "detail": "worker_exited_without_result",
+            })
+
+        if success:
+            return payload
+        raise payload
+    return _sync_wrapped
 
 
 def noop(*args, **kwargs):
@@ -228,13 +299,13 @@ class AgentsGenerator:
         elif os.environ.get('LOGLEVEL'):
             self.logger.setLevel(getattr(logging, os.environ.get('LOGLEVEL', 'INFO').upper(), logging.INFO))
         
-        # Initialize tool resolver (single source of truth for tool resolution)
-        from .tool_resolver import ToolResolver
-        self.tool_resolver = ToolResolver()
-        
         # Keep tool registry for backward compatibility with autogen adapters
         self.tool_registry = ToolRegistry()
-        self.tool_registry.register_builtin_autogen_adapters()
+        self.tool_registry.register_builtin_autogen_adapters(_suppress_deprecation_warning=True)
+        
+        # Initialize tool resolver with the registry wired in (single source of truth for tool resolution)
+        from .tool_resolver import ToolResolver
+        self.tool_resolver = ToolResolver(registry=self.tool_registry)
         
         # DI-friendly: tests/multi-tenant runtimes pass their own registry;
         # CLI users get the process default.
@@ -286,8 +357,30 @@ class AgentsGenerator:
                 self.logger.debug(f"CLI override: lsp = {cli_config['lsp']}")
         
         # Handle agent-level overrides using unified approach
-        agent_level_fields = ['tool_timeout', 'planning_tools', 'autonomy']
+        agent_level_fields = ['tool_timeout', 'planning_tools', 'autonomy', 'planning', 'web', 'web_fetch']
         agent_overrides = {k: v for k, v in cli_config.items() if k in agent_level_fields}
+        
+        # Handle handoff configuration - convert CLI flags into handoff dict
+        handoff_fields = ['handoff', 'handoff_policy', 'handoff_timeout', 'handoff_max_depth', 'handoff_max_concurrent', 'handoff_detect_cycles']
+        if any(field in cli_config for field in handoff_fields):
+            handoff_config = {}
+            if 'handoff' in cli_config:
+                # Convert comma-separated roles to list
+                handoff_roles = [role.strip() for role in cli_config['handoff'].split(',') if role.strip()]
+                handoff_config['to'] = handoff_roles
+            if 'handoff_policy' in cli_config:
+                handoff_config['policy'] = cli_config['handoff_policy']
+            if 'handoff_timeout' in cli_config:
+                handoff_config['timeout'] = cli_config['handoff_timeout']
+            if 'handoff_max_depth' in cli_config:
+                handoff_config['max_depth'] = cli_config['handoff_max_depth']
+            if 'handoff_max_concurrent' in cli_config:
+                handoff_config['max_concurrent'] = cli_config['handoff_max_concurrent']
+            if 'handoff_detect_cycles' in cli_config:
+                handoff_config['detect_cycles'] = cli_config['handoff_detect_cycles'].lower() == 'true'
+            
+            if handoff_config:
+                agent_overrides['handoff'] = handoff_config
         
         # Handle approval configuration using unified spec
         approval_fields = ['trust', 'approval', 'approve_all_tools', 'approval_timeout', 'approve_level']
@@ -339,7 +432,7 @@ class AgentsGenerator:
             'max_execution_time', 'verbose', 'cache', 'system_template',
             'prompt_template', 'response_template', 'tool_timeout', 'planning_tools',
             'planning', 'autonomy', 'guardrails', 'streaming', 'stream',
-            'approval', 'skills', 'cli_backend', 'reflection'
+            'approval', 'skills', 'cli_backend', 'reflection', 'handoff', 'web', 'web_fetch'
         }
 
         for section_name in ('agents', 'roles'):
@@ -396,24 +489,6 @@ class AgentsGenerator:
             return {}
         return {name: obj for name, obj in inspect.getmembers(module, self.is_function_or_decorated)}
     
-    def _extract_tool_classes(self, module):
-        """
-        Extract tool classes from a loaded module that inherit from BaseTool 
-        or are part of langchain_community.tools package.
-        """
-        result = {}
-        for name, obj in inspect.getmembers(module, 
-            lambda x: inspect.isclass(x) and (
-                x.__module__.startswith('langchain_community.tools') or 
-                (PRAISONAI_TOOLS_AVAILABLE and BaseTool and issubclass(x, BaseTool))
-            ) and x is not BaseTool):
-            try:
-                result[name] = obj()
-            except Exception as e:
-                self.logger.warning(f"Error instantiating tool class {name}: {e}")
-                continue
-        return result
-    
     def load_tools_from_module_class(self, module_path):
         """
         Load BaseTool / langchain tool classes from a user-supplied module (gated by PRAISONAI_ALLOW_LOCAL_TOOLS).
@@ -422,7 +497,7 @@ class AgentsGenerator:
         module = load_user_module(module_path, name="tools_module")
         if module is None:
             return {}
-        return self._extract_tool_classes(module)
+        return self.tool_resolver._extract_tool_classes(module)
 
     def load_tools_from_package(self, package_path):
         """
@@ -448,36 +523,6 @@ class AgentsGenerator:
                     tools_dict[name] = obj
         return tools_dict
 
-    def load_tools_from_tools_py(self):
-        """
-        Imports and returns all contents from tools.py file.
-        Uses the tool registry instead of global namespace pollution.
-
-        Returns:
-            list: A list of callable functions with proper formatting
-        """
-        tools_list = []
-        try:
-            # Try to import tools.py from current directory using safe loading
-            from ._safe_loader import load_user_module
-            module = load_user_module("tools.py", name="tools")
-            if module is None:
-                self.logger.debug("tools.py not found or local tools loading disabled")
-                return tools_list
-
-            # Register functions in the tool registry instead of globals()
-            registered_tools = self.tool_registry.register_from_module(module)
-            tools_list = [self.tool_registry.get_function(name) for name in registered_tools]
-
-            self.logger.debug(f"Loaded {len(tools_list)} tool functions from tools.py")
-            self.logger.debug(f"Registered tools: {registered_tools}")
-            
-        except FileNotFoundError:
-            self.logger.debug("tools.py not found in current directory")
-        except Exception as e:
-            self.logger.warning(f"Error loading tools from tools.py: {e}")
-            
-        return tools_list
 
     def generate_crew_and_kickoff(self):
         """
@@ -529,7 +574,7 @@ class AgentsGenerator:
             for agent_name, agent_config in config['agents'].items():
                 role_config = dict(agent_config) if agent_config else {}
                 # Convert 'instructions' to 'backstory' if present
-                # Note: preserve 'instructions' key so _run_praisonai can pass it to PraisonAgent
+                # Note: preserve 'instructions' key for adapters that pass it to PraisonAgent
                 if 'instructions' in role_config and 'backstory' not in role_config:
                     role_config['backstory'] = role_config['instructions']
                 # Ensure required fields have defaults
@@ -566,16 +611,16 @@ class AgentsGenerator:
         for tool_name in requested:
             try:
                 resolved = self.tool_resolver.resolve(tool_name)
+                if resolved is None:
+                    self.logger.warning(
+                        f"Tool {tool_name!r} referenced in YAML but not resolvable "
+                        f"(local tools.py / praisonaiagents.tools / praisonai-tools / registry)."
+                    )
+                    continue
+                tools_dict[tool_name] = resolved() if inspect.isclass(resolved) else resolved
             except Exception as e:
-                self.logger.warning(f"Tool {tool_name!r} failed to resolve: {e}")
+                self.logger.warning(f"Tool {tool_name!r} failed to resolve or instantiate: {e}")
                 continue
-            if resolved is None:
-                self.logger.warning(
-                    f"Tool {tool_name!r} referenced in YAML but not resolvable "
-                    f"(local tools.py / praisonaiagents.tools / praisonai-tools / registry)."
-                )
-                continue
-            tools_dict[tool_name] = resolved() if inspect.isclass(resolved) else resolved
             
         # Add tools from class names
         for tool_class in self.tools:
@@ -588,32 +633,173 @@ class AgentsGenerator:
         tools_py_path = os.path.join(root_directory, 'tools.py')
         tools_dir_path = Path(root_directory) / 'tools'
         
+        # Use consolidated ToolResolver for tools.py loading
+        tools_dict.update(self.tool_resolver.get_local_tool_classes())
         if os.path.isfile(tools_py_path):
-            from ._safe_loader import load_user_module
-            module = load_user_module(tools_py_path, name="tools_module")
-            if module is not None:
-                tools_dict.update(self._extract_tool_classes(module))
-                self.logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
+            self.logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
         elif tools_dir_path.is_dir():
-            from ._safe_loader import load_user_module
-            for py_file in tools_dir_path.glob("*.py"):
-                if py_file.name.startswith("__"):
-                    continue
-                module = load_user_module(py_file, name=f"tools_{py_file.stem}")
-                if module is not None:
-                    tools_dict.update(self._extract_tool_classes(module))
+            tools_dict.update(self.tool_resolver.get_local_tool_classes_from_dir(tools_dir_path))
             if tools_dict:
                 self.logger.debug("tools folder exists in the root directory")
 
         framework = self.framework or config.get('framework', 'crewai')
+        
+        # Get initial adapter and resolve to concrete variant
+        initial_adapter = self._get_framework_adapter(framework)
+        adapter = initial_adapter.resolve()
+        
+        # Validate framework availability early
+        from .framework_adapters.validators import assert_framework_available
+        assert_framework_available(adapter.name)
+        
+        # Initialize observability hooks
+        from .observability.hooks import init_observability
+        init_observability(adapter.name)
+        
+        # Run adapter setup hooks
+        adapter.setup(framework_tag=adapter.name)
+        
+        # Update framework reference if resolution changed it
+        self.framework = adapter.name
+        self.framework_adapter = adapter
+        
+        self.logger.info(f"Using framework: {adapter.name}")
+        return adapter.run(
+            config,
+            self.config_list,
+            topic,
+            tools_dict=tools_dict,
+            agent_callback=getattr(self, 'agent_callback', None),
+            task_callback=getattr(self, 'task_callback', None),
+            cli_config=getattr(self, 'cli_config', None),
+        )
 
-        # Determine AutoGen version if needed (keeping compatibility logic)
+    async def agenerate_crew_and_kickoff(self):
+        """
+        Async version of generate_crew_and_kickoff.
+        Generates a crew of agents and initiates tasks based on the provided configuration.
+        """
+        if self.agent_yaml:
+            config = yaml.safe_load(self.agent_yaml)
+        else:
+            if self.agent_file == '/app/api:app' or self.agent_file == 'api:app':
+                self.agent_file = 'agents.yaml'
+            try:
+                with open(self.agent_file, 'r') as f:
+                    config = yaml.safe_load(f)
+            except FileNotFoundError:
+                print(f"File not found: {self.agent_file}")
+                return
+
+        # Apply CLI configuration overrides to YAML config
+        if self.cli_config:
+            # Merge CLI configuration with YAML config
+            self._merge_cli_config(config, self.cli_config)
+
+        # Check if this is a workflow-mode YAML (process: workflow or has steps section)
+        process_type = config.get('process', 'sequential')
+        has_steps = 'steps' in config
+        has_workflow_config = 'workflow' in config
+        
+        if process_type == 'workflow' or (has_steps and has_workflow_config):
+            return await self._arun_yaml_workflow(config)
+        else:
+            return await self._arun_framework(config)
+
+    async def _arun_framework(self, config):
+        """Async version of _run_framework with shared preparation logic."""
+        # Canonical format conversion: 'agents' -> 'roles', 'instructions' -> 'backstory'
+        if 'agents' in config and 'roles' not in config:
+            config['roles'] = {}
+            for agent_name, agent_config in config['agents'].items():
+                role_config = dict(agent_config) if agent_config else {}
+                if 'instructions' in role_config and 'backstory' not in role_config:
+                    role_config['backstory'] = role_config['instructions']
+                if 'role' not in role_config:
+                    role_config['role'] = agent_name.replace('_', ' ').title()
+                if 'goal' not in role_config:
+                    role_config['goal'] = role_config.get('backstory', 'Complete the assigned task')
+                if 'backstory' not in role_config:
+                    role_config['backstory'] = f'You are a {role_config["role"]}'
+                config['roles'][agent_name] = role_config
+
+        # Get workflow input: 'input' is canonical, 'topic' is alias for backward compatibility
+        topic = config.get('input', config.get('topic', ''))
+        
+        # Validate agents configuration for typos in field names
+        self._validate_agents_config(config)
+        
+        tools_dict = {}
+        
+        # Demand-driven tool resolution - only resolve tools actually used in YAML
+        if is_available("crewai") or is_available("autogen") or is_available("praisonaiagents") or is_available("ag2"):
+            try:
+                # Collect all tool names mentioned in the YAML config
+                needed_tools: set[str] = set()
+                for role_cfg in config.get('roles', {}).values():
+                    for t in role_cfg.get('tools') or []:
+                        if isinstance(t, str) and t.strip():
+                            needed_tools.add(t.strip())
+                    for task_cfg in (role_cfg.get('tasks') or {}).values():
+                        if not isinstance(task_cfg, dict):
+                            continue
+                        for t in task_cfg.get('tools') or []:
+                            if isinstance(t, str) and t.strip():
+                                needed_tools.add(t.strip())
+
+                # Resolve only the tools actually referenced in YAML
+                for tool_name in needed_tools:
+                    try:
+                        resolved_tool = self.tool_resolver.resolve(tool_name)
+                        if resolved_tool is None:
+                            self.logger.warning(f"Tool '{tool_name}' not found")
+                            continue
+                        tools_dict[tool_name] = (
+                            resolved_tool() if inspect.isclass(resolved_tool) else resolved_tool
+                        )
+                    except Exception as e:
+                        self.logger.warning(f"Failed to initialize tool '{tool_name}': {e}")
+                        continue
+
+            except Exception as e:
+                self.logger.warning(f"Error collecting YAML tool references: {e}")
+
+            # Add tools from class names - use tool_resolver to check tool validity
+            for tool_class in self.tools:
+                if isinstance(tool_class, type):
+                    try:
+                        tool_instance = tool_class()
+                        tool_name = tool_class.__name__
+                        tools_dict[tool_name] = tool_instance
+                        self.logger.debug(f"Added tool: {tool_name}")
+                    except Exception as e:
+                        self.logger.warning(f"Failed to instantiate tool class {tool_class.__name__}: {e}")
+
+        root_directory = os.getcwd()
+        tools_py_path = os.path.join(root_directory, 'tools.py')
+        tools_dir_path = Path(root_directory) / 'tools'
+
+        # Use consolidated ToolResolver for tools.py loading
+        tools_dict.update(self.tool_resolver.get_local_tool_classes())
+        if os.path.isfile(tools_py_path):
+            self.logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
+        elif tools_dir_path.is_dir():
+            tools_dict.update(self.tool_resolver.get_local_tool_classes_from_dir(tools_dir_path))
+            if tools_dict:
+                self.logger.debug("tools folder exists in the root directory")
+
+        framework = self.framework or config.get('framework', 'crewai')
+        
+        # AutoGen version selection logic
         if framework == "autogen":
-            autogen_version = os.environ.get("AUTOGEN_VERSION", "auto").lower()
             autogen_v4_adapter = self._get_framework_adapter("autogen_v4")
             autogen_v2_adapter = self._get_framework_adapter("autogen")
             
+            autogen_version = str(
+                config.get('autogen_version', os.environ.get("AUTOGEN_VERSION", "auto"))
+            ).lower()
             use_v4 = False
+            
             if autogen_version == "v0.4" and autogen_v4_adapter.is_available():
                 use_v4 = True
             elif autogen_version == "v0.2" and autogen_v2_adapter.is_available():
@@ -624,27 +810,27 @@ class AgentsGenerator:
                 use_v4 = autogen_v4_adapter.is_available() and not autogen_v2_adapter.is_available()
             
             framework = "autogen_v4" if use_v4 else "autogen"
-            
-        # Initialize AgentOps if available
-        try:
-            import agentops
-            agentops_api_key = os.getenv("AGENTOPS_API_KEY")
-            if agentops_api_key:
+
+        # Initialize AgentOps if configured
+        agentops_api_key = os.getenv("AGENTOPS_API_KEY")
+        if agentops_api_key:
+            try:
+                import agentops
                 agentops.init(agentops_api_key, default_tags=[framework])
-        except ImportError:
-            pass
-            
-        # Update framework adapter if framework changed (e.g., AutoGen version selection)
+            except ImportError:
+                pass
+                
+        # Update framework adapter if framework changed
         if framework != self.framework:
             self.framework = framework
             self.framework_adapter = self._get_framework_adapter(framework)
             
-        # Validate framework availability for non-CLI callers
+        # Validate framework availability
         from .framework_adapters.validators import assert_framework_available
         assert_framework_available(framework)
         
         self.logger.info(f"Using framework: {framework}")
-        return self.framework_adapter.run(
+        return await self.framework_adapter.arun(
             config,
             self.config_list,
             topic,
@@ -653,6 +839,12 @@ class AgentsGenerator:
             task_callback=getattr(self, 'task_callback', None),
             cli_config=getattr(self, 'cli_config', None),
         )
+
+    async def _arun_yaml_workflow(self, config):
+        """Async placeholder for workflow mode - currently delegates to sync version."""
+        # For now, delegate to sync version using asyncio.to_thread
+        import asyncio
+        return await asyncio.to_thread(self._run_yaml_workflow, config)
 
     def _run_yaml_workflow(self, config):
         """
@@ -668,7 +860,7 @@ class AgentsGenerator:
         Returns:
             str: Result of the workflow execution
         """
-        if not PRAISONAI_AVAILABLE:
+        if not is_available("praisonaiagents"):
             raise ImportError("PraisonAI is not installed. Please install it with 'pip install praisonaiagents'")
         
         try:
@@ -709,525 +901,3 @@ class AgentsGenerator:
             return result.get("output", "Workflow completed successfully")
         else:
             return f"Workflow failed: {result.get('error', 'Unknown error')}"
-
-    def _run_autogen(self, config, topic, tools_dict):
-        """
-        Run agents using the AutoGen framework.
-        
-        Args:
-            config (dict): Configuration dictionary
-            topic (str): The topic to process
-            tools_dict (dict): Dictionary of available tools
-            
-        Returns:
-            str: Result of the agent interactions
-        """
-        llm_config = {"config_list": self.config_list}
-        
-        # Set up user proxy agent
-        user_proxy = autogen.UserProxyAgent(
-            name="User",
-            human_input_mode="NEVER",
-            is_termination_msg=lambda x: (x.get("content") or "").rstrip().rstrip(".").lower().endswith("terminate") or "TERMINATE" in (x.get("content") or ""),
-            code_execution_config={
-                "work_dir": "coding",
-                "use_docker": False,
-            }
-        )
-        
-        agents = {}
-        tasks = []
-        
-        # Create agents and tasks from config
-        for role, details in config['roles'].items():
-            agent_name = safe_format(details['role'], topic=topic).replace("{topic}", topic)
-            agent_goal = safe_format(details['goal'], topic=topic)
-            
-            # Create AutoGen assistant agent
-            agents[role] = autogen.AssistantAgent(
-                name=agent_name,
-                llm_config=llm_config,
-                system_message=safe_format(details['backstory'], topic=topic) + 
-                             ". Must Reply \"TERMINATE\" in the end when everything is done.",
-            )
-            
-            # Add tools to agent if specified
-            for tool in details.get('tools', []):
-                if tool in tools_dict:
-                    tool_type_name = type(tools_dict[tool]).__name__
-                    adapter = self.tool_registry.get_autogen_adapter(tool_type_name)
-                    if adapter:
-                        try:
-                            self.logger.debug(f"Found AutoGen adapter for {tool_type_name}")
-                            adapter(agents[role], user_proxy)
-                        except Exception as e:
-                            self.logger.warning(f"Error applying AutoGen adapter for {tool}: {e}")
-                    else:
-                        self.logger.warning(f"Warning: No AutoGen adapter found for {tool_type_name}. Skipping this tool.")
-
-            # Prepare tasks
-            for task_name, task_details in details.get('tasks', {}).items():
-                description_filled = safe_format(task_details['description'], topic=topic)
-                expected_output_filled = safe_format(task_details['expected_output'], topic=topic)
-                
-                chat_task = {
-                    "recipient": agents[role],
-                    "message": description_filled,
-                    "summary_method": "last_msg",
-                }
-                tasks.append(chat_task)
-
-        # Execute tasks
-        response = user_proxy.initiate_chats(tasks)
-        result = "### Output ###\n" + response[-1].summary if hasattr(response[-1], 'summary') else ""
-        
-        if AGENTOPS_AVAILABLE:
-            import agentops
-            try:
-                agentops.end_session("Success")
-            except Exception as e:  # noqa: BLE001 -- agentops errors must not crash the caller
-                self.logger.warning(f"agentops.end_session failed: {e}")
-            
-        return result
-
-
-    def _run_crewai(self, config, topic, tools_dict):
-        """
-        Run agents using the CrewAI framework.
-        
-        Args:
-            config (dict): Configuration dictionary
-            topic (str): The topic to process
-            tools_dict (dict): Dictionary of available tools
-            
-        Returns:
-            str: Result of the agent interactions
-        """
-        agents = {}
-        tasks = []
-        tasks_dict = {}
-
-        # Create agents from config
-        for role, details in config['roles'].items():
-            role_filled = safe_format(details['role'], topic=topic)
-            goal_filled = safe_format(details['goal'], topic=topic)
-            backstory_filled = safe_format(details['backstory'], topic=topic)
-            
-            # Get agent tools
-            agent_tools = [tools_dict[tool] for tool in details.get('tools', []) 
-                         if tool in tools_dict]
-            
-            # Configure LLM
-            llm_model = details.get('llm')
-            if llm_model:
-                llm = PraisonAIModel(
-                    model=llm_model.get("model") or os.environ.get("MODEL_NAME") or "openai/gpt-5-nano",
-                    base_url=self.config_list[0].get('base_url') if self.config_list else None,
-                    api_key=self.config_list[0].get('api_key') if self.config_list else None
-                ).get_model()
-            else:
-                llm = PraisonAIModel(
-                    base_url=self.config_list[0].get('base_url') if self.config_list else None,
-                    api_key=self.config_list[0].get('api_key') if self.config_list else None
-                ).get_model()
-
-            # Configure function calling LLM
-            function_calling_llm_model = details.get('function_calling_llm')
-            if function_calling_llm_model:
-                function_calling_llm = PraisonAIModel(
-                    model=function_calling_llm_model.get("model") or os.environ.get("MODEL_NAME") or "openai/gpt-5-nano",
-                    base_url=self.config_list[0].get('base_url') if self.config_list else None,
-                    api_key=self.config_list[0].get('api_key') if self.config_list else None
-                ).get_model()
-            else:
-                function_calling_llm = PraisonAIModel(
-                    base_url=self.config_list[0].get('base_url') if self.config_list else None,
-                    api_key=self.config_list[0].get('api_key') if self.config_list else None
-                ).get_model()
-
-            # Create CrewAI agent
-            agent = Agent(
-                role=role_filled,
-                goal=goal_filled,
-                backstory=backstory_filled,
-                tools=agent_tools,
-                allow_delegation=details.get('allow_delegation', False),
-                llm=llm,
-                function_calling_llm=function_calling_llm,
-                max_iter=details.get('max_iter') or 15,
-                max_rpm=details.get('max_rpm') or None,
-                max_execution_time=details.get('max_execution_time') or None,
-                verbose=details.get('verbose', True),
-                cache=details.get('cache', True),
-                system_template=details.get('system_template') or None,
-                prompt_template=details.get('prompt_template') or None,
-                response_template=details.get('response_template') or None,
-            )
-            
-            # Set agent callback if provided
-            if self.agent_callback:
-                agent.step_callback = self.agent_callback
-
-            agents[role] = agent
-
-            # Create tasks for the agent
-            for task_name, task_details in details.get('tasks', {}).items():
-                description_filled = safe_format(task_details['description'], topic=topic)
-                expected_output_filled = safe_format(task_details['expected_output'], topic=topic)
-
-                task = Task(
-                    description=description_filled,
-                    expected_output=expected_output_filled,
-                    agent=agent,
-                    tools=task_details.get('tools', []),
-                    async_execution=task_details.get('async_execution', False),
-                    context=[],
-                    config=task_details.get('config', {}),
-                    output_json=task_details.get('output_json'),
-                    output_pydantic=task_details.get('output_pydantic'),
-                    output_file=task_details.get('output_file', ""),
-                    callback=task_details.get('callback'),
-                    human_input=task_details.get('human_input', False),
-                    create_directory=task_details.get('create_directory', False)
-                )
-                
-                # Set task callback if provided
-                if self.task_callback:
-                    task.callback = self.task_callback
-
-                tasks.append(task)
-                tasks_dict[task_name] = task
-
-        # Set up task contexts
-        for role, details in config['roles'].items():
-            for task_name, task_details in details.get('tasks', {}).items():
-                task = tasks_dict[task_name]
-                context_tasks = [tasks_dict[ctx] for ctx in task_details.get('context', []) 
-                               if ctx in tasks_dict]
-                task.context = context_tasks
-
-        # Create and run the crew
-        crew = Crew(
-            agents=list(agents.values()),
-            tasks=tasks,
-            verbose=True
-        )
-        
-        self.logger.debug("Final Crew Configuration:")
-        self.logger.debug(f"Agents: {crew.agents}")
-        self.logger.debug(f"Tasks: {crew.tasks}")
-
-        response = crew.kickoff()
-        result = f"### Task Output ###\n{response}"
-        
-        if AGENTOPS_AVAILABLE:
-            import agentops
-            try:
-                agentops.end_session("Success")
-            except Exception as e:  # noqa: BLE001 -- agentops errors must not crash the caller
-                self.logger.warning(f"agentops.end_session failed: {e}")
-            
-        return result
-
-    def _run_praisonai(self, config, topic, tools_dict):
-        """
-        Run agents using the PraisonAI framework.
-        
-        Tool resolution order:
-        1. Local tools.py (backward compat, custom tools)
-        2. YAML tools: field resolved via ToolResolver
-        3. Built-in tools from praisonaiagents.tools
-        """
-        agents = {}
-        tasks = []
-        tasks_dict = {}
-
-        # Use existing tool resolver instance
-        
-        # Load tools from local tools.py (backward compat)
-        tools_list = self.load_tools_from_tools_py()
-        self.logger.debug(f"Loaded tools from tools.py: {tools_list}")
-
-        # Initialize InteractiveRuntime for ACP/LSP if enabled globally
-        global_config = config.get('config', {})
-        acp_enabled = global_config.get('acp', False)
-        lsp_enabled = global_config.get('lsp', False)
-        interactive_runtime = None
-        interactive_loop = None
-        
-        if acp_enabled or lsp_enabled:
-            try:
-                from praisonai.cli.features.interactive_runtime import InteractiveRuntime, RuntimeConfig
-                from praisonai.cli.features.agent_tools import create_agent_centric_tools
-                from ._async_bridge import run_sync
-                
-                runtime_config = RuntimeConfig(
-                    workspace=os.getcwd(),
-                    acp_enabled=acp_enabled,
-                    lsp_enabled=lsp_enabled,
-                    approval_mode=os.environ.get("PRAISONAI_APPROVAL_MODE", "prompt")
-                )
-                interactive_runtime = InteractiveRuntime(runtime_config)
-                
-                # start() runs on the shared background loop; subprocesses stay alive
-                # for the entire AgentsGenerator run.
-                run_sync(interactive_runtime.start())
-                self._interactive_runtime = interactive_runtime  # for later cleanup
-
-                centric_tools = create_agent_centric_tools(interactive_runtime)
-                self.logger.info(f"Loaded {len(centric_tools)} InteractiveRuntime tools")
-                tools_list.extend(centric_tools)
-
-            except ImportError as e:
-                self.logger.warning(f"Failed to load InteractiveRuntime components: {e}")
-            except Exception as e:
-                self.logger.error(f"Error starting InteractiveRuntime: {e}")
-
-        # Create agents from config
-        for role, details in config['roles'].items():
-            role_filled = safe_format(details['role'], topic=topic)
-            goal_filled = safe_format(details['goal'], topic=topic)
-            backstory_filled = safe_format(details['backstory'], topic=topic)
-            
-            # Resolve tools for this agent from YAML tools: field
-            yaml_tool_names = details.get('tools', [])
-            agent_tools = list(tools_list)  # Start with local tools.py tools
-            
-            if yaml_tool_names:
-                # Resolve each tool name from YAML
-                for tool_name in yaml_tool_names:
-                    if not tool_name or not isinstance(tool_name, str):
-                        continue
-                    tool_name = tool_name.strip()
-                    
-                    # Check if already in tools_list (from tools.py)
-                    already_loaded = any(
-                        getattr(t, '__name__', None) == tool_name or 
-                        getattr(t, 'name', None) == tool_name
-                        for t in agent_tools
-                    )
-                    
-                    if not already_loaded:
-                        resolved_tool = self.tool_resolver.resolve(tool_name)
-                        if resolved_tool is not None:
-                            agent_tools.append(resolved_tool)
-                            self.logger.debug(f"Resolved tool '{tool_name}' for agent {role}")
-                        else:
-                            self.logger.warning(f"Tool '{tool_name}' not found for agent {role}")
-            
-            # Get LLM from config or environment
-            llm_config = details.get('llm', {})
-            llm_model = llm_config.get("model") if isinstance(llm_config, dict) else llm_config
-            llm_model = llm_model or os.environ.get("MODEL_NAME") or "gpt-4o-mini"
-            
-            # Extract YAML configuration for new CLI parity features
-            agent_tool_timeout = details.get('tool_timeout', None)
-            
-            agent_planning_tools = details.get('planning_tools', None)
-            agent_planning = details.get('planning', False)
-            if agent_planning_tools is not None:
-                if isinstance(agent_planning, dict):
-                    agent_planning['tools'] = agent_planning_tools
-                elif not agent_planning:
-                    agent_planning = {'tools': agent_planning_tools}
-            
-            # Clean up user YAML if they nested 'planning_tools' inside 'planning'
-            if isinstance(agent_planning, dict) and 'planning_tools' in agent_planning:
-                if 'tools' not in agent_planning:
-                    agent_planning['tools'] = agent_planning.pop('planning_tools')
-                else:
-                    agent_planning.pop('planning_tools')
-            
-            # Extract YAML configuration for advanced features
-            autonomy_config = details.get('autonomy')
-            guardrails_config = details.get('guardrails')
-            
-            # Extract streaming configuration - YAML takes precedence over CLI
-            has_streaming_config = 'streaming' in details
-            has_legacy_stream = 'stream' in details
-            streaming_config = details.get('streaming')
-            stream_enabled = False
-            stream_metrics = False
-            
-            if has_streaming_config:
-                if isinstance(streaming_config, bool):
-                    stream_enabled = streaming_config
-                elif isinstance(streaming_config, dict):
-                    stream_enabled = streaming_config.get('enabled', False)
-                    stream_metrics = streaming_config.get('emit_metrics', False)
-                    # Future: can add callbacks, etc. from streaming_config
-            elif has_legacy_stream:  # Also support direct 'stream: true' format
-                stream_enabled = details.get('stream', False)
-            
-            # CLI streaming flags override if YAML doesn't specify
-            cli_config = getattr(self, 'cli_config', {}) or {}
-            if not has_streaming_config and not has_legacy_stream:
-                stream_enabled = cli_config.get('stream', False)
-                stream_metrics = cli_config.get('stream_metrics', False)
-            
-            # Use unified approval specification
-            approval_config = None
-            if 'approval' in details:
-                from ._approval_spec import ApprovalSpec
-                try:
-                    spec = ApprovalSpec.from_yaml(details.get('approval'))
-                    if spec.enabled:
-                        from .cli.features.approval import resolve_approval_config
-                        approval_config = resolve_approval_config(
-                            backend_name=spec.backend,
-                            all_tools=spec.approve_all_tools,
-                            timeout=spec.timeout
-                    )
-                except ImportError:
-                    # Fallback: Create ApprovalConfig directly if resolve_approval_config isn't available
-                    try:
-                        from praisonaiagents.approval.protocols import ApprovalConfig
-                        approval_config = ApprovalConfig(
-                            backend=spec.backend,
-                            all_tools=spec.approve_all_tools,
-                            timeout=spec.timeout
-                        )
-                    except ImportError:
-                        # Last resort: disable approval for this agent
-                        approval_config = None
-            
-            # Build output configuration with streaming support
-            output_config = None
-            if stream_enabled:
-                try:
-                    from praisonaiagents.config import OutputConfig
-                    output_config = OutputConfig(stream=True, metrics=stream_metrics)
-                except ImportError:
-                    self.logger.warning("OutputConfig not available, streaming disabled")
-            
-            # G16: YAML `skills:` key. Accepts a list of paths, a single path
-            # string, or a full SkillsConfig dict (paths/dirs/auto_discover).
-            agent_skills = details.get('skills')
-
-            # H17: CLI Backend support - delegates full turns to external CLI tools
-            cli_backend_resolved = _resolve_yaml_cli_backend(
-                details.get('cli_backend'), self.logger
-            )
-
-            agent = PraisonAgent(
-                name=role_filled,
-                role=role_filled,
-                goal=goal_filled,
-                backstory=backstory_filled,
-                instructions=details.get('instructions'),
-                tools=agent_tools,  # Pass resolved tools to the agent
-                allow_delegation=details.get('allow_delegation', False),
-                llm=llm_model,
-                reflection=details.get('reflection', False),
-                tool_timeout=agent_tool_timeout,
-                planning=agent_planning,
-                autonomy=autonomy_config,
-                guardrails=guardrails_config,
-                approval=approval_config,
-                output=output_config,
-                skills=agent_skills,
-                cli_backend=cli_backend_resolved,
-            )
-            
-            if self.agent_callback:
-                agent.step_callback = self.agent_callback
-
-            agents[role] = agent
-            self.logger.debug(f"Created agent {role_filled} with tools: {agent.tools}")
-
-            # Create tasks for the agent
-            agent_tasks = details.get('tasks', {})
-            
-            # If no tasks defined, auto-generate one from instructions/backstory
-            if not agent_tasks:
-                # Use instructions or backstory as the task description
-                task_description = details.get('instructions') or backstory_filled
-                auto_task = PraisonTask(
-                    description=task_description,
-                    expected_output="Complete the assigned task successfully.",
-                    agent=agent,
-                )
-                tasks.append(auto_task)
-                tasks_dict[f"{role}_auto_task"] = auto_task
-                self.logger.debug(f"Auto-generated task for agent {role_filled}")
-            else:
-                for task_name, task_details in agent_tasks.items():
-                    description_filled = safe_format(task_details['description'], topic=topic)
-                    expected_output_filled = safe_format(task_details['expected_output'], topic=topic)
-
-                    task = PraisonTask(
-                        description=description_filled,
-                        expected_output=expected_output_filled,
-                        agent=agent,
-                        tools=agent_tools,  # Pass resolved tools to the task
-                        async_execution=task_details.get('async_execution', False),
-                        context=[],
-                        config=task_details.get('config', {}),
-                        output_json=task_details.get('output_json'),
-                        output_pydantic=task_details.get('output_pydantic'),
-                        output_file=task_details.get('output_file', ""),
-                        callback=task_details.get('callback'),
-                        create_directory=task_details.get('create_directory', False)
-                    )
-
-                    self.logger.debug(f"Created task {task_name} with tools: {task.tools}")
-                    
-                    if self.task_callback:
-                        task.callback = self.task_callback
-
-                    tasks.append(task)
-                    tasks_dict[task_name] = task
-
-        # Set up task contexts
-        for role, details in config['roles'].items():
-            for task_name, task_details in details.get('tasks', {}).items():
-                task = tasks_dict[task_name]
-                context_tasks = [tasks_dict[ctx] for ctx in task_details.get('context', []) 
-                            if ctx in tasks_dict]
-                task.context = context_tasks
-
-        # Create and run the PraisonAI agents
-        memory = config.get('memory', False)
-        
-        self.logger.debug(f"Memory: {memory}")
-        
-        if config.get('process') == 'hierarchical':
-            agents = AgentTeam(
-                agents=list(agents.values()),
-                tasks=tasks,
-                process="hierarchical",
-                manager_llm=config.get('manager_llm') or os.environ.get("MODEL_NAME") or "gpt-4o-mini",
-                memory=memory
-            )
-        else:
-            agents = AgentTeam(
-                agents=list(agents.values()),
-                tasks=tasks,
-                memory=memory
-            )
-
-        self.logger.debug("Final Configuration:")
-        self.logger.debug(f"Agents: {agents.agents}")
-        self.logger.debug(f"Tasks: {agents.tasks}")
-
-        try:
-            response = agents.start()
-            self.logger.debug(f"Result: {response}")
-            result = response if response else ""
-        finally:
-            if interactive_runtime:
-                try:
-                    self.logger.info("Stopping InteractiveRuntime...")
-                    from ._async_bridge import run_sync
-                    run_sync(interactive_runtime.stop())
-                except Exception as e:
-                    self.logger.error(f"Error stopping InteractiveRuntime: {e}")
-        
-        if AGENTOPS_AVAILABLE:
-            import agentops
-            try:
-                agentops.end_session("Success")
-            except Exception as e:  # noqa: BLE001 -- agentops errors must not crash the caller
-                self.logger.warning(f"agentops.end_session failed: {e}")
-            
-        return result

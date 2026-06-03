@@ -439,3 +439,13 @@ def has_hook(event: Union[str, HookEvent]) -> bool:
             )
     
     return get_default_registry().has_hooks(event)
+
+
+def list_hooks_for_api() -> List[Dict]:
+    """Flat hook list suitable for REST/UI consumers."""
+    registry = get_default_registry()
+    flat: List[Dict] = []
+    for event, hooks in registry.list_hooks().items():
+        for h in hooks:
+            flat.append({"event": event, "source": "sdk", **h})
+    return flat

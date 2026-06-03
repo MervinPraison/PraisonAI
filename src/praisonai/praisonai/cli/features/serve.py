@@ -127,6 +127,11 @@ Launch PraisonAI servers with unified discovery support.
 
 [bold]Discovery:[/bold]
   All servers expose /__praisonai__/discovery for unified endpoint discovery.
+
+[bold]A2UI / AG-UI rendering:[/bold]
+  For live A2UI surfaces in a web UI, use PraisonAIUI (POST /agui SSE + /api/surfaces):
+    pip install praisonaiui praisonaiagents[a2ui]
+  See docs: Integrate A2UI with Your Frontend.
   Use `praisonai endpoints` to interact with any server.
 """
         self._print_rich(help_text)

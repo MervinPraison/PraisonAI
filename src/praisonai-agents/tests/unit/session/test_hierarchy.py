@@ -103,6 +103,73 @@ class TestHierarchicalSessionStore:
         """Clean up test fixtures."""
         shutil.rmtree(self.temp_dir, ignore_errors=True)
     
+    def test_add_message_preserves_concurrent_writes(self):
+        """Concurrent add_message must not lose messages (same as DefaultSessionStore)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = HierarchicalSessionStore(session_dir=tmpdir)
+            reader = HierarchicalSessionStore(session_dir=tmpdir)
+
+            writer.add_user_message("session-1", "first")
+            reader._load_session("session-1")
+            writer.add_user_message("session-1", "second")
+
+            history = writer.get_chat_history("session-1")
+            assert len(history) == 2
+            assert history[1]["content"] == "second"
+
+    def test_get_extended_session_sees_writes_from_other_store(self):
+        """Extended reads must reload from disk, not stale _extended_cache."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = HierarchicalSessionStore(session_dir=tmpdir)
+            reader = HierarchicalSessionStore(session_dir=tmpdir)
+
+            writer.add_user_message("session-1", "first")
+            reader._load_extended_session("session-1")
+            writer.add_user_message("session-1", "second")
+
+            session = reader.get_extended_session("session-1")
+            assert len(session.messages) == 2
+            assert session.messages[1].content == "second"
+
+    def test_stale_cache_write_preserves_concurrent_updates(self):
+        """Metadata writes must not truncate messages written by other processes."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            writer = HierarchicalSessionStore(session_dir=tmpdir)
+            reader = HierarchicalSessionStore(session_dir=tmpdir)
+            
+            # Create session and warm reader's cache
+            writer.create_session("session-1", title="Original")
+            reader.get_extended_session("session-1")  # Warms cache
+            
+            # Writer adds messages, reader has stale cache
+            writer.add_user_message("session-1", "first message")
+            writer.add_assistant_message("session-1", "first response")
+            
+            # Reader performs metadata-only write with stale cache
+            reader.set_title("session-1", "Updated Title")
+            
+            # Verify messages are preserved
+            session = writer.get_extended_session("session-1")
+            assert session.title == "Updated Title"
+            assert len(session.messages) == 2
+            assert session.messages[0].content == "first message"
+            assert session.messages[1].content == "first response"
+
+    def test_update_session_metadata_preserves_extended_fields(self):
+        """Metadata updates must not strip parent_id, snapshots, etc."""
+        session_id = self.store.create_session(title="Parent")
+        self.store.add_message(session_id, "user", "hello")
+        parent_id = self.store.create_session(title="Child", parent_id=session_id)
+        snapshot_id = self.store.create_snapshot(session_id, label="checkpoint")
+
+        assert self.store.update_session_metadata(session_id, model="gpt-4o-mini")
+
+        session = self.store.get_extended_session(session_id)
+        assert session.metadata.get("model") == "gpt-4o-mini"
+        assert session.title == "Parent"
+        assert parent_id in session.children_ids
+        assert any(s.id == snapshot_id for s in session.snapshots)
+
     def test_create_session(self):
         """Test creating a session."""
         session_id = self.store.create_session(title="Test Session")
@@ -295,6 +362,94 @@ class TestHierarchicalSessionStore:
         new_id = self.store.import_session(exported, new_session_id=custom_id)
         
         assert new_id == custom_id
+    
+    def test_set_title_does_not_drop_messages_after_external_write(self):
+        """
+        Regression test for the stale cache bug.
+        
+        Reproduces the scenario where:
+        1. Process A loads session (warms cache)
+        2. Process B writes new messages
+        3. Process A calls set_title() → should NOT drop Process B's messages
+        """
+        import json
+        
+        # Create session with initial messages
+        session_id = self.store.create_session(title="Test Session")
+        self.store.add_message(session_id, "user", "Message 1")
+        self.store.add_message(session_id, "assistant", "Response 1")
+        
+        # Process A: Load session (warms cache)
+        session_a = self.store.get_extended_session(session_id)
+        assert len(session_a.messages) == 2
+        
+        # Process B: Simulate external write by directly modifying file
+        # This mimics another process/store instance writing to the same session
+        filepath = self.store._get_session_path(session_id)
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        
+        # Add messages from "Process B"
+        data["messages"].extend([
+            {"role": "user", "content": "Message 2", "timestamp": time.time(), "metadata": {}},
+            {"role": "assistant", "content": "Response 2", "timestamp": time.time(), "metadata": {}}
+        ])
+        data["updated_at"] = time.time()
+        
+        # Write the updated data (simulating external process write)
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        
+        # Brief sleep to ensure file mtime is different
+        time.sleep(0.1)
+        
+        # Process A: Call set_title() - this should detect the external write
+        # and reload fresh data instead of using stale cache
+        result = self.store.set_title(session_id, "Updated Title")
+        assert result is True
+        
+        # Verify no messages were lost - should have all 4 messages
+        final_session = self.store.get_extended_session(session_id)
+        assert len(final_session.messages) == 4, f"Expected 4 messages, got {len(final_session.messages)}"
+        assert final_session.title == "Updated Title"
+        assert final_session.messages[0].content == "Message 1"
+        assert final_session.messages[1].content == "Response 1"
+        assert final_session.messages[2].content == "Message 2"
+        assert final_session.messages[3].content == "Response 2"
+    
+    def test_cache_performance_with_unchanged_files(self):
+        """
+        Test that performance optimization works - reads from cache when file hasn't changed.
+        """
+        session_id = self.store.create_session(title="Cache Test")
+        self.store.add_message(session_id, "user", "Test message")
+        
+        # First read - loads from disk and caches
+        session1 = self.store.get_extended_session(session_id)
+        assert len(session1.messages) == 1
+        
+        # Second read should use cache (file hasn't changed)
+        # We can't easily test this directly, but we can verify the cache is valid
+        assert self.store._is_cache_valid(session_id) is True
+        
+        session2 = self.store.get_extended_session(session_id)
+        assert len(session2.messages) == 1
+        assert session2 is session1  # Should be same cached object
+    
+    def test_force_reload_bypasses_cache(self):
+        """Test that force_reload=True always loads from disk."""
+        session_id = self.store.create_session(title="Force Reload Test")
+        self.store.add_message(session_id, "user", "Message 1")
+        
+        # Load and cache
+        session1 = self.store._load_extended_session(session_id, force_reload=False)
+        
+        # Force reload should bypass cache
+        session2 = self.store._load_extended_session(session_id, force_reload=True)
+        
+        # Both should have same data but force_reload ensures fresh read
+        assert len(session1.messages) == len(session2.messages)
+        assert session1.session_id == session2.session_id
 
 
 class TestGlobalHierarchicalStore:

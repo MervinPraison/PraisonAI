@@ -20,12 +20,30 @@ from ..registry import register_check
 
 def _find_mcp_config() -> dict:
     """Find MCP configuration files."""
-    locations = [
-        Path.cwd() / ".praison" / "mcp.json",
-        Path.cwd() / ".praison" / "mcp" / "config.json",
-        Path.home() / ".praison" / "mcp.json",
-        Path.home() / ".config" / "praison" / "mcp.json",
-    ]
+    # Use canonical MCP paths from praisonaiagents.paths
+    try:
+        from praisonaiagents.paths import get_mcp_dir, get_project_data_dir
+        canonical_mcp_dir = get_mcp_dir()
+        project_mcp_dir = get_project_data_dir() / "mcp"
+        
+        locations = [
+            project_mcp_dir / "config.json",
+            canonical_mcp_dir / "config.json",
+            # Legacy paths for backward compatibility
+            Path.cwd() / ".praison" / "mcp.json",
+            Path.cwd() / ".praison" / "mcp" / "config.json",
+            Path.home() / ".praison" / "mcp.json",
+            Path.home() / ".config" / "praison" / "mcp.json",
+        ]
+    except ImportError:
+        # Fallback to legacy paths if praisonaiagents not available
+        locations = [
+            Path.cwd() / ".praisonai" / "mcp" / "config.json",
+            Path.cwd() / ".praison" / "mcp.json",
+            Path.cwd() / ".praison" / "mcp" / "config.json", 
+            Path.home() / ".praison" / "mcp.json",
+            Path.home() / ".config" / "praison" / "mcp.json",
+        ]
     
     for loc in locations:
         if loc.exists():
@@ -70,7 +88,7 @@ def check_mcp_config(config: DoctorConfig) -> CheckResult:
             category=CheckCategory.MCP,
             status=CheckStatus.SKIP,
             message="No MCP configuration found (optional)",
-            details="Create .praison/mcp.json to configure MCP servers",
+            details="Create ~/.praisonai/mcp/config.json to configure MCP servers",
         )
 
 

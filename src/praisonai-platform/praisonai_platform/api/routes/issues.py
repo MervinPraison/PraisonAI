@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from praisonaiagents.auth import AuthIdentity
 
-from ..deps import get_db, require_workspace_member
+from ..deps import ensure_resource_in_workspace, get_db, require_workspace_member
 from ..schemas import (
     CommentCreate,
     CommentResponse,
@@ -87,7 +87,7 @@ async def get_issue(
     session: AsyncSession = Depends(get_db),
 ):
     svc = IssueService(session)
-    issue = await svc.get(issue_id)
+    issue = await svc.get(issue_id, workspace_id=workspace_id)
     if issue is None:
         raise HTTPException(status_code=404, detail="Issue not found")
     return IssueResponse.model_validate(issue)
@@ -104,6 +104,7 @@ async def update_issue(
     svc = IssueService(session)
     issue = await svc.update(
         issue_id,
+        workspace_id=workspace_id,
         title=body.title,
         description=body.description,
         status=body.status,
@@ -132,7 +133,7 @@ async def delete_issue(
     session: AsyncSession = Depends(get_db),
 ):
     svc = IssueService(session)
-    deleted = await svc.delete(issue_id)
+    deleted = await svc.delete(issue_id, workspace_id=workspace_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Issue not found")
 
@@ -148,6 +149,11 @@ async def add_comment(
     user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
+    issue_svc = IssueService(session)
+    issue = await issue_svc.get(issue_id)
+    if issue is None:
+        raise HTTPException(status_code=404, detail="Issue not found")
+    ensure_resource_in_workspace(issue.workspace_id, workspace_id, label="Issue")
     svc = CommentService(session)
     comment = await svc.create(
         issue_id=issue_id,
@@ -166,6 +172,11 @@ async def list_comments(
     user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
+    issue_svc = IssueService(session)
+    issue = await issue_svc.get(issue_id)
+    if issue is None:
+        raise HTTPException(status_code=404, detail="Issue not found")
+    ensure_resource_in_workspace(issue.workspace_id, workspace_id, label="Issue")
     svc = CommentService(session)
     comments = await svc.list_for_issue(issue_id)
     return [CommentResponse.model_validate(c) for c in comments]

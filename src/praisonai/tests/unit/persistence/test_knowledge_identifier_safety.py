@@ -151,3 +151,24 @@ def test_cassandra_rejects_malicious_collection(monkeypatch):
         store.delete_collection("x; DROP TABLE users; --")
     with pytest.raises(ValueError):
         store.count("x; DROP TABLE users; --")
+
+
+def test_clickhouse_rejects_malicious_database(monkeypatch):
+    clickhouse_connect = types.ModuleType("clickhouse_connect")
+    clickhouse_connect.get_client = lambda **kwargs: object()
+    monkeypatch.setitem(sys.modules, "clickhouse_connect", clickhouse_connect)
+
+    from praisonai.persistence.knowledge.clickhouse import ClickHouseKnowledgeStore
+
+    with pytest.raises(ValueError):
+        ClickHouseKnowledgeStore(database="db; DROP DATABASE prod; --")
+
+
+def test_surrealdb_rejects_malicious_collection_on_get():
+    from praisonai.persistence.knowledge.surrealdb_vector import (
+        SurrealDBVectorKnowledgeStore,
+    )
+
+    store = SurrealDBVectorKnowledgeStore(username="user", password="pass")
+    with pytest.raises(ValueError):
+        store.get("x; DROP TABLE users; --", ["doc-1"])

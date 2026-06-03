@@ -110,8 +110,8 @@ def create_agent_centric_tools(
     if orchestrator is None:
         orchestrator = ActionOrchestrator(runtime)
     
-    # Helper to run async functions synchronously - use the documented bridge
-    from praisonai._async_bridge import run_sync as run_async
+    # Helper to run async functions synchronously using the shared bridge
+    from praisonai._async_bridge import run_sync
     
     # =========================================================================
     # ACP-Powered File Tools
@@ -191,7 +191,7 @@ def create_agent_centric_tools(
                 "verified": result.success
             })
         
-        return run_async(_create())
+        return run_sync(_create())
     
     def acp_edit_file(filepath: str, new_content: str) -> str:
         """
@@ -248,7 +248,7 @@ def create_agent_centric_tools(
                 "error": result.error
             })
         
-        return run_async(_edit())
+        return run_sync(_edit())
     
     def acp_delete_file(filepath: str) -> str:
         """
@@ -300,7 +300,7 @@ def create_agent_centric_tools(
                 "verified": result.success
             })
         
-        return run_async(_delete())
+        return run_sync(_delete())
     
     def acp_execute_command(command: str, cwd: str = None) -> str:
         """
@@ -359,7 +359,7 @@ def create_agent_centric_tools(
                 "error": result.error
             })
         
-        return run_async(_execute())
+        return run_sync(_execute())
     
     # =========================================================================
     # LSP-Powered Code Intelligence Tools
@@ -391,7 +391,7 @@ def create_agent_centric_tools(
             except asyncio.TimeoutError:
                 return json.dumps({"error": "LSP list_symbols timed out (10s)", "success": False})
         
-        return run_async(_list())
+        return run_sync(_list())
     
     def lsp_find_definition(symbol: str, file_path: str = None) -> str:
         """
@@ -419,7 +419,7 @@ def create_agent_centric_tools(
             except asyncio.TimeoutError:
                 return json.dumps({"error": "LSP find_definition timed out (10s)", "success": False})
         
-        return run_async(_find())
+        return run_sync(_find())
     
     def lsp_find_references(symbol: str, file_path: str = None) -> str:
         """
@@ -447,7 +447,7 @@ def create_agent_centric_tools(
             except asyncio.TimeoutError:
                 return json.dumps({"error": "LSP find_references timed out (10s)", "success": False})
         
-        return run_async(_find())
+        return run_sync(_find())
     
     def lsp_get_diagnostics(file_path: str = None) -> str:
         """
@@ -474,7 +474,7 @@ def create_agent_centric_tools(
             except asyncio.TimeoutError:
                 return json.dumps({"error": "LSP diagnostics timed out (10s)", "success": False})
         
-        return run_async(_get())
+        return run_sync(_get())
     
     # =========================================================================
     # Basic File Tools (for read-only operations)

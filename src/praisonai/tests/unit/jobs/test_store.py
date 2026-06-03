@@ -1,5 +1,7 @@
 """Unit tests for jobs store."""
 
+import asyncio
+import threading
 import pytest
 
 from praisonai.jobs.models import Job, JobStatus
@@ -237,3 +239,74 @@ class TestInMemoryJobStore:
         assert "status_counts" in stats
         assert stats["status_counts"]["queued"] == 1
         assert stats["status_counts"]["running"] == 1
+
+
+class TestInMemoryJobStoreConcurrency:
+    """Concurrency tests for InMemoryJobStore."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_saves_no_data_loss(self):
+        """Concurrent save() calls must not lose jobs."""
+        store = InMemoryJobStore(max_jobs=1000)
+        jobs = [Job(prompt=f"Job {i}") for i in range(50)]
+
+        await asyncio.gather(*[store.save(job) for job in jobs])
+
+        count = await store.count()
+        assert count == 50
+
+    @pytest.mark.asyncio
+    async def test_concurrent_reads_while_writing(self):
+        """list_jobs() and count() must not raise while saves are in flight."""
+        store = InMemoryJobStore(max_jobs=1000)
+        errors = []
+
+        async def writer():
+            for i in range(20):
+                await store.save(Job(prompt=f"job {i}"))
+
+        async def reader():
+            for _ in range(30):
+                try:
+                    await store.list_jobs()
+                    await store.count()
+                except Exception as e:
+                    errors.append(e)
+
+        await asyncio.gather(writer(), reader(), reader())
+        assert errors == [], f"Concurrent read/write raised: {errors}"
+
+    @pytest.mark.asyncio
+    async def test_get_stats_consistent_snapshot(self):
+        """get_stats() must not raise RuntimeError with concurrent mutations."""
+        store = InMemoryJobStore(max_jobs=1000)
+        errors = []
+
+        async def writer():
+            for i in range(30):
+                await store.save(Job(prompt=f"job {i}"))
+
+        def stats_reader():
+            for _ in range(50):
+                try:
+                    store.get_stats()
+                except RuntimeError as e:
+                    errors.append(e)
+
+        # Run stats reader in a thread while async writer runs
+        t = threading.Thread(target=stats_reader)
+        t.start()
+        await writer()
+        t.join()
+
+        assert errors == [], f"get_stats raised RuntimeError: {errors}"
+
+    @pytest.mark.asyncio
+    async def test_get_stats_returns_correct_total(self):
+        """get_stats() total_jobs must match actual job count."""
+        store = InMemoryJobStore(max_jobs=100)
+        for i in range(5):
+            await store.save(Job(prompt=f"Job {i}"))
+
+        stats = store.get_stats()
+        assert stats["total_jobs"] == 5

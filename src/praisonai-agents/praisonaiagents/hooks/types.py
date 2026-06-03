@@ -68,6 +68,14 @@ class HookEvent(str, Enum):
     SCHEDULE_REMOVE = "schedule_remove"
     SCHEDULE_TRIGGER = "schedule_trigger"
 
+    # Kanban task lifecycle (wrapper dispatcher + tools emit these)
+    KANBAN_TASK_CREATED = "kanban_task_created"
+    KANBAN_TASK_CLAIMED = "kanban_task_claimed"
+    KANBAN_TASK_MOVED = "kanban_task_moved"
+    KANBAN_TASK_DONE = "kanban_task_done"
+    KANBAN_TASK_BLOCKED = "kanban_task_blocked"
+    KANBAN_TASK_FAILED = "kanban_task_failed"
+
     # Claude Code parity events
     USER_PROMPT_SUBMIT = "user_prompt_submit"  # When user submits a prompt
     NOTIFICATION = "notification"              # When notification is sent
@@ -99,6 +107,34 @@ class HookInput:
             "agent_name": self.agent_name,
             **self.extra
         }
+
+
+@dataclass
+class KanbanHookInput(HookInput):
+    """Hook input for kanban task lifecycle events.
+    
+    Used by wrapper dispatcher and tools when emitting kanban events.
+    Observability adapters can subscribe to these via the hook registry.
+    """
+    task_id: str = ""
+    board: str = "default"
+    status: str = ""
+    assignee: Optional[str] = field(default=None)
+    from_status: Optional[str] = field(default=None)
+    to_status: Optional[str] = field(default=None)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        result = super().to_dict()
+        result.update({
+            "task_id": self.task_id,
+            "board": self.board,
+            "status": self.status,
+            "assignee": self.assignee,
+            "from_status": self.from_status,
+            "to_status": self.to_status,
+        })
+        return result
 
 
 @dataclass

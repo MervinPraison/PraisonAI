@@ -112,6 +112,22 @@ class TestSandboxEscapePrevention:
         result = sandbox.run("__import__('os')")
         assert result["success"] is False
 
+    def test_print_self_blocked(self, sandbox):
+        """print.__self__ leaks real builtins module (GHSA-4mr5-g6f9-cfrh)."""
+        result = sandbox.run("b = print.__self__")
+        assert result["success"] is False
+        assert "restricted" in result["stderr"].lower()
+
+    def test_vars_call_blocked(self, sandbox):
+        """vars() can expose builtins.__dict__ after __self__ leak."""
+        result = sandbox.run("vars({})")
+        assert result["success"] is False
+
+    def test_attribute_dunder_call_blocked(self, sandbox):
+        """Attribute calls bypass bare-name Call checks."""
+        result = sandbox.run("(1).__class__.__mro__")
+        assert result["success"] is False
+
 
 # ── Legitimate Code (all must PASS) ─────────────────────────────────────────
 

@@ -7,7 +7,7 @@ Defines the data structures for job submission, status, and results.
 import uuid
 from enum import Enum
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import BaseModel, Field, field_validator
 import socket
 import ipaddress
@@ -177,7 +177,7 @@ class Job(BaseModel):
     run_id: Optional[str] = Field(None)
     
     # Timestamps
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     started_at: Optional[datetime] = Field(None)
     completed_at: Optional[datetime] = Field(None)
     
@@ -194,7 +194,7 @@ class Job(BaseModel):
         """Calculate job duration."""
         if self.started_at is None:
             return None
-        end_time = self.completed_at or datetime.utcnow()
+        end_time = self.completed_at or datetime.now(timezone.utc)
         return (end_time - self.started_at).total_seconds()
     
     @property
@@ -247,26 +247,26 @@ class Job(BaseModel):
     def start(self):
         """Mark job as started."""
         self.status = JobStatus.RUNNING
-        self.started_at = datetime.utcnow()
+        self.started_at = datetime.now(timezone.utc)
     
     def succeed(self, result: Any, metrics: Optional[Dict[str, Any]] = None):
         """Mark job as succeeded."""
         self.status = JobStatus.SUCCEEDED
         self.result = result
         self.metrics = metrics
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(timezone.utc)
         self.progress_percentage = 100.0
     
     def fail(self, error: str):
         """Mark job as failed."""
         self.status = JobStatus.FAILED
         self.error = error
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(timezone.utc)
     
     def cancel(self):
         """Mark job as cancelled."""
         self.status = JobStatus.CANCELLED
-        self.completed_at = datetime.utcnow()
+        self.completed_at = datetime.now(timezone.utc)
         self._cancel_requested = True
     
     def update_progress(

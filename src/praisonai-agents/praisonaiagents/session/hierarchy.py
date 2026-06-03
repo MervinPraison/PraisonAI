@@ -144,6 +144,74 @@ class HierarchicalSessionStore(DefaultSessionStore):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._extended_cache: Dict[str, ExtendedSessionData] = {}
+        self._cache_mtimes: Dict[str, float] = {}  # Track file modification times
+
+
+    def _load_session_from_disk(self, session_id: str, filepath: str) -> ExtendedSessionData:
+        """Load extended session JSON from disk (caller must hold FileLock)."""
+        if os.path.exists(filepath):
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                return ExtendedSessionData.from_dict(data)
+            except (json.JSONDecodeError, IOError):
+                pass
+        return ExtendedSessionData(session_id=session_id)
+
+    def _modify_session_locked(
+        self,
+        session_id: str,
+        mutator,
+        *,
+        error_label: str = "modify session",
+    ) -> bool:
+        """Locked read-modify-write preserving extended session fields."""
+        result = super()._modify_session_locked(
+            session_id, mutator, error_label=error_label
+        )
+        if result:
+            with self._lock:
+                cached = self._cache.get(session_id)
+                if isinstance(cached, ExtendedSessionData):
+                    self._extended_cache[session_id] = cached
+        return result
+
+    def _is_cache_valid(self, session_id: str) -> bool:
+        """Check if cached session is still valid based on file mtime."""
+        if session_id not in self._extended_cache:
+            return False
+        
+        filepath = self._get_session_path(session_id)
+        if not os.path.exists(filepath):
+            return False
+        
+        try:
+            current_mtime = os.path.getmtime(filepath)
+            cached_mtime = self._cache_mtimes.get(session_id, 0)
+            return current_mtime <= cached_mtime
+        except (OSError, IOError):
+            return False
+    
+    def _read_session_fresh(self, session_id: str) -> ExtendedSessionData:
+        """Reload from disk and keep _cache and _extended_cache in sync."""
+        session = super()._read_session_fresh(session_id)
+        if not isinstance(session, ExtendedSessionData):
+            session = ExtendedSessionData.from_session_data(session)
+            with self._lock:
+                self._cache[session_id] = session
+        
+        # Update cache with fresh file mtime
+        filepath = self._get_session_path(session_id)
+        try:
+            mtime = os.path.getmtime(filepath) if os.path.exists(filepath) else time.time()
+        except (OSError, IOError):
+            mtime = time.time()
+        
+        with self._lock:
+            self._extended_cache[session_id] = session
+            self._cache_mtimes[session_id] = mtime
+        
+        return session
     
     def add_message(
         self,
@@ -157,56 +225,32 @@ class HierarchicalSessionStore(DefaultSessionStore):
         
         Overrides parent to preserve extended session data.
         """
-        from .store import SessionMessage
-        
-        # Load extended session (force reload to get latest)
-        session = self._load_extended_session(session_id, force_reload=True)
-        
+
         message = SessionMessage(
             role=role,
             content=content,
             timestamp=time.time(),
             metadata=metadata or {},
         )
-        
-        session.messages.append(message)
-        
-        # Trim messages if over limit
-        if len(session.messages) > self.max_messages:
-            session.messages = session.messages[-self.max_messages:]
-        
-        return self._save_extended_session(session)
+
+        def _apply(session: SessionData) -> None:
+            session.messages.append(message)
+            if len(session.messages) > self.max_messages:
+                session.messages = session.messages[-self.max_messages :]
+
+        return self._modify_session_locked(
+            session_id, _apply, error_label="add message to session"
+        )
     
     def _load_extended_session(self, session_id: str, force_reload: bool = False) -> ExtendedSessionData:
-        """Load extended session from disk."""
-        filepath = self._get_session_path(session_id)
+        """Load extended session with smart caching based on file modification time."""
+        # Force reload bypasses cache validation
+        if force_reload or not self._is_cache_valid(session_id):
+            return self._read_session_fresh(session_id)
         
-        # Check cache first (unless force reload)
-        if not force_reload:
-            with self._lock:
-                if session_id in self._extended_cache:
-                    return self._extended_cache[session_id]
-        
-        # Load from disk
-        if not os.path.exists(filepath):
-            session = ExtendedSessionData(session_id=session_id)
-            with self._lock:
-                self._extended_cache[session_id] = session
-            return session
-        
-        with FileLock(filepath, self.lock_timeout):
-            try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                session = ExtendedSessionData.from_dict(data)
-            except (json.JSONDecodeError, IOError) as e:
-                logger.warning(f"Failed to load session {session_id}: {e}")
-                session = ExtendedSessionData(session_id=session_id)
-        
+        # Cache is valid, return cached version
         with self._lock:
-            self._extended_cache[session_id] = session
-        
-        return session
+            return self._extended_cache[session_id]
     
     def _save_extended_session(self, session: ExtendedSessionData) -> bool:
         """Save extended session to disk."""
@@ -234,8 +278,15 @@ class HierarchicalSessionStore(DefaultSessionStore):
                 
                 os.replace(temp_path, filepath)
                 
+                # Update cache with current file mtime after successful write
+                try:
+                    mtime = os.path.getmtime(filepath)
+                except (OSError, IOError):
+                    mtime = time.time()
+                
                 with self._lock:
                     self._extended_cache[session.session_id] = session
+                    self._cache_mtimes[session.session_id] = mtime
                 
                 return True
             except (IOError, OSError) as e:
@@ -278,12 +329,13 @@ class HierarchicalSessionStore(DefaultSessionStore):
             metadata=metadata or {},
         )
         
-        # Update parent's children list
+        # Update parent's children list without clobbering concurrent message writes
         if parent_id:
-            parent = self._load_extended_session(parent_id)
-            if sid not in parent.children_ids:
-                parent.children_ids.append(sid)
-                self._save_extended_session(parent)
+            def _apply(parent_session: SessionData) -> None:
+                assert isinstance(parent_session, ExtendedSessionData)
+                if sid not in parent_session.children_ids:
+                    parent_session.children_ids.append(sid)
+            self._modify_session_locked(parent_id, _apply, error_label="update parent children")
         
         self._save_extended_session(session)
         return sid
@@ -330,11 +382,15 @@ class HierarchicalSessionStore(DefaultSessionStore):
             metadata=copy.deepcopy(parent.metadata),
         )
         
-        # Update parent's children list
-        parent.children_ids.append(new_id)
-        
         self._save_extended_session(forked)
-        self._save_extended_session(parent)
+
+        def _register_fork(parent: SessionData) -> None:
+            if new_id not in parent.children_ids:
+                parent.children_ids.append(new_id)
+
+        self._modify_session_locked(
+            session_id, _register_fork, error_label="register forked session"
+        )
         
         return new_id
     
@@ -385,18 +441,22 @@ class HierarchicalSessionStore(DefaultSessionStore):
         Returns:
             The snapshot ID
         """
-        # Force reload to get latest messages
-        session = self._load_extended_session(session_id, force_reload=True)
-        
         snapshot = SessionSnapshot(
             session_id=session_id,
-            message_index=len(session.messages) - 1 if session.messages else -1,
+            message_index=-1,  # Set from fresh session inside locked write
             label=label,
             metadata=metadata or {},
         )
-        
-        session.snapshots.append(snapshot)
-        self._save_extended_session(session)
+
+        def _record_snapshot(session: SessionData) -> None:
+            snapshot.message_index = (
+                len(session.messages) - 1 if session.messages else -1
+            )
+            session.snapshots.append(snapshot)
+
+        self._modify_session_locked(
+            session_id, _record_snapshot, error_label="create snapshot"
+        )
         
         return snapshot.id
     
@@ -416,26 +476,30 @@ class HierarchicalSessionStore(DefaultSessionStore):
         Returns:
             True if successful
         """
-        session = self._load_extended_session(session_id)
-        
-        # Find the snapshot
-        snapshot = None
-        for s in session.snapshots:
-            if s.id == snapshot_id:
-                snapshot = s
-                break
-        
-        if snapshot is None:
-            logger.warning(f"Snapshot {snapshot_id} not found")
+        def _apply(session: SessionData) -> None:
+            assert isinstance(session, ExtendedSessionData)
+            
+            # Find the snapshot
+            snapshot = None
+            for s in session.snapshots:
+                if s.id == snapshot_id:
+                    snapshot = s
+                    break
+            
+            if snapshot is None:
+                logger.warning(f"Snapshot {snapshot_id} not found")
+                raise ValueError(f"Snapshot {snapshot_id} not found")
+            
+            # Revert messages
+            if snapshot.message_index >= 0:
+                session.messages = session.messages[:snapshot.message_index + 1]
+            else:
+                session.messages = []
+                
+        try:
+            return self._modify_session_locked(session_id, _apply, error_label="revert to snapshot")
+        except ValueError:
             return False
-        
-        # Revert messages
-        if snapshot.message_index >= 0:
-            session.messages = session.messages[:snapshot.message_index + 1]
-        else:
-            session.messages = []
-        
-        return self._save_extended_session(session)
     
     def revert_to_message(self, session_id: str, message_index: int) -> bool:
         """
@@ -448,27 +512,33 @@ class HierarchicalSessionStore(DefaultSessionStore):
         Returns:
             True if successful
         """
-        # Force reload to get latest messages
-        session = self._load_extended_session(session_id, force_reload=True)
-        
-        if message_index < 0 or message_index >= len(session.messages):
-            logger.warning(f"Invalid message index {message_index}")
+        def _apply(session: SessionData) -> None:
+            assert isinstance(session, ExtendedSessionData)
+            
+            if message_index < 0 or message_index >= len(session.messages):
+                logger.warning(f"Invalid message index {message_index}")
+                raise ValueError(f"Invalid message index {message_index}")
+            
+            session.messages = session.messages[:message_index + 1]
+            
+        try:
+            return self._modify_session_locked(session_id, _apply, error_label="revert to message")
+        except ValueError:
             return False
-        
-        session.messages = session.messages[:message_index + 1]
-        return self._save_extended_session(session)
     
     def share_session(self, session_id: str) -> bool:
         """Mark a session as shared."""
-        session = self._load_extended_session(session_id)
-        session.is_shared = True
-        return self._save_extended_session(session)
+        def _apply(session: SessionData) -> None:
+            assert isinstance(session, ExtendedSessionData)
+            session.is_shared = True
+        return self._modify_session_locked(session_id, _apply, error_label="share session")
     
     def unshare_session(self, session_id: str) -> bool:
         """Mark a session as not shared."""
-        session = self._load_extended_session(session_id)
-        session.is_shared = False
-        return self._save_extended_session(session)
+        def _apply(session: SessionData) -> None:
+            assert isinstance(session, ExtendedSessionData)
+            session.is_shared = False
+        return self._modify_session_locked(session_id, _apply, error_label="unshare session")
     
     def is_shared(self, session_id: str) -> bool:
         """Check if a session is shared."""
@@ -477,9 +547,10 @@ class HierarchicalSessionStore(DefaultSessionStore):
     
     def set_title(self, session_id: str, title: str) -> bool:
         """Set session title."""
-        session = self._load_extended_session(session_id)
-        session.title = title
-        return self._save_extended_session(session)
+        def _apply(session: SessionData) -> None:
+            assert isinstance(session, ExtendedSessionData)
+            session.title = title
+        return self._modify_session_locked(session_id, _apply, error_label="set session title")
     
     async def auto_title(self, session_id: str) -> bool:
         """Generate and set title automatically from first exchange.
@@ -534,12 +605,19 @@ class HierarchicalSessionStore(DefaultSessionStore):
             title = await generate_title_async(user_msg, assistant_msg)
             
             if title and title.strip():
-                # Reload session to avoid overwriting concurrent updates
-                fresh_session = await asyncio.to_thread(self._load_extended_session, session_id)
-                # Only set title if it's still empty
-                if not fresh_session.title or not fresh_session.title.strip():
-                    fresh_session.title = title.strip()
-                    return await asyncio.to_thread(self._save_extended_session, fresh_session)
+                # Use locked read-modify-write to avoid overwriting concurrent updates
+                def _apply(fresh_session: SessionData) -> None:
+                    assert isinstance(fresh_session, ExtendedSessionData)
+                    # Only set title if it's still empty
+                    if not fresh_session.title or not fresh_session.title.strip():
+                        fresh_session.title = title.strip()
+                        
+                return await asyncio.to_thread(
+                    self._modify_session_locked, 
+                    session_id, 
+                    _apply, 
+                    error_label="auto-title session"
+                )
                 
         except Exception as e:
             # Title generation failed - log with context instead of silent failure
@@ -551,7 +629,17 @@ class HierarchicalSessionStore(DefaultSessionStore):
     
     def get_extended_session(self, session_id: str) -> ExtendedSessionData:
         """Get extended session data."""
-        return self._load_extended_session(session_id)
+        return self._read_session_fresh(session_id)
+
+    def invalidate_cache(self, session_id: Optional[str] = None) -> None:
+        """Invalidate base and extended in-memory caches atomically."""
+        with self._lock:
+            if session_id:
+                self._cache.pop(session_id, None)
+                self._extended_cache.pop(session_id, None)
+            else:
+                self._cache.clear()
+                self._extended_cache.clear()
     
     def export_session(self, session_id: str) -> Dict[str, Any]:
         """

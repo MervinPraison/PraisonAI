@@ -40,6 +40,7 @@ class DoctorHandler(CommandHandler):
             "permissions",
             "network",
             "performance",
+            "packaging",
             "ci",
             "selftest",
         ]
@@ -290,6 +291,7 @@ class DoctorHandler(CommandHandler):
             "permissions": [CheckCategory.PERMISSIONS],
             "network": [CheckCategory.NETWORK],
             "performance": [CheckCategory.PERFORMANCE],
+            "packaging": [CheckCategory.PACKAGING],
             "selftest": [CheckCategory.SELFTEST],
             "ci": None,  # CI runs all checks
         }

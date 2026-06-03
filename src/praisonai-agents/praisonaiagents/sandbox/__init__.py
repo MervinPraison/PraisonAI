@@ -15,6 +15,8 @@ from .protocols import (
     ResourceLimits,
 )
 from .config import SandboxConfig, SecurityPolicy
+from .manager import SandboxManager
+from .security import SecurityWarning, check_code_safety, format_warnings, get_security_summary
 
 __all__ = [
     "SandboxProtocol",
@@ -22,5 +24,10 @@ __all__ = [
     "SandboxStatus",
     "ResourceLimits",
     "SandboxConfig",
-    "SecurityPolicy",
+    "SecurityPolicy", 
+    "SandboxManager",
+    "SecurityWarning",
+    "check_code_safety",
+    "format_warnings", 
+    "get_security_summary",
 ]

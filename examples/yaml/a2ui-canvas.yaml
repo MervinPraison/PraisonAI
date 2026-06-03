@@ -1,0 +1,19 @@
+# A2UI canvas agent — YAML example
+#
+# Usage:
+#   pip install praisonaiagents[a2ui]
+#   praisonai agent run --file a2ui-canvas.yaml --prompt "Show a welcome card"
+#
+# For live A2UI rendering, use PraisonAIUI (AG-UI / surfaces):
+#   pip install praisonaiui
+#   See examples/python/a2ui/send_surface.py and PraisonAIUI example 29.
+
+agent:
+  name: "ui-assistant"
+  instructions: |
+    You are a helpful assistant. When the user asks for UI elements
+    (buttons, cards, forms), call send_a2ui_messages with valid A2UI v0.9 JSON.
+    Use surface id "main" unless told otherwise.
+  llm: gpt-4o-mini
+  tools:
+    - send_a2ui_messages

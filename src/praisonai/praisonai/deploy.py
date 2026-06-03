@@ -57,7 +57,7 @@ class CloudDeployer:
             file.write("FROM python:3.11-slim\n")
             file.write("WORKDIR /app\n")
             file.write("COPY . .\n")
-            file.write("RUN pip install flask praisonai==4.6.37 gunicorn markdown\n")
+            file.write("RUN pip install flask praisonai==4.6.51 gunicorn markdown\n")
             file.write("EXPOSE 8080\n")
             file.write('CMD ["gunicorn", "-b", "0.0.0.0:8080", "api:app"]\n')
             
@@ -76,7 +76,8 @@ class CloudDeployer:
         with open("api.py", "w") as file:
             file.write("from flask import Flask\n")
             file.write("from praisonai import PraisonAI\n")
-            file.write("import markdown\n\n")
+            file.write("import markdown\n")
+            file.write("import bleach\n\n")
             file.write("app = Flask(__name__)\n\n")
             file.write("def basic():\n")
             file.write("    praisonai = PraisonAI(agent_file=\"agents.yaml\")\n")
@@ -84,8 +85,9 @@ class CloudDeployer:
             file.write("@app.route('/')\n")
             file.write("def home():\n")
             file.write("    output = basic()\n")
-            file.write("    html_output = markdown.markdown(output)\n")
-            file.write("    return f'<html><body>{html_output}</body></html>'\n\n")
+            file.write("    rendered = markdown.markdown(str(output))\n")
+            file.write("    safe_html = bleach.clean(rendered, tags=bleach.sanitizer.ALLOWED_TAGS, attributes=bleach.sanitizer.ALLOWED_ATTRIBUTES)\n")
+            file.write("    return f'<html><body>{safe_html}</body></html>'\n\n")
             file.write("if __name__ == \"__main__\":\n")
             file.write("    import os\n")
             file.write("    app.run(debug=os.environ.get('DEBUG', 'false').lower() == 'true')\n")
@@ -138,52 +140,82 @@ class CloudDeployer:
         openai_key = ep.api_key or 'Enter your API key'
         openai_base = ep.base_url
         
-        # Build commands with actual values
-        commands = [
-            ['gcloud', 'auth', 'configure-docker', 'us-central1-docker.pkg.dev'],
-            ['gcloud', 'artifacts', 'repositories', 'create', 'praisonai-repository', 
-             '--repository-format=docker', '--location=us-central1'],
-            ['docker', 'build', '--platform', 'linux/amd64', '-t', 
-             f'gcr.io/{project_id}/praisonai-app:latest', '.'],
-            ['docker', 'tag', f'gcr.io/{project_id}/praisonai-app:latest',
-             f'us-central1-docker.pkg.dev/{project_id}/praisonai-repository/praisonai-app:latest'],
-            ['docker', 'push', 
-             f'us-central1-docker.pkg.dev/{project_id}/praisonai-repository/praisonai-app:latest'],
-            ['gcloud', 'run', 'deploy', 'praisonai-service', 
-             '--image', f'us-central1-docker.pkg.dev/{project_id}/praisonai-repository/praisonai-app:latest',
-             '--platform', 'managed', '--region', 'us-central1', '--allow-unauthenticated',
-             '--set-env-vars', f'OPENAI_MODEL_NAME={openai_model},OPENAI_API_KEY={openai_key},OPENAI_API_BASE={openai_base}']
-        ]
+        # Create temporary env vars file to avoid exposing secrets in argv
+        import tempfile
+        import yaml
+        import os
         
-        # Run commands with appropriate handling for each platform
-        for i, cmd in enumerate(commands):
-            try:
-                if i == 0:  # First command (gcloud auth configure-docker)
-                    if platform.system() != 'Windows':
-                        # On Unix, pipe 'yes' to auto-confirm
-                        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-                        proc.communicate(input=b'Y\n')
-                        if proc.returncode != 0:
-                            raise subprocess.CalledProcessError(proc.returncode, cmd)
+        env_vars_file = None
+        try:
+            # Create secure temp file for environment variables
+            fd, env_vars_file = tempfile.mkstemp(suffix=".yaml", prefix="praisonai-deploy-")
+            os.close(fd)
+            os.chmod(env_vars_file, 0o600)  # Secure file permissions
+            
+            # Write env vars to file instead of passing in argv
+            env_vars = {
+                "OPENAI_MODEL_NAME": openai_model,
+                "OPENAI_API_KEY": openai_key,
+                "OPENAI_API_BASE": openai_base
+            }
+            
+            with open(env_vars_file, "w") as f:
+                yaml.safe_dump(env_vars, f)
+            
+            # Build commands with secure env vars file
+            commands = [
+                ['gcloud', 'auth', 'configure-docker', 'us-central1-docker.pkg.dev'],
+                ['gcloud', 'artifacts', 'repositories', 'create', 'praisonai-repository', 
+                 '--repository-format=docker', '--location=us-central1'],
+                ['docker', 'build', '--platform', 'linux/amd64', '-t', 
+                 f'gcr.io/{project_id}/praisonai-app:latest', '.'],
+                ['docker', 'tag', f'gcr.io/{project_id}/praisonai-app:latest',
+                 f'us-central1-docker.pkg.dev/{project_id}/praisonai-repository/praisonai-app:latest'],
+                ['docker', 'push', 
+                 f'us-central1-docker.pkg.dev/{project_id}/praisonai-repository/praisonai-app:latest'],
+                ['gcloud', 'run', 'deploy', 'praisonai-service', 
+                 '--image', f'us-central1-docker.pkg.dev/{project_id}/praisonai-repository/praisonai-app:latest',
+                 '--platform', 'managed', '--region', 'us-central1', '--allow-unauthenticated',
+                 '--env-vars-file', env_vars_file]
+            ]
+            
+            # Run commands with appropriate handling for each platform
+            for i, cmd in enumerate(commands):
+                try:
+                    if i == 0:  # First command (gcloud auth configure-docker)
+                        if platform.system() != 'Windows':
+                            # On Unix, pipe 'yes' to auto-confirm
+                            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+                            proc.communicate(input=b'Y\n')
+                            if proc.returncode != 0:
+                                raise subprocess.CalledProcessError(proc.returncode, cmd)
+                        else:
+                            # On Windows, try with --quiet flag to avoid prompts
+                            cmd_with_quiet = cmd + ['--quiet']
+                            try:
+                                subprocess.run(cmd_with_quiet, check=True)
+                            except subprocess.CalledProcessError:
+                                # If --quiet fails, try without it
+                                print("Note: You may need to manually confirm the authentication prompt")
+                                subprocess.run(cmd, check=True)
                     else:
-                        # On Windows, try with --quiet flag to avoid prompts
-                        cmd_with_quiet = cmd + ['--quiet']
-                        try:
-                            subprocess.run(cmd_with_quiet, check=True)
-                        except subprocess.CalledProcessError:
-                            # If --quiet fails, try without it
-                            print("Note: You may need to manually confirm the authentication prompt")
-                            subprocess.run(cmd, check=True)
-                else:
-                    # Run other commands normally
-                    subprocess.run(cmd, check=True)
-            except subprocess.CalledProcessError as e:
-                print(f"ERROR: Command failed with exit status {e.returncode}")
-                # Commands 2 (build) and 4 (push) and 5 (deploy) are critical
-                if i in [2, 4, 5]:
-                    print("Critical command failed. Aborting deployment.")
-                    return
-                print(f"Continuing with the next command...")
+                        # Run other commands normally
+                        subprocess.run(cmd, check=True)
+                except subprocess.CalledProcessError as e:
+                    print(f"ERROR: Command failed with exit status {e.returncode}")
+                    # Commands 2 (build) and 4 (push) and 5 (deploy) are critical
+                    if i in [2, 4, 5]:
+                        print("Critical command failed. Aborting deployment.")
+                        return
+                    print(f"Continuing with the next command...")
+        
+        finally:
+            # Always cleanup the temporary env vars file
+            if env_vars_file:
+                try:
+                    os.remove(env_vars_file)
+                except Exception:
+                    pass  # Don't fail deployment if cleanup fails
 
 # Usage
 if __name__ == "__main__":

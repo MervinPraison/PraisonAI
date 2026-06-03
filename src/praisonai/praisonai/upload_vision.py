@@ -82,26 +82,15 @@ class UploadVisionModel:
 
     def create_and_push_ollama_model(self):
         """Create and push model to Ollama."""
+        from .train._ollama import create_and_push_ollama_model
         print(f"DEBUG: Creating Ollama model: {self.config['ollama_model']}:{self.config['model_parameters']}")
         modelfile_content = self.prepare_modelfile_content()
-        with open("Modelfile", "w") as file:
-            file.write(modelfile_content)
-        
-        print("DEBUG: Starting Ollama server...")
-        subprocess.run(["ollama", "serve"])
-        
-        print("DEBUG: Creating Ollama model...")
-        subprocess.run([
-            "ollama", "create", 
-            f"{self.config['ollama_model']}:{self.config['model_parameters']}", 
-            "-f", "Modelfile"
-        ])
-        
-        print("DEBUG: Pushing model to Ollama...")
-        subprocess.run([
-            "ollama", "push", 
-            f"{self.config['ollama_model']}:{self.config['model_parameters']}"
-        ])
+        print("DEBUG: Starting Ollama server and creating model...")
+        create_and_push_ollama_model(
+            self.config['ollama_model'], 
+            self.config['model_parameters'], 
+            modelfile_content
+        )
         print("DEBUG: Model pushed to Ollama successfully.")
 
     def upload(self, target="all"):

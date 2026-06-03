@@ -192,3 +192,8 @@ class TokenCollector:
 
 # Global token collector instance
 _token_collector = TokenCollector()
+
+
+def get_token_collector() -> TokenCollector:
+    """Return the global TokenCollector singleton."""
+    return _token_collector

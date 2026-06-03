@@ -7,7 +7,7 @@ import threading
 from typing import Any, Dict, List, Optional, Union, Literal
 import logging
 from praisonaiagents._logging import get_logger
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Decomposed memory functionality - imported as mixins for backward compatibility
 from .storage import StorageMixin
@@ -692,7 +692,7 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
                         "_id": ident,
                         "content": text,
                         "metadata": metadata,
-                        "created_at": datetime.utcnow(),
+                        "created_at": datetime.now(timezone.utc),
                         "memory_type": "short_term"
                     }
                     self.mongo_short_term.insert_one(doc)
@@ -918,7 +918,7 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
                     "_id": ident,
                     "content": text,
                     "metadata": metadata,
-                    "created_at": datetime.utcnow(),
+                    "created_at": datetime.now(timezone.utc),
                     "memory_type": "long_term"
                 }
                 
@@ -1441,14 +1441,14 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
             self.mem0_client.add(text, user_id=user_id, metadata=meta)
         elif self.use_mongodb and hasattr(self, "mongo_users"):
             try:
-                from datetime import datetime
+                from datetime import datetime, timezone
                 ident = str(time.time_ns())
                 doc = {
                     "_id": ident,
                     "user_id": user_id,
                     "content": text,
                     "metadata": meta,
-                    "created_at": datetime.utcnow()
+                    "created_at": datetime.now(timezone.utc)
                 }
                 self.mongo_users.insert_one(doc)
                 self._log_verbose(f"Successfully stored user memory for {user_id}")

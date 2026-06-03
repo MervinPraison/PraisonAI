@@ -195,6 +195,12 @@ class TestCodexCLIStructuredOutput:
 class TestIntegrationExports:
     """Tests for integration module exports."""
 
+    def test_exported_codex_integration_is_class(self):
+        """Test exported CodexCLIIntegration resolves to the class, not a loader."""
+        from praisonai.integrations import CodexCLIIntegration
+
+        assert inspect.isclass(CodexCLIIntegration)
+
     def test_get_available_integrations_export_is_sync(self):
         """Test exported get_available_integrations remains synchronous."""
         from praisonai.integrations import get_available_integrations
