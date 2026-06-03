@@ -17,6 +17,7 @@ Usage:
 import logging
 import threading
 from typing import Any, Callable, Dict, List, Optional, Union
+from dataclasses import dataclass
 
 from .base import BaseTool
 
@@ -36,6 +37,47 @@ def _get_entry_points():
 ENTRY_POINT_GROUP = "praisonaiagents.tools"
 
 
+@dataclass
+class ToolEntry:
+    """Internal registry entry for a tool with optional dynamic schema override."""
+    tool: Union[BaseTool, Callable]
+    schema_override: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
+    available: bool = True
+    
+    @property
+    def name(self) -> str:
+        """Get the tool name."""
+        if hasattr(self.tool, 'name'):
+            return self.tool.name
+        elif hasattr(self.tool, '__name__'):
+            return self.tool.__name__
+        else:
+            return str(id(self.tool))
+    
+    @property
+    def schema(self) -> Dict[str, Any]:
+        """Get the tool schema, applying dynamic overrides if present."""
+        # Get base schema
+        if hasattr(self.tool, 'get_schema'):
+            # If the tool already handles schema overrides (like FunctionTool), 
+            # just use its get_schema() method and don't apply override again
+            return self.tool.get_schema()
+        else:
+            # For plain functions, generate schema and apply override if present
+            from .decorator import get_tool_schema
+            base_schema = get_tool_schema(self.tool)
+            
+            # Apply dynamic override if present
+            if self.schema_override is not None:
+                try:
+                    return self.schema_override(base_schema)
+                except Exception as e:
+                    logging.warning(f"Dynamic schema override failed for tool '{self.name}': {e}")
+                    return base_schema
+            
+            return base_schema
+
+
 class ToolRegistry:
     """Central registry for all tools.
     
@@ -47,8 +89,7 @@ class ToolRegistry:
     """
     
     def __init__(self):
-        self._tools: Dict[str, BaseTool] = {}
-        self._functions: Dict[str, Callable] = {}  # For backward compat with plain functions
+        self._tools: Dict[str, ToolEntry] = {}  # Unified storage for tools and functions
         self._discovered: bool = False
         self._lock = threading.RLock()  # Thread-safe operations for multi-agent scenarios
     
@@ -56,7 +97,8 @@ class ToolRegistry:
         self,
         tool: Union[BaseTool, Callable],
         name: Optional[str] = None,
-        overwrite: bool = False
+        overwrite: bool = False,
+        dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
     ) -> None:
         """Register a tool with the registry.
         
@@ -66,32 +108,37 @@ class ToolRegistry:
             tool: BaseTool instance or callable function
             name: Override name (default: tool.name or function.__name__)
             overwrite: If True, overwrite existing tool with same name
+            dynamic_schema_overrides: Optional function to dynamically modify tool schema.
+                Called with base schema dict, returns modified schema dict.
         
         Raises:
             ValueError: If tool with same name exists and overwrite=False
         """
         with self._lock:
-            # Handle BaseTool instances
+            # Determine tool name
             if isinstance(tool, BaseTool):
                 tool_name = name or tool.name
-                if tool_name in self._tools and not overwrite:
-                    logging.debug(f"Tool '{tool_name}' already registered, skipping")
-                    return
-                self._tools[tool_name] = tool
-                logging.debug(f"Registered tool: {tool_name}")
-                return
-            
-            # Handle plain callables
-            if callable(tool):
+            elif callable(tool):
                 tool_name = name or getattr(tool, '__name__', str(id(tool)))
-                if tool_name in self._functions and not overwrite:
-                    logging.debug(f"Function '{tool_name}' already registered, skipping")
-                    return
-                self._functions[tool_name] = tool
-                logging.debug(f"Registered function: {tool_name}")
+            else:
+                raise TypeError(f"Cannot register {type(tool)}, expected BaseTool or callable")
+            
+            # Check for existing tool
+            if tool_name in self._tools and not overwrite:
+                logging.debug(f"Tool '{tool_name}' already registered, skipping")
                 return
             
-            raise TypeError(f"Cannot register {type(tool)}, expected BaseTool or callable")
+            # Create tool entry with optional dynamic override
+            entry = ToolEntry(
+                tool=tool,
+                schema_override=dynamic_schema_overrides,
+                available=True
+            )
+            
+            self._tools[tool_name] = entry
+            logging.debug(f"Registered tool: {tool_name}")
+            if dynamic_schema_overrides:
+                logging.debug(f"Tool '{tool_name}' has dynamic schema override function")
     
     def unregister(self, name: str) -> bool:
         """Remove a tool from the registry.
@@ -108,9 +155,6 @@ class ToolRegistry:
             if name in self._tools:
                 del self._tools[name]
                 return True
-            if name in self._functions:
-                del self._functions[name]
-                return True
             return False
     
     def get(self, name: str) -> Optional[Union[BaseTool, Callable]]:
@@ -125,31 +169,68 @@ class ToolRegistry:
             BaseTool instance, callable, or None if not found
         """
         with self._lock:
-            # Check BaseTool registry first
+            # Check tool registry first
             if name in self._tools:
-                return self._tools[name]
-            
-            # Check functions registry
-            if name in self._functions:
-                return self._functions[name]
+                return self._tools[name].tool
             
             # Try auto-discovery if not found
             if not self._discovered:
                 self.discover_plugins()
                 if name in self._tools:
-                    return self._tools[name]
+                    return self._tools[name].tool
             
             return None
     
     def list_tools(self) -> List[str]:
         """List all registered tool names. Thread-safe."""
         with self._lock:
-            return list(self._tools.keys()) + list(self._functions.keys())
+            return list(self._tools.keys())
     
     def list_base_tools(self) -> List[BaseTool]:
         """List all registered BaseTool instances. Thread-safe."""
         with self._lock:
-            return list(self._tools.values())
+            base_tools = []
+            for entry in self._tools.values():
+                if isinstance(entry.tool, BaseTool):
+                    base_tools.append(entry.tool)
+            return base_tools
+    
+    def get_tool_definitions(self) -> List[Dict[str, Any]]:
+        """Get OpenAI-compatible tool definitions with dynamic schema overrides applied.
+        
+        This is the main entry point for getting tool schemas that respects
+        dynamic overrides. Called every time tools need to be passed to the LLM.
+        
+        Returns:
+            List of OpenAI-compatible tool definition dictionaries
+        """
+        with self._lock:
+            definitions = []
+            for entry in self._tools.values():
+                if not entry.available:
+                    continue
+                
+                # Check tool availability if it supports the protocol
+                if hasattr(entry.tool, 'check_availability'):
+                    try:
+                        is_available, reason = entry.tool.check_availability()
+                        if not is_available:
+                            if reason:
+                                logging.debug(f"Tool '{entry.name}' unavailable: {reason}")
+                            continue
+                    except Exception as e:
+                        logging.warning(f"Availability check failed for tool '{entry.name}': {e}")
+                        continue
+                
+                # Get schema with dynamic overrides applied
+                try:
+                    schema = entry.schema
+                    definitions.append(schema)
+                except Exception as e:
+                    logging.error(f"Failed to get schema for tool '{entry.name}': {e}")
+                    continue
+            
+            return definitions
     
     def list_available_tools(self, context: Optional[Dict[str, Any]] = None) -> List[Union[BaseTool, Callable]]:
         """List only currently available tools (those that pass availability checks).
@@ -163,24 +244,23 @@ class ToolRegistry:
         with self._lock:
             available = []
             
-            # Check BaseTool instances
-            for tool in self._tools.values():
+            for entry in self._tools.values():
+                if not entry.available:
+                    continue
+                
                 # Check if tool has availability checking capability
-                if hasattr(tool, 'check_availability'):
+                if hasattr(entry.tool, 'check_availability'):
                     try:
-                        is_available, reason = tool.check_availability()
+                        is_available, reason = entry.tool.check_availability()
                         if is_available:
-                            available.append(tool)
+                            available.append(entry.tool)
                         elif reason:
-                            logging.debug(f"Tool '{tool.name}' unavailable: {reason}")
+                            logging.debug(f"Tool '{entry.name}' unavailable: {reason}")
                     except Exception as e:
-                        logging.warning(f"Availability check failed for tool '{tool.name}': {e}")
+                        logging.warning(f"Availability check failed for tool '{entry.name}': {e}")
                 else:
                     # No availability check = always available
-                    available.append(tool)
-            
-            # Functions are always considered available (no protocol for them currently)
-            available.extend(self._functions.values())
+                    available.append(entry.tool)
             
             return available
     
@@ -222,8 +302,9 @@ class ToolRegistry:
     def get_all(self) -> Dict[str, Union[BaseTool, Callable]]:
         """Get all registered tools as a dict. Thread-safe."""
         with self._lock:
-            result = dict(self._tools)
-            result.update(self._functions)
+            result = {}
+            for name, entry in self._tools.items():
+                result[name] = entry.tool
             return result
     
     def discover_plugins(self) -> int:
@@ -302,19 +383,18 @@ class ToolRegistry:
         """Clear all registered tools. Thread-safe."""
         with self._lock:
             self._tools.clear()
-            self._functions.clear()
             self._discovered = False
     
     def __contains__(self, name: str) -> bool:
         with self._lock:
-            return name in self._tools or name in self._functions
+            return name in self._tools
     
     def __len__(self) -> int:
         with self._lock:
-            return len(self._tools) + len(self._functions)
+            return len(self._tools)
     
     def __repr__(self) -> str:
-        return f"ToolRegistry(tools={len(self._tools)}, functions={len(self._functions)})"
+        return f"ToolRegistry(tools={len(self._tools)})"
 
 
 # Global registry instance (protected by _registry_lock for thread safety)
@@ -335,10 +415,11 @@ def get_registry() -> ToolRegistry:
 
 def register_tool(
     tool: Union[BaseTool, Callable],
-    name: Optional[str] = None
+    name: Optional[str] = None,
+    dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
 ) -> None:
     """Convenience function to register a tool with the global registry."""
-    get_registry().register(tool, name=name)
+    get_registry().register(tool, name=name, dynamic_schema_overrides=dynamic_schema_overrides)
 
 
 def get_tool(name: str) -> Optional[Union[BaseTool, Callable]]:
@@ -349,15 +430,17 @@ def get_tool(name: str) -> Optional[Union[BaseTool, Callable]]:
 # Simplified alias for register_tool
 def add_tool(
     tool: Union[BaseTool, Callable],
-    name: Optional[str] = None
+    name: Optional[str] = None,
+    dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
 ) -> None:
     """Register a tool. Simplified alias for register_tool().
     
     Args:
         tool: BaseTool instance or callable function
         name: Optional override name
+        dynamic_schema_overrides: Optional function to dynamically modify tool schema
     """
-    register_tool(tool, name=name)
+    register_tool(tool, name=name, dynamic_schema_overrides=dynamic_schema_overrides)
 
 
 def has_tool(name: str) -> bool:
@@ -391,6 +474,18 @@ def list_tools() -> List[str]:
         List of tool names
     """
     return get_registry().list_tools()
+
+
+def get_tool_definitions() -> List[Dict[str, Any]]:
+    """Get OpenAI-compatible tool definitions with dynamic schema overrides applied.
+    
+    This is the main entry point for getting tool schemas that respects
+    dynamic overrides. Called every time tools need to be passed to the LLM.
+    
+    Returns:
+        List of OpenAI-compatible tool definition dictionaries
+    """
+    return get_registry().get_tool_definitions()
 
 
 def discover_plugins() -> int:
