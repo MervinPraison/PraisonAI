@@ -50,3 +50,28 @@ class CompactionConfig:
     compaction_prefix: str = COMPACTION_PREFIX  # Override for custom framing
     structured_template: bool = True  # Emit Active Task / Remaining Work sections
     iterative_update: bool = True  # Merge previous summary on re-compaction
+    
+    # Anti-thrashing protection
+    min_savings_pct: float = 10.0  # Skip if projected saving < 10%
+    max_consecutive_low_savings: int = 2  # Abort after N low-savings attempts
+    
+    # Tool result optimization
+    tool_prune_before_summarise: bool = True  # Deduplicate tool results before summarization
+    max_tool_result_size: int = 500  # Maximum size for tool results before pruning
+    
+    # Iterative summarization
+    enable_iterative_summary: bool = True  # Build on previous summaries instead of starting from scratch
+    
+    def __post_init__(self):
+        """Validate and normalize configuration values."""
+        # Normalize min_savings_pct to 0-100 scale if provided as ratio
+        if self.min_savings_pct < 1.0:
+            self.min_savings_pct *= 100.0
+        
+        # Validate ranges
+        if not 0.0 <= self.min_savings_pct <= 100.0:
+            raise ValueError("min_savings_pct must be between 0 and 100")
+        if self.max_consecutive_low_savings < 0:
+            raise ValueError("max_consecutive_low_savings must be >= 0")
+        if self.max_tool_result_size <= 0:
+            raise ValueError("max_tool_result_size must be > 0")

@@ -18,6 +18,12 @@ class CompactionResult:
     strategy_used: CompactionStrategy
     summary: str = ""
     
+    # Anti-thrashing and optimization info
+    savings_pct: float = 0.0  # Percentage of tokens saved
+    tool_results_pruned: int = 0  # Number of tool results deduplicated/pruned
+    previous_summary_reused: bool = False  # Whether iterative summary was used
+    was_skipped_due_to_low_savings: bool = False  # Whether compaction was skipped due to anti-thrashing
+    
     @property
     def tokens_saved(self) -> int:
         """Get number of tokens saved."""
@@ -29,6 +35,13 @@ class CompactionResult:
         if self.original_tokens == 0:
             return 0.0
         return self.compacted_tokens / self.original_tokens
+    
+    def calculate_savings_pct(self) -> None:
+        """Calculate and set the savings percentage."""
+        if self.original_tokens > 0:
+            self.savings_pct = (self.tokens_saved / self.original_tokens) * 100.0
+        else:
+            self.savings_pct = 0.0
     
     @property
     def was_compacted(self) -> bool:
@@ -45,5 +58,9 @@ class CompactionResult:
             "messages_kept": self.messages_kept,
             "strategy_used": self.strategy_used.value,
             "compression_ratio": self.compression_ratio,
+            "savings_pct": self.savings_pct,
+            "tool_results_pruned": self.tool_results_pruned,
+            "previous_summary_reused": self.previous_summary_reused,
+            "was_skipped_due_to_low_savings": self.was_skipped_due_to_low_savings,
             "summary": self.summary
         }
