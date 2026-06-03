@@ -23,9 +23,16 @@ import json
 
 try:
     from pydantic import BaseModel, ValidationError as PydanticValidationError
+    PYDANTIC_AVAILABLE = True
 except ImportError:
-    BaseModel = None
-    PydanticValidationError = Exception
+    PYDANTIC_AVAILABLE = False
+    if TYPE_CHECKING:
+        from pydantic import BaseModel, ValidationError as PydanticValidationError
+    else:
+        # Provide a safe sentinel for runtime
+        class BaseModel:  # type: ignore
+            pass
+        PydanticValidationError = Exception
 
 if TYPE_CHECKING:
     from .agent import Agent
@@ -1003,7 +1010,7 @@ class TypedHandoff(Handoff, Generic[T]):
             ImportError: If Pydantic is not available
             TypeError: If input_schema is not a Pydantic model
         """
-        if BaseModel is None:
+        if not PYDANTIC_AVAILABLE:
             raise ImportError(
                 "Pydantic is required for TypedHandoff. Install with: pip install pydantic"
             )
@@ -1116,13 +1123,18 @@ class TypedHandoff(Handoff, Generic[T]):
             # Execute on_handoff callback
             self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
             
+            # Apply input filter if provided (fixes Greptile P1 issue)
+            _ = self._prepare_context(source_agent, kwargs)
+            
             # Validate payload against schema
             try:
                 validated_payload = self._validate_payload(payload)
             except HandoffValidationError as e:
-                # Update error context with proper agent info
+                # Update error context with proper agent info (fixes Greptile P2 issue)
                 e.source_agent = source_agent.name
                 e.agent_id = source_agent.name
+                e.context["source_agent"] = source_agent.name
+                e.context["agent_id"] = source_agent.name
                 raise
             
             # Convert validated payload to structured JSON for the prompt
@@ -1224,12 +1236,18 @@ class TypedHandoff(Handoff, Generic[T]):
                 # Execute callback
                 self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
                 
+                # Apply input filter if provided (fixes Greptile P1 issue)
+                _ = self._prepare_context(source_agent, kwargs)
+                
                 # Validate payload against schema
                 try:
                     validated_payload = self._validate_payload(payload)
                 except HandoffValidationError as e:
+                    # Update error context with proper agent info (fixes Greptile P2 issue)
                     e.source_agent = source_agent.name
                     e.agent_id = source_agent.name
+                    e.context["source_agent"] = source_agent.name
+                    e.context["agent_id"] = source_agent.name
                     raise
                 
                 # Convert to structured JSON
@@ -1285,7 +1303,7 @@ class TypedHandoff(Handoff, Generic[T]):
             self._execute_callback(self.config.on_complete, source_agent, kwargs, result)
             return result
             
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as err:
             result = HandoffResult(
                 success=False,
                 target_agent=self.agent.name,
@@ -1301,7 +1319,7 @@ class TypedHandoff(Handoff, Generic[T]):
                 source_agent=source_agent.name,
                 target_agent=self.agent.name,
                 agent_id=source_agent.name
-            )
+            ) from err
         except Exception as e:
             result = HandoffResult(
                 success=False,

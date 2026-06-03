@@ -114,7 +114,7 @@ def __getattr__(name):
     
     # Handoff - lightweight
     _handoff_names = {
-        'Handoff', 'handoff', 'handoff_filters', 'parallel_handoffs',
+        'Handoff', 'handoff_filters', 'parallel_handoffs',
         'RECOMMENDED_PROMPT_PREFIX', 'prompt_with_handoff_instructions',
         'HandoffConfig', 'HandoffResult', 'HandoffInputData',
         'ContextPolicy', 'HandoffError', 'HandoffCycleError', 
