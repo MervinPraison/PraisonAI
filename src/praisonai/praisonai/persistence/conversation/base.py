@@ -166,3 +166,84 @@ class ConversationStore(ABC):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
         return False
+
+
+class AsyncConversationStore(ABC):
+    """
+    Abstract base class for async conversation persistence.
+    
+    Async version of ConversationStore with async/await methods.
+    Async stores should implement this instead of ConversationStore.
+    """
+    
+    @abstractmethod
+    async def create_session(self, session: ConversationSession) -> ConversationSession:
+        """Create a new session."""
+        raise NotImplementedError
+    
+    @abstractmethod
+    async def get_session(self, session_id: str) -> Optional[ConversationSession]:
+        """Get a session by ID."""
+        raise NotImplementedError
+    
+    @abstractmethod
+    async def update_session(self, session: ConversationSession) -> ConversationSession:
+        """Update an existing session."""
+        raise NotImplementedError
+    
+    @abstractmethod
+    async def delete_session(self, session_id: str) -> bool:
+        """Delete a session and all its messages."""
+        raise NotImplementedError
+    
+    @abstractmethod
+    async def list_sessions(
+        self, 
+        user_id: Optional[str] = None, 
+        agent_id: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> List[ConversationSession]:
+        """List sessions, optionally filtered by user or agent."""
+        raise NotImplementedError
+    
+    @abstractmethod
+    async def add_message(self, session_id: str, message: ConversationMessage) -> ConversationMessage:
+        """Add a message to a session."""
+        raise NotImplementedError
+    
+    @abstractmethod
+    async def get_messages(
+        self, 
+        session_id: str, 
+        limit: Optional[int] = None,
+        before: Optional[float] = None,
+        after: Optional[float] = None
+    ) -> List[ConversationMessage]:
+        """Get messages from a session."""
+        raise NotImplementedError
+    
+    @abstractmethod
+    async def delete_messages(self, session_id: str, message_ids: Optional[List[str]] = None) -> int:
+        """Delete messages. If message_ids is None, delete all messages in session."""
+        raise NotImplementedError
+    
+    async def upsert_session(self, session: ConversationSession) -> ConversationSession:
+        """Create or update a session."""
+        existing = await self.get_session(session.session_id)
+        if existing:
+            session.updated_at = time.time()
+            return await self.update_session(session)
+        return await self.create_session(session)
+    
+    @abstractmethod
+    async def close(self) -> None:
+        """Close the store and release resources."""
+        raise NotImplementedError
+    
+    async def __aenter__(self):
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+        return False

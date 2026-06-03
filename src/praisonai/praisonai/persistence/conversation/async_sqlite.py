@@ -11,7 +11,7 @@ import logging
 import time
 from typing import List, Optional
 
-from .base import ConversationStore, ConversationSession, ConversationMessage, validate_identifier
+from .base import AsyncConversationStore, ConversationSession, ConversationMessage, validate_identifier
 # Note: This store is async-only. For sync operations, use sync_sqlite.SyncSQLiteConversationStore
 
 try:
@@ -22,7 +22,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class AsyncSQLiteConversationStore(ConversationStore):
+class AsyncSQLiteConversationStore(AsyncConversationStore):
     """
     Async SQLite conversation store using aiosqlite.
     
@@ -32,43 +32,6 @@ class AsyncSQLiteConversationStore(ConversationStore):
         store = AsyncSQLiteConversationStore(path="./conversations.db")
         await store.init()
     """
-    
-    # Sync method stubs - this store is async-only
-    def create_session(self, session) -> None:
-        """This store is async-only; use async_create_session or the sync_sqlite store."""
-        raise RuntimeError("This store is async-only; use async_create_session() or the sync_sqlite store")
-    
-    def get_session(self, session_id: str) -> None:
-        """This store is async-only; use async_get_session or the sync_sqlite store."""
-        raise RuntimeError("This store is async-only; use async_get_session() or the sync_sqlite store")
-    
-    def update_session(self, session) -> None:
-        """This store is async-only; use async_update_session or the sync_sqlite store."""
-        raise RuntimeError("This store is async-only; use async_update_session() or the sync_sqlite store")
-    
-    def delete_session(self, session_id: str) -> None:
-        """This store is async-only; use async_delete_session or the sync_sqlite store."""
-        raise RuntimeError("This store is async-only; use async_delete_session() or the sync_sqlite store")
-    
-    def list_sessions(self, **kwargs) -> None:
-        """This store is async-only; use async_list_sessions or the sync_sqlite store."""
-        raise RuntimeError("This store is async-only; use async_list_sessions() or the sync_sqlite store")
-    
-    def add_message(self, session_id: str, message) -> None:
-        """This store is async-only; use async_add_message or the sync_sqlite store."""
-        raise RuntimeError("This store is async-only; use async_add_message() or the sync_sqlite store")
-    
-    def get_messages(self, session_id: str, **kwargs) -> None:
-        """This store is async-only; use async_get_messages or the sync_sqlite store."""
-        raise RuntimeError("This store is async-only; use async_get_messages() or the sync_sqlite store")
-    
-    def delete_messages(self, session_id: str, **kwargs) -> None:
-        """This store is async-only; use async_delete_messages or the sync_sqlite store."""
-        raise RuntimeError("This store is async-only; use async_delete_messages() or the sync_sqlite store")
-    
-    def close(self) -> None:
-        """This store is async-only; use async_close or the sync_sqlite store."""
-        raise RuntimeError("This store is async-only; use async_close() or the sync_sqlite store")
     
     def __init__(
         self,
@@ -143,7 +106,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
         
         await self._conn.commit()
     
-    async def async_create_session(self, session: ConversationSession) -> ConversationSession:
+    async def create_session(self, session: ConversationSession) -> ConversationSession:
         """Create a new session asynchronously."""
         if not self._initialized:
             await self.init()
@@ -161,7 +124,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
         return session
     
     
-    async def async_get_session(self, session_id: str) -> Optional[ConversationSession]:
+    async def get_session(self, session_id: str) -> Optional[ConversationSession]:
         """Get a session by ID asynchronously."""
         if not self._initialized:
             await self.init()
@@ -186,7 +149,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
         return None
     
     
-    async def async_update_session(self, session: ConversationSession) -> ConversationSession:
+    async def update_session(self, session: ConversationSession) -> ConversationSession:
         """Update an existing session asynchronously."""
         if not self._initialized:
             await self.init()
@@ -207,7 +170,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
         return session
     
     
-    async def async_delete_session(self, session_id: str) -> bool:
+    async def delete_session(self, session_id: str) -> bool:
         """Delete a session asynchronously."""
         if not self._initialized:
             await self.init()
@@ -221,7 +184,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
         return cursor.rowcount > 0
     
     
-    async def async_list_sessions(
+    async def list_sessions(
         self,
         user_id: Optional[str] = None,
         agent_id: Optional[str] = None,
@@ -269,7 +232,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
         ]
     
     
-    async def async_add_message(self, session_id: str, message: ConversationMessage) -> ConversationMessage:
+    async def add_message(self, session_id: str, message: ConversationMessage) -> ConversationMessage:
         """Add a message asynchronously."""
         if not self._initialized:
             await self.init()
@@ -290,7 +253,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
         return message
     
     
-    async def async_get_messages(
+    async def get_messages(
         self,
         session_id: str,
         limit: Optional[int] = None,
@@ -339,7 +302,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
         ]
     
     
-    async def async_delete_messages(self, session_id: str, message_ids: Optional[List[str]] = None) -> int:
+    async def delete_messages(self, session_id: str, message_ids: Optional[List[str]] = None) -> int:
         """Delete messages asynchronously."""
         if not self._initialized:
             await self.init()
@@ -360,7 +323,7 @@ class AsyncSQLiteConversationStore(ConversationStore):
         return cursor.rowcount
     
     
-    async def async_close(self) -> None:
+    async def close(self) -> None:
         """Close the connection."""
         if self._conn:
             await self._conn.close()

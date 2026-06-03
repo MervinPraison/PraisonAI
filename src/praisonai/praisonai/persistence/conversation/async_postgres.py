@@ -12,13 +12,12 @@ import threading
 import time
 from typing import List, Optional
 
-from .base import ConversationStore, ConversationSession, ConversationMessage, validate_identifier
-from ..._async_bridge import run_sync
+from .base import AsyncConversationStore, ConversationSession, ConversationMessage, validate_identifier
 
 logger = logging.getLogger(__name__)
 
 
-class AsyncPostgresConversationStore(ConversationStore):
+class AsyncPostgresConversationStore(AsyncConversationStore):
     """
     Async PostgreSQL conversation store using asyncpg.
     
@@ -141,7 +140,7 @@ class AsyncPostgresConversationStore(ConversationStore):
                 ON {messages_table}(session_id)
             """)
     
-    async def async_create_session(self, session: ConversationSession) -> ConversationSession:
+    async def create_session(self, session: ConversationSession) -> ConversationSession:
         """Create a new session asynchronously."""
         if not self._initialized:
             await self.init()
@@ -158,11 +157,8 @@ class AsyncPostgresConversationStore(ConversationStore):
         
         return session
     
-    def create_session(self, session: ConversationSession) -> ConversationSession:
-        """Sync wrapper for create_session."""
-        return run_sync(self.async_create_session(session))
     
-    async def async_get_session(self, session_id: str) -> Optional[ConversationSession]:
+    async def get_session(self, session_id: str) -> Optional[ConversationSession]:
         """Get a session by ID asynchronously."""
         if not self._initialized:
             await self.init()
@@ -186,11 +182,8 @@ class AsyncPostgresConversationStore(ConversationStore):
             )
         return None
     
-    def get_session(self, session_id: str) -> Optional[ConversationSession]:
-        """Sync wrapper for get_session."""
-        return run_sync(self.async_get_session(session_id))
     
-    async def async_update_session(self, session: ConversationSession) -> ConversationSession:
+    async def update_session(self, session: ConversationSession) -> ConversationSession:
         """Update an existing session asynchronously."""
         if not self._initialized:
             await self.init()
@@ -210,11 +203,8 @@ class AsyncPostgresConversationStore(ConversationStore):
         
         return session
     
-    def update_session(self, session: ConversationSession) -> ConversationSession:
-        """Sync wrapper for update_session."""
-        return run_sync(self.async_update_session(session))
     
-    async def async_delete_session(self, session_id: str) -> bool:
+    async def delete_session(self, session_id: str) -> bool:
         """Delete a session asynchronously."""
         if not self._initialized:
             await self.init()
@@ -227,11 +217,8 @@ class AsyncPostgresConversationStore(ConversationStore):
         
         return "DELETE 1" in result
     
-    def delete_session(self, session_id: str) -> bool:
-        """Sync wrapper for delete_session."""
-        return run_sync(self.async_delete_session(session_id))
     
-    async def async_list_sessions(
+    async def list_sessions(
         self,
         user_id: Optional[str] = None,
         agent_id: Optional[str] = None,
@@ -281,17 +268,8 @@ class AsyncPostgresConversationStore(ConversationStore):
             for row in rows
         ]
     
-    def list_sessions(
-        self,
-        user_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        limit: int = 100,
-        offset: int = 0
-    ) -> List[ConversationSession]:
-        """Sync wrapper for list_sessions."""
-        return run_sync(self.async_list_sessions(user_id, agent_id, limit, offset))
     
-    async def async_add_message(self, session_id: str, message: ConversationMessage) -> ConversationMessage:
+    async def add_message(self, session_id: str, message: ConversationMessage) -> ConversationMessage:
         """Add a message asynchronously."""
         if not self._initialized:
             await self.init()
@@ -311,11 +289,8 @@ class AsyncPostgresConversationStore(ConversationStore):
         
         return message
     
-    def add_message(self, session_id: str, message: ConversationMessage) -> ConversationMessage:
-        """Sync wrapper for add_message."""
-        return run_sync(self.async_add_message(session_id, message))
     
-    async def async_get_messages(
+    async def get_messages(
         self,
         session_id: str,
         limit: Optional[int] = None,
@@ -366,17 +341,8 @@ class AsyncPostgresConversationStore(ConversationStore):
             for row in rows
         ]
     
-    def get_messages(
-        self,
-        session_id: str,
-        limit: Optional[int] = None,
-        before: Optional[float] = None,
-        after: Optional[float] = None
-    ) -> List[ConversationMessage]:
-        """Sync wrapper for get_messages."""
-        return run_sync(self.async_get_messages(session_id, limit, before, after))
     
-    async def async_delete_messages(self, session_id: str, message_ids: Optional[List[str]] = None) -> int:
+    async def delete_messages(self, session_id: str, message_ids: Optional[List[str]] = None) -> int:
         """Delete messages asynchronously."""
         if not self._initialized:
             await self.init()
@@ -399,18 +365,11 @@ class AsyncPostgresConversationStore(ConversationStore):
         except (ValueError, IndexError):
             return 0
     
-    def delete_messages(self, session_id: str, message_ids: Optional[List[str]] = None) -> int:
-        """Sync wrapper for delete_messages."""
-        return run_sync(self.async_delete_messages(session_id, message_ids))
     
-    async def async_close(self) -> None:
+    async def close(self) -> None:
         """Close the connection pool."""
         if self._pool:
             await self._pool.close()
             self._pool = None
             self._initialized = False
     
-    def close(self) -> None:
-        """Sync wrapper for close."""
-        if self._pool:
-            run_sync(self.async_close())
