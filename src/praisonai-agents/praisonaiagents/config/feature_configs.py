@@ -719,6 +719,9 @@ class ExecutionConfig:
     
     # Retry settings
     max_retry_limit: int = 2
+    retry_initial_delay: float = 1.0  # seconds
+    retry_backoff_factor: float = 2.0
+    retry_jitter: float = 0.1  # fraction of computed delay
     
     # Code execution (consolidated from allow_code_execution + code_execution_mode)
     code_execution: bool = False
@@ -759,6 +762,9 @@ class ExecutionConfig:
             "max_rpm": self.max_rpm,
             "max_execution_time": self.max_execution_time,
             "max_retry_limit": self.max_retry_limit,
+            "retry_initial_delay": self.retry_initial_delay,
+            "retry_backoff_factor": self.retry_backoff_factor,
+            "retry_jitter": self.retry_jitter,
             "code_execution": self.code_execution,
             "code_mode": self.code_mode,
             "code_sandbox_mode": self.code_sandbox_mode,
