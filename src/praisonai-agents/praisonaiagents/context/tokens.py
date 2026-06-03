@@ -56,17 +56,32 @@ def estimate_tokens_accurate(text: str, model: str = "gpt-4") -> int:
     try:
         import tiktoken
         
-        # Cache tokenizer
-        if model not in _tokenizer_cache:
+        # Cache tokenizer with improved model mapping
+        cache_key = model.lower()
+        if cache_key not in _tokenizer_cache:
             try:
-                _tokenizer_cache[model] = tiktoken.encoding_for_model(model)
+                _tokenizer_cache[cache_key] = tiktoken.encoding_for_model(model)
             except KeyError:
-                # Fallback to cl100k_base for unknown models
-                _tokenizer_cache[model] = tiktoken.get_encoding("cl100k_base")
+                # Enhanced fallback mapping for common models
+                if any(model_name in model.lower() for model_name in 
+                       ["gpt-4", "gpt-4o", "gpt-4-turbo"]):
+                    _tokenizer_cache[cache_key] = tiktoken.get_encoding("cl100k_base")
+                elif any(model_name in model.lower() for model_name in 
+                         ["gpt-3.5", "text-davinci", "text-curie"]):
+                    _tokenizer_cache[cache_key] = tiktoken.get_encoding("cl100k_base")
+                elif "claude" in model.lower():
+                    # Claude models use similar tokenization to GPT-4
+                    _tokenizer_cache[cache_key] = tiktoken.get_encoding("cl100k_base")
+                else:
+                    # Ultimate fallback
+                    _tokenizer_cache[cache_key] = tiktoken.get_encoding("cl100k_base")
         
-        enc = _tokenizer_cache[model]
+        enc = _tokenizer_cache[cache_key]
         return len(enc.encode(text))
     except ImportError:
+        return estimate_tokens_heuristic(text)
+    except Exception:
+        # Fallback on any tokenization error
         return estimate_tokens_heuristic(text)
 
 
