@@ -128,6 +128,7 @@ def classify_llm_error(
     model: str,
     prompt_tokens: int = 0,
     context_length: int = 0,
+    retry_depth: int = 0,
 ) -> LLMErrorClassification:
     """
     Classify an LLM error and return structured recovery hints.
@@ -141,6 +142,7 @@ def classify_llm_error(
         model: Model name (e.g., "gpt-4", "claude-3-sonnet")
         prompt_tokens: Current prompt token count
         context_length: Current context window usage
+        retry_depth: Current retry attempt (0-based)
         
     Returns:
         LLMErrorClassification with specific recovery routing
@@ -155,7 +157,11 @@ def classify_llm_error(
     # Rate limit classification
     if category == ErrorCategory.RATE_LIMIT:
         retry_after = extract_retry_after(exc)
-        backoff_time = retry_after if retry_after else _calculate_rate_limit_backoff(error_str, provider)
+        if retry_after:
+            from .retry_utils import calculate_backoff_with_retry_after
+            backoff_time = calculate_backoff_with_retry_after(retry_after, retry_depth + 1)
+        else:
+            backoff_time = _calculate_rate_limit_backoff(error_str, provider, retry_depth + 1)
         
         return LLMErrorClassification(
             error_category="rate_limit",
@@ -183,12 +189,12 @@ def classify_llm_error(
     if category == ErrorCategory.AUTH:
         return LLMErrorClassification(
             error_category="auth",
-            is_retryable=True,  # Can retry with credential rotation
+            is_retryable=False,  # Don't retry until credential rotation is implemented
             should_compress_context=False,
             should_rotate_credential=True,
             should_fallback_model=False,
-            backoff_seconds=1.0,
-            user_message=f"Authentication failed for {provider}. Trying alternate credentials.",
+            backoff_seconds=0.0,
+            user_message=f"Authentication failed for {provider}. Check API credentials.",
         )
     
     # Transient service errors (map to overloaded category for consistency with issue)
@@ -199,7 +205,7 @@ def classify_llm_error(
             should_compress_context=False,
             should_rotate_credential=False,
             should_fallback_model=True,
-            backoff_seconds=_calculate_service_backoff(error_str),
+            backoff_seconds=_calculate_service_backoff(error_str, retry_depth + 1),
             user_message=f"Service {provider} temporarily unavailable. Falling back to alternate model.",
         )
     
@@ -227,41 +233,51 @@ def classify_llm_error(
             user_message="Permanent error occurred. Cannot retry.",
         )
     
-    # Unknown errors - default to retryable with minimal backoff
+    # This fallback should be unreachable since classify_error() always returns one of the 6 categories
+    # But we keep it for safety in case of future enum additions
     return LLMErrorClassification(
         error_category="unknown",
         is_retryable=True,
         should_compress_context=False,
         should_rotate_credential=False,
         should_fallback_model=False,
-        backoff_seconds=jittered_backoff(1, base=2.0),
+        backoff_seconds=jittered_backoff(retry_depth + 1, base=2.0),
         user_message="Unknown error occurred. Retrying with backoff.",
     )
 
 
-def _calculate_rate_limit_backoff(error_str: str, provider: str) -> float:
-    """Extract or calculate appropriate backoff time for rate limits."""
-    # Provider-specific defaults
-    if provider == "openai":
-        return 60.0  # OpenAI rate limits are typically per minute
-    elif provider == "anthropic":
-        return 20.0  # Anthropic rate limits are often shorter
-    elif provider == "azure":
-        return 45.0  # Azure varies by deployment
+def _calculate_rate_limit_backoff(error_str: str, provider: str, retry_attempt: int = 1) -> float:
+    """Calculate jittered backoff time for rate limits based on provider and attempt."""
+    from .retry_utils import jittered_backoff
     
-    # Default backoff
-    return 30.0
+    # Provider-specific base delays
+    if provider == "openai":
+        base = 60.0  # OpenAI rate limits are typically per minute
+    elif provider == "anthropic":
+        base = 20.0  # Anthropic rate limits are often shorter
+    elif provider == "azure":
+        base = 45.0  # Azure varies by deployment
+    else:
+        base = 30.0  # Default backoff
+    
+    # Apply jittered exponential backoff
+    return jittered_backoff(retry_attempt, base=base)
 
 
-def _calculate_service_backoff(error_str: str) -> float:
-    """Calculate backoff time for service unavailable errors."""
+def _calculate_service_backoff(error_str: str, retry_attempt: int = 1) -> float:
+    """Calculate jittered backoff time for service unavailable errors."""
+    from .retry_utils import jittered_backoff
+    
     # Look for any suggested retry time in error message
     retry_match = re.search(r'retry[:\s]+(\d+)', error_str)
     if retry_match:
-        return min(float(retry_match.group(1)), 120.0)  # Cap at 2 minutes
+        suggested_delay = min(float(retry_match.group(1)), 120.0)  # Cap at 2 minutes
+        # Use the larger of suggested delay or jittered backoff
+        jittered_delay = jittered_backoff(retry_attempt, base=15.0)
+        return max(suggested_delay, jittered_delay)
     
-    # Default service unavailable backoff
-    return 15.0
+    # Default jittered service unavailable backoff
+    return jittered_backoff(retry_attempt, base=15.0)
 
 
 def classify_error(error: Exception) -> ErrorCategory:
