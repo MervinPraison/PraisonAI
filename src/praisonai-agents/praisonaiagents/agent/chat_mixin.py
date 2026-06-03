@@ -3003,7 +3003,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             response_format = self._build_response_format(schema_model)
                         
                         # Use composition instead of runtime class mutation for safety
-                        response = await self._execute_unified_achat_completion(
+                        response = await self._achat_completion_with_retry(
                             messages=messages,
                             temperature=temperature,
                             tools=formatted_tools,
@@ -3175,7 +3175,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         {"role": "user", "content": "Now regenerate your response using the reflection you made"}
                                     ]
                                     
-                                    new_response = await self._execute_unified_achat_completion(
+                                    new_response = await self._achat_completion_with_retry(
                                         messages=regenerate_messages,
                                         temperature=temperature,
                                         tools=formatted_tools,
@@ -4123,12 +4123,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # Log retry attempt (buffered to avoid spam during transient failures)
                 logger.debug(f"[{self.name}] Retry {attempt + 1}/{max_attempts} after {delay:.1f}s: {str(e)[:100]}")
                 
-                # Sleep with interrupt awareness
+                # Sleep with interrupt awareness - make interruption terminal
                 interrupt_fn = getattr(self, '_is_interrupted', lambda: False)
                 sleep_start = time.time()
                 while time.time() - sleep_start < delay:
                     if interrupt_fn():
-                        break
+                        # Interruption is terminal - stop retrying
+                        raise RuntimeError("Agent interrupted during retry backoff")
                     time.sleep(min(0.2, delay - (time.time() - sleep_start)))
         
         # This should never be reached, but just in case
@@ -4194,7 +4195,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     retry_count=attempt + 1,
                     max_retries=retry_config.max_retries,
                     error_message=str(e),
-                    operation="llm_request",
+                    operation="async_llm_request",
                     delay_seconds=delay,
                     attempt=attempt
                 )

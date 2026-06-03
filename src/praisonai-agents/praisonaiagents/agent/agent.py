@@ -2217,6 +2217,9 @@ Your Goal: {self.goal}
             # Tool configuration - use consolidated config when available  
             'tool_config': getattr(self, '_tool_config', None),
             
+            # Retry configuration
+            'retry': getattr(self, '_retry_config', None),
+            
             # CLI backend
             'cli_backend': getattr(self, '_cli_backend', None),
             

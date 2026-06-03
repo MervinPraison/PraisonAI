@@ -19,6 +19,17 @@ class RetryBackoffConfig:
     max_delay: float = 120.0     # Maximum delay in seconds  
     jitter_ratio: float = 0.5    # Jitter as fraction of delay (0.0-1.0)
     max_retries: int = 3         # Maximum retry attempts
+    
+    def __post_init__(self):
+        """Validate configuration parameters."""
+        if self.base_delay <= 0:
+            raise ValueError("base_delay must be > 0")
+        if self.max_delay < self.base_delay:
+            raise ValueError("max_delay must be >= base_delay")
+        if not (0 <= self.jitter_ratio <= 1):
+            raise ValueError("jitter_ratio must be between 0 and 1")
+        if self.max_retries < 0:
+            raise ValueError("max_retries must be >= 0")
 
 
 def jittered_backoff(
@@ -47,11 +58,11 @@ def jittered_backoff(
     # Exponential backoff: base * 2^attempt
     delay = min(base_delay * (2 ** max(0, attempt)), max_delay)
     
-    # Apply jitter: delay ± (jitter_ratio * delay)
+    # Apply jitter: delay + uniform(0, jitter_ratio * delay) for additive positive jitter
     if jitter_ratio > 0:
         jitter_range = delay * jitter_ratio
-        jitter = random.uniform(-jitter_range, jitter_range)
-        delay = max(0.1, delay + jitter)  # Ensure minimum 100ms delay
+        jitter = random.uniform(0, jitter_range)  # Positive additive jitter only
+        delay = max(0.1, min(delay + jitter, max_delay))  # Clamp again after jitter
     
     return delay
 
