@@ -99,7 +99,7 @@ class MCPToolRunner(threading.Thread):
                 # Track initialization timeout failure
                 if telemetry:
                     telemetry.track_tool_usage(tool_name, success=False, execution_time=0)
-                return f"Error: MCP initialization timed out after {self.timeout} seconds
+                return f"Error: MCP initialization timed out after {self.timeout} seconds"
 
         if self._init_error:
             if telemetry:
