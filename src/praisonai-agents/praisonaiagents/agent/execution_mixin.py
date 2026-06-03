@@ -805,7 +805,20 @@ Write the complete compiled report:"""
                             # Suppress verbose during animation - we'll display result ourselves
                             self.verbose = False
                             current_status[0] = "Sending to LLM..."
-                            result_holder[0] = self.chat(prompt, **kwargs)
+                            
+                            # Check for steering messages before starting chat
+                            if hasattr(self, '_check_steering_messages'):
+                                steering_msg = self._check_steering_messages()
+                                if steering_msg:
+                                    # Inject steering message into prompt
+                                    prompt_with_steering = f"{prompt}{steering_msg}"
+                                    current_status[0] = "Processing steering guidance..."
+                                    result_holder[0] = self.chat(prompt_with_steering, **kwargs)
+                                else:
+                                    result_holder[0] = self.chat(prompt, **kwargs)
+                            else:
+                                result_holder[0] = self.chat(prompt, **kwargs)
+                                
                             current_status[0] = "Finalizing response..."
                         except Exception as e:
                             error_holder[0] = e

@@ -195,6 +195,14 @@ class ToolExecutionMixin:
             ))
         
         try:
+            # Check for steering messages before tool execution
+            if hasattr(self, '_check_steering_messages'):
+                steering_msg = self._check_steering_messages()
+                if steering_msg and "INTERRUPT" in steering_msg:
+                    # High priority steering - interrupt tool execution
+                    logger.info(f"Tool {function_name} execution interrupted by steering message")
+                    return f"Tool execution interrupted by user guidance: {steering_msg}"
+            
             # Trigger BEFORE_TOOL hook
             from ..hooks import HookEvent, BeforeToolInput
             before_tool_input = BeforeToolInput(
