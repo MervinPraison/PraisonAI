@@ -354,7 +354,7 @@ class UnifiedSessionStore:
         """
         path = self._get_session_path(session_id)
         if path.exists():
-            path.unlink()
+            path.unlink(missing_ok=True)
             with self._lock:
                 self._cache.pop(session_id, None)
                 self._cache_mtimes.pop(session_id, None)
