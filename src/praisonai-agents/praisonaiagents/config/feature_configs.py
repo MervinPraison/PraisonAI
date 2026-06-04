@@ -38,6 +38,10 @@ from enum import Enum
 # Import AutonomyConfig from canonical location (no circular dep)
 from ..agent.autonomy import AutonomyConfig
 
+# TYPE_CHECKING import to avoid circular dependency
+if Union.__module__ == "typing":
+    from ..compaction.strategy import CompactionStrategy
+
 
 class MemoryBackend(str, Enum):
     """Memory storage backends."""
@@ -739,6 +743,10 @@ class ExecutionConfig:
 
     # Token limit before compaction triggers. None = auto-detect from model metadata.
     max_context_tokens: Optional[int] = None
+    
+    # Compaction strategy to use when context_compaction is enabled.
+    # Defaults to TRUNCATE for backward compatibility.
+    compaction_strategy: Optional["CompactionStrategy"] = None
 
     # Token budget guard — hard dollar limit per agent run.
     # None = disabled (zero overhead). Float = max USD spend.
@@ -802,6 +810,7 @@ class ExecutionConfig:
                 else self.context_compaction
             ),
             "max_context_tokens": self.max_context_tokens,
+            "compaction_strategy": self.compaction_strategy.value if self.compaction_strategy else None,
             "max_budget": self.max_budget,
             "parallel_tool_calls": self.parallel_tool_calls,
         }
