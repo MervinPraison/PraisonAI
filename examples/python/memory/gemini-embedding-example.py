@@ -86,7 +86,7 @@ def main():
         agents=[researcher, retriever],
         tasks=[store_task, retrieve_task],
         memory={
-            "provider": "rag",
+            "backend": "sqlite",
             "embedder": {
                 "provider": "gemini",
                 "config": {

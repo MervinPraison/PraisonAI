@@ -124,7 +124,7 @@ def main():
             # Show strategy selection for different corpus sizes
             print(f"\nStrategy selection by corpus size:")
             for size in [100, 1000, 10000, 50000, 100000]:
-                strategy = select_strategy(corpus_tokens=size)
+                strategy = select_strategy(CorpusStats(file_count=max(1, size // 1000), total_tokens=size))
                 print(f"  {size:>6} tokens -> {strategy.value}")
                 
         except ImportError as e:
@@ -142,7 +142,7 @@ Answer questions based ONLY on the provided knowledge context.
 When asked about verification codes, provide the EXACT code from the documents.
 If information is not in the context, say 'Information not found in documents.'""",
             knowledge=[temp_dir],
-            user_id="strategy_demo_user",
+            memory={"user_id": "strategy_demo_user"},
             output="verbose",  # Use new consolidated param
         )
         

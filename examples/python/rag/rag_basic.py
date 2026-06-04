@@ -44,7 +44,7 @@ agent = Agent(
     name="MLExpert",
     instructions="You are a machine learning expert. Answer questions based on the provided context.",
     knowledge=[sample_doc],
-    user_id="rag_user",
+    memory={"user_id": "rag_user"},
     llm="openai/gpt-4o-mini",
     output="minimal",
 )

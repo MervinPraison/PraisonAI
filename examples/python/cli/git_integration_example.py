@@ -8,7 +8,7 @@ Docs: https://docs.praison.ai/cli/git-integration
 from praisonai.cli.features import GitIntegrationHandler
 
 # Initialize
-handler = GitIntegrationHandler(output="verbose")
+handler = GitIntegrationHandler(verbose=True)
 git = handler.initialize(repo_path=".")
 
 # Check if it's a git repo

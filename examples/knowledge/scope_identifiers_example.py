@@ -50,7 +50,7 @@ def main():
             name="HR_Assistant_User1",
             instructions="You are an HR assistant.",
             knowledge=[temp_dir],
-            user_id="user_alice",  # Knowledge scoped to Alice
+            memory={"user_id": "user_alice"},
         )
         
         response = user1_agent.chat("What is the policy on remote work?")
@@ -80,7 +80,7 @@ def main():
             name="Personal_HR_Bot",
             instructions="You are a personal HR assistant.",
             knowledge=[temp_dir],
-            user_id="user_bob",
+            memory={"user_id": "user_bob"},
             agent_id="hr_bot_v2",
         )
         

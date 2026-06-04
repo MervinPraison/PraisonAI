@@ -20,8 +20,9 @@ if not os.environ.get("OPENAI_API_KEY"):
     exit(1)
 
 # Create a sample document for testing
-sample_doc = "/tmp/sample_doc.txt"
-with open(sample_doc, "w") as f:
+from pathlib import Path
+sample_doc = str(Path(__file__).with_name("sample_doc.txt"))
+with open(sample_doc, "w", encoding="utf-8") as f:
     f.write("""
 PraisonAI Framework Documentation
 
@@ -44,7 +45,7 @@ agent = Agent(
     name="DocBot",
     instructions="You are a helpful documentation assistant. Answer questions based on the provided context.",
     knowledge=[sample_doc],
-    user_id="example_user",  # Required for RAG retrieval
+    memory={"user_id": "example_user"},
     llm="openai/gpt-4o-mini",
     output="minimal",
 )

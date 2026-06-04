@@ -61,8 +61,8 @@ search_task = Task(
 agents_system = AgentTeam(
     agents=[research_agent],
     tasks=[build_memory_task, search_task],
-    memory=True,
-    memory=memory_config, output="verbose"
+    memory=memory_config,
+    output="verbose",
 )
 
 print("Starting memory search optimization demonstration...")
