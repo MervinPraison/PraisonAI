@@ -179,7 +179,7 @@ def main():
     
     context = memory.build_context_for_task(
         task_descr="Explain AI alignment challenges",
-        memory={"user_id": "quality_demo_user"},
+        user_id="quality_demo_user",
         max_items=3
     )
     
