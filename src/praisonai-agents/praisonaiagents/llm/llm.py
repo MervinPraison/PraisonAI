@@ -23,6 +23,7 @@ import json
 import xml.etree.ElementTree as ET
 # Gap 2: Tool call execution imports
 from ..tools.call_executor import ToolCall, create_tool_call_executor
+from ..tools.schema import annotation_to_json_schema, get_parameter_requirements
 # Display functions - lazy loaded to avoid importing rich at startup
 # These are only needed when output=verbose
 _display_module = None
@@ -5605,34 +5606,32 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             function_name = function_or_name
             logging.debug(f"Attempting to generate tool definition for: {function_name}")
             
-            # First try to get the tool definition if it exists
-            tool_def_name = f"{function_name}_definition"
-            tool_def = globals().get(tool_def_name)
-            logging.debug(f"Looking for {tool_def_name} in globals: {tool_def is not None}")
-            
-            if not tool_def:
-                import __main__
-                tool_def = getattr(__main__, tool_def_name, None)
-                logging.debug(f"Looking for {tool_def_name} in __main__: {tool_def is not None}")
-            
-            if tool_def:
-                logging.debug(f"Found tool definition: {tool_def}")
-                return tool_def
-
-            # Try to find the function
-            func = globals().get(function_name)
-            logging.debug(f"Looking for {function_name} in globals: {func is not None}")
-            
-            if not func:
-                import __main__
-                func = getattr(__main__, function_name, None)
-                logging.debug(f"Looking for {function_name} in __main__: {func is not None}")
-            
-            if not func or not callable(func):
-                logging.debug(f"Function {function_name} not found or not callable")
+            # First try to get from the tool registry (preferred method)
+            try:
+                from ..tools.registry import get_registry
+                registry = get_registry()
+                tool = registry.get(function_name)
+                if tool:
+                    logging.debug(f"Found tool in registry: {function_name}")
+                    # If it's a BaseTool, get its schema
+                    if hasattr(tool, 'get_schema'):
+                        return tool.get_schema()
+                    # If it's a callable, use it as func
+                    if callable(tool):
+                        func = tool
+                    else:
+                        logging.debug(f"Tool {function_name} in registry is not callable")
+                        return None
+                else:
+                    logging.debug(f"Tool {function_name} not found in registry")
+                    return None
+            except ImportError:
+                logging.debug("Tool registry not available")
                 return None
 
         import inspect
+        from typing import get_type_hints
+        
         # Handle Langchain and CrewAI tools
         if inspect.isclass(func) and hasattr(func, 'run') and not hasattr(func, '_run'):
             original_func = func
@@ -5680,26 +5679,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         
         logging.debug(f"Parameter descriptions: {param_descriptions}")
 
+        # Get type hints for proper schema generation
+        hints = get_type_hints(func) if hasattr(func, '__annotations__') else {}
+
         for name, param in parameters_list:
-            param_type = "string"  # Default type
-            if param.annotation != inspect.Parameter.empty:
-                if param.annotation == int:
-                    param_type = "integer"
-                elif param.annotation == float:
-                    param_type = "number"
-                elif param.annotation == bool:
-                    param_type = "boolean"
-                elif param.annotation == list:
-                    param_type = "array"
-                elif param.annotation == dict:
-                    param_type = "object"
+            # Get type annotation
+            param_type = hints.get(name, param.annotation if param.annotation != inspect.Parameter.empty else str)
             
-            parameters["properties"][name] = {
-                "type": param_type,
-                "description": param_descriptions.get(name, "Parameter description not available")
-            }
+            # Use new schema utility for proper type handling
+            prop_schema = annotation_to_json_schema(param_type)
             
-            if param.default == inspect.Parameter.empty:
+            # Add description from docstring
+            prop_schema["description"] = param_descriptions.get(name, "Parameter description not available")
+            
+            parameters["properties"][name] = prop_schema
+            
+            # Check if required using improved logic
+            if get_parameter_requirements(sig, name):
                 parameters["required"].append(name)
         
         logging.debug(f"Generated parameters: {parameters}")

@@ -30,6 +30,7 @@ import logging
 from typing import Any, Callable, Dict, Optional, Union, get_type_hints
 
 from .base import BaseTool
+from .schema import annotation_to_json_schema, get_parameter_requirements
 
 # Lazy load injected module functions to reduce import time
 _injected_module = None
@@ -127,12 +128,13 @@ class FunctionTool(BaseTool):
                 if is_injected_type(param_type):
                     continue
                 
-                json_type = BaseTool._python_type_to_json(param_type)
+                # Use new schema utility for proper type handling
+                prop_schema = annotation_to_json_schema(param_type)
                 
-                schema["properties"][param_name] = {"type": json_type}
+                schema["properties"][param_name] = prop_schema
                 
-                # Check if required (no default value)
-                if param.default is inspect.Parameter.empty:
+                # Check if required using improved logic  
+                if get_parameter_requirements(sig, param_name):
                     schema["required"].append(param_name)
         except Exception as e:
             logging.debug(f"Could not generate schema for {func.__name__}: {e}")
@@ -292,9 +294,11 @@ def _schema_from_function(func: Callable) -> Dict[str, Any]:
                 continue
             
             param_type = hints.get(param_name, Any)
-            json_type = BaseTool._python_type_to_json(param_type)
             
-            properties[param_name] = {"type": json_type}
+            # Use new schema utility for proper type handling
+            prop_schema = annotation_to_json_schema(param_type)
+            
+            properties[param_name] = prop_schema
             
             if param.default is inspect.Parameter.empty:
                 required.append(param_name)
