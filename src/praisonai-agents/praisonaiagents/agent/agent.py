@@ -1564,6 +1564,7 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
                     if auth:
                         llm_config['auth'] = auth
                     llm_config['metrics'] = metrics
+                    llm_config['max_iter'] = max_iter
                     self.llm_instance = LLM(**llm_config)
                     self.llm = llm.get('model', Agent._get_default_model())
                 else:
@@ -1575,6 +1576,7 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
                         api_key=api_key,
                         auth=auth,
                         metrics=metrics,
+                        max_iter=max_iter,
                         web_search=web_search,
                         web_fetch=web_fetch,
                         prompt_caching=prompt_caching,
@@ -1602,6 +1604,7 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
                 # Add metrics parameter
                 llm = llm.copy()
                 llm['metrics'] = metrics
+                llm['max_iter'] = max_iter
                 self.llm_instance = LLM(**llm)  # Pass all dict items as kwargs
                 self._using_custom_llm = True
                 self.llm = llm.get('model', Agent._get_default_model())
@@ -1625,6 +1628,7 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
                 llm_params['web_fetch'] = web_fetch
                 llm_params['prompt_caching'] = prompt_caching
                 llm_params['claude_memory'] = claude_memory
+                llm_params['max_iter'] = max_iter
                 self.llm_instance = LLM(**llm_params)
                 self._using_custom_llm = True
                 self.llm = llm

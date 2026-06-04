@@ -10,7 +10,49 @@ Provides uniform error semantics for consistent handling across:
 """
 
 from typing import Literal, Protocol, runtime_checkable, Optional, Dict, Any
+from dataclasses import dataclass
 import uuid
+
+
+# Closed error taxonomy for typed failure classification
+AgentErrorKind = Literal[
+    "auth", "auth_permanent", "rate_limit", "overloaded",
+    "context_overflow", "idle_timeout", "billing",
+    "model_not_found", "empty_response", "format_error", "unknown",
+]
+
+
+@dataclass
+class FailoverDecision:
+    """
+    Discriminated struct for retry and failover decisions.
+    
+    Separates classification (error kind) from action (what to do),
+    making the policy independently testable and overridable.
+    """
+    action: Literal["retry", "rotate_profile", "surface_error"]
+    reason: AgentErrorKind
+    backoff_ms: int = 0
+    is_retryable: bool = True
+
+
+@dataclass
+class IdleTimeoutBreaker:
+    """
+    Circuit breaker for consecutive idle-timeout failures.
+    
+    Prevents runaway API costs when providers repeatedly stall.
+    """
+    max_consecutive: int = 3
+    _count: int = 0
+
+    def record_idle_timeout(self) -> bool:
+        """Returns True when the hard cap is reached."""
+        self._count += 1
+        return self._count >= self.max_consecutive
+
+    def reset(self) -> None:
+        self._count = 0
 
 
 @runtime_checkable
@@ -20,7 +62,7 @@ class ErrorContextProtocol(Protocol):
     agent_id: str
     run_id: str
     is_retryable: bool
-    error_category: Literal["tool", "llm", "budget", "validation", "network", "handoff"]
+    error_category: AgentErrorKind
 
 
 class PraisonAIError(Exception):
@@ -36,7 +78,7 @@ class PraisonAIError(Exception):
         message: str,
         agent_id: str = "unknown",
         run_id: Optional[str] = None,
-        error_category: Literal["tool", "llm", "budget", "validation", "network", "handoff"] = "validation",
+        error_category: Optional[AgentErrorKind] = None,
         is_retryable: bool = False,
         context: Optional[Dict[str, Any]] = None
     ):
@@ -44,7 +86,7 @@ class PraisonAIError(Exception):
         self.message = message
         self.agent_id = agent_id
         self.run_id = run_id or str(uuid.uuid4())
-        self.error_category = error_category
+        self.error_category = error_category or "unknown"
         self.is_retryable = is_retryable
         self.context = context or {}
 
@@ -75,7 +117,7 @@ class ToolExecutionError(PraisonAIError):
             message, 
             agent_id=agent_id, 
             run_id=run_id, 
-            error_category="tool",
+            error_category="unknown",  # Tools use "unknown" by default, can be overridden
             is_retryable=is_retryable,
             context=context
         )
@@ -104,7 +146,7 @@ class LLMError(PraisonAIError):
             message, 
             agent_id=agent_id, 
             run_id=run_id, 
-            error_category="llm",
+            error_category="unknown",  # LLM errors use "unknown" by default, specific kind determined by classify_error
             is_retryable=is_retryable,
             context=context
         )
@@ -152,7 +194,7 @@ class BudgetExceededError(PraisonAIError):
                 message, 
                 agent_id=agent_name, 
                 run_id=run_id, 
-                error_category="budget",
+                error_category="billing",
                 is_retryable=False,
                 context=context
             )
@@ -181,7 +223,7 @@ class BudgetExceededError(PraisonAIError):
                 message, 
                 agent_id=agent_id, 
                 run_id=run_id, 
-                error_category="budget",
+                error_category="billing",
                 is_retryable=False,
                 context=context
             )
@@ -217,7 +259,7 @@ class ValidationError(PraisonAIError):
             message, 
             agent_id=agent_id, 
             run_id=run_id, 
-            error_category="validation",
+            error_category="format_error",  # Validation errors are format issues
             is_retryable=False,  # Validation errors need code fixes
             context=context
         )
@@ -250,7 +292,7 @@ class NetworkError(PraisonAIError):
             message, 
             agent_id=agent_id, 
             run_id=run_id, 
-            error_category="network",
+            error_category="unknown",  # Network errors map to "unknown" by default, can be classified as specific types
             is_retryable=is_retryable,
             context=context
         )
@@ -284,7 +326,7 @@ class HandoffError(PraisonAIError):
             message, 
             agent_id=agent_id, 
             run_id=run_id, 
-            error_category="handoff",
+            error_category="unknown",  # Handoff errors use "unknown" by default
             is_retryable=is_retryable,
             context=context
         )
@@ -322,7 +364,7 @@ class PraisonAIConfigError(PraisonAIError):
             message,
             agent_id=agent_id,
             run_id=run_id,
-            error_category="validation",  # Configuration is a type of validation error
+            error_category="format_error",  # Configuration is a type of format error
             is_retryable=is_retryable,
             context=context
         )
@@ -369,6 +411,9 @@ class HandoffTimeoutError(HandoffError):
 
 # Export all error types for easy importing
 __all__ = [
+    "AgentErrorKind",
+    "FailoverDecision",
+    "IdleTimeoutBreaker",
     "ErrorContextProtocol",
     "PraisonAIError", 
     "ToolExecutionError",
