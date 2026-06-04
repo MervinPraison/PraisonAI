@@ -169,47 +169,10 @@ def sanitize_agent_name_for_autogen_v4(name):
 
 def _resolve_yaml_cli_backend(cli_backend_config, logger):
     """Resolve a YAML ``cli_backend`` field to a CliBackendProtocol instance.
-
-    Accepts ``None`` (no backend), a string id (e.g. ``"claude-code"``), or a
-    dict of shape ``{"id": "claude-code", "overrides": {...}}``. Returns
-    ``None`` on any error after logging a warning, so YAML parsing never raises.
-
-    Kept at module scope so it is unit-testable without constructing a full
-    ``AgentsGenerator`` instance.
+    Deprecated wrapper. Use praisonai.cli_backends.resolve_cli_backend_config directly.
     """
-    if not cli_backend_config:
-        return None
-
-    # Pre-seed label from config before import so we can show it in error logs
-    if isinstance(cli_backend_config, str):
-        label = cli_backend_config
-    elif isinstance(cli_backend_config, dict):
-        label = cli_backend_config.get('id') or "<missing>"
-    else:
-        label = type(cli_backend_config).__name__
-
-    try:
-        from praisonai.cli_backends import resolve_cli_backend
-        if isinstance(cli_backend_config, str):
-            return resolve_cli_backend(cli_backend_config)
-        if isinstance(cli_backend_config, dict):
-            backend_id = cli_backend_config.get('id')
-            if not backend_id:
-                raise ValueError("cli_backend dict must contain an 'id' field")
-            overrides = cli_backend_config.get('overrides') or {}
-            return resolve_cli_backend(backend_id, overrides=overrides)
-        raise ValueError(
-            f"cli_backend must be string or dict, got: {type(cli_backend_config).__name__}"
-        )
-    except ImportError:
-        logger.warning(
-            "CLI backend '%s' requested but not available", label
-        )
-    except Exception as e:
-        logger.warning(
-            "Failed to resolve CLI backend '%s': %s", label, e
-        )
-    return None
+    from praisonai.cli_backends import resolve_cli_backend_config
+    return resolve_cli_backend_config(cli_backend_config)
 
 
 class AgentsGenerator:
@@ -379,6 +342,27 @@ class AgentsGenerator:
                 for field, value in agent_overrides.items():
                     agent_config[field] = value
                     self.logger.debug(f"CLI override for agent {agent_name}: {field} = {value}")
+
+    def _validate_cli_backend_compatibility(self, config, framework):
+        """Validate that cli_backend is only used with compatible frameworks."""
+        # Check if any agent/role defines cli_backend (support both key names)
+        all_entities = {
+            **config.get('roles', {}),
+            **config.get('agents', {}),
+        }
+        has_cli_backend = any(
+            isinstance(details, dict) and details.get('cli_backend')
+            for details in all_entities.values()
+        )
+        
+        if has_cli_backend and framework != 'praisonai':
+            self.logger.error(
+                f"cli_backend is not supported for framework='{framework}'. "
+                f"Remove cli_backend from your YAML or switch to framework='praisonai'."
+            )
+            raise ValueError(
+                f"cli_backend requires framework='praisonai', but framework='{framework}' was specified"
+            )
 
     def _validate_agents_config(self, config):
         """
@@ -571,18 +555,14 @@ class AgentsGenerator:
                             if isinstance(t, str) and t.strip():
                                 needed_tools.add(t.strip())
 
-                # Resolve only the tools actually referenced in YAML
+                # Resolve only the tools actually referenced in YAML using ToolResolver with instantiation
                 for tool_name in needed_tools:
                     try:
-                        resolved_tool = self.tool_resolver.resolve(tool_name)
-                        if resolved_tool is None:
-                            self.logger.warning(f"Tool '{tool_name}' not found")
-                            continue
-                        tools_dict[tool_name] = (
-                            resolved_tool() if inspect.isclass(resolved_tool) else resolved_tool
-                        )
+                        resolved_tool = self.tool_resolver.resolve(tool_name, instantiate=True)
+                        if resolved_tool is not None:
+                            tools_dict[tool_name] = resolved_tool
                     except Exception as e:
-                        self.logger.warning(f"Failed to initialize tool '{tool_name}': {e}")
+                        self.logger.warning(f"Failed to resolve or instantiate tool '{tool_name}': {e}")
                         continue
                             
             except Exception as e:
@@ -799,6 +779,9 @@ class AgentsGenerator:
         # Validate framework availability
         from .framework_adapters.validators import assert_framework_available
         assert_framework_available(framework)
+        
+        # Validate cli_backend compatibility
+        self._validate_cli_backend_compatibility(config, framework)
         
         self.logger.info(f"Using framework: {framework}")
         return await self.framework_adapter.arun(
