@@ -552,6 +552,7 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
         skills: Optional[Union[List[str], str, Dict[str, Any], 'SkillsConfig']] = None,
         approval: Optional[Union[bool, str, Dict[str, Any], 'ApprovalConfig', 'ApprovalProtocol']] = None,
         tool_timeout: Optional[int] = None,  # P8/G11: Timeout in seconds for each tool call
+        tool_retry_policy: Optional['RetryPolicy'] = None,  # Retry policy for tool execution with exponential backoff  
         parallel_tool_calls: bool = False,  # Gap 2: Enable parallel execution of batched LLM tool calls
         learn: Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
         backend: Optional[Any] = None,  # External managed agent backend (e.g., ManagedAgentIntegration)
@@ -646,6 +647,11 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
                 - LearnConfig: Custom configuration
                 Learning is a first-class citizen, peer to memory. It captures patterns,
                 preferences, and insights from interactions to improve future responses.
+            tool_retry_policy: Retry policy for tool execution with exponential backoff.
+                Automatically retries transient tool failures (timeout, rate limit, connection error)
+                before surfacing errors to the LLM. Accepts RetryPolicy instance with configurable 
+                max_attempts, backoff_factor, delay settings, and error types to retry on.
+                Defaults to RetryPolicy() with 3 attempts, exponential backoff, and standard retry conditions.
             parallel_tool_calls: Enable parallel execution of batched LLM tool calls (default False).
                 When True and LLM returns multiple tool calls in a single response, they execute
                 concurrently instead of sequentially. Provides ~3x speedup for I/O-bound tools.
@@ -1913,6 +1919,9 @@ Your Goal: {self.goal}
         
         # P8/G11: Tool timeout - prevent slow tools from blocking
         self._tool_timeout = tool_timeout
+        
+        # Store tool retry policy for tool execution with exponential backoff
+        self._tool_retry_policy = tool_retry_policy
         
         # Cache for system prompts and formatted tools with eager thread-safe lock
         # Use OrderedDict for LRU behavior

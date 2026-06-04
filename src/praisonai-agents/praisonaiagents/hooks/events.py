@@ -178,7 +178,14 @@ class OnErrorInput(HookInput):
 
 @dataclass
 class OnRetryInput(HookInput):
-    """Input for OnRetry hooks."""
+    """Input for OnRetry hooks fired during tool execution retries."""
+    tool_name: str = ""
+    attempt: int = 1
+    delay_ms: int = 0
+    error: str = ""
+    max_attempts: int = 0
+    error_type: str = "unknown"
+    # Legacy fields for backward compatibility
     retry_count: int = 0
     max_retries: int = 3
     error_message: str = ""
@@ -187,6 +194,13 @@ class OnRetryInput(HookInput):
     def to_dict(self) -> Dict[str, Any]:
         base = super().to_dict()
         base.update({
+            "tool_name": self.tool_name,
+            "attempt": self.attempt,
+            "delay_ms": self.delay_ms,
+            "error": self.error,
+            "max_attempts": self.max_attempts,
+            "error_type": self.error_type,
+            # Legacy fields
             "retry_count": self.retry_count,
             "max_retries": self.max_retries,
             "error_message": self.error_message,
