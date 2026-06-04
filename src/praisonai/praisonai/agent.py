@@ -24,39 +24,23 @@ class Agent(CoreAgent):
             *args: Positional arguments for core Agent
             cli_backend: CLI backend for delegating full turns. Accepts:
                 - str: Backend ID ("claude-code", "codex-cli") - resolved in wrapper
+                - dict: Backend config {"id": "claude-code", "overrides": {...}}
                 - CliBackendProtocol: Pre-resolved backend instance
                 - callable: Factory function returning CliBackendProtocol
                 - None: No CLI backend
             **kwargs: Keyword arguments for core Agent
         """
-        # Resolve string CLI backends to instances in wrapper layer
-        if isinstance(cli_backend, str):
-            cli_backend = self._resolve_string_backend(cli_backend)
+        # Resolve CLI backend configuration using unified resolver
+        if cli_backend is not None and not self._is_protocol_instance(cli_backend):
+            from .cli_backends import resolve_cli_backend_config
+            cli_backend = resolve_cli_backend_config(cli_backend)
         
         # Pass resolved backend to core Agent
         super().__init__(*args, cli_backend=cli_backend, **kwargs)
     
-    def _resolve_string_backend(self, backend_id: str) -> Any:
-        """Resolve string backend ID to CliBackendProtocol instance.
-        
-        Args:
-            backend_id: Backend identifier (e.g., "claude-code")
-            
-        Returns:
-            CliBackendProtocol instance
-            
-        Raises:
-            ImportError: If CLI backends module not available
-            ValueError: If backend_id is not registered
-        """
-        try:
-            from .cli_backends import resolve_cli_backend
-            return resolve_cli_backend(backend_id)
-        except ImportError:
-            raise ImportError(
-                f"CLI backend '{backend_id}' requested but CLI backends not available. "
-                "This may indicate a packaging or installation issue."
-            )
+    def _is_protocol_instance(self, obj) -> bool:
+        """Check if object appears to be a protocol instance (duck typing)."""
+        return callable(obj) or hasattr(obj, 'process_turn')
 
 
 # Export the wrapper Agent as the default for import from praisonai

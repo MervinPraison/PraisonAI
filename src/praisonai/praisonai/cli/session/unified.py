@@ -8,14 +8,24 @@ Uses JSON-based persistence with file locking for multi-process safety.
 import json
 import logging
 import os
+import sys
 import uuid
-import fcntl
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+# fcntl is Unix-only; on Windows, use msvcrt for file locking
+try:
+    import fcntl
+    _HAS_FCNTL = True
+except ImportError:
+    _HAS_FCNTL = False
+
 logger = logging.getLogger(__name__)
+
+# Module-level sentinel to track if we've warned about degraded locking
+_WARNED_NO_FCNTL = False
 
 # Default session directory
 DEFAULT_SESSION_DIR = Path.home() / ".praison" / "sessions"
@@ -118,7 +128,7 @@ class UnifiedSessionStore:
         Args:
             session_dir: Directory to store sessions. Defaults to ~/.praison/sessions/
         """
-        self.session_dir = session_dir or DEFAULT_SESSION_DIR
+        self.session_dir = Path(session_dir) if session_dir else DEFAULT_SESSION_DIR
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self._cache: Dict[str, UnifiedSession] = {}
         self._last_session_id: Optional[str] = None
@@ -142,12 +152,53 @@ class UnifiedSessionStore:
         session.updated_at = datetime.now().isoformat()
         
         try:
-            with open(path, 'w') as f:
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-                try:
-                    json.dump(session.to_dict(), f, indent=2)
-                finally:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            # Open in r+b mode to avoid truncation before locking
+            # Create file if it doesn't exist
+            if not path.exists():
+                path.touch()
+            
+            with open(path, 'r+b') as f:
+                # Cross-platform file locking
+                if sys.platform == "win32":
+                    # Windows locking - ensure consistent file position
+                    import msvcrt
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)  # Use blocking lock
+                    try:
+                        f.seek(0)
+                        f.truncate()  # Clear file after acquiring lock
+                        json_data = json.dumps(session.to_dict(), indent=2).encode('utf-8')
+                        f.write(json_data)
+                        f.flush()
+                        os.fsync(f.fileno())  # Force data to disk before unlock
+                    finally:
+                        f.seek(0)  # Return to start position for unlock
+                        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                elif _HAS_FCNTL:
+                    # Unix locking
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                    try:
+                        f.seek(0)
+                        f.truncate()  # Clear file after acquiring lock
+                        json_data = json.dumps(session.to_dict(), indent=2).encode('utf-8')
+                        f.write(json_data)
+                        f.flush()
+                        os.fsync(f.fileno())  # Force data to disk before unlock
+                    finally:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                else:
+                    # Warn once about degraded locking on non-Windows platforms without fcntl
+                    global _WARNED_NO_FCNTL
+                    if not _WARNED_NO_FCNTL:
+                        logger.warning(
+                            "File locking unavailable on this platform (fcntl not available); "
+                            "concurrent writers may corrupt session files."
+                        )
+                        _WARNED_NO_FCNTL = True
+                    f.seek(0)
+                    f.truncate()
+                    json_data = json.dumps(session.to_dict(), indent=2).encode('utf-8')
+                    f.write(json_data)
             
             # Update cache
             self._cache[session.session_id] = session
@@ -179,12 +230,31 @@ class UnifiedSessionStore:
             return None
         
         try:
-            with open(path, 'r') as f:
-                fcntl.flock(f.fileno(), fcntl.LOCK_SH)
-                try:
-                    data = json.load(f)
-                finally:
-                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            with open(path, 'rb') as f:
+                # Cross-platform file locking (shared lock for reading)
+                if sys.platform == "win32":
+                    # Windows shared locking (read-only) - use blocking read lock
+                    import msvcrt
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_RLCK, 1)  # Use shared/read lock
+                    try:
+                        json_data = f.read().decode('utf-8')
+                        data = json.loads(json_data)
+                    finally:
+                        f.seek(0)  # Return to start position for unlock
+                        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                elif _HAS_FCNTL:
+                    # Unix shared locking
+                    fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+                    try:
+                        json_data = f.read().decode('utf-8')
+                        data = json.loads(json_data)
+                    finally:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                else:
+                    # No locking available - just read
+                    json_data = f.read().decode('utf-8')
+                    data = json.loads(json_data)
             
             session = UnifiedSession.from_dict(data)
             self._cache[session_id] = session

@@ -667,7 +667,7 @@ class JobWorkflowExecutor:
 
     def _resolve_agent_tools(self, tool_names: List) -> List:
         """
-        Resolve tool names to actual tool functions.
+        Resolve tool names to actual tool functions using the canonical ToolResolver.
         
         Args:
             tool_names: List of tool names (strings) or tool functions
@@ -678,38 +678,19 @@ class JobWorkflowExecutor:
         if not tool_names:
             return []
         
+        from praisonai.tool_resolver import ToolResolver
+        resolver = ToolResolver()
+        
         resolved = []
         for tool in tool_names:
             if callable(tool):
                 # Already a function
                 resolved.append(tool)
             elif isinstance(tool, str):
-                # Try to resolve from registry
-                try:
-                    from praisonaiagents.tools import get_tool
-                    resolved_tool = get_tool(tool)
-                    if resolved_tool:
-                        resolved.append(resolved_tool)
-                except (ImportError, Exception):
-                    # Try common tools
-                    if tool == "execute_command":
-                        try:
-                            from praisonaiagents.tools import execute_command
-                            resolved.append(execute_command)
-                        except ImportError:
-                            pass
-                    elif tool == "read_file":
-                        try:
-                            from praisonaiagents.tools import read_file
-                            resolved.append(read_file)
-                        except ImportError:
-                            pass
-                    elif tool == "write_file":
-                        try:
-                            from praisonaiagents.tools import write_file
-                            resolved.append(write_file)
-                        except ImportError:
-                            pass
+                # Use canonical ToolResolver
+                resolved_tool = resolver.resolve(tool, instantiate=True)
+                if resolved_tool:
+                    resolved.append(resolved_tool)
         return resolved
 
     # ------------------------------------------------------------------
