@@ -127,6 +127,18 @@ _LAZY_IMPORTS = {
     'get_tool': ('praisonaiagents.tools.registry', 'get_tool'),
     'ToolRegistry': ('praisonaiagents.tools.registry', 'ToolRegistry'),
     
+    # Toolsets (named toolset groups)
+    'ToolsetSpec': ('praisonaiagents.toolsets', 'ToolsetSpec'),
+    'ToolsetRegistry': ('praisonaiagents.toolsets', 'ToolsetRegistry'),
+    'get_toolset_registry': ('praisonaiagents.toolsets', 'get_toolset_registry'),
+    'register_toolset': ('praisonaiagents.toolsets', 'register_toolset'),
+    'resolve_toolset': ('praisonaiagents.toolsets', 'resolve_toolset'),
+    'resolve_toolsets': ('praisonaiagents.toolsets', 'resolve_toolsets'),
+    'list_toolsets': ('praisonaiagents.toolsets', 'list_toolsets'),
+    'get_toolset': ('praisonaiagents.toolsets', 'get_toolset'),
+    'unregister_toolset': ('praisonaiagents.toolsets', 'unregister_toolset'),
+    'has_toolset': ('praisonaiagents.toolsets', 'has_toolset'),
+    
     # Main display utilities (imports rich)
     'TaskOutput': ('praisonaiagents.main', 'TaskOutput'),
     'ReflectionOutput': ('praisonaiagents.main', 'ReflectionOutput'),
@@ -625,6 +637,11 @@ def _custom_handler(name, cache):
         import importlib
         mod = importlib.import_module('.db', 'praisonaiagents')
         cache['db'] = mod
+        return mod
+    if name == 'toolsets':
+        import importlib
+        mod = importlib.import_module('.toolsets', 'praisonaiagents')
+        cache['toolsets'] = mod
         return mod
     
     raise AttributeError(f"Not handled by custom_handler: {name}")

@@ -959,6 +959,7 @@ class PraisonAI:
         parser.add_argument("--expand-prompt", action="store_true", help="Expand short prompt into detailed prompt (works with any command)")
         parser.add_argument("--expand-tools", type=str, help="Tools for prompt expander (e.g., 'internet_search' or path to tools.py)")
         parser.add_argument("--tools", "-t", type=str, help="Path to tools.py file for research agent")
+        parser.add_argument("--toolset", type=str, help="Named toolset groups (comma-separated, e.g., web,files,research)")
         parser.add_argument("--no-tools", action="store_true", help="Disable default built-in tools (for models that don't support tool calling)")
         parser.add_argument("--no-acp", action="store_true", help="Disable ACP tools (agentic file operations with plan/approve/apply)")
         parser.add_argument("--no-lsp", action="store_true", help="Disable LSP tools (code intelligence: symbols, definitions, references)")
@@ -2159,6 +2160,34 @@ class PraisonAI:
                     print(f"[cyan]Loaded {len(tools_list)} built-in tools[/cyan]")
             except ImportError:
                 print("[yellow]Warning: Could not import tools module[/yellow]")
+        
+        return tools_list
+    
+    def _load_toolsets(self, toolset_names: list) -> list:
+        """
+        Load tools from named toolset groups.
+        
+        Args:
+            toolset_names: List of toolset names to resolve
+            
+        Returns:
+            List of tool functions from all toolsets
+        """
+        tools_list = []
+        if not toolset_names:
+            return tools_list
+        
+        try:
+            from ..tool_resolver import resolve_toolsets
+            tools_list = resolve_toolsets(toolset_names)
+            
+            if tools_list:
+                print(f"[cyan]Loaded {len(tools_list)} tools from toolsets: {', '.join(toolset_names)}[/cyan]")
+            else:
+                print(f"[yellow]Warning: No tools found for toolsets: {', '.join(toolset_names)}[/yellow]")
+                
+        except Exception as e:
+            print(f"[yellow]Warning: Failed to load toolsets {toolset_names}: {e}[/yellow]")
         
         return tools_list
 
@@ -4327,10 +4356,18 @@ Do NOT add any explanations or formatting."""
                         existing_tools = agent_config.get('tools', [])
                         if isinstance(existing_tools, list):
                             existing_tools.extend(tools_list)
+                
+                # Load toolsets if specified (--toolset flag)
+                if getattr(self.args, 'toolset', None):
+                    toolset_names = [name.strip() for name in self.args.toolset.split(',')]
+                    toolset_tools = self._load_toolsets(toolset_names)
+                    if toolset_tools:
+                        existing_tools = agent_config.get('tools', [])
+                        if isinstance(existing_tools, list):
+                            existing_tools.extend(toolset_tools)
                         else:
-                            existing_tools = tools_list
-                        agent_config['tools'] = existing_tools
-                        print(f"[bold cyan]Tools loaded: {len(tools_list)} tool(s) available for agent[/bold cyan]")
+                            agent_config["tools"] = toolset_tools
+                        print(f"[bold cyan]Toolsets loaded: {len(toolset_tools)} tool(s) from {self.args.toolset}[/bold cyan]")
                 
                 # Planning Mode
                 if getattr(self.args, 'planning', False):

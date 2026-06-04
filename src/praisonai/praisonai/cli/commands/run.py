@@ -26,6 +26,7 @@ def run_main(
     trace: bool = typer.Option(False, "--trace", help="Enable tracing"),
     memory: bool = typer.Option(False, "--memory", help="Enable memory"),
     tools: Optional[str] = typer.Option(None, "--tools", "-t", help="Tools file path"),
+    toolset: Optional[str] = typer.Option(None, "--toolset", help="Named toolset groups (comma-separated, e.g., web,files)"),
     max_tokens: int = typer.Option(16000, "--max-tokens", help="Maximum output tokens"),
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
@@ -245,6 +246,7 @@ def _run_prompt(
         args.verbose = verbose
         args.memory = memory
         args.tools = tools
+        args.toolset = toolset
         args.max_tokens = max_tokens
         args.web_search = False
         args.web_fetch = False

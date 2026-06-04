@@ -516,6 +516,60 @@ class ToolResolver:
                 continue
         
         return result
+    
+    def resolve_toolsets(self, toolset_names: List[str]) -> List[Callable]:
+        """Resolve named toolset groups to callables.
+        
+        Expands each toolset to tool names, then resolves to callables.
+        
+        Args:
+            toolset_names: List of toolset names to resolve
+            
+        Returns:
+            List of resolved callables from all toolsets
+        """
+        if not toolset_names:
+            return []
+        
+        try:
+            from praisonaiagents.toolsets import resolve_toolsets
+            
+            # Resolve toolset names to tool names
+            tool_names = resolve_toolsets(toolset_names)
+            logger.debug(f"Resolved toolsets {toolset_names} to tools: {tool_names}")
+            
+            # Resolve tool names to callables
+            return self.resolve_many(tool_names)
+            
+        except Exception as e:
+            logger.warning(f"Failed to resolve toolsets {toolset_names}: {e}")
+            return []
+    
+    def resolve_tools_and_toolsets(
+        self, 
+        tool_names: Optional[List[str]] = None,
+        toolset_names: Optional[List[str]] = None
+    ) -> List[Callable]:
+        """Resolve both individual tools and toolset groups to callables.
+        
+        Args:
+            tool_names: List of individual tool names
+            toolset_names: List of toolset names to expand
+            
+        Returns:
+            Combined list of callables from tools and toolsets
+        """
+        all_tools = []
+        
+        # Add explicit tools
+        if tool_names:
+            all_tools.extend(self.resolve_many(tool_names))
+        
+        # Add toolset tools
+        if toolset_names:
+            all_tools.extend(self.resolve_toolsets(toolset_names))
+        
+        return all_tools
 
 
 # Context-local resolver for multi-project safety
@@ -619,5 +673,36 @@ def validate_yaml_tools(yaml_config: Dict[str, Any], resolver: Optional[ToolReso
         List of missing tool names
     """
     return (resolver or _get_default_resolver()).validate_yaml_tools(yaml_config)
+
+
+def resolve_toolsets(toolset_names: List[str], resolver: Optional[ToolResolver] = None) -> List[Callable]:
+    """Resolve named toolset groups to callables.
+    
+    Args:
+        toolset_names: List of toolset names to resolve
+        resolver: Optional resolver instance. If None, uses cached default resolver.
+        
+    Returns:
+        List of resolved callables from all toolsets
+    """
+    return (resolver or _get_default_resolver()).resolve_toolsets(toolset_names)
+
+
+def resolve_tools_and_toolsets(
+    tool_names: Optional[List[str]] = None,
+    toolset_names: Optional[List[str]] = None,
+    resolver: Optional[ToolResolver] = None
+) -> List[Callable]:
+    """Resolve both individual tools and toolset groups to callables.
+    
+    Args:
+        tool_names: List of individual tool names
+        toolset_names: List of toolset names to expand
+        resolver: Optional resolver instance. If None, uses cached default resolver.
+        
+    Returns:
+        Combined list of callables from tools and toolsets
+    """
+    return (resolver or _get_default_resolver()).resolve_tools_and_toolsets(tool_names, toolset_names)
 
 
