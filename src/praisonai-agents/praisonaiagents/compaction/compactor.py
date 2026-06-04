@@ -140,12 +140,14 @@ class ContextCompactor:
             if self.llm_summarize_fn:
                 # For sync calls with LLM function, we need to run async
                 try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
+                    # Check if we're already in an async context
+                    try:
+                        loop = asyncio.get_running_loop()
                         # If in async context, fallback to naive summarization
                         compacted = self._summarize(messages)
-                    else:
-                        compacted = loop.run_until_complete(self._llm_summarize_async(messages))
+                    except RuntimeError:
+                        # No running loop, safe to create one
+                        compacted = asyncio.run(self._llm_summarize_async(messages))
                 except Exception:
                     # Fallback to naive summarization if async fails
                     compacted = self._summarize(messages)

@@ -914,22 +914,26 @@ Your Goal: {self.goal}"""
                             if getattr(self, '_strict_hooks', False):
                                 raise
                         
-                        # Use async compaction for LLM_SUMMARIZE with fallback warning
-                        if _llm_fn:
+                        # Use async compaction for LLM_SUMMARIZE strategy
+                        if _strategy == CompactionStrategy.LLM_SUMMARIZE and _llm_fn:
+                            import asyncio
                             try:
-                                import asyncio
-                                loop = asyncio.get_running_loop()
-                                if loop.is_running():
+                                # Check if we're already in an async context
+                                try:
+                                    loop = asyncio.get_running_loop()
+                                    # If in async context, fall back to sync (naive) compaction
                                     logging.warning("LLM_SUMMARIZE in sync context - falling back to naive summarization")
                                     compacted_msgs, _cr = _compactor.compact(messages)
-                                else:
-                                    compacted_msgs, _cr = loop.run_until_complete(_compactor.compact_async(messages))
+                                except RuntimeError:
+                                    # No running loop, safe to create one
+                                    compacted_msgs, _cr = asyncio.run(_compactor.compact_async(messages))
                             except Exception:
+                                # If async fails, fall back to sync (naive) compaction
                                 logging.warning("Async LLM summarization failed, falling back to naive")
                                 compacted_msgs, _cr = _compactor.compact(messages)
                         else:
                             compacted_msgs, _cr = _compactor.compact(messages)
-                            
+                        
                         messages[:] = compacted_msgs  # in-place update so callers see the change
                         logging.info(
                             f"[compaction] {self.name}: {_cr.original_tokens}→{_cr.compacted_tokens} tokens "
@@ -3831,16 +3835,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     emit_events=False,  # Don't emit events for internal calls
                 )
                 
-                # Extract the content from response
-                if hasattr(response, 'content'):
-                    return str(response.content)
-                elif isinstance(response, dict) and 'content' in response:
-                    return str(response['content'])
-                elif hasattr(response, 'message') and hasattr(response.message, 'content'):
-                    return str(response.message.content)
-                else:
-                    # Fallback for different response formats
-                    return str(response)
+                # Extract the content from response using existing method
+                extracted = self._extract_llm_response_content(response)
+                if not extracted or not str(extracted).strip():
+                    raise ValueError("LLM summarization returned empty content")
+                return str(extracted).strip()
                     
             except Exception as e:
                 logging.warning(f"LLM summarization call failed: {e}")

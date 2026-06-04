@@ -39,7 +39,8 @@ from enum import Enum
 from ..agent.autonomy import AutonomyConfig
 
 # TYPE_CHECKING import to avoid circular dependency
-if Union.__module__ == "typing":
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
     from ..compaction.strategy import CompactionStrategy
 
 
@@ -810,7 +811,7 @@ class ExecutionConfig:
                 else self.context_compaction
             ),
             "max_context_tokens": self.max_context_tokens,
-            "compaction_strategy": self.compaction_strategy.value if self.compaction_strategy else None,
+            "compaction_strategy": self.compaction_strategy.value if self.compaction_strategy and hasattr(self.compaction_strategy, 'value') else (str(self.compaction_strategy) if self.compaction_strategy else None),
             "max_budget": self.max_budget,
             "parallel_tool_calls": self.parallel_tool_calls,
         }
