@@ -9,11 +9,12 @@ import json
 import logging
 import os
 import sys
+import threading
 import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # fcntl is Unix-only; on Windows, use msvcrt for file locking
 try:
@@ -131,7 +132,44 @@ class UnifiedSessionStore:
         self.session_dir = Path(session_dir) if session_dir else DEFAULT_SESSION_DIR
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self._cache: Dict[str, UnifiedSession] = {}
+        self._cache_mtimes: Dict[str, float] = {}
+        self._lock = threading.RLock()
         self._last_session_id: Optional[str] = None
+
+    @staticmethod
+    def _message_key(message: Dict[str, Any]) -> Tuple[Any, ...]:
+        return (
+            message.get("role"),
+            message.get("content"),
+            message.get("timestamp"),
+        )
+
+    def _merge_sessions(
+        self, on_disk: UnifiedSession, incoming: UnifiedSession
+    ) -> UnifiedSession:
+        """Merge concurrent updates without dropping chat messages."""
+        seen = {self._message_key(m) for m in on_disk.messages}
+        merged_messages = list(on_disk.messages)
+        for message in incoming.messages:
+            key = self._message_key(message)
+            if key not in seen:
+                merged_messages.append(message)
+                seen.add(key)
+
+        merged = UnifiedSession.from_dict(on_disk.to_dict())
+        merged.messages = merged_messages
+        merged.metadata = {**on_disk.metadata, **incoming.metadata}
+        merged.total_input_tokens = max(
+            on_disk.total_input_tokens, incoming.total_input_tokens
+        )
+        merged.total_output_tokens = max(
+            on_disk.total_output_tokens, incoming.total_output_tokens
+        )
+        merged.total_cost = max(on_disk.total_cost, incoming.total_cost)
+        merged.request_count = max(on_disk.request_count, incoming.request_count)
+        merged.current_model = incoming.current_model or on_disk.current_model
+        merged.updated_at = max(on_disk.updated_at, incoming.updated_at)
+        return merged
     
     def _get_session_path(self, session_id: str) -> Path:
         """Get the file path for a session."""
@@ -141,6 +179,47 @@ class UnifiedSessionStore:
         """Get the path to the last session marker file."""
         return self.session_dir / ".last_session"
     
+    def _acquire_exclusive_lock(self, file_obj) -> None:
+        if sys.platform == "win32":
+            import msvcrt
+            file_obj.seek(0)
+            msvcrt.locking(file_obj.fileno(), msvcrt.LK_LOCK, 1)
+        elif _HAS_FCNTL:
+            fcntl.flock(file_obj.fileno(), fcntl.LOCK_EX)
+        else:
+            global _WARNED_NO_FCNTL
+            if not _WARNED_NO_FCNTL:
+                logger.warning(
+                    "File locking unavailable on this platform (fcntl not available); "
+                    "concurrent writers may corrupt session files."
+                )
+                _WARNED_NO_FCNTL = True
+
+    def _release_exclusive_lock(self, file_obj) -> None:
+        if sys.platform == "win32":
+            import msvcrt
+            file_obj.seek(0)
+            msvcrt.locking(file_obj.fileno(), msvcrt.LK_UNLCK, 1)
+        elif _HAS_FCNTL:
+            fcntl.flock(file_obj.fileno(), fcntl.LOCK_UN)
+
+    def _read_json_locked(self, file_obj) -> Optional[Dict[str, Any]]:
+        """Read session JSON (caller must hold exclusive lock)."""
+        file_obj.seek(0)
+        raw = file_obj.read().decode("utf-8")
+        if not raw.strip():
+            return None
+        return json.loads(raw)
+
+    def _write_json_locked(self, file_obj, data: Dict[str, Any]) -> None:
+        """Write session JSON (caller must hold exclusive lock)."""
+        json_data = json.dumps(data, indent=2).encode("utf-8")
+        file_obj.seek(0)
+        file_obj.truncate()
+        file_obj.write(json_data)
+        file_obj.flush()
+        os.fsync(file_obj.fileno())
+
     def save(self, session: UnifiedSession) -> None:
         """
         Save a session to disk with file locking.
@@ -152,65 +231,50 @@ class UnifiedSessionStore:
         session.updated_at = datetime.now().isoformat()
         
         try:
-            # Open in r+b mode to avoid truncation before locking
-            # Create file if it doesn't exist
             if not path.exists():
                 path.touch()
-            
-            with open(path, 'r+b') as f:
-                # Cross-platform file locking
-                if sys.platform == "win32":
-                    # Windows locking - ensure consistent file position
-                    import msvcrt
-                    f.seek(0)
-                    msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)  # Use blocking lock
-                    try:
-                        f.seek(0)
-                        f.truncate()  # Clear file after acquiring lock
-                        json_data = json.dumps(session.to_dict(), indent=2).encode('utf-8')
-                        f.write(json_data)
-                        f.flush()
-                        os.fsync(f.fileno())  # Force data to disk before unlock
-                    finally:
-                        f.seek(0)  # Return to start position for unlock
-                        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
-                elif _HAS_FCNTL:
-                    # Unix locking
-                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-                    try:
-                        f.seek(0)
-                        f.truncate()  # Clear file after acquiring lock
-                        json_data = json.dumps(session.to_dict(), indent=2).encode('utf-8')
-                        f.write(json_data)
-                        f.flush()
-                        os.fsync(f.fileno())  # Force data to disk before unlock
-                    finally:
-                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-                else:
-                    # Warn once about degraded locking on non-Windows platforms without fcntl
-                    global _WARNED_NO_FCNTL
-                    if not _WARNED_NO_FCNTL:
-                        logger.warning(
-                            "File locking unavailable on this platform (fcntl not available); "
-                            "concurrent writers may corrupt session files."
-                        )
-                        _WARNED_NO_FCNTL = True
-                    f.seek(0)
-                    f.truncate()
-                    json_data = json.dumps(session.to_dict(), indent=2).encode('utf-8')
-                    f.write(json_data)
-            
-            # Update cache
-            self._cache[session.session_id] = session
-            
-            # Update last session marker
+
+            to_save = session
+            with open(path, "r+b") as f:
+                self._acquire_exclusive_lock(f)
+                try:
+                    existing_data = self._read_json_locked(f)
+                    if existing_data:
+                        on_disk = UnifiedSession.from_dict(existing_data)
+                        to_save = self._merge_sessions(on_disk, session)
+                    to_save.updated_at = datetime.now().isoformat()
+                    self._write_json_locked(f, to_save.to_dict())
+                finally:
+                    self._release_exclusive_lock(f)
+
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                mtime = datetime.now().timestamp()
+
+            with self._lock:
+                self._cache[session.session_id] = to_save
+                self._cache_mtimes[session.session_id] = mtime
+
             self._update_last_session(session.session_id)
-            
             logger.debug(f"Saved session: {session.session_id}")
         except Exception as e:
             logger.error(f"Failed to save session {session.session_id}: {e}")
             raise
     
+    def _is_cache_fresh(self, session_id: str, path: Path) -> bool:
+        """Return True if in-memory cache matches the on-disk file."""
+        if session_id not in self._cache:
+            return False
+        if not path.exists():
+            return False
+        try:
+            current_mtime = path.stat().st_mtime
+        except OSError:
+            return False
+        cached_mtime = self._cache_mtimes.get(session_id, 0)
+        return current_mtime <= cached_mtime
+
     def load(self, session_id: str) -> Optional[UnifiedSession]:
         """
         Load a session from disk.
@@ -221,43 +285,36 @@ class UnifiedSessionStore:
         Returns:
             Session if found, None otherwise
         """
-        # Check cache first
-        if session_id in self._cache:
-            return self._cache[session_id]
-        
         path = self._get_session_path(session_id)
         if not path.exists():
+            with self._lock:
+                self._cache.pop(session_id, None)
+                self._cache_mtimes.pop(session_id, None)
             return None
+
+        with self._lock:
+            if self._is_cache_fresh(session_id, path):
+                return self._cache[session_id]
         
         try:
-            with open(path, 'rb') as f:
-                # Cross-platform file locking (shared lock for reading)
-                if sys.platform == "win32":
-                    # Windows shared locking (read-only) - use blocking read lock
-                    import msvcrt
-                    f.seek(0)
-                    msvcrt.locking(f.fileno(), msvcrt.LK_RLCK, 1)  # Use shared/read lock
-                    try:
-                        json_data = f.read().decode('utf-8')
-                        data = json.loads(json_data)
-                    finally:
-                        f.seek(0)  # Return to start position for unlock
-                        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
-                elif _HAS_FCNTL:
-                    # Unix shared locking
-                    fcntl.flock(f.fileno(), fcntl.LOCK_SH)
-                    try:
-                        json_data = f.read().decode('utf-8')
-                        data = json.loads(json_data)
-                    finally:
-                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-                else:
-                    # No locking available - just read
-                    json_data = f.read().decode('utf-8')
-                    data = json.loads(json_data)
-            
+            with open(path, "r+b") as f:
+                self._acquire_exclusive_lock(f)
+                try:
+                    data = self._read_json_locked(f)
+                finally:
+                    self._release_exclusive_lock(f)
+            if data is None:
+                return None
+
             session = UnifiedSession.from_dict(data)
-            self._cache[session_id] = session
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                mtime = datetime.now().timestamp()
+
+            with self._lock:
+                self._cache[session_id] = session
+                self._cache_mtimes[session_id] = mtime
             logger.debug(f"Loaded session: {session_id}")
             return session
         except Exception as e:
@@ -298,7 +355,9 @@ class UnifiedSessionStore:
         path = self._get_session_path(session_id)
         if path.exists():
             path.unlink()
-            self._cache.pop(session_id, None)
+            with self._lock:
+                self._cache.pop(session_id, None)
+                self._cache_mtimes.pop(session_id, None)
             logger.debug(f"Deleted session: {session_id}")
             return True
         return False
