@@ -20,37 +20,50 @@ def test_toolset_basic():
         )
         print("✓ Successfully imported toolset functions")
         
-        # Test registering a custom toolset
-        register_toolset(
-            "test_toolset",
-            tools=["tool1", "tool2"],
-            description="Test toolset"
-        )
-        print("✓ Successfully registered custom toolset")
+        # Test registering a custom toolset with unique names to avoid pollution
+        import uuid
+        test_toolset_name = f"test_toolset_{uuid.uuid4().hex[:8]}"
+        composed_toolset_name = f"composed_test_{uuid.uuid4().hex[:8]}"
         
-        # Test resolving the toolset
-        tools = resolve_toolset("test_toolset")
-        assert tools == ["tool1", "tool2"]
-        print("✓ Successfully resolved toolset")
-        
-        # Test listing toolsets (should include prebuilt ones)
-        toolset_list = list_toolsets()
-        assert "test_toolset" in toolset_list
-        assert "web" in toolset_list
-        assert "research" in toolset_list
-        print(f"✓ Found {len(toolset_list)} toolsets: {toolset_list}")
-        
-        # Test composition via includes
-        register_toolset(
-            "composed_test",
-            tools=["tool3"],
-            includes=["test_toolset"]
-        )
-        composed_tools = resolve_toolset("composed_test")
-        assert "tool1" in composed_tools
-        assert "tool2" in composed_tools
-        assert "tool3" in composed_tools
-        print("✓ Successfully tested toolset composition")
+        try:
+            register_toolset(
+                test_toolset_name,
+                tools=["tool1", "tool2"],
+                description="Test toolset"
+            )
+            print("✓ Successfully registered custom toolset")
+            
+            # Test resolving the toolset
+            tools = resolve_toolset(test_toolset_name)
+            assert tools == ["tool1", "tool2"]
+            print("✓ Successfully resolved toolset")
+            
+            # Test listing toolsets (should include prebuilt ones)
+            toolset_list = list_toolsets()
+            assert test_toolset_name in toolset_list
+            assert "web" in toolset_list
+            assert "research" in toolset_list
+            print(f"✓ Found {len(toolset_list)} toolsets: {toolset_list}")
+            
+            # Test composition via includes
+            register_toolset(
+                composed_toolset_name,
+                tools=["tool3"],
+                includes=[test_toolset_name]
+            )
+            composed_tools = resolve_toolset(composed_toolset_name)
+            assert "tool1" in composed_tools
+            assert "tool2" in composed_tools
+            assert "tool3" in composed_tools
+            print("✓ Successfully tested toolset composition")
+        finally:
+            # Cleanup to avoid registry pollution
+            from praisonaiagents.toolsets import unregister_toolset
+            try:
+                unregister_toolset(composed_toolset_name)
+                unregister_toolset(test_toolset_name)
+            except Exception:
+                pass
         
         print("All basic toolset tests passed!\n")
         return True
@@ -95,6 +108,11 @@ def test_agent_integration():
         
         print(f"✓ Agent has {len(agent.tools)} tools: {tool_names}")
         
+        # Verify expected tools are present
+        assert "internet_search" in tool_names, f"internet_search was not resolved from toolset. Available: {tool_names}"
+        assert "read_file" in tool_names, f"read_file was not resolved from toolset. Available: {tool_names}"
+        print("✓ Verified expected tools are present")
+        
         # Test mixing tools and toolsets
         agent2 = Agent(
             name="test_agent2", 
@@ -103,6 +121,18 @@ def test_agent_integration():
             toolsets=["agent_test"]  # toolset
         )
         print("✓ Successfully created Agent with both tools and toolsets")
+        
+        # Check tools in agent2
+        tool_names2 = []
+        for tool in agent2.tools:
+            if hasattr(tool, '__name__'):
+                tool_names2.append(tool.__name__)
+            elif hasattr(tool, 'name'):
+                tool_names2.append(tool.name)
+        
+        assert "write_file" in tool_names2, f"explicit tool write_file missing. Available: {tool_names2}"
+        assert "internet_search" in tool_names2, f"toolset tool internet_search missing. Available: {tool_names2}"
+        print("✓ Verified mixed tools and toolsets work correctly")
         
         print("All agent integration tests passed!\n")
         return True

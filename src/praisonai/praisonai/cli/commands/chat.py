@@ -286,6 +286,7 @@ def _run_legacy_terminal_chat(
     verbose: bool = False,
     memory: bool = False,
     tools: Optional[str] = None,
+    toolset: Optional[str] = None,
     user_id: Optional[str] = None,
     session_id: Optional[str] = None,
     continue_session: bool = False,

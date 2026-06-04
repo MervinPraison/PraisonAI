@@ -541,9 +541,14 @@ class ToolResolver:
             # Resolve tool names to callables
             return self.resolve_many(tool_names)
             
-        except Exception as e:
-            logger.warning(f"Failed to resolve toolsets {toolset_names}: {e}")
+        except ImportError as e:
+            logger.warning(f"Toolset support unavailable: {e}")
             return []
+        except (ValueError, KeyError) as e:
+            raise ValueError(
+                f"Failed to resolve toolsets {toolset_names}: {e}. "
+                "Check toolset names and includes."
+            ) from e
     
     def resolve_tools_and_toolsets(
         self, 
@@ -569,7 +574,16 @@ class ToolResolver:
         if toolset_names:
             all_tools.extend(self.resolve_toolsets(toolset_names))
         
-        return all_tools
+        # Deduplicate while preserving order
+        deduped: List[Callable] = []
+        seen: set[int] = set()
+        for tool in all_tools:
+            marker = id(tool)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            deduped.append(tool)
+        return deduped
 
 
 # Context-local resolver for multi-project safety

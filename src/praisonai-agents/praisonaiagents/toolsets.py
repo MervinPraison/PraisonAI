@@ -79,8 +79,8 @@ class ToolsetRegistry:
                 
             toolset = ToolsetSpec(
                 name=name,
-                tools=tools or [],
-                includes=includes or [],
+                tools=list(tools) if tools else [],
+                includes=list(includes) if includes else [],
                 description=description
             )
             self._toolsets[name] = toolset
@@ -113,7 +113,16 @@ class ToolsetRegistry:
         """
         with self._lock:
             self._ensure_prebuilt_loaded()
-            return self._toolsets.get(name)
+            spec = self._toolsets.get(name)
+            if spec is None:
+                return None
+            # Return defensive copy to prevent external mutation
+            return ToolsetSpec(
+                name=spec.name,
+                tools=list(spec.tools),
+                includes=list(spec.includes),
+                description=spec.description,
+            )
     
     def list_toolsets(self) -> List[str]:
         """List all registered toolset names."""
@@ -138,7 +147,15 @@ class ToolsetRegistry:
         """
         with self._lock:
             self._ensure_prebuilt_loaded()
-            return self._resolve_toolset_recursive(name, set())
+            tools = self._resolve_toolset_recursive(name, set())
+            # Ensure uniqueness while preserving order
+            seen = set()
+            unique_tools = []
+            for tool in tools:
+                if tool not in seen:
+                    seen.add(tool)
+                    unique_tools.append(tool)
+            return unique_tools
     
     def resolve_toolsets(self, names: List[str]) -> List[str]:
         """Resolve multiple toolset names to a flat list of tool names.

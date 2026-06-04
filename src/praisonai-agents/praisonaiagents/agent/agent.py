@@ -1664,12 +1664,24 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
             try:
                 from ..toolsets import resolve_toolsets
                 toolset_tool_names = resolve_toolsets(toolsets)
-                toolset_tools = self._resolve_tool_names(toolset_tool_names)
+                # Remove duplicates with existing tools
+                existing_tool_names = set()
+                for tool in self.tools:
+                    name = getattr(tool, 'name', getattr(tool, '__name__', str(tool)))
+                    existing_tool_names.add(name)
+                
+                unique_tool_names = [name for name in toolset_tool_names if name not in existing_tool_names]
+                toolset_tools = self._resolve_tool_names(unique_tool_names)
                 self.tools.extend(toolset_tools)
                 logging.debug(f"Resolved toolsets {toolsets} to {len(toolset_tools)} tools: {[getattr(t, '__name__', str(t)) for t in toolset_tools]}")
-            except Exception as e:
+            except (ValueError, KeyError) as e:
+                raise ValueError(
+                    f"Agent '{getattr(self, 'display_name', 'unknown')}' failed to resolve toolsets {toolsets}: {e}. "
+                    "Verify names with praisonaiagents.toolsets.list_toolsets()."
+                ) from e
+            except ImportError as e:
                 logging.warning(f"Failed to resolve toolsets {toolsets}: {e}")
-                # Continue without toolsets rather than failing
+                # Continue without toolsets if module is unavailable
         
         # Inject default tools for autonomy mode (after self.tools is initialized)
         # ONLY inject if caller didn't provide tools - avoid duplicates with CLI/wrapper tools

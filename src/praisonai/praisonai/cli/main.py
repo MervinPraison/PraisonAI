@@ -4356,15 +4356,19 @@ Do NOT add any explanations or formatting."""
                         existing_tools = agent_config.get('tools', [])
                         if isinstance(existing_tools, list):
                             existing_tools.extend(tools_list)
+                            agent_config["tools"] = existing_tools
+                        else:
+                            agent_config["tools"] = tools_list
                 
                 # Load toolsets if specified (--toolset flag)
                 if getattr(self.args, 'toolset', None):
-                    toolset_names = [name.strip() for name in self.args.toolset.split(',')]
-                    toolset_tools = self._load_toolsets(toolset_names)
+                    toolset_names = [name.strip() for name in self.args.toolset.split(',') if name.strip()]
+                    toolset_tools = self._load_toolsets(toolset_names) if toolset_names else []
                     if toolset_tools:
                         existing_tools = agent_config.get('tools', [])
                         if isinstance(existing_tools, list):
                             existing_tools.extend(toolset_tools)
+                            agent_config["tools"] = existing_tools
                         else:
                             agent_config["tools"] = toolset_tools
                         print(f"[bold cyan]Toolsets loaded: {len(toolset_tools)} tool(s) from {self.args.toolset}[/bold cyan]")

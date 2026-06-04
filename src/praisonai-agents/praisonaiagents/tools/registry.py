@@ -111,9 +111,13 @@ class ToolRegistry:
         with self._lock:
             if name in self._tools:
                 del self._tools[name]
+                # Evict cache entry to prevent stale growth
+                self._availability_cache.pop(name, None)
                 return True
             if name in self._functions:
                 del self._functions[name]
+                # Evict cache entry to prevent stale growth
+                self._availability_cache.pop(name, None)
                 return True
             return False
     
@@ -179,11 +183,11 @@ class ToolRegistry:
             current_time = time.time()
             
             # Check BaseTool instances
-            for tool in self._tools.values():
+            for registered_name, tool in self._tools.items():
                 # Check if tool has availability checking capability
                 if hasattr(tool, 'check_availability'):
-                    # Check cache first
-                    cache_entry = self._availability_cache.get(tool.name)
+                    # Check cache first using registry key (not tool.name)
+                    cache_entry = self._availability_cache.get(registered_name)
                     if cache_entry is not None:
                         cached_result, cached_time = cache_entry
                         if current_time - cached_time < ttl_seconds:
@@ -195,17 +199,17 @@ class ToolRegistry:
                     # Cache miss or expired - perform availability check
                     try:
                         is_available, reason = tool.check_availability()
-                        # Cache the result
-                        self._availability_cache[tool.name] = (is_available, current_time)
+                        # Cache the result using registry key
+                        self._availability_cache[registered_name] = (is_available, current_time)
                         
                         if is_available:
                             available.append(tool)
                         elif reason:
-                            logging.debug(f"Tool '{tool.name}' unavailable: {reason}")
+                            logging.debug(f"Tool '{registered_name}' unavailable: {reason}")
                     except Exception as e:
-                        logging.warning(f"Availability check failed for tool '{tool.name}': {e}")
+                        logging.warning(f"Availability check failed for tool '{registered_name}': {e}")
                         # Cache as unavailable on error
-                        self._availability_cache[tool.name] = (False, current_time)
+                        self._availability_cache[registered_name] = (False, current_time)
                 else:
                     # No availability check = always available
                     available.append(tool)
