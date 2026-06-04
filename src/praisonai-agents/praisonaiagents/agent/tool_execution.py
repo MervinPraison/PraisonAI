@@ -1238,8 +1238,10 @@ class ToolExecutionMixin:
         if agent_policy is not None:
             return agent_policy
         
-        # Return default retry policy
-        return RetryPolicy()
+        # Return default retry policy (cached class-level instance)
+        if not hasattr(ToolExecutionMixin, '_default_retry_policy'):
+            ToolExecutionMixin._default_retry_policy = RetryPolicy()
+        return ToolExecutionMixin._default_retry_policy
 
     def _classify_error_type(self, error_dict, exception):
         """Classify error type for retry policy matching.

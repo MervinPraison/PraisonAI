@@ -9,6 +9,7 @@ import time
 import json
 import logging
 import inspect
+import os
 
 import asyncio
 import threading
@@ -964,7 +965,8 @@ Write the complete compiled report:"""
                     # Skip retry for non-retryable errors (approval, permission, etc.)
                     if (result.get("approval_denied") or 
                         result.get("permission_denied") or 
-                        result.get("approval_error")):
+                        result.get("approval_error") or
+                        result.get("circuit_open")):
                         return result
                     
                     # Determine error type for retry policy
@@ -1377,7 +1379,6 @@ Write the complete compiled report:"""
             if hook_runner is None:
                 return
             
-            import os
             retry_input = OnRetryInput(
                 session_id=getattr(self, '_session_id', 'default'),
                 cwd=os.getcwd(),
