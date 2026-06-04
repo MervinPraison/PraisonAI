@@ -359,7 +359,7 @@ class Handoff:
             agent_desc += f" - {self.agent.goal}"
         return agent_desc
         
-    def _compute_effective_tools(self, source_agent: 'Agent') -> List[Any]:
+    def _compute_effective_tools(self, source_agent: 'Agent') -> List[Any] | None:
         """
         Compute the effective tool set for the target agent based on tool policy.
         
@@ -367,16 +367,24 @@ class Handoff:
             source_agent: The agent initiating the handoff
             
         Returns:
-            List of tools the target agent should have access to during handoff
+            List of tools the target agent should have access to during handoff.
+            Returns None to indicate unrestricted access (for passthrough mode without blocked tools).
+            Returns [] to indicate no tools allowed (for intersect mode with empty intersection).
         """
         policy = self.config.tool_policy
         
         if policy.mode == "passthrough":
             # Legacy behavior - target keeps its full tool set, minus blocked tools
-            effective_tools = [
-                tool for tool in getattr(self.agent, 'tools', [])
-                if getattr(tool, 'name', getattr(tool, '__name__', str(tool))) not in policy.blocked_tools
-            ]
+            if not policy.blocked_tools:
+                # No restrictions - return None so chat() uses the agent's configured tools
+                return None
+            else:
+                # Filter out blocked tools
+                effective_tools = [
+                    tool for tool in getattr(self.agent, 'tools', [])
+                    if getattr(tool, 'name', getattr(tool, '__name__', str(tool))) not in policy.blocked_tools
+                ]
+                return effective_tools
         else:  # intersect mode (default)
             # Security by default - intersection of source and target tools
             source_tool_names = {
@@ -390,8 +398,9 @@ class Handoff:
                 if (tool_name in source_tool_names and 
                     tool_name not in policy.blocked_tools):
                     effective_tools.append(tool)
-        
-        return effective_tools
+            
+            # In intersect mode, empty list means no tools allowed - this is the security boundary
+            return effective_tools
     
     def _check_safety(self, source_agent: 'Agent') -> None:
         """
@@ -969,8 +978,8 @@ def handoff(
     if tool_policy_mode is not None or blocked_tools is not None:
         # Create new tool policy with updated values
         config.tool_policy = HandoffToolPolicy(
-            mode=tool_policy_mode or config.tool_policy.mode,
-            blocked_tools=blocked_tools or config.tool_policy.blocked_tools
+            mode=tool_policy_mode if tool_policy_mode is not None else config.tool_policy.mode,
+            blocked_tools=blocked_tools if blocked_tools is not None else config.tool_policy.blocked_tools
         )
     
     return Handoff(
