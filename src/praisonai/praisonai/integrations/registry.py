@@ -19,8 +19,10 @@ Usage:
     # Register custom integration
     registry.register('my-agent', MyCustomIntegration)
     
-    # Create integration
-    agent = registry.create('claude', workspace="/path/to/project")
+    # Create integration (use try_create for optional behavior)
+    agent = registry.try_create('claude', workspace="/path/to/project")
+    if agent is None:
+        print("Integration 'claude' not found or unavailable")
     
     # List available integrations
     available = await registry.get_available()

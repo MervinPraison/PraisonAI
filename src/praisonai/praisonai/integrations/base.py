@@ -102,8 +102,6 @@ class BaseCLIIntegration(ABC):
         """
         cmd = self.cli_command
         cache = BaseCLIIntegration._availability_cache
-        if cmd in cache:
-            return cache[cmd]
         with BaseCLIIntegration._availability_cache_lock:
             if cmd not in cache:
                 cache[cmd] = shutil.which(cmd) is not None

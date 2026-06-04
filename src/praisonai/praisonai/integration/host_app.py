@@ -13,6 +13,18 @@ from typing import Any, Dict, List, Optional, Sequence
 # Use context variable instead of module-level global for multi-agent safety
 _configured_context: contextvars.ContextVar[bool] = contextvars.ContextVar('host_configured', default=False)
 
+# Backward compatibility shim for tests that assign host_app._CONFIGURED = False
+class _ConfiguredShim:
+    """Backward compatibility shim that proxies to the ContextVar."""
+    def __get__(self, obj, objtype=None):
+        return _configured_context.get()
+    
+    def __set__(self, obj, value):
+        _configured_context.set(bool(value))
+
+# Expose the shim so tests can still use host_app._CONFIGURED = False 
+_CONFIGURED = _ConfiguredShim()
+
 
 def is_legacy_host() -> bool:
     """True when callback-only ``@aiui.reply`` mode is requested."""
@@ -41,7 +53,7 @@ def configure_host(
 ) -> None:
     """Apply PraisonAIUI host settings and wire L1 backends (unless legacy mode)."""
     # Check if already configured in this context to avoid duplicate configuration
-    if _configured_context.get(False):
+    if _configured_context.get():
         return
 
     import praisonaiui as aiui
@@ -182,7 +194,7 @@ def create_host_app():
     """Return the Starlette app from PraisonAIUI (call after ``configure_host``)."""
     from praisonaiui.server import create_app
 
-    if not _configured_context.get(False):
+    if not _configured_context.get():
         configure_host()
     return create_app()
 
