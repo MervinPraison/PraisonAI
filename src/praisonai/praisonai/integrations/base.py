@@ -109,6 +109,20 @@ class BaseCLIIntegration(ABC):
                 cache[cmd] = shutil.which(cmd) is not None
             return cache[cmd]
     
+    @classmethod
+    def invalidate_availability(cls, command: Optional[str] = None) -> None:
+        """
+        Invalidate availability cache for CLI tools.
+        
+        Args:
+            command: Specific CLI command to invalidate, or None to clear all
+        """
+        with cls._availability_cache_lock:
+            if command is None:
+                cls._availability_cache.clear()
+            else:
+                cls._availability_cache.pop(command, None)
+    
     @abstractmethod
     async def execute(self, prompt: str, **options) -> str:
         """

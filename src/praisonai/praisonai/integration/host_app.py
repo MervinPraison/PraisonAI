@@ -7,9 +7,11 @@ Set ``PRAISONAI_HOST_LEGACY=1`` to skip provider wiring (callback-only mode).
 from __future__ import annotations
 
 import os
+import contextvars
 from typing import Any, Dict, List, Optional, Sequence
 
-_CONFIGURED = False
+# Use context variable instead of module-level global for multi-agent safety
+_configured_context: contextvars.ContextVar[bool] = contextvars.ContextVar('host_configured', default=False)
 
 
 def is_legacy_host() -> bool:
@@ -38,7 +40,9 @@ def configure_host(
     **kwargs: Any,
 ) -> None:
     """Apply PraisonAIUI host settings and wire L1 backends (unless legacy mode)."""
-    global _CONFIGURED
+    # Check if already configured in this context to avoid duplicate configuration
+    if _configured_context.get(False):
+        return
 
     import praisonaiui as aiui
     from praisonai.ui._aiui_datastore import PraisonAISessionDataStore
@@ -112,7 +116,7 @@ def configure_host(
     except ImportError:
         pass  # L3 pages are optional
 
-    _CONFIGURED = True
+    _configured_context.set(True)
 
 
 def setup_bridges() -> None:
@@ -171,8 +175,6 @@ def setup_bridges() -> None:
         register_kanban_backends()
         
     except Exception as exc:
-        log.debug("aiui backend injection failed: %s", exc)
-    except Exception as exc:
         log.warning("aiui backend injection failed: %s", exc)
 
 
@@ -180,7 +182,7 @@ def create_host_app():
     """Return the Starlette app from PraisonAIUI (call after ``configure_host``)."""
     from praisonaiui.server import create_app
 
-    if not _CONFIGURED:
+    if not _configured_context.get(False):
         configure_host()
     return create_app()
 

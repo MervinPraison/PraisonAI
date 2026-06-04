@@ -104,9 +104,9 @@ class ExternalAgentRegistry(PluginRegistry[BaseCLIIntegration]):
         """
         return self.list_names()
         
-    def create(self, name: str, **kwargs: Any) -> Optional[BaseCLIIntegration]:
+    def try_create(self, name: str, **kwargs: Any) -> Optional[BaseCLIIntegration]:
         """
-        Create an instance of the specified integration.
+        Try to create an instance of the specified integration.
         
         Args:
             name: Name of the integration
@@ -217,7 +217,7 @@ def create_integration(name: str, **kwargs: Any) -> Optional[BaseCLIIntegration]
         BaseCLIIntegration: Instance of the integration, or None if not found
     """
     registry = get_default_registry()
-    return registry.create(name, **kwargs)
+    return registry.try_create(name, **kwargs)
 
 
 def get_available_integrations() -> Dict[str, bool]:
