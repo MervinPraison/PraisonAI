@@ -98,7 +98,7 @@ def get_file_snapshot(project_dir: Path) -> dict:
     snapshot = {}
     for py_file in project_dir.rglob("*.py"):
         rel_path = py_file.relative_to(project_dir)
-        snapshot[str(rel_path)] = py_file.read_text()
+        snapshot[str(rel_path)] = py_file.read_text(encoding="utf-8")
     return snapshot
 
 
@@ -255,9 +255,14 @@ def build_isolated_pytest_env() -> dict:
 
 def run_pytest(project_dir: Path, test_filter: Optional[str] = None) -> tuple:
     """Run pytest and return (passed, output)."""
-    cmd = ["python", "-m", "pytest", "-v", "--tb=short"]
+    import sys
+    cmd = [sys.executable, "-m", "pytest", "-v", "--tb=short"]
     if test_filter:
-        cmd.extend(["-k", test_filter])
+        # Use node ID if it looks like a file path, otherwise use -k pattern
+        if "::" in test_filter or test_filter.endswith(".py"):
+            cmd.append(test_filter)  # Node ID
+        else:
+            cmd.extend(["-k", test_filter])  # Pattern
     
     # Use isolated environment to prevent inheritance of dev PYTHONPATH
     env = build_isolated_pytest_env()
@@ -284,7 +289,8 @@ def run_pytest(project_dir: Path, test_filter: Optional[str] = None) -> tuple:
 
 def run_ruff(project_dir: Path, fix: bool = False) -> tuple:
     """Run ruff linter and return (clean, output)."""
-    cmd = ["python", "-m", "ruff", "check", "."]
+    import sys
+    cmd = [sys.executable, "-m", "ruff", "check", "."]
     if fix:
         cmd.append("--fix")
     exit_code, stdout, stderr = run_command(cmd, project_dir, timeout=30)

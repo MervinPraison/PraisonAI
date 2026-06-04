@@ -19,6 +19,7 @@ Mandatory coverage (10+ scenarios):
 from pathlib import Path
 from typing import List, Optional
 import subprocess
+import sys
 
 from ..runner import Scenario, build_isolated_pytest_env
 
@@ -26,7 +27,7 @@ from ..runner import Scenario, build_isolated_pytest_env
 def check_pytest_passes(test_filter: Optional[str] = None):
     """Check that pytest passes for given filter."""
     def check(project_dir: Path) -> tuple:
-        cmd = ["python", "-m", "pytest", "-v", "--tb=short"]
+        cmd = [sys.executable, "-m", "pytest", "-v", "--tb=short"]
         if test_filter:
             # Use node ID if it looks like a file path, otherwise use -k pattern
             if "::" in test_filter or test_filter.endswith(".py"):
@@ -63,7 +64,7 @@ def check_file_contains(filepath: str, text: str):
         path = project_dir / filepath
         if not path.exists():
             return False, f"File {filepath} does not exist"
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         if text in content:
             return True, f"Found '{text}' in {filepath}"
         return False, f"'{text}' not found in {filepath}"
@@ -76,7 +77,7 @@ def check_file_not_contains(filepath: str, text: str):
         path = project_dir / filepath
         if not path.exists():
             return False, f"File {filepath} does not exist"
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         if text not in content:
             return True, f"'{text}' correctly removed from {filepath}"
         return False, f"'{text}' still present in {filepath}"
@@ -89,7 +90,7 @@ def check_function_exists(filepath: str, func_name: str):
         path = project_dir / filepath
         if not path.exists():
             return False, f"File {filepath} does not exist"
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         if f"def {func_name}" in content:
             return True, f"Function {func_name} exists in {filepath}"
         return False, f"Function {func_name} not found in {filepath}"
@@ -99,7 +100,7 @@ def check_function_exists(filepath: str, func_name: str):
 def check_cli_command_works(cmd_args: List[str], expected_output: Optional[str] = None):
     """Check that a CLI command works."""
     def check(project_dir: Path) -> tuple:
-        cmd = ["python", "-m", "mathlib.cli"] + cmd_args
+        cmd = [sys.executable, "-m", "mathlib.cli"] + cmd_args
         env = build_isolated_pytest_env()
         result = subprocess.run(
             cmd, 
@@ -124,7 +125,7 @@ def check_ruff_clean():
     def check(project_dir: Path) -> tuple:
         env = build_isolated_pytest_env()
         result = subprocess.run(
-            ["python", "-m", "ruff", "check", "."],
+            [sys.executable, "-m", "ruff", "check", "."],
             cwd=project_dir,
             capture_output=True,
             text=True,
@@ -145,7 +146,7 @@ def check_file_modified(filepath: str):
         path = project_dir / filepath
         if not path.exists():
             return False, f"File {filepath} does not exist"
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         if len(content) > 0:
             return True, f"File {filepath} exists and has content"
         return False, f"File {filepath} is empty"
@@ -159,7 +160,7 @@ def check_grep_pattern(filepath: str, pattern: str):
         path = project_dir / filepath
         if not path.exists():
             return False, f"File {filepath} does not exist"
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         if re.search(pattern, content):
             return True, f"Pattern '{pattern}' found in {filepath}"
         return False, f"Pattern '{pattern}' not found in {filepath}"
