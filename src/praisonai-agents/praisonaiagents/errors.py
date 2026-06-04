@@ -9,9 +9,10 @@ Provides uniform error semantics for consistent handling across:
 - External integrations
 """
 
-from typing import Literal, Protocol, runtime_checkable, Optional, Dict, Any
-from dataclasses import dataclass
+from typing import Literal, Protocol, runtime_checkable, Optional, Dict, Any, get_args
+from dataclasses import dataclass, field
 import uuid
+import warnings
 
 
 # Closed error taxonomy for typed failure classification
@@ -20,6 +21,16 @@ AgentErrorKind = Literal[
     "context_overflow", "idle_timeout", "billing",
     "model_not_found", "empty_response", "format_error", "unknown",
 ]
+
+# Legacy error category mapping for backward compatibility
+LEGACY_ERROR_CATEGORY_MAP = {
+    "tool": "unknown",
+    "llm": "unknown", 
+    "budget": "billing",
+    "validation": "format_error",
+    "network": "unknown",
+    "handoff": "unknown",
+}
 
 
 @dataclass
@@ -44,7 +55,7 @@ class IdleTimeoutBreaker:
     Prevents runaway API costs when providers repeatedly stall.
     """
     max_consecutive: int = 3
-    _count: int = 0
+    _count: int = field(default=0, init=False, repr=False)
 
     def record_idle_timeout(self) -> bool:
         """Returns True when the hard cap is reached."""
@@ -86,7 +97,23 @@ class PraisonAIError(Exception):
         self.message = message
         self.agent_id = agent_id
         self.run_id = run_id or str(uuid.uuid4())
-        self.error_category = error_category or "unknown"
+        
+        # Handle error category with legacy mapping
+        if error_category is None:
+            self.error_category = "unknown"
+        elif error_category in get_args(AgentErrorKind):
+            self.error_category = error_category
+        elif error_category in LEGACY_ERROR_CATEGORY_MAP:
+            self.error_category = LEGACY_ERROR_CATEGORY_MAP[error_category]
+            warnings.warn(
+                f"error_category={error_category!r} is deprecated; "
+                f"use {self.error_category!r} instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        else:
+            raise ValueError(f"Unsupported error_category: {error_category!r}")
+            
         self.is_retryable = is_retryable
         self.context = context or {}
 
@@ -108,6 +135,7 @@ class ToolExecutionError(PraisonAIError):
         tool_name: str = "unknown",
         agent_id: str = "unknown",
         run_id: Optional[str] = None,
+        error_category: AgentErrorKind = "unknown",
         is_retryable: bool = True,  # Most tool errors are retryable
         context: Optional[Dict[str, Any]] = None
     ):
@@ -117,7 +145,7 @@ class ToolExecutionError(PraisonAIError):
             message, 
             agent_id=agent_id, 
             run_id=run_id, 
-            error_category="unknown",  # Tools use "unknown" by default, can be overridden
+            error_category=error_category,
             is_retryable=is_retryable,
             context=context
         )
@@ -137,6 +165,7 @@ class LLMError(PraisonAIError):
         model_name: str = "unknown", 
         agent_id: str = "unknown",
         run_id: Optional[str] = None,
+        error_category: AgentErrorKind = "unknown",
         is_retryable: bool = False,  # Default to non-retryable unless specified
         context: Optional[Dict[str, Any]] = None
     ):
@@ -146,7 +175,7 @@ class LLMError(PraisonAIError):
             message, 
             agent_id=agent_id, 
             run_id=run_id, 
-            error_category="unknown",  # LLM errors use "unknown" by default, specific kind determined by classify_error
+            error_category=error_category,
             is_retryable=is_retryable,
             context=context
         )
@@ -280,6 +309,7 @@ class NetworkError(PraisonAIError):
         status_code: Optional[int] = None,
         agent_id: str = "unknown",
         run_id: Optional[str] = None,
+        error_category: AgentErrorKind = "unknown",
         is_retryable: bool = True,  # Most network errors are retryable
         context: Optional[Dict[str, Any]] = None
     ):
@@ -292,7 +322,7 @@ class NetworkError(PraisonAIError):
             message, 
             agent_id=agent_id, 
             run_id=run_id, 
-            error_category="unknown",  # Network errors map to "unknown" by default, can be classified as specific types
+            error_category=error_category,
             is_retryable=is_retryable,
             context=context
         )
@@ -314,6 +344,7 @@ class HandoffError(PraisonAIError):
         target_agent: Optional[str] = None,
         agent_id: str = "unknown",
         run_id: Optional[str] = None,
+        error_category: AgentErrorKind = "unknown",
         is_retryable: bool = False,  # Handoff errors usually need investigation
         context: Optional[Dict[str, Any]] = None
     ):
@@ -326,7 +357,7 @@ class HandoffError(PraisonAIError):
             message, 
             agent_id=agent_id, 
             run_id=run_id, 
-            error_category="unknown",  # Handoff errors use "unknown" by default
+            error_category=error_category,
             is_retryable=is_retryable,
             context=context
         )
