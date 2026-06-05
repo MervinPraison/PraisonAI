@@ -12,6 +12,7 @@ from typing import Optional, Dict, Any, Callable, Union
 from abc import ABC, abstractmethod
 
 from .shared import ScheduleParser, backoff_delay, safe_call
+from ._base_scheduler import _BaseAgentScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ class AsyncPraisonAgentExecutor(AsyncAgentExecutorInterface):
             raise
 
 
-class AsyncAgentScheduler:
+class AsyncAgentScheduler(_BaseAgentScheduler):
     """
     Async-native scheduler for running PraisonAI agents periodically.
     
@@ -296,15 +297,9 @@ class AsyncAgentScheduler:
                 failed = self._failure_count
                 total_cost = self._total_cost
         
-        return {
-            "is_running": self.is_running,
-            "total_executions": execs,
-            "successful_executions": success,
-            "failed_executions": failed,
-            "success_rate": (success / execs * 100) if execs > 0 else 0,
-            "total_cost_usd": round(total_cost, 4),
-            "remaining_budget": round(self.max_cost - total_cost, 4) if self.max_cost is not None else None,
-        }
+        return self._build_stats(
+            execs=execs, success=success, failed=failed, total_cost=total_cost
+        )
     
     def get_stats_sync(self) -> Dict[str, Any]:
         """
@@ -390,8 +385,7 @@ class AsyncAgentScheduler:
                 logger.info(f"Estimated cost this run: ${estimated_cost:.4f}, Total: ${self._total_cost:.4f}")
                 
                 safe_call(self.on_success, result)
-                # TODO: Add daemon state update from sync version:
-                # self._update_state_if_daemon()
+                self._update_state_if_daemon()
                 return
                 
             except asyncio.TimeoutError as e:
@@ -418,8 +412,7 @@ class AsyncAgentScheduler:
             last_exc if last_exc is not None
             else RuntimeError(f"Failed after {max_retries} attempts")
         )
-        # TODO: Add daemon state update from sync version:
-        # self._update_state_if_daemon()
+        self._update_state_if_daemon()
     
     async def execute_once(self) -> Any:
         """
