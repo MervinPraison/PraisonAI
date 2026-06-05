@@ -12,8 +12,8 @@ print("=== Advanced Graph Memory Integration Example ===\n")
 
 # Configure simple graph memory
 memory_config = {
-    "provider": "mem0",
     "config": {
+        "provider": "mem0",
         "vector_store": {
             "provider": "chroma",
             "config": {
