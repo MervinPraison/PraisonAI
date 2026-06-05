@@ -234,6 +234,25 @@ class TestToolResolverPerformance:
         # Import should be fast (< 100ms)
         assert import_time < 0.1, f"Import took {import_time}s, expected < 0.1s"
     
+    def test_resolve_instantiate_after_has_tool_cache_hit(self, tmp_path, monkeypatch):
+        """has_tool() must not break later resolve(..., instantiate=True) via cache."""
+        tools_py = tmp_path / "tools.py"
+        tools_py.write_text('''
+class ClassTool:
+    def __init__(self):
+        self.instantiated = True
+''')
+
+        monkeypatch.chdir(tmp_path)
+
+        from praisonai.tool_resolver import ToolResolver
+        resolver = ToolResolver()
+
+        assert resolver.has_tool("ClassTool") is True
+        result = resolver.resolve("ClassTool", instantiate=True)
+        assert not isinstance(result, type)
+        assert getattr(result, "instantiated", False) is True
+
     def test_resolve_caches_local_tools(self, tmp_path, monkeypatch):
         """Resolver should cache local tools.py to avoid repeated file reads."""
         tools_py = tmp_path / "tools.py"
