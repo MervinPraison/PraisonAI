@@ -12,6 +12,7 @@ Environment:
 """
 
 import os
+import tempfile
 from praisonaiagents import Agent, AutoRagAgent
 
 # Ensure API key is set
@@ -20,8 +21,7 @@ if not os.environ.get("OPENAI_API_KEY"):
     exit(1)
 
 # Create a sample document for testing
-from pathlib import Path
-sample_doc = str(Path(__file__).with_name("sample_doc.txt"))
+sample_doc = os.path.join(tempfile.gettempdir(), "sample_doc.txt")
 with open(sample_doc, "w", encoding="utf-8") as f:
     f.write("""
 PraisonAI Framework Documentation

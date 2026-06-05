@@ -1,9 +1,8 @@
-from pathlib import Path
-
-from praisonaiagents import Agent, Task, AgentTeam
-import logging
+import tempfile
 import os
 import sys
+import logging
+from praisonaiagents import Agent, Task, AgentTeam
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -20,9 +19,11 @@ config = {
     }
 }
 
-_sample_path = Path(__file__).with_name("sample_knowledge.txt")
-if not _sample_path.exists():
-    _sample_path.write_text("Mervin Praison is the creator of PraisonAI.\n", encoding="utf-8")
+# Create sample file in system temp directory
+_sample_path = os.path.join(tempfile.gettempdir(), "sample_knowledge.txt")
+if not os.path.exists(_sample_path):
+    with open(_sample_path, "w", encoding="utf-8") as f:
+        f.write("Mervin Praison is the creator of PraisonAI.\n")
 
 # Create an agent with knowledge capabilities
 knowledge_agent = Agent(
@@ -30,7 +31,7 @@ knowledge_agent = Agent(
     role="Information Specialist",
     goal="Store and retrieve knowledge efficiently",
     backstory="Expert in managing and utilizing stored knowledge",
-    knowledge={**config, "sources": [str(_sample_path)]},
+    knowledge={**config, "sources": [_sample_path]},
 )
 
 # Define a task for the agent
