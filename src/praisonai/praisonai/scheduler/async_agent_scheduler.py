@@ -125,6 +125,7 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
         self._execution_count = 0
         self._success_count = 0
         self._failure_count = 0
+        self._start_time: Optional[datetime] = None
         
         # Sync lock for async primitives creation and bound loop tracking
         self._primitives_lock = threading.Lock()
@@ -170,6 +171,7 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
         try:
             interval = ScheduleParser.parse(schedule_expr)
             self.is_running = True
+            self._start_time = datetime.now()
             self._ensure_async_primitives()  # bind to the loop start() runs on
             self._stop_event.clear()
             
@@ -385,7 +387,7 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
                 logger.info(f"Estimated cost this run: ${estimated_cost:.4f}, Total: ${self._total_cost:.4f}")
                 
                 safe_call(self.on_success, result)
-                self._update_state_if_daemon()
+                await asyncio.to_thread(self._update_state_if_daemon)
                 return
                 
             except asyncio.TimeoutError as e:
@@ -412,7 +414,7 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
             last_exc if last_exc is not None
             else RuntimeError(f"Failed after {max_retries} attempts")
         )
-        self._update_state_if_daemon()
+        await asyncio.to_thread(self._update_state_if_daemon)
     
     async def execute_once(self) -> Any:
         """

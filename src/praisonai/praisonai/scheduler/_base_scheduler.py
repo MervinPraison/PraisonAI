@@ -43,7 +43,7 @@ class _BaseAgentScheduler:
             "success_rate": (success / execs * 100) if execs > 0 else 0,
             "total_cost_usd": round(total_cost, 4),
             "remaining_budget": (
-                round(self.max_cost - total_cost, 4) if self.max_cost else None
+                round(self.max_cost - total_cost, 4) if self.max_cost is not None else None
             ),
             "runtime_seconds": runtime,
             "cost_per_execution": (
