@@ -181,8 +181,9 @@ class BaseFrameworkAdapter:
         cli_config: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
-        Safe default for sync-only adapters (crewai, autogen v0.2):
-        run the sync implementation in a worker thread, freeing the loop.
+        Safe default: run sync implementation in a worker thread.
+        
+        Framework adapters with native async support should override this method.
         """
         import asyncio
         return await asyncio.to_thread(

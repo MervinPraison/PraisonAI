@@ -255,6 +255,47 @@ class AgentsGenerator:
         """
         return self._adapter_registry.create(framework)
 
+    def _prepare_adapter(self, framework: str, config: dict, tools_dict: dict):
+        """
+        Single source of truth for adapter resolution + setup + observability.
+        
+        Called by both sync and async entry points so they cannot drift.
+        
+        Args:
+            framework: Framework name to prepare
+            config: Configuration dictionary
+            tools_dict: Tools dictionary
+            
+        Returns:
+            Prepared and configured framework adapter
+        """
+        initial_adapter = self._get_framework_adapter(framework)
+        adapter = initial_adapter.resolve()  # autogen v0.2/v0.4, etc.
+
+        from .framework_adapters.validators import assert_framework_available
+        assert_framework_available(adapter.name)
+
+        from .observability.hooks import init_observability
+        init_observability(adapter.name)
+
+        adapter.setup(framework_tag=adapter.name)
+
+        self._validate_cli_backend_compatibility(config, adapter.name)
+
+        # AgentOps init lives here too -- once, not in two places.
+        api_key = os.getenv("AGENTOPS_API_KEY")
+        if api_key:
+            try:
+                import agentops
+                agentops.init(api_key, default_tags=[adapter.name])
+            except ImportError:
+                pass
+
+        self.framework = adapter.name
+        self.framework_adapter = adapter
+        self.logger.info(f"Using framework: {adapter.name}")
+        return adapter
+
     def _merge_cli_config(self, config, cli_config):
         """
         Merge CLI configuration with YAML configuration.
