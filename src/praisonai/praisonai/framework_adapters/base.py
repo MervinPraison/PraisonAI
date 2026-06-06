@@ -161,6 +161,7 @@ class BaseFrameworkAdapter:
             task_callback=task_callback,
             cli_config=cli_config
         )
+
     def cleanup(self) -> None:
         """Clean up resources - default implementation does nothing."""
         pass

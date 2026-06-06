@@ -300,6 +300,9 @@ class ToolResolver:
                     return cached()
                 return cached
 
+            # Track if any source indicated a non-cacheable failure
+            allow_none_cache = True
+
             # 1. Check local tools.py first (highest priority)
             if name in local_tools:
                 logger.debug(f"Resolved '{name}' from local tools.py")
@@ -325,6 +328,9 @@ class ToolResolver:
                 if instantiate and self._is_class(result.tool):
                     return result.tool()
                 return result.tool
+            elif not result.cacheable:
+                # Track that a non-cacheable failure occurred
+                allow_none_cache = False
             
             # 4. Check praisonai-tools package
             tool = self._resolve_from_praisonai_tools(name)
@@ -342,9 +348,12 @@ class ToolResolver:
                     return tool()
                 return tool
             
-            # Cache the None result to avoid repeated failed lookups
-            logger.warning(f"Tool '{name}' not found in any source")
-            self._resolve_cache[name] = None
+            # Cache None only if the failure was not transient
+            if allow_none_cache:
+                logger.warning(f"Tool '{name}' not found in any source")
+                self._resolve_cache[name] = None
+            else:
+                logger.debug(f"Tool '{name}' failed transiently; not caching None")
             return None
     
     def _is_class(self, obj) -> bool:
