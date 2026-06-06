@@ -146,8 +146,10 @@ class PairingStore:
         self._pending: Dict[str, dict] = {}
         # (channel_id, channel_type) -> PairedChannel
         self._paired: Dict[tuple, PairedChannel] = {}
+        self._loaded_mtime: float = 0.0
 
         self._load()
+        self._loaded_mtime = self._get_store_mtime()
 
     # ── Code lifecycle ────────────────────────────────────────────────
 
@@ -230,6 +232,7 @@ class PairingStore:
     def is_paired(self, channel_id: str, channel_type: str) -> bool:
         """Check if a channel is authorised."""
         with self._lock:
+            self._reload_if_stale()
             return (channel_id, channel_type) in self._paired
 
     def list_paired(self) -> List[PairedChannel]:
@@ -331,6 +334,7 @@ class PairingStore:
                 with os.fdopen(fd, "w") as fh:
                     json.dump(data, fh, indent=2)
                 os.replace(tmp_path, self._path)  # atomic on POSIX
+                self._loaded_mtime = self._get_store_mtime()
             except Exception:
                 # Clean up temp file on failure
                 try:
@@ -340,6 +344,23 @@ class PairingStore:
                 raise
         except OSError as exc:
             logger.warning("Failed to save pairing store: %s", exc)
+
+    def _get_store_mtime(self) -> float:
+        """Return pairing store file mtime, or 0 if unavailable."""
+        try:
+            return os.path.getmtime(self._path) if os.path.exists(self._path) else 0.0
+        except OSError:
+            return 0.0
+
+    def _reload_if_stale(self) -> None:
+        """Reload from disk when another process has updated the store."""
+        current_mtime = self._get_store_mtime()
+        if current_mtime <= self._loaded_mtime:
+            return
+        self._paired.clear()
+        self._pending.clear()
+        self._load()
+        self._loaded_mtime = current_mtime
 
     def _load(self) -> None:
         """Load paired channels from disk."""

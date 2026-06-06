@@ -1685,6 +1685,13 @@ class WebSocketGateway:
                 self._channel_tasks.append(task)
             logger.info(f"Started {len(self._channel_bots)} channel bot(s)")
 
+    def _wire_gateway_pairing_store(self, bot: Any) -> None:
+        """Share the gateway pairing store with a channel bot."""
+        from praisonai.bots._pairing_ui import PairingCallbackHandler
+
+        bot._pairing_store = self.pairing_store
+        bot._pairing_callback_handler = PairingCallbackHandler(self.pairing_store)
+
     def _create_bot(
         self,
         channel_type: str,
@@ -1714,14 +1721,20 @@ class WebSocketGateway:
 
         if channel_type == "telegram":
             from praisonai.bots import TelegramBot
-            return TelegramBot(token=token, agent=agent, config=config)
+            bot = TelegramBot(token=token, agent=agent, config=config)
+            self._wire_gateway_pairing_store(bot)
+            return bot
         elif channel_type == "discord":
             from praisonai.bots import DiscordBot
-            return DiscordBot(token=token, agent=agent, config=config)
+            bot = DiscordBot(token=token, agent=agent, config=config)
+            self._wire_gateway_pairing_store(bot)
+            return bot
         elif channel_type == "slack":
             from praisonai.bots import SlackBot
             app_token = ch_cfg.get("app_token", os.environ.get("SLACK_APP_TOKEN", ""))
-            return SlackBot(token=token, agent=agent, config=config, app_token=app_token)
+            bot = SlackBot(token=token, agent=agent, config=config, app_token=app_token)
+            self._wire_gateway_pairing_store(bot)
+            return bot
         elif channel_type == "whatsapp":
             from praisonai.bots import WhatsAppBot
             wa_mode = ch_cfg.get("mode", "cloud").lower().strip()

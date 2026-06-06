@@ -131,6 +131,7 @@ class UnifiedSessionStore:
         self.session_dir = Path(session_dir) if session_dir else DEFAULT_SESSION_DIR
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self._cache: Dict[str, UnifiedSession] = {}
+        self._cache_mtimes: Dict[str, float] = {}
         self._last_session_id: Optional[str] = None
     
     def _get_session_path(self, session_id: str) -> Path:
@@ -140,6 +141,20 @@ class UnifiedSessionStore:
     def _get_last_session_path(self) -> Path:
         """Get the path to the last session marker file."""
         return self.session_dir / ".last_session"
+
+    def _is_cache_valid(self, session_id: str) -> bool:
+        """Return True if the in-memory cache matches the on-disk file."""
+        if session_id not in self._cache:
+            return False
+        path = self._get_session_path(session_id)
+        if not path.exists():
+            return False
+        try:
+            current_mtime = path.stat().st_mtime_ns
+            cached_mtime = self._cache_mtimes.get(session_id, 0)
+            return current_mtime <= cached_mtime
+        except OSError:
+            return False
     
     def save(self, session: UnifiedSession) -> None:
         """
@@ -200,8 +215,12 @@ class UnifiedSessionStore:
                     json_data = json.dumps(session.to_dict(), indent=2).encode('utf-8')
                     f.write(json_data)
             
-            # Update cache
+            # Update cache and track file mtime for cross-process invalidation
             self._cache[session.session_id] = session
+            try:
+                self._cache_mtimes[session.session_id] = path.stat().st_mtime_ns
+            except OSError:
+                pass
             
             # Update last session marker
             self._update_last_session(session.session_id)
@@ -221,8 +240,8 @@ class UnifiedSessionStore:
         Returns:
             Session if found, None otherwise
         """
-        # Check cache first
-        if session_id in self._cache:
+        # Return cached session only when the on-disk file has not changed
+        if self._is_cache_valid(session_id):
             return self._cache[session_id]
         
         path = self._get_session_path(session_id)
@@ -258,6 +277,10 @@ class UnifiedSessionStore:
             
             session = UnifiedSession.from_dict(data)
             self._cache[session_id] = session
+            try:
+                self._cache_mtimes[session_id] = path.stat().st_mtime_ns
+            except OSError:
+                pass
             logger.debug(f"Loaded session: {session_id}")
             return session
         except Exception as e:
@@ -299,6 +322,7 @@ class UnifiedSessionStore:
         if path.exists():
             path.unlink()
             self._cache.pop(session_id, None)
+            self._cache_mtimes.pop(session_id, None)
             logger.debug(f"Deleted session: {session_id}")
             return True
         return False

@@ -698,18 +698,14 @@ class AgentsGenerator:
                             if isinstance(t, str) and t.strip():
                                 needed_tools.add(t.strip())
 
-                # Resolve only the tools actually referenced in YAML
+                # Resolve only the tools actually referenced in YAML using ToolResolver with instantiation
                 for tool_name in needed_tools:
                     try:
-                        resolved_tool = self.tool_resolver.resolve(tool_name)
-                        if resolved_tool is None:
-                            self.logger.warning(f"Tool '{tool_name}' not found")
-                            continue
-                        tools_dict[tool_name] = (
-                            resolved_tool() if inspect.isclass(resolved_tool) else resolved_tool
-                        )
+                        resolved_tool = self.tool_resolver.resolve(tool_name, instantiate=True)
+                        if resolved_tool is not None:
+                            tools_dict[tool_name] = resolved_tool
                     except Exception as e:
-                        self.logger.warning(f"Failed to initialize tool '{tool_name}': {e}")
+                        self.logger.warning(f"Failed to resolve or instantiate tool '{tool_name}': {e}")
                         continue
 
             except Exception as e:

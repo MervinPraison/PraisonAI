@@ -155,6 +155,30 @@ class TestPairingOwnerDM:
         # Should not send another approval DM
         assert len(self.adapter.approval_dms) == 1  # Still only the original one
     
+    async def test_non_owner_cannot_approve_pairing(self):
+        """Only the configured owner may approve pairing callbacks."""
+        code = self.pairing_store.generate_code(channel_type="telegram")
+        keyboard = PairingUIBuilder.create_telegram_keyboard(
+            user_name="Alice",
+            code=code,
+            channel="telegram",
+            user_id="new-user",
+        )
+        callback_data = keyboard["inline_keyboard"][0][0]["callback_data"]
+
+        self.adapter.config = self.config
+
+        callback_handler = PairingCallbackHandler(self.pairing_store)
+        result = await callback_handler.handle_approval_callback(
+            callback_data=callback_data,
+            owner_user_id="attacker-999",
+            bot_adapter=self.adapter,
+        )
+
+        assert result.success is False
+        assert "owner" in result.message.lower()
+        assert not self.pairing_store.is_paired("new-user", "telegram")
+
     async def test_no_owner_id_falls_back_to_cli(self):
         """Test fallback to CLI instructions when owner_user_id is not configured."""
         # Configure bot without owner ID
