@@ -270,7 +270,23 @@ class AgentsGenerator:
             Prepared and configured framework adapter
         """
         initial_adapter = self._get_framework_adapter(framework)
-        adapter = initial_adapter.resolve()  # autogen v0.2/v0.4, etc.
+        
+        # Handle YAML-level autogen_version override
+        autogen_version_override = config.get('autogen_version')
+        original_env_value = None
+        if framework == 'autogen' and autogen_version_override:
+            original_env_value = os.environ.get('AUTOGEN_VERSION')
+            os.environ['AUTOGEN_VERSION'] = str(autogen_version_override)
+            self.logger.debug(f"Temporarily setting AUTOGEN_VERSION={autogen_version_override}")
+        
+        try:
+            adapter = initial_adapter.resolve()  # autogen v0.2/v0.4, etc.
+        finally:
+            # Restore original environment variable
+            if autogen_version_override and original_env_value is not None:
+                os.environ['AUTOGEN_VERSION'] = original_env_value
+            elif autogen_version_override and original_env_value is None:
+                os.environ.pop('AUTOGEN_VERSION', None)
 
         from .framework_adapters.validators import assert_framework_available
         assert_framework_available(adapter.name)
@@ -281,15 +297,6 @@ class AgentsGenerator:
         adapter.setup(framework_tag=adapter.name)
 
         self._validate_cli_backend_compatibility(config, adapter.name)
-
-        # AgentOps init lives here too -- once, not in two places.
-        api_key = os.getenv("AGENTOPS_API_KEY")
-        if api_key:
-            try:
-                import agentops
-                agentops.init(api_key, default_tags=[adapter.name])
-            except ImportError:
-                pass
 
         self.framework = adapter.name
         self.framework_adapter = adapter
