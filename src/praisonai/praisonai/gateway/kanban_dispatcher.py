@@ -110,8 +110,13 @@ class KanbanDispatcher:
                 # Release claim on error
                 try:
                     store.release_claim(task.id, self.worker_id)
-                except:
-                    pass
+                except Exception as release_err:
+                    logger.error(
+                        "Failed to release claim for task %s (worker %s); task may be stuck "
+                        "in 'claimed' state until manually released: %s",
+                        task.id, self.worker_id, release_err,
+                        exc_info=True,
+                    )
         
         if spawned > 0:
             logger.info(f"Spawned {spawned} kanban task workers")
@@ -149,13 +154,15 @@ class KanbanDispatcher:
             with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.log') as temp_log:
                 temp_log_path = temp_log.name
             
-            process = subprocess.Popen(
-                cmd,
-                env=env,
-                stdout=open(temp_log_path, 'w'),
-                stderr=subprocess.STDOUT,
-                text=True
-            )
+            with open(temp_log_path, 'w') as log_handle:
+                process = subprocess.Popen(
+                    cmd,
+                    env=env,
+                    stdout=log_handle,
+                    stderr=subprocess.STDOUT,
+                    text=True
+                )
+            # parent FD closed here; child still has its duped copy
             
             # Store log path for later cleanup
             if not hasattr(self, '_temp_logs'):
@@ -275,8 +282,12 @@ class KanbanDispatcher:
                     # Release claim as fallback
                     try:
                         store.release_claim(task_id, self.worker_id)
-                    except:
-                        pass
+                    except Exception as release_err:
+                        logger.error(
+                            "Failed to release claim during cleanup for task %s: %s",
+                            task_id, release_err,
+                            exc_info=True,
+                        )
         
         # Remove completed tasks from tracking and clean up temp logs
         for task_id in completed:
@@ -330,12 +341,17 @@ class KanbanDispatcher:
             
             # Force terminate remaining tasks
             for task_id, process in self.running_tasks.items():
+                logger.warning(f"Force terminating task {task_id}")
                 try:
-                    logger.warning(f"Force terminating task {task_id}")
                     process.terminate()
                     process.wait(timeout=5)
-                except:
+                except subprocess.TimeoutExpired:
+                    logger.warning(f"Task {task_id} did not terminate in 5s; sending SIGKILL")
                     process.kill()
+                except OSError as os_err:
+                    logger.error(f"OS error while terminating task {task_id}: {os_err}")
+                    process.kill()
+                # KeyboardInterrupt, SystemExit, CancelledError now propagate as intended
             
             self.running_tasks.clear()
         
