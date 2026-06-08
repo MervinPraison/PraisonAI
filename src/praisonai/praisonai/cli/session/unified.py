@@ -56,6 +56,10 @@ class UnifiedSession:
     # Model info
     current_model: str = "gpt-4o-mini"
     
+    # Versioning for proper merge resolution
+    _version: int = 0
+    _baseline_counters: Optional[Dict[str, float]] = None
+    
     def add_message(self, role: str, content: str) -> None:
         """Add a message to the session."""
         self.messages.append({
@@ -84,6 +88,14 @@ class UnifiedSession:
     
     def update_stats(self, input_tokens: int, output_tokens: int, cost: float = 0.0) -> None:
         """Update token and cost statistics."""
+        if self._baseline_counters is None:
+            self._baseline_counters = {
+                "total_input_tokens": self.total_input_tokens,
+                "total_output_tokens": self.total_output_tokens,
+                "total_cost": self.total_cost,
+                "request_count": self.request_count,
+            }
+        
         self.total_input_tokens += input_tokens
         self.total_output_tokens += output_tokens
         self.total_cost += cost
@@ -148,24 +160,65 @@ class UnifiedSessionStore:
 
     def _merge_sessions(self, disk: UnifiedSession, incoming: UnifiedSession) -> UnifiedSession:
         """Merge incoming session into disk state without losing concurrent writes."""
-        messages_by_key = {self._message_key(m): m for m in disk.messages}
-        for msg in incoming.messages:
-            messages_by_key.setdefault(self._message_key(msg), msg)
+        # Initialize baseline counters if not set
+        if incoming._baseline_counters is None:
+            incoming._baseline_counters = {
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "total_cost": 0.0,
+                "request_count": 0,
+            }
+        
+        # Version-based merge strategy
+        if incoming._version == disk._version:
+            # Same version - incoming can replace disk messages (preserving order)
+            disk.messages = incoming.messages
+            
+            # For counters, apply deltas instead of max
+            if incoming._baseline_counters:
+                delta_input = incoming.total_input_tokens - incoming._baseline_counters["total_input_tokens"]
+                delta_output = incoming.total_output_tokens - incoming._baseline_counters["total_output_tokens"]
+                delta_cost = incoming.total_cost - incoming._baseline_counters["total_cost"]
+                delta_requests = incoming.request_count - incoming._baseline_counters["request_count"]
+                
+                disk.total_input_tokens += delta_input
+                disk.total_output_tokens += delta_output
+                disk.total_cost += delta_cost
+                disk.request_count += delta_requests
+            else:
+                # Fallback to max if no baseline
+                disk.total_input_tokens = max(disk.total_input_tokens, incoming.total_input_tokens)
+                disk.total_output_tokens = max(disk.total_output_tokens, incoming.total_output_tokens)
+                disk.total_cost = max(disk.total_cost, incoming.total_cost)
+                disk.request_count = max(disk.request_count, incoming.request_count)
+        else:
+            # Different versions - perform three-way merge for messages
+            messages_by_key = {self._message_key(m): m for m in disk.messages}
+            for msg in incoming.messages:
+                messages_by_key.setdefault(self._message_key(msg), msg)
 
-        disk.messages = sorted(
-            messages_by_key.values(),
-            key=lambda m: m.get("timestamp", ""),
-        )
+            disk.messages = sorted(
+                messages_by_key.values(),
+                key=lambda m: m.get("timestamp", ""),
+            )
+            
+            # For counters with version mismatch, sum the totals
+            disk.total_input_tokens += incoming.total_input_tokens
+            disk.total_output_tokens += incoming.total_output_tokens
+            disk.total_cost += incoming.total_cost
+            disk.request_count += incoming.request_count
+        
+        # Update other fields
         disk.metadata = {**disk.metadata, **incoming.metadata}
-        disk.total_input_tokens = max(disk.total_input_tokens, incoming.total_input_tokens)
-        disk.total_output_tokens = max(disk.total_output_tokens, incoming.total_output_tokens)
-        disk.total_cost = max(disk.total_cost, incoming.total_cost)
-        disk.request_count = max(disk.request_count, incoming.request_count)
         if incoming.workspace:
             disk.workspace = incoming.workspace
         if incoming.current_model:
             disk.current_model = incoming.current_model
+        
+        # Increment version and update timestamp
+        disk._version += 1
         disk.updated_at = datetime.now().isoformat()
+        
         return disk
 
     def _read_json_locked(self, f) -> Optional[Dict[str, Any]]:
@@ -273,6 +326,15 @@ class UnifiedSessionStore:
                 return None
 
             session = UnifiedSession.from_dict(data)
+            
+            # Initialize baseline counters for proper delta calculation on save
+            session._baseline_counters = {
+                "total_input_tokens": session.total_input_tokens,
+                "total_output_tokens": session.total_output_tokens,
+                "total_cost": session.total_cost,
+                "request_count": session.request_count,
+            }
+            
             self._cache[session_id] = session
             logger.debug(f"Loaded session: {session_id}")
             return session
