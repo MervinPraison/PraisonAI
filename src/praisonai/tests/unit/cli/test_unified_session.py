@@ -263,6 +263,27 @@ class TestUnifiedSessionStore:
         
         assert session is None
 
+    def test_concurrent_save_preserves_messages(self, temp_session_dir):
+        """Stale in-memory sessions must not overwrite concurrent writes on disk."""
+        store_a = UnifiedSessionStore(session_dir=temp_session_dir)
+        store_b = UnifiedSessionStore(session_dir=temp_session_dir)
+
+        session = UnifiedSession(session_id="race-test")
+        session.add_user_message("msg1")
+        store_a.save(session)
+
+        session_b = store_b.load("race-test")
+        session_b.add_user_message("msg2")
+        store_b.save(session_b)
+
+        session.add_user_message("msg3")
+        store_a.save(session)
+
+        final = UnifiedSessionStore(session_dir=temp_session_dir).load("race-test")
+        contents = [m["content"] for m in final.messages]
+
+        assert contents == ["msg1", "msg2", "msg3"]
+
 
 class TestGlobalSessionStore:
     """Tests for global session store."""
