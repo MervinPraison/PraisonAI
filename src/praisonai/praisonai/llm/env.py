@@ -20,11 +20,11 @@ class LLMEndpoint:
 
 # Map well-known model prefixes to their (env-var, default base_url).
 _PROVIDER_MAP = {
-    "anthropic/":  ("ANTHROPIC_API_KEY",  None),
-    "google/":     ("GOOGLE_API_KEY",     None),
-    "gemini/":     ("GEMINI_API_KEY",     None),
+    "anthropic/":  ("ANTHROPIC_API_KEY",  "https://api.anthropic.com/v1"),
+    "google/":     ("GOOGLE_API_KEY",     "https://generativelanguage.googleapis.com/v1beta"),
+    "gemini/":     ("GEMINI_API_KEY",     "https://generativelanguage.googleapis.com/v1beta"),
     "groq/":       ("GROQ_API_KEY",       "https://api.groq.com/openai/v1"),
-    "cohere/":     ("COHERE_API_KEY",     None),
+    "cohere/":     ("COHERE_API_KEY",     "https://api.cohere.ai/v1"),
     "openrouter/": ("OPENROUTER_API_KEY", "https://openrouter.ai/api/v1"),
     "ollama/":     ("OLLAMA_API_KEY",     "http://localhost:11434/v1"),
 }
@@ -78,10 +78,10 @@ def resolve_llm_endpoint(*, default_base: str = _DEFAULT_BASE) -> LLMEndpoint:
         or default_base
     )
     
-    # api_key is read from the provider-specific var, falling back to OPENAI_API_KEY
-    # only when the model is the default OpenAI shape.
+    # Try provider-specific key first; fall back to OPENAI_API_KEY only for
+    # OpenAI-compatible proxies that may use a single shared key.
     api_key = os.environ.get(key_var) or (
-        os.environ.get("OPENAI_API_KEY") if key_var != "OPENAI_API_KEY" else None
+        os.environ.get("OPENAI_API_KEY") if key_var == "OPENAI_API_KEY" else None
     )
     
     return LLMEndpoint(model=model, base_url=base_url, api_key=api_key)

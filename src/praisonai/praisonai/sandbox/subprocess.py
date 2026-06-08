@@ -69,6 +69,7 @@ class SubprocessSandbox:
 
         # Always pass a minimal PATH (so /usr/bin/python resolves) — never the host's.
         env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
+        # HOME uses temp_dir which is set during start() - /tmp is defensive fallback  # noqa: S108
         env.setdefault("HOME", self._temp_dir or "/tmp")
         return env
     
@@ -154,22 +155,25 @@ class SubprocessSandbox:
         
         started_at = time.time()
         
+        # preexec_fn is POSIX-only; omit on Windows
+        popen_kwargs = {
+            "stdout": asyncio.subprocess.PIPE,
+            "stderr": asyncio.subprocess.PIPE,
+            "cwd": working_dir or self._temp_dir,
+            "env": process_env,
+        }
+        if os.name == "posix":
+            popen_kwargs["start_new_session"] = True
+            popen_kwargs["preexec_fn"] = lambda: self._apply_rlimits(limits)
+        else:
+            logger.warning("Resource limits and session isolation not available on Windows")
+
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=working_dir or self._temp_dir,
-                env=process_env,
-                start_new_session=True,  # new pgid so we can SIGKILL the tree
-                preexec_fn=lambda: self._apply_rlimits(limits),
-            )
+            proc = await asyncio.create_subprocess_exec(*cmd, **popen_kwargs)
             
             try:
-                # Enforce max_output_size by reading incrementally
+                # Truncate output to max_output_size after reading
                 max_output_size = self.config.security_policy.max_output_size
-                stdout_data = b""
-                stderr_data = b""
                 
                 stdout, stderr = await asyncio.wait_for(
                     proc.communicate(),
@@ -198,9 +202,12 @@ class SubprocessSandbox:
             except asyncio.TimeoutError:
                 # Kill the whole process group, not just the leader
                 try:
-                    import signal
-                    os.killpg(proc.pid, signal.SIGKILL)
-                except (ProcessLookupError, PermissionError):
+                    if os.name == "posix":
+                        import signal
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    else:
+                        proc.kill()
+                except (ProcessLookupError, PermissionError, OSError):
                     proc.kill()
                 await proc.wait()
                 
@@ -276,16 +283,21 @@ class SubprocessSandbox:
         
         started_at = time.time()
         
+        # preexec_fn is POSIX-only; omit on Windows
+        popen_kwargs = {
+            "stdout": asyncio.subprocess.PIPE,
+            "stderr": asyncio.subprocess.PIPE,
+            "cwd": working_dir or self._temp_dir,
+            "env": process_env,
+        }
+        if os.name == "posix":
+            popen_kwargs["start_new_session"] = True
+            popen_kwargs["preexec_fn"] = lambda: self._apply_rlimits(limits)
+        else:
+            logger.warning("Resource limits and session isolation not available on Windows")
+
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=working_dir or self._temp_dir,
-                env=process_env,
-                start_new_session=True,  # new pgid so we can SIGKILL the tree
-                preexec_fn=lambda: self._apply_rlimits(limits),
-            )
+            proc = await asyncio.create_subprocess_exec(*cmd, **popen_kwargs)
             
             try:
                 stdout, stderr = await asyncio.wait_for(
@@ -316,9 +328,12 @@ class SubprocessSandbox:
             except asyncio.TimeoutError:
                 # Kill the whole process group, not just the leader
                 try:
-                    import signal
-                    os.killpg(proc.pid, signal.SIGKILL)
-                except (ProcessLookupError, PermissionError):
+                    if os.name == "posix":
+                        import signal
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    else:
+                        proc.kill()
+                except (ProcessLookupError, PermissionError, OSError):
                     proc.kill()
                 await proc.wait()
                 
