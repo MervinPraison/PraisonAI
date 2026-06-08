@@ -42,6 +42,7 @@ def main():
     
     # Create tasks with robustness features
     research_task = Task(
+        name="research",
         description="Research the latest trends in AI agents for 2025",
         expected_output="A summary of key AI agent trends",
         agent=researcher,
@@ -51,6 +52,7 @@ def main():
     
     # Optional enrichment step - workflow continues even if this fails
     enrich_task = Task(
+        name="enrich",
         description="Enrich the research with real-world examples",
         expected_output="Research with added examples",
         agent=enricher,
@@ -60,6 +62,7 @@ def main():
     )
     
     write_task = Task(
+        name="write",
         description="Write a brief summary based on the research",
         expected_output="A well-written summary paragraph",
         agent=writer,

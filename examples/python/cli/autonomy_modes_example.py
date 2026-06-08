@@ -34,5 +34,5 @@ print(f"\nChanged to: {handler.get_mode()}")
 print("File edits now auto-approved, shell commands still require approval")
 
 # Get statistics
-stats = handler.get_stats()
+stats = manager.get_stats()
 print(f"\nStats: {stats}")

@@ -26,7 +26,8 @@ Expected Output:
     Messages persisted: 2
 """
 
-from praisonaiagents import Agent, db
+from praisonaiagents import Agent
+from praisonaiagents.db import db
 
 # Create database adapter (simplified import)
 db_instance = db(
@@ -37,8 +38,10 @@ db_instance = db(
 agent = Agent(
     name="Assistant",
     instructions="You are a helpful assistant. Keep responses brief.",
-    db=db_instance,
-    session_id="demo-session-001",  # Same session_id = resume conversation
+    memory={
+        "db": db_instance,
+        "session_id": "demo-session-001",  # Same session_id = resume conversation
+    },
     output="silent"
 )
 

@@ -11,7 +11,8 @@ Expected output:
     - Second run: Resumes with history
 """
 
-from praisonaiagents import Agent, db
+from praisonaiagents import Agent
+from praisonaiagents.db import db
 
 # Create database
 my_db = db(
@@ -25,8 +26,10 @@ SESSION_ID = "resume-demo-session"
 agent = Agent(
     name="MemoryBot",
     instructions="You remember our conversation. Be helpful and concise.",
-    db=my_db,
-    session_id=SESSION_ID
+    memory={
+        "db": my_db,
+        "session_id": SESSION_ID,
+    },
 )
 
 # Check if this is a new or resumed session
