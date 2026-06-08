@@ -21,8 +21,6 @@ config = {
 }
 
 _sample_path = Path(__file__).with_name("sample_knowledge.txt")
-if not _sample_path.exists():
-    _sample_path.write_text("Mervin Praison is the creator of PraisonAI.\n", encoding="utf-8")
 
 # Create an agent with knowledge capabilities
 knowledge_agent = Agent(
@@ -49,6 +47,10 @@ agents = AgentTeam(
 )
 
 if __name__ == "__main__":
+    # Create sample file for this run only
+    if not _sample_path.exists():
+        _sample_path.write_text("Mervin Praison is the creator of PraisonAI.\n", encoding="utf-8")
+    
     if not os.environ.get("OPENAI_API_KEY"):
         print("Set OPENAI_API_KEY to run this example.")
         sys.exit(0)

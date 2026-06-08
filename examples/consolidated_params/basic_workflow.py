@@ -30,5 +30,5 @@ if __name__ == "__main__":
             sys.stdout.reconfigure(encoding="utf-8")
         except Exception:
             pass
-    result = workflow.run("AI agents")
+    result = workflow.run()
     print(result)
