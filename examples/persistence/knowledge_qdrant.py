@@ -52,8 +52,10 @@ agent = Agent(
     instructions="You are a helpful assistant with access to technical documentation.",
     knowledge={
         "sources": [doc_path],
-        "vector_store": "qdrant",
-        "url": "http://localhost:6333",
+        "vector_store": {
+            "provider": "qdrant",
+            "url": "http://localhost:6333",
+        },
     }
 )
 

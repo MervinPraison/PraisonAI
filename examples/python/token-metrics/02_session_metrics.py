@@ -14,7 +14,7 @@ def main():
         goal="Analyze data and provide insights",
         backstory="You are an experienced data analyst with expertise in market research.",
         llm="gpt-4o-mini",
-        metrics=True  # 🎯 Enable metrics tracking
+        output={"metrics": True}
     )
     
     writer_agent = Agent(
@@ -23,7 +23,7 @@ def main():
         goal="Create well-structured content",
         backstory="You are a skilled technical writer who creates clear, engaging content.",
         llm="gpt-4o-mini",
-        metrics=True  # 🎯 Enable metrics tracking
+        output={"metrics": True}
     )
     
     # Create multiple tasks
