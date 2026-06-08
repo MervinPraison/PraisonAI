@@ -53,7 +53,7 @@ workflow = AgentFlow(
         # Step 4: Function - formats output
         format_output
     ],
-    default_llm="gpt-4o-mini"  # Used for action-based steps
+    llm="gpt-4o-mini",  # Used for action-based steps
 )
 
 if __name__ == "__main__":

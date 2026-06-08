@@ -6,6 +6,7 @@ built-in validation and safety mechanisms for secure agent operations.
 """
 
 from praisonaiagents import Agent, Task, AgentTeam
+from praisonaiagents.config.feature_configs import GuardrailConfig
 from praisonaiagents.tools import internet_search
 
 print("=== Production Guardrails Patterns Example ===\n")
@@ -38,8 +39,8 @@ production_agent = Agent(
     goal="Generate safe, compliant content for production use",
     backstory="Production-ready agent with built-in safety and compliance checks",
     tools=[internet_search],
-    guardrails=content_guardrail,
-    max_retries=3)
+    guardrails=GuardrailConfig(validator=content_guardrail, max_retries=3),
+)
 
 # Create secure task with validation
 secure_task = Task(

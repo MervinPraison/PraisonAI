@@ -21,7 +21,7 @@ agent = Agent(
     name="ContextBot",
     instructions="You help show context information.",
     tools=[show_context],
-    session_id="my-session-123"
+    memory={"session_id": "my-session-123"},
 )
 
 if __name__ == "__main__":

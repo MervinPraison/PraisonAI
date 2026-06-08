@@ -18,7 +18,7 @@ openai_profile = AuthProfile(
     provider="openai",
     api_key=os.environ.get("OPENAI_API_KEY", "sk-..."),
     priority=1,  # Highest priority
-    rate_limit=100,
+    rate_limit_rpm=100,
 )
 
 anthropic_profile = AuthProfile(
@@ -26,7 +26,7 @@ anthropic_profile = AuthProfile(
     provider="anthropic",
     api_key=os.environ.get("ANTHROPIC_API_KEY", "sk-ant-..."),
     priority=2,  # Second priority
-    rate_limit=50,
+    rate_limit_rpm=50,
 )
 
 groq_profile = AuthProfile(
@@ -34,7 +34,7 @@ groq_profile = AuthProfile(
     provider="groq",
     api_key=os.environ.get("GROQ_API_KEY", "gsk-..."),
     priority=3,  # Third priority (fast but limited)
-    rate_limit=30,
+    rate_limit_rpm=30,
 )
 
 # Configure failover behavior
