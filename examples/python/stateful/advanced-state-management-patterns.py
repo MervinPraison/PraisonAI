@@ -69,9 +69,10 @@ agents_system = AgentTeam(
     memory=True, output="verbose"
 )
 
-print("Starting state management demonstration...")
-result = agents_system.start()
+if __name__ == "__main__":
+    print("Starting state management demonstration...")
+    result = agents_system.start()
 
-print(f"\nState Management Result: {str(result)[:200]}...")
-print("\n✅ State management patterns complete!")
-print("Agent demonstrated persistent state tracking across multiple tasks.")
+    print(f"\nState Management Result: {str(result)[:200]}...")
+    print("\n✅ State management patterns complete!")
+    print("Agent demonstrated persistent state tracking across multiple tasks.")

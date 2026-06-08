@@ -33,15 +33,16 @@ reflection_task = Task(
 )
 
 # Run with self-reflection optimization
-print("Starting self-reflection optimization demonstration...")
-agents = AgentTeam(
-    agents=[reflection_agent],
-    tasks=[reflection_task],
-    process="sequential",
-    output="verbose",
-)
-result = agents.start()
+if __name__ == "__main__":
+    print("Starting self-reflection optimization demonstration...")
+    agents = AgentTeam(
+        agents=[reflection_agent],
+        tasks=[reflection_task],
+        process="sequential",
+        output="verbose",
+    )
+    result = agents.start()
 
-print(f"\nSelf-Reflection Result: {str(result)[:200]}...")
-print("\n✅ Self-reflection optimization complete!")
-print("Agent demonstrated iterative improvement through built-in self-reflection capabilities.")
+    print(f"\nSelf-Reflection Result: {str(result)[:200]}...")
+    print("\n✅ Self-reflection optimization complete!")
+    print("Agent demonstrated iterative improvement through built-in self-reflection capabilities.")

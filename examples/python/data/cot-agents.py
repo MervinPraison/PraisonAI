@@ -136,4 +136,5 @@ agents = AgentTeam(
     output="minimal",
 )
 
-agents.start()
+if __name__ == "__main__":
+    agents.start()
