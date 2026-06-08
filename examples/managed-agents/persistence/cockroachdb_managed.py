@@ -17,8 +17,10 @@ from praisonaiagents import Agent
 agent = Agent(
     name="CockroachDB Agent",
     instructions="You are a helpful assistant.",
-    db={"database_url": os.getenv("COCKROACHDB_URL")},
-    session_id="crdb-demo-session",
+    memory={
+        "session_id": "crdb-demo-session",
+        "db": {"database_url": os.getenv("COCKROACHDB_URL")},
+    },
 )
 
 result = agent.start("What is distributed SQL? Explain in 2 sentences.")

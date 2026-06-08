@@ -28,7 +28,7 @@ def example_basic_persistence():
     agent = Agent(
         name="Assistant",
         instructions="You are a helpful assistant. Be very brief.",
-        session_id=session_id,
+        memory={"session_id": session_id},
         output="minimal",
     )
     
@@ -59,7 +59,7 @@ def example_session_restoration():
     agent1 = Agent(
         name="MemoryBot",
         instructions="You are a helpful assistant. Be very brief.",
-        session_id=session_id,
+        memory={"session_id": session_id},
         output="minimal",
     )
     
@@ -72,7 +72,7 @@ def example_session_restoration():
     agent2 = Agent(
         name="MemoryBot",
         instructions="You are a helpful assistant. Be very brief.",
-        session_id=session_id,
+        memory={"session_id": session_id},
         output="minimal",
     )
     

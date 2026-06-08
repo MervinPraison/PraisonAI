@@ -57,8 +57,8 @@ def main():
     agent = Agent(
         name="SecureAgent",
         instructions="You are a file management assistant.",
-        policy=engine
     )
+    agent.policy = engine
     
     print("\n--- Agent with Policy Enforcement Created ---")
     print(f"Agent: {agent.name}")

@@ -60,7 +60,7 @@ print("=" * 50)
 agent_with_discovery = Agent(
     name="Multi-Skill Agent",
     instructions="You are a versatile assistant with multiple skills.",
-    skills_dirs=["./"],  # Scan current directory for skill subdirectories
+    skills=["./"],  # Scan current directory for skill subdirectories
 )
 
 if agent_with_discovery.skill_manager:

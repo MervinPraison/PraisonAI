@@ -40,7 +40,7 @@ agent = Agent(
         "execute_command"
     ],
     memory=True,
-    web_search=True,
+    web=True,
     auto_approve_tools=True,
 )
 
