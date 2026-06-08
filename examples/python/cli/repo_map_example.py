@@ -8,7 +8,7 @@ Docs: https://docs.praison.ai/cli/repo-map
 from praisonai.cli.features import RepoMapHandler
 
 # Initialize with current directory
-handler = RepoMapHandler(output="verbose")
+handler = RepoMapHandler(verbose=True)
 repo_map = handler.initialize(root=".")
 
 # Get the repository map

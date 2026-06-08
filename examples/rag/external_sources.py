@@ -207,7 +207,7 @@ def api_augmented_rag():
         instructions="""You are a financial assistant with access to market APIs.
         Provide accurate financial information and context.
         Always note that prices are subject to change.""",
-        user_id="api_demo"
+        memory={"user_id": "api_demo"},
     )
     
     queries = [

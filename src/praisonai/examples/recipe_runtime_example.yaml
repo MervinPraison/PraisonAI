@@ -85,7 +85,7 @@ examples:
   - name: Basic usage
     command: praisonai recipe run news-monitor
   - name: With custom topic
-    command: praisonai recipe run news-monitor -i '{"topic": "LLMs"}'
+    command: 'praisonai recipe run news-monitor -i ''{"topic": "LLMs"}'''
   - name: Background execution
     command: praisonai recipe run news-monitor --background
   - name: Submit as job

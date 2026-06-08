@@ -15,8 +15,20 @@ workflow = AgentFlow(
     ],
     output="verbose",
     planning=True,
+    variables={"topic": "AI agents"},
 )
 
 if __name__ == "__main__":
-    result = workflow.run(variables={"topic": "AI agents"})
+    import os
+    import sys
+
+    if not os.environ.get("OPENAI_API_KEY"):
+        print("Set OPENAI_API_KEY to run this example.")
+        sys.exit(0)
+    if sys.platform == "win32":
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+    result = workflow.run("AI agents")
     print(result)

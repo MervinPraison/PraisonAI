@@ -38,7 +38,7 @@ agent = Agent(
     name="PolicyBot",
     instructions="You are a customer service assistant.",
     knowledge=[sample_doc],
-    user_id="policy_user",
+    memory={"user_id": "policy_user"},
     llm="openai/gpt-4o-mini",
     output="minimal",
 )
