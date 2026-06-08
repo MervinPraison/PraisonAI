@@ -16,36 +16,33 @@ Protocol: SEP-1288 (WebSocket Transport)
 
 from praisonaiagents import Agent, MCP
 
-# Basic WebSocket connection
-agent = Agent(
-    name="WebSocket Assistant",
-    instructions="You are a helpful assistant connected via WebSocket.",
-    tools=MCP("ws://localhost:8080/mcp")
-)
-
-# Secure WebSocket with authentication
-agent_secure = Agent(
-    name="Secure WebSocket Assistant",
-    instructions="You are a helpful assistant with secure WebSocket connection.",
-    tools=MCP(
-        "wss://api.example.com/mcp",
-        auth_token="Bearer your-secret-token",
-        timeout=60
-    )
-)
-
-# WebSocket with custom options
-agent_custom = Agent(
-    name="Custom WebSocket Assistant",
-    tools=MCP(
-        "wss://api.example.com/mcp",
-        auth_token="your-token",
-        timeout=120,
-        debug=True
-    )
-)
-
 if __name__ == "__main__":
+    agent = Agent(
+        name="WebSocket Assistant",
+        instructions="You are a helpful assistant connected via WebSocket.",
+        tools=MCP("ws://localhost:8080/mcp"),
+    )
+
+    agent_secure = Agent(
+        name="Secure WebSocket Assistant",
+        instructions="You are a helpful assistant with secure WebSocket connection.",
+        tools=MCP(
+            "wss://api.example.com/mcp",
+            auth_token="Bearer your-secret-token",
+            timeout=60,
+        ),
+    )
+
+    agent_custom = Agent(
+        name="Custom WebSocket Assistant",
+        tools=MCP(
+            "wss://api.example.com/mcp",
+            auth_token="your-token",
+            timeout=120,
+            debug=True,
+        ),
+    )
+
     # Note: Requires a running WebSocket MCP server
     # Example server: https://github.com/modelcontextprotocol/servers
     

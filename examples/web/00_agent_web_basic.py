@@ -12,7 +12,7 @@ assert os.getenv("OPENAI_API_KEY"), "OPENAI_API_KEY must be set"
 # Enable web search and fetch
 agent = Agent(
     instructions="You are a research assistant with web access.",
-    web=True,
+    web="search_only",
 )
 
 # Disable web (default)

@@ -41,9 +41,9 @@ def my_custom_handler(args, context):
 custom_cmd = SlashCommand(
     name="mycommand",
     description="My custom command",
-    handler=my_custom_handler,
-    kind=CommandKind.ACTION,
-    aliases=["mc"]
+    action=my_custom_handler,
+    kind=CommandKind.CUSTOM,
+    alt_names=["mc"]
 )
 
 handler.register(custom_cmd)

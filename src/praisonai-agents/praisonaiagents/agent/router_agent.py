@@ -353,9 +353,9 @@ class RouterAgent(Agent):
         
         return report
     
-    def _build_system_prompt(self) -> str:
+    def _build_system_prompt(self, tools=None, **kwargs) -> str:
         """Build system prompt (inherited from parent but can be customized)."""
-        base_prompt = super()._build_system_prompt()
+        base_prompt = super()._build_system_prompt(tools=tools, **kwargs)
         
         # Add multi-model context if needed
         if self.routing_strategy == "auto":

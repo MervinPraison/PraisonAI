@@ -10,7 +10,7 @@ from praisonaiagents import Agent
 # Basic: Enable web search with preset
 agent = Agent(
     instructions="You are a research assistant with web access.",
-    web="duckduckgo",  # Presets: duckduckgo, tavily, google, bing, serper
+    web="search_only",  # Compatible across models without web_fetch
 )
 
 if __name__ == "__main__":

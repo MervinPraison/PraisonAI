@@ -13,7 +13,8 @@ Expected output:
     - Session can be resumed later with same session_id
 """
 
-from praisonaiagents import Agent, db
+from praisonaiagents import Agent
+from praisonaiagents.db import db
 
 # Create database connection (PostgreSQL + Redis)
 my_db = db(
@@ -25,10 +26,12 @@ my_db = db(
 agent = Agent(
     name="Assistant",
     instructions="You are a helpful assistant. Be concise.",
-    db=my_db,
-    # session_id is optional - defaults to per-hour ID (YYYYMMDDHH-hash)
-    # Set explicitly for session continuity across runs:
-    session_id="my-persistent-session"
+    memory={
+        "db": my_db,
+        # session_id is optional - defaults to per-hour ID (YYYYMMDDHH-hash)
+        # Set explicitly for session continuity across runs:
+        "session_id": "my-persistent-session",
+    },
 )
 
 # Chat - messages are automatically persisted
