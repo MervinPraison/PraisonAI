@@ -2,6 +2,7 @@
 import os
 import time
 import logging
+import re
 from typing import Dict, List, Optional, Any
 from .decorator import tool
 
@@ -56,92 +57,92 @@ def _get_jira_connection(
 def jira_watch_issue(
     issue_key: str,
     url: str,
-    check_interval: int = 300,
+    since_timestamp: Optional[str] = None,
     username: Optional[str] = None,
     token: Optional[str] = None,
-    email: Optional[str] = None,
-    max_checks: int = 12
+    email: Optional[str] = None
 ) -> str:
-    """Watch a specific JIRA issue for changes and return updates.
+    """Check a specific JIRA issue for changes since a timestamp.
     
     Args:
         issue_key: JIRA issue key (e.g., "PROJ-123")
         url: JIRA server URL 
-        check_interval: Seconds between checks (default: 300 = 5 minutes)
+        since_timestamp: Check for changes since this ISO timestamp (optional)
         username: Username or use JIRA_USERNAME env var
         token: API token or use JIRA_API_TOKEN env var
         email: Email for cloud JIRA or use JIRA_EMAIL env var
-        max_checks: Maximum number of checks to perform (default: 12 = 1 hour)
     """
     try:
         jira = _get_jira_connection(url, username, token, email)
         
-        # Get initial issue state
+        # Get current issue state
         issue = jira.issue(issue_key, expand='changelog')
-        initial_updated = issue.fields.updated
-        initial_status = issue.fields.status.name
+        current_updated = issue.fields.updated
+        current_status = issue.fields.status.name
         
-        logger.info(f"Starting to watch JIRA issue {issue_key}")
-        logger.info(f"Initial status: {initial_status}")
-        logger.info(f"Last updated: {initial_updated}")
+        logger.info(f"Checking JIRA issue {issue_key} for changes")
+        logger.info(f"Current status: {current_status}")
+        logger.info(f"Last updated: {current_updated}")
         
         changes_detected = []
         
-        for check in range(max_checks):
-            time.sleep(check_interval)
+        # If no timestamp provided, just return current state
+        if not since_timestamp:
+            result = f"JIRA issue {issue_key} current state:\n"
+            result += f"Status: {current_status}\n"
+            result += f"Summary: {issue.fields.summary}\n"
+            result += f"Assignee: {issue.fields.assignee.displayName if issue.fields.assignee else 'Unassigned'}\n"
+            result += f"Priority: {issue.fields.priority.name if issue.fields.priority else 'None'}\n"
+            result += f"Updated: {current_updated}\n"
+            return result
+        
+        # Check if updated since timestamp
+        if current_updated > since_timestamp:
+            change_info = {
+                'timestamp': current_updated,
+                'status': current_status,
+                'summary': issue.fields.summary,
+                'assignee': issue.fields.assignee.displayName if issue.fields.assignee else 'Unassigned',
+                'priority': issue.fields.priority.name if issue.fields.priority else 'None'
+            }
             
-            # Refresh issue data
-            try:
-                issue = jira.issue(issue_key, expand='changelog')
-                current_updated = issue.fields.updated
-                current_status = issue.fields.status.name
-                
-                # Check if issue was updated
-                if current_updated != initial_updated:
-                    change_info = {
-                        'timestamp': current_updated,
-                        'status': current_status,
-                        'summary': issue.fields.summary,
-                        'assignee': issue.fields.assignee.displayName if issue.fields.assignee else 'Unassigned',
-                        'priority': issue.fields.priority.name if issue.fields.priority else 'None'
-                    }
-                    
-                    # Get recent changelog entries
-                    recent_changes = []
-                    if issue.changelog and issue.changelog.histories:
-                        for history in issue.changelog.histories[-3:]:  # Last 3 changes
-                            for item in history.items:
-                                recent_changes.append({
-                                    'field': item.field,
-                                    'from': item.fromString,
-                                    'to': item.toString,
-                                    'author': history.author.displayName,
-                                    'created': history.created
-                                })
-                    
-                    change_info['recent_changes'] = recent_changes
-                    changes_detected.append(change_info)
-                    
-                    logger.info(f"Change detected in {issue_key} at {current_updated}")
-                    initial_updated = current_updated
-                
-                # Check for comments
-                comments = jira.comments(issue_key)
-                if comments:
-                    latest_comment = comments[-1]
-                    change_info = changes_detected[-1] if changes_detected else {}
-                    change_info['latest_comment'] = {
-                        'author': latest_comment.author.displayName,
-                        'body': latest_comment.body[:500],  # First 500 chars
-                        'created': latest_comment.created
-                    }
-                    
-            except Exception as e:
-                logger.error(f"Error checking issue {issue_key}: {e}")
-                return f"Error monitoring issue {issue_key}: {e}"
+            # Get recent changelog entries
+            recent_changes = []
+            if issue.changelog and issue.changelog.histories:
+                for history in issue.changelog.histories[-3:]:  # Last 3 changes
+                    if history.created > since_timestamp:
+                        for item in history.items:
+                            recent_changes.append({
+                                'field': item.field,
+                                'from': item.fromString,
+                                'to': item.toString,
+                                'author': history.author.displayName,
+                                'created': history.created
+                            })
+            
+            change_info['recent_changes'] = recent_changes
+            changes_detected.append(change_info)
+            
+            logger.info(f"Change detected in {issue_key} at {current_updated}")
+            
+            # Check for recent comments
+            comments = jira.comments(issue_key)
+            comment_changes = []
+            if comments:
+                for comment in comments:
+                    if comment.created > since_timestamp:
+                        comment_changes.append({
+                            'author': comment.author.displayName,
+                            'body': comment.body[:500],  # First 500 chars
+                            'created': comment.created
+                        })
+            
+            # Add comment changes as separate entries if they exist
+            if comment_changes:
+                change_info['recent_comments'] = comment_changes
         
         if changes_detected:
-            result = f"Watched JIRA issue {issue_key} - {len(changes_detected)} changes detected:\n"
+            result = f"JIRA issue {issue_key} - changes detected since {since_timestamp}:\n"
             for i, change in enumerate(changes_detected, 1):
                 result += f"\n--- Change {i} at {change['timestamp']} ---\n"
                 result += f"Status: {change['status']}\n"
@@ -153,128 +154,124 @@ def jira_watch_issue(
                     for rc in change['recent_changes']:
                         result += f"  - {rc['field']}: '{rc['from']}' → '{rc['to']}' by {rc['author']}\n"
                 
-                if change.get('latest_comment'):
-                    comment = change['latest_comment']
-                    result += f"Latest comment by {comment['author']}: {comment['body'][:200]}...\n"
+                if change.get('recent_comments'):
+                    result += "Recent comments:\n"
+                    for comment in change['recent_comments']:
+                        result += f"  - {comment['author']} ({comment['created']}): {comment['body'][:200]}...\n"
             
             return result
         else:
-            return f"Watched JIRA issue {issue_key} for {max_checks * check_interval // 60} minutes - no changes detected"
+            return f"No changes detected in JIRA issue {issue_key} since {since_timestamp}"
             
     except Exception as e:
         logger.error(f"Failed to watch JIRA issue: {e}")
         return f"Error watching JIRA issue {issue_key}: {e}"
 
+def _validate_project_key(project_key: str) -> bool:
+    """Validate JIRA project key to prevent injection.
+    
+    Args:
+        project_key: Project key to validate
+        
+    Returns:
+        True if valid, raises ValueError if invalid
+    """
+    # JIRA project keys must be uppercase letters, numbers, and underscores
+    # and start with a letter
+    if not re.match(r'^[A-Z][A-Z0-9_]*$', project_key):
+        raise ValueError(f"Invalid project key format: {project_key}. Must start with letter and contain only uppercase letters, numbers, and underscores.")
+    return True
+
 @tool  
 def jira_watch_project(
     project_key: str,
     url: str,
-    check_interval: int = 600,
+    since_timestamp: Optional[str] = None,
     username: Optional[str] = None,
     token: Optional[str] = None,
-    email: Optional[str] = None,
-    max_checks: int = 6
+    email: Optional[str] = None
 ) -> str:
-    """Watch a JIRA project for new issues and updates.
+    """Check a JIRA project for new issues and updates since a timestamp.
     
     Args:
         project_key: JIRA project key (e.g., "PROJ")
         url: JIRA server URL
-        check_interval: Seconds between checks (default: 600 = 10 minutes)
+        since_timestamp: Check for changes since this ISO timestamp (optional)
         username: Username or use JIRA_USERNAME env var
         token: API token or use JIRA_API_TOKEN env var
         email: Email for cloud JIRA or use JIRA_EMAIL env var
-        max_checks: Maximum number of checks (default: 6 = 1 hour)
     """
     try:
+        # Validate project key to prevent JQL injection
+        _validate_project_key(project_key)
+        
         jira = _get_jira_connection(url, username, token, email)
         
-        # Get initial project state
-        initial_jql = f'project = {project_key} ORDER BY updated DESC'
-        initial_issues = jira.search_issues(initial_jql, maxResults=50)
-        initial_count = len(initial_issues)
-        initial_keys = {issue.key for issue in initial_issues}
+        logger.info(f"Checking JIRA project {project_key} for changes")
         
-        logger.info(f"Starting to watch JIRA project {project_key}")
-        logger.info(f"Initial issue count: {initial_count}")
+        project_changes = {
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'new_issues': [],
+            'updated_issues': []
+        }
         
-        project_changes = []
-        
-        for check in range(max_checks):
-            time.sleep(check_interval)
+        # If no timestamp provided, return recent activity
+        if not since_timestamp:
+            recent_jql = f'project = {project_key} ORDER BY updated DESC'
+            recent_issues = jira.search_issues(recent_jql, maxResults=20)
             
-            try:
-                # Check for project updates
-                current_issues = jira.search_issues(initial_jql, maxResults=50)
-                current_count = len(current_issues)
-                current_keys = {issue.key for issue in current_issues}
-                
-                changes_in_check = {
-                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
-                    'new_issues': [],
-                    'updated_issues': []
-                }
-                
-                # Check for new issues
-                new_issues = current_keys - initial_keys
-                if new_issues:
-                    for issue_key in new_issues:
-                        issue = jira.issue(issue_key)
-                        changes_in_check['new_issues'].append({
-                            'key': issue_key,
-                            'summary': issue.fields.summary,
-                            'status': issue.fields.status.name,
-                            'assignee': issue.fields.assignee.displayName if issue.fields.assignee else 'Unassigned',
-                            'creator': issue.fields.creator.displayName,
-                            'created': issue.fields.created
-                        })
-                
-                # Check for recently updated issues  
-                recent_jql = f'project = {project_key} AND updated >= -{check_interval // 60}m ORDER BY updated DESC'
-                recently_updated = jira.search_issues(recent_jql, maxResults=20)
-                
-                for issue in recently_updated:
-                    if issue.key in initial_keys:  # Existing issue was updated
-                        changes_in_check['updated_issues'].append({
-                            'key': issue.key,
-                            'summary': issue.fields.summary,
-                            'status': issue.fields.status.name,
-                            'assignee': issue.fields.assignee.displayName if issue.fields.assignee else 'Unassigned',
-                            'updated': issue.fields.updated
-                        })
-                
-                if changes_in_check['new_issues'] or changes_in_check['updated_issues']:
-                    project_changes.append(changes_in_check)
-                    logger.info(f"Project changes detected in {project_key}")
-                
-                # Update baseline
-                initial_keys = current_keys
-                
-            except Exception as e:
-                logger.error(f"Error checking project {project_key}: {e}")
-                return f"Error monitoring project {project_key}: {e}"
+            result = f"JIRA project {project_key} recent activity ({len(recent_issues)} issues):\n"
+            for issue in recent_issues[:10]:  # Show top 10
+                result += f"  {issue.key}: {issue.fields.summary[:60]}...\n"
+                result += f"    Status: {issue.fields.status.name}, Updated: {issue.fields.updated}\n"
+            return result
         
-        if project_changes:
-            result = f"Watched JIRA project {project_key} - changes detected in {len(project_changes)} checks:\n"
+        # Check for new issues since timestamp
+        new_jql = f'project = {project_key} AND created >= "{since_timestamp}" ORDER BY created DESC'
+        new_issues = jira.search_issues(new_jql, maxResults=50)
+        
+        for issue in new_issues:
+            project_changes['new_issues'].append({
+                'key': issue.key,
+                'summary': issue.fields.summary,
+                'status': issue.fields.status.name,
+                'assignee': issue.fields.assignee.displayName if issue.fields.assignee else 'Unassigned',
+                'creator': issue.fields.creator.displayName,
+                'created': issue.fields.created
+            })
+        
+        # Check for updated issues since timestamp
+        updated_jql = f'project = {project_key} AND updated >= "{since_timestamp}" AND created < "{since_timestamp}" ORDER BY updated DESC'
+        updated_issues = jira.search_issues(updated_jql, maxResults=50)
+        
+        for issue in updated_issues:
+            project_changes['updated_issues'].append({
+                'key': issue.key,
+                'summary': issue.fields.summary,
+                'status': issue.fields.status.name,
+                'assignee': issue.fields.assignee.displayName if issue.fields.assignee else 'Unassigned',
+                'updated': issue.fields.updated
+            })
+        
+        if project_changes['new_issues'] or project_changes['updated_issues']:
+            result = f"JIRA project {project_key} - changes detected since {since_timestamp}:\n"
+            result += f"\n--- Activity at {project_changes['timestamp']} ---\n"
             
-            for i, check_changes in enumerate(project_changes, 1):
-                result += f"\n--- Check {i} at {check_changes['timestamp']} ---\n"
-                
-                if check_changes['new_issues']:
-                    result += f"New issues ({len(check_changes['new_issues'])}):\n"
-                    for issue in check_changes['new_issues']:
-                        result += f"  📝 {issue['key']}: {issue['summary'][:80]}...\n"
-                        result += f"     Status: {issue['status']}, Assignee: {issue['assignee']}\n"
-                
-                if check_changes['updated_issues']:
-                    result += f"Updated issues ({len(check_changes['updated_issues'])}):\n"
-                    for issue in check_changes['updated_issues']:
-                        result += f"  🔄 {issue['key']}: {issue['summary'][:80]}...\n"
-                        result += f"     Status: {issue['status']}, Updated: {issue['updated']}\n"
+            if project_changes['new_issues']:
+                result += f"New issues ({len(project_changes['new_issues'])}):\n"
+                for issue in project_changes['new_issues']:
+                    result += f"  📝 {issue['key']}: {issue['summary'][:80]}...\n"
+                    result += f"     Status: {issue['status']}, Assignee: {issue['assignee']}, Created: {issue['created']}\n"
+            
+            if project_changes['updated_issues']:
+                result += f"Updated issues ({len(project_changes['updated_issues'])}):\n"
+                for issue in project_changes['updated_issues']:
+                    result += f"  🔄 {issue['key']}: {issue['summary'][:80]}...\n"
+                    result += f"     Status: {issue['status']}, Updated: {issue['updated']}\n"
             
             return result
         else:
-            return f"Watched JIRA project {project_key} for {max_checks * check_interval // 60} minutes - no changes detected"
+            return f"No changes detected in JIRA project {project_key} since {since_timestamp}"
             
     except Exception as e:
         logger.error(f"Failed to watch JIRA project: {e}")
