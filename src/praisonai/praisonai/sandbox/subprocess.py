@@ -272,10 +272,12 @@ class SubprocessSandbox:
         content: Union[str, bytes],
     ) -> bool:
         """Write a file to the sandbox."""
-        if not self._temp_dir:
+        from ._compat import safe_sandbox_path
+        
+        full_path = safe_sandbox_path(self._temp_dir, path)
+        if full_path is None:
             return False
         
-        full_path = os.path.join(self._temp_dir, path.lstrip("/"))
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         
         try:
@@ -292,12 +294,10 @@ class SubprocessSandbox:
         path: str,
     ) -> Optional[Union[str, bytes]]:
         """Read a file from the sandbox."""
-        if not self._temp_dir:
-            return None
+        from ._compat import safe_sandbox_path
         
-        full_path = os.path.join(self._temp_dir, path.lstrip("/"))
-        
-        if not os.path.exists(full_path):
+        full_path = safe_sandbox_path(self._temp_dir, path)
+        if full_path is None or not os.path.exists(full_path):
             return None
         
         try:
@@ -314,12 +314,10 @@ class SubprocessSandbox:
         path: str = "/",
     ) -> List[str]:
         """List files in a sandbox directory."""
-        if not self._temp_dir:
-            return []
+        from ._compat import safe_sandbox_path
         
-        full_path = os.path.join(self._temp_dir, path.lstrip("/"))
-        
-        if not os.path.exists(full_path):
+        full_path = safe_sandbox_path(self._temp_dir, path)
+        if full_path is None or not os.path.exists(full_path):
             return []
         
         try:
