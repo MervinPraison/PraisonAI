@@ -463,24 +463,16 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         msg["Subject"] = subject
         
         # Add CC and BCC headers if provided
+        from praisonaiagents.tools.email_tools import _parse_email_list
         all_recipients = [channel_id]
         if cc:
-            if isinstance(cc, str):
-                cc_list = [email.strip() for email in cc.split(',') if email.strip()]
-            else:
-                cc_list = cc
+            cc_list = _parse_email_list(cc)
             msg["CC"] = ", ".join(cc_list)
             all_recipients.extend(cc_list)
         if bcc:
-            if isinstance(bcc, str):
-                bcc_list = [email.strip() for email in bcc.split(',') if email.strip()]
-            else:
-                bcc_list = bcc
+            bcc_list = _parse_email_list(bcc)
             all_recipients.extend(bcc_list)
             # Note: BCC is not added to headers (by design)
-        
-        # Store all recipients for SMTP sending
-        self._temp_all_recipients = all_recipients
         
         # Generate unique Message-ID
         domain = self._email_address.split("@")[-1]
@@ -499,7 +491,7 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         
         # Send via SMTP
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, self._send_smtp, msg)
+        await loop.run_in_executor(None, self._send_smtp, msg, all_recipients)
         
         # Create BotMessage for return
         bot_message = BotMessage(
@@ -518,17 +510,12 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         
         return bot_message
     
-    def _send_smtp(self, msg: MIMEText) -> None:
+    def _send_smtp(self, msg: MIMEText, to_addrs: List[str]) -> None:
         """Send email via SMTP (sync, runs in executor)."""
         with smtplib.SMTP(self._smtp_server, self._smtp_port) as server:
             server.starttls()
             server.login(self._email_address, self._token)
-            # Use all recipients if CC/BCC were specified
-            if hasattr(self, '_temp_all_recipients'):
-                server.send_message(msg, to_addrs=self._temp_all_recipients)
-                delattr(self, '_temp_all_recipients')  # Clean up
-            else:
-                server.send_message(msg)
+            server.send_message(msg, to_addrs=to_addrs)
     
     async def edit_message(
         self,

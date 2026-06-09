@@ -41,7 +41,7 @@ def _parse_email_list(emails: Union[str, List[str]]) -> List[str]:
         return []
     if isinstance(emails, str):
         return [email.strip() for email in emails.split(',') if email.strip()]
-    return emails
+    return [email.strip() for email in emails if email and email.strip()]
 
 def _detect_backend() -> str:
     """Detect which email backend is available.
@@ -633,6 +633,8 @@ def _smtp_draft_email(to: str, subject: str, body: str, cc: Optional[Union[str, 
         # Add CC header if provided (BCC is not added to headers in drafts)
         if cc_list:
             msg["CC"] = ", ".join(cc_list)
+        if bcc_list:
+            msg["Bcc"] = ", ".join(bcc_list)
         
         mail = imaplib.IMAP4_SSL(imap_server, imap_port)
         mail.login(email_addr, password)
