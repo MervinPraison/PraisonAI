@@ -419,11 +419,13 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         reply_to: Optional[str] = None,
         thread_id: Optional[str] = None,
     ) -> BotMessage:
-        """Send an email message.
+        """Send an email message with optional CC and BCC recipients.
         
         Args:
             channel_id: Recipient email address
-            content: Message content (str or {"subject": ..., "body": ...})
+            content: Message content. Can be:
+                - str: Plain text message body
+                - dict: {"subject": str, "body": str, "html": str, "cc": str/list, "bcc": str/list}
             reply_to: Message-ID to reply to (sets In-Reply-To header)
             thread_id: References chain (sets References header)
             
@@ -439,10 +441,14 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
             subject = content.get("subject", "Message from PraisonAI")
             body = content.get("body", "")
             html = content.get("html")
+            cc = content.get("cc")
+            bcc = content.get("bcc")
         else:
             subject = "Message from PraisonAI"
             body = str(content)
             html = None
+            cc = None
+            bcc = None
         
         # Build email
         if html:
@@ -455,6 +461,26 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         msg["From"] = self._email_address
         msg["To"] = channel_id
         msg["Subject"] = subject
+        
+        # Add CC and BCC headers if provided
+        all_recipients = [channel_id]
+        if cc:
+            if isinstance(cc, str):
+                cc_list = [email.strip() for email in cc.split(',') if email.strip()]
+            else:
+                cc_list = cc
+            msg["CC"] = ", ".join(cc_list)
+            all_recipients.extend(cc_list)
+        if bcc:
+            if isinstance(bcc, str):
+                bcc_list = [email.strip() for email in bcc.split(',') if email.strip()]
+            else:
+                bcc_list = bcc
+            all_recipients.extend(bcc_list)
+            # Note: BCC is not added to headers (by design)
+        
+        # Store all recipients for SMTP sending
+        self._temp_all_recipients = all_recipients
         
         # Generate unique Message-ID
         domain = self._email_address.split("@")[-1]
@@ -497,7 +523,12 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         with smtplib.SMTP(self._smtp_server, self._smtp_port) as server:
             server.starttls()
             server.login(self._email_address, self._token)
-            server.send_message(msg)
+            # Use all recipients if CC/BCC were specified
+            if hasattr(self, '_temp_all_recipients'):
+                server.send_message(msg, to_addrs=self._temp_all_recipients)
+                delattr(self, '_temp_all_recipients')  # Clean up
+            else:
+                server.send_message(msg)
     
     async def edit_message(
         self,
