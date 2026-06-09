@@ -15,13 +15,6 @@ Protocol: MCP 2025-11-25
 
 from praisonaiagents import Agent, MCP
 
-# Basic agent with automatic session management
-agent = Agent(
-    name="Session Assistant",
-    instructions="You are a helpful assistant with session support.",
-    tools=MCP("https://api.example.com/mcp")
-)
-
 # Session management is automatic - the MCP client:
 # 1. Receives Mcp-Session-Id from server during initialization
 # 2. Includes session ID in all subsequent requests
@@ -29,6 +22,12 @@ agent = Agent(
 # 4. Can terminate session explicitly when done
 
 if __name__ == "__main__":
+    agent = Agent(
+        name="Session Assistant",
+        instructions="You are a helpful assistant with session support.",
+        tools=MCP("https://api.example.com/mcp"),
+    )
+
     print("MCP Session Management Example")
     print("=" * 40)
     print()

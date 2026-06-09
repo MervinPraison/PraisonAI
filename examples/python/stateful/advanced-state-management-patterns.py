@@ -72,6 +72,6 @@ agents_system = AgentTeam(
 print("Starting state management demonstration...")
 result = agents_system.start()
 
-print(f"\nState Management Result: {result[:200]}...")
+print(f"\nState Management Result: {str(result)[:200]}...")
 print("\n✅ State management patterns complete!")
 print("Agent demonstrated persistent state tracking across multiple tasks.")
