@@ -512,109 +512,7 @@ class AgentsGenerator:
             # Route to YAMLWorkflowParser for advanced workflow patterns
             return self._run_yaml_workflow(config)
 
-        # Canonical format conversion: 'agents' -> 'roles', 'instructions' -> 'backstory'
-        # This ensures backward compatibility while supporting the new canonical format
-        if 'agents' in config and 'roles' not in config:
-            config['roles'] = {}
-            for agent_name, agent_config in config['agents'].items():
-                role_config = dict(agent_config) if agent_config else {}
-                # Convert 'instructions' to 'backstory' if present
-                # Note: preserve 'instructions' key for adapters that pass it to PraisonAgent
-                if 'instructions' in role_config and 'backstory' not in role_config:
-                    role_config['backstory'] = role_config['instructions']
-                # Ensure required fields have defaults
-                if 'role' not in role_config:
-                    role_config['role'] = agent_name.replace('_', ' ').title()
-                if 'goal' not in role_config:
-                    role_config['goal'] = role_config.get('backstory', 'Complete the assigned task')
-                if 'backstory' not in role_config:
-                    role_config['backstory'] = f'You are a {role_config["role"]}'
-                config['roles'][agent_name] = role_config
-
-        # Get workflow input: 'input' is canonical, 'topic' is alias for backward compatibility
-        topic = config.get('input', config.get('topic', ''))
-        
-        # Validate agents configuration for typos in field names
-        self._validate_agents_config(config)
-        
-        tools_dict = {}
-        
-        # Demand-driven tool resolution - only resolve tools actually used in YAML
-        if is_available("crewai") or is_available("autogen") or is_available("praisonaiagents") or is_available("ag2"):
-            try:
-                # Collect all tool names mentioned in the YAML config
-                needed_tools: set[str] = set()
-                for role_cfg in config.get('roles', {}).values():
-                    for t in role_cfg.get('tools') or []:
-                        if isinstance(t, str) and t.strip():
-                            needed_tools.add(t.strip())
-                    for task_cfg in (role_cfg.get('tasks') or {}).values():
-                        if not isinstance(task_cfg, dict):
-                            continue
-                        for t in task_cfg.get('tools') or []:
-                            if isinstance(t, str) and t.strip():
-                                needed_tools.add(t.strip())
-
-                # Resolve only the tools actually referenced in YAML using ToolResolver with instantiation
-                for tool_name in needed_tools:
-                    try:
-                        resolved_tool = self.tool_resolver.resolve(tool_name, instantiate=True)
-                        if resolved_tool is not None:
-                            tools_dict[tool_name] = resolved_tool
-                    except Exception as e:
-                        self.logger.warning(f"Failed to resolve or instantiate tool '{tool_name}': {e}")
-                        continue
-                            
-            except Exception as e:
-                self.logger.warning(f"Error collecting YAML tool references: {e}")
-            
-            # Add tools from class names - use tool_resolver to check tool validity
-            for tool_class in self.tools:
-                if isinstance(tool_class, type):
-                    try:
-                        # Try to instantiate the tool to validate it
-                        tool_instance = tool_class()
-                        tool_name = tool_class.__name__
-                        tools_dict[tool_name] = tool_instance
-                        self.logger.debug(f"Added tool: {tool_name}")
-                    except Exception as e:
-                        self.logger.warning(f"Failed to instantiate tool class {tool_class.__name__}: {e}")
-
-        root_directory = os.getcwd()
-        tools_py_path = os.path.join(root_directory, 'tools.py')
-        tools_dir_path = Path(root_directory) / 'tools'
-        
-        # Use consolidated ToolResolver for tools.py loading
-        tools_dict.update(self.tool_resolver.get_local_tool_classes())
-        if os.path.isfile(tools_py_path):
-            self.logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
-        elif tools_dir_path.is_dir():
-            tools_dict.update(self.tool_resolver.get_local_tool_classes_from_dir(tools_dir_path))
-            if tools_dict:
-                self.logger.debug("tools folder exists in the root directory")
-
-        framework = self.framework or config.get('framework', 'crewai')
-        
-        # Get initial adapter and resolve to concrete variant
-        initial_adapter = self._get_framework_adapter(framework)
-        adapter = initial_adapter.resolve()
-        
-        # Validate framework availability early
-        from .framework_adapters.validators import assert_framework_available
-        assert_framework_available(adapter.name)
-        
-        # Initialize observability hooks
-        from .observability.hooks import init_observability
-        init_observability(adapter.name)
-        
-        # Run adapter setup hooks
-        adapter.setup(framework_tag=adapter.name)
-        
-        # Update framework reference if resolution changed it
-        self.framework = adapter.name
-        self.framework_adapter = adapter
-        
-        self.logger.info(f"Using framework: {adapter.name}")
+        config, adapter, tools_dict, topic = self._prepare(config)
         return adapter.run(
             config,
             self.config_list,
@@ -726,15 +624,6 @@ class AgentsGenerator:
             
             framework = "autogen_v4" if use_v4 else "autogen"
 
-        # Initialize AgentOps if configured
-        agentops_api_key = os.getenv("AGENTOPS_API_KEY")
-        if agentops_api_key:
-            try:
-                import agentops
-                agentops.init(agentops_api_key, default_tags=[framework])
-            except ImportError:
-                pass
-                
         # Validate cli_backend compatibility
         self._validate_cli_backend_compatibility(config, framework)
         

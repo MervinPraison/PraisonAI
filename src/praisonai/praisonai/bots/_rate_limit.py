@@ -104,7 +104,10 @@ class RateLimiter:
             global_wait = 0.0
             if self._tokens < 1.0:
                 global_wait = (1.0 - self._tokens) / self._config.messages_per_second
-                self._tokens = 1.0  # reserved; consumed below
+                self._tokens = 1.0  # reserve one future token
+                # Move refill anchor forward to the reservation time so
+                # concurrent callers cannot reuse the same future interval.
+                self._last_refill = now + global_wait
             self._tokens -= 1.0
             
             channel_wait = 0.0
