@@ -41,7 +41,7 @@ def test_loop_vulnerability():
         # Safety valve - prevent actual infinite loop in test
         if call_count > 10:
             print("🚨 SAFETY VALVE TRIGGERED: Too many tool calls!")
-            sys.exit(1)
+            raise RuntimeError("Safety valve triggered: too many tool calls")
             
         return original_execute_tool(*args, **kwargs)
     
