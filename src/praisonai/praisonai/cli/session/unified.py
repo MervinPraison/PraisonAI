@@ -53,6 +53,12 @@ class UnifiedSession:
     total_cost: float = 0.0
     request_count: int = 0
     
+    # Track baseline values for proper delta merging (not persisted)
+    _baseline_input_tokens: int = field(default=0, init=False, repr=False)
+    _baseline_output_tokens: int = field(default=0, init=False, repr=False) 
+    _baseline_cost: float = field(default=0.0, init=False, repr=False)
+    _baseline_request_count: int = field(default=0, init=False, repr=False)
+    
     # Model info
     current_model: str = "gpt-4o-mini"
     
@@ -90,19 +96,45 @@ class UnifiedSession:
         self.request_count += 1
         self.updated_at = datetime.now().isoformat()
     
+    def set_baseline_stats(self) -> None:
+        """Set baseline stats for delta tracking during merge operations."""
+        self._baseline_input_tokens = self.total_input_tokens
+        self._baseline_output_tokens = self.total_output_tokens
+        self._baseline_cost = self.total_cost
+        self._baseline_request_count = self.request_count
+        
+    def get_stat_deltas(self) -> Dict[str, int | float]:
+        """Get deltas from baseline for proper merge."""
+        return {
+            "input_tokens": self.total_input_tokens - self._baseline_input_tokens,
+            "output_tokens": self.total_output_tokens - self._baseline_output_tokens,
+            "cost": self.total_cost - self._baseline_cost,
+            "request_count": self.request_count - self._baseline_request_count,
+        }
+    
     def clear_messages(self) -> None:
         """Clear all messages from the session."""
         self.messages.clear()
         self.updated_at = datetime.now().isoformat()
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert session to dictionary."""
-        return asdict(self)
+        """Convert session to dictionary, excluding internal baseline fields."""
+        data = asdict(self)
+        # Remove internal baseline fields from serialization
+        for key in list(data.keys()):
+            if key.startswith('_baseline_'):
+                del data[key]
+        return data
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "UnifiedSession":
         """Create session from dictionary."""
-        return cls(**data)
+        # Remove any internal baseline fields that might have leaked into saved data
+        clean_data = {k: v for k, v in data.items() if not k.startswith('_baseline_')}
+        instance = cls(**clean_data)
+        # Initialize baseline values to current values
+        instance.set_baseline_stats()
+        return instance
     
     @property
     def message_count(self) -> int:
@@ -159,7 +191,7 @@ class UnifiedSessionStore:
     ) -> int:
         """Return shared message prefix length for safe concurrent merge."""
         prefix = 0
-        for left_msg, right_msg in zip(left, right):
+        for left_msg, right_msg in zip(left, right, strict=False):
             if left_msg.get("role") != right_msg.get("role"):
                 break
             if left_msg.get("content") != right_msg.get("content"):
@@ -218,17 +250,19 @@ class UnifiedSessionStore:
             return incoming
 
         merged = UnifiedSession.from_dict(disk_session.to_dict())
+        
+        # Use prefix-based merge for append-only scenarios (original design)
         prefix = self._messages_common_prefix(disk_session.messages, incoming.messages)
         merged.messages = disk_session.messages + incoming.messages[prefix:]
 
-        if incoming.total_input_tokens > merged.total_input_tokens:
-            merged.total_input_tokens = incoming.total_input_tokens
-        if incoming.total_output_tokens > merged.total_output_tokens:
-            merged.total_output_tokens = incoming.total_output_tokens
-        if incoming.total_cost > merged.total_cost:
-            merged.total_cost = incoming.total_cost
-        if incoming.request_count > merged.request_count:
-            merged.request_count = incoming.request_count
+        # Merge stats using deltas instead of max()
+        incoming_deltas = incoming.get_stat_deltas()
+        merged.total_input_tokens += max(0, incoming_deltas["input_tokens"])
+        merged.total_output_tokens += max(0, incoming_deltas["output_tokens"])
+        merged.total_cost += max(0.0, incoming_deltas["cost"])
+        merged.request_count += max(0, incoming_deltas["request_count"])
+        
+        # Update other fields with incoming values if present
         if incoming.current_model:
             merged.current_model = incoming.current_model
         if incoming.metadata:
@@ -279,33 +313,6 @@ class UnifiedSessionStore:
         file_obj.flush()
         os.fsync(file_obj.fileno())
 
-    def _merge_sessions(
-        self, disk_session: Optional[UnifiedSession], incoming: UnifiedSession
-    ) -> UnifiedSession:
-        """Merge incoming session updates without clobbering concurrent writes."""
-        if disk_session is None:
-            return incoming
-
-        merged = UnifiedSession.from_dict(disk_session.to_dict())
-        prefix = self._messages_common_prefix(disk_session.messages, incoming.messages)
-        merged.messages = disk_session.messages + incoming.messages[prefix:]
-
-        if incoming.total_input_tokens > merged.total_input_tokens:
-            merged.total_input_tokens = incoming.total_input_tokens
-        if incoming.total_output_tokens > merged.total_output_tokens:
-            merged.total_output_tokens = incoming.total_output_tokens
-        if incoming.total_cost > merged.total_cost:
-            merged.total_cost = incoming.total_cost
-        if incoming.request_count > merged.request_count:
-            merged.request_count = incoming.request_count
-        if incoming.current_model:
-            merged.current_model = incoming.current_model
-        if incoming.metadata:
-            merged.metadata.update(incoming.metadata)
-        if incoming.workspace:
-            merged.workspace = incoming.workspace
-
-        return merged
 
     def save(self, session: UnifiedSession) -> None:
         """
@@ -320,6 +327,9 @@ class UnifiedSessionStore:
             if not path.exists():
                 path.touch()
 
+            # Set baseline stats for proper delta tracking
+            session.set_baseline_stats()
+            
             to_save = session
             with open(path, "r+b") as f:
                 self._acquire_exclusive_lock(f)
@@ -333,9 +343,11 @@ class UnifiedSessionStore:
                 finally:
                     self._release_exclusive_lock(f)
 
+            # Safely update mtime cache with error handling
             try:
                 mtime = path.stat().st_mtime
-            except OSError:
+            except (FileNotFoundError, OSError):
+                # File was deleted/moved between write and stat, skip mtime update
                 mtime = datetime.now().timestamp()
 
             with self._lock:
@@ -394,9 +406,13 @@ class UnifiedSessionStore:
                 return None
 
             session = UnifiedSession.from_dict(data)
+            # Set baseline stats for proper delta tracking
+            session.set_baseline_stats()
+            
             try:
                 mtime = path.stat().st_mtime
-            except OSError:
+            except (FileNotFoundError, OSError):
+                # File was deleted/moved after read, skip mtime update
                 mtime = datetime.now().timestamp()
 
             with self._lock:
@@ -423,6 +439,8 @@ class UnifiedSessionStore:
         # Create new session
         new_id = session_id or str(uuid.uuid4())[:8]
         session = UnifiedSession(session_id=new_id)
+        # Set baseline stats for new session
+        session.set_baseline_stats()
         self.save(session)
         return session
     
