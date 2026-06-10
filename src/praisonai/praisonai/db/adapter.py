@@ -453,6 +453,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when a new trace starts."""
+        self._init_stores()
         if self._state_store:
             trace_key = f"trace:{trace_id}"
             self._state_store.set(trace_key, {
@@ -474,6 +475,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when a trace ends."""
+        self._init_stores()
         if self._state_store:
             trace_key = f"trace:{trace_id}"
             trace_data = self._state_store.get(trace_key) or {}
@@ -493,6 +495,7 @@ class PraisonAIDB:
         attributes: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when a new span starts."""
+        self._init_stores()
         if self._state_store:
             span_key = f"span:{span_id}"
             self._state_store.set(span_key, {
@@ -513,6 +516,7 @@ class PraisonAIDB:
         attributes: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when a span ends."""
+        self._init_stores()
         if self._state_store:
             span_key = f"span:{span_id}"
             span_data = self._state_store.get(span_key) or {}
