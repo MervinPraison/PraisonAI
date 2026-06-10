@@ -954,8 +954,8 @@ class MultiAgentOutputConfig:
     # Verbosity level (0=silent, 1=minimal, 2+=verbose)
     verbose: int = 0
     
-    # Streaming output
-    stream: bool = True
+    # Streaming output - False by default for sync multi-agent compatibility
+    stream: bool = False
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
