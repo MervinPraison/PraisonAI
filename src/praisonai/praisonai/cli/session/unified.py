@@ -132,7 +132,7 @@ class UnifiedSessionStore:
         self.session_dir = Path(session_dir) if session_dir else DEFAULT_SESSION_DIR
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self._cache: Dict[str, UnifiedSession] = {}
-        self._cache_mtimes: Dict[str, float] = {}
+        self._cache_mtime: Dict[str, float] = {}
         self._lock = threading.RLock()
         self._last_session_id: Optional[str] = None
 
@@ -144,32 +144,6 @@ class UnifiedSessionStore:
             message.get("timestamp"),
         )
 
-    def _merge_sessions(
-        self, on_disk: UnifiedSession, incoming: UnifiedSession
-    ) -> UnifiedSession:
-        """Merge concurrent updates without dropping chat messages."""
-        seen = {self._message_key(m) for m in on_disk.messages}
-        merged_messages = list(on_disk.messages)
-        for message in incoming.messages:
-            key = self._message_key(message)
-            if key not in seen:
-                merged_messages.append(message)
-                seen.add(key)
-
-        merged = UnifiedSession.from_dict(on_disk.to_dict())
-        merged.messages = merged_messages
-        merged.metadata = {**on_disk.metadata, **incoming.metadata}
-        merged.total_input_tokens = max(
-            on_disk.total_input_tokens, incoming.total_input_tokens
-        )
-        merged.total_output_tokens = max(
-            on_disk.total_output_tokens, incoming.total_output_tokens
-        )
-        merged.total_cost = max(on_disk.total_cost, incoming.total_cost)
-        merged.request_count = max(on_disk.request_count, incoming.request_count)
-        merged.current_model = incoming.current_model or on_disk.current_model
-        merged.updated_at = max(on_disk.updated_at, incoming.updated_at)
-        return merged
     
     def _get_session_path(self, session_id: str) -> Path:
         """Get the file path for a session."""
@@ -178,6 +152,91 @@ class UnifiedSessionStore:
     def _get_last_session_path(self) -> Path:
         """Get the path to the last session marker file."""
         return self.session_dir / ".last_session"
+
+    @staticmethod
+    def _messages_common_prefix(
+        left: List[Dict[str, str]], right: List[Dict[str, str]]
+    ) -> int:
+        """Return shared message prefix length for safe concurrent merge."""
+        prefix = 0
+        for left_msg, right_msg in zip(left, right):
+            if left_msg.get("role") != right_msg.get("role"):
+                break
+            if left_msg.get("content") != right_msg.get("content"):
+                break
+            prefix += 1
+        return prefix
+
+    def _parse_session_file(self, f) -> Optional[UnifiedSession]:
+        """Parse session JSON from an open file handle."""
+        try:
+            f.seek(0)
+            raw = f.read()
+            if not raw:
+                return None
+            data = json.loads(raw.decode('utf-8'))
+            return UnifiedSession.from_dict(data)
+        except Exception as e:
+            logger.error(f"Failed to parse session file: {e}")
+            return None
+
+    def _read_session_from_file(self, path: Path) -> Optional[UnifiedSession]:
+        """Read a session from disk without using the in-process cache."""
+        if not path.exists():
+            return None
+
+        try:
+            with open(path, 'rb') as f:
+                if sys.platform == "win32":
+                    import msvcrt
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_RLCK, 1)
+                    try:
+                        session = self._parse_session_file(f)
+                    finally:
+                        f.seek(0)
+                        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                elif _HAS_FCNTL:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+                    try:
+                        session = self._parse_session_file(f)
+                    finally:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                else:
+                    session = self._parse_session_file(f)
+
+            return session
+        except Exception as e:
+            logger.error(f"Failed to read session file {path}: {e}")
+            return None
+
+    def _merge_sessions(
+        self, disk_session: Optional[UnifiedSession], incoming: UnifiedSession
+    ) -> UnifiedSession:
+        """Merge incoming session updates without clobbering concurrent writes."""
+        if disk_session is None:
+            return incoming
+
+        merged = UnifiedSession.from_dict(disk_session.to_dict())
+        prefix = self._messages_common_prefix(disk_session.messages, incoming.messages)
+        merged.messages = disk_session.messages + incoming.messages[prefix:]
+
+        if incoming.total_input_tokens > merged.total_input_tokens:
+            merged.total_input_tokens = incoming.total_input_tokens
+        if incoming.total_output_tokens > merged.total_output_tokens:
+            merged.total_output_tokens = incoming.total_output_tokens
+        if incoming.total_cost > merged.total_cost:
+            merged.total_cost = incoming.total_cost
+        if incoming.request_count > merged.request_count:
+            merged.request_count = incoming.request_count
+        if incoming.current_model:
+            merged.current_model = incoming.current_model
+        if incoming.metadata:
+            merged.metadata.update(incoming.metadata)
+        if incoming.workspace:
+            merged.workspace = incoming.workspace
+
+        return merged
     
     def _acquire_exclusive_lock(self, file_obj) -> None:
         if sys.platform == "win32":
@@ -220,6 +279,34 @@ class UnifiedSessionStore:
         file_obj.flush()
         os.fsync(file_obj.fileno())
 
+    def _merge_sessions(
+        self, disk_session: Optional[UnifiedSession], incoming: UnifiedSession
+    ) -> UnifiedSession:
+        """Merge incoming session updates without clobbering concurrent writes."""
+        if disk_session is None:
+            return incoming
+
+        merged = UnifiedSession.from_dict(disk_session.to_dict())
+        prefix = self._messages_common_prefix(disk_session.messages, incoming.messages)
+        merged.messages = disk_session.messages + incoming.messages[prefix:]
+
+        if incoming.total_input_tokens > merged.total_input_tokens:
+            merged.total_input_tokens = incoming.total_input_tokens
+        if incoming.total_output_tokens > merged.total_output_tokens:
+            merged.total_output_tokens = incoming.total_output_tokens
+        if incoming.total_cost > merged.total_cost:
+            merged.total_cost = incoming.total_cost
+        if incoming.request_count > merged.request_count:
+            merged.request_count = incoming.request_count
+        if incoming.current_model:
+            merged.current_model = incoming.current_model
+        if incoming.metadata:
+            merged.metadata.update(incoming.metadata)
+        if incoming.workspace:
+            merged.workspace = incoming.workspace
+
+        return merged
+
     def save(self, session: UnifiedSession) -> None:
         """
         Save a session to disk with file locking.
@@ -228,7 +315,6 @@ class UnifiedSessionStore:
             session: Session to save
         """
         path = self._get_session_path(session.session_id)
-        session.updated_at = datetime.now().isoformat()
         
         try:
             if not path.exists():
@@ -254,8 +340,9 @@ class UnifiedSessionStore:
 
             with self._lock:
                 self._cache[session.session_id] = to_save
-                self._cache_mtimes[session.session_id] = mtime
+                self._cache_mtime[session.session_id] = mtime
 
+            # Update last session marker
             self._update_last_session(session.session_id)
             logger.debug(f"Saved session: {session.session_id}")
         except Exception as e:
@@ -272,7 +359,7 @@ class UnifiedSessionStore:
             current_mtime = path.stat().st_mtime
         except OSError:
             return False
-        cached_mtime = self._cache_mtimes.get(session_id, 0)
+        cached_mtime = self._cache_mtime.get(session_id, 0)
         return current_mtime <= cached_mtime
 
     def load(self, session_id: str) -> Optional[UnifiedSession]:
@@ -289,7 +376,7 @@ class UnifiedSessionStore:
         if not path.exists():
             with self._lock:
                 self._cache.pop(session_id, None)
-                self._cache_mtimes.pop(session_id, None)
+                self._cache_mtime.pop(session_id, None)
             return None
 
         with self._lock:
@@ -314,12 +401,9 @@ class UnifiedSessionStore:
 
             with self._lock:
                 self._cache[session_id] = session
-                self._cache_mtimes[session_id] = mtime
+                self._cache_mtime[session_id] = mtime
             logger.debug(f"Loaded session: {session_id}")
-            return session
-        except Exception as e:
-            logger.error(f"Failed to load session {session_id}: {e}")
-            return None
+        return session
     
     def get_or_create(self, session_id: Optional[str] = None) -> UnifiedSession:
         """
@@ -357,7 +441,7 @@ class UnifiedSessionStore:
             path.unlink(missing_ok=True)
             with self._lock:
                 self._cache.pop(session_id, None)
-                self._cache_mtimes.pop(session_id, None)
+                self._cache_mtime.pop(session_id, None)
             logger.debug(f"Deleted session: {session_id}")
             return True
         return False
