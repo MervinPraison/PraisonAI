@@ -720,6 +720,9 @@ class ExecutionConfig:
     # Retry settings
     max_retry_limit: int = 2
     
+    # Tool call limits (loop protection)
+    max_tool_calls_per_turn: int = 10
+    
     # Code execution (consolidated from allow_code_execution + code_execution_mode)
     code_execution: bool = False
     code_mode: str = "safe"  # "safe" or "unsafe"
