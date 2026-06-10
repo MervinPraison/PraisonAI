@@ -343,6 +343,168 @@ class AgentsGenerator:
                     agent_config[field] = value
                     self.logger.debug(f"CLI override for agent {agent_name}: {field} = {value}")
 
+    def _prepare_for_run(self, config):
+        """
+        Single source of truth for YAML normalisation, validation,
+        CLI-backend compatibility, tool resolution, AutoGen version
+        selection, and adapter resolution. Used by BOTH sync and async.
+        """
+        # Canonical format conversion: 'agents' -> 'roles', 'instructions' -> 'backstory'
+        if 'agents' in config and 'roles' not in config:
+            config['roles'] = {}
+            for agent_name, agent_config in config['agents'].items():
+                role_config = dict(agent_config) if agent_config else {}
+                # Convert 'instructions' to 'backstory' if present
+                if 'instructions' in role_config and 'backstory' not in role_config:
+                    role_config['backstory'] = role_config['instructions']
+                # Ensure required fields have defaults
+                if 'role' not in role_config:
+                    role_config['role'] = agent_name.replace('_', ' ').title()
+                if 'goal' not in role_config:
+                    role_config['goal'] = role_config.get('backstory', 'Complete the assigned task')
+                if 'backstory' not in role_config:
+                    role_config['backstory'] = f'You are a {role_config["role"]}'
+                config['roles'][agent_name] = role_config
+
+        # Get workflow input: 'input' is canonical, 'topic' is alias for backward compatibility
+        topic = config.get('input', config.get('topic', ''))
+        
+        # Validate agents configuration for typos in field names
+        self._validate_agents_config(config)
+        
+        # Build tools dictionary using shared logic
+        tools_dict = self._build_tools_dict(config)
+        
+        # Select framework with AutoGen version logic
+        framework = self._select_autogen_version(
+            self.framework or config.get('framework', 'crewai'),
+            config,
+        )
+        
+        # Get and resolve adapter
+        adapter = self._get_framework_adapter(framework).resolve()
+        
+        # Validate framework availability
+        from .framework_adapters.validators import assert_framework_available
+        assert_framework_available(adapter.name)
+        
+        # Validate cli_backend compatibility
+        self._validate_cli_backend_compatibility(config, framework)
+        
+        # Initialize observability hooks
+        from .observability.hooks import init_observability
+        init_observability(adapter.name)
+        
+        # Run adapter setup hooks
+        adapter.setup(framework_tag=adapter.name)
+        
+        # Update framework reference if resolution changed it
+        self.framework = adapter.name
+        self.framework_adapter = adapter
+        
+        return {
+            'adapter': adapter,
+            'config': config,
+            'topic': topic,
+            'tools_dict': tools_dict,
+        }
+    
+    def _build_tools_dict(self, config):
+        """Shared tool resolution logic for sync and async paths."""
+        tools_dict = {}
+        
+        # Demand-driven tool resolution - only resolve tools actually used in YAML
+        if is_available("crewai") or is_available("autogen") or is_available("praisonaiagents") or is_available("ag2"):
+            try:
+                # Collect all tool names mentioned in the YAML config
+                needed_tools: set[str] = set()
+                for role_cfg in config.get('roles', {}).values():
+                    for t in role_cfg.get('tools') or []:
+                        if isinstance(t, str) and t.strip():
+                            needed_tools.add(t.strip())
+                    for task_cfg in (role_cfg.get('tasks') or {}).values():
+                        if not isinstance(task_cfg, dict):
+                            continue
+                        for t in task_cfg.get('tools') or []:
+                            if isinstance(t, str) and t.strip():
+                                needed_tools.add(t.strip())
+
+                # Resolve only the tools actually referenced in YAML
+                for tool_name in needed_tools:
+                    try:
+                        resolved_tool = self.tool_resolver.resolve(tool_name)
+                        if resolved_tool is None:
+                            self.logger.warning(f"Tool '{tool_name}' not found")
+                            continue
+                        tools_dict[tool_name] = (
+                            resolved_tool() if inspect.isclass(resolved_tool) else resolved_tool
+                        )
+                    except Exception as e:
+                        self.logger.warning(f"Failed to initialize tool '{tool_name}': {e}")
+                        continue
+                            
+            except Exception as e:
+                self.logger.warning(f"Error collecting YAML tool references: {e}")
+            
+            # Add tools from class names - use tool_resolver to check tool validity
+            for tool_class in self.tools:
+                if isinstance(tool_class, type):
+                    try:
+                        tool_instance = tool_class()
+                        tool_name = tool_class.__name__
+                        tools_dict[tool_name] = tool_instance
+                        self.logger.debug(f"Added tool: {tool_name}")
+                    except Exception as e:
+                        self.logger.warning(f"Failed to instantiate tool class {tool_class.__name__}: {e}")
+
+        root_directory = os.getcwd()
+        tools_py_path = os.path.join(root_directory, 'tools.py')
+        tools_dir_path = Path(root_directory) / 'tools'
+        
+        # Use consolidated ToolResolver for tools.py loading
+        tools_dict.update(self.tool_resolver.get_local_tool_classes())
+        if os.path.isfile(tools_py_path):
+            self.logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
+        elif tools_dir_path.is_dir():
+            tools_dict.update(self.tool_resolver.get_local_tool_classes_from_dir(tools_dir_path))
+            if tools_dict:
+                self.logger.debug("tools folder exists in the root directory")
+        
+        return tools_dict
+    
+    def _select_autogen_version(self, framework, config):
+        """Shared AutoGen version selection logic for sync and async paths."""
+        if framework == "autogen":
+            autogen_v4_adapter = self._get_framework_adapter("autogen_v4")
+            autogen_v2_adapter = self._get_framework_adapter("autogen")
+            
+            autogen_version = str(
+                config.get('autogen_version', os.environ.get("AUTOGEN_VERSION", "auto"))
+            ).lower()
+            use_v4 = False
+            
+            if autogen_version == "v0.4" and autogen_v4_adapter.is_available():
+                use_v4 = True
+            elif autogen_version == "v0.2" and autogen_v2_adapter.is_available():
+                use_v4 = False
+            elif autogen_version == "auto":
+                use_v4 = autogen_v4_adapter.is_available()
+            else:
+                use_v4 = autogen_v4_adapter.is_available() and not autogen_v2_adapter.is_available()
+            
+            framework = "autogen_v4" if use_v4 else "autogen"
+        
+        # Initialize AgentOps if configured
+        agentops_api_key = os.getenv("AGENTOPS_API_KEY")
+        if agentops_api_key:
+            try:
+                import agentops
+                agentops.init(agentops_api_key, default_tags=[framework])
+            except ImportError:
+                pass
+        
+        return framework
+    
     def _validate_cli_backend_compatibility(self, config, framework):
         """Validate that cli_backend is only used with compatible frameworks."""
         # Check if any agent/role defines cli_backend (support both key names)
@@ -512,141 +674,19 @@ class AgentsGenerator:
             # Route to YAMLWorkflowParser for advanced workflow patterns
             return self._run_yaml_workflow(config)
 
-        config, adapter, tools_dict, topic = self._prepare(config)
-        return adapter.run(
-            config,
+        # Use shared preparation logic
+        prep = self._prepare_for_run(config)
+        
+        self.logger.info(f"Using framework: {prep['adapter'].name}")
+        return prep['adapter'].run(
+            prep['config'],
             self.config_list,
-            topic,
-            tools_dict=tools_dict,
+            prep['topic'],
+            tools_dict=prep['tools_dict'],
             agent_callback=getattr(self, 'agent_callback', None),
             task_callback=getattr(self, 'task_callback', None),
             cli_config=getattr(self, 'cli_config', None),
         )
-    
-    def _prepare(self, config):
-        """Shared preparation logic for both sync and async entry points."""
-        # Canonical format conversion: 'agents' -> 'roles', 'instructions' -> 'backstory'
-        if 'agents' in config and 'roles' not in config:
-            config['roles'] = {}
-            for agent_name, agent_config in config['agents'].items():
-                role_config = dict(agent_config) if agent_config else {}
-                if 'instructions' in role_config and 'backstory' not in role_config:
-                    role_config['backstory'] = role_config['instructions']
-                if 'role' not in role_config:
-                    role_config['role'] = agent_name.replace('_', ' ').title()
-                if 'goal' not in role_config:
-                    role_config['goal'] = role_config.get('backstory', 'Complete the assigned task')
-                if 'backstory' not in role_config:
-                    role_config['backstory'] = f'You are a {role_config["role"]}'
-                config['roles'][agent_name] = role_config
-
-        # Get workflow input: 'input' is canonical, 'topic' is alias for backward compatibility
-        topic = config.get('input', config.get('topic', ''))
-        
-        # Validate agents configuration for typos in field names
-        self._validate_agents_config(config)
-        
-        tools_dict = {}
-        
-        # Demand-driven tool resolution - only resolve tools actually used in YAML
-        if is_available("crewai") or is_available("autogen") or is_available("praisonaiagents") or is_available("ag2"):
-            try:
-                # Collect all tool names mentioned in the YAML config
-                needed_tools: set[str] = set()
-                for role_cfg in config.get('roles', {}).values():
-                    for t in role_cfg.get('tools') or []:
-                        if isinstance(t, str) and t.strip():
-                            needed_tools.add(t.strip())
-                    for task_cfg in (role_cfg.get('tasks') or {}).values():
-                        if not isinstance(task_cfg, dict):
-                            continue
-                        for t in task_cfg.get('tools') or []:
-                            if isinstance(t, str) and t.strip():
-                                needed_tools.add(t.strip())
-
-                # Resolve only the tools actually referenced in YAML
-                for tool_name in needed_tools:
-                    try:
-                        resolved_tool = self.tool_resolver.resolve(tool_name, instantiate=True)
-                        if resolved_tool is not None:
-                            tools_dict[tool_name] = resolved_tool
-                    except Exception as e:
-                        self.logger.warning(f"Failed to initialize tool '{tool_name}': {e}")
-                        continue
-
-            except Exception as e:
-                self.logger.warning(f"Error collecting YAML tool references: {e}")
-
-            # Add tools from class names - use tool_resolver to check tool validity
-            for tool_class in self.tools:
-                if isinstance(tool_class, type):
-                    try:
-                        tool_instance = tool_class()
-                        tool_name = tool_class.__name__
-                        tools_dict[tool_name] = tool_instance
-                        self.logger.debug(f"Added tool: {tool_name}")
-                    except Exception as e:
-                        self.logger.warning(f"Failed to instantiate tool class {tool_class.__name__}: {e}")
-
-        root_directory = os.getcwd()
-        tools_py_path = os.path.join(root_directory, 'tools.py')
-        tools_dir_path = Path(root_directory) / 'tools'
-
-        # Use consolidated ToolResolver for tools.py loading
-        tools_dict.update(self.tool_resolver.get_local_tool_classes())
-        if os.path.isfile(tools_py_path):
-            self.logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
-        elif tools_dir_path.is_dir():
-            tools_dict.update(self.tool_resolver.get_local_tool_classes_from_dir(tools_dir_path))
-            if tools_dict:
-                self.logger.debug("tools folder exists in the root directory")
-
-        framework = self.framework or config.get('framework', 'crewai')
-        
-        # AutoGen version selection logic
-        if framework == "autogen":
-            autogen_v4_adapter = self._get_framework_adapter("autogen_v4")
-            autogen_v2_adapter = self._get_framework_adapter("autogen")
-            
-            autogen_version = str(
-                config.get('autogen_version', os.environ.get("AUTOGEN_VERSION", "auto"))
-            ).lower()
-            use_v4 = False
-            
-            if autogen_version == "v0.4" and autogen_v4_adapter.is_available():
-                use_v4 = True
-            elif autogen_version == "v0.2" and autogen_v2_adapter.is_available():
-                use_v4 = False
-            elif autogen_version == "auto":
-                use_v4 = autogen_v4_adapter.is_available()
-            else:
-                use_v4 = autogen_v4_adapter.is_available() and not autogen_v2_adapter.is_available()
-            
-            framework = "autogen_v4" if use_v4 else "autogen"
-
-        # Validate cli_backend compatibility
-        self._validate_cli_backend_compatibility(config, framework)
-        
-        # Get framework adapter and resolve to concrete variant
-        adapter = self._get_framework_adapter(framework).resolve()
-        
-        # Validate framework availability early
-        from .framework_adapters.validators import assert_framework_available
-        assert_framework_available(adapter.name)
-        
-        # Initialize observability hooks
-        from .observability.hooks import init_observability
-        init_observability(adapter.name)
-        
-        # Run adapter setup hooks
-        adapter.setup(framework_tag=adapter.name)
-        
-        # Update framework reference if resolution changed it
-        self.framework = adapter.name
-        self.framework_adapter = adapter
-        
-        self.logger.info(f"Using framework: {adapter.name}")
-        return config, adapter, tools_dict, topic
 
     async def agenerate_crew_and_kickoff(self):
         """
@@ -682,12 +722,15 @@ class AgentsGenerator:
 
     async def _arun_framework(self, config):
         """Async version of _run_framework with shared preparation logic."""
-        config, adapter, tools_dict, topic = self._prepare(config)
-        return await adapter.arun(
-            config,
+        # Use shared preparation logic
+        prep = self._prepare_for_run(config)
+        
+        self.logger.info(f"Using framework: {prep['adapter'].name}")
+        return await prep['adapter'].arun(
+            prep['config'],
             self.config_list,
-            topic,
-            tools_dict=tools_dict,
+            prep['topic'],
+            tools_dict=prep['tools_dict'],
             agent_callback=getattr(self, 'agent_callback', None),
             task_callback=getattr(self, 'task_callback', None),
             cli_config=getattr(self, 'cli_config', None),

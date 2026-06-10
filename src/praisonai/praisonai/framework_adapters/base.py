@@ -101,6 +101,8 @@ class FrameworkAdapter(Protocol):
 class BaseFrameworkAdapter:
     """Base class for framework adapters providing common functionality."""
     
+    DEFAULT_MODEL = "openai/gpt-4o-mini"
+    
     def __init__(self):
         self._tool_registry: Dict[str, Any] = {}
         
@@ -115,6 +117,24 @@ class BaseFrameworkAdapter:
     def list_tools(self) -> List[str]:
         """List all registered tool names."""
         return list(self._tool_registry.keys())
+    
+    def _resolve_llm(self, spec, llm_config, *, field="llm"):
+        """Build a PraisonAIModel from a per-agent llm/function_calling_llm spec.
+        Accepts str, dict, or None. Single source of truth for all adapters."""
+        from ..inc import PraisonAIModel
+        import os
+        
+        base = llm_config[0].get('base_url') if llm_config else None
+        key = llm_config[0].get('api_key') if llm_config else None
+
+        if isinstance(spec, str) and spec.strip():
+            model = spec.strip()
+        elif isinstance(spec, dict) and spec.get('model'):
+            model = spec['model']
+        else:
+            model = os.environ.get("MODEL_NAME") or self.DEFAULT_MODEL
+
+        return PraisonAIModel(model=model, base_url=base, api_key=key).get_model()
     
     def _format_template(self, template: str, **kwargs) -> str:
         """Safely format template string with given kwargs, preserving JSON-like braces."""

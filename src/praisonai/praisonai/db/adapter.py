@@ -195,6 +195,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when user sends a message."""
+        self._init_stores()
         if not self._conversation_store:
             return
         
@@ -218,6 +219,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when agent produces a response."""
+        self._init_stores()
         if not self._conversation_store:
             return
         
@@ -243,6 +245,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when a tool is executed."""
+        self._init_stores()
         if not self._conversation_store:
             return
         
@@ -273,6 +276,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when agent session ends."""
+        self._init_stores()
         if not self._conversation_store:
             return
         
@@ -290,6 +294,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when a new run (turn) starts."""
+        self._init_stores()
         # Store run start in state if available (even without conversation store)
         if self._state_store:
             run_key = f"run:{session_id}:{run_id}"
@@ -316,6 +321,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when a run (turn) ends."""
+        self._init_stores()
         if self._state_store:
             run_key = f"run:{session_id}:{run_id}"
             run_data = self._state_store.get(run_key) or {}
