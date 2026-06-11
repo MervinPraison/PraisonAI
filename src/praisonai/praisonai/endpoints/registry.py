@@ -72,8 +72,23 @@ class ProviderRegistry(PluginRegistry[Type[BaseProvider]]):
         try:
             cls = self.resolve(provider_type)
         except ValueError:
-            return None
+            # Distinguish between missing provider vs import failure
+            if provider_type.lower() not in self.list_all_names():
+                return None
+            raise
         return cls(base_url=base_url, api_key=api_key, **kwargs)
+
+    # Backward compatibility methods - forward to parent class methods
+    def list_types(self) -> List[str]:
+        """List available provider types. Backward compatibility alias for list_names()."""
+        return self.list_names()
+
+    def get_class(self, provider_type: str) -> Optional[Type[BaseProvider]]:
+        """Get provider class by type. Backward compatibility alias for resolve()."""
+        try:
+            return self.resolve(provider_type)
+        except ValueError:
+            return None
 
 
 _default_registry: Optional[ProviderRegistry] = None
@@ -103,7 +118,11 @@ def list_provider_types() -> List[str]:
 
 
 def get_provider_class(provider_type: str) -> Optional[Type[BaseProvider]]:
+    registry = get_default_registry()
     try:
-        return get_default_registry().resolve(provider_type)
+        return registry.resolve(provider_type)
     except ValueError:
-        return None
+        # Distinguish between missing provider vs import failure
+        if provider_type.lower() not in registry.list_all_names():
+            return None
+        raise

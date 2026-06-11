@@ -40,7 +40,10 @@ def _lazy_import_training_deps():
             'get_chat_template': get_chat_template,
         })
     except ImportError as e:
-        raise ImportError(f"Training dependencies not available. Install with: pip install torch transformers unsloth datasets trl psutil. Error: {e}")
+        raise ImportError(
+            f"Training dependencies not available. Install with: "
+            f"pip install torch transformers unsloth datasets trl psutil. Error: {e}"
+        ) from e
 
 #####################################
 # Step 1: Formatting Raw Conversations

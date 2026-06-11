@@ -190,13 +190,16 @@ class DeploymentScheduler:
         
         for attempt in range(max_retries):
             try:
-                if deployer.deploy():
+                # Run blocking deploy() call in thread pool to avoid blocking event loop
+                if await asyncio.to_thread(deployer.deploy):
                     logger.info(f"Deployment successful on attempt {attempt + 1}")
                     return True
                 else:
                     logger.warning(f"Deployment failed on attempt {attempt + 1}")
+            except (OSError, RuntimeError, ConnectionError) as e:
+                logger.exception(f"Deployment error on attempt {attempt + 1}: {e}")
             except Exception as e:
-                logger.error(f"Deployment error on attempt {attempt + 1}: {e}")
+                logger.exception(f"Unexpected deployment error on attempt {attempt + 1}: {e}")
             
             if attempt < max_retries - 1:
                 await asyncio.sleep(30)  # Wait before retry (cooperative)
