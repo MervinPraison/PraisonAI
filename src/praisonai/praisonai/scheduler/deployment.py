@@ -8,6 +8,7 @@ previously shadowed by the mock in __init__.py.
 import logging
 import threading
 import time
+import asyncio
 from typing import Optional, Dict, Any
 from abc import ABC, abstractmethod
 
@@ -174,6 +175,34 @@ class DeploymentScheduler:
         except Exception as e:
             logger.error(f"One-time deployment failed: {e}")
             return False
+
+    async def adeploy_with_retry(self, max_retries: int = 3) -> bool:
+        """
+        Async variant of deployment retry logic — never blocks the event loop.
+        
+        Args:
+            max_retries: Maximum number of retry attempts
+            
+        Returns:
+            True if deployment succeeded, False otherwise
+        """
+        deployer = self._get_deployer()
+        
+        for attempt in range(max_retries):
+            try:
+                if deployer.deploy():
+                    logger.info(f"Deployment successful on attempt {attempt + 1}")
+                    return True
+                else:
+                    logger.warning(f"Deployment failed on attempt {attempt + 1}")
+            except Exception as e:
+                logger.error(f"Deployment error on attempt {attempt + 1}: {e}")
+            
+            if attempt < max_retries - 1:
+                await asyncio.sleep(30)  # Wait before retry (cooperative)
+        
+        logger.error(f"Deployment failed after {max_retries} attempts")
+        return False
 
 
 def create_deployment_scheduler(provider: str = "gcp", config: Optional[Dict[str, Any]] = None) -> DeploymentScheduler:

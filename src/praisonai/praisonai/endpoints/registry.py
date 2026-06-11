@@ -1,131 +1,109 @@
 """
 Provider Registry
 
-Central registry for provider adapters.
+Central registry for provider adapters — unified with the rest of the wrapper.
 """
 
-from typing import Dict, List, Optional, Type
+from __future__ import annotations
+
+import threading
+from typing import Any, List, Optional, Type
 
 from .providers.base import BaseProvider
+from .._registry import PluginRegistry
 
 
-# Global provider registry
-_providers: Dict[str, Type[BaseProvider]] = {}
-
-
-def register_provider(provider_type: str, provider_class: Type[BaseProvider]) -> None:
-    """
-    Register a provider class.
-    
-    Args:
-        provider_type: Provider type identifier
-        provider_class: Provider class to register
-    """
-    _providers[provider_type] = provider_class
-
-
-def get_provider(
-    provider_type: str,
-    base_url: str = "http://localhost:8765",
-    api_key: Optional[str] = None,
-    **kwargs,
-) -> Optional[BaseProvider]:
-    """
-    Get a provider instance by type.
-    
-    Args:
-        provider_type: Provider type identifier
-        base_url: Base URL for the provider
-        api_key: Optional API key
-        **kwargs: Additional provider-specific arguments
-        
-    Returns:
-        Provider instance or None if not found
-    """
-    # Lazy register built-in providers
-    _ensure_providers_registered()
-    
-    if provider_type not in _providers:
-        return None
-    
-    return _providers[provider_type](base_url=base_url, api_key=api_key, **kwargs)
-
-
-def list_provider_types() -> List[str]:
-    """
-    List all registered provider types.
-    
-    Returns:
-        List of provider type identifiers
-    """
-    _ensure_providers_registered()
-    return list(_providers.keys())
-
-
-def get_provider_class(provider_type: str) -> Optional[Type[BaseProvider]]:
-    """
-    Get a provider class by type.
-    
-    Args:
-        provider_type: Provider type identifier
-        
-    Returns:
-        Provider class or None if not found
-    """
-    _ensure_providers_registered()
-    return _providers.get(provider_type)
-
-
-def _ensure_providers_registered() -> None:
-    """Ensure built-in providers are registered."""
-    if _providers:
-        return
-    
-    # Lazy import and register built-in providers
+def _recipe_loader():
     from .providers.recipe import RecipeProvider
+    return RecipeProvider
+
+
+def _agents_api_loader():
     from .providers.agents_api import AgentsAPIProvider
+    return AgentsAPIProvider
+
+
+def _mcp_loader():
     from .providers.mcp import MCPProvider
+    return MCPProvider
+
+
+def _tools_mcp_loader():
     from .providers.tools_mcp import ToolsMCPProvider
+    return ToolsMCPProvider
+
+
+def _a2a_loader():
     from .providers.a2a import A2AProvider
+    return A2AProvider
+
+
+def _a2u_loader():
     from .providers.a2u import A2UProvider
-    
-    register_provider("recipe", RecipeProvider)
-    register_provider("agents-api", AgentsAPIProvider)
-    register_provider("mcp", MCPProvider)
-    register_provider("tools-mcp", ToolsMCPProvider)
-    register_provider("a2a", A2AProvider)
-    register_provider("a2u", A2UProvider)
+    return A2UProvider
 
 
-class ProviderRegistry:
-    """
-    Provider registry class for managing provider instances.
-    
-    This class provides a more object-oriented interface to the provider registry.
-    """
-    
-    def __init__(self):
-        """Initialize the registry."""
-        _ensure_providers_registered()
-    
+_BUILTIN_PROVIDERS = {
+    "recipe":      _recipe_loader,
+    "agents-api":  _agents_api_loader,
+    "mcp":         _mcp_loader,
+    "tools-mcp":   _tools_mcp_loader,
+    "a2a":         _a2a_loader,
+    "a2u":         _a2u_loader,
+}
+
+
+class ProviderRegistry(PluginRegistry[Type[BaseProvider]]):
+    """Endpoint provider registry — unified with the rest of the wrapper."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            entry_point_group="praisonai.endpoint_providers",
+            builtins=_BUILTIN_PROVIDERS,
+        )
+
     def get(
         self,
         provider_type: str,
         base_url: str = "http://localhost:8765",
         api_key: Optional[str] = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> Optional[BaseProvider]:
-        """Get a provider instance."""
-        return get_provider(provider_type, base_url, api_key, **kwargs)
-    
-    def register(self, provider_type: str, provider_class: Type[BaseProvider]) -> None:
-        """Register a provider class."""
-        register_provider(provider_type, provider_class)
-    
-    def list_types(self) -> List[str]:
-        """List all provider types."""
-        return list_provider_types()
-    
-    def get_class(self, provider_type: str) -> Optional[Type[BaseProvider]]:
-        """Get a provider class."""
-        return get_provider_class(provider_type)
+        try:
+            cls = self.resolve(provider_type)
+        except ValueError:
+            return None
+        return cls(base_url=base_url, api_key=api_key, **kwargs)
+
+
+_default_registry: Optional[ProviderRegistry] = None
+_default_lock = threading.Lock()
+
+
+def get_default_registry() -> ProviderRegistry:
+    global _default_registry
+    if _default_registry is None:
+        with _default_lock:
+            if _default_registry is None:
+                _default_registry = ProviderRegistry()
+    return _default_registry
+
+
+# Module-level functions kept for backwards compat — now delegate to the registry
+def register_provider(provider_type: str, provider_class: Type[BaseProvider]) -> None:
+    get_default_registry().register(provider_type, provider_class)
+
+
+def get_provider(provider_type, base_url="http://localhost:8765", api_key=None, **kwargs):
+    return get_default_registry().get(provider_type, base_url=base_url, api_key=api_key, **kwargs)
+
+
+def list_provider_types() -> List[str]:
+    return get_default_registry().list_names()
+
+
+def get_provider_class(provider_type: str) -> Optional[Type[BaseProvider]]:
+    try:
+        return get_default_registry().resolve(provider_type)
+    except ValueError:
+        return None
