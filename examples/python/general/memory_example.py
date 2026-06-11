@@ -105,6 +105,7 @@ def main():
         agents=[researcher, retriever],
         tasks=[store_task, verify_task, query_task, query_both_task],  # Use same verbose level as memory
         memory={
+main
             "embedder": {
                 "provider": "openai",
                 "config": {

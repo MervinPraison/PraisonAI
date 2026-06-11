@@ -86,6 +86,7 @@ def main():
         agents=[researcher, retriever],
         tasks=[store_task, retrieve_task],
         memory={
+main
             "embedder": {
                 "provider": "gemini",
                 "config": {
