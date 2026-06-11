@@ -5,7 +5,7 @@ Demonstrates using Agent instances directly as workflow steps.
 Each agent processes the input and passes output to the next agent.
 """
 
-from praisonaiagents import Agent, Workflow
+from praisonaiagents import Agent, AgentFlow
 
 # Create agents with specific roles
 researcher = Agent(
