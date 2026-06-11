@@ -182,8 +182,12 @@ class UnifiedSessionStore:
     def _acquire_exclusive_lock(self, file_obj) -> None:
         if sys.platform == "win32":
             import msvcrt
+            # Lock entire file by using file size (or large value for empty files)
+            file_obj.seek(0, os.SEEK_END)
+            file_size = file_obj.tell()
+            lock_length = max(file_size, 1)
             file_obj.seek(0)
-            msvcrt.locking(file_obj.fileno(), msvcrt.LK_LOCK, 1)
+            msvcrt.locking(file_obj.fileno(), msvcrt.LK_LOCK, lock_length)
         elif _HAS_FCNTL:
             fcntl.flock(file_obj.fileno(), fcntl.LOCK_EX)
         else:
@@ -198,8 +202,12 @@ class UnifiedSessionStore:
     def _release_exclusive_lock(self, file_obj) -> None:
         if sys.platform == "win32":
             import msvcrt
+            # Use the same lock length as acquisition
+            file_obj.seek(0, os.SEEK_END)
+            file_size = file_obj.tell()
+            lock_length = max(file_size, 1)
             file_obj.seek(0)
-            msvcrt.locking(file_obj.fileno(), msvcrt.LK_UNLCK, 1)
+            msvcrt.locking(file_obj.fileno(), msvcrt.LK_UNLCK, lock_length)
         elif _HAS_FCNTL:
             fcntl.flock(file_obj.fileno(), fcntl.LOCK_UN)
 
