@@ -30,7 +30,11 @@ config = {
 agent = Agent(
     name="Knowledge Agent",
     instructions="You answer questions based on the provided knowledge.",
-main
+    knowledge={
+        "sources": ["kag-research-paper.pdf"],
+        "vector_store": config["vector_store"],
+        "embedder": config["embedder"],
+    },
     memory={"user_id": "user1"},
     llm="deepseek-r1"
 )
