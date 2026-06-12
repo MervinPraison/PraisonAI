@@ -101,6 +101,8 @@ class FrameworkAdapter(Protocol):
 class BaseFrameworkAdapter:
     """Base class for framework adapters providing common functionality."""
     
+    DEFAULT_MODEL = "openai/gpt-4o-mini"
+    
     def __init__(self):
         self._tool_registry: Dict[str, Any] = {}
         
@@ -115,6 +117,24 @@ class BaseFrameworkAdapter:
     def list_tools(self) -> List[str]:
         """List all registered tool names."""
         return list(self._tool_registry.keys())
+    
+    def _resolve_llm(self, spec, llm_config):
+        """Build a PraisonAIModel from a per-agent llm/function_calling_llm spec.
+        Accepts str, dict, or None. Single source of truth for all adapters."""
+        from ..inc import PraisonAIModel
+        import os
+        
+        base = llm_config[0].get('base_url') if (llm_config and len(llm_config) > 0) else None
+        key = llm_config[0].get('api_key') if (llm_config and len(llm_config) > 0) else None
+
+        if isinstance(spec, str) and spec.strip():
+            model = spec.strip()
+        elif isinstance(spec, dict) and spec.get('model'):
+            model = spec['model']
+        else:
+            model = os.environ.get("MODEL_NAME") or self.DEFAULT_MODEL
+
+        return PraisonAIModel(model=model, base_url=base, api_key=key).get_model()
     
     def _format_template(self, template: str, **kwargs) -> str:
         """Safely format template string with given kwargs, preserving JSON-like braces."""
@@ -150,22 +170,8 @@ class BaseFrameworkAdapter:
         cli_config: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
-        Async execution. Default implementation offloads sync run() to a worker thread.
-        
-        Sync-only adapters (crewai, autogen v0.2) can use this default.
-        Native-async adapters should override this method.
-        
-        Args:
-            config: Framework configuration
-            llm_config: LLM configuration list
-            topic: Topic for the tasks
-            tools_dict: Available tools dictionary
-            agent_callback: Callback for agent events
-            task_callback: Callback for task events
-            cli_config: CLI configuration
-            
-        Returns:
-            Execution result as string
+        Safe default for sync-only adapters (crewai, autogen v0.2):
+        run the sync implementation in a worker thread, freeing the loop.
         """
         import asyncio
         return await asyncio.to_thread(
@@ -175,6 +181,7 @@ class BaseFrameworkAdapter:
             task_callback=task_callback,
             cli_config=cli_config
         )
+    
     def cleanup(self) -> None:
         """Clean up resources - default implementation does nothing."""
         pass
