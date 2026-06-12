@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 
 class PluginRegistry(Generic[T]):
+    # Guards creation of per-subclass default-instance locks
+    _default_locks_guard = threading.Lock()
     """Generic plugin registry: builtins + entry points + runtime register().
     
     This replaces the singleton pattern with dependency injection while maintaining
@@ -253,6 +255,42 @@ class PluginRegistry(Generic[T]):
             return self.resolve(attr_name)
         except ValueError:
             raise AttributeError(f"module {module_name!r} has no attribute {attr_name!r}")
+
+    @classmethod
+    def default(cls) -> "PluginRegistry[T]":
+        """
+        Process-default registry. Prefer DI; use this only at the edge.
+        
+        Provides thread-safe lazy initialization of default instances per-subclass.
+        Each subclass gets its own default instance cache.
+        """
+        # Use a class-level cache stored in the subclass's __dict__
+        cache_key = "_default_instance"
+        lock_key = "_default_instance_lock"
+        
+        # Get or create lock in subclass __dict__ (not shared across inheritance hierarchy)
+        if lock_key not in cls.__dict__:
+            # Thread-safe initialization of the per-subclass lock itself
+            with PluginRegistry._default_locks_guard:
+                if lock_key not in cls.__dict__:
+                    # Store directly in the class __dict__ to avoid inheritance sharing
+                    setattr(cls, lock_key, threading.Lock())
+        
+        lock = getattr(cls, lock_key)
+        
+        # Check cache first (without lock for performance)
+        cache = cls.__dict__.get(cache_key)
+        if cache is not None:
+            return cache
+        
+        # Double-checked locking pattern
+        with lock:
+            cache = cls.__dict__.get(cache_key)
+            if cache is None:
+                cache = cls()
+                # Store directly in the class __dict__ to ensure per-subclass isolation
+                setattr(cls, cache_key, cache)
+            return cache
 
 
 def create_lazy_getattr(registry: PluginRegistry[T]) -> Callable[[str], T]:

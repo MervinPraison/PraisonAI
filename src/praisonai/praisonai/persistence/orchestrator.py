@@ -5,6 +5,7 @@ Hooks into agent lifecycle to provide automatic conversation persistence,
 knowledge retrieval, and state management.
 """
 
+import asyncio
 import logging
 import time
 import threading
@@ -13,7 +14,7 @@ import inspect
 from copy import deepcopy
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
-from .conversation.base import ConversationStore, ConversationSession, ConversationMessage
+from .conversation.base import ConversationStore, AsyncConversationStore, ConversationSession, ConversationMessage
 from .knowledge.base import KnowledgeStore, KnowledgeDocument
 from .state.base import StateStore
 from .config import PersistenceConfig
@@ -278,11 +279,11 @@ class PersistenceOrchestrator:
         # Try to load existing session
         session = None
         if resume:
-            getter = getattr(self.conversation, 'async_get_session', self.conversation.get_session)
-            if inspect.iscoroutinefunction(getter):
-                session = await getter(session_id)
+            if isinstance(self.conversation, AsyncConversationStore):
+                session = await self.conversation.get_session(session_id)
             else:
-                session = getter(session_id)
+                # Run blocking store off the loop so we don't block multi-agent execution
+                session = await asyncio.to_thread(self.conversation.get_session, session_id)
         
         if session:
             logger.info(f"Resuming session: {session_id}")
@@ -290,11 +291,10 @@ class PersistenceOrchestrator:
             self._cache_put(session)
             
             # Load previous messages
-            msg_getter = getattr(self.conversation, 'async_get_messages', self.conversation.get_messages)
-            if inspect.iscoroutinefunction(msg_getter):
-                messages = await msg_getter(session_id)
+            if isinstance(self.conversation, AsyncConversationStore):
+                messages = await self.conversation.get_messages(session_id)
             else:
-                messages = msg_getter(session_id)
+                messages = await asyncio.to_thread(self.conversation.get_messages, session_id)
             return messages
         else:
             # Create new session
@@ -307,11 +307,10 @@ class PersistenceOrchestrator:
                 metadata={"agent_type": type(agent).__name__},
             )
             
-            creator = getattr(self.conversation, 'async_create_session', self.conversation.create_session)
-            if inspect.iscoroutinefunction(creator):
-                await creator(session)
+            if isinstance(self.conversation, AsyncConversationStore):
+                await self.conversation.create_session(session)
             else:
-                creator(session)
+                await asyncio.to_thread(self.conversation.create_session, session)
                 
             logger.info(f"Created new session: {session_id}")
             self._current_session = session
@@ -354,11 +353,10 @@ class PersistenceOrchestrator:
             metadata=metadata,
         )
         
-        adder = getattr(self.conversation, 'async_add_message', self.conversation.add_message)
-        if inspect.iscoroutinefunction(adder):
-            await adder(session_id, message)
+        if isinstance(self.conversation, AsyncConversationStore):
+            await self.conversation.add_message(session_id, message)
         else:
-            adder(session_id, message)
+            await asyncio.to_thread(self.conversation.add_message, session_id, message)
             
         logger.debug(f"Persisted {role} message to session {session_id}")
         return message
@@ -382,22 +380,20 @@ class PersistenceOrchestrator:
         
         session = self._cache_get(session_id)
         if not session:
-            getter = getattr(self.conversation, 'async_get_session', self.conversation.get_session)
-            if inspect.iscoroutinefunction(getter):
-                session = await getter(session_id)
+            if isinstance(self.conversation, AsyncConversationStore):
+                session = await self.conversation.get_session(session_id)
             else:
-                session = getter(session_id)
+                session = await asyncio.to_thread(self.conversation.get_session, session_id)
                 
         if session:
             session.updated_at = time.time()
             if metadata:
                 session.metadata = {**(session.metadata or {}), **metadata}
                 
-            updater = getattr(self.conversation, 'async_update_session', self.conversation.update_session)
-            if inspect.iscoroutinefunction(updater):
-                await updater(session)
+            if isinstance(self.conversation, AsyncConversationStore):
+                await self.conversation.update_session(session)
             else:
-                updater(session)
+                await asyncio.to_thread(self.conversation.update_session, session)
                 
             # Update cache with the modified session
             self._cache_put(session)

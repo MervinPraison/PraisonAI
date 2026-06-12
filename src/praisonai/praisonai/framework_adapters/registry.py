@@ -8,7 +8,6 @@ Uses dependency injection instead of singleton pattern.
 
 from __future__ import annotations
 
-import threading
 from typing import Dict, Type, Optional
 import logging
 
@@ -96,16 +95,7 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
             return False
 
 
-# Default registry (lazy, module-private). NOT exposed as a singleton getter.
-_default_registry: Optional[FrameworkAdapterRegistry] = None
-_default_lock = threading.Lock()
-
-
+# Default registry access - replaced by FrameworkAdapterRegistry.default()
 def get_default_registry() -> FrameworkAdapterRegistry:
     """Return the process-default registry. Prefer DI; use this only at the edge."""
-    global _default_registry
-    if _default_registry is None:
-        with _default_lock:
-            if _default_registry is None:
-                _default_registry = FrameworkAdapterRegistry()
-    return _default_registry
+    return FrameworkAdapterRegistry.default()
