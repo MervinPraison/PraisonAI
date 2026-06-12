@@ -92,33 +92,6 @@ class FrameworkAdapter(Protocol):
         """
         ...
     
-    async def arun(
-        self,
-        config: Dict[str, Any],
-        llm_config: List[Dict],
-        topic: str,
-        *,
-        tools_dict: Optional[Dict[str, Any]] = None,
-        agent_callback: Optional[Callable] = None,
-        task_callback: Optional[Callable] = None,
-        cli_config: Optional[Dict[str, Any]] = None,
-    ) -> str:
-        """
-        Run the framework asynchronously with given configuration.
-        
-        Args:
-            config: Framework configuration
-            llm_config: LLM configuration list
-            topic: Topic for the tasks
-            tools_dict: Available tools dictionary
-            agent_callback: Callback for agent events
-            task_callback: Callback for task events
-            cli_config: CLI configuration
-            
-        Returns:
-            Execution result as string
-        """
-        ...
     
     def cleanup(self) -> None:
         """Clean up any resources after execution."""
@@ -157,29 +130,6 @@ class BaseFrameworkAdapter:
         # Only substitute simple variable names like {topic}, not JSON like {"level":2}
         return re.sub(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', _sub, template)
     
-    async def arun(
-        self,
-        config: Dict[str, Any],
-        llm_config: List[Dict],
-        topic: str,
-        *,
-        tools_dict: Optional[Dict[str, Any]] = None,
-        agent_callback: Optional[Callable] = None,
-        task_callback: Optional[Callable] = None,
-        cli_config: Optional[Dict[str, Any]] = None,
-    ) -> str:
-        """
-        Default async implementation that falls back to thread-offloaded sync.
-        
-        Framework adapters with native async support should override this method.
-        """
-        import asyncio
-        return await asyncio.to_thread(
-            self.run, config, llm_config, topic,
-            tools_dict=tools_dict, agent_callback=agent_callback,
-            task_callback=task_callback, cli_config=cli_config
-        )
-    
     def resolve(self) -> "FrameworkAdapter":
         """Default implementation returns self."""
         return self
@@ -200,8 +150,22 @@ class BaseFrameworkAdapter:
         cli_config: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
-        Safe default for sync-only adapters (crewai, autogen v0.2):
-        run the sync implementation in a worker thread, freeing the loop.
+        Async execution. Default implementation offloads sync run() to a worker thread.
+        
+        Sync-only adapters (crewai, autogen v0.2) can use this default.
+        Native-async adapters should override this method.
+        
+        Args:
+            config: Framework configuration
+            llm_config: LLM configuration list
+            topic: Topic for the tasks
+            tools_dict: Available tools dictionary
+            agent_callback: Callback for agent events
+            task_callback: Callback for task events
+            cli_config: CLI configuration
+            
+        Returns:
+            Execution result as string
         """
         import asyncio
         return await asyncio.to_thread(

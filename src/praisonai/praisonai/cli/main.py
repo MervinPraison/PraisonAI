@@ -2141,25 +2141,21 @@ class PraisonAI:
             except Exception as e:
                 print(f"[yellow]Warning: Failed to load tools from {tools_path}: {e}[/yellow]")
         else:
-            # Treat as comma-separated tool names
-            try:
-                from praisonaiagents.tools import TOOL_MAPPINGS
-                import praisonaiagents.tools as tools_module
-                
-                tool_names = [t.strip() for t in tools_path.split(',')]
-                for tool_name in tool_names:
-                    if tool_name in TOOL_MAPPINGS:
-                        try:
-                            tool = getattr(tools_module, tool_name)
-                            tools_list.append(tool)
-                        except Exception as e:
-                            print(f"[yellow]Warning: Failed to load tool '{tool_name}': {e}[/yellow]")
+            # Comma-separated names: use the unified resolver so CLI == YAML == Python
+            from ..tool_resolver import ToolResolver
+            resolver = ToolResolver()
+            tool_names = [t.strip() for t in tools_path.split(',') if t.strip()]
+            for tool_name in tool_names:
+                try:
+                    tool = resolver.resolve(tool_name, instantiate=True)
+                    if tool is not None:
+                        tools_list.append(tool)
                     else:
                         print(f"[yellow]Warning: Unknown tool '{tool_name}'[/yellow]")
-                if tools_list:
-                    print(f"[cyan]Loaded {len(tools_list)} built-in tools[/cyan]")
-            except ImportError:
-                print("[yellow]Warning: Could not import tools module[/yellow]")
+                except Exception as e:
+                    print(f"[yellow]Warning: Failed to load tool '{tool_name}': {e}[/yellow]")
+            if tools_list:
+                print(f"[cyan]Loaded {len(tools_list)} tools[/cyan]")
         
         return tools_list
     
