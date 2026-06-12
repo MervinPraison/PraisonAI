@@ -9,6 +9,7 @@ from ..agent.agent import Agent
 from ..task.task import Task
 from ..main import display_error
 from ..llm import LLM
+from ..run_outcome import AgentRunOutcome, RunStatus, validate_decision_string
 import csv
 import os
 
@@ -18,6 +19,7 @@ class LoopItems(BaseModel):
 
 class Process:
     DEFAULT_RETRY_LIMIT = 3  # Predefined retry limit in a common place
+    # Legacy validation decisions - deprecated in favor of typed outcomes
     VALIDATION_FAILURE_DECISIONS = ["invalid", "retry", "failed", "error", "unsuccessful", "fail", "errors", "reject", "rejected", "incomplete"]  # Decision strings that trigger validation feedback
 
     def __init__(
@@ -75,6 +77,105 @@ class Process:
     def _create_llm_instance(self):
         """Create and return a configured LLM instance for manager tasks."""
         return LLM(model=self.manager_llm, temperature=0.7)
+
+    def _process_validation_outcome(
+        self, 
+        decision_str: str, 
+        current_task, 
+        elapsed_s: float = 0.0
+    ) -> AgentRunOutcome:
+        """
+        Process validation decision using typed outcomes.
+        
+        Converts legacy validation decision strings to typed AgentRunOutcome
+        for structured error handling and exhaustive matching.
+        
+        Args:
+            decision_str: Raw validation decision string from LLM
+            current_task: Task that performed the validation
+            elapsed_s: Execution time for the validation
+            
+        Returns:
+            AgentRunOutcome with typed status and structured metadata
+        """
+        # Convert decision string to typed status
+        status = validate_decision_string(decision_str)
+        
+        # Extract task and agent context
+        agent_name = current_task.agent.name if current_task and current_task.agent else "unknown"
+        task_name = current_task.name if current_task else "unknown"
+        
+        # Find the task that was validated
+        validated_task = None
+        rejected_output = None
+        
+        if current_task:
+            # Find the task that produced the output being validated
+            if current_task.previous_tasks:
+                # For validation tasks, typically validate the most recent previous task
+                prev_task_name = current_task.previous_tasks[-1]
+                validated_task = next((t for t in self.tasks.values() if t.name == prev_task_name), None)
+            elif current_task.context:
+                # If no previous_tasks, check context for the validated task
+                for ctx_task in reversed(current_task.context):
+                    if ctx_task.result and ctx_task.name != current_task.name:
+                        validated_task = ctx_task
+                        break
+            
+            if validated_task and validated_task.result:
+                rejected_output = validated_task.result.raw
+        
+        # Create structured context
+        context = {
+            "validation_response": decision_str,
+            "validation_details": current_task.result.raw if current_task and current_task.result else None,
+            "rejected_output": rejected_output,
+            "validator_task": task_name,
+            "validated_task": validated_task.name if validated_task else None,
+        }
+        
+        # Create appropriate outcome based on status
+        if status == "success":
+            return AgentRunOutcome.success(
+                output=current_task.result.raw if current_task and current_task.result else "",
+                elapsed_s=elapsed_s,
+                agent_name=agent_name,
+                run_id=getattr(current_task, 'run_id', None),
+                context=context,
+            )
+        elif status == "timeout":
+            return AgentRunOutcome.timeout(
+                error=f"Validation timed out: {decision_str}",
+                elapsed_s=elapsed_s,
+                agent_name=agent_name,
+                run_id=getattr(current_task, 'run_id', None),
+                context=context,
+            )
+        elif status == "cancelled":
+            return AgentRunOutcome.cancelled(
+                error=f"Validation was cancelled: {decision_str}",
+                elapsed_s=elapsed_s,
+                agent_name=agent_name,
+                run_id=getattr(current_task, 'run_id', None),
+                context=context,
+            )
+        elif status == "invalid_output":
+            return AgentRunOutcome.invalid_output(
+                error=f"Validation failed: {decision_str}",
+                elapsed_s=elapsed_s,
+                agent_name=agent_name,
+                run_id=getattr(current_task, 'run_id', None),
+                context=context,
+            )
+        else:  # status == "failure"
+            return AgentRunOutcome.failure(
+                error=f"Validation failed: {decision_str}",
+                error_category="validation",
+                elapsed_s=elapsed_s,
+                agent_name=agent_name,
+                run_id=getattr(current_task, 'run_id', None),
+                context=context,
+            )
 
     def _parse_manager_instructions(self, response, ManagerInstructions):
         """Parse LLM response and return ManagerInstructions instance.
@@ -714,35 +815,28 @@ Subtask: {st.name}
                             if next_task:
                                 next_task.status = "not started"  # Reset status to allow execution
                                 
-                                # Capture validation feedback for retry scenarios
+                                # NEW: Process validation outcome using typed system
+                                validation_outcome = self._process_validation_outcome(decision_str, current_task)
+                                
+                                # Store typed outcome on task for new callers
+                                next_task.validation_outcome = validation_outcome
+                                
+                                # Backward compatibility: legacy string-based validation feedback  
                                 if decision_str in Process.VALIDATION_FAILURE_DECISIONS:
                                     if current_task and current_task.result:
-                                        # Get the rejected output from the task that was validated
-                                        validated_task = None
-                                        # Find the task that produced the output being validated
-                                        if current_task.previous_tasks:
-                                            # For validation tasks, typically validate the most recent previous task
-                                            prev_task_name = current_task.previous_tasks[-1]
-                                            validated_task = next((t for t in self.tasks.values() if t.name == prev_task_name), None)
-                                        elif current_task.context:
-                                            # If no previous_tasks, check context for the validated task
-                                            # Use the most recent task with a result from context
-                                            for ctx_task in reversed(current_task.context):
-                                                if ctx_task.result and ctx_task.name != current_task.name:
-                                                    validated_task = ctx_task
-                                                    break
-                                        
-                                        feedback = {
+                                        feedback = validation_outcome.to_dict()
+                                        # Flatten context fields to top level for legacy compatibility
+                                        if 'context' in feedback and feedback['context']:
+                                            feedback.update(feedback['context'])
+                                        # Add legacy fields for backward compatibility
+                                        feedback.update({
                                             'validation_response': decision_str,
                                             'validation_details': current_task.result.raw,
-                                            'rejected_output': validated_task.result.raw if validated_task and validated_task.result else None,
-                                            'validator_task': current_task.name,
-                                            'validated_task': validated_task.name if validated_task else None
-                                        }
+                                        })
                                         next_task.validation_feedback = feedback
                                         logging.debug(f"Added validation feedback to {next_task.name}: {feedback['validation_response']} (validated task: {feedback.get('validated_task', 'None')})")
                                 
-                                logging.debug(f"Routing to {next_task.name} based on decision: {decision_str}")
+                                logging.debug(f"Routing to {next_task.name} based on decision: {decision_str} (outcome: {validation_outcome.status})")
                                 # Don't mark workflow as finished when following condition path
                                 await self._set_workflow_finished(False)
 
@@ -1438,35 +1532,28 @@ Subtask: {st.name}
                             if next_task:
                                 next_task.status = "not started"  # Reset status to allow execution
                                 
-                                # Capture validation feedback for retry scenarios
+                                # NEW: Process validation outcome using typed system
+                                validation_outcome = self._process_validation_outcome(decision_str, current_task)
+                                
+                                # Store typed outcome on task for new callers
+                                next_task.validation_outcome = validation_outcome
+                                
+                                # Backward compatibility: legacy string-based validation feedback
                                 if decision_str in Process.VALIDATION_FAILURE_DECISIONS:
                                     if current_task and current_task.result:
-                                        # Get the rejected output from the task that was validated
-                                        validated_task = None
-                                        # Find the task that produced the output being validated
-                                        if current_task.previous_tasks:
-                                            # For validation tasks, typically validate the most recent previous task
-                                            prev_task_name = current_task.previous_tasks[-1]
-                                            validated_task = next((t for t in self.tasks.values() if t.name == prev_task_name), None)
-                                        elif current_task.context:
-                                            # If no previous_tasks, check context for the validated task
-                                            # Use the most recent task with a result from context
-                                            for ctx_task in reversed(current_task.context):
-                                                if ctx_task.result and ctx_task.name != current_task.name:
-                                                    validated_task = ctx_task
-                                                    break
-                                        
-                                        feedback = {
+                                        feedback = validation_outcome.to_dict()
+                                        # Flatten context fields to top level for legacy compatibility
+                                        if 'context' in feedback and feedback['context']:
+                                            feedback.update(feedback['context'])
+                                        # Add legacy fields for backward compatibility
+                                        feedback.update({
                                             'validation_response': decision_str,
                                             'validation_details': current_task.result.raw,
-                                            'rejected_output': validated_task.result.raw if validated_task and validated_task.result else None,
-                                            'validator_task': current_task.name,
-                                            'validated_task': validated_task.name if validated_task else None
-                                        }
+                                        })
                                         next_task.validation_feedback = feedback
                                         logging.debug(f"Added validation feedback to {next_task.name}: {feedback['validation_response']} (validated task: {feedback.get('validated_task', 'None')})")
                                 
-                                logging.debug(f"Routing to {next_task.name} based on decision: {decision_str}")
+                                logging.debug(f"Routing to {next_task.name} based on decision: {decision_str} (outcome: {validation_outcome.status})")
                                 # Don't mark workflow as finished when following condition path
                                 self._set_workflow_finished_sync(False)
 
