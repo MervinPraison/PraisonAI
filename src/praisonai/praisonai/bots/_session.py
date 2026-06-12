@@ -171,6 +171,7 @@ class BotSessionManager:
         chat_id: str = "",
         thread_id: str = "",
         user_name: str = "",
+        stream_callback: Optional[Any] = None,
     ) -> str:
         """Run ``agent.chat(prompt)`` with *user_id*-scoped history.
 
@@ -179,6 +180,10 @@ class BotSessionManager:
 
         Uses both a per-user lock (serialise same user) and a per-agent
         lock (prevent concurrent history swaps on a shared Agent).
+
+        Args:
+            stream_callback: Optional async callback for streaming events.
+                            If provided, will be passed to agent.astart() for streaming.
 
         N4 — Inbound DLQ: if a ``dlq`` was passed to ``__init__`` and
         ``agent.chat()`` raises, the failing message is persisted to
@@ -227,14 +232,17 @@ class BotSessionManager:
                     saved_history = agent.chat_history
                     agent.chat_history = user_history
                     try:
-                        # Copy current task's contextvars (incl. SessionContext)
-                        # into the worker thread so tools the agent invokes can
-                        # read platform/user metadata.
-                        import contextvars
-                        _ctx = contextvars.copy_context()
-                        response = await loop.run_in_executor(
-                            None, _ctx.run, agent.chat, prompt
-                        )
+                        # Choose streaming vs non-streaming path based on callback
+                        if stream_callback:
+                            # Streaming path: use agent.astart() with stream callback
+                            response = await agent.astart(prompt, stream_callback=stream_callback)
+                        else:
+                            # Legacy non-streaming path: use agent.chat() in executor
+                            import contextvars
+                            _ctx = contextvars.copy_context()
+                            response = await loop.run_in_executor(
+                                None, _ctx.run, agent.chat, prompt
+                            )
                         # Capture updated history before restoring caller's.
                         updated_history = agent.chat_history
                     except Exception as exc:

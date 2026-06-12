@@ -33,6 +33,8 @@ from ._debounce import InboundDebouncer
 from ._ack import AckReactor
 from ._unknown_user import UnknownUserHandler, BotContext
 from ._pairing_ui import PairingUIBuilder, PairingCallbackHandler
+from ._streaming import StreamingConfig, StreamingMode, DraftStreamer
+from ._rate_limit import RateLimiter
 from ..gateway.unicode_utils import safe_error_message, safe_log_message, extract_root_cause_from_error
 from ..gateway.pairing import PairingStore
 
@@ -82,6 +84,10 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._agent = agent
         self.config = config or BotConfig(token=token)
         
+        # Initialize streaming config (None means streaming disabled)
+        self._streaming_config = None
+        self._rate_limiter = RateLimiter.for_platform("telegram")
+        
         self._is_running = False
         self._bot_user: Optional[BotUser] = None
         self._application = None
@@ -119,6 +125,15 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._monitor = None  # Lazy: ConnectionMonitor
         self._stop_event: Optional[asyncio.Event] = None
     
+    
+    def configure_streaming(self, config: StreamingConfig) -> None:
+        """Configure streaming reply mode.
+        
+        Args:
+            config: Streaming configuration. Set mode=StreamingMode.OFF to disable.
+        """
+        self._streaming_config = config
+        logger.debug("TelegramBot: streaming configured, mode=%s", config.mode)
     
     def enable_stt(self, enabled: bool = True) -> None:
         """Enable STT for voice message transcription."""
@@ -227,41 +242,76 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 try:
                     message_text = await self._debouncer.debounce(user_id, message.content)
                     
-                    # Show typing indicator with renewal during long operation
-                    if self.config.typing_indicator:
-                        from ._typing_indicator import with_typing_renewal
-                        
-                        async def _typing_action():
-                            await update.message.chat.send_action("typing")
-                        
-                        response = await with_typing_renewal(
-                            typing_func=_typing_action,
-                            operation_coro=self._session.chat(
-                                self._agent, user_id, message_text,
-                                chat_id=str(update.message.chat_id) if update.message.chat_id else "",
-                                user_name=user_name,
-                            )
+                    # Check if streaming is enabled and configured
+                    streaming_enabled = (
+                        self._streaming_config and 
+                        self._streaming_config.mode != StreamingMode.OFF
+                    )
+                    
+                    if streaming_enabled:
+                        # Streaming path
+                        streamer = DraftStreamer(
+                            adapter=self,
+                            channel_id=str(update.message.chat_id),
+                            config=self._streaming_config,
+                            rate_limiter=self._rate_limiter,
                         )
-                    else:
+                        
+                        # Start streaming (send placeholder)
+                        await streamer.start()
+                        
+                        # Get response with streaming callback
                         response = await self._session.chat(
                             self._agent, user_id, message_text,
                             chat_id=str(update.message.chat_id) if update.message.chat_id else "",
                             user_name=user_name,
+                            stream_callback=streamer.on_event,
                         )
-                    send_result = self.fire_message_sending(
-                        str(update.message.chat_id), str(response),
-                        reply_to=str(update.message.message_id),
-                    )
-                    if send_result["cancel"]:
-                        return
-                    await self._send_response_with_media(
-                        update.message.chat_id,
-                        send_result["content"],
-                        reply_to=update.message.message_id,
-                    )
-                    self.fire_message_sent(
-                        str(update.message.chat_id), send_result["content"],
-                    )
+                        
+                        # Finalize with complete response
+                        await streamer.finalize(response)
+                        
+                        # Skip normal send flow for streaming - message already handled
+                        
+                    else:
+                        # Legacy non-streaming path
+                        # Show typing indicator with renewal during long operation
+                        if self.config.typing_indicator:
+                            from ._typing_indicator import with_typing_renewal
+                            
+                            async def _typing_action():
+                                await update.message.chat.send_action("typing")
+                            
+                            response = await with_typing_renewal(
+                                typing_func=_typing_action,
+                                operation_coro=self._session.chat(
+                                    self._agent, user_id, message_text,
+                                    chat_id=str(update.message.chat_id) if update.message.chat_id else "",
+                                    user_name=user_name,
+                                )
+                            )
+                        else:
+                            response = await self._session.chat(
+                                self._agent, user_id, message_text,
+                                chat_id=str(update.message.chat_id) if update.message.chat_id else "",
+                                user_name=user_name,
+                            )
+                        
+                        # Normal send flow for non-streaming
+                        send_result = self.fire_message_sending(
+                            str(update.message.chat_id), str(response),
+                            reply_to=str(update.message.message_id),
+                        )
+                        if send_result["cancel"]:
+                            return
+                        await self._send_response_with_media(
+                            update.message.chat_id,
+                            send_result["content"],
+                            reply_to=update.message.message_id,
+                        )
+                        self.fire_message_sent(
+                            str(update.message.chat_id), send_result["content"],
+                        )
                     # Done reaction
                     if ack_ctx:
                         await self._ack.done(ack_ctx, react_fn=_tg_react, unreact_fn=_tg_unreact)
