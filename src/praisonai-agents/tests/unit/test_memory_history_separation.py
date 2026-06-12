@@ -303,6 +303,63 @@ class TestMemoryHistorySeparation:
         assert any(msg.get("role") == "assistant" for msg in history)
 
 
+class TestPersistAutoSaveNoDuplicates:
+    """Per-turn _persist_message must not double-save via _auto_save_session."""
+
+    def test_persist_then_auto_save_does_not_duplicate(self, tmp_path, monkeypatch):
+        """memory=history + auto_save: one turn should persist exactly two messages."""
+        monkeypatch.setenv("PRAISONAI_SESSIONS_DIR", str(tmp_path))
+        import praisonaiagents.session as session_mod
+        session_mod._default_store = None
+
+        from praisonaiagents import Agent
+        from praisonaiagents.session import get_default_session_store
+
+        agent = Agent(
+            name="test",
+            instructions="Test agent",
+            memory="history",
+            auto_save="dup-session",
+        )
+        agent._init_session_store()
+        agent.chat_history = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi"},
+        ]
+        agent._persist_message("user", "Hello")
+        agent._persist_message("assistant", "Hi")
+        agent._auto_save_session()
+
+        history = get_default_session_store().get_chat_history("dup-session")
+        assert len(history) == 2
+
+
+class TestSessionSaveStateNoDuplicates:
+    """Repeated save_state() must not append duplicate chat history."""
+
+    def test_repeated_save_agent_histories_is_idempotent(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PRAISONAI_SESSIONS_DIR", str(tmp_path))
+        import praisonaiagents.session as session_mod
+        session_mod._default_store = None
+
+        from unittest.mock import MagicMock
+        from praisonaiagents.session import Session, get_default_session_store
+
+        session = Session(session_id="sess1", user_id="user1")
+        mock_agent = MagicMock()
+        mock_agent.chat_history = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi"},
+        ]
+        session._agents["agent1"] = {"agent": mock_agent, "chat_history": []}
+
+        session._save_agent_chat_histories()
+        session._save_agent_chat_histories()
+
+        history = get_default_session_store().get_chat_history("sess1_agent1")
+        assert len(history) == 2
+
+
 class TestG3PerTurnPersist:
     """G-3: Verify per-turn persist exists via _persist_message()."""
 

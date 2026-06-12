@@ -340,14 +340,24 @@ class Session:
                     pass
                 
                 if session_store is not None:
-                    # Use SessionStore for conversation history
+                    # Replace atomically to avoid duplicate appends on repeated save_state()
                     session_id = f"{self.session_id}_{agent_key}"
-                    for msg in chat_history:
-                        if isinstance(msg, dict):
+                    messages = [
+                        {
+                            "role": msg.get("role", "user"),
+                            "content": msg.get("content", ""),
+                        }
+                        for msg in chat_history
+                        if isinstance(msg, dict)
+                    ]
+                    if messages and hasattr(session_store, "set_chat_history"):
+                        session_store.set_chat_history(session_id, messages)
+                    elif messages:
+                        for msg in messages:
                             session_store.add_message(
                                 session_id,
-                                role=msg.get("role", "user"),
-                                content=msg.get("content", ""),
+                                role=msg["role"],
+                                content=msg["content"],
                             )
                 else:
                     # Fallback to Memory.store_short_term() for backward compatibility

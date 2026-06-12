@@ -403,6 +403,11 @@ class MemoryMixin:
                     self._session_store.add_user_message(self._session_id, content)
                 elif role == "assistant":
                     self._session_store.add_assistant_message(self._session_id, content)
+                # Keep auto_save index in sync when per-turn persist shares session_id
+                if self.auto_save and self.auto_save == self._session_id:
+                    self._auto_save_last_index = (
+                        getattr(self, "_auto_save_last_index", 0) + 1
+                    )
                 self._persist_session_stats()
             except Exception as e:
                 logging.warning(f"Failed to persist message to session store: {e}")
