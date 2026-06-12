@@ -882,7 +882,7 @@ async def process_inbound_telegram_message(
     
     # 2. User allowlist and pairing check
     user_id = message.sender.user_id if message.sender else ""
-    is_explicitly_allowed = bot.config.is_user_allowed(user_id)
+    is_explicitly_allowed = bool(bot.config.allowed_users) and bot.config.is_user_allowed(user_id)
     
     if not is_explicitly_allowed:
         # Check if bot context is available for pairing system

@@ -264,33 +264,29 @@ class TestUnifiedSessionStore:
         
         assert session is None
 
-    def test_stale_save_preserves_concurrent_messages(self, temp_session_dir):
-        """Saving from a stale in-memory copy must not drop newer disk messages."""
-        store_a = UnifiedSessionStore(session_dir=temp_session_dir)
-        store_b = UnifiedSessionStore(session_dir=temp_session_dir)
+    def test_stale_cache_write_preserves_concurrent_updates(self, temp_session_dir):
+        """Stale in-process cache must not clobber messages written by another store."""
+        writer = UnifiedSessionStore(session_dir=temp_session_dir)
+        reader = UnifiedSessionStore(session_dir=temp_session_dir)
 
-        base = UnifiedSession(session_id="shared")
-        base.add_user_message("Hello")
-        store_a.save(base)
+        session = UnifiedSession(session_id="shared")
+        session.add_user_message("warm cache")
+        writer.save(session)
+        stale = reader.load("shared")
 
-        stale = store_a.load("shared")
-        assert stale is not None
+        writer_session = writer.load("shared")
+        writer_session.add_user_message("from writer")
+        writer_session.add_assistant_message("writer reply")
+        writer.save(writer_session)
 
-        fresh = store_b.load("shared")
-        assert fresh is not None
-        fresh.add_assistant_message("From process B")
-        store_b.save(fresh)
+        stale.add_user_message("from reader")
+        stale.add_assistant_message("reader reply")
+        reader.save(stale)
 
-        stale.add_user_message("From process A")
-        store_a.save(stale)
-
-        final = store_b.load("shared")
-        assert final is not None
-        contents = [m["content"] for m in final.messages]
-        assert "Hello" in contents
-        assert "From process B" in contents
-        assert "From process A" in contents
-        assert len(final.messages) == 3
+        final = writer.load("shared")
+        assert len(final.messages) == 5
+        assert final.messages[1]["content"] == "from writer"
+        assert final.messages[3]["content"] == "from reader"
 
     def test_concurrent_saves_preserve_all_messages(self, temp_session_dir):
         """Concurrent full-session saves should not lose chat history."""
