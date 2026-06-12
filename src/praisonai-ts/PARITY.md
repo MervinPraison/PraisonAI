@@ -7,14 +7,14 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 339 |
+| Python Core Features | 349 |
 | Python Wrapper Features | 99 |
 | TypeScript Features | 1192 |
-| **Gap Count** | **47** |
+| **Gap Count** | **57** |
 | P0 (Critical) | 1 |
 | P1 (High) | 0 |
 | P2 (Medium) | 0 |
-| P3 (Low) | 46 |
+| P3 (Low) | 56 |
 
 ## Gap Matrix
 
@@ -147,7 +147,7 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (179 done, 46 todo)
+### P3_Advanced (179 done, 56 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -193,9 +193,19 @@
 | `ToolExecutionError` | ✅ | ❌ | low | ⏳ TODO |
 | `ToolSearchConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `ToolUseEvent` | ✅ | ❌ | high | ⏳ TODO |
+| `ToolsetRegistry` | ✅ | ❌ | high | ⏳ TODO |
+| `ToolsetSpec` | ✅ | ❌ | high | ⏳ TODO |
 | `ValidationError` | ✅ | ❌ | low | ⏳ TODO |
 | `configure\_structured\_logging` | ✅ | ❌ | low | ⏳ TODO |
 | `get\_logger` | ✅ | ❌ | low | ⏳ TODO |
+| `get\_toolset` | ✅ | ❌ | low | ⏳ TODO |
+| `get\_toolset\_registry` | ✅ | ❌ | low | ⏳ TODO |
+| `has\_toolset` | ✅ | ❌ | low | ⏳ TODO |
+| `list\_toolsets` | ✅ | ❌ | low | ⏳ TODO |
+| `register\_toolset` | ✅ | ❌ | low | ⏳ TODO |
+| `resolve\_toolset` | ✅ | ❌ | low | ⏳ TODO |
+| `resolve\_toolsets` | ✅ | ❌ | low | ⏳ TODO |
+| `unregister\_toolset` | ✅ | ❌ | low | ⏳ TODO |
 | `validate\_decision\_string` | ✅ | ❌ | low | ⏳ TODO |
 | `A2A` | ✅ | ✅ | low | ✅ DONE |
 | `AGUI` | ✅ | ✅ | low | ✅ DONE |
@@ -535,7 +545,7 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (51 exports)</summary>
+<summary><strong>other</strong> (61 exports)</summary>
 
 ```python
 from praisonaiagents import AgentMessageEvent, AgentRunOutcome, Agents, AsyncLearnProtocol, AutonomyConfig, BudgetExceededError, CliBackendConfig, CliBackendDelta, CliBackendProtocol, CliBackendResult...

@@ -4,14 +4,14 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 339,
+    "pythonCoreFeatures": 349,
     "pythonWrapperFeatures": 99,
     "typescriptFeatures": 1192,
-    "gapCount": 47,
+    "gapCount": 57,
     "priorityP0": 1,
     "priorityP1": 0,
     "priorityP2": 0,
-    "priorityP3": 46
+    "priorityP3": 56
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -255,6 +255,8 @@
       "ToolUseEvent",
       "ToolValidationError",
       "Tools",
+      "ToolsetRegistry",
+      "ToolsetSpec",
       "TraceSink",
       "TraceSinkProtocol",
       "ValidationError",
@@ -311,10 +313,14 @@
       "get_registry",
       "get_telemetry",
       "get_tool",
+      "get_toolset",
+      "get_toolset_registry",
       "handoff",
       "handoff_filters",
+      "has_toolset",
       "is_path_like",
       "is_policy_string",
+      "list_toolsets",
       "load_plugin",
       "loop",
       "memory",
@@ -326,6 +332,7 @@
       "prompt_with_handoff_instructions",
       "register_display_callback",
       "register_tool",
+      "register_toolset",
       "repeat",
       "resolve",
       "resolve_autonomy",
@@ -342,6 +349,8 @@
       "resolve_reflection",
       "resolve_routing",
       "resolve_skills",
+      "resolve_toolset",
+      "resolve_toolsets",
       "resolve_web",
       "route",
       "suggest_similar",
@@ -350,6 +359,7 @@
       "tools",
       "trace_context",
       "track_workflow",
+      "unregister_toolset",
       "validate_config",
       "validate_decision_string",
       "validate_tool",
@@ -623,14 +633,24 @@
         "StructuredFormatter",
         "ToolExecutionError",
         "ToolUseEvent",
+        "ToolsetRegistry",
+        "ToolsetSpec",
         "ValidationError",
         "config",
         "configure_structured_logging",
         "embedding",
         "embeddings",
         "get_logger",
+        "get_toolset",
+        "get_toolset_registry",
+        "has_toolset",
+        "list_toolsets",
         "memory",
+        "register_toolset",
+        "resolve_toolset",
+        "resolve_toolsets",
         "tools",
+        "unregister_toolset",
         "validate_decision_string",
         "workflows"
       ],
@@ -5299,6 +5319,24 @@
         "category": "other"
       },
       {
+        "feature": "ToolsetRegistry",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "ToolsetSpec",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "TraceSink",
         "python": true,
         "typescript": true,
@@ -5650,6 +5688,33 @@
         "category": "config"
       },
       {
+        "feature": "get_toolset",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "get_toolset_registry",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "has_toolset",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "is_path_like",
         "python": true,
         "typescript": true,
@@ -5666,6 +5731,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "list_toolsets",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "load_plugin",
@@ -5720,6 +5794,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "main"
+      },
+      {
+        "feature": "register_toolset",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "resolve",
@@ -5857,6 +5940,24 @@
         "category": "config"
       },
       {
+        "feature": "resolve_toolset",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "resolve_toolsets",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "resolve_web",
         "python": true,
         "typescript": true,
@@ -5909,6 +6010,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "flow_display"
+      },
+      {
+        "feature": "unregister_toolset",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "validate_config",

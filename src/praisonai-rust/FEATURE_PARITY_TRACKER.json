@@ -5,10 +5,10 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 339,
+    "pythonCoreFeatures": 349,
     "rustFeatures": 667,
-    "gapCount": 60,
-    "parityPercentage": 196.8
+    "gapCount": 70,
+    "parityPercentage": 191.1
   },
   "pythonCoreSDK": {
     "exports": [
@@ -251,6 +251,8 @@
       "ToolUseEvent",
       "ToolValidationError",
       "Tools",
+      "ToolsetRegistry",
+      "ToolsetSpec",
       "TraceSink",
       "TraceSinkProtocol",
       "ValidationError",
@@ -307,10 +309,14 @@
       "get_registry",
       "get_telemetry",
       "get_tool",
+      "get_toolset",
+      "get_toolset_registry",
       "handoff",
       "handoff_filters",
+      "has_toolset",
       "is_path_like",
       "is_policy_string",
+      "list_toolsets",
       "load_plugin",
       "loop",
       "memory",
@@ -322,6 +328,7 @@
       "prompt_with_handoff_instructions",
       "register_display_callback",
       "register_tool",
+      "register_toolset",
       "repeat",
       "resolve",
       "resolve_autonomy",
@@ -338,6 +345,8 @@
       "resolve_reflection",
       "resolve_routing",
       "resolve_skills",
+      "resolve_toolset",
+      "resolve_toolsets",
       "resolve_web",
       "route",
       "suggest_similar",
@@ -346,6 +355,7 @@
       "tools",
       "trace_context",
       "track_workflow",
+      "unregister_toolset",
       "validate_config",
       "validate_decision_string",
       "validate_tool",
@@ -4202,6 +4212,24 @@
         "category": "other"
       },
       {
+        "feature": "ToolsetRegistry",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "ToolsetSpec",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "TraceSink",
         "python": true,
         "rust": true,
@@ -4553,6 +4581,33 @@
         "category": "config"
       },
       {
+        "feature": "get_toolset",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "get_toolset_registry",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "has_toolset",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "is_path_like",
         "python": true,
         "rust": true,
@@ -4569,6 +4624,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "list_toolsets",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "load_plugin",
@@ -4623,6 +4687,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "main"
+      },
+      {
+        "feature": "register_toolset",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "resolve",
@@ -4760,6 +4833,24 @@
         "category": "config"
       },
       {
+        "feature": "resolve_toolset",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "resolve_toolsets",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "resolve_web",
         "python": true,
         "rust": true,
@@ -4812,6 +4903,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "flow_display"
+      },
+      {
+        "feature": "unregister_toolset",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "validate_config",
