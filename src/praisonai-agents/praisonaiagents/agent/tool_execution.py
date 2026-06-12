@@ -16,6 +16,7 @@ import contextvars
 import concurrent.futures
 from typing import List, Optional, Any, Dict, Union, TYPE_CHECKING
 from ..errors import ToolExecutionError
+from ..tools.trust import wrap_if_external
 
 logger = logging.getLogger(__name__)
 
@@ -288,7 +289,6 @@ class ToolExecutionMixin:
             
             # Apply prompt injection protection for external tools
             # Zero-cost for trusted tools, wraps external content in security markers
-            from ..tools.trust import wrap_if_external
             result = wrap_if_external(function_name, result)
             
             # Apply tool output truncation to prevent context overflow
