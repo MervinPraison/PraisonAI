@@ -347,10 +347,16 @@ class KanbanDispatcher:
                     process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     logger.warning(f"Task {task_id} did not terminate in 5s; sending SIGKILL")
-                    process.kill()
+                    try:
+                        process.kill()
+                    except OSError as kill_err:
+                        logger.error(f"Failed to kill task {task_id}: {kill_err}")
                 except OSError as os_err:
                     logger.error(f"OS error while terminating task {task_id}: {os_err}")
-                    process.kill()
+                    try:
+                        process.kill()
+                    except OSError as kill_err:
+                        logger.error(f"Failed to kill task {task_id}: {kill_err}")
                 # KeyboardInterrupt, SystemExit, CancelledError now propagate as intended
             
             self.running_tasks.clear()
