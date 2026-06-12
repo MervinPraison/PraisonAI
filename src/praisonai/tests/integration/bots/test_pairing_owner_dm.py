@@ -110,7 +110,7 @@ class TestPairingOwnerDM:
         approval_dm = self.adapter.approval_dms[0]
         assert approval_dm["to"] == "owner-123"
         assert approval_dm["user_name"] == "Alice"
-        assert approval_dm["channel"] == "dm-123"
+        assert approval_dm["channel"] == "telegram"
         assert approval_dm["user_id"] == "new-user"
         
         # Should notify user that request was sent
@@ -128,12 +128,12 @@ class TestPairingOwnerDM:
         approval_dm = self.adapter.approval_dms[0]
         code = approval_dm["code"]
         
-        # Simulate owner approval using real signed callback
+        # Simulate owner approval using callback payload from the approval DM
         keyboard = PairingUIBuilder.create_telegram_keyboard(
-            user_name="Alice",
+            user_name=approval_dm["user_name"],
             code=code,
-            channel="telegram",
-            user_id="new-user",
+            channel=approval_dm["channel"],
+            user_id=approval_dm["user_id"],
         )
         callback_data = keyboard["inline_keyboard"][0][0]["callback_data"]  # Get approve button callback
         
