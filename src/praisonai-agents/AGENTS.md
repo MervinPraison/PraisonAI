@@ -390,7 +390,7 @@ Agent parameters are consolidated into Config objects following the pattern:
 
 **Deprecated standalone params still work** (backward compatible) but emit `DeprecationWarning`.
 
-> **📢 Breaking Change Notice:** `ExecutionConfig.context_compaction` currently defaults to `False` during a deprecation period. In the next release, it will default to `True` for automatic proactive context overflow protection. To opt out explicitly, set `context_compaction=False`. To use the new behavior early, set `context_compaction=True`.
+> **📢 Deprecation Notice:** `ExecutionConfig.context_compaction` currently defaults to `False` during a deprecation period. In the next release, it will default to `True` for automatic proactive context overflow protection. To opt out explicitly, set `context_compaction=False`. To use the new behavior early, set `context_compaction=True`.
 
 ```python
 # ❌ Old way (deprecated)
@@ -415,7 +415,7 @@ agent = Agent(
         code_execution=True,
         code_mode="safe",
         rate_limiter=my_limiter,
-        context_compaction=False,  # explicit opt-out during deprecation period
+        context_compaction=False,  # prepare for next release when default becomes True; warning still fires during deprecation period
     ),
     memory=MemoryConfig(auto_save="my_session"),
     autonomy=AutonomyConfig(verification_hooks=[my_hook]),
