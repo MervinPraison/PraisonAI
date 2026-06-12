@@ -65,6 +65,7 @@ class BotSessionManager:
         dlq: Optional[Any] = None,
         identity_resolver: Optional[Any] = None,
         ingress_journal: Optional[Any] = None,
+        run_control: Optional[Any] = None,
     ) -> None:
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
         self._locks: Dict[str, asyncio.Lock] = {}
@@ -86,6 +87,8 @@ class BotSessionManager:
         # crash recovery and webhook redelivery protection.
         self._ingress_journal = ingress_journal
         self._last_journal_key = None  # Store key for delayed completion
+        # Run control for in-flight message handling
+        self._run_control = run_control
 
     def _storage_key(self, user_id: str) -> str:
         """Resolve a raw platform user id to the in-memory/store key.
@@ -344,6 +347,129 @@ class BotSessionManager:
                     _clear_ctx(ctx_token)
                 except Exception as e:
                     logger.debug("Failed to clear task-local session context for ctx_token=%r: %s", ctx_token, e)
+
+    async def chat_with_run_control(
+        self,
+        agent: "Agent",
+        user_id: str,
+        prompt: str,
+        chat_id: str = "",
+        thread_id: str = "",
+        user_name: str = "",
+    ) -> Dict[str, Any]:
+        """Run agent.chat() with run control for better UX during long operations.
+        
+        This method integrates with SessionRunControl to provide:
+        - Busy acknowledgment for mid-run messages
+        - Pending message slot for follow-ups
+        - Interrupt support via /stop command
+        - Optional steering for real-time guidance
+        
+        Returns:
+            Dict with 'response' (str) and 'metadata' (dict) keys.
+            Metadata includes run control information.
+        """
+        if self._run_control is None:
+            # Fall back to regular chat if no run control
+            response = await self.chat(agent, user_id, prompt, chat_id, thread_id, user_name)
+            return {"response": response, "metadata": {"run_control": False}}
+        
+        try:
+            # Import here to avoid circular dependency
+            from ._run_control import RunDecision
+        except ImportError:
+            # Fall back if run control not available
+            response = await self.chat(agent, user_id, prompt, chat_id, thread_id, user_name)
+            return {"response": response, "metadata": {"run_control": False, "error": "run_control_unavailable"}}
+        
+        # Submit message to run control
+        decision = await self._run_control.submit(user_id, prompt)
+        
+        if decision in (RunDecision.QUEUED, RunDecision.MERGED):
+            # Message was queued or merged, return acknowledgment
+            ack_msg = await self._run_control.get_busy_ack_message(user_id, decision)
+            return {
+                "response": ack_msg,
+                "metadata": {
+                    "run_control": True,
+                    "decision": decision.value,
+                    "queued": True
+                }
+            }
+        
+        # We're running now (RUN_NOW or INTERRUPTED)
+        run_generation = None
+        interrupt_controller = None
+        
+        if decision == RunDecision.RUN_NOW:
+            # Get the interrupt controller for this run
+            interrupt_controller = self._run_control.get_interrupt_controller(user_id)
+        elif decision == RunDecision.INTERRUPTED:
+            # Previous run was cancelled, get new controller
+            interrupt_controller = self._run_control.get_interrupt_controller(user_id)
+        
+        # Get current run generation for race protection
+        status = self._run_control.get_run_status(user_id)
+        run_generation = status.get("run_generation")
+        
+        try:
+            # Attach interrupt controller to agent if available
+            original_interrupt = None
+            if interrupt_controller and hasattr(agent, '_interrupt_controller'):
+                original_interrupt = getattr(agent, '_interrupt_controller', None)
+                agent._interrupt_controller = interrupt_controller
+            
+            # Run the chat with the existing method
+            response = await self.chat(agent, user_id, prompt, chat_id, thread_id, user_name)
+            
+            # Check for pending messages to process next
+            pending = self._run_control.next_pending(user_id)
+            pending_info = {}
+            if pending:
+                pending_info = {
+                    "next_pending": pending[:100] + "..." if len(pending) > 100 else pending
+                }
+            
+            return {
+                "response": response,
+                "metadata": {
+                    "run_control": True,
+                    "decision": decision.value,
+                    "completed": True,
+                    "run_generation": run_generation,
+                    **pending_info
+                }
+            }
+            
+        except Exception as e:
+            # Handle interruption specifically
+            if interrupt_controller and interrupt_controller.is_set():
+                reason = interrupt_controller.reason or "unknown"
+                return {
+                    "response": f"⚠️ Task cancelled: {reason}",
+                    "metadata": {
+                        "run_control": True,
+                        "decision": decision.value,
+                        "interrupted": True,
+                        "reason": reason,
+                        "run_generation": run_generation
+                    }
+                }
+            else:
+                # Re-raise other exceptions
+                raise
+                
+        finally:
+            # Restore original interrupt controller
+            if interrupt_controller and hasattr(agent, '_interrupt_controller'):
+                if original_interrupt is not None:
+                    agent._interrupt_controller = original_interrupt
+                else:
+                    agent._interrupt_controller = None
+            
+            # Mark run as finished
+            if run_generation is not None:
+                await self._run_control.finish_run(user_id, run_generation)
 
     def reap_stale(self, max_age_seconds: int) -> int:
         """Remove sessions older than *max_age_seconds*.  Returns count reaped.
