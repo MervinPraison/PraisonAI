@@ -85,6 +85,7 @@ class BotSessionManager:
         # When set, messages are journaled before agent processing for
         # crash recovery and webhook redelivery protection.
         self._ingress_journal = ingress_journal
+        self._last_journal_key = None  # Store key for delayed completion
 
     def _storage_key(self, user_id: str) -> str:
         """Resolve a raw platform user id to the in-memory/store key.
@@ -308,14 +309,18 @@ class BotSessionManager:
                         None, self._save_history, user_id, updated_history
                     )
 
-                    # Mark journal entry as completed on success
-                    if journal_key is not None:
-                        self._ingress_journal.complete(journal_key)
-
+                    # Store journal key in instance for later completion after message delivery
+                    self._last_journal_key = journal_key
+                    
                     return response
                     
-            finally:
-                # Always release journal claim
+            except Exception as e:
+                # Handle any remaining exceptions and ensure claim is released 
+                if claim_ctx is not None:
+                    await claim_ctx.__aexit__(type(e), e, e.__traceback__)
+                raise
+            else:
+                # Clean exit - no exception
                 if claim_ctx is not None:
                     await claim_ctx.__aexit__(None, None, None)
         finally:
@@ -352,6 +357,23 @@ class BotSessionManager:
         if stale:
             logger.debug("BotSessionManager: reaped %d stale sessions", len(stale))
         return len(stale)
+
+    def complete_last_journal_entry(self) -> bool:
+        """Complete the last journal entry if one exists.
+        
+        Call this after successfully delivering a message to the platform
+        to ensure the journal entry is marked as completed.
+        
+        Returns True if an entry was completed, False if no entry was pending.
+        """
+        if self._last_journal_key is not None and self._ingress_journal is not None:
+            try:
+                self._ingress_journal.complete(self._last_journal_key)
+                self._last_journal_key = None
+                return True
+            except Exception as e:
+                logger.warning("Failed to complete journal entry: %s", e)
+        return False
 
     def reset(self, user_id: str) -> bool:
         """Clear a user's session history.  Returns True if it existed."""

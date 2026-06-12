@@ -86,14 +86,15 @@ class ClaimContext:
         return self
         
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # Always release claim on exit - completion is explicit via complete()
-        self._journal._release_claim(self._key)
+        # No longer needed - release is handled by the outer context managers
+        pass
         
     async def __aenter__(self):
         return self
         
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        self.__exit__(exc_type, exc_val, exc_tb)
+        # No longer needed - release is handled by the outer context managers
+        pass
 
 
 class InboundJournal:
@@ -110,7 +111,7 @@ class InboundJournal:
         from praisonai.bots import InboundJournal, BotSessionManager
         
         journal = InboundJournal(path="~/.praisonai/state/ingress.sqlite")
-        session_mgr = BotSessionManager(platform="telegram", journal=journal)
+        session_mgr = BotSessionManager(platform="telegram", ingress_journal=journal)
         
         # In message handler:
         key = journal.receive("telegram", "bot123", chat_id, update.message.message_id, payload)
@@ -227,8 +228,8 @@ class InboundJournal:
         try:
             yield ClaimContext(self, key)
         finally:
-            # Context manager will call _release_claim
-            pass
+            # Release claim if not completed
+            self._release_claim(key)
     
     @asynccontextmanager  
     async def aclaim(self, key: str):
@@ -237,8 +238,8 @@ class InboundJournal:
         try:
             yield ClaimContext(self, key)
         finally:
-            # Context manager will call _release_claim
-            pass
+            # Release claim if not completed
+            self._release_claim(key)
     
     def complete(self, key: str) -> None:
         """Mark a journal entry as completed."""
@@ -292,13 +293,15 @@ class InboundJournal:
         return int(cur.rowcount or 0)
     
     def _evict_overflow_locked(self, conn: sqlite3.Connection) -> int:
-        """Remove oldest completed entries if over max_size."""
+        """Remove oldest entries if over max_size. Prefers completed, then oldest pending."""
         n = conn.execute("SELECT COUNT(*) FROM ingress_journal").fetchone()[0]
         if n <= self.max_size:
             return 0
             
         excess = n - self.max_size
-        cur = conn.execute("""
+        
+        # First try to delete completed entries
+        completed_cur = conn.execute("""
             DELETE FROM ingress_journal WHERE id IN (
                 SELECT id FROM ingress_journal 
                 WHERE status = 'completed'
@@ -306,7 +309,22 @@ class InboundJournal:
                 LIMIT ?
             )
         """, (excess,))
-        return int(cur.rowcount or 0)
+        deleted = int(completed_cur.rowcount or 0)
+        
+        # If we still have excess after deleting completed entries, delete oldest pending
+        remaining_excess = excess - deleted
+        if remaining_excess > 0:
+            pending_cur = conn.execute("""
+                DELETE FROM ingress_journal WHERE id IN (
+                    SELECT id FROM ingress_journal 
+                    WHERE status = 'pending'
+                    ORDER BY ts ASC 
+                    LIMIT ?
+                )
+            """, (remaining_excess,))
+            deleted += int(pending_cur.rowcount or 0)
+            
+        return deleted
     
     def replay(self) -> int:
         """Find and replay stale claimed entries. Returns count replayed."""
