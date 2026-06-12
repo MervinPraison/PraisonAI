@@ -805,6 +805,29 @@ class ExecutionConfig:
             "max_budget": self.max_budget,
             "parallel_tool_calls": self.parallel_tool_calls,
         }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ExecutionConfig":
+        """Create ExecutionConfig from dictionary."""
+        # Handle context_compaction policy restoration
+        context_compaction = data.get("context_compaction", False)
+        if isinstance(context_compaction, dict):
+            from ..context.policy import ContextCompactionPolicy
+            context_compaction = ContextCompactionPolicy.from_dict(context_compaction)
+        
+        return cls(
+            max_iter=data.get("max_iter", 20),
+            max_rpm=data.get("max_rpm", None),
+            max_execution_time=data.get("max_execution_time", None),
+            max_retry_limit=data.get("max_retry_limit", 2),
+            code_execution=data.get("code_execution", False),
+            code_mode=data.get("code_mode", "safe"),
+            code_sandbox_mode=data.get("code_sandbox_mode", "docker"),
+            context_compaction=context_compaction,
+            max_context_tokens=data.get("max_context_tokens", None),
+            max_budget=data.get("max_budget", None),
+            parallel_tool_calls=data.get("parallel_tool_calls", False),
+        )
 
 
 @dataclass

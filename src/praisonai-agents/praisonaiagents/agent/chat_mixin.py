@@ -549,41 +549,45 @@ Your Goal: {self.goal}"""
             emit_events=True
         )
 
-    def _compute_context_budget_and_route(self, messages, tools=None, system_prompt=None):
+    def _get_compaction_policy(self):
         """
-        Compute context budget and determine proactive route BEFORE LLM call.
+        Get the active compaction policy for this agent.
         
-        Replaces the old opt-in reactive approach with proactive budget checking.
-        
-        Returns:
-            tuple: (route, compacted_messages) where route is from CompactionRoute enum
+        Shared logic used by both sync and async context budget computation.
         """
-        from ..context.policy import get_default_policy, CompactionRoute
-        from ..compaction import ContextCompactor
-        from ..hooks import HookEvent as _HookEvent
-        import logging
+        from ..context.policy import get_default_policy
         
         # Get execution config and policy
         _execution_cfg = getattr(self, 'execution', None)
         
-        # Determine if context compaction is enabled and what policy to use
-        context_compaction = True  # New default
-        policy = None
-        
         if _execution_cfg:
             compaction_setting = getattr(_execution_cfg, 'context_compaction', True)
             if compaction_setting is False:
-                # Explicitly disabled - use old reactive approach
-                return CompactionRoute.FITS, messages
+                # Explicitly disabled 
+                return None
             elif compaction_setting is True:
                 # Use default policy
-                policy = get_default_policy()
+                return get_default_policy()
             else:
                 # Custom policy provided
-                policy = compaction_setting
+                return compaction_setting
         else:
             # No execution config - use safe default
-            policy = get_default_policy()
+            return get_default_policy()
+
+    def _compute_context_budget_core(self, messages, tools=None, system_prompt=None):
+        """
+        Core context budget computation logic shared by sync and async versions.
+        
+        Returns:
+            tuple: (policy, budget_result) or (None, None) if compaction disabled
+        """
+        import logging
+        
+        # Get policy (None means disabled)
+        policy = self._get_compaction_policy()
+        if policy is None:
+            return None, None
         
         # Get model name for context window lookup
         model_name = self.llm if isinstance(self.llm, str) else "gpt-4o-mini"
@@ -603,11 +607,33 @@ Your Goal: {self.goal}"""
                 f"{budget_result.utilization:.1%} utilization, route: {budget_result.route.value}"
             )
         
+        return policy, budget_result
+
+    def _compute_context_budget_and_route(self, messages, tools=None, system_prompt=None):
+        """
+        Compute context budget and determine proactive route BEFORE LLM call.
+        
+        Replaces the old opt-in reactive approach with proactive budget checking.
+        
+        Returns:
+            tuple: (route, compacted_messages) where route is from CompactionRoute enum
+        """
+        from ..context.policy import CompactionRoute
+        from ..compaction import ContextCompactor
+        
+        # Use shared core logic
+        policy, budget_result = self._compute_context_budget_core(messages, tools, system_prompt)
+        
+        # If compaction disabled, return unchanged
+        if policy is None:
+            return CompactionRoute.FITS, messages
+        
         # Handle the routing decision
         if budget_result.route == CompactionRoute.FITS:
             return CompactionRoute.FITS, messages
         
         # Need some form of compaction - get max tokens for compactor
+        _execution_cfg = getattr(self, 'execution', None)
         max_tokens = getattr(_execution_cfg, 'max_context_tokens', None) if _execution_cfg else None
         if max_tokens is None:
             # Use 90% of available tokens as max to leave room for output
@@ -711,56 +737,22 @@ Your Goal: {self.goal}"""
 
     async def _compute_context_budget_and_route_async(self, messages, tools=None, system_prompt=None):
         """Async version of _compute_context_budget_and_route."""
-        from ..context.policy import get_default_policy, CompactionRoute
+        from ..context.policy import CompactionRoute
         from ..compaction import ContextCompactor
-        from ..hooks import HookEvent as _HookEvent
-        import logging
         
-        # Get execution config and policy
-        _execution_cfg = getattr(self, 'execution', None)
+        # Use shared core logic (synchronous part)
+        policy, budget_result = self._compute_context_budget_core(messages, tools, system_prompt)
         
-        # Determine if context compaction is enabled and what policy to use
-        context_compaction = True  # New default
-        policy = None
-        
-        if _execution_cfg:
-            compaction_setting = getattr(_execution_cfg, 'context_compaction', True)
-            if compaction_setting is False:
-                # Explicitly disabled - use old reactive approach
-                return CompactionRoute.FITS, messages
-            elif compaction_setting is True:
-                # Use default policy
-                policy = get_default_policy()
-            else:
-                # Custom policy provided
-                policy = compaction_setting
-        else:
-            # No execution config - use safe default
-            policy = get_default_policy()
-        
-        # Get model name for context window lookup
-        model_name = self.llm if isinstance(self.llm, str) else "gpt-4o-mini"
-        
-        # Compute budget using the policy
-        budget_result = policy.compute_context_budget(
-            messages=messages,
-            model=model_name,
-            tools=tools,
-            system_prompt=system_prompt
-        )
-        
-        # Log budget analysis if enabled
-        if getattr(self, '_verbose_context', False):
-            logging.info(
-                f"[context-budget] {self.name}: {budget_result.current_tokens} tokens, "
-                f"{budget_result.utilization:.1%} utilization, route: {budget_result.route.value}"
-            )
+        # If compaction disabled, return unchanged
+        if policy is None:
+            return CompactionRoute.FITS, messages
         
         # Handle the routing decision
         if budget_result.route == CompactionRoute.FITS:
             return CompactionRoute.FITS, messages
         
         # Need some form of compaction - get max tokens for compactor
+        _execution_cfg = getattr(self, 'execution', None)
         max_tokens = getattr(_execution_cfg, 'max_context_tokens', None) if _execution_cfg else None
         if max_tokens is None:
             # Use 90% of available tokens as max to leave room for output
