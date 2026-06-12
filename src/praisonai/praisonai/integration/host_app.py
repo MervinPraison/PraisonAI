@@ -13,26 +13,43 @@ from typing import Any, Dict, List, Optional, Sequence
 # Use context variable instead of module-level global for multi-agent safety
 _configured_context: contextvars.ContextVar[bool] = contextvars.ContextVar('host_configured', default=False)
 
+# For testing: also maintain a module-level flag that can be accessed across contexts
+_configured_global = False
+
 # Backward compatibility for tests
 def reset_configuration() -> None:
     """Reset configuration state for testing. Use instead of host_app._CONFIGURED = False."""
+    global _configured_global
     _configured_context.set(False)
+    _configured_global = False
+    
+    # Also clear any cached state that might be lingering
+    try:
+        import praisonaiui.server as srv
+        if hasattr(srv, '_provider'):
+            srv._provider = None
+        if hasattr(srv, '_datastore'):
+            srv._datastore = None
+    except ImportError:
+        pass
 
 def is_configured() -> bool:
     """Check if configuration has been applied in current context."""
-    return _configured_context.get()
+    return _configured_context.get() or _configured_global
 
 # Backward compatibility shim for tests that assign host_app._CONFIGURED = False
 class _ConfiguredShim:
-    """Backward compatibility shim that proxies to the ContextVar."""
+    """Backward compatibility shim that proxies to both ContextVar and global."""
     def __get__(self, obj, objtype=None):
-        return _configured_context.get()
+        return _configured_context.get() or _configured_global
     
     def __set__(self, obj, value):
+        global _configured_global
         _configured_context.set(bool(value))
+        _configured_global = bool(value)
         
     def __bool__(self):
-        return _configured_context.get()
+        return _configured_context.get() or _configured_global
 
 # Expose the shim so tests can still use host_app._CONFIGURED = False 
 _CONFIGURED = _ConfiguredShim()
@@ -65,7 +82,7 @@ def configure_host(
 ) -> None:
     """Apply PraisonAIUI host settings and wire L1 backends (unless legacy mode)."""
     # Check if already configured in this context to avoid duplicate configuration
-    if _configured_context.get():
+    if _configured_context.get() or _configured_global:
         return
 
     import praisonaiui as aiui
@@ -140,7 +157,9 @@ def configure_host(
     except ImportError:
         pass  # L3 pages are optional
 
+    global _configured_global
     _configured_context.set(True)
+    _configured_global = True
 
 
 def setup_bridges() -> None:
@@ -206,7 +225,7 @@ def create_host_app():
     """Return the Starlette app from PraisonAIUI (call after ``configure_host``)."""
     from praisonaiui.server import create_app
 
-    if not _configured_context.get():
+    if not (_configured_context.get() or _configured_global):
         configure_host()
     return create_app()
 
