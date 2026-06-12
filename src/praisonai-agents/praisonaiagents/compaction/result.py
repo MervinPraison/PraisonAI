@@ -19,10 +19,14 @@ class CompactionResult:
     summary: str = ""
     
     # Anti-thrashing and optimization info
-    savings_pct: float = 0.0  # Percentage of tokens saved
+    savings_pct: float = field(default=0.0, init=False)  # Percentage of tokens saved (computed)
     tool_results_pruned: int = 0  # Number of tool results deduplicated/pruned
     previous_summary_reused: bool = False  # Whether iterative summary was used
     was_skipped_due_to_low_savings: bool = False  # Whether compaction was skipped due to anti-thrashing
+    
+    def __post_init__(self):
+        """Initialize computed fields after construction."""
+        self.calculate_savings_pct()
     
     @property
     def tokens_saved(self) -> int:

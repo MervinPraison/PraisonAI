@@ -49,29 +49,20 @@ class ContextCompactor:
             config: Optional CompactionConfig for advanced settings
             llm_summarize_fn: Async function to call LLM for summarization
         """
-        # Initialize config first
-        self.config = config or CompactionConfig()
+        # Use provided config or create default
+        self.config = config or CompactionConfig(
+            max_tokens=max_tokens,
+            target_tokens=target_tokens or int(max_tokens * 0.75),
+            preserve_system=preserve_system,
+            preserve_recent=preserve_recent
+        )
         
-        # Use config values if config provided, otherwise use constructor args
-        if config is not None:
-            self.max_tokens = config.max_tokens
-            self.target_tokens = config.target_tokens
-            self.preserve_system = config.preserve_system
-            self.preserve_recent = config.preserve_recent
-        else:
-            self.max_tokens = max_tokens
-            self.target_tokens = target_tokens or int(max_tokens * 0.75)
-            self.preserve_system = preserve_system
-            self.preserve_recent = preserve_recent
-            # Update config with constructor args for consistency
-            self.config = CompactionConfig(
-                max_tokens=max_tokens,
-                target_tokens=self.target_tokens,
-                preserve_system=preserve_system,
-                preserve_recent=preserve_recent
-            )
-            
+        # Set instance attributes from config to ensure consistency
+        self.max_tokens = self.config.max_tokens
+        self.target_tokens = self.config.target_tokens
         self.strategy = strategy
+        self.preserve_system = self.config.preserve_system
+        self.preserve_recent = self.config.preserve_recent
         self.llm_summarize_fn = llm_summarize_fn
         
         # Anti-thrashing state tracking
@@ -82,8 +73,7 @@ class ContextCompactor:
         self._previous_summary: Optional[str] = None
         self._previous_summary_global_idx: int = 0
         
-        # Tool result cache for deduplication
-        self._tool_result_cache: Dict[str, str] = {}  # hash -> reference
+        # Reset state tracking for each compact() call
         self._used_previous_summary: bool = False
     
     def estimate_tokens(self, text: str) -> int:
@@ -146,6 +136,9 @@ class ContextCompactor:
         Returns:
             Tuple of (compacted messages, result)
         """
+        # Reset state for this compaction call
+        self._used_previous_summary = False
+        
         original_tokens = self.count_total_tokens(messages)
         
         if original_tokens <= self.max_tokens:
@@ -165,26 +158,8 @@ class ContextCompactor:
         if self.config.tool_prune_before_summarise:
             processed_messages, tool_results_pruned = self._prune_tool_results(messages)
         
-        # Check if projected savings would be too low (anti-thrashing)
-        projected_tokens = self.count_total_tokens(processed_messages)
-        projected_savings_pct = ((original_tokens - projected_tokens) / original_tokens) * 100.0 if original_tokens > 0 else 0.0
-        
-        if projected_savings_pct < (self.config.min_savings_pct * 100.0):
-            self._low_savings_streak += 1
-            result = CompactionResult(
-                original_tokens=original_tokens,
-                compacted_tokens=original_tokens,
-                messages_removed=0,
-                messages_kept=len(messages),
-                strategy_used=self.strategy,
-                was_skipped_due_to_low_savings=True,
-                tool_results_pruned=tool_results_pruned
-            )
-            result.calculate_savings_pct()
-            return messages, result
-        else:
-            # Reset streak on good savings
-            self._low_savings_streak = 0
+        # Skip early exit - proceed with full compaction strategy
+        # Anti-thrashing check will be applied after strategy runs
         
         if self.strategy == CompactionStrategy.TRUNCATE:
             compacted = self._truncate(processed_messages)
@@ -229,7 +204,7 @@ class ContextCompactor:
         )
         result.calculate_savings_pct()
         
-        # Update anti-thrashing tracking
+        # Update anti-thrashing tracking based on actual results
         self._last_savings_pct = result.savings_pct
         if result.savings_pct >= self.config.min_savings_pct:
             self._low_savings_streak = 0
@@ -298,6 +273,7 @@ class ContextCompactor:
         """
         processed_messages = []
         pruned_count = 0
+        tool_result_cache: Dict[str, str] = {}  # Local cache per compaction call
         
         for msg in messages:
             role = msg.get("role", "")
@@ -306,14 +282,14 @@ class ContextCompactor:
             # Process tool result messages
             if role == "tool" or msg.get("tool_call_id"):
                 if isinstance(content, str) and content:
-                    # Create hash of tool result content
-                    content_hash = hashlib.md5(content.encode()).hexdigest()[:8]
+                    # Create hash of tool result content - use SHA256 for collision resistance
+                    content_hash = hashlib.sha256(content.encode()).hexdigest()[:16]
                     
-                    # Check if we've seen this tool result before
-                    if content_hash in self._tool_result_cache:
+                    # Check if we've seen this tool result before in this compaction
+                    if content_hash in tool_result_cache:
                         # Replace with reference to previous occurrence
                         pruned_msg = msg.copy()
-                        pruned_msg["content"] = self._tool_result_cache[content_hash]
+                        pruned_msg["content"] = tool_result_cache[content_hash]
                         processed_messages.append(pruned_msg)
                         pruned_count += 1
                     else:
@@ -325,10 +301,10 @@ class ContextCompactor:
                             tail = content[-tail_size:] if tail_size > 0 else ""
                             truncated = f"{head}\n...[{len(content):,} chars, showing first/last portions]...\n{tail}"
                             
-                            # Store reference for future use
+                            # Store reference for future use within this compaction
                             tool_name = msg.get("name", "tool")
                             reference = f"[{tool_name}] ran → {len(content):,} chars output (full result at hash {content_hash})"
-                            self._tool_result_cache[content_hash] = reference
+                            tool_result_cache[content_hash] = reference
                             
                             pruned_msg = msg.copy()
                             pruned_msg["content"] = truncated
@@ -338,7 +314,7 @@ class ContextCompactor:
                             # Small tool result, keep as is but cache for future reference
                             tool_name = msg.get("name", "tool")
                             reference = f"[{tool_name}] ran → {len(content)} chars output (see hash {content_hash})"
-                            self._tool_result_cache[content_hash] = reference
+                            tool_result_cache[content_hash] = reference
                             processed_messages.append(msg)
                 else:
                     processed_messages.append(msg)
@@ -518,8 +494,14 @@ class ContextCompactor:
         if (self.config.enable_iterative_summary and 
             self._previous_summary and 
             total_original_messages > self._previous_summary_global_idx):
-            # Iterative: summarize only new turns after previous summary
-            to_summarize = other_msgs[self._previous_summary_global_idx:-self.preserve_recent] if len(other_msgs) > self.preserve_recent else []
+            # Iterative: summarize only new messages since previous summary
+            # Calculate how many old messages to summarize based on global position
+            messages_since_summary = total_original_messages - self._previous_summary_global_idx
+            new_older_messages = max(0, messages_since_summary - self.preserve_recent)
+            if new_older_messages > 0:
+                to_summarize = other_msgs[-messages_since_summary:-self.preserve_recent]
+            else:
+                to_summarize = []
             self._used_previous_summary = True
         else:
             # Fresh summary: summarize all older messages
@@ -577,7 +559,7 @@ class ContextCompactor:
                 
                 # Update tracking for future iterative summarization
                 self._previous_summary = summary
-                self._previous_summary_global_idx = total_original_messages - self.preserve_recent
+                self._previous_summary_global_idx = len(messages)
         
         result.extend(recent)
         return result

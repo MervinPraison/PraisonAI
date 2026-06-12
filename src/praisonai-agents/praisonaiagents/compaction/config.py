@@ -52,7 +52,7 @@ class CompactionConfig:
     iterative_update: bool = True  # Merge previous summary on re-compaction
     
     # Anti-thrashing protection
-    min_savings_pct: float = 10.0  # Skip if projected saving < 10%
+    min_savings_pct: float = 10.0  # Skip if projected saving < 10% (0-100 scale)
     max_consecutive_low_savings: int = 2  # Abort after N low-savings attempts
     
     # Tool result optimization
@@ -65,7 +65,7 @@ class CompactionConfig:
     def __post_init__(self):
         """Validate and normalize configuration values."""
         # Normalize min_savings_pct to 0-100 scale if provided as ratio
-        if self.min_savings_pct < 1.0:
+        if self.min_savings_pct <= 1.0:
             self.min_savings_pct *= 100.0
         
         # Validate ranges
