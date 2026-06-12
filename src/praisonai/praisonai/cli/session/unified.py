@@ -10,6 +10,7 @@ import logging
 import os
 import sys
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
@@ -55,6 +56,10 @@ class UnifiedSession:
     # Model info
     current_model: str = "gpt-4o-mini"
     
+    # Versioning for proper merge resolution
+    _version: int = 0
+    _baseline_counters: Optional[Dict[str, float]] = None
+    
     def add_message(self, role: str, content: str) -> None:
         """Add a message to the session."""
         self.messages.append({
@@ -83,6 +88,14 @@ class UnifiedSession:
     
     def update_stats(self, input_tokens: int, output_tokens: int, cost: float = 0.0) -> None:
         """Update token and cost statistics."""
+        if self._baseline_counters is None:
+            self._baseline_counters = {
+                "total_input_tokens": self.total_input_tokens,
+                "total_output_tokens": self.total_output_tokens,
+                "total_cost": self.total_cost,
+                "request_count": self.request_count,
+            }
+        
         self.total_input_tokens += input_tokens
         self.total_output_tokens += output_tokens
         self.total_cost += cost
@@ -140,72 +153,153 @@ class UnifiedSessionStore:
     def _get_last_session_path(self) -> Path:
         """Get the path to the last session marker file."""
         return self.session_dir / ".last_session"
-    
+
+    @staticmethod
+    def _message_key(msg: Dict[str, str]) -> tuple:
+        return (msg.get("role"), msg.get("content"), msg.get("timestamp"))
+
+    def _merge_sessions(self, disk: UnifiedSession, incoming: UnifiedSession) -> UnifiedSession:
+        """Merge incoming session into disk state without losing concurrent writes."""
+        # Initialize baseline counters if not set
+        if incoming._baseline_counters is None:
+            incoming._baseline_counters = {
+                "total_input_tokens": 0,
+                "total_output_tokens": 0,
+                "total_cost": 0.0,
+                "request_count": 0,
+            }
+        
+        # Version-based merge strategy
+        if incoming._version == disk._version:
+            # Same version - incoming can replace disk messages (preserving order)
+            disk.messages = incoming.messages
+            
+            # For counters, apply deltas instead of max
+            if incoming._baseline_counters:
+                delta_input = incoming.total_input_tokens - incoming._baseline_counters["total_input_tokens"]
+                delta_output = incoming.total_output_tokens - incoming._baseline_counters["total_output_tokens"]
+                delta_cost = incoming.total_cost - incoming._baseline_counters["total_cost"]
+                delta_requests = incoming.request_count - incoming._baseline_counters["request_count"]
+                
+                disk.total_input_tokens += delta_input
+                disk.total_output_tokens += delta_output
+                disk.total_cost += delta_cost
+                disk.request_count += delta_requests
+            else:
+                # Fallback to max if no baseline
+                disk.total_input_tokens = max(disk.total_input_tokens, incoming.total_input_tokens)
+                disk.total_output_tokens = max(disk.total_output_tokens, incoming.total_output_tokens)
+                disk.total_cost = max(disk.total_cost, incoming.total_cost)
+                disk.request_count = max(disk.request_count, incoming.request_count)
+        else:
+            # Different versions - perform three-way merge for messages
+            messages_by_key = {self._message_key(m): m for m in disk.messages}
+            for msg in incoming.messages:
+                messages_by_key.setdefault(self._message_key(msg), msg)
+
+            disk.messages = sorted(
+                messages_by_key.values(),
+                key=lambda m: m.get("timestamp", ""),
+            )
+            
+            # For counters with version mismatch, sum the totals
+            disk.total_input_tokens += incoming.total_input_tokens
+            disk.total_output_tokens += incoming.total_output_tokens
+            disk.total_cost += incoming.total_cost
+            disk.request_count += incoming.request_count
+        
+        # Update other fields
+        disk.metadata = {**disk.metadata, **incoming.metadata}
+        if incoming.workspace:
+            disk.workspace = incoming.workspace
+        if incoming.current_model:
+            disk.current_model = incoming.current_model
+        
+        # Increment version and update timestamp
+        disk._version += 1
+        disk.updated_at = datetime.now().isoformat()
+        
+        return disk
+
+    def _read_json_locked(self, f) -> Optional[Dict[str, Any]]:
+        """Read JSON from a locked file handle."""
+        f.seek(0)
+        raw = f.read().decode("utf-8").strip()
+        if not raw:
+            return None
+        return json.loads(raw)
+
+    def _write_json_locked(self, f, data: Dict[str, Any]) -> None:
+        """Write JSON to a locked file handle."""
+        f.seek(0)
+        f.truncate()
+        json_data = json.dumps(data, indent=2).encode("utf-8")
+        f.write(json_data)
+        f.flush()
+        os.fsync(f.fileno())
+
+    @contextmanager
+    def _with_file_lock(self, path: Path, exclusive: bool):
+        """Context manager for cross-platform file locking."""
+        if not path.exists():
+            path.touch()
+
+        f = open(path, "r+b")
+        try:
+            if sys.platform == "win32":
+                import msvcrt
+                f.seek(0)
+                lock_mode = msvcrt.LK_LOCK if exclusive else msvcrt.LK_RLCK
+                msvcrt.locking(f.fileno(), lock_mode, 1)
+                try:
+                    yield f
+                finally:
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+            elif _HAS_FCNTL:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+                try:
+                    yield f
+                finally:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            else:
+                global _WARNED_NO_FCNTL
+                if not _WARNED_NO_FCNTL:
+                    logger.warning(
+                        "File locking unavailable on this platform (fcntl not available); "
+                        "concurrent writers may corrupt session files."
+                    )
+                    _WARNED_NO_FCNTL = True
+                yield f
+        finally:
+            f.close()
+
     def save(self, session: UnifiedSession) -> None:
         """
         Save a session to disk with file locking.
+        
+        Reloads from disk under lock before writing so concurrent writers
+        (e.g. TUI and --interactive sharing a session) do not lose messages.
         
         Args:
             session: Session to save
         """
         path = self._get_session_path(session.session_id)
-        session.updated_at = datetime.now().isoformat()
-        
+
         try:
-            # Open in r+b mode to avoid truncation before locking
-            # Create file if it doesn't exist
-            if not path.exists():
-                path.touch()
-            
-            with open(path, 'r+b') as f:
-                # Cross-platform file locking
-                if sys.platform == "win32":
-                    # Windows locking - ensure consistent file position
-                    import msvcrt
-                    f.seek(0)
-                    msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)  # Use blocking lock
-                    try:
-                        f.seek(0)
-                        f.truncate()  # Clear file after acquiring lock
-                        json_data = json.dumps(session.to_dict(), indent=2).encode('utf-8')
-                        f.write(json_data)
-                        f.flush()
-                        os.fsync(f.fileno())  # Force data to disk before unlock
-                    finally:
-                        f.seek(0)  # Return to start position for unlock
-                        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
-                elif _HAS_FCNTL:
-                    # Unix locking
-                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-                    try:
-                        f.seek(0)
-                        f.truncate()  # Clear file after acquiring lock
-                        json_data = json.dumps(session.to_dict(), indent=2).encode('utf-8')
-                        f.write(json_data)
-                        f.flush()
-                        os.fsync(f.fileno())  # Force data to disk before unlock
-                    finally:
-                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            with self._with_file_lock(path, exclusive=True) as f:
+                data = self._read_json_locked(f)
+                if data:
+                    disk_session = UnifiedSession.from_dict(data)
+                    merged = self._merge_sessions(disk_session, session)
                 else:
-                    # Warn once about degraded locking on non-Windows platforms without fcntl
-                    global _WARNED_NO_FCNTL
-                    if not _WARNED_NO_FCNTL:
-                        logger.warning(
-                            "File locking unavailable on this platform (fcntl not available); "
-                            "concurrent writers may corrupt session files."
-                        )
-                        _WARNED_NO_FCNTL = True
-                    f.seek(0)
-                    f.truncate()
-                    json_data = json.dumps(session.to_dict(), indent=2).encode('utf-8')
-                    f.write(json_data)
-            
-            # Update cache
-            self._cache[session.session_id] = session
-            
-            # Update last session marker
+                    merged = session
+                    merged.updated_at = datetime.now().isoformat()
+
+                self._write_json_locked(f, merged.to_dict())
+
+            self._cache[session.session_id] = merged
             self._update_last_session(session.session_id)
-            
             logger.debug(f"Saved session: {session.session_id}")
         except Exception as e:
             logger.error(f"Failed to save session {session.session_id}: {e}")
@@ -221,42 +315,26 @@ class UnifiedSessionStore:
         Returns:
             Session if found, None otherwise
         """
-        # Check cache first
-        if session_id in self._cache:
-            return self._cache[session_id]
-        
         path = self._get_session_path(session_id)
         if not path.exists():
             return None
-        
+
         try:
-            with open(path, 'rb') as f:
-                # Cross-platform file locking (shared lock for reading)
-                if sys.platform == "win32":
-                    # Windows shared locking (read-only) - use blocking read lock
-                    import msvcrt
-                    f.seek(0)
-                    msvcrt.locking(f.fileno(), msvcrt.LK_RLCK, 1)  # Use shared/read lock
-                    try:
-                        json_data = f.read().decode('utf-8')
-                        data = json.loads(json_data)
-                    finally:
-                        f.seek(0)  # Return to start position for unlock
-                        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
-                elif _HAS_FCNTL:
-                    # Unix shared locking
-                    fcntl.flock(f.fileno(), fcntl.LOCK_SH)
-                    try:
-                        json_data = f.read().decode('utf-8')
-                        data = json.loads(json_data)
-                    finally:
-                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-                else:
-                    # No locking available - just read
-                    json_data = f.read().decode('utf-8')
-                    data = json.loads(json_data)
-            
+            with self._with_file_lock(path, exclusive=False) as f:
+                data = self._read_json_locked(f)
+            if not data:
+                return None
+
             session = UnifiedSession.from_dict(data)
+            
+            # Initialize baseline counters for proper delta calculation on save
+            session._baseline_counters = {
+                "total_input_tokens": session.total_input_tokens,
+                "total_output_tokens": session.total_output_tokens,
+                "total_cost": session.total_cost,
+                "request_count": session.request_count,
+            }
+            
             self._cache[session_id] = session
             logger.debug(f"Loaded session: {session_id}")
             return session
