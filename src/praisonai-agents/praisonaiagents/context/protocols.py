@@ -18,7 +18,7 @@ Zero Performance Impact:
 """
 
 from typing import (
-    Protocol, List, Dict, Any, Optional,
+    Protocol, List, Dict, Any, Optional, Union,
     runtime_checkable, Tuple
 )
 from dataclasses import dataclass, field
@@ -396,7 +396,105 @@ def cleanup_orphaned_parents(messages: List[Dict[str, Any]]) -> List[Dict[str, A
     return result
 
 
+# ============================================================================
+# Context Compaction Policy Protocol (Added for Issue #1817)
+# ============================================================================
+
+class CompactionRoute(str, Enum):
+    """Routes for context handling decisions."""
+    FITS = "fits"                      # Context fits, proceed normally
+    COMPACT_NEEDED = "compact_needed"   # Need compaction before LLM call
+    TRUNCATE_TOOLS = "truncate_tools"   # Truncate tool results first
+    COMPACT_THEN_TRUNCATE = "compact_then_truncate"  # Both needed
+
+
+class CompactionStrategy(str, Enum):
+    """Strategy for context compaction."""
+    TRUNCATE = "truncate"              # Remove oldest messages
+    SUMMARISE = "summarise"            # Summarize old messages
+    DROP_OLDEST_TOOLS = "drop_oldest_tools"  # Remove old tool outputs
+    SLIDING_WINDOW = "sliding_window"  # Keep recent messages only
+
+
+class ContextBudgetResult:
+    """Result of context budget analysis."""
+    def __init__(
+        self,
+        route: CompactionRoute,
+        current_tokens: int,
+        available_tokens: int,
+        utilization: float,
+        needs_action: bool,
+        recommended_strategy: CompactionStrategy,
+        details: Dict[str, Any]
+    ):
+        self.route = route
+        self.current_tokens = current_tokens
+        self.available_tokens = available_tokens
+        self.utilization = utilization
+        self.needs_action = needs_action
+        self.recommended_strategy = recommended_strategy
+        self.details = details
+
+
+@runtime_checkable
+class ContextCompactionPolicyProtocol(Protocol):
+    """
+    Protocol for context compaction policy implementations.
+    
+    As per AGENTS.md: "Core SDK uses typing.Protocol for all extension points"
+    This defines the interface that all compaction policies must implement.
+    """
+    
+    # Configuration attributes
+    trigger_at: float
+    strategy: Union[str, CompactionStrategy]
+    preserve_last_n_turns: int
+    max_compaction_attempts: int
+    target_utilization: float
+    aggressive_tool_truncation: bool
+    model_overrides: Optional[Dict[str, Dict[str, Any]]]
+    
+    def compute_context_budget(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str = "gpt-4o-mini",
+        tools: Optional[List[Dict[str, Any]]] = None,
+        system_prompt: Optional[str] = None
+    ) -> ContextBudgetResult:
+        """
+        Compute context budget and determine route before LLM call.
+        
+        Args:
+            messages: Current conversation history
+            model: Model name for context window lookup
+            tools: Tool schemas (if any)
+            system_prompt: System prompt content
+            
+        Returns:
+            ContextBudgetResult with routing decision
+        """
+        ...
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert policy to dictionary for serialization."""
+        ...
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ContextCompactionPolicyProtocol":
+        """Create policy from dictionary."""
+        ...
+
+
+def get_default_policy() -> ContextCompactionPolicyProtocol:
+    """Get the default context compaction policy."""
+    from .adapters import get_default_policy_impl
+    return get_default_policy_impl()
+
+
+# ============================================================================
 # Conversation Compaction Protocols
+# ============================================================================
 
 @dataclass
 class ConversationContext:

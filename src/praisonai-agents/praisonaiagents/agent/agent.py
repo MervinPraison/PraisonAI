@@ -1753,6 +1753,9 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
         self.embedder_config = embedder_config
         self.knowledge = knowledge
         self.use_system_prompt = use_system_prompt
+        
+        # Store ExecutionConfig for context compaction policy access
+        self.execution = _exec_config
         # Async-safe chat_history with dual-lock protection
         self.__chat_history_state = AsyncSafeState([])
         

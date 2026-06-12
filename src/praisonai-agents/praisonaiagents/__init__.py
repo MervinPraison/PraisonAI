@@ -403,6 +403,17 @@ _LAZY_IMPORTS = {
     'MultiAgentMemoryConfig': ('praisonaiagents.config.feature_configs', 'MultiAgentMemoryConfig'),
     'ToolSearchConfig': ('praisonaiagents.config.feature_configs', 'ToolSearchConfig'),
     
+    # Context compaction policies
+    'ContextCompactionPolicy': ('praisonaiagents.context.policy', 'ContextCompactionPolicy'),
+    'ContextCompactionPolicyProtocol': ('praisonaiagents.context.policy', 'ContextCompactionPolicyProtocol'),
+    'CompactionRoute': ('praisonaiagents.context.policy', 'CompactionRoute'),
+    'CompactionStrategy': ('praisonaiagents.context.policy', 'CompactionStrategy'),
+    'ContextBudgetResult': ('praisonaiagents.context.policy', 'ContextBudgetResult'),
+    'get_default_policy': ('praisonaiagents.context.policy', 'get_default_policy'),
+    'CONSERVATIVE_POLICY': ('praisonaiagents.context.policy', 'CONSERVATIVE_POLICY'),
+    'BALANCED_POLICY': ('praisonaiagents.context.policy', 'BALANCED_POLICY'),
+    'AGGRESSIVE_POLICY': ('praisonaiagents.context.policy', 'AGGRESSIVE_POLICY'),
+    
     # Parameter resolver
     'resolve': ('praisonaiagents.config.param_resolver', 'resolve'),
     'ArrayMode': ('praisonaiagents.config.param_resolver', 'ArrayMode'),

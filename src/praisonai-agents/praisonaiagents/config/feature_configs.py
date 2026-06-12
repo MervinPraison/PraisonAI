@@ -732,9 +732,10 @@ class ExecutionConfig:
     rate_limiter: Optional[Any] = None
 
     # Context compaction: automatically compact chat_history when approaching token limit.
-    # Opt-in only (safe default: False). Uses existing praisonaiagents.compaction module.
-    # Usage: Agent(execution=ExecutionConfig(context_compaction=True, max_context_tokens=8000))
-    context_compaction: bool = False
+    # DEFAULT CHANGED: Previously False, now True (with deprecation warning period).
+    # Usage: Agent(execution=ExecutionConfig(context_compaction=False))  # to disable
+    # Or: Agent(execution=ExecutionConfig(context_compaction=my_policy))  # custom policy
+    context_compaction: Union[bool, "ContextCompactionPolicy"] = False  # Keep False during deprecation period
 
     # Token limit before compaction triggers. None = auto-detect from model metadata.
     max_context_tokens: Optional[int] = None
@@ -752,6 +753,39 @@ class ExecutionConfig:
     # Default False preserves existing behavior for backward compatibility
     parallel_tool_calls: bool = False
 
+    def __post_init__(self) -> None:
+        """Post-initialization processing with deprecation warnings."""
+        # Handle context_compaction serialization round-trip
+        if isinstance(self.context_compaction, dict):
+            from ..context.policy import ContextCompactionPolicy
+            self.context_compaction = ContextCompactionPolicy.from_dict(
+                self.context_compaction
+            )
+        
+        # Emit deprecation warning for default behavior change
+        # Only warn if context_compaction was not explicitly set (i.e., using the default False)
+        import warnings
+        import inspect
+        frame = inspect.currentframe()
+        try:
+            # Check if this is being called from user code (not internal)
+            caller_frame = frame.f_back
+            if (caller_frame and 
+                not any(path_part in caller_frame.f_code.co_filename 
+                       for path_part in ['praisonaiagents', 'test_', '__pycache__'])):
+                # This is being called from user code
+                if self.context_compaction is False:
+                    warnings.warn(
+                        "ExecutionConfig.context_compaction will default to True in the next "
+                        "release for proactive context overflow protection. To disable, explicitly "
+                        "set context_compaction=False. To use the new default early, set "
+                        "context_compaction=True.",
+                        DeprecationWarning,
+                        stacklevel=3
+                    )
+        finally:
+            del frame
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -762,11 +796,38 @@ class ExecutionConfig:
             "code_execution": self.code_execution,
             "code_mode": self.code_mode,
             "code_sandbox_mode": self.code_sandbox_mode,
-            "context_compaction": self.context_compaction,
+            "context_compaction": (
+                self.context_compaction.to_dict() 
+                if hasattr(self.context_compaction, 'to_dict') 
+                else self.context_compaction
+            ),
             "max_context_tokens": self.max_context_tokens,
             "max_budget": self.max_budget,
             "parallel_tool_calls": self.parallel_tool_calls,
         }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ExecutionConfig":
+        """Create ExecutionConfig from dictionary."""
+        # Handle context_compaction policy restoration
+        context_compaction = data.get("context_compaction", False)
+        if isinstance(context_compaction, dict):
+            from ..context.policy import ContextCompactionPolicy
+            context_compaction = ContextCompactionPolicy.from_dict(context_compaction)
+        
+        return cls(
+            max_iter=data.get("max_iter", 20),
+            max_rpm=data.get("max_rpm", None),
+            max_execution_time=data.get("max_execution_time", None),
+            max_retry_limit=data.get("max_retry_limit", 2),
+            code_execution=data.get("code_execution", False),
+            code_mode=data.get("code_mode", "safe"),
+            code_sandbox_mode=data.get("code_sandbox_mode", "docker"),
+            context_compaction=context_compaction,
+            max_context_tokens=data.get("max_context_tokens", None),
+            max_budget=data.get("max_budget", None),
+            parallel_tool_calls=data.get("parallel_tool_calls", False),
+        )
 
 
 @dataclass
