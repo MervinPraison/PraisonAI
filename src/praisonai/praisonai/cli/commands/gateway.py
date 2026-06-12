@@ -204,10 +204,17 @@ def gateway_pause_channel(
         praisonai gateway pause discord --url ws://localhost:8000
     """
     import requests
+    import sys
+    from urllib.parse import urlparse, urlunparse
     
     try:
-        # Convert WebSocket URL to HTTP for REST API
-        rest_url = url.replace("ws://", "http://").replace("wss://", "https://")
+        # Parse URL and convert WebSocket to HTTP
+        parsed = urlparse(url)
+        scheme = "https" if parsed.scheme == "wss" else "http"
+        # Reconstruct base URL preserving path and query
+        rest_url = urlunparse((
+            scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment
+        ))
         if not rest_url.endswith("/"):
             rest_url += "/"
         
@@ -218,10 +225,13 @@ def gateway_pause_channel(
         if result.get("success"):
             print(f"✅ Channel '{name}' paused successfully")
         else:
-            print(f"❌ Failed to pause channel '{name}': {result.get('error', 'Unknown error')}")
+            message = result.get("message", result.get("error", "Unknown error"))
+            print(f"❌ Failed to pause channel '{name}': {message}")
+            sys.exit(1)
     
     except Exception as e:
         print(f"❌ Error pausing channel '{name}': {str(e)}")
+        sys.exit(1)
 
 
 @app.command("resume")
@@ -236,10 +246,17 @@ def gateway_resume_channel(
         praisonai gateway resume discord --url ws://localhost:8000
     """
     import requests
+    import sys
+    from urllib.parse import urlparse, urlunparse
     
     try:
-        # Convert WebSocket URL to HTTP for REST API
-        rest_url = url.replace("ws://", "http://").replace("wss://", "https://")
+        # Parse URL and convert WebSocket to HTTP
+        parsed = urlparse(url)
+        scheme = "https" if parsed.scheme == "wss" else "http"
+        # Reconstruct base URL preserving path and query
+        rest_url = urlunparse((
+            scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment
+        ))
         if not rest_url.endswith("/"):
             rest_url += "/"
         
@@ -250,10 +267,13 @@ def gateway_resume_channel(
         if result.get("success"):
             print(f"✅ Channel '{name}' resumed successfully")
         else:
-            print(f"❌ Failed to resume channel '{name}': {result.get('error', 'Unknown error')}")
+            message = result.get("message", result.get("error", "Unknown error"))
+            print(f"❌ Failed to resume channel '{name}': {message}")
+            sys.exit(1)
     
     except Exception as e:
         print(f"❌ Error resuming channel '{name}': {str(e)}")
+        sys.exit(1)
 
 
 @app.command("reconnect")
@@ -268,10 +288,17 @@ def gateway_reconnect_channel(
         praisonai gateway reconnect discord --url ws://localhost:8000
     """
     import requests
+    import sys
+    from urllib.parse import urlparse, urlunparse
     
     try:
-        # Convert WebSocket URL to HTTP for REST API
-        rest_url = url.replace("ws://", "http://").replace("wss://", "https://")
+        # Parse URL and convert WebSocket to HTTP
+        parsed = urlparse(url)
+        scheme = "https" if parsed.scheme == "wss" else "http"
+        # Reconstruct base URL preserving path and query
+        rest_url = urlunparse((
+            scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment
+        ))
         if not rest_url.endswith("/"):
             rest_url += "/"
         
@@ -282,10 +309,13 @@ def gateway_reconnect_channel(
         if result.get("success"):
             print(f"✅ Channel '{name}' reconnected successfully")
         else:
-            print(f"❌ Failed to reconnect channel '{name}': {result.get('error', 'Unknown error')}")
+            message = result.get("message", result.get("error", "Unknown error"))
+            print(f"❌ Failed to reconnect channel '{name}': {message}")
+            sys.exit(1)
     
     except Exception as e:
         print(f"❌ Error reconnecting channel '{name}': {str(e)}")
+        sys.exit(1)
 
 
 @app.command("install")

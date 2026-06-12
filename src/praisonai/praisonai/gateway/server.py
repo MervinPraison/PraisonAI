@@ -725,6 +725,9 @@ class WebSocketGateway:
         # Channel control endpoints
         async def pause_channel_handler(request) -> JSONResponse:
             """POST /api/channels/{name}/pause — pause a channel."""
+            auth_err = _check_auth(request)
+            if auth_err:
+                return auth_err
             channel_name = request.path_params["name"]
             success = self.pause_channel(channel_name)
             return JSONResponse({
@@ -734,6 +737,9 @@ class WebSocketGateway:
         
         async def resume_channel_handler(request) -> JSONResponse:
             """POST /api/channels/{name}/resume — resume a paused channel."""
+            auth_err = _check_auth(request)
+            if auth_err:
+                return auth_err
             channel_name = request.path_params["name"]
             success = self.resume_channel(channel_name)
             return JSONResponse({
@@ -743,6 +749,9 @@ class WebSocketGateway:
         
         async def reconnect_channel_handler(request) -> JSONResponse:
             """POST /api/channels/{name}/reconnect — reconnect a channel."""
+            auth_err = _check_auth(request)
+            if auth_err:
+                return auth_err
             channel_name = request.path_params["name"]
             success = self.reconnect_channel(channel_name)
             return JSONResponse({
@@ -2067,6 +2076,10 @@ class WebSocketGateway:
                 logger.info(f"Stopped bot '{name}'")
             except Exception as e:
                 logger.error(f"Error stopping bot '{name}': {e}")
+
+        # Clean up supervisor state for all channels
+        for name in list(self._channel_bots.keys()):
+            self._channel_supervisor.cleanup(name)
 
         self._channel_bots.clear()
         self._routing_rules.clear()

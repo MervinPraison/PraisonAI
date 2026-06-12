@@ -123,9 +123,9 @@ class ChannelSupervisor:
             status.state = ChannelState.STOPPED  # Will be restarted by supervision
             status.manual_pause = False
             
-            # Clear abort signal to allow restart
+            # SET abort signal to wake the paused supervision loop
             if name in self._abort_signals:
-                self._abort_signals[name].clear()
+                self._abort_signals[name].set()
                 
             logger.info(f"Channel '{name}' manually resumed")
             return True
@@ -152,6 +152,7 @@ class ChannelSupervisor:
             
         status = self._channels[name]
         status.state = ChannelState.STOPPED
+        status.manual_pause = False  # Clear manual pause flag
         status.last_error = None
         status.last_error_time = None
         status.next_retry_at = None
@@ -209,6 +210,7 @@ class ChannelSupervisor:
                 
                 # If we get here, the bot exited cleanly
                 monitor.record_success()
+                status.total_recoveries = monitor.total_recoveries  # Sync recovery count
                 status.state = ChannelState.STOPPED
                 logger.info(f"Channel '{name}' stopped cleanly")
                 break
@@ -257,8 +259,9 @@ class ChannelSupervisor:
                         # Aborted - check if paused or reconnect requested
                         continue
         
-        # Cleanup
-        status.state = ChannelState.STOPPED
+        # Cleanup - don't overwrite terminal failure states
+        if status.state != ChannelState.FAILED:
+            status.state = ChannelState.STOPPED
         logger.info(f"Supervision ended for channel '{name}'")
         
     def cleanup(self, name: str) -> None:
