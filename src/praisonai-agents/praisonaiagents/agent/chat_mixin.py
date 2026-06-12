@@ -239,7 +239,7 @@ Your Goal: {self.goal}"""
         try:
             from ..llm.model_capabilities import supports_structured_outputs
         except ImportError:
-            return False  # Module genuinely not available — acceptable
+            return False  # Module genuinely not available - acceptable
 
         try:
             return supports_structured_outputs(self.llm)
@@ -906,7 +906,7 @@ Your Goal: {self.goal}"""
             temperature=temperature
         )
         self._hook_runner.execute_sync(HookEvent.BEFORE_LLM, before_llm_input)
-        # C7 — honour any BEFORE_LLM hook that mutated the message stream
+        # C7 - honour any BEFORE_LLM hook that mutated the message stream
         # (e.g. PII redactor). The runner applies modified_input in-place on
         # before_llm_input.messages; adopt that value for the actual LLM call.
         messages = before_llm_input.messages
@@ -1964,7 +1964,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
         
         try:
-            # C2 — cooperative cancellation: abort early if a pre-set token is given
+            # C2 - cooperative cancellation: abort early if a pre-set token is given
             _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
             if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
                 reason = getattr(_cancel, "reason", None) or "cancelled before LLM call"
@@ -2218,11 +2218,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if effective_tool_choice:
                         llm_kwargs['tool_choice'] = effective_tool_choice
 
-                    # C1 — per-call seed overrides llm_instance.seed for determinism
+                    # C1 - per-call seed overrides llm_instance.seed for determinism
                     if seed is not None:
                         llm_kwargs['seed'] = seed
 
-                    # C2 — last-chance cancel check before handing to the LLM
+                    # C2 - last-chance cancel check before handing to the LLM
                     if cancel_token is not None and getattr(cancel_token, 'is_set', lambda: False)():
                         reason = getattr(cancel_token, 'reason', None) or 'cancelled'
                         raise InterruptedError(f"Agent chat cancelled: {reason}")
@@ -2553,7 +2553,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     async def _achat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None, seed=None, cancel_token=None):
         """Internal async chat implementation (extracted for trace wrapping)."""
-        # C2 — cooperative cancellation: abort early if a pre-set token is given
+        # C2 - cooperative cancellation: abort early if a pre-set token is given
         _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
         if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
             reason = getattr(_cancel, "reason", None) or "cancelled before LLM call"
@@ -2671,7 +2671,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     pass
 
                 try:
-                    # C1 — per-call seed forwarding (async path)  
+                    # C1 - per-call seed forwarding (async path)  
                     llm_kwargs = {
                         'prompt': prompt,
                         'system_prompt': self._build_system_prompt(tools),
@@ -2698,11 +2698,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         'stream': stream
                     }
                     
-                    # C1 — per-call seed overrides llm_instance.seed for determinism  
+                    # C1 - per-call seed overrides llm_instance.seed for determinism  
                     if seed is not None:
                         llm_kwargs['seed'] = seed
                     
-                    # C2 — last-chance cancel check before handing to the LLM
+                    # C2 - last-chance cancel check before handing to the LLM
                     if _cancel is not None and getattr(_cancel, 'is_set', lambda: False)():
                         reason = getattr(_cancel, 'reason', None) or 'cancelled'
                         raise InterruptedError(f"Agent chat cancelled: {reason}")
