@@ -259,51 +259,37 @@ class ToolRegistry:
             available = []
             current_time = time.time()
             
-<<<<<<< HEAD
-            # Check BaseTool instances
-            for registered_name, tool in self._tools.items():
+            # Check tool entries with TTL availability caching  
+            for registered_name, entry in self._tools.items():
+                if not entry.available:
+                    continue
+                
                 # Check if tool has availability checking capability
-                if hasattr(tool, 'check_availability'):
-                    # Check cache first using registry key (not tool.name)
+                if hasattr(entry.tool, 'check_availability'):
+                    # Check cache first using registry key (not tool.name) to avoid collisions
                     cache_entry = self._availability_cache.get(registered_name)
                     if cache_entry is not None:
                         cached_result, cached_time = cache_entry
                         if current_time - cached_time < ttl_seconds:
                             # Use cached result
                             if cached_result:
-                                available.append(tool)
+                                available.append(entry.tool)
                             continue
                     
                     # Cache miss or expired - perform availability check
                     try:
-                        is_available, reason = tool.check_availability()
-                        # Cache the result using registry key
+                        is_available, reason = entry.tool.check_availability()
+                        # Cache the result using registry key to avoid collisions
                         self._availability_cache[registered_name] = (is_available, current_time)
                         
-=======
-            for entry in self._tools.values():
-                if not entry.available:
-                    continue
-                
-                # Check if tool has availability checking capability
-                if hasattr(entry.tool, 'check_availability'):
-                    try:
-                        is_available, reason = entry.tool.check_availability()
->>>>>>> origin/main
                         if is_available:
                             available.append(entry.tool)
                         elif reason:
-<<<<<<< HEAD
                             logging.debug(f"Tool '{registered_name}' unavailable: {reason}")
                     except Exception as e:
                         logging.warning(f"Availability check failed for tool '{registered_name}': {e}")
                         # Cache as unavailable on error
                         self._availability_cache[registered_name] = (False, current_time)
-=======
-                            logging.debug(f"Tool '{entry.name}' unavailable: {reason}")
-                    except Exception as e:
-                        logging.warning(f"Availability check failed for tool '{entry.name}': {e}")
->>>>>>> origin/main
                 else:
                     # No availability check = always available
                     available.append(entry.tool)
@@ -429,11 +415,7 @@ class ToolRegistry:
         """Clear all registered tools. Thread-safe."""
         with self._lock:
             self._tools.clear()
-<<<<<<< HEAD
-            self._functions.clear()
             self._availability_cache.clear()
-=======
->>>>>>> origin/main
             self._discovered = False
     
     def __contains__(self, name: str) -> bool:
