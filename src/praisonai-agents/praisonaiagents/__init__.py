@@ -186,6 +186,8 @@ _LAZY_IMPORTS = {
     'HandoffCycleError': ('praisonaiagents.errors', 'HandoffCycleError'),
     'HandoffDepthError': ('praisonaiagents.errors', 'HandoffDepthError'),
     'HandoffTimeoutError': ('praisonaiagents.errors', 'HandoffTimeoutError'),
+    'HandoffValidationError': ('praisonaiagents.errors', 'HandoffValidationError'),
+    'TypedHandoff': ('praisonaiagents.agent.handoff', 'TypedHandoff'),
     
     # Embedding API (Note: embedding/embeddings handled in custom_handler to override subpackage)
     'aembedding': ('praisonaiagents.embedding.embed', 'aembedding'),

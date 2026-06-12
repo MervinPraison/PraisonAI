@@ -112,7 +112,7 @@ def __getattr__(name):
         _lazy_cache[name] = CodeConfig
         return CodeConfig
     
-    # Handoff - lightweight
+    # Handoff - lightweight  
     _handoff_names = {
         'Handoff', 'handoff_filters', 'parallel_handoffs',
         'RECOMMENDED_PROMPT_PREFIX', 'prompt_with_handoff_instructions',
@@ -124,6 +124,14 @@ def __getattr__(name):
     if name in _handoff_names:
         from . import handoff as _handoff_module
         value = getattr(_handoff_module, name)
+        _lazy_cache[name] = value
+        return value
+    
+    # Special case for 'handoff' factory function to avoid recursion
+    if name == 'handoff':
+        import importlib
+        _handoff_module = importlib.import_module('.handoff', __name__)
+        value = getattr(_handoff_module, 'handoff')
         _lazy_cache[name] = value
         return value
     

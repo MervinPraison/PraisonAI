@@ -1091,6 +1091,11 @@ class TypedHandoff(Handoff, Generic[T]):
         bad_payload = {"summary": "...", "citations": "not-a-list"}
         typed_handoff.execute_programmatic(source_agent, bad_payload)  # Raises error
         ```
+    
+    Note: CLI/YAML parity for TypedHandoff is planned for a future release, as this 
+    feature is primarily designed for programmatic inter-agent communication with 
+    runtime schema validation. CLI/YAML support would require serializing Pydantic 
+    schemas to configuration format.
     """
     
     def __init__(
@@ -1219,88 +1224,38 @@ class TypedHandoff(Handoff, Generic[T]):
         if isinstance(payload, str):
             return super().execute_programmatic(source_agent, payload, context)
         
-        start_time = time.time()
-        kwargs = context or {}
-        
+        # Validate-then-delegate pattern: validate payload first, then delegate to parent
         try:
-            # Safety checks
-            self._check_safety(source_agent)
-            
-            # Track handoff chain
-            _push_handoff(source_agent.name)
-            
-            # Execute on_handoff callback
-            self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
-            
-            # Apply input filter if provided (fixes Greptile P1 issue)
-            _ = self._prepare_context(source_agent, kwargs)
-            
-            # Validate payload against schema
-            try:
-                validated_payload = self._validate_payload(payload)
-            except HandoffValidationError as e:
-                # Update error context with proper agent info (fixes Greptile P2 issue)
-                e.source_agent = source_agent.name
-                e.agent_id = source_agent.name
-                e.context["source_agent"] = source_agent.name
-                e.context["agent_id"] = source_agent.name
-                raise
-            
-            # Convert validated payload to structured JSON for the prompt
-            payload_json = validated_payload.model_dump_json(indent=2)
-            
-            # Build prompt with structured JSON instead of string concatenation
-            context_prefix = f"[Handoff from {source_agent.name}] "
-            if kwargs:
-                context_prefix += f"Additional context: {json.dumps(kwargs, indent=2)}\n"
-            
-            # The key improvement: structured JSON instead of str() concatenation
-            full_prompt = f"{context_prefix}Payload:\n{payload_json}"
-            
-            logger.info(f"Typed handoff to {self.agent.name} with validated payload")
-            
-            # Execute with timeout if sync
-            response = self.agent.chat(full_prompt)
-            
-            result = HandoffResult(
-                success=True,
-                response=str(response) if response else "",
-                target_agent=self.agent.name,
-                source_agent=source_agent.name,
-                duration_seconds=time.time() - start_time,
-                handoff_depth=_get_handoff_depth(),
-            )
-            
-            # Execute on_complete callback
-            self._execute_callback(self.config.on_complete, source_agent, kwargs, result)
-            
-            return result
-            
-        except (HandoffCycleError, HandoffDepthError, HandoffTimeoutError, HandoffValidationError) as e:
-            result = HandoffResult(
-                success=False,
-                target_agent=self.agent.name,
-                source_agent=source_agent.name,
-                duration_seconds=time.time() - start_time,
-                error=str(e),
-                handoff_depth=_get_handoff_depth(),
-            )
-            self._execute_callback(self.config.on_error, source_agent, kwargs, result)
+            validated_payload = self._validate_payload(payload)
+        except HandoffValidationError as e:
+            # Update error context with proper agent info
+            e.source_agent = source_agent.name
+            e.agent_id = source_agent.name
+            e.context["source_agent"] = source_agent.name
+            e.context["agent_id"] = source_agent.name
             raise
-        except Exception as e:
-            result = HandoffResult(
-                success=False,
-                target_agent=self.agent.name,
-                source_agent=source_agent.name,
-                duration_seconds=time.time() - start_time,
-                error=str(e),
-                handoff_depth=_get_handoff_depth(),
-            )
-            self._execute_callback(self.config.on_error, source_agent, kwargs, result)
-            logger.error(f"Typed handoff error: {e}")
-            return result
-        finally:
-            _pop_handoff()
+        
+        # Convert validated payload to structured JSON for the prompt
+        payload_json = validated_payload.model_dump_json(indent=2)
+        
+        # Build prompt with structured JSON instead of string concatenation
+        kwargs = context or {}
+        context_prefix = f"[Handoff from {source_agent.name}] "
+        if kwargs:
+            try:
+                context_json = json.dumps(kwargs, indent=2, default=str)
+                context_prefix += f"Additional context: {context_json}\n"
+            except (TypeError, ValueError):
+                # Fallback for non-serializable context
+                context_prefix += f"Additional context: {kwargs}\n"
+        
+        # The key improvement: structured JSON instead of str() concatenation
+        full_prompt = f"{context_prefix}Payload:\n{payload_json}"
+        
+        logger.info(f"Typed handoff to {self.agent.name} with validated payload")
+        
+        # Delegate to parent with structured JSON payload
+        return super().execute_programmatic(source_agent, full_prompt, context)
     
     async def execute_async(
         self,
@@ -1327,121 +1282,38 @@ class TypedHandoff(Handoff, Generic[T]):
         if isinstance(payload, str):
             return await super().execute_async(source_agent, payload, context)
         
-        # Initialize semaphore if needed (thread-safe)
-        if self.config.max_concurrent > 0 and Handoff._semaphore is None:
-            with Handoff._semaphore_lock:
-                if Handoff._semaphore is None:
-                    Handoff._semaphore = asyncio.Semaphore(self.config.max_concurrent)
-        
-        start_time = time.time()
-        kwargs = context or {}
-        
-        async def _execute():
-            try:
-                # Safety checks
-                self._check_safety(source_agent)
-                _push_handoff(source_agent.name)
-                
-                # Execute callback
-                self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
-                
-                # Apply input filter if provided (fixes Greptile P1 issue)
-                _ = self._prepare_context(source_agent, kwargs)
-                
-                # Validate payload against schema
-                try:
-                    validated_payload = self._validate_payload(payload)
-                except HandoffValidationError as e:
-                    # Update error context with proper agent info (fixes Greptile P2 issue)
-                    e.source_agent = source_agent.name
-                    e.agent_id = source_agent.name
-                    e.context["source_agent"] = source_agent.name
-                    e.context["agent_id"] = source_agent.name
-                    raise
-                
-                # Convert to structured JSON
-                payload_json = validated_payload.model_dump_json(indent=2)
-                
-                # Build prompt
-                context_prefix = f"[Handoff from {source_agent.name}] "
-                if kwargs:
-                    context_prefix += f"Additional context: {json.dumps(kwargs, indent=2)}\n"
-                
-                full_prompt = f"{context_prefix}Payload:\n{payload_json}"
-                
-                logger.info(f"Async typed handoff to {self.agent.name}")
-                
-                # Execute - check for async chat method
-                if hasattr(self.agent, 'achat'):
-                    response = await self.agent.achat(full_prompt)
-                else:
-                    # Run sync chat in executor
-                    loop = asyncio.get_event_loop()
-                    response = await loop.run_in_executor(None, self.agent.chat, full_prompt)
-                
-                return HandoffResult(
-                    success=True,
-                    response=str(response) if response else "",
-                    target_agent=self.agent.name,
-                    source_agent=source_agent.name,
-                    duration_seconds=time.time() - start_time,
-                    handoff_depth=_get_handoff_depth(),
-                )
-            finally:
-                _pop_handoff()
-        
+        # Validate-then-delegate pattern: validate payload first, then delegate to parent
         try:
-            if self.config.max_concurrent > 0 and Handoff._semaphore:
-                async with Handoff._semaphore:
-                    if self.config.timeout_seconds > 0:
-                        result = await asyncio.wait_for(
-                            _execute(),
-                            timeout=self.config.timeout_seconds
-                        )
-                    else:
-                        result = await _execute()
-            else:
-                if self.config.timeout_seconds > 0:
-                    result = await asyncio.wait_for(
-                        _execute(),
-                        timeout=self.config.timeout_seconds
-                    )
-                else:
-                    result = await _execute()
-            
-            self._execute_callback(self.config.on_complete, source_agent, kwargs, result)
-            return result
-            
-        except asyncio.TimeoutError as err:
-            result = HandoffResult(
-                success=False,
-                target_agent=self.agent.name,
-                source_agent=source_agent.name,
-                duration_seconds=time.time() - start_time,
-                error=f"Timeout after {self.config.timeout_seconds}s",
-                handoff_depth=_get_handoff_depth(),
-            )
-            self._execute_callback(self.config.on_error, source_agent, kwargs, result)
-            raise HandoffTimeoutError(
-                f"Typed handoff to {self.agent.name} timed out after {self.config.timeout_seconds}s",
-                timeout_seconds=self.config.timeout_seconds,
-                source_agent=source_agent.name,
-                target_agent=self.agent.name,
-                agent_id=source_agent.name
-            ) from err
-        except Exception as e:
-            result = HandoffResult(
-                success=False,
-                target_agent=self.agent.name,
-                source_agent=source_agent.name,
-                duration_seconds=time.time() - start_time,
-                error=str(e),
-                handoff_depth=_get_handoff_depth(),
-            )
-            self._execute_callback(self.config.on_error, source_agent, kwargs, result)
-            if isinstance(e, (HandoffCycleError, HandoffDepthError, HandoffValidationError)):
-                raise
-            return result
+            validated_payload = self._validate_payload(payload)
+        except HandoffValidationError as e:
+            # Update error context with proper agent info
+            e.source_agent = source_agent.name
+            e.agent_id = source_agent.name
+            e.context["source_agent"] = source_agent.name
+            e.context["agent_id"] = source_agent.name
+            raise
+        
+        # Convert validated payload to structured JSON for the prompt
+        payload_json = validated_payload.model_dump_json(indent=2)
+        
+        # Build prompt with structured JSON instead of string concatenation
+        kwargs = context or {}
+        context_prefix = f"[Handoff from {source_agent.name}] "
+        if kwargs:
+            try:
+                context_json = json.dumps(kwargs, indent=2, default=str)
+                context_prefix += f"Additional context: {context_json}\n"
+            except (TypeError, ValueError):
+                # Fallback for non-serializable context
+                context_prefix += f"Additional context: {kwargs}\n"
+        
+        # The key improvement: structured JSON instead of str() concatenation
+        full_prompt = f"{context_prefix}Payload:\n{payload_json}"
+        
+        logger.info(f"Async typed handoff to {self.agent.name} with validated payload")
+        
+        # Delegate to parent with structured JSON payload
+        return await super().execute_async(source_agent, full_prompt, context)
 
 
 def prompt_with_handoff_instructions(base_prompt: str, agent: 'Agent') -> str:
