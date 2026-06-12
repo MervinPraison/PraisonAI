@@ -34,19 +34,34 @@ def test_conversation_compaction():
         {"role": "assistant", "content": "You're welcome! Is there anything else about Python lists you'd like to know?"},
     ]
     
-    try:
-        result, context = compactor.compact_conversation(
-            messages=messages,
-            target_tokens=200,
-            preserve_recent=2
-        )
-        print(f"✓ Compaction successful: {len(messages)} → {len(result)} messages")
-        print(f"  Context topic: {context.main_topic}")
-        print("✓ Conversation compaction test passed!")
-        return True
-    except Exception as e:
-        print(f"✗ Error during compaction: {e}")
-        return False
+    result, context = compactor.compact_conversation(
+        messages=messages,
+        target_tokens=200,
+        preserve_recent=2
+    )
+    
+    # Assert the compaction contract
+    assert isinstance(result, list), "Result should be a list of messages"
+    assert len(result) <= len(messages), "Compacted result should have same or fewer messages"
+    assert isinstance(context, ConversationContext), "Context should be ConversationContext instance"
+    
+    # Validate message structure
+    for msg in result:
+        assert "role" in msg, "Each message should have a 'role' field"
+        assert "content" in msg, "Each message should have a 'content' field"
+    
+    # Validate preserve_recent behavior - last 2 messages should be preserved
+    if len(messages) >= 2:
+        assert result[-2:] == messages[-2:], "Last 2 messages should be preserved when preserve_recent=2"
+    
+    # Validate context has meaningful topic
+    assert isinstance(context.main_topic, str), "Main topic should be a string"
+    # Note: main_topic may be empty for short conversations, which is acceptable
+    
+    print(f"✓ Compaction successful: {len(messages)} → {len(result)} messages")
+    print(f"  Context topic: {context.main_topic}")
+    print("✓ Conversation compaction test passed!")
+    return True
 
 
 if __name__ == "__main__":

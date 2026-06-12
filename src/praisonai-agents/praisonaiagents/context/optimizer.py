@@ -4,11 +4,14 @@ Context Optimizer for PraisonAI Agents.
 Provides strategies for reducing context size when approaching limits.
 """
 
+import logging
 from typing import Dict, List, Any, Optional, Tuple
 from abc import ABC, abstractmethod
 from .models import ContextLedger, OptimizerStrategy, OptimizationResult
 from .tokens import estimate_messages_tokens, get_estimator
 from .compressor import ContextCompressor
+
+logger = logging.getLogger(__name__)
 
 
 class BaseOptimizer(ABC):
@@ -993,7 +996,6 @@ class ConversationOptimizer(BaseOptimizer):
         target_ratio = target_tokens / original_tokens
         if target_ratio > (1 - self.min_compaction_ratio):
             # Not enough reduction needed, fall back to smart optimizer
-            from .optimizer import SmartOptimizer
             fallback = SmartOptimizer(preserve_recent=self.preserve_recent)
             return fallback.optimize(messages, target_tokens, ledger)
         
@@ -1003,7 +1005,7 @@ class ConversationOptimizer(BaseOptimizer):
                 self._load_conversation_components()
             
             # Perform conversation compaction
-            compacted_messages, conversation_context = self._compactor.compact_conversation(
+            compacted_messages, _ = self._compactor.compact_conversation(
                 messages=messages,
                 target_tokens=target_tokens,
                 preserve_recent=self.preserve_recent
@@ -1021,7 +1023,10 @@ class ConversationOptimizer(BaseOptimizer):
             
         except Exception as e:
             # Fall back to smart optimizer on any error
-            from .optimizer import SmartOptimizer
+            logger.warning(
+                "ConversationOptimizer compaction failed, falling back to SmartOptimizer: %s", 
+                str(e)
+            )
             fallback = SmartOptimizer(preserve_recent=self.preserve_recent)
             return fallback.optimize(messages, target_tokens, ledger)
     

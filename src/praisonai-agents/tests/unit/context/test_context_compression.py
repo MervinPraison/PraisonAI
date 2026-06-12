@@ -6,7 +6,7 @@ This tests the ContextCompressor and LLMContextCompressorOptimizer classes
 to ensure they work correctly according to issue #1806 requirements.
 """
 
-import pytest
+import sys
 from praisonaiagents.context.compressor import ContextCompressor, CompressResult
 from praisonaiagents.context.optimizer import LLMContextCompressorOptimizer
 from praisonaiagents.context.tokens import estimate_messages_tokens

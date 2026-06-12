@@ -84,17 +84,6 @@ def test_conversation_optimizer_real_agentic():
             # For this test, we simulate the behavior by manually setting up conversation optimization
         )
         
-        # Simulate conversation history that would trigger compaction
-        # In a real scenario, this would be accumulated over multiple agent.start() calls
-        conversation_history = [
-            {"role": "user", "content": "Tell me about Python"},
-            {"role": "assistant", "content": "Python is a high-level programming language known for its simplicity and readability."},
-            {"role": "user", "content": "What about variables?"},
-            {"role": "assistant", "content": "Variables in Python store data values and are created by assignment."},
-            {"role": "user", "content": "How do I create functions?"},
-            {"role": "assistant", "content": "Functions are defined using the 'def' keyword followed by the function name."},
-        ]
-        
         # Test with real LLM call - this is the "real agentic" part
         response = agent.start("Can you summarize what we've discussed about Python so far?")
         
