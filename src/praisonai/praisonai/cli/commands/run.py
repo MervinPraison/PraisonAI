@@ -439,6 +439,45 @@ def _run_prompt(
         args.approval = approval
         
         praison.args = args
+        
+        # If output_mode is "actions", use direct Agent with actions preset
+        if output_mode == "actions":
+            from praisonaiagents import Agent
+            
+            agent_config = {
+                "name": "RunAgent",
+                "role": "Assistant", 
+                "goal": "Complete the task",
+                "output": "actions",  # Use actions preset
+            }
+            if model:
+                agent_config["llm"] = model
+            
+            # Resolve approval backend if specified
+            if approval:
+                from praisonai.cli.features.approval import resolve_approval_config
+                agent_config["approval"] = resolve_approval_config(
+                    approval, all_tools=approve_all_tools, timeout=approval_timeout,
+                )
+            
+            # Add session support to Agent if needed
+            if session_id:
+                agent_config["resume_session"] = session_id
+            if auto_save_name:
+                agent_config["auto_save"] = auto_save_name
+            
+            agent = Agent(**agent_config)
+            result = agent.start(prompt)
+            
+            output.emit_result(
+                message="Prompt completed",
+                data={"result": str(result) if result else None}
+            )
+            
+            # Don't print result again - actions mode already shows output
+            return
+        
+        # Use handle_direct_prompt for other modes
         result = praison.handle_direct_prompt(prompt)
         
         output.emit_result(

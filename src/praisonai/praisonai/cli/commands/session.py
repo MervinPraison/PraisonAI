@@ -75,15 +75,8 @@ def session_list(
         from ..state.project_sessions import get_project_session_store
         from ..utils.project import get_project_id, get_project_name
         
-        if project_id:
-            # List sessions for specific project
-            from praisonaiagents.paths import get_sessions_dir
-            project_session_dir = get_sessions_dir() / f"projects/{project_id}"
-            project_store = get_project_session_store()
-            project_store.session_dir = str(project_session_dir)
-        else:
-            # List sessions for current project
-            project_store = get_project_session_store()
+        # List sessions for specific or current project
+        project_store = get_project_session_store(project_id=project_id)
             
         sessions_data = project_store.list_sessions(limit=limit)
         
@@ -94,7 +87,7 @@ def session_list(
                 
                 self.session_id = data.get("session_id", data.get("id", ""))
                 self.name = data.get("agent_name", "")
-                self.status = "active"  # Default status
+                self.status = data.get("status")  # Use actual status from data if available
                 self.event_count = data.get("message_count", 0)
                 
                 # Parse updated_at string

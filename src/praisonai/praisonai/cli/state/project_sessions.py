@@ -70,7 +70,7 @@ def get_project_session_store(project_path: Optional[str] = None, project_id: Op
     
     Args:
         project_path: Project root path (defaults to cwd)
-        project_id: Specific project ID to use instead of detecting from project_path
+        project_id: Specific project ID to use (if provided, creates store for that project)
         
     Returns:
         ProjectSessionStore instance
@@ -79,9 +79,11 @@ def get_project_session_store(project_path: Optional[str] = None, project_id: Op
         # Create store for specific project ID
         from praisonaiagents.paths import get_sessions_dir
         project_session_dir = get_sessions_dir() / f"projects/{project_id}"
-        return ProjectSessionStore(str(project_session_dir))
+        # Use DefaultSessionStore directly with the specific directory
+        from praisonaiagents.session.store import DefaultSessionStore
+        return DefaultSessionStore(session_dir=str(project_session_dir))
     else:
-        # Use current project path
+        # Use current project
         return ProjectSessionStore(project_path)
 
 

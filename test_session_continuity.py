@@ -8,9 +8,7 @@ import os
 import tempfile
 from pathlib import Path
 
-# Add project paths
-sys.path.insert(0, 'src/praisonai-agents')
-sys.path.insert(0, 'src/praisonai')
+# Project paths should be handled by proper package installation
 
 def test_project_identification():
     """Test project identification functionality."""
@@ -46,7 +44,7 @@ def test_project_session_store():
     # Test project session store creation
     store = get_project_session_store()
     
-    print(f"✅ Session store created")
+    print("✅ Session store created")
     print(f"   Project ID: {store.project_id}")
     print(f"   Project Name: {store.project_name}")
     print(f"   Session Dir: {store.session_dir}")
@@ -78,7 +76,7 @@ def test_project_session_store():
     
     # Cleanup
     store.delete_session(test_session_id)
-    print(f"✅ Cleaned up test session")
+    print("✅ Cleaned up test session")
     
     print("✅ Project session store tests passed\n")
 

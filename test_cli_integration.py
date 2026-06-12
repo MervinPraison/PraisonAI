@@ -7,9 +7,7 @@ import sys
 import os
 from unittest.mock import Mock, patch
 
-# Add project paths
-sys.path.insert(0, 'src/praisonai-agents')
-sys.path.insert(0, 'src/praisonai')
+# Project paths should be handled by proper package installation
 
 def test_run_command_session_args():
     """Test that the run command properly handles session arguments."""
