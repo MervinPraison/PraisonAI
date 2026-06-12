@@ -236,6 +236,9 @@ class BotSessionManager:
                         if stream_callback:
                             # Streaming path: use agent.astart() with stream callback
                             response = await agent.astart(prompt, stream_callback=stream_callback)
+                            # Handle AutonomyResult when autonomy is enabled in caller mode
+                            if hasattr(response, 'output'):
+                                response = response.output
                         else:
                             # Legacy non-streaming path: use agent.chat() in executor
                             import contextvars

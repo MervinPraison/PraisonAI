@@ -206,11 +206,19 @@ class DraftStreamer:
         # Calculate delay to respect min_interval
         delay = max(0, self._config.min_interval - elapsed)
         
-        if delay > 0:
-            await asyncio.sleep(delay)
+        # Schedule update as background task to avoid blocking token stream
+        async def _delayed_update():
+            if delay > 0:
+                await asyncio.sleep(delay)
+            await self._perform_update()
+            self._pending_update = False
         
-        await self._perform_update()
-        self._pending_update = False
+        # Cancel existing update task if any
+        if self._update_task and not self._update_task.done():
+            self._update_task.cancel()
+        
+        # Schedule new update task
+        self._update_task = asyncio.create_task(_delayed_update())
     
     async def _perform_update(self) -> None:
         """Perform the actual message edit."""

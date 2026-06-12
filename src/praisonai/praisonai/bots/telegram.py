@@ -268,10 +268,21 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                             stream_callback=streamer.on_event,
                         )
                         
-                        # Finalize with complete response
-                        await streamer.finalize(response)
+                        # Apply message hooks to final response (same as non-streaming path)
+                        send_result = self.fire_message_sending(
+                            str(update.message.chat_id), str(response),
+                            reply_to=str(update.message.message_id),
+                        )
+                        if send_result["cancel"]:
+                            return
                         
-                        # Skip normal send flow for streaming - message already handled
+                        # Finalize with complete response (after hook processing)
+                        await streamer.finalize(send_result["content"])
+                        
+                        # Fire sent hooks
+                        self.fire_message_sent(
+                            str(update.message.chat_id), send_result["content"],
+                        )
                         
                     else:
                         # Legacy non-streaming path
