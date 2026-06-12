@@ -166,6 +166,21 @@ def __getattr__(name):
         _lazy_cache[name] = value
         return value
     
+    # Message Steering - lightweight protocols and implementations
+    _steering_names = {
+        'MessageSteeringProtocol', 'AgentSteeringProtocol', 'SteeringPriority',
+        'SteeringMessage', 'MessageSteering', 'SteeringMixin'
+    }
+    if name in _steering_names:
+        if name in {'MessageSteeringProtocol', 'AgentSteeringProtocol', 'SteeringPriority', 'SteeringMessage'}:
+            from . import protocols as _protocols_module
+            value = getattr(_protocols_module, name)
+        else:
+            from . import message_steering as _steering_module
+            value = getattr(_steering_module, name)
+        _lazy_cache[name] = value
+        return value
+    
     # Decomposed mixins - for advanced use cases
     if name == 'ToolExecutionMixin':
         from .tool_execution import ToolExecutionMixin
@@ -256,6 +271,13 @@ __all__ = [
     'MemoryAwareAgentProtocol',
     'FullAgentProtocol',
     'ContextEngineerProtocol',
+    # Message Steering
+    'MessageSteeringProtocol',
+    'AgentSteeringProtocol',
+    'SteeringPriority',
+    'SteeringMessage',
+    'MessageSteering',
+    'SteeringMixin',
     # Decomposed mixins (for advanced use cases)
     'ToolExecutionMixin',
     'ChatHandlerMixin',

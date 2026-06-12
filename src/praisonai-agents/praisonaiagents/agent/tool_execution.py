@@ -196,6 +196,19 @@ class ToolExecutionMixin:
             ))
         
         try:
+            # Check for steering messages before tool execution
+            if hasattr(self, '_check_steering_messages'):
+                try:
+                    steering_msg = self._check_steering_messages()
+                    if steering_msg:
+                        # Check if steering message indicates interruption priority
+                        # (SteeringMixin formats HIGH/URGENT as "[URGENT USER GUIDANCE]" and INTERRUPT as "[INTERRUPT USER GUIDANCE]")
+                        if "[URGENT USER GUIDANCE]" in steering_msg or "[INTERRUPT USER GUIDANCE]" in steering_msg:
+                            logger.info(f"Tool {function_name} execution interrupted by high-priority steering")
+                            return f"Tool execution interrupted by user guidance: {steering_msg}"
+                except Exception as e:
+                    logger.warning(f"Steering check failed, continuing with tool execution: {e}")
+            
             # Trigger BEFORE_TOOL hook
             from ..hooks import HookEvent, BeforeToolInput
             before_tool_input = BeforeToolInput(

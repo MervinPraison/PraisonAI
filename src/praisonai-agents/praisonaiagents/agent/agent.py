@@ -22,6 +22,7 @@ from .session_manager import SessionManagerMixin
 from .async_safety import AsyncSafeState
 from .unified_execution_mixin import UnifiedExecutionMixin
 from .sandbox_mixin import SandboxMixin
+from .message_steering import SteeringMixin
 
 # Module-level logger for thread safety errors and debugging
 logger = get_logger(__name__)
@@ -256,7 +257,7 @@ if TYPE_CHECKING:
 # Import structured error from central errors module
 from ..errors import BudgetExceededError
 
-class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin, AsyncMemoryMixin):
+class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin, AsyncMemoryMixin):
     # Class-level counter for generating unique display names for nameless agents
     _agent_counter = 0
     _agent_counter_lock = threading.Lock()
@@ -558,6 +559,7 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
         cli_backend: Optional[Union[str, Any]] = None,  # CLI backend for delegating turns (e.g., "claude-code")
         interrupt_controller: Optional['InterruptController'] = None,  # G2: Cooperative cancellation
         tool_search: Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']] = False,  # Progressive tool disclosure
+        message_steering: Optional[Union[bool, 'MessageSteeringProtocol']] = False,  # Real-time message steering during execution
         sandbox: Optional[Union[bool, 'SandboxConfig']] = None,  # Sandbox for safe code execution
     ):
         """Initialize an Agent instance.
@@ -1729,6 +1731,7 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
         self.max_execution_time = max_execution_time
         self._memory_instance = None
         self._init_memory(memory, user_id)
+        self._init_message_steering(message_steering)
         self.verbose = verbose
         self._has_explicit_output_config = _has_explicit_output  # Track if user set output mode
         self.tool_output_limit = tool_output_limit  # Configurable tool output limit

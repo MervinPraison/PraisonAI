@@ -989,6 +989,7 @@ class PraisonAI:
         # Memory arguments
         parser.add_argument("--memory", action="store_true", help="Enable file-based memory for agent")
         parser.add_argument("--user-id", type=str, help="User ID for memory isolation")
+        parser.add_argument("--message-steering", action="store_true", help="Enable real-time message steering for agents during execution")
         
         # Session management arguments
         parser.add_argument("--auto-save", type=str, metavar="NAME", help="Auto-save session with given name after each run")
@@ -4433,6 +4434,11 @@ Do NOT add any explanations or formatting."""
                         print("[bold cyan]Claude Memory Tool enabled - Claude will autonomously manage memories[/bold cyan]")
                     else:
                         print("[yellow]Warning: --claude-memory requires an Anthropic model (--llm anthropic/...)[/yellow]")
+                
+                # Message Steering
+                if getattr(self.args, 'message_steering', False):
+                    agent_config["message_steering"] = True
+                    print("[bold cyan]Message steering enabled - agent can receive guidance during execution[/bold cyan]")
                 
                 # ===== NEW CLI FEATURES INTEGRATION =====
                 
