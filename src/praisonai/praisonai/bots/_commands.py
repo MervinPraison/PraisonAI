@@ -64,6 +64,7 @@ def format_help(
         "Available Commands",
         "/status - Show bot status and info",
         "/new - Reset conversation session",
+        "/stop - Cancel the current agent run",
         "/help - Show this help message",
     ]
     if extra_commands:
@@ -72,3 +73,23 @@ def format_help(
     lines.append(f"\nAgent: {agent_name}")
     lines.append(f"Model: {model}")
     return "\n".join(lines)
+
+
+def handle_stop_command(session_manager, user_id: str) -> str:
+    """Handle a /stop command to cancel an active run.
+    
+    Args:
+        session_manager: BotSessionManager instance
+        user_id: User ID to cancel run for
+        
+    Returns:
+        Response message indicating success or failure
+    """
+    if hasattr(session_manager, 'cancel_run'):
+        was_cancelled = session_manager.cancel_run(user_id, "user_stop_command")
+        if was_cancelled:
+            return "Stopped. The previous request was cancelled."
+        else:
+            return "No active run to cancel."
+    else:
+        return "Stop command not supported by this session manager."
