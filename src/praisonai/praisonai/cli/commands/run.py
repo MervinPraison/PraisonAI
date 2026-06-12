@@ -14,6 +14,43 @@ from ..state.identifiers import get_current_context
 app = typer.Typer(help="Run agents")
 
 
+def _check_api_key_available() -> bool:
+    """
+    Check if an API key is available from environment or stored credentials.
+    
+    Also injects stored credentials into environment if no env key is present.
+    
+    Returns:
+        True if an API key is available, False otherwise
+    """
+    import os
+    
+    # Check if we already have an environment API key
+    if os.environ.get("OPENAI_API_KEY"):
+        return True
+    
+    # Try to inject stored credentials
+    try:
+        from ...llm.credentials import inject_credentials_into_env
+        if inject_credentials_into_env():
+            # Check again after injection
+            return bool(os.environ.get("OPENAI_API_KEY"))
+    except ImportError:
+        # Fallback if credential module not available
+        pass
+    
+    # Final check using LLM resolution with credential fallback
+    try:
+        from ...llm.credentials import resolve_llm_endpoint_with_credentials
+        endpoint = resolve_llm_endpoint_with_credentials()
+        return bool(endpoint.api_key)
+    except ImportError:
+        # Fallback to basic env check
+        return bool(os.environ.get("OPENAI_API_KEY"))
+    except Exception:
+        return False
+
+
 @app.callback(invoke_without_command=True)
 def run_main(
     ctx: typer.Context,
@@ -150,6 +187,13 @@ def _run_from_file(
     """Run agents from a YAML file."""
     output = get_output_controller()
     
+    # Preflight check for API key availability
+    if not _check_api_key_available():
+        output.print_error(
+            "No API key configured. Run: praisonai auth login"
+        )
+        raise typer.Exit(1)
+    
     try:
         # Use existing PraisonAI class
         from praisonai.cli.main import PraisonAI
@@ -198,6 +242,13 @@ def _run_prompt(
 ):
     """Run a direct prompt."""
     output = get_output_controller()
+    
+    # Preflight check for API key availability
+    if not _check_api_key_available():
+        output.print_error(
+            "No API key configured. Run: praisonai auth login"
+        )
+        raise typer.Exit(1)
     
     try:
         # If output_mode is "actions", use direct Agent with actions preset

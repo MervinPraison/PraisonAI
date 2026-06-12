@@ -291,6 +291,7 @@ def register_commands():
     from .commands.config import app as config_app
     from .commands.traces import app as traces_app
     from .commands.environment import app as env_app
+    from .commands.auth import app as auth_app
     from .commands.session import app as session_app
     from .commands.completion import app as completion_app
     from .commands.version import app as version_app
@@ -374,6 +375,7 @@ def register_commands():
     app.add_typer(config_app, name="config", help="Configuration management")
     app.add_typer(traces_app, name="traces", help="Trace collection management")
     app.add_typer(env_app, name="env", help="Environment and diagnostics")
+    app.add_typer(auth_app, name="auth", help="Credential management")
     app.add_typer(session_app, name="session", help="Session management")
     app.add_typer(completion_app, name="completion", help="Shell completion scripts")
     app.add_typer(version_app, name="version", help="Version information")

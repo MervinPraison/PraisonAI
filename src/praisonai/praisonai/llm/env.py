@@ -34,23 +34,44 @@ def _first_set(*names: str) -> Optional[str]:
     return None
 
 
-def resolve_llm_endpoint(*, default_base: str = _DEFAULT_BASE) -> LLMEndpoint:
+def resolve_llm_endpoint(*, default_base: str = _DEFAULT_BASE, fallback_lookup: callable = None) -> LLMEndpoint:
     """
     Resolve LLM endpoint configuration from environment variables.
     
     Precedence order:
-    - Model: MODEL_NAME > OPENAI_MODEL_NAME > default
-    - Base URL: OPENAI_BASE_URL > OPENAI_API_BASE > OLLAMA_API_BASE > default
-    - API Key: OPENAI_API_KEY
+    - Model: MODEL_NAME > OPENAI_MODEL_NAME > fallback > default
+    - Base URL: OPENAI_BASE_URL > OPENAI_API_BASE > OLLAMA_API_BASE > fallback > default
+    - API Key: OPENAI_API_KEY > fallback > None
     
     Args:
         default_base: Default base URL if none found in environment variables
+        fallback_lookup: Optional callable to get stored credentials (provider_name) -> dict
         
     Returns:
         LLMEndpoint with resolved configuration
     """
+    # Resolve API key with fallback
+    api_key = os.environ.get("OPENAI_API_KEY")
+    fallback_model = None
+    fallback_base = None
+    
+    # Try fallback lookup if no env API key and fallback function provided
+    if not api_key and fallback_lookup:
+        try:
+            # Try common provider names
+            for provider in ["openai", "anthropic", "google", "gemini"]:
+                cred = fallback_lookup(provider)
+                if cred and cred.get("api_key"):
+                    api_key = cred["api_key"]
+                    fallback_model = cred.get("model")
+                    fallback_base = cred.get("base_url")
+                    break
+        except Exception:
+            # Ignore fallback lookup errors
+            pass
+    
     return LLMEndpoint(
-        model=_first_set(*_MODEL_VARS) or _DEFAULT_MODEL,
-        base_url=_first_set(*_BASE_URL_VARS) or default_base,
-        api_key=os.environ.get("OPENAI_API_KEY"),
+        model=_first_set(*_MODEL_VARS) or fallback_model or _DEFAULT_MODEL,
+        base_url=_first_set(*_BASE_URL_VARS) or fallback_base or default_base,
+        api_key=api_key,
     )
