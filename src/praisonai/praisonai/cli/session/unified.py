@@ -419,7 +419,10 @@ class UnifiedSessionStore:
                 self._cache[session_id] = session
                 self._cache_mtime[session_id] = mtime
             logger.debug(f"Loaded session: {session_id}")
-        return session
+            return session
+        except Exception as e:
+            logger.error(f"Failed to load session {session_id}: {e}")
+            return None
     
     def get_or_create(self, session_id: Optional[str] = None) -> UnifiedSession:
         """
