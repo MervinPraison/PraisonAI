@@ -245,7 +245,19 @@ Expected Output: {task.expected_output}."""
     # Add memory context if available
     if task.memory:
         try:
-            memory_context = task.memory.build_context_for_task(task.description)
+            # Use cache-optimized context if available for better prompt caching
+            if hasattr(task.memory, 'build_cache_optimized_context'):
+                try:
+                    cache_result = task.memory.build_cache_optimized_context(
+                        task_descr=task.description,
+                        include_cache_boundary=False  # Don't include boundary for agent task context
+                    )
+                    memory_context = cache_result.get('stable_prefix', '')
+                except Exception:
+                    # Fall back to standard context building
+                    memory_context = task.memory.build_context_for_task(task.description)
+            else:
+                memory_context = task.memory.build_context_for_task(task.description)
             if memory_context:
                 # Log detailed memory context for debugging
                 logger.debug(f"Memory context for task '{task.description}': {memory_context}")

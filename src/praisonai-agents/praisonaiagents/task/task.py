@@ -740,10 +740,26 @@ class Task:
                 # Build context for next tasks
                 if self.next_tasks:
                     logger.info(f"Task {self.id}: Building context for next tasks...")
-                    context = self.memory.build_context_for_task(
-                        task_descr=task_output.raw,
-                        max_items=5
-                    )
+                    # Use cache-optimized context if available for better prompt caching
+                    if hasattr(self.memory, 'build_cache_optimized_context'):
+                        try:
+                            cache_result = self.memory.build_cache_optimized_context(
+                                task_descr=task_output.raw,
+                                max_items=5,
+                                include_cache_boundary=False  # Don't include boundary for task context
+                            )
+                            context = cache_result.get('stable_prefix', '')
+                        except Exception:
+                            # Fall back to standard context building
+                            context = self.memory.build_context_for_task(
+                                task_descr=task_output.raw,
+                                max_items=5
+                            )
+                    else:
+                        context = self.memory.build_context_for_task(
+                            task_descr=task_output.raw,
+                            max_items=5
+                        )
                     logger.info(f"Task {self.id}: Built context for next tasks: {len(context)} items")
 
                 logger.info(f"Task {self.id}: Memory operations complete")
