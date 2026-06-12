@@ -367,6 +367,20 @@ class HandoffTimeoutError(HandoffError):
         self.timeout = timeout_seconds
 
 
+class HandoffValidationError(HandoffError):
+    """Raised when a typed handoff payload does not satisfy the declared schema."""
+    
+    def __init__(self, message: str, validation_errors: Optional[list] = None, **kwargs):
+        # Add remediation hint if not already in message
+        if "Check payload" not in message and "schema" not in message.lower():
+            message = f"{message}. Check that your payload matches the declared Pydantic schema."
+        super().__init__(message, is_retryable=False, **kwargs)  # Schema errors need code fixes
+        if validation_errors:
+            self.context["validation_errors"] = validation_errors
+            self.context["remediation"] = "Validate payload against declared schema; ensure required fields and types match"
+        self.validation_errors = validation_errors
+
+
 # Export all error types for easy importing
 __all__ = [
     "ErrorContextProtocol",
@@ -380,5 +394,6 @@ __all__ = [
     "HandoffCycleError", 
     "HandoffDepthError", 
     "HandoffTimeoutError",
+    "HandoffValidationError",
     "PraisonAIConfigError"
 ]
