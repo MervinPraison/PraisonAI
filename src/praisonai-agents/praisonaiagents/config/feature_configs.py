@@ -738,6 +738,14 @@ class ExecutionConfig:
 
     # Token limit before compaction triggers. None = auto-detect from model metadata.
     max_context_tokens: Optional[int] = None
+    
+    # Anti-injection prefix for compacted context (from merged PR #1823)
+    # None = use default COMPACTION_PREFIX. String = custom framing.
+    compaction_prefix: Optional[str] = None
+    
+    # Enable structured compaction templates with categorized sections
+    # True = use Active Task/Completed Actions/etc structure (default)
+    structured_template: bool = True
 
     # Token budget guard — hard dollar limit per agent run.
     # None = disabled (zero overhead). Float = max USD spend.
@@ -764,6 +772,8 @@ class ExecutionConfig:
             "code_sandbox_mode": self.code_sandbox_mode,
             "context_compaction": self.context_compaction,
             "max_context_tokens": self.max_context_tokens,
+            "compaction_prefix": self.compaction_prefix,
+            "structured_template": self.structured_template,
             "max_budget": self.max_budget,
             "parallel_tool_calls": self.parallel_tool_calls,
         }

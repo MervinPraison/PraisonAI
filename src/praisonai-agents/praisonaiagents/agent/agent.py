@@ -1700,6 +1700,8 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
         self.max_iter = max_iter
         self.max_rpm = max_rpm
         self.max_execution_time = max_execution_time
+        # Store ExecutionConfig for compaction and other features 
+        self.execution = _exec_config
         self._memory_instance = None
         self._init_memory(memory, user_id)
         self.verbose = verbose

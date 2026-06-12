@@ -51,6 +51,39 @@ if TYPE_CHECKING:
 
 class ChatMixin:
     """Mixin providing chat methods for the Agent class."""
+    
+    @property
+    def _context_compactor(self):
+        """Get or create the ContextCompactor instance for this agent."""
+        if not hasattr(self, '_compactor_instance'):
+            self._compactor_instance = None
+        
+        _execution_cfg = getattr(self, 'execution', None)
+        if not (_execution_cfg and getattr(_execution_cfg, 'context_compaction', False)):
+            return None
+            
+        # Check if we need to create or recreate the compactor
+        _max_tok = getattr(_execution_cfg, 'max_context_tokens', None) or 8000
+        _compaction_prefix = getattr(_execution_cfg, 'compaction_prefix', None)
+        _structured_template = getattr(_execution_cfg, 'structured_template', True)
+        
+        if (self._compactor_instance is None or 
+            self._compactor_instance.max_tokens != _max_tok or
+            self._compactor_instance.config.compaction_prefix != (_compaction_prefix or self._compactor_instance.config.compaction_prefix) or
+            self._compactor_instance.config.structured_template != _structured_template):
+            
+            from ..compaction import ContextCompactor, CompactionConfig
+            
+            # Create config with current execution settings
+            config = CompactionConfig(
+                max_tokens=_max_tok,
+                compaction_prefix=_compaction_prefix,
+                structured_template=_structured_template,
+                iterative_update=True  # Enable iterative_update to maintain state
+            )
+            self._compactor_instance = ContextCompactor(config=config)
+            
+        return self._compactor_instance
 
     def _build_system_prompt(self, tools=None):
         """Build the system prompt with tool information.
@@ -554,13 +587,10 @@ Your Goal: {self.goal}"""
 
         # --- Context compaction (opt-in via ExecutionConfig.context_compaction) ---
         # Compacts message history before sending to LLM. Zero overhead when disabled.
-        _execution_cfg = getattr(self, 'execution', None)
-        if _execution_cfg and getattr(_execution_cfg, 'context_compaction', False):
+        _compactor = self._context_compactor
+        if _compactor:
             try:
-                from ..compaction import ContextCompactor
                 from ..hooks import HookEvent as _HookEvent
-                _max_tok = getattr(_execution_cfg, 'max_context_tokens', None) or 8000
-                _compactor = ContextCompactor(max_tokens=_max_tok)
                 if _compactor.needs_compaction(messages):
                     try:
                         self._hook_runner.execute_sync(_HookEvent.BEFORE_COMPACTION, None)
@@ -2319,13 +2349,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     self._append_to_chat_history({"role": "user", "content": normalized_content})
 
                 # --- Context compaction (async custom LLM path) ---
-                _exec_cfg = getattr(self, 'execution', None)
-                if _exec_cfg and getattr(_exec_cfg, 'context_compaction', False):
+                _cw = self._context_compactor
+                if _cw:
                     try:
-                        from ..compaction import ContextCompactor
                         from ..hooks import HookEvent as _HE
-                        _mtok = getattr(_exec_cfg, 'max_context_tokens', None) or 8000
-                        _cw = ContextCompactor(max_tokens=_mtok)
                         if _cw.needs_compaction(self.chat_history):
                             try:
                                 await self._hook_runner.execute(_HE.BEFORE_COMPACTION, None)
@@ -2436,13 +2463,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 self._append_to_chat_history({"role": "user", "content": normalized_content})
 
             # --- Context compaction (async standard OpenAI path) ---
-            _exec_cfg2 = getattr(self, 'execution', None)
-            if _exec_cfg2 and getattr(_exec_cfg2, 'context_compaction', False):
+            _cw2 = self._context_compactor
+            if _cw2:
                 try:
-                    from ..compaction import ContextCompactor
                     from ..hooks import HookEvent as _HE2
-                    _mtok2 = getattr(_exec_cfg2, 'max_context_tokens', None) or 8000
-                    _cw2 = ContextCompactor(max_tokens=_mtok2)
                     if _cw2.needs_compaction(messages):
                         try:
                             await self._hook_runner.execute(_HE2.BEFORE_COMPACTION, None)
