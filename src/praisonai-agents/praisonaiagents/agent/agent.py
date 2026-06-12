@@ -1473,6 +1473,11 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
         
         # Initialize autonomy features (agent-centric escalation/doom-loop)
         self._init_autonomy(autonomy, verification_hooks=verification_hooks)
+        
+        # Initialize loop guard for all execution modes (not just autonomous)
+        # Provides idempotency-aware guardrails for tool execution loops
+        from ..escalation.loop_guard import LoopGuard, LoopGuardConfig
+        self._loop_guard = LoopGuard(LoopGuardConfig(enabled=True))
 
         # If instructions are provided, use them to set role, goal, and backstory
         if instructions:
