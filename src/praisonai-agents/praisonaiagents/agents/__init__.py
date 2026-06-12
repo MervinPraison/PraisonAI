@@ -8,7 +8,8 @@ from .autoagents import AutoAgents
 from .auto_rag_agent import AutoRagAgent, AutoRagConfig, RetrievalPolicy
 from .protocols import (
     MergeStrategyProtocol, FirstWinsMerge, ConcatMerge, DictMerge,
-    TaskExecutorProtocol, ExecutionContext, TaskResult
+    TaskExecutorProtocol, ExecutionContext, TaskResult,
+    SpawnAnnounceProtocol, SpawnedSubAgent, SubAgentCompletionEvent
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     'AutoRagAgent', 'AutoRagConfig', 'RetrievalPolicy',
     'MergeStrategyProtocol', 'FirstWinsMerge', 'ConcatMerge', 'DictMerge',
     'TaskExecutorProtocol', 'ExecutionContext', 'TaskResult',
+    'SpawnAnnounceProtocol', 'SpawnedSubAgent', 'SubAgentCompletionEvent',
 ]
