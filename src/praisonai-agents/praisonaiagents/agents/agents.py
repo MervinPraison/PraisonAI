@@ -2758,6 +2758,7 @@ class AgentTeam(SpawnAnnounceProtocol):
         """Spawn a sub-agent for non-blocking execution (sync version).
         
         Implements the SpawnAnnounceProtocol for efficient parallel sub-agent workflows.
+        Integrates with existing handoff infrastructure to avoid code duplication.
         Uses threading.Thread for background execution.
         
         Note: For async contexts, use aspawn_sub_agent() which uses asyncio primitives.
@@ -3116,12 +3117,19 @@ class AgentTeam(SpawnAnnounceProtocol):
         completed_agents = set()
         
         def check_completions():
+            """Check if all target agents are completed - THREAD-SAFE version."""
             for event in self._completion_events:
                 if event.agent_id in target_agents:
                     completed_agents.add(event.agent_id)
             
             if completed_agents >= set(target_agents):
-                completion_event.set()
+                # CRITICAL FIX: Use call_soon_threadsafe() to safely set event from background thread
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.call_soon_threadsafe(completion_event.set)
+                except RuntimeError:
+                    # Fallback if no event loop running
+                    pass
         
         # Check initial state
         check_completions()
