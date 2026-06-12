@@ -144,6 +144,17 @@ class BaseFormatter:
 class TextFormatter(BaseFormatter):
     """Text formatter with optional color support."""
     
+    def __init__(
+        self,
+        no_color: bool = False,
+        quiet: bool = False,
+        redact: bool = True,
+        show_prefix_suffix: bool = False,
+    ):
+        super().__init__(no_color, quiet, redact, show_prefix_suffix)
+        # Cache encoding detection result at initialization
+        self._unicode_supported = self._can_encode_unicode()
+    
     # ANSI color codes
     COLORS = {
         "reset": "\033[0m",
@@ -212,7 +223,7 @@ class TextFormatter(BaseFormatter):
     
     def _status_symbol(self, status: CheckStatus) -> str:
         """Get colored status symbol with encoding safety."""
-        if self._can_encode_unicode():
+        if self._unicode_supported:
             symbol = self.STATUS_SYMBOLS.get(status, "?")
         else:
             symbol = self.STATUS_SYMBOLS_ASCII.get(status, "[?]")

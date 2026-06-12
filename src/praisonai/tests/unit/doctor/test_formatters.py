@@ -182,24 +182,17 @@ class TestTextFormatter:
         
         # Mock sys.stdout to report cp1252 encoding (Windows default)
         with patch.object(sys.stdout, 'encoding', 'cp1252'):
-            # Mock the encoding attempt to raise UnicodeEncodeError
-            def mock_encode(encoding, errors='strict'):
-                if errors == 'strict':
-                    raise UnicodeEncodeError('cp1252', '✓', 0, 1, 'charmap codec can\'t encode')
-                return b'?'
-            
-            with patch('str.encode', side_effect=mock_encode):
-                result = CheckResult(
-                    id="test",
-                    title="Test Check", 
-                    category=CheckCategory.ENVIRONMENT,
-                    status=CheckStatus.PASS,
-                    message="OK",
-                )
-                output = formatter.format_result(result)
-                # Should use ASCII symbol for pass instead of Unicode
-                assert "[OK]" in output
-                assert "✓" not in output
+            result = CheckResult(
+                id="test",
+                title="Test Check", 
+                category=CheckCategory.ENVIRONMENT,
+                status=CheckStatus.PASS,
+                message="OK",
+            )
+            output = formatter.format_result(result)
+            # Should use ASCII symbol for pass instead of Unicode
+            assert "[OK]" in output
+            assert "✓" not in output
 
 
 class TestJsonFormatter:
