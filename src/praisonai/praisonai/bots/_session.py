@@ -256,9 +256,9 @@ class BotSessionManager:
                         from functools import partial
                         _ctx = contextvars.copy_context()
                         
-                        # Create agent.chat call with interrupt controller if supported
-                        if controller and hasattr(agent, 'chat') and 'interrupt_controller' in agent.chat.__code__.co_varnames:
-                            chat_call = partial(agent.chat, prompt, interrupt_controller=controller)
+                        # Create agent.chat call with cancel_token if supported
+                        if controller and hasattr(agent, 'chat') and 'cancel_token' in agent.chat.__code__.co_varnames:
+                            chat_call = partial(agent.chat, prompt, cancel_token=controller)
                         else:
                             chat_call = partial(agent.chat, prompt)
                         
@@ -277,7 +277,8 @@ class BotSessionManager:
                         updated_history = agent.chat_history
                     except Exception as exc:
                         # N4: persist the failed inbound message before bubbling.
-                        if self._dlq is not None:
+                        # Skip DLQ for timeout exceptions to prevent infinite retry loops
+                        if self._dlq is not None and not isinstance(exc, BotRunTimeout):
                             try:
                                 await loop.run_in_executor(
                                     None,

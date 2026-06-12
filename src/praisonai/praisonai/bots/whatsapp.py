@@ -43,7 +43,7 @@ from praisonaiagents.bots import (
     MessageType,
 )
 
-from ._commands import format_status, format_help
+from ._commands import format_status, format_help, handle_stop_command
 from ._session import BotSessionManager
 from ._rate_limit import RateLimiter
 from ._ack import AckReactor
@@ -175,13 +175,18 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
             extra = {
                 name: info.get("description", "")
                 for name, info in self._command_info.items()
-                if name not in ("status", "new", "help")
+                if name not in ("status", "new", "help", "stop")
             }
             return format_help(self._agent, "whatsapp", extra or None)
+
+        async def _stop(msg):
+            user_id = msg.sender.user_id if msg.sender else "unknown"
+            return handle_stop_command(self._session_mgr, user_id)
 
         self.register_command("status", _status, description="Show bot status and info")
         self.register_command("new", _new, description="Reset conversation session")
         self.register_command("help", _help, description="Show this help message")
+        self.register_command("stop", _stop, description="Cancel the current agent run")
 
     # ── Properties ──────────────────────────────────────────────────
 

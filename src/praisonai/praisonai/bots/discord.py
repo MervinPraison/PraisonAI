@@ -24,7 +24,7 @@ from praisonaiagents.bots import (
     MessageType,
 )
 
-from ._commands import format_status, format_help
+from ._commands import format_status, format_help, handle_stop_command
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
 from ._ack import AckReactor
@@ -199,6 +199,11 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                     return
                 elif command == "help":
                     await message.reply(self._format_help())
+                    return
+                elif command == "stop":
+                    user_id = str(message.author.id)
+                    response = handle_stop_command(self._session, user_id)
+                    await message.reply(response)
                     return
                 elif command and command in self._command_handlers:
                     handler = self._command_handlers[command]

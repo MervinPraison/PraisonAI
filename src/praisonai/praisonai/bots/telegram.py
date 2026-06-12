@@ -27,7 +27,7 @@ from praisonaiagents.bots import (
 )
 
 from .media import split_media_from_output, is_audio_file
-from ._commands import format_status, format_help
+from ._commands import format_status, format_help, handle_stop_command
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
 from ._ack import AckReactor
@@ -318,9 +318,20 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 return
             await update.message.reply_text(self._format_help())
         
+        async def handle_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message:
+                return
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return
+            user_id = message.sender.user_id if message.sender else "unknown"
+            response = handle_stop_command(self._session, user_id)
+            await update.message.reply_text(response)
+        
         self._application.add_handler(CommandHandler("status", handle_status))
         self._application.add_handler(CommandHandler("new", handle_new))
         self._application.add_handler(CommandHandler("help", handle_help))
+        self._application.add_handler(CommandHandler("stop", handle_stop))
         
         for command in self._command_handlers:
             self._application.add_handler(CommandHandler(command, handle_command))
