@@ -322,8 +322,8 @@ CACHING_PRESETS: Dict[str, Dict[str, Any]] = {
 # =============================================================================
 
 MULTI_AGENT_OUTPUT_PRESETS: Dict[str, Dict[str, Any]] = {
-    "verbose": {"verbose": 2, "stream": True},
-    "minimal": {"verbose": 1, "stream": True},
+    "verbose": {"verbose": 2, "stream": False},
+    "minimal": {"verbose": 1, "stream": False},
     "silent": {"verbose": 0, "stream": False},
 }
 

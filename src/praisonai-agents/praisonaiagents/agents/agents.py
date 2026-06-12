@@ -649,7 +649,7 @@ class AgentTeam:
             _stream = _output_config.stream
         else:
             _verbose = 0
-            _stream = True
+            _stream = False
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve EXECUTION param using canonical resolver

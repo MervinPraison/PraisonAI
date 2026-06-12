@@ -4,7 +4,12 @@ Test script to reproduce and verify fix for multi-agent streaming issue #1882
 """
 import os
 import sys
-sys.path.insert(0, '/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents')
+from pathlib import Path
+
+# Add the praisonai-agents package to Python path dynamically
+script_dir = Path(__file__).parent.absolute()
+agents_dir = script_dir / 'src' / 'praisonai-agents'
+sys.path.insert(0, str(agents_dir))
 
 # Set minimal OpenAI API key for testing (should fail gracefully)
 os.environ.setdefault('OPENAI_API_KEY', 'sk-test-key-for-reproduction')
@@ -41,7 +46,8 @@ def test_multi_agent():
             print("🔥 STREAMING ERROR STILL EXISTS - Fix didn't work!")
             return False
         else:
-            print("ℹ️  Different error (likely API key) - fix may have worked")
+            print(f"ℹ️  Different error: {e}")
+            print("   This is expected with a test API key - streaming fix appears to work")
             return True
 
 def test_config_defaults():
