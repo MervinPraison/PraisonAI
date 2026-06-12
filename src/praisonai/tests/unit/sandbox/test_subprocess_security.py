@@ -349,9 +349,9 @@ class TestSecurityRegressions:
         """Regression: Ensure host environment doesn't leak into sandbox."""
         # Set some sensitive host environment variables (using clearly fake test values)
         sensitive_env = {
-            "AWS_SECRET_ACCESS_KEY": "not-a-real-aws-secret",
-            "DATABASE_PASSWORD": "not-a-real-db-password", 
-            "API_TOKEN": "not-a-real-api-token"
+            "AWS_SECRET_ACCESS_KEY": "FAKE_AWS_KEY_FOR_TESTING_ONLY",
+            "DATABASE_PASSWORD": "FAKE_DB_PASSWORD_FOR_TESTING_ONLY", 
+            "API_TOKEN": "FAKE_API_TOKEN_FOR_TESTING_ONLY"
         }
         
         with patch.dict(os.environ, sensitive_env):
