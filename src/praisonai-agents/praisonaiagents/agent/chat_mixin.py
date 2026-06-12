@@ -2496,8 +2496,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # If not satisfactory and not at max reflections, continue with regeneration
                             logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
                             messages.append({"role": "user", "content": "Now regenerate your response using the reflection you made"})
-                            # For custom LLMs during reflection, always use non-streaming to ensure complete responses
-                            use_stream = self.stream if not self._using_custom_llm else False
+                            # For reflection, always use non-streaming to ensure compatibility with sync adapters
+                            # and to avoid streaming complexity during regeneration process
+                            use_stream = False
                             response = self._chat_completion(messages, temperature=temperature, tools=None, stream=use_stream, task_name=task_name, task_description=task_description, task_id=task_id)
                             content = response.choices[0].message.content
                             response_text = content.strip() if content else ""
