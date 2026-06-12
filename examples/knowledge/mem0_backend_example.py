@@ -65,7 +65,7 @@ def main():
             name="PolicyExpert",
             instructions="You are a company policy expert. Answer questions based ONLY on the provided knowledge. Quote exact values when asked about codes or numbers.",
             knowledge=[temp_dir],  # Add directory with documents
-            user_id="example_user",  # Required for mem0 backend
+            memory={"user_id": "example_user"},
         )
         
         print("\n1. Testing Agent.chat() with context-required question:")

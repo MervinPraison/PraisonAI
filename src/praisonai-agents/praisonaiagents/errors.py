@@ -9,8 +9,61 @@ Provides uniform error semantics for consistent handling across:
 - External integrations
 """
 
-from typing import Literal, Protocol, runtime_checkable, Optional, Dict, Any
+from typing import Literal, Protocol, runtime_checkable, Optional, Dict, Any, get_args
+from dataclasses import dataclass, field
 import uuid
+import warnings
+
+
+# Closed error taxonomy for typed failure classification
+AgentErrorKind = Literal[
+    "auth", "auth_permanent", "rate_limit", "overloaded",
+    "context_overflow", "idle_timeout", "billing",
+    "model_not_found", "empty_response", "format_error", "unknown",
+]
+
+# Legacy error category mapping for backward compatibility
+LEGACY_ERROR_CATEGORY_MAP = {
+    "tool": "unknown",
+    "llm": "unknown", 
+    "budget": "billing",
+    "validation": "format_error",
+    "network": "unknown",
+    "handoff": "unknown",
+}
+
+
+@dataclass
+class FailoverDecision:
+    """
+    Discriminated struct for retry and failover decisions.
+    
+    Separates classification (error kind) from action (what to do),
+    making the policy independently testable and overridable.
+    """
+    action: Literal["retry", "rotate_profile", "surface_error"]
+    reason: AgentErrorKind
+    backoff_ms: int = 0
+    is_retryable: bool = True
+
+
+@dataclass
+class IdleTimeoutBreaker:
+    """
+    Circuit breaker for consecutive idle-timeout failures.
+    
+    Prevents runaway API costs when providers repeatedly stall.
+    """
+    max_consecutive: int = 3
+    _count: int = field(default=0, init=False, repr=False)
+
+    def record_idle_timeout(self) -> bool:
+        """Returns True when the hard cap is reached."""
+        self._count += 1
+        return self._count >= self.max_consecutive
+
+    def reset(self) -> None:
+        self._count = 0
 
 
 @runtime_checkable
@@ -20,7 +73,7 @@ class ErrorContextProtocol(Protocol):
     agent_id: str
     run_id: str
     is_retryable: bool
-    error_category: Literal["tool", "llm", "budget", "validation", "network", "handoff"]
+    error_category: AgentErrorKind
 
 
 class PraisonAIError(Exception):
@@ -36,7 +89,7 @@ class PraisonAIError(Exception):
         message: str,
         agent_id: str = "unknown",
         run_id: Optional[str] = None,
-        error_category: Literal["tool", "llm", "budget", "validation", "network", "handoff"] = "validation",
+        error_category: Optional[AgentErrorKind] = None,
         is_retryable: bool = False,
         context: Optional[Dict[str, Any]] = None
     ):
@@ -44,7 +97,23 @@ class PraisonAIError(Exception):
         self.message = message
         self.agent_id = agent_id
         self.run_id = run_id or str(uuid.uuid4())
-        self.error_category = error_category
+        
+        # Handle error category with legacy mapping
+        if error_category is None:
+            self.error_category = "unknown"
+        elif error_category in get_args(AgentErrorKind):
+            self.error_category = error_category
+        elif error_category in LEGACY_ERROR_CATEGORY_MAP:
+            self.error_category = LEGACY_ERROR_CATEGORY_MAP[error_category]
+            warnings.warn(
+                f"error_category={error_category!r} is deprecated; "
+                f"use {self.error_category!r} instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        else:
+            raise ValueError(f"Unsupported error_category: {error_category!r}")
+            
         self.is_retryable = is_retryable
         self.context = context or {}
 
@@ -66,6 +135,7 @@ class ToolExecutionError(PraisonAIError):
         tool_name: str = "unknown",
         agent_id: str = "unknown",
         run_id: Optional[str] = None,
+        error_category: AgentErrorKind = "unknown",
         is_retryable: bool = True,  # Most tool errors are retryable
         context: Optional[Dict[str, Any]] = None
     ):
@@ -75,7 +145,7 @@ class ToolExecutionError(PraisonAIError):
             message, 
             agent_id=agent_id, 
             run_id=run_id, 
-            error_category="tool",
+            error_category=error_category,
             is_retryable=is_retryable,
             context=context
         )
@@ -95,6 +165,7 @@ class LLMError(PraisonAIError):
         model_name: str = "unknown", 
         agent_id: str = "unknown",
         run_id: Optional[str] = None,
+        error_category: AgentErrorKind = "unknown",
         is_retryable: bool = False,  # Default to non-retryable unless specified
         context: Optional[Dict[str, Any]] = None
     ):
@@ -104,7 +175,7 @@ class LLMError(PraisonAIError):
             message, 
             agent_id=agent_id, 
             run_id=run_id, 
-            error_category="llm",
+            error_category=error_category,
             is_retryable=is_retryable,
             context=context
         )
@@ -152,7 +223,7 @@ class BudgetExceededError(PraisonAIError):
                 message, 
                 agent_id=agent_name, 
                 run_id=run_id, 
-                error_category="budget",
+                error_category="billing",
                 is_retryable=False,
                 context=context
             )
@@ -181,7 +252,7 @@ class BudgetExceededError(PraisonAIError):
                 message, 
                 agent_id=agent_id, 
                 run_id=run_id, 
-                error_category="budget",
+                error_category="billing",
                 is_retryable=False,
                 context=context
             )
@@ -217,7 +288,7 @@ class ValidationError(PraisonAIError):
             message, 
             agent_id=agent_id, 
             run_id=run_id, 
-            error_category="validation",
+            error_category="format_error",  # Validation errors are format issues
             is_retryable=False,  # Validation errors need code fixes
             context=context
         )
@@ -238,6 +309,7 @@ class NetworkError(PraisonAIError):
         status_code: Optional[int] = None,
         agent_id: str = "unknown",
         run_id: Optional[str] = None,
+        error_category: AgentErrorKind = "unknown",
         is_retryable: bool = True,  # Most network errors are retryable
         context: Optional[Dict[str, Any]] = None
     ):
@@ -250,7 +322,7 @@ class NetworkError(PraisonAIError):
             message, 
             agent_id=agent_id, 
             run_id=run_id, 
-            error_category="network",
+            error_category=error_category,
             is_retryable=is_retryable,
             context=context
         )
@@ -272,6 +344,7 @@ class HandoffError(PraisonAIError):
         target_agent: Optional[str] = None,
         agent_id: str = "unknown",
         run_id: Optional[str] = None,
+        error_category: AgentErrorKind = "unknown",
         is_retryable: bool = False,  # Handoff errors usually need investigation
         context: Optional[Dict[str, Any]] = None
     ):
@@ -284,7 +357,7 @@ class HandoffError(PraisonAIError):
             message, 
             agent_id=agent_id, 
             run_id=run_id, 
-            error_category="handoff",
+            error_category=error_category,
             is_retryable=is_retryable,
             context=context
         )
@@ -322,7 +395,7 @@ class PraisonAIConfigError(PraisonAIError):
             message,
             agent_id=agent_id,
             run_id=run_id,
-            error_category="validation",  # Configuration is a type of validation error
+            error_category="format_error",  # Configuration is a type of format error
             is_retryable=is_retryable,
             context=context
         )
@@ -367,8 +440,25 @@ class HandoffTimeoutError(HandoffError):
         self.timeout = timeout_seconds
 
 
+class HandoffValidationError(HandoffError):
+    """Raised when a typed handoff payload does not satisfy the declared schema."""
+    
+    def __init__(self, message: str, validation_errors: Optional[list] = None, **kwargs):
+        # Add remediation hint if not already in message
+        if "Check payload" not in message and "schema" not in message.lower():
+            message = f"{message}. Check that your payload matches the declared Pydantic schema."
+        super().__init__(message, is_retryable=False, **kwargs)  # Schema errors need code fixes
+        if validation_errors:
+            self.context["validation_errors"] = validation_errors
+            self.context["remediation"] = "Validate payload against declared schema; ensure required fields and types match"
+        self.validation_errors = validation_errors
+
+
 # Export all error types for easy importing
 __all__ = [
+    "AgentErrorKind",
+    "FailoverDecision",
+    "IdleTimeoutBreaker",
     "ErrorContextProtocol",
     "PraisonAIError", 
     "ToolExecutionError",
@@ -380,5 +470,6 @@ __all__ = [
     "HandoffCycleError", 
     "HandoffDepthError", 
     "HandoffTimeoutError",
+    "HandoffValidationError",
     "PraisonAIConfigError"
 ]

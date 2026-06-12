@@ -49,7 +49,7 @@ Only authorized personnel with code WRENCH-992 may access this project.
             name="AgentA_Ingester",
             instructions="You ingest and store knowledge.",
             knowledge=[temp_dir],
-            user_id="user_alice",  # Scoped to Alice
+            memory={"user_id": "user_alice"},
             output="silent",
         )
         
@@ -103,7 +103,7 @@ Only authorized personnel with code WRENCH-992 may access this project.
             name="AgentB_Querier",
             instructions="Answer questions based on the provided knowledge. If you don't have the information, say so.",
             knowledge=[temp_dir],
-            user_id="user_alice",  # Same scope as Agent A
+            memory={"user_id": "user_alice"},
             output="silent",
         )
         

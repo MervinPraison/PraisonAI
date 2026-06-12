@@ -498,14 +498,23 @@ class ContextManager:
             return messages, None
         
         # Get optimizer with LLM summarization if configured
-        optimizer = get_optimizer(
-            self.config.strategy,
-            preserve_recent=self.config.keep_recent_turns,
-            protected_tools=self.config.protected_tools,
-            llm_summarize_fn=self._llm_summarize_fn if self.config.llm_summarize else None,
-            smart_tool_summarize=self.config.smart_tool_summarize,
-            tool_summarize_limits=self.config.tool_summarize_limits,
-        )
+        optimizer_kwargs = {
+            "preserve_recent": self.config.keep_recent_turns,
+            "protected_tools": self.config.protected_tools,
+            "llm_summarize_fn": self._llm_summarize_fn if self.config.llm_summarize else None,
+            "smart_tool_summarize": self.config.smart_tool_summarize,
+            "tool_summarize_limits": self.config.tool_summarize_limits,
+        }
+        
+        # Add conversation compaction parameters for CONVERSATION strategy
+        if self.config.strategy.value == "conversation":
+            optimizer_kwargs.update({
+                "llm_analyze_fn": self._llm_summarize_fn if self.config.conversation_compaction else None,
+                "min_compaction_ratio": self.config.conversation_min_compaction_ratio,
+                "analyzer_strategy": self.config.conversation_analyzer_strategy,
+            })
+        
+        optimizer = get_optimizer(self.config.strategy, **optimizer_kwargs)
         
         # Try optimization
         optimized, result = optimizer.optimize(messages, target_tokens, self._ledger.get_ledger())

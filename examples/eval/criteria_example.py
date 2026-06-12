@@ -27,7 +27,7 @@ if has_api_key:
         scoring_type="numeric",  # Score 1-10
         threshold=7.0,           # Pass if score >= 7
         num_iterations=2,
-        output="verbose"
+        verbose=True
     )
 
     # Run evaluation
@@ -45,7 +45,7 @@ if has_api_key:
         agent=agent,
         input_text="Tell me a joke",
         scoring_type="binary",  # Pass or Fail
-        output="verbose"
+        verbose=True
     )
 
     binary_result = binary_evaluator.run(print_summary=True)

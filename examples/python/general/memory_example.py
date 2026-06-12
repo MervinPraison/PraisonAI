@@ -5,7 +5,7 @@ import os
 def main():
     # Initialize memory config
     memory_config = {
-        "provider": "rag",
+        "backend": "sqlite",
         "use_embedding": True,
         "storage": {
             "type": "sqlite",
@@ -105,7 +105,7 @@ def main():
         agents=[researcher, retriever],
         tasks=[store_task, verify_task, query_task, query_both_task],  # Use same verbose level as memory
         memory={
-            "provider": "rag",
+            "backend": "sqlite",
             "embedder": {
                 "provider": "openai",
                 "config": {

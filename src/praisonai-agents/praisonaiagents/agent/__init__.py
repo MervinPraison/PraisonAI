@@ -114,11 +114,12 @@ def __getattr__(name):
     
     # Handoff - lightweight
     _handoff_names = {
-        'Handoff', 'handoff', 'handoff_filters', 'parallel_handoffs',
+        'Handoff', 'handoff_filters', 'parallel_handoffs',
         'RECOMMENDED_PROMPT_PREFIX', 'prompt_with_handoff_instructions',
         'HandoffConfig', 'HandoffResult', 'HandoffInputData',
         'ContextPolicy', 'HandoffError', 'HandoffCycleError', 
-        'HandoffDepthError', 'HandoffTimeoutError'
+        'HandoffDepthError', 'HandoffTimeoutError', 'HandoffValidationError',
+        'TypedHandoff'
     }
     if name in _handoff_names:
         from . import handoff as _handoff_module
@@ -230,6 +231,8 @@ __all__ = [
     'HandoffCycleError',
     'HandoffDepthError',
     'HandoffTimeoutError',
+    'HandoffValidationError',
+    'TypedHandoff',
     'RouterAgent',
     'DeepResearchAgent',
     'DeepResearchResponse',

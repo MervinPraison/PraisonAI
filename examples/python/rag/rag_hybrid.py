@@ -59,7 +59,7 @@ agent = Agent(
     name="APIDocBot",
     instructions="You are an API documentation assistant.",
     knowledge=[sample_doc],
-    user_id="hybrid_user",
+    memory={"user_id": "hybrid_user"},
     llm="openai/gpt-4o-mini",
     output="minimal",
 )

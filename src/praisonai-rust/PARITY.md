@@ -1,16 +1,16 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 336 | **Rust Features:** 667 | **Parity:** 84.8%
+> **Python Features:** 339 | **Rust Features:** 667 | **Parity:** 84.1%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 336 |
+| Python Core Features | 339 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **51** |
+| **Actual Gap Count** | **54** |
 | Language Limitations (N/A) | 5 |
-| **Parity** | **84.8%** |
+| **Parity** | **84.1%** |
 
 ## Implemented Features
 
@@ -696,6 +696,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 
 - ❌ `A2UI`
 - ❌ `AgentMessageEvent`
+- ❌ `AgentRunOutcome`
 - ❌ `AsyncLearnProtocol`
 - ❌ `AutoApproveBackend`
 - ❌ `BaseTool`
@@ -730,6 +731,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `ObservabilityHooks`
 - ❌ `PraisonAIConfigError`
 - ❌ `PraisonAIError`
+- ❌ `RunStatus`
 - ❌ `SessionErrorEvent`
 - ❌ `SessionIdleEvent`
 - ❌ `StopReason`
@@ -744,6 +746,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `get_tool`
 - ❌ `parallel_handoffs`
 - ❌ `register_tool`
+- ❌ `validate_decision_string`
 - ❌ `validate_tool`
 
 ---

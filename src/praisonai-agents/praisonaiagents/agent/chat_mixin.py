@@ -752,56 +752,6 @@ Your Goal: {self.goal}"""
             raise
         except Exception as e:
             from ..errors import LLMError
-            error_str = str(e).lower()
-            
-            # Check if this is a context overflow error
-            context_overflow_phrases = [
-                "maximum context length",
-                "context window is too long", 
-                "context length exceeded",
-                "context_length_exceeded",
-                "token limit",
-                "too many tokens"
-            ]
-            is_overflow = any(phrase in error_str for phrase in context_overflow_phrases)
-            
-            if is_overflow and self.context_manager:
-                # Attempt overflow recovery with emergency truncation
-                logging.warning(f"[{self.name}] Context overflow detected, attempting recovery...")
-                try:
-                    from ..context.budgeter import get_model_limit
-                    from ..context.tokens import estimate_messages_tokens
-                    
-                    model_name = self.llm if isinstance(self.llm, str) else "gpt-4o-mini"
-                    model_limit = get_model_limit(model_name)
-                    target = int(model_limit * 0.7)  # Target 70% of limit for safety
-                    
-                    # Apply emergency truncation
-                    truncated_messages = self.context_manager.emergency_truncate(messages, target)
-                    
-                    logging.info(
-                        f"[{self.name}] Emergency truncation: {estimate_messages_tokens(messages)} -> "
-                        f"{estimate_messages_tokens(truncated_messages)} tokens"
-                    )
-                    
-                    # Retry with truncated messages (recursive call with depth limit)
-                    if _retry_depth < 2:
-                        return self._chat_completion(
-                            truncated_messages, temperature, tools, stream, 
-                            reasoning_steps, task_name, task_description, task_id, response_format, 
-                            _retry_depth=_retry_depth + 1
-                        )
-                    else:
-                        logging.error(f"[{self.name}] Context overflow retry limit exceeded")
-                        raise LLMError(
-                            f"Context overflow could not be resolved after {_retry_depth} attempts", 
-                            model_name=model_name, agent_id=self.name, is_retryable=False
-                        ) from e
-                except LLMError:
-                    # Re-raise LLMError (including depth limit errors) without swallowing
-                    raise
-                except Exception as recovery_error:
-                    logging.error(f"[{self.name}] Overflow recovery failed: {recovery_error}")
             
             # Emit LLM response trace event on error
             _duration_ms = (time.time() - start_time) * 1000
@@ -812,36 +762,101 @@ Your Goal: {self.goal}"""
                 response_content=str(e),  # Include error for context replay
             )
             
-            # Classify and raise structured error with improved transient failure detection
+            # Use structured error classification for all error types (replaces legacy heuristic checks)
+            from ..llm.error_classifier import classify_llm_error
+            from ..llm.retry_utils import jittered_backoff
+            import time
+            
             model_name = self.llm if isinstance(self.llm, str) else "unknown"
             session_id = getattr(self, '_session_id', 'unknown')
             
-            # Check for retryable errors (rate limits, transient network issues, provider errors)
-            retryable_indicators = [
-                "rate limit", "429", "too many requests",
-                "timeout", "connection reset", "connection error", "socket error",
-                "500", "502", "503", "504", "service unavailable", "internal server error",
-                "dns", "network", "connection refused"
-            ]
+            # Determine provider from model name or use default
+            provider = "openai"  # Default assumption
+            if "claude" in model_name.lower() or "anthropic" in model_name.lower():
+                provider = "anthropic"
+            elif "azure" in model_name.lower():
+                provider = "azure"
             
-            # Check for non-retryable errors (auth issues)
-            auth_indicators = ["401", "403", "authentication", "unauthorized", "invalid_api_key"]
+            # Get token counts for context-aware classification
+            prompt_tokens = 0
+            context_length = 0
+            try:
+                from ..context.tokens import estimate_messages_tokens
+                prompt_tokens = estimate_messages_tokens(messages)
+                context_length = prompt_tokens
+            except Exception:
+                pass  # Token estimation failed, continue without counts
             
-            if any(phrase in error_str.lower() for phrase in retryable_indicators):
-                is_retryable = True
-            elif any(phrase in error_str.lower() for phrase in auth_indicators):
-                is_retryable = False
-            else:
-                # Default to retryable for unknown errors to be more resilient
-                is_retryable = True
+            # Classify error with structured recovery hints
+            classification = classify_llm_error(
+                e,
+                provider=provider,
+                model=model_name,
+                prompt_tokens=prompt_tokens,
+                context_length=context_length,
+                retry_depth=_retry_depth,
+            )
             
-            # Create LLMError with contextual metadata
+            # Execute recovery actions based on classification
+            if classification.should_compress_context and self.context_manager:
+                try:
+                    from ..context.budgeter import get_model_limit
+                    model_limit = get_model_limit(model_name)
+                    target = int(model_limit * 0.7)  # Target 70% of limit for safety
+                    
+                    # Apply emergency truncation
+                    truncated_messages = self.context_manager.emergency_truncate(messages, target)
+                    
+                    logging.info(f"[{self.name}] {classification.user_message}")
+                    
+                    # Retry with compressed context (recursive call with depth limit)
+                    if _retry_depth < 2:
+                        return self._chat_completion(
+                            truncated_messages, temperature, tools, stream, 
+                            reasoning_steps, task_name, task_description, task_id, response_format, 
+                            _retry_depth=_retry_depth + 1
+                        )
+                except Exception as compression_error:
+                    logging.error(f"[{self.name}] Context compression failed: {compression_error}")
+            
+            if classification.should_rotate_credential:
+                # TODO: Implement credential rotation when available
+                logging.warning(f"[{self.name}] {classification.user_message} (credential rotation not yet implemented)")
+                # Don't retry without actual credential rotation
+                
+            elif classification.should_fallback_model:
+                # TODO: Implement model fallback when available
+                logging.warning(f"[{self.name}] {classification.user_message} (model fallback not yet implemented)")
+                # Don't retry without actual model fallback
+                
+            elif classification.is_retryable and classification.backoff_seconds > 0:
+                if _retry_depth < 2:  # Limit retry attempts
+                    logging.info(f"[{self.name}] {classification.user_message} (waiting {classification.backoff_seconds:.1f}s)")
+                    time.sleep(classification.backoff_seconds)
+                    return self._chat_completion(
+                        messages, temperature, tools, stream, 
+                        reasoning_steps, task_name, task_description, task_id, response_format, 
+                        _retry_depth=_retry_depth + 1
+                    )
+            
+            # Include remediation hints for unimplemented recovery actions
+            user_message = classification.user_message
+            if classification.should_rotate_credential:
+                user_message += " Credential rotation is not yet implemented."
+            if classification.should_fallback_model:
+                user_message += " Model fallback is not yet implemented."
+            
+            # Create LLMError with classification context
             error = LLMError(
                 str(e),
                 model_name=model_name,
                 agent_id=self.name,
-                is_retryable=is_retryable,
-                context={"session_id": session_id},
+                is_retryable=classification.is_retryable,
+                context={
+                    "session_id": session_id,
+                    "error_category": classification.error_category,
+                    "user_message": user_message,
+                },
             )
             
             # Call error hook if available for error interception
@@ -852,6 +867,150 @@ Your Goal: {self.goal}"""
                     logging.debug(f"Error in on_error hook: {hook_error}")
             
             raise error from e
+
+    async def _handle_async_llm_error(
+        self, 
+        exc: Exception, 
+        messages, 
+        temperature=1.0, 
+        tools=None, 
+        stream=True,
+        reasoning_steps=False,
+        task_name=None,
+        task_description=None,
+        task_id=None,
+        response_format=None,
+        stream_callback=None,
+        emit_events=True,
+        _retry_depth=0
+    ):
+        """
+        Handle LLM errors in async context using structured classification.
+        Mirrors the sync error handling logic but with async-compatible primitives.
+        """
+        import asyncio
+        from ..llm.error_classifier import classify_llm_error
+        from ..errors import LLMError
+        
+        model_name = self.llm if isinstance(self.llm, str) else "unknown"
+        session_id = getattr(self, '_session_id', 'unknown')
+        
+        # Determine provider from model name or use default
+        provider = "openai"  # Default assumption
+        if "claude" in model_name.lower() or "anthropic" in model_name.lower():
+            provider = "anthropic"
+        elif "azure" in model_name.lower():
+            provider = "azure"
+        
+        # Get token counts for context-aware classification
+        prompt_tokens = 0
+        context_length = 0
+        try:
+            from ..context.tokens import estimate_messages_tokens
+            prompt_tokens = estimate_messages_tokens(messages)
+            context_length = prompt_tokens
+        except Exception:
+            pass  # Token estimation failed, continue without counts
+        
+        # Classify error with structured recovery hints
+        classification = classify_llm_error(
+            exc,
+            provider=provider,
+            model=model_name,
+            prompt_tokens=prompt_tokens,
+            context_length=context_length,
+            retry_depth=_retry_depth,
+        )
+        
+        # Execute recovery actions based on classification (async-compatible)
+        if classification.should_compress_context and self.context_manager:
+            try:
+                from ..context.budgeter import get_model_limit
+                model_limit = get_model_limit(model_name)
+                target = int(model_limit * 0.7)  # Target 70% of limit for safety
+                
+                # Apply emergency truncation
+                truncated_messages = self.context_manager.emergency_truncate(messages, target)
+                
+                logging.info(f"[{self.name}] {classification.user_message}")
+                
+                # Retry with compressed context (recursive call with depth limit)
+                if _retry_depth < 2:
+                    # Need to call the full async method that includes error handling
+                    try:
+                        return await self._execute_unified_achat_completion(
+                            truncated_messages, temperature, tools, stream, 
+                            reasoning_steps, task_name, task_description, task_id, response_format,
+                            stream_callback, emit_events
+                        )
+                    except Exception as retry_error:
+                        return await self._handle_async_llm_error(
+                            retry_error, truncated_messages, temperature, tools, stream,
+                            reasoning_steps, task_name, task_description, task_id, response_format,
+                            stream_callback, emit_events, _retry_depth + 1
+                        )
+            except Exception as compression_error:
+                logging.error(f"[{self.name}] Context compression failed: {compression_error}")
+        
+        if classification.should_rotate_credential:
+            # TODO: Implement credential rotation when available
+            logging.warning(f"[{self.name}] {classification.user_message} (credential rotation not yet implemented)")
+            # Don't retry without actual credential rotation
+            
+        elif classification.should_fallback_model:
+            # TODO: Implement model fallback when available
+            logging.warning(f"[{self.name}] {classification.user_message} (model fallback not yet implemented)")
+            # Don't retry without actual model fallback
+            
+        elif classification.is_retryable and classification.backoff_seconds > 0:
+            if _retry_depth < 2:  # Limit retry attempts
+                logging.info(f"[{self.name}] {classification.user_message} (waiting {classification.backoff_seconds:.1f}s)")
+                await asyncio.sleep(classification.backoff_seconds)
+                # Need to call the full async method that includes error handling
+                try:
+                    return await self._execute_unified_achat_completion(
+                        messages, temperature, tools, stream, 
+                        reasoning_steps, task_name, task_description, task_id, response_format,
+                        stream_callback, emit_events
+                    )
+                except Exception as retry_error:
+                    return await self._handle_async_llm_error(
+                        retry_error, messages, temperature, tools, stream,
+                        reasoning_steps, task_name, task_description, task_id, response_format,
+                        stream_callback, emit_events, _retry_depth + 1
+                    )
+        
+        # Include remediation hints for unimplemented recovery actions
+        user_message = classification.user_message
+        if classification.should_rotate_credential:
+            user_message += " Credential rotation is not yet implemented."
+        if classification.should_fallback_model:
+            user_message += " Model fallback is not yet implemented."
+        
+        # Create LLMError with classification context
+        error = LLMError(
+            str(exc),
+            model_name=model_name,
+            agent_id=self.name,
+            is_retryable=classification.is_retryable,
+            context={
+                "session_id": session_id,
+                "error_category": classification.error_category,
+                "user_message": user_message,
+            },
+        )
+        
+        # Call error hook if available for error interception
+        if hasattr(self, 'on_error') and self.on_error:
+            try:
+                # Note: calling sync hook from async context - this is intentional
+                # for backward compatibility with existing hook implementations
+                self.on_error(error)
+            except Exception as hook_error:
+                logging.debug(f"Error in on_error hook: {hook_error}")
+        
+        # Raise the enriched error
+        raise error
 
     def _execute_unified_chat_completion(
         self, 
@@ -1057,8 +1216,12 @@ Your Goal: {self.goal}"""
             return final_response
             
         except Exception as e:
-            logging.error(f"Unified async chat completion failed: {e}")
-            raise
+            from ..errors import LLMError
+            # Apply the same structured error classification for async path
+            return await self._handle_async_llm_error(
+                e, messages, temperature, tools, stream, reasoning_steps,
+                task_name, task_description, task_id, response_format, stream_callback, emit_events
+            )
 
     async def _finalize_unified_achat_response(
         self,
@@ -1289,6 +1452,45 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             return messages, None
         
         try:
+            # First check if compression will be needed
+            self.context_manager._ledger.reset()
+            if system_prompt:
+                self.context_manager._ledger.track_system_prompt(system_prompt)
+            if tools:
+                self.context_manager._ledger.track_tools(tools or [])
+            self.context_manager._ledger.track_history(messages)
+            
+            utilization = self.context_manager._ledger.get_utilization()
+            needs_optimization = utilization >= self.context_manager.config.compact_threshold
+            
+            # Only call on_pre_compress hook when compression will actually occur
+            if needs_optimization and self._memory_instance:
+                try:
+                    # Try async version first if in async context, fallback to sync
+                    import asyncio
+                    summary = ""
+                    try:
+                        loop = asyncio.get_running_loop()
+                        # In async context - run async hook if available
+                        if hasattr(self._memory_instance, 'aon_pre_compress'):
+                            # Schedule async hook without blocking
+                            task = asyncio.create_task(self._memory_instance.aon_pre_compress(messages))
+                            # For now, we'll run sync hook to avoid blocking
+                            # TODO: Make this method async-aware or run async hook in background
+                            if hasattr(self._memory_instance, 'on_pre_compress'):
+                                summary = self._memory_instance.on_pre_compress(messages)
+                        elif hasattr(self._memory_instance, 'on_pre_compress'):
+                            summary = self._memory_instance.on_pre_compress(messages)
+                    except RuntimeError:
+                        # Not in async context - use sync hook
+                        if hasattr(self._memory_instance, 'on_pre_compress'):
+                            summary = self._memory_instance.on_pre_compress(messages)
+                    
+                    if summary:
+                        logging.debug(f"[{self.name}] Memory provider extracted: {summary[:100]}...")
+                except Exception as e:
+                    logging.warning(f"[{self.name}] Memory on_pre_compress hook failed: {e}")
+            
             # Process through context manager
             result = self.context_manager.process(
                 messages=messages,

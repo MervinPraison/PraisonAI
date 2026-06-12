@@ -1959,17 +1959,27 @@ class WebSocketGateway:
         async def handle_status(update: Update, context: Any):
             if not update.message:
                 return
+            from praisonai.bots.telegram import process_inbound_telegram_message
+            if not await process_inbound_telegram_message(update, bot):
+                return
             await update.message.reply_text(bot._format_status())
 
         async def handle_new(update: Update, context: Any):
             if not update.message:
                 return
-            user_id = str(update.message.from_user.id) if update.message.from_user else "unknown"
+            from praisonai.bots.telegram import process_inbound_telegram_message
+            message = await process_inbound_telegram_message(update, bot)
+            if not message:
+                return
+            user_id = message.sender.user_id if message.sender else "unknown"
             bot._session.reset(user_id)
             await update.message.reply_text("Session reset. Starting fresh conversation.")
 
         async def handle_help(update: Update, context: Any):
             if not update.message:
+                return
+            from praisonai.bots.telegram import process_inbound_telegram_message
+            if not await process_inbound_telegram_message(update, bot):
                 return
             await update.message.reply_text(bot._format_help())
 

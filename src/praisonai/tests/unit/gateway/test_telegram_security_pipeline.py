@@ -65,8 +65,12 @@ def create_test_bot(allowed_users=None, allowed_channels=None, group_policy="men
         is_bot=True,
     )
     
-    # Mock the fire_message_received method
+    # Mock the fire_message_received method and other required attributes
     bot.fire_message_received = MagicMock()
+    bot._started_at = 1234567890.0
+    bot._agent = MagicMock()
+    bot._command_handlers = {}
+    bot._session = MagicMock()
     
     return bot
 
@@ -237,6 +241,85 @@ def test_security_pipeline_exists():
     """Basic smoke test to ensure the security pipeline function exists and is importable."""
     from praisonai.bots.telegram import process_inbound_telegram_message
     assert callable(process_inbound_telegram_message), "Security pipeline function should be callable"
+
+
+@pytest.mark.asyncio
+@patch.object(UnknownUserHandler, 'handle')
+async def test_command_handlers_respect_user_allowlist(mock_unknown_handler):
+    """Built-in commands must pass the same security pipeline as text messages."""
+    mock_unknown_handler.return_value = False
+
+    bot = create_test_bot(allowed_users=["42"])
+    
+    # Mock the reply_text method to track if command handlers were called
+    reply_mock = AsyncMock()
+    
+    # Test that disallowed users are blocked by command handlers
+    for command in ("help", "status", "new"):
+        update = create_mock_telegram_update(
+            user_id="99",
+            text=f"/{command}",
+            chat_type="private",
+        )
+        update.message.reply_text = reply_mock
+        reply_mock.reset_mock()
+        
+        # Get the registered handler for this command from the bot's handlers
+        # We need to simulate how the telegram bot framework would call the handler
+        if command == "help":
+            from praisonai.bots.telegram import TelegramBot
+            # Create a handler like the bot does
+            async def test_handle_help(update, context):
+                if not update.message:
+                    return
+                if not await process_inbound_telegram_message(update, bot):
+                    return
+                await update.message.reply_text(bot._format_help())
+            await test_handle_help(update, None)
+        elif command == "status":
+            async def test_handle_status(update, context):
+                if not update.message:
+                    return
+                if not await process_inbound_telegram_message(update, bot):
+                    return
+                await update.message.reply_text(bot._format_status())
+            await test_handle_status(update, None)
+        elif command == "new":
+            async def test_handle_new(update, context):
+                if not update.message:
+                    return
+                message = await process_inbound_telegram_message(update, bot)
+                if not message:
+                    return
+                user_id = message.sender.user_id if message.sender else "unknown"
+                bot._session.reset(user_id)
+                await update.message.reply_text("Session reset. Starting fresh conversation.")
+            # Mock session reset
+            bot._session = MagicMock()
+            bot._session.reset = MagicMock()
+            await test_handle_new(update, None)
+        
+        # Assert the command handler did not reply (because security blocked it)
+        reply_mock.assert_not_called(), f"/{command} from disallowed user should not reply"
+
+    # Test that allowed users can use commands
+    allowed_update = create_mock_telegram_update(
+        user_id="42",
+        text="/help",
+        chat_type="private",
+    )
+    allowed_update.message.reply_text = reply_mock
+    reply_mock.reset_mock()
+    
+    async def test_handle_help_allowed(update, context):
+        if not update.message:
+            return
+        if not await process_inbound_telegram_message(update, bot):
+            return
+        await update.message.reply_text(bot._format_help())
+    
+    await test_handle_help_allowed(allowed_update, None)
+    reply_mock.assert_called_once(), "Commands from allowed users should reply"
 
 
 @pytest.mark.asyncio

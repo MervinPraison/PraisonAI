@@ -277,8 +277,11 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         async def handle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message or not update.message.text:
                 return
-            
-            message = self._convert_update_to_message(update)
+
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return
+
             command = message.command
             
             if command and command in self._command_handlers:
@@ -294,17 +297,24 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message:
                 return
+            if not await process_inbound_telegram_message(update, self):
+                return
             await update.message.reply_text(self._format_status())
         
         async def handle_new(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message:
                 return
-            user_id = str(update.message.from_user.id) if update.message.from_user else "unknown"
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return
+            user_id = message.sender.user_id if message.sender else "unknown"
             self._session.reset(user_id)
             await update.message.reply_text("Session reset. Starting fresh conversation.")
         
         async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message:
+                return
+            if not await process_inbound_telegram_message(update, self):
                 return
             await update.message.reply_text(self._format_help())
         

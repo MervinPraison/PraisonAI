@@ -46,13 +46,22 @@
 - `praisonai/cli/features/interactive_runtime.py` - Modified read_only property for auto mode
 - `praisonai/api.py` - Fixed circular import
 
-### Test Infrastructure
+### Test Infrastructure (Windows Compatibility Fixes - Issue #1839)
 - `tests/live/runner.py` - CLI-first runner using `python -m praisonai code`
+  - Fixed PYTHONPATH to use `os.pathsep` for Windows compatibility
+  - Added UTF-8 encoding for subprocess operations
+  - Added `--no-acp` flag for Windows automation
+  - Added isolated pytest environment function
 - `tests/live/scenarios/__init__.py` - 10 scenario definitions with acceptance checks
+  - Updated pytest calls to use isolated environment
+  - Fixed over-broad test selectors (use node IDs instead of `-k` patterns)
+  - Added UTF-8 encoding to all subprocess calls
 - `tests/live/test_ai_code_editor_smoke.py` - Pytest test suite
 
-### Fixture
-- `tests/fixtures/ai_code_editor_fixture/` - Single fixture template with intentional bugs
+### Fixture (Issue #1839)
+- `tests/fixtures/ai_code_editor_fixture/` - Complete fixture template with intentional bugs
+  - Created missing fixture directory with mathlib project
+  - Added intentionally failing tests for comprehensive smoke testing
 
 ### Documentation
 - `PraisonAIDocs/docs/cli/realworld-examples.mdx` - Updated with CLI contract and scenarios

@@ -32,8 +32,12 @@ rag_task = Task(
 agents = AgentTeam(
     agents=[rag_agent],
     tasks=[rag_task],
-    user_id="user1"
 )
 
-# Start Agents
-agents.start()
+if __name__ == "__main__":
+    import os
+    import sys
+    if not os.environ.get("OPENAI_API_KEY"):
+        print("Set OPENAI_API_KEY to run this example.")
+        sys.exit(0)
+    agents.start()
