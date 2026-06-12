@@ -523,6 +523,7 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
         auth: Optional[str] = None,  # Subscription auth provider: "claude-code", "codex", etc.
         # Tools
         tools: Optional[List[Any]] = None,
+        toolsets: Optional[List[str]] = None,  # Named toolset groups to resolve
         allow_delegation: bool = False,  # Deprecated: use handoffs= instead
         allow_code_execution: Optional[bool] = False,  # Deprecated: use execution=ExecutionConfig(code_execution=True)
         code_execution_mode: Literal["safe", "unsafe"] = "safe",  # Deprecated: use execution=ExecutionConfig(code_mode="safe")
@@ -1666,6 +1667,32 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
                 self.tools = list(tools)
         else:
             self.tools = tools or []
+        
+        # Handle toolsets parameter - resolve named toolset groups
+        if toolsets:
+            try:
+                from ..toolsets import resolve_toolsets
+                toolset_tool_names = resolve_toolsets(toolsets)
+                # Remove duplicates with existing tools
+                existing_tool_names = set()
+                for tool in self.tools:
+                    name = getattr(tool, 'name', getattr(tool, '__name__', str(tool)))
+                    existing_tool_names.add(name)
+                
+                unique_tool_names = [name for name in toolset_tool_names if name not in existing_tool_names]
+                toolset_tools = self._resolve_tool_names(unique_tool_names)
+                self.tools.extend(toolset_tools)
+                logging.debug(f"Resolved toolsets {toolsets} to {len(toolset_tools)} tools: {[getattr(t, '__name__', str(t)) for t in toolset_tools]}")
+            except (ValueError, KeyError) as e:
+                raise ValueError(
+                    f"Agent '{getattr(self, 'display_name', 'unknown')}' failed to resolve toolsets {toolsets}: {e}. "
+                    "Verify names with praisonaiagents.toolsets.list_toolsets()."
+                ) from e
+            except ImportError as e:
+                raise ImportError(
+                    f"Agent '{getattr(self, 'display_name', 'unknown')}' failed to import toolsets module: {e}. "
+                    "Ensure praisonaiagents is properly installed."
+                ) from e
         
         # Inject default tools for autonomy mode (after self.tools is initialized)
         # ONLY inject if caller didn't provide tools - avoid duplicates with CLI/wrapper tools

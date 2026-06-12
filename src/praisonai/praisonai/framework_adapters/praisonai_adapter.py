@@ -136,10 +136,13 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                     agent_tools = details.get('tools', [])
                     agent_tool_list = [tools_dict[t] for t in agent_tools if t in tools_dict]
                 
+                # Extract toolsets from YAML config
+                agent_toolsets = details.get('toolsets', [])
+                
                 # Resolve per-agent LLM model
                 agent_model = self._resolve_agent_model(details, model_name)
                 
-                # Create basic agent
+                # Create basic agent (pass both tools and toolsets)
                 agent = PraisonAgent(
                     name=role_filled,
                     role=role_filled,
@@ -149,6 +152,7 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                     llm=agent_model,
                     allow_delegation=details.get('allow_delegation', False),
                     tools=agent_tool_list,
+                    toolsets=agent_toolsets,
                 )
                 
                 if agent_callback:
@@ -315,10 +319,13 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                     agent_tools = details.get('tools', [])
                     agent_tool_list = [tools_dict[t] for t in agent_tools if t in tools_dict]
                 
+                # Extract toolsets from YAML config
+                agent_toolsets = details.get('toolsets', [])
+                
                 # Resolve per-agent LLM model
                 agent_model = self._resolve_agent_model(details, model_name)
                 
-                # Create basic agent
+                # Create basic agent (pass both tools and toolsets)
                 agent = PraisonAgent(
                     name=role_filled,
                     role=role_filled,
@@ -328,6 +335,7 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                     llm=agent_model,
                     allow_delegation=details.get('allow_delegation', False),
                     tools=agent_tool_list,
+                    toolsets=agent_toolsets,
                 )
                 
                 if agent_callback:

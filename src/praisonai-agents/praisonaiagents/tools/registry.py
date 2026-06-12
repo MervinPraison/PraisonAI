@@ -16,6 +16,7 @@ Usage:
 
 import logging
 import threading
+import time
 from typing import Any, Callable, Dict, List, Optional, Union
 from dataclasses import dataclass
 
@@ -90,6 +91,9 @@ class ToolRegistry:
         self._tools: Dict[str, ToolEntry] = {}  # Unified storage for tools and functions
         self._discovered: bool = False
         self._lock = threading.RLock()  # Thread-safe operations for multi-agent scenarios
+        # TTL cache for availability checks (tool_name -> (is_available, timestamp))
+        self._availability_cache: Dict[str, tuple[bool, float]] = {}
+        self._availability_cache_ttl: float = 30.0  # seconds
     
     def register(
         self,
@@ -152,6 +156,8 @@ class ToolRegistry:
         with self._lock:
             if name in self._tools:
                 del self._tools[name]
+                # Evict cache entry to prevent stale growth
+                self._availability_cache.pop(name, None)
                 return True
             return False
     
@@ -230,32 +236,60 @@ class ToolRegistry:
             
             return definitions
     
-    def list_available_tools(self, context: Optional[Dict[str, Any]] = None) -> List[Union[BaseTool, Callable]]:
+    def list_available_tools(
+        self, 
+        context: Optional[Dict[str, Any]] = None, 
+        ttl_seconds: Optional[float] = None
+    ) -> List[Union[BaseTool, Callable]]:
         """List only currently available tools (those that pass availability checks).
+        
+        Uses TTL cache to avoid expensive availability checks on every call.
         
         Args:
             context: Optional context for availability checks (unused currently)
+            ttl_seconds: Cache TTL override (default: 30.0 seconds)
             
         Returns:
             List of available tools (both BaseTool instances and callables)
         """
+        if ttl_seconds is None:
+            ttl_seconds = self._availability_cache_ttl
+            
         with self._lock:
             available = []
+            current_time = time.time()
             
-            for entry in self._tools.values():
+            # Check tool entries with TTL availability caching  
+            for registered_name, entry in self._tools.items():
                 if not entry.available:
                     continue
                 
                 # Check if tool has availability checking capability
                 if hasattr(entry.tool, 'check_availability'):
+                    # Check cache first using registry key (not tool.name) to avoid collisions
+                    cache_entry = self._availability_cache.get(registered_name)
+                    if cache_entry is not None:
+                        cached_result, cached_time = cache_entry
+                        if current_time - cached_time < ttl_seconds:
+                            # Use cached result
+                            if cached_result:
+                                available.append(entry.tool)
+                            continue
+                    
+                    # Cache miss or expired - perform availability check
                     try:
                         is_available, reason = entry.tool.check_availability()
+                        # Cache the result using registry key to avoid collisions
+                        self._availability_cache[registered_name] = (is_available, current_time)
+                        
                         if is_available:
                             available.append(entry.tool)
                         elif reason:
-                            logging.debug(f"Tool '{entry.name}' unavailable: {reason}")
+                            logging.debug(f"Tool '{registered_name}' unavailable: {reason}")
                     except Exception as e:
-                        logging.warning(f"Availability check failed for tool '{entry.name}': {e}")
+                        logging.warning(f"Availability check failed for tool '{registered_name}': {e}")
+                        # Cache as unavailable on error
+                        self._availability_cache[registered_name] = (False, current_time)
                 else:
                     # No availability check = always available
                     available.append(entry.tool)
@@ -381,6 +415,7 @@ class ToolRegistry:
         """Clear all registered tools. Thread-safe."""
         with self._lock:
             self._tools.clear()
+            self._availability_cache.clear()
             self._discovered = False
     
     def __contains__(self, name: str) -> bool:
@@ -499,16 +534,20 @@ def discover_plugins() -> int:
     return get_registry().discover_single_file_plugins()
 
 
-def list_available_tools(context: Optional[Dict[str, Any]] = None) -> List[Union[BaseTool, Callable]]:
+def list_available_tools(
+    context: Optional[Dict[str, Any]] = None, 
+    ttl_seconds: Optional[float] = None
+) -> List[Union[BaseTool, Callable]]:
     """List only currently available tools from the global registry.
     
     Args:
         context: Optional context for availability checks
+        ttl_seconds: Cache TTL override (default: 30.0 seconds)
         
     Returns:
         List of available tools
     """
-    return get_registry().list_available_tools(context)
+    return get_registry().list_available_tools(context, ttl_seconds)
 
 
 def list_tools_with_allowed_filter(context: Optional[Dict[str, Any]] = None) -> List[str]:
