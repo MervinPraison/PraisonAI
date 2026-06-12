@@ -235,8 +235,9 @@ class AgentsGenerator:
         # CLI users get the process default.
         self._adapter_registry = adapter_registry or get_default_registry()
         
-        # Get framework adapter (availability already validated at CLI entry)
-        self.framework_adapter = self._get_framework_adapter(framework)
+        # Defer framework adapter creation until YAML is loaded
+        # This fixes the issue where empty framework string fails before YAML framework is read
+        self.framework_adapter = None
 
     def _get_framework_adapter(self, framework: str) -> FrameworkAdapter:
         """
@@ -377,7 +378,7 @@ class AgentsGenerator:
         
         # Select framework with AutoGen version logic
         framework = self._select_autogen_version(
-            self.framework or config.get('framework', 'crewai'),
+            self.framework or config.get('framework', 'praisonai'),
             config,
         )
         
