@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import uuid
 import json
+import logging
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -350,9 +351,16 @@ class Session:
                         for msg in chat_history
                         if isinstance(msg, dict)
                     ]
-                    if messages and hasattr(session_store, "set_chat_history"):
+                    if not messages:
+                        logging.debug(f"No chat history to persist for session {session_id}")
+                    elif hasattr(session_store, "set_chat_history"):
                         session_store.set_chat_history(session_id, messages)
-                    elif messages:
+                    else:
+                        # Fallback to add_message - may create duplicates on repeated calls
+                        logging.warning(
+                            f"Session store lacks 'set_chat_history' method. Using fallback "
+                            f"'add_message' which may create duplicates on repeated save_state() calls."
+                        )
                         for msg in messages:
                             session_store.add_message(
                                 session_id,
