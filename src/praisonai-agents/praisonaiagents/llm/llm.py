@@ -2066,6 +2066,7 @@ Now provide your final answer using this result. Summarize the information natur
         task_id: Optional[str] = None,
         execute_tool_fn: Optional[Callable] = None,
         parallel_tool_calls: bool = False,  # Gap 2: Enable parallel tool execution
+        max_tool_calls_per_turn: int = 10,  # Loop guardrails
         stream: bool = True,
         stream_callback: Optional[Callable] = None,
         emit_events: bool = False,
@@ -2190,6 +2191,7 @@ Now provide your final answer using this result. Summarize the information natur
             # Sequential tool calling loop - similar to agent.py
             max_iterations = self.max_iter  # Use configurable iteration limit
             iteration_count = 0
+            tool_call_count = 0  # Track total tool calls for guardrails
             final_response_text = ""
             response_text = ""  # Initialize to prevent UnboundLocalError on API errors
             stored_reasoning_content = None  # Store reasoning content from tool execution
@@ -3049,6 +3051,18 @@ Now provide your final answer using this result. Summarize the information natur
                         tool_results = []  # Store current iteration tool results
                         tool_result_mapping = {}  # Store function results by name for Ollama chaining
                         
+                        # Guardrail: Check tool call limit to prevent infinite loops
+                        # Allow execution if we haven't reached the limit yet, but limit the batch size
+                        if tool_call_count >= max_tool_calls_per_turn:
+                            logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
+                            final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
+                            break
+                        elif tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
+                            # Limit the batch to stay within the total limit
+                            remaining_calls = max_tool_calls_per_turn - tool_call_count
+                            tool_calls = tool_calls[:remaining_calls]
+                            logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
+                        
                         for tool_call in tool_calls:
                             # Handle both object and dict access patterns
                             is_ollama = self._is_ollama_provider()
@@ -3069,7 +3083,8 @@ Now provide your final answer using this result. Summarize the information natur
 
                             logging.debug(f"[TOOL_EXEC_DEBUG] About to execute tool {function_name} with args: {arguments}")
                             tool_result = execute_tool_fn(function_name, arguments, tool_call_id=tool_call_id)
-                            logging.debug(f"[TOOL_EXEC_DEBUG] Tool execution result: {tool_result}")
+                            tool_call_count += 1  # Increment tool call counter for guardrails
+                            logging.debug(f"[TOOL_EXEC_DEBUG] Tool execution result: {tool_result} (call #{tool_call_count})")
                             tool_results.append(tool_result)  # Store the result
                             accumulated_tool_results.append(tool_result)  # Accumulate across iterations
                             
@@ -3581,6 +3596,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         task_id: Optional[str] = None,
         execute_tool_fn: Optional[Callable] = None,
         parallel_tool_calls: bool = False,  # Gap 2: Enable parallel tool execution
+        max_tool_calls_per_turn: int = 10,  # Loop guardrails
         **kwargs
     ):
         """Generator that yields real-time response chunks from the LLM.
@@ -3727,6 +3743,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                     # After streaming completes, handle tool calls if present
                     if tool_calls and execute_tool_fn:
+                        # Guardrail: Check tool call limit to prevent infinite loops
+                        if len(tool_calls) > max_tool_calls_per_turn:
+                            logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
+                            error_message = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
+                            yield error_message
+                            return
+                        
                         # Add assistant message with tool calls to conversation
                         if self._is_ollama_provider():
                             messages.append({
@@ -3903,6 +3926,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         task_description: Optional[str] = None,
         task_id: Optional[str] = None,
         execute_tool_fn: Optional[Callable] = None,
+        max_tool_calls_per_turn: int = 10,  # Loop guardrails
         stream: bool = True,
         **kwargs
     ) -> str:
@@ -3981,6 +4005,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Initialize variables for iteration loop
             max_iterations = self.max_iter  # Use configurable iteration limit
             iteration_count = 0
+            tool_call_count = 0  # Track total tool calls for guardrails
             final_response_text = ""
             stored_reasoning_content = None  # Store reasoning content from tool execution
             accumulated_tool_results = []  # Store all tool results across iterations
@@ -4053,6 +4078,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             "tool_calls": serializable_tool_calls,
                         })
 
+                        # Guardrail: Check tool call limit to prevent infinite loops
+                        # Allow execution if we haven't reached the limit yet, but limit the batch size
+                        if tool_call_count >= max_tool_calls_per_turn:
+                            logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
+                            final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
+                            break
+                        elif tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
+                            # Limit the batch to stay within the total limit
+                            remaining_calls = max_tool_calls_per_turn - tool_call_count
+                            tool_calls = tool_calls[:remaining_calls]
+                            logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
+                        
                         for tool_call in tool_calls:
                             function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call)
                             logging.debug(f"[RESPONSES_API_ASYNC] Executing tool {function_name}")
@@ -4060,6 +4097,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 tool_result = await execute_tool_fn(function_name, arguments, tool_call_id=tool_call_id)
                             else:
                                 tool_result = execute_tool_fn(function_name, arguments, tool_call_id=tool_call_id)
+                            tool_call_count += 1  # Increment tool call counter for guardrails
                             accumulated_tool_results.append(tool_result)
 
                             if verbose:
@@ -4266,6 +4304,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             "tool_calls": serializable_tool_calls
                         })
                     
+                    # Guardrail: Check tool call limit to prevent infinite loops
+                    # Allow execution if we haven't reached the limit yet, but limit the batch size
+                    if tool_call_count >= max_tool_calls_per_turn:
+                        logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
+                        final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
+                        break
+                    elif tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
+                        # Limit the batch to stay within the total limit
+                        remaining_calls = max_tool_calls_per_turn - tool_call_count
+                        tool_calls = tool_calls[:remaining_calls]
+                        logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
+                    
                     tool_results = []  # Store current iteration tool results
                     for tool_call in tool_calls:
                         # Handle both object and dict access patterns
@@ -4277,6 +4327,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, tools)
 
                         tool_result = await execute_tool_fn(function_name, arguments)
+                        tool_call_count += 1  # Increment tool call counter for guardrails
                         tool_results.append(tool_result)  # Store the result
                         accumulated_tool_results.append(tool_result)  # Accumulate across iterations
 
@@ -4915,6 +4966,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             'task_name', 'task_description', 'task_id',  # Task metadata
             'execute_tool_fn', 'stream_callback', 'emit_events',  # Callbacks
             'console',  # Rich console
+            'max_tool_calls_per_turn', 'parallel_tool_calls',  # Tool execution settings
         ]
         for param in internal_params:
             params.pop(param, None)
