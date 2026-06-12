@@ -1,16 +1,16 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 359 | **Rust Features:** 667 | **Parity:** 79.4%
+> **Python Features:** 360 | **Rust Features:** 667 | **Parity:** 79.2%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 359 |
+| Python Core Features | 360 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **74** |
+| **Actual Gap Count** | **75** |
 | Language Limitations (N/A) | 5 |
-| **Parity** | **79.4%** |
+| **Parity** | **79.2%** |
 
 ## Implemented Features
 
@@ -751,6 +751,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `ToolValidationError`
 - ❌ `ToolsetRegistry`
 - ❌ `ToolsetSpec`
+- ❌ `__version__`
 - ❌ `configure_structured_logging`
 - ❌ `get_default_policy`
 - ❌ `get_logger`

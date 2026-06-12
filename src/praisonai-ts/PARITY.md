@@ -7,14 +7,14 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 359 |
+| Python Core Features | 360 |
 | Python Wrapper Features | 99 |
 | TypeScript Features | 1192 |
-| **Gap Count** | **67** |
+| **Gap Count** | **68** |
 | P0 (Critical) | 2 |
 | P1 (High) | 0 |
 | P2 (Medium) | 0 |
-| P3 (Low) | 65 |
+| P3 (Low) | 66 |
 
 ## Gap Matrix
 
@@ -148,7 +148,7 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (179 done, 65 todo)
+### P3_Advanced (179 done, 66 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -205,6 +205,7 @@
 | `ToolsetRegistry` | ✅ | ❌ | high | ⏳ TODO |
 | `ToolsetSpec` | ✅ | ❌ | high | ⏳ TODO |
 | `ValidationError` | ✅ | ❌ | low | ⏳ TODO |
+| `\_\_version\_\_` | ✅ | ❌ | low | ⏳ TODO |
 | `configure\_structured\_logging` | ✅ | ❌ | low | ⏳ TODO |
 | `get\_default\_policy` | ✅ | ❌ | low | ⏳ TODO |
 | `get\_logger` | ✅ | ❌ | low | ⏳ TODO |
@@ -555,7 +556,7 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (70 exports)</summary>
+<summary><strong>other</strong> (71 exports)</summary>
 
 ```python
 from praisonaiagents import AGGRESSIVE_POLICY, AgentMessageEvent, AgentRunOutcome, Agents, AsyncLearnProtocol, AutonomyConfig, BALANCED_POLICY, BudgetExceededError, CONSERVATIVE_POLICY, CliBackendConfig...
