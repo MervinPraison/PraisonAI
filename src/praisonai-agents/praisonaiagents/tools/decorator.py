@@ -300,7 +300,8 @@ def _schema_from_function(func: Callable) -> Dict[str, Any]:
             
             properties[param_name] = prop_schema
             
-            if param.default is inspect.Parameter.empty:
+            # Check if required using improved logic
+            if get_parameter_requirements(sig, param_name):
                 required.append(param_name)
     except Exception as e:
         logging.debug(f"Could not generate schema for {name}: {e}")

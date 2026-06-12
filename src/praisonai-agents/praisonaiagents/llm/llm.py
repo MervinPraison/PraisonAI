@@ -5615,7 +5615,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     logging.debug(f"Found tool in registry: {function_name}")
                     # If it's a BaseTool, get its schema
                     if hasattr(tool, 'get_schema'):
-                        return tool.get_schema()
+                        tool_def = tool.get_schema()
+                        # Apply same normalization as the callable path
+                        if (
+                            isinstance(tool_def, dict)
+                            and isinstance(tool_def.get("function"), dict)
+                            and isinstance(tool_def["function"].get("parameters"), dict)
+                        ):
+                            tool_def = tool_def.copy()
+                            tool_def["function"] = tool_def["function"].copy()
+                            tool_def["function"]["parameters"] = self._fix_array_schemas(
+                                tool_def["function"]["parameters"]
+                            )
+                        return tool_def
                     # If it's a callable, use it as func
                     if callable(tool):
                         func = tool
@@ -5623,11 +5635,41 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         logging.debug(f"Tool {function_name} in registry is not callable")
                         return None
                 else:
-                    logging.debug(f"Tool {function_name} not found in registry")
-                    return None
+                    logging.debug(f"Tool {function_name} not found in registry, falling back to globals/__main__")
+                    # Fall back to globals and __main__ for backward compatibility
+                    tool_def_name = f"{function_name}_definition"
+                    tool_def = globals().get(tool_def_name)
+                    if not tool_def:
+                        import __main__
+                        tool_def = getattr(__main__, tool_def_name, None)
+                    if tool_def:
+                        return tool_def
+                    
+                    func = globals().get(function_name)
+                    if not func:
+                        import __main__
+                        func = getattr(__main__, function_name, None)
+                    if not func or not callable(func):
+                        logging.debug(f"Function {function_name} not found or not callable")
+                        return None
             except ImportError:
-                logging.debug("Tool registry not available")
-                return None
+                logging.debug("Tool registry not available, falling back to globals/__main__")
+                # Fall back to globals and __main__ when registry unavailable
+                tool_def_name = f"{function_name}_definition"
+                tool_def = globals().get(tool_def_name)
+                if not tool_def:
+                    import __main__
+                    tool_def = getattr(__main__, tool_def_name, None)
+                if tool_def:
+                    return tool_def
+                
+                func = globals().get(function_name)
+                if not func:
+                    import __main__
+                    func = getattr(__main__, function_name, None)
+                if not func or not callable(func):
+                    logging.debug(f"Function {function_name} not found or not callable")
+                    return None
 
         import inspect
         from typing import get_type_hints
@@ -5680,7 +5722,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         logging.debug(f"Parameter descriptions: {param_descriptions}")
 
         # Get type hints for proper schema generation
-        hints = get_type_hints(func) if hasattr(func, '__annotations__') else {}
+        try:
+            hints = get_type_hints(func) if getattr(func, "__annotations__", None) else {}
+        except (NameError, TypeError, AttributeError):
+            hints = getattr(func, "__annotations__", {}) or {}
 
         for name, param in parameters_list:
             # Get type annotation

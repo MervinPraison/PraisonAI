@@ -63,11 +63,31 @@ def annotation_to_json_schema(annotation: Any) -> dict:
     # Handle Literal types
     if origin is Literal or (hasattr(annotation, '__origin__') and 
                            str(annotation.__origin__).endswith('Literal')):
-        return {"type": "string", "enum": list(args)}
+        # Infer type from literal values if all are the same type
+        values = list(args)
+        if values:
+            types_seen = set(type(v) for v in values)
+            if len(types_seen) == 1:
+                single_type = next(iter(types_seen))
+                type_map = {str: "string", int: "integer", float: "number", bool: "boolean"}
+                if single_type in type_map:
+                    return {"type": type_map[single_type], "enum": values}
+        # Mixed types or non-primitive - use enum without type constraint
+        return {"enum": values}
     
     # Handle Enum subclasses
     if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
-        return {"type": "string", "enum": [e.value for e in annotation]}
+        # Infer type from enum values if all are the same type
+        values = [e.value for e in annotation]
+        if values:
+            types_seen = set(type(v) for v in values)
+            if len(types_seen) == 1:
+                single_type = next(iter(types_seen))
+                type_map = {str: "string", int: "integer", float: "number", bool: "boolean"}
+                if single_type in type_map:
+                    return {"type": type_map[single_type], "enum": values}
+        # Mixed types or non-primitive - use enum without type constraint
+        return {"enum": values}
     
     # Handle List types
     if origin is list:
