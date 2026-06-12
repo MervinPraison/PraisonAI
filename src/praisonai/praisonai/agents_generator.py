@@ -282,7 +282,7 @@ class AgentsGenerator:
                 self.logger.debug(f"CLI override: lsp = {cli_config['lsp']}")
         
         # Handle agent-level overrides using unified approach
-        agent_level_fields = ['tool_timeout', 'planning_tools', 'autonomy', 'planning', 'web', 'web_fetch']
+        agent_level_fields = ['tool_timeout', 'tool_retry_policy', 'planning_tools', 'autonomy', 'planning', 'web', 'web_fetch']
         agent_overrides = {k: v for k, v in cli_config.items() if k in agent_level_fields}
         
         # Handle handoff configuration - convert CLI flags into handoff dict
@@ -538,8 +538,8 @@ class AgentsGenerator:
             'role', 'goal', 'instructions', 'backstory', 'tools', 'toolsets', 'tasks', 'llm',
             'function_calling_llm', 'allow_delegation', 'max_iter', 'max_rpm',
             'max_execution_time', 'verbose', 'cache', 'system_template',
-            'prompt_template', 'response_template', 'tool_timeout', 'planning_tools',
-            'planning', 'autonomy', 'guardrails', 'streaming', 'stream',
+            'prompt_template', 'response_template', 'tool_timeout', 'tool_retry_policy',
+            'planning_tools', 'planning', 'autonomy', 'guardrails', 'streaming', 'stream',
             'approval', 'skills', 'cli_backend', 'reflection', 'handoff', 'web', 'web_fetch'
         }
 

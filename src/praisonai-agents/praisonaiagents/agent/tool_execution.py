@@ -713,7 +713,111 @@ class ToolExecutionMixin:
         return None, arguments
 
     def _execute_tool_with_circuit_breaker(self, function_name, arguments):
-        """Execute tool with circuit breaker protection.
+        """Execute tool with retry policy and circuit breaker protection.
+        
+        Args:
+            function_name: Name of the tool to execute
+            arguments: Arguments for the tool
+            
+        Returns:
+            Tool execution result or circuit breaker error
+        """
+        # Get retry policy (tool-level > agent-level > default)
+        retry_policy = self._get_tool_retry_policy(function_name)
+        
+        last_exception = None
+        
+        # Retry loop with exponential backoff
+        for attempt in range(retry_policy.max_attempts):
+            try:
+                result = self._execute_tool_with_circuit_breaker_impl(function_name, arguments)
+                
+                # Check if result is an error that should be retried
+                if isinstance(result, dict) and result.get("error"):
+                    # Skip retry for non-retryable errors (approval, permission, etc.)
+                    if (result.get("approval_denied") or 
+                        result.get("permission_denied") or 
+                        result.get("approval_error") or
+                        result.get("circuit_open")):
+                        return result
+                    
+                    # Determine error type for retry policy
+                    error_type = self._classify_error_type(result, last_exception)
+                    
+                    # Check if we should retry
+                    if not retry_policy.should_retry(error_type, attempt):
+                        return result
+                    
+                    # Don't retry on last attempt
+                    if attempt == retry_policy.max_attempts - 1:
+                        return result
+                    
+                    # Emit retry hook event  
+                    delay_ms = retry_policy.get_delay_ms(attempt)
+                    self._emit_retry_hook(function_name, attempt + 1, delay_ms, result.get("error", "Unknown error"), retry_policy.max_attempts, error_type)
+                    
+                    # Wait before retry
+                    time.sleep(delay_ms / 1000.0)
+                    continue
+                else:
+                    # Success - return result
+                    return result
+                    
+            except ToolExecutionError as e:
+                last_exception = e
+                # Check if the error is retryable
+                if not e.is_retryable or attempt == retry_policy.max_attempts - 1:
+                    raise
+                
+                # Determine error type
+                error_type = self._classify_error_type(None, e) 
+                
+                if not retry_policy.should_retry(error_type, attempt):
+                    raise
+                
+                # Emit retry hook event
+                delay_ms = retry_policy.get_delay_ms(attempt)
+                self._emit_retry_hook(function_name, attempt + 1, delay_ms, str(e), retry_policy.max_attempts, error_type)
+                
+                # Wait before retry
+                time.sleep(delay_ms / 1000.0)
+                continue
+                
+            except Exception as e:
+                # Wrap in ToolExecutionError for consistency
+                is_retryable = not isinstance(e, (ValueError, TypeError, AttributeError))
+                wrapped_error = ToolExecutionError(
+                    f"Tool '{function_name}' failed: {e}",
+                    tool_name=function_name,
+                    agent_id=self.name,
+                    is_retryable=is_retryable,
+                )
+                
+                # Check if retryable and not last attempt
+                if not is_retryable or attempt == retry_policy.max_attempts - 1:
+                    raise wrapped_error from e
+                
+                # Determine error type  
+                error_type = self._classify_error_type(None, wrapped_error)
+                
+                if not retry_policy.should_retry(error_type, attempt):
+                    raise wrapped_error from e
+                
+                # Emit retry hook event
+                delay_ms = retry_policy.get_delay_ms(attempt)
+                self._emit_retry_hook(function_name, attempt + 1, delay_ms, str(e), retry_policy.max_attempts, error_type)
+                
+                # Wait before retry
+                time.sleep(delay_ms / 1000.0)
+                continue
+        
+        # Should never reach here due to loop logic, but safety fallback
+        if last_exception:
+            raise last_exception
+        return {"error": "Maximum retry attempts exceeded"}
+
+    def _execute_tool_with_circuit_breaker_impl(self, function_name, arguments):
+        """Execute tool with circuit breaker protection (internal implementation).
         
         Args:
             function_name: Name of the tool to execute
@@ -1123,3 +1227,110 @@ class ToolExecutionMixin:
         
         else:
             return f"Unknown bridge tool: {function_name}"
+
+    def _get_tool_retry_policy(self, tool_name):
+        """Get retry policy for a tool (tool-level > agent-level > default).
+        
+        Args:
+            tool_name: Name of the tool to get retry policy for
+            
+        Returns:
+            RetryPolicy instance
+        """
+        from ..tools.retry import RetryPolicy
+        
+        # Check for tool-level retry policy first
+        tools = getattr(self, 'tools', [])
+        # Handle non-iterable tools (e.g., single MCP instance)
+        if not isinstance(tools, (list, tuple)):
+            tools = []  # MCP or single tool instance - no tool-level policy lookup
+        for tool in tools:
+            if (callable(tool) and 
+                getattr(tool, '__name__', '') == tool_name and
+                hasattr(tool, 'retry_policy')):
+                return tool.retry_policy
+        
+        # Check for agent-level retry policy
+        agent_policy = getattr(self, '_tool_retry_policy', None)
+        if agent_policy is not None:
+            return agent_policy
+        
+        # Return default retry policy (cached class-level instance)
+        if not hasattr(ToolExecutionMixin, '_default_retry_policy'):
+            ToolExecutionMixin._default_retry_policy = RetryPolicy()
+        return ToolExecutionMixin._default_retry_policy
+
+    def _classify_error_type(self, error_dict, exception):
+        """Classify error type for retry policy matching.
+        
+        Args:
+            error_dict: Error dictionary from tool execution (if any)
+            exception: Exception that was raised (if any)
+            
+        Returns:
+            String error type for retry policy checking
+        """
+        # Check error dict first
+        if error_dict and isinstance(error_dict, dict):
+            error_msg = error_dict.get("error", "").lower()
+            if "timeout" in error_msg or "timed out" in error_msg:
+                return "timeout"
+            elif "rate" in error_msg and "limit" in error_msg:
+                return "rate_limit"
+            elif "connection" in error_msg or "network" in error_msg:
+                return "connection_error"
+        
+        # Check exception type
+        if exception:
+            exc_msg = str(exception).lower()
+            exc_type = type(exception).__name__.lower()
+            
+            if "timeout" in exc_msg or "timeout" in exc_type:
+                return "timeout"
+            elif "rate" in exc_msg and "limit" in exc_msg:
+                return "rate_limit"  
+            elif ("connection" in exc_msg or "network" in exc_msg or 
+                  "connection" in exc_type):
+                return "connection_error"
+        
+        return "unknown"
+
+    def _emit_retry_hook(self, tool_name, attempt, delay_ms, error, max_attempts, error_type):
+        """Emit ON_RETRY hook event.
+        
+        Args:
+            tool_name: Name of the tool being retried
+            attempt: Current attempt number (1-based)
+            delay_ms: Delay before retry in milliseconds
+            error: Error message or description
+            max_attempts: Maximum number of attempts configured
+            error_type: Classified error type
+        """
+        try:
+            from ..hooks import HookEvent, OnRetryInput
+            
+            # Only emit if we have a hook runner
+            hook_runner = getattr(self, '_hook_runner', None)
+            if hook_runner is None:
+                return
+            
+            retry_input = OnRetryInput(
+                session_id=getattr(self, '_session_id', 'default'),
+                cwd=os.getcwd(),
+                event_name=HookEvent.ON_RETRY,
+                timestamp=str(time.time()),
+                agent_name=self.name,
+                tool_name=tool_name,
+                attempt=attempt,
+                delay_ms=delay_ms,
+                error=error,
+                max_attempts=max_attempts,
+                error_type=error_type
+            )
+            
+            # Execute hook synchronously
+            hook_runner.execute_sync(HookEvent.ON_RETRY, retry_input, target=tool_name)
+            
+        except Exception as e:
+            # Don't let hook failures break retry logic
+            logging.debug(f"Failed to emit retry hook: {e}")

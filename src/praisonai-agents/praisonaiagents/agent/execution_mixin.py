@@ -9,6 +9,7 @@ import time
 import json
 import logging
 import inspect
+import os
 
 import asyncio
 import threading
@@ -965,7 +966,80 @@ Write the complete compiled report:"""
         return await self.achat(prompt, task_name=task_name, task_description=task_description, task_id=task_id)
 
     async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
-        """Async version of execute_tool"""
+        """Async version of execute_tool with retry policy support"""
+        
+        # Get retry policy (tool-level > agent-level > default)
+        retry_policy = self._get_tool_retry_policy(function_name)
+        
+        last_exception = None
+        
+        # Retry loop with exponential backoff
+        for attempt in range(retry_policy.max_attempts):
+            try:
+                result = await self._execute_tool_async_impl(function_name, arguments, tool_call_id, tools_override)
+                
+                # Check if result is an error that should be retried
+                if isinstance(result, dict) and result.get("error"):
+                    # Skip retry for non-retryable errors (approval, permission, etc.)
+                    if (result.get("approval_denied") or 
+                        result.get("permission_denied") or 
+                        result.get("approval_error") or
+                        result.get("circuit_open")):
+                        return result
+                    
+                    # Determine error type for retry policy
+                    error_type = self._classify_error_type(result, last_exception)
+                    
+                    # Check if we should retry
+                    if not retry_policy.should_retry(error_type, attempt):
+                        return result
+                    
+                    # Don't retry on last attempt
+                    if attempt == retry_policy.max_attempts - 1:
+                        return result
+                    
+                    # Emit retry hook event  
+                    delay_ms = retry_policy.get_delay_ms(attempt)
+                    await self._emit_retry_hook_async(function_name, attempt + 1, delay_ms, result.get("error", "Unknown error"), retry_policy.max_attempts, error_type)
+                    
+                    # Wait before retry (async)
+                    await asyncio.sleep(delay_ms / 1000.0)
+                    continue
+                else:
+                    # Success - return result
+                    return result
+                    
+            except Exception as e:
+                last_exception = e
+                # Determine if retryable
+                is_retryable = not isinstance(e, (ValueError, TypeError, AttributeError))
+                
+                # Check if retryable and not last attempt
+                if not is_retryable or attempt == retry_policy.max_attempts - 1:
+                    # Return error dict instead of raising for consistency with sync version
+                    return {"error": f"Error in execute_tool_async: {str(e)}"}
+                
+                # Determine error type  
+                error_type = self._classify_error_type(None, e)
+                
+                if not retry_policy.should_retry(error_type, attempt):
+                    return {"error": f"Error in execute_tool_async: {str(e)}"}
+                
+                # Emit retry hook event
+                delay_ms = retry_policy.get_delay_ms(attempt)
+                await self._emit_retry_hook_async(function_name, attempt + 1, delay_ms, str(e), retry_policy.max_attempts, error_type)
+                
+                # Wait before retry (async)
+                await asyncio.sleep(delay_ms / 1000.0)
+                continue
+        
+        # Should never reach here due to loop logic, but safety fallback
+        if last_exception:
+            return {"error": f"Error in execute_tool_async: {str(last_exception)}"}
+        return {"error": "Maximum retry attempts exceeded"}
+
+    async def _execute_tool_async_impl(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
+        """Internal async tool execution implementation"""
         try:
             logging.info(f"Executing async tool: {function_name} with arguments: {arguments}")
             
@@ -1303,4 +1377,52 @@ Write the complete compiled report:"""
             _get_display_functions()['display_error'](f"Missing dependency: {missing_module}. Required for MCP mode.")
             print(f"\nTo add MCP capabilities, install: pip install {missing_module}")
             return None 
+
+    async def _emit_retry_hook_async(self, tool_name, attempt, delay_ms, error, max_attempts, error_type):
+        """Emit ON_RETRY hook event (async version).
+        
+        Args:
+            tool_name: Name of the tool being retried
+            attempt: Current attempt number (1-based)
+            delay_ms: Delay before retry in milliseconds
+            error: Error message or description
+            max_attempts: Maximum number of attempts configured
+            error_type: Classified error type
+        """
+        try:
+            from ..hooks import HookEvent, OnRetryInput
+            
+            # Only emit if we have a hook runner
+            hook_runner = getattr(self, '_hook_runner', None)
+            if hook_runner is None:
+                return
+            
+            retry_input = OnRetryInput(
+                session_id=getattr(self, '_session_id', 'default'),
+                cwd=os.getcwd(),
+                event_name=HookEvent.ON_RETRY,
+                timestamp=str(time.time()),
+                agent_name=self.name,
+                tool_name=tool_name,
+                attempt=attempt,
+                delay_ms=delay_ms,
+                error=error,
+                max_attempts=max_attempts,
+                error_type=error_type
+            )
+            
+            # Execute hook asynchronously if supported, otherwise use sync
+            if hasattr(hook_runner, 'execute_async'):
+                await hook_runner.execute_async(HookEvent.ON_RETRY, retry_input, target=tool_name)
+            else:
+                # Fallback to sync execution in executor to avoid blocking event loop
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(
+                    None,
+                    lambda: hook_runner.execute_sync(HookEvent.ON_RETRY, retry_input, target=tool_name)
+                )
+            
+        except Exception as e:
+            # Don't let hook failures break retry logic
+            logging.debug(f"Failed to emit async retry hook: {e}")
 

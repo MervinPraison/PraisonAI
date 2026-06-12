@@ -70,7 +70,8 @@ class FunctionTool(BaseTool):
         description: Optional[str] = None,
         version: str = "1.0.0",
         availability: Optional[Callable[[], tuple[bool, str]]] = None,
-        dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
+        dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+        retry_policy: Optional[Any] = None
     ):
         self._func = func
         self.name = name or func.__name__
@@ -78,6 +79,7 @@ class FunctionTool(BaseTool):
         self.version = version
         self._availability = availability
         self._schema_override = dynamic_schema_overrides
+        self.retry_policy = retry_policy
         
         # Detect injected parameters
         self._injected_params = get_injected_params(func)
@@ -205,7 +207,8 @@ def tool(
     description: Optional[str] = None,
     version: str = "1.0.0",
     availability: Optional[Callable[[], tuple[bool, str]]] = None,
-    dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
+    dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None,
+    retry_policy: Optional[Any] = None
 ) -> Union[FunctionTool, Callable[[Callable], FunctionTool]]:
     """Decorator to convert a function into a tool.
     
@@ -223,6 +226,10 @@ def tool(
         @tool(availability=lambda: (bool(os.getenv("API_KEY")), "API_KEY missing"))
         def my_func(x: str) -> str:
             return x
+            
+        @tool(retry_policy=RetryPolicy(max_attempts=5))
+        def my_func(x: str) -> str:
+            return x
     
     Args:
         func: The function to wrap (when used without parentheses)
@@ -231,6 +238,7 @@ def tool(
         version: Tool version (default: "1.0.0")
         availability: Function that returns (is_available, reason) tuple
         dynamic_schema_overrides: Function to dynamically modify tool schema at runtime
+        retry_policy: RetryPolicy for tool execution with exponential backoff
     
     Returns:
         FunctionTool instance that wraps the function
@@ -242,7 +250,8 @@ def tool(
             description=description,
             version=version,
             availability=availability,
-            dynamic_schema_overrides=dynamic_schema_overrides
+            dynamic_schema_overrides=dynamic_schema_overrides,
+            retry_policy=retry_policy
         )
         
         # Validate the tool at creation time for early error detection

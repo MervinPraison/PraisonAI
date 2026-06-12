@@ -1,0 +1,396 @@
+"""
+Unit tests for tool retry policy integration in Agent class.
+Tests sync and async retry, hook emission, clone_for_channel propagation, and non-retryable errors.
+"""
+import asyncio
+import pytest
+import time
+from unittest.mock import Mock, patch, AsyncMock, call
+
+from praisonaiagents import Agent, tool
+from praisonaiagents.tools.retry import RetryPolicy
+from praisonaiagents.hooks.types import HookEvent
+
+
+class TestAgentRetryPolicyIntegration:
+    """Test agent-level retry policy integration."""
+    
+    def test_agent_retry_policy_initialization(self):
+        """Test agent initialization with retry policy."""
+        retry_policy = RetryPolicy(max_attempts=5, initial_delay_ms=500)
+        agent = Agent(
+            name="test_agent",
+            instructions="Test agent",
+            tool_retry_policy=retry_policy
+        )
+        assert agent._tool_retry_policy == retry_policy
+    
+    def test_agent_clone_propagates_retry_policy(self):
+        """Test that clone_for_channel preserves tool_retry_policy."""
+        retry_policy = RetryPolicy(max_attempts=5, initial_delay_ms=500)
+        agent = Agent(
+            name="test_agent",
+            instructions="Test agent",
+            tool_retry_policy=retry_policy
+        )
+        
+        cloned = agent.clone_for_channel()
+        assert cloned._tool_retry_policy == retry_policy
+        assert cloned._tool_retry_policy is not agent._tool_retry_policy  # Different instance
+    
+    def test_agent_clone_none_retry_policy(self):
+        """Test clone works when retry_policy is None."""
+        agent = Agent(name="test_agent", instructions="Test agent")
+        cloned = agent.clone_for_channel()
+        assert cloned._tool_retry_policy is None
+
+
+class TestSyncRetryIntegration:
+    """Test synchronous retry integration."""
+    
+    def test_sync_retry_with_timeout_error(self):
+        """Test sync tool execution with retryable timeout error."""
+        call_count = [0]
+        
+        @tool
+        def flaky_tool(query: str) -> str:
+            """A tool that fails with timeout on first calls."""
+            call_count[0] += 1
+            if call_count[0] < 3:
+                raise Exception("Connection timeout")
+            return f"Success on attempt {call_count[0]}"
+        
+        retry_policy = RetryPolicy(
+            max_attempts=3,
+            initial_delay_ms=10,  # Fast for testing
+            retry_on={"timeout", "connection_error"}
+        )
+        
+        agent = Agent(
+            name="test_agent",
+            instructions="Test agent",
+            tools=[flaky_tool],
+            tool_retry_policy=retry_policy
+        )
+        
+        # Mock time.sleep to avoid actual delays
+        with patch('time.sleep'):
+            # This should succeed after retries
+            result = agent._execute_tool_with_circuit_breaker("flaky_tool", {"query": "test"})
+            assert not result.get("error")
+            assert "Success on attempt 3" in str(result)
+            assert call_count[0] == 3
+    
+    def test_sync_retry_non_retryable_error(self):
+        """Test sync tool execution with non-retryable error."""
+        call_count = [0]
+        
+        @tool  
+        def permission_denied_tool(query: str) -> str:
+            """A tool that fails with permission denied."""
+            call_count[0] += 1
+            return {
+                "error": "Permission denied",
+                "permission_denied": True
+            }
+        
+        retry_policy = RetryPolicy(max_attempts=3)
+        agent = Agent(
+            name="test_agent", 
+            instructions="Test agent",
+            tools=[permission_denied_tool],
+            tool_retry_policy=retry_policy
+        )
+        
+        result = agent._execute_tool_with_circuit_breaker("permission_denied_tool", {"query": "test"})
+        assert result.get("error")
+        assert result.get("permission_denied")
+        assert call_count[0] == 1  # Should not retry
+    
+    def test_sync_retry_hook_emission(self):
+        """Test that ON_RETRY hooks are emitted during sync retries."""
+        call_count = [0]
+        hook_calls = []
+        
+        @tool
+        def failing_tool(query: str) -> str:
+            call_count[0] += 1
+            if call_count[0] < 3:
+                raise Exception("Rate limit exceeded")
+            return "Success"
+        
+        def retry_hook(event_data):
+            hook_calls.append(event_data)
+        
+        retry_policy = RetryPolicy(max_attempts=3, initial_delay_ms=10)
+        agent = Agent(
+            name="test_agent",
+            instructions="Test agent", 
+            tools=[failing_tool],
+            tool_retry_policy=retry_policy
+        )
+        
+        # Add hook manually
+        agent.hook_runner.register_handler(HookEvent.ON_RETRY, retry_hook)
+        
+        with patch('time.sleep'):
+            result = agent._execute_tool_with_circuit_breaker("failing_tool", {"query": "test"})
+            
+        assert len(hook_calls) == 2  # Two retries before success
+        assert all(call.tool_name == "failing_tool" for call in hook_calls)
+        assert hook_calls[0].attempt == 2  # Second attempt (1-based)
+        assert hook_calls[1].attempt == 3  # Third attempt
+
+
+class TestAsyncRetryIntegration:
+    """Test asynchronous retry integration."""
+    
+    @pytest.mark.asyncio
+    async def test_async_retry_with_rate_limit_error(self):
+        """Test async tool execution with retryable rate limit error."""
+        call_count = [0]
+        
+        async def mock_async_impl(function_name, arguments, tool_call_id, tools_override):
+            call_count[0] += 1
+            if call_count[0] < 3:
+                return {
+                    "error": "Rate limit exceeded. Try again later.",
+                    "tool_name": function_name
+                }
+            return {
+                "result": f"Success on attempt {call_count[0]}",
+                "tool_name": function_name
+            }
+        
+        retry_policy = RetryPolicy(
+            max_attempts=3,
+            initial_delay_ms=10,
+            retry_on={"rate_limit"}
+        )
+        
+        agent = Agent(
+            name="test_agent",
+            instructions="Test agent",
+            tool_retry_policy=retry_policy
+        )
+        
+        # Mock the internal async implementation
+        with patch.object(agent, '_execute_tool_async_impl', side_effect=mock_async_impl), \
+             patch('asyncio.sleep'):  # Mock async sleep
+            
+            result = await agent.execute_tool_async("test_tool", {"query": "test"})
+            assert not result.get("error")
+            assert "Success on attempt 3" in str(result)
+            assert call_count[0] == 3
+    
+    @pytest.mark.asyncio
+    async def test_async_retry_circuit_open_guard(self):
+        """Test async retry respects circuit_open flag."""
+        call_count = [0]
+        
+        async def mock_async_impl(function_name, arguments, tool_call_id, tools_override):
+            call_count[0] += 1
+            return {
+                "error": "Circuit breaker is open",
+                "circuit_open": True,
+                "tool_name": function_name
+            }
+        
+        retry_policy = RetryPolicy(max_attempts=3)
+        agent = Agent(
+            name="test_agent",
+            instructions="Test agent", 
+            tool_retry_policy=retry_policy
+        )
+        
+        with patch.object(agent, '_execute_tool_async_impl', side_effect=mock_async_impl):
+            result = await agent.execute_tool_async("test_tool", {"query": "test"})
+            assert result.get("error")
+            assert result.get("circuit_open")
+            assert call_count[0] == 1  # Should not retry
+    
+    @pytest.mark.asyncio
+    async def test_async_retry_hook_emission(self):
+        """Test that ON_RETRY hooks are emitted during async retries."""
+        call_count = [0]
+        hook_calls = []
+        
+        async def mock_async_impl(function_name, arguments, tool_call_id, tools_override):
+            call_count[0] += 1
+            if call_count[0] < 3:
+                return {
+                    "error": "Connection error occurred",
+                    "tool_name": function_name
+                }
+            return {
+                "result": "Success",
+                "tool_name": function_name
+            }
+        
+        async def async_retry_hook(event_data):
+            hook_calls.append(event_data)
+        
+        retry_policy = RetryPolicy(max_attempts=3, initial_delay_ms=10)
+        agent = Agent(
+            name="test_agent",
+            instructions="Test agent",
+            tool_retry_policy=retry_policy
+        )
+        
+        # Mock hook runner to capture calls
+        agent.hook_runner = Mock()
+        agent.hook_runner.execute_async = AsyncMock()
+        agent.hook_runner.execute_sync = Mock()
+        
+        with patch.object(agent, '_execute_tool_async_impl', side_effect=mock_async_impl), \
+             patch('asyncio.sleep'):
+            
+            result = await agent.execute_tool_async("test_tool", {"query": "test"})
+            
+        # Verify hook was called for each retry
+        assert agent.hook_runner.execute_async.call_count == 2  # Two retries
+        
+        # Verify hook calls have correct structure
+        calls = agent.hook_runner.execute_async.call_args_list
+        for i, call in enumerate(calls):
+            event, retry_input, _ = call[0]
+            assert event == HookEvent.ON_RETRY
+            assert retry_input.tool_name == "test_tool"
+            assert retry_input.attempt == i + 2  # 1-based, starts at 2nd attempt
+
+
+class TestRetryPolicyPrecedence:
+    """Test retry policy precedence (tool-level > agent-level > default)."""
+    
+    def test_tool_level_policy_precedence(self):
+        """Test that tool-level retry policy takes precedence."""
+        # Create a tool with its own retry policy
+        tool_policy = RetryPolicy(max_attempts=1)
+        
+        @tool
+        def test_tool(query: str) -> str:
+            return "result"
+        
+        # Add retry policy to the tool
+        test_tool.retry_policy = tool_policy
+        
+        agent_policy = RetryPolicy(max_attempts=5)
+        agent = Agent(
+            name="test_agent",
+            instructions="Test agent",
+            tools=[test_tool],
+            tool_retry_policy=agent_policy
+        )
+        
+        # Get the resolved policy for this tool
+        resolved_policy = agent._get_tool_retry_policy("test_tool")
+        assert resolved_policy == tool_policy
+        assert resolved_policy.max_attempts == 1
+    
+    def test_agent_level_policy_precedence(self):
+        """Test that agent-level policy is used when tool-level is absent."""
+        @tool
+        def test_tool(query: str) -> str:
+            return "result"
+        
+        agent_policy = RetryPolicy(max_attempts=5)
+        agent = Agent(
+            name="test_agent",
+            instructions="Test agent", 
+            tools=[test_tool],
+            tool_retry_policy=agent_policy
+        )
+        
+        resolved_policy = agent._get_tool_retry_policy("test_tool")
+        assert resolved_policy == agent_policy
+        assert resolved_policy.max_attempts == 5
+    
+    def test_default_policy_fallback(self):
+        """Test that default policy is used when no other policy is set."""
+        @tool
+        def test_tool(query: str) -> str:
+            return "result"
+        
+        agent = Agent(
+            name="test_agent",
+            instructions="Test agent",
+            tools=[test_tool]
+        )
+        
+        resolved_policy = agent._get_tool_retry_policy("test_tool")
+        assert resolved_policy is not None
+        assert resolved_policy.max_attempts == 3  # Default value
+    
+    def test_mcp_tools_no_crash(self):
+        """Test that MCP tools (non-iterable) don't crash retry policy lookup."""
+        # Mock an MCP instance (non-iterable)
+        mock_mcp = Mock()
+        mock_mcp.__name__ = "mcp_instance"
+        
+        agent = Agent(
+            name="test_agent",
+            instructions="Test agent",
+            tools=mock_mcp  # Non-iterable single tool
+        )
+        
+        # This should not crash
+        resolved_policy = agent._get_tool_retry_policy("some_tool")
+        assert resolved_policy is not None
+        assert resolved_policy.max_attempts == 3  # Default
+
+
+class TestErrorClassification:
+    """Test error type classification for retry decisions."""
+    
+    def test_classify_timeout_error(self):
+        """Test classification of timeout errors."""
+        agent = Agent(name="test", instructions="test")
+        
+        # Test various timeout patterns
+        timeout_msgs = [
+            "Connection timeout",
+            "Request timed out", 
+            "timeout occurred",
+            "TIMEOUT ERROR"
+        ]
+        
+        for msg in timeout_msgs:
+            error_type = agent._classify_error_type({"error": msg}, None)
+            assert error_type == "timeout", f"Failed to classify: {msg}"
+    
+    def test_classify_rate_limit_error(self):
+        """Test classification of rate limit errors."""
+        agent = Agent(name="test", instructions="test")
+        
+        rate_limit_msgs = [
+            "Rate limit exceeded",
+            "rate limited",
+            "Too many requests",
+            "RATE_LIMIT_ERROR"
+        ]
+        
+        for msg in rate_limit_msgs:
+            error_type = agent._classify_error_type({"error": msg}, None)
+            assert error_type == "rate_limit", f"Failed to classify: {msg}"
+    
+    def test_classify_connection_error(self):
+        """Test classification of connection errors.""" 
+        agent = Agent(name="test", instructions="test")
+        
+        connection_msgs = [
+            "Connection failed",
+            "Network error",
+            "connection refused",
+            "CONNECTION_ERROR"
+        ]
+        
+        for msg in connection_msgs:
+            error_type = agent._classify_error_type({"error": msg}, None)
+            assert error_type == "connection_error", f"Failed to classify: {msg}"
+    
+    def test_classify_unknown_error(self):
+        """Test classification of unknown errors."""
+        agent = Agent(name="test", instructions="test")
+        
+        error_type = agent._classify_error_type({"error": "Something weird happened"}, None)
+        assert error_type == "unknown"

@@ -843,6 +843,67 @@ class ExecutionConfig:
         )
 
 
+@dataclass  
+class ToolConfig:
+    """
+    Configuration for tool execution behavior.
+    
+    Consolidates: tool_timeout, tool_retry_policy, parallel_tool_calls
+    
+    Usage:
+        # Simple enable with defaults
+        Agent(tools=ToolConfig())
+        
+        # With custom settings
+        Agent(tools=ToolConfig(
+            timeout=60,
+            retry_policy=RetryPolicy(max_attempts=5),
+            parallel=True,
+        ))
+        
+        # With timeout only
+        Agent(tools=ToolConfig(timeout=30))
+    """
+    # Tool execution timeout in seconds  
+    timeout: Optional[int] = None
+    
+    # Retry policy for tool execution with exponential backoff
+    retry_policy: Optional[Any] = None  # RetryPolicy instance
+    
+    # Enable parallel execution of batched LLM tool calls
+    parallel: bool = False
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "timeout": self.timeout,
+            "retry_policy": (
+                self.retry_policy.to_dict()
+                if hasattr(self.retry_policy, 'to_dict')
+                else self.retry_policy
+            ),
+            "parallel": self.parallel,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ToolConfig":
+        """Create ToolConfig from dictionary."""
+        retry_policy = data.get("retry_policy")
+        if isinstance(retry_policy, dict):
+            try:
+                from ..tools.retry import RetryPolicy
+                retry_policy = RetryPolicy.from_dict(retry_policy)
+            except ImportError:
+                # Keep as dict if RetryPolicy not available
+                pass
+                
+        return cls(
+            timeout=data.get("timeout"),
+            retry_policy=retry_policy,
+            parallel=data.get("parallel", False),
+        )
+
+
 @dataclass
 class TemplateConfig:
     """
@@ -1188,6 +1249,7 @@ HooksParam = Union[List[Any], HooksConfig]
 SkillsParam = Union[List[str], SkillsConfig]
 AutonomyParam = Union[bool, Dict[str, Any], "AutonomyConfig"]
 ToolSearchParam = Union[bool, str, Dict[str, Any], ToolSearchConfig]
+ToolParam = Union[bool, ToolConfig]  # bool = defaults, ToolConfig = custom
 
 
 # =============================================================================
@@ -1454,6 +1516,19 @@ def resolve_tool_search(value: ToolSearchParam) -> Optional[ToolSearchConfig]:
     return value
 
 
+def resolve_tools(value: ToolParam) -> Optional[ToolConfig]:
+    """Resolve tools= parameter following precedence ladder."""
+    if value is None or value is False:
+        return None
+    if value is True:
+        return ToolConfig()
+    if isinstance(value, dict):
+        return ToolConfig.from_dict(value)
+    if isinstance(value, ToolConfig):
+        return value
+    return value
+
+
 __all__ = [
     # Enums
     "MemoryBackend",
@@ -1474,6 +1549,7 @@ __all__ = [
     "WebConfig",
     "OutputConfig",
     "ExecutionConfig",
+    "ToolConfig",
     "TemplateConfig",
     "CachingConfig",
     "HooksConfig",
@@ -1500,7 +1576,8 @@ __all__ = [
     "HooksParam",
     "SkillsParam",
     "AutonomyParam",
-    "ToolSearchParam",
+    "ToolSearchParam", 
+    "ToolParam",
     # Precedence ladder resolvers
     "resolve_memory",
     "resolve_knowledge",
@@ -1513,4 +1590,5 @@ __all__ = [
     "resolve_caching",
     "resolve_autonomy",
     "resolve_tool_search",
+    "resolve_tools",
 ]
