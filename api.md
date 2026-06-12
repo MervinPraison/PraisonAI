@@ -175,6 +175,7 @@ Methods:
 * <code title="class BaseTool">BaseTool.<a href="./src/praisonai-agents/praisonaiagents/tools/base.py">validate_schema_roundtrip</a>() -> bool</code>
 * <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">__call__</a>(*args, **kwargs) -> Any</code>
 * <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">check_availability</a>() -> tuple[bool, str]</code>
+* <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">get_schema</a>() -> Dict[str, Any]</code>
 * <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">injected_params</a>() -> Dict[str, Any]</code>
 * <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">run</a>(**kwargs) -> Any</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">clear</a>() -> None</code>
@@ -182,16 +183,17 @@ Methods:
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">discover_single_file_plugins</a>() -> int</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get</a>(name: str) -> Optional[Union[BaseTool, Callable]]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get_all</a>() -> Dict[str, Union[BaseTool, Callable]]</code>
+* <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get_tool_definitions</a>() -> List[Dict[str, Any]]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_available_tools</a>(context: Optional[Dict[str, Any]] = None) -> List[Union[BaseTool, Callable]]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_base_tools</a>() -> List[BaseTool]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_tools</a>() -> List[str]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_tools_with_allowed_filter</a>(context: Optional[Dict[str, Any]] = None) -> List[str]</code>
-* <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">register</a>(tool: Union[BaseTool, Callable], name: Optional[str] = None, overwrite: bool = False) -> None</code>
+* <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">register</a>(tool: Union[BaseTool, Callable], name: Optional[str] = None, overwrite: bool = False, dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None) -> None</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">unregister</a>(name: str) -> bool</code>
 * <code title="class Tools">Tools.<a href="./src/praisonai-agents/praisonaiagents/tools/tools.py">internet_search</a>(*args, **kwargs)</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get_registry</a>() -> ToolRegistry</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get_tool</a>(name: str) -> Optional[Union[BaseTool, Callable]]</code>
-* <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">register_tool</a>(tool: Union[BaseTool, Callable], name: Optional[str] = None) -> None</code>
+* <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">register_tool</a>(tool: Union[BaseTool, Callable], name: Optional[str] = None, dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None) -> None</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">tool</a>(func: Optional[Callable] = None) -> Union[FunctionTool, Callable[[Callable], FunctionTool]]</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/tools/base.py">validate_tool</a>(tool: Any) -> bool</code>
 
