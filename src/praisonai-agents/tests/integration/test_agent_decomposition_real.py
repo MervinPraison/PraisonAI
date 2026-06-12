@@ -19,7 +19,7 @@ from typing import Any, Dict, Optional
 from praisonaiagents import Agent, tool
 from praisonaiagents.config.feature_configs import (
     OutputConfig, ExecutionConfig, ReflectionConfig,
-    TemplateConfig, CachingConfig,
+    TemplateConfig, CachingConfig, ToolConfig,
 )
 
 
@@ -179,7 +179,7 @@ class TestAgentParamSmoke:
         agent = Agent(name="AP", approval=False)
 
     def test_param_tool_timeout(self):
-        agent = Agent(name="TT", tool_timeout=30)
+        agent = Agent(name="TT", tool_config=ToolConfig(timeout=30))
 
     def test_param_learn(self):
         agent = Agent(name="LN", learn=False)
@@ -349,12 +349,12 @@ class TestAgentParamReal:
 
     # 33: tool_timeout
     def test_real_tool_timeout(self, api_key_check):
-        """Tests: tool_timeout=30"""
+        """Tests: tool_config=ToolConfig(timeout=30)"""
         agent = Agent(
             name="TimeoutAgent",
             instructions="Use echo_tool.",
             tools=[echo_tool],
-            tool_timeout=30,
+            tool_config=ToolConfig(timeout=30),
             llm="gpt-4o-mini",
         )
         result = agent.start("Echo the phrase 'timeout_test'.")
@@ -548,7 +548,7 @@ class TestMethodExistence:
             'memory', 'knowledge', 'planning', 'reflection', 'guardrails',
             'web', 'context', 'autonomy', 'verification_hooks',
             'output', 'execution', 'templates', 'caching', 'hooks', 'skills',
-            'approval', 'tool_timeout', 'learn',
+            'approval', 'tool_config', 'learn',
         ]
         
         missing = [p for p in expected if p not in params]

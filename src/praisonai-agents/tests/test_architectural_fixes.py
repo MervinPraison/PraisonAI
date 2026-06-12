@@ -18,6 +18,7 @@ import asyncio
 import time
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 from praisonaiagents import Agent, tool
+from praisonaiagents.config.feature_configs import ToolConfig
 from praisonaiagents.agent.unified_execution_mixin import UnifiedExecutionMixin
 from praisonaiagents.llm.streaming_protocol import (
     get_streaming_adapter, 
@@ -220,7 +221,7 @@ class TestGap2ParallelToolExecution:
         agent = Agent(
             name="parallel_test",
             instructions="You are a test agent",
-            parallel_tool_calls=True
+            tool_config=ToolConfig(parallel=True)
         )
         
         assert hasattr(agent, 'parallel_tool_calls')
@@ -370,7 +371,7 @@ class TestRealAgenticIntegration:
             name="integration_test",
             instructions="You are a helpful assistant. Use tools when needed.",
             tools=[get_weather, get_time, get_news],
-            parallel_tool_calls=True,  # Gap 2: Enable parallel execution
+            tool_config=ToolConfig(parallel=True),  # Gap 2: Enable parallel execution
             llm="gpt-4o-mini",  # Use a real model
             stream=True  # Gap 3: Enable streaming
         )
