@@ -227,41 +227,80 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 try:
                     message_text = await self._debouncer.debounce(user_id, message.content)
                     
-                    # Show typing indicator with renewal during long operation
-                    if self.config.typing_indicator:
-                        from ._typing_indicator import with_typing_renewal
+                    # Choose streaming or blocking mode based on config
+                    if self.config.streaming:
+                        # Progressive streaming mode
+                        from ._stream import create_stream_consumer
                         
-                        async def _typing_action():
-                            await update.message.chat.send_action("typing")
+                        chat_id_str = str(update.message.chat_id) if update.message.chat_id else ""
                         
-                        response = await with_typing_renewal(
-                            typing_func=_typing_action,
-                            operation_coro=self._session.chat(
+                        # Create streaming consumer
+                        stream_consumer = create_stream_consumer(
+                            adapter=self,
+                            channel_id=chat_id_str,
+                            config=self.config.to_dict(),
+                            platform="telegram"
+                        )
+                        
+                        # Send placeholder message for progressive editing
+                        placeholder_msg = await self._application.bot.send_message(
+                            chat_id=update.message.chat_id,
+                            text="🤖 Thinking...",
+                            reply_to_message_id=update.message.message_id,
+                        )
+                        
+                        # Run agent with streaming
+                        response = await self._session.chat_with_streaming(
+                            self._agent, user_id, message_text,
+                            stream_consumer=stream_consumer,
+                            placeholder_message_id=str(placeholder_msg.message_id),
+                            chat_id=chat_id_str,
+                            user_name=user_name,
+                        )
+                    else:
+                        # Traditional blocking mode
+                        # Show typing indicator with renewal during long operation
+                        if self.config.typing_indicator:
+                            from ._typing_indicator import with_typing_renewal
+                            
+                            async def _typing_action():
+                                await update.message.chat.send_action("typing")
+                            
+                            response = await with_typing_renewal(
+                                typing_func=_typing_action,
+                                operation_coro=self._session.chat(
+                                    self._agent, user_id, message_text,
+                                    chat_id=str(update.message.chat_id) if update.message.chat_id else "",
+                                    user_name=user_name,
+                                )
+                            )
+                        else:
+                            response = await self._session.chat(
                                 self._agent, user_id, message_text,
                                 chat_id=str(update.message.chat_id) if update.message.chat_id else "",
                                 user_name=user_name,
                             )
+                    # In streaming mode, the response was already sent via progressive edits
+                    if not self.config.streaming:
+                        send_result = self.fire_message_sending(
+                            str(update.message.chat_id), str(response),
+                            reply_to=str(update.message.message_id),
+                        )
+                        if send_result["cancel"]:
+                            return
+                        await self._send_response_with_media(
+                            update.message.chat_id,
+                            send_result["content"],
+                            reply_to=update.message.message_id,
+                        )
+                        self.fire_message_sent(
+                            str(update.message.chat_id), send_result["content"],
                         )
                     else:
-                        response = await self._session.chat(
-                            self._agent, user_id, message_text,
-                            chat_id=str(update.message.chat_id) if update.message.chat_id else "",
-                            user_name=user_name,
+                        # Fire events for streaming mode completion
+                        self.fire_message_sent(
+                            str(update.message.chat_id), str(response),
                         )
-                    send_result = self.fire_message_sending(
-                        str(update.message.chat_id), str(response),
-                        reply_to=str(update.message.message_id),
-                    )
-                    if send_result["cancel"]:
-                        return
-                    await self._send_response_with_media(
-                        update.message.chat_id,
-                        send_result["content"],
-                        reply_to=update.message.message_id,
-                    )
-                    self.fire_message_sent(
-                        str(update.message.chat_id), send_result["content"],
-                    )
                     # Done reaction
                     if ack_ctx:
                         await self._ack.done(ack_ctx, react_fn=_tg_react, unreact_fn=_tg_unreact)

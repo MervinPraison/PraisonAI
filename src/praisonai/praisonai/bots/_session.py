@@ -277,6 +277,140 @@ class BotSessionManager:
                 except Exception as e:
                     logger.debug("Failed to clear task-local session context for ctx_token=%r: %s", ctx_token, e)
 
+    async def chat_with_streaming(
+        self,
+        agent: "Agent",
+        user_id: str,
+        prompt: str,
+        stream_consumer: Optional[Any] = None,
+        placeholder_message_id: str = "",
+        chat_id: str = "",
+        thread_id: str = "",
+        user_name: str = "",
+    ) -> str:
+        """Run ``agent.chat(prompt)`` with streaming support and *user_id*-scoped history.
+
+        This method extends the standard chat() functionality with progressive
+        streaming support for bot platforms that support message editing.
+
+        Args:
+            agent: The agent to run
+            user_id: User identifier for session isolation
+            prompt: The user's prompt
+            stream_consumer: Optional ChannelStreamConsumer for progressive editing
+            placeholder_message_id: ID of placeholder message to edit progressively
+            chat_id: Platform chat ID
+            thread_id: Platform thread ID
+            user_name: User display name
+
+        Returns:
+            The final agent response
+        """
+        self._last_active[self._storage_key(user_id)] = time.monotonic()
+        user_lock = self._get_lock(user_id)
+        agent_lock = self._get_agent_lock(agent)
+
+        # Set up session context
+        ctx_token = None
+        _clear_ctx = None
+        try:
+            from praisonaiagents.session.context import (
+                set_session_context as _set_ctx,
+                clear_session_context as _clear_ctx,
+            )
+            ctx_token = _set_ctx(
+                platform=self._platform,
+                chat_id=chat_id,
+                thread_id=thread_id,
+                user_id=user_id,
+                user_name=user_name,
+                unified_user_id=self._storage_key(user_id),
+            )
+        except Exception:  # pragma: no cover — defensive
+            _clear_ctx = None  # type: ignore[assignment]
+
+        try:
+            async with user_lock:
+                # Load history
+                loop = asyncio.get_running_loop()
+                user_history = await loop.run_in_executor(
+                    None, self._load_history, user_id
+                )
+
+                # Start streaming consumer if provided
+                if stream_consumer and stream_consumer.supports_streaming and placeholder_message_id:
+                    try:
+                        await stream_consumer.start_streaming(agent.stream_emitter, placeholder_message_id)
+                    except Exception as e:
+                        logger.warning("Failed to start streaming consumer: %s", e)
+                        stream_consumer = None
+
+                async with agent_lock:
+                    saved_history = agent.chat_history
+                    agent.chat_history = user_history
+                    try:
+                        # Copy current task's contextvars into the worker thread
+                        import contextvars
+                        _ctx = contextvars.copy_context()
+                        response = await loop.run_in_executor(
+                            None, _ctx.run, agent.chat, prompt
+                        )
+                        # Capture updated history before restoring caller's
+                        updated_history = agent.chat_history
+                    except Exception as exc:
+                        # Handle DLQ like in regular chat method
+                        if self._dlq is not None:
+                            try:
+                                await loop.run_in_executor(
+                                    None,
+                                    lambda: self._dlq.enqueue(
+                                        platform=self._platform,
+                                        user_id=user_id,
+                                        prompt=prompt,
+                                        error=f"{type(exc).__name__}: {exc}",
+                                        chat_id=chat_id,
+                                        thread_id=thread_id,
+                                        user_name=user_name,
+                                    )
+                                )
+                            except Exception as dlq_exc:  # pragma: no cover
+                                logger.error(
+                                    "Failed to enqueue inbound DLQ entry: %s", dlq_exc
+                                )
+                        
+                        # Finalize stream consumer on error
+                        if stream_consumer:
+                            try:
+                                await stream_consumer.finalize("")
+                            except Exception:
+                                pass
+                        
+                        agent.chat_history = saved_history
+                        raise
+                    finally:
+                        agent.chat_history = saved_history
+
+                # Finalize streaming with the complete response
+                if stream_consumer:
+                    try:
+                        await stream_consumer.finalize(response)
+                    except Exception as e:
+                        logger.warning("Failed to finalize streaming consumer: %s", e)
+
+                # Persist outside the agent_lock
+                await loop.run_in_executor(
+                    None, self._save_history, user_id, updated_history
+                )
+
+                return response
+        finally:
+            # Always clear task-local session context
+            if ctx_token is not None and _clear_ctx is not None:
+                try:
+                    _clear_ctx(ctx_token)
+                except Exception as e:
+                    logger.debug("Failed to clear task-local session context for ctx_token=%r: %s", ctx_token, e)
+
     def reap_stale(self, max_age_seconds: int) -> int:
         """Remove sessions older than *max_age_seconds*.  Returns count reaped.
 
