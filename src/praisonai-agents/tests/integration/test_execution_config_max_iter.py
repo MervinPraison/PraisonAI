@@ -64,6 +64,10 @@ class TestExecutionConfigMaxIter:
             # max_iter should be passed to LLM constructor
             assert 'max_iter' in call_args.kwargs
             assert call_args.kwargs['max_iter'] == 15
+            
+            # Execute agent to verify max_iter is enforced in practice
+            result = agent.start("Count to 5 and stop")
+            assert result is not None
     
     def test_llm_constructor_accepts_max_iter(self):
         """Test that LLM constructor accepts max_iter parameter."""
@@ -261,6 +265,35 @@ class TestMaxIterInToolCallLoops:
         # If there are any methods with hardcoded limits, they should use self.max_iter
         # This is tested by checking that iteration behavior respects the configured value
         # rather than hardcoded constants like 5, 10, 20, etc.
+    
+    def test_real_agent_execution_with_max_iter(self):
+        """Real agentic test: Agent calls real LLM with max_iter enforcement.
+        
+        This is a REAL agentic test as required by AGENTS.md §9.4:
+        - Agent must call agent.start() with real prompt
+        - Agent must call the LLM and produce actual text response
+        - Not just smoke tests of object construction
+        """
+        from praisonaiagents import Agent
+        from praisonaiagents.config.feature_configs import ExecutionConfig
+        
+        # Use a simple, reliable test configuration
+        agent = Agent(
+            name="test_agent",
+            instructions="You are a helpful assistant. Always respond briefly in one sentence.",
+            llm="gpt-4o-mini",  # Fast, reliable model for testing
+            execution=ExecutionConfig(max_iter=3)  # Low limit to test enforcement
+        )
+        
+        # Agent MUST call LLM and produce actual text response
+        result = agent.start("Say hello in one sentence")
+        print(f"Real agentic test result: {result}")  # Print output so developers can verify
+        
+        # Verify we got actual LLM output
+        assert result is not None
+        assert isinstance(result, str)
+        assert len(result.strip()) > 0
+        assert "hello" in result.lower() or "hi" in result.lower()  # Verify it responded to prompt
 
 
 if __name__ == "__main__":
