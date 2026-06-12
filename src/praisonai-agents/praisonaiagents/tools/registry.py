@@ -40,10 +40,11 @@ ENTRY_POINT_GROUP = "praisonaiagents.tools"
 
 @dataclass
 class ToolEntry:
-    """Internal registry entry for a tool with optional dynamic schema override."""
+    """Internal registry entry for a tool with optional dynamic schema override and trust level."""
     tool: Union[BaseTool, Callable]
     schema_override: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
     available: bool = True
+    trust_level: Optional[str] = None
     
     @property
     def name(self) -> str:
@@ -85,6 +86,7 @@ class ToolRegistry:
     - Tool lookup by name
     - Tool listing and filtering
     - Entry points discovery for external plugins
+    - Trust level management for security
     """
     
     def __init__(self):
@@ -100,6 +102,7 @@ class ToolRegistry:
         tool: Union[BaseTool, Callable],
         name: Optional[str] = None,
         overwrite: bool = False,
+        trust_level: Optional[str] = None,
         dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
     ) -> None:
         """Register a tool with the registry.
@@ -110,6 +113,7 @@ class ToolRegistry:
             tool: BaseTool instance or callable function
             name: Override name (default: tool.name or function.__name__)
             overwrite: If True, overwrite existing tool with same name
+            trust_level: Trust level for the tool ("trusted" or "external")
             dynamic_schema_overrides: Optional function to dynamically modify tool schema.
                 Called with base schema dict, returns modified schema dict.
         
@@ -117,6 +121,18 @@ class ToolRegistry:
             ValueError: If tool with same name exists and overwrite=False
         """
         with self._lock:
+            # Validate trust level if provided
+            if trust_level is not None:
+                from .trust import ToolTrustLevel
+                try:
+                    trust_level = ToolTrustLevel(trust_level).value
+                except ValueError as exc:
+                    tool_name = name or getattr(tool, "name", getattr(tool, "__name__", "<unknown>"))
+                    raise ValueError(
+                        f"Invalid trust_level {trust_level!r} for tool '{tool_name}'. "
+                        "Use 'trusted' or 'external'."
+                    ) from exc
+            
             # Determine tool name
             if isinstance(tool, BaseTool):
                 tool_name = name or tool.name
@@ -130,17 +146,20 @@ class ToolRegistry:
                 logging.debug(f"Tool '{tool_name}' already registered, skipping")
                 return
             
-            # Create tool entry with optional dynamic override
+            # Create tool entry with optional dynamic override and trust level
             entry = ToolEntry(
                 tool=tool,
                 schema_override=dynamic_schema_overrides,
-                available=True
+                available=True,
+                trust_level=trust_level
             )
             
             self._tools[tool_name] = entry
             logging.debug(f"Registered tool: {tool_name}")
             if dynamic_schema_overrides:
                 logging.debug(f"Tool '{tool_name}' has dynamic schema override function")
+            if trust_level:
+                logging.debug(f"Tool '{tool_name}' has trust level: {trust_level}")
     
     def unregister(self, name: str) -> bool:
         """Remove a tool from the registry.
@@ -411,6 +430,20 @@ class ToolRegistry:
             logging.warning(f"Error discovering single-file plugins: {e}")
             return 0
     
+    def get_trust_level(self, name: str) -> Optional[str]:
+        """Get the trust level for a tool.
+        
+        Args:
+            name: Tool name
+            
+        Returns:
+            Trust level string or None if not set
+        """
+        with self._lock:
+            if name in self._tools:
+                return self._tools[name].trust_level
+            return None
+
     def clear(self) -> None:
         """Clear all registered tools. Thread-safe."""
         with self._lock:
@@ -449,10 +482,11 @@ def get_registry() -> ToolRegistry:
 def register_tool(
     tool: Union[BaseTool, Callable],
     name: Optional[str] = None,
+    trust_level: Optional[str] = None,
     dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
 ) -> None:
     """Convenience function to register a tool with the global registry."""
-    get_registry().register(tool, name=name, dynamic_schema_overrides=dynamic_schema_overrides)
+    get_registry().register(tool, name=name, trust_level=trust_level, dynamic_schema_overrides=dynamic_schema_overrides)
 
 
 def get_tool(name: str) -> Optional[Union[BaseTool, Callable]]:
@@ -464,6 +498,7 @@ def get_tool(name: str) -> Optional[Union[BaseTool, Callable]]:
 def add_tool(
     tool: Union[BaseTool, Callable],
     name: Optional[str] = None,
+    trust_level: Optional[str] = None,
     dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None
 ) -> None:
     """Register a tool. Simplified alias for register_tool().
@@ -471,9 +506,10 @@ def add_tool(
     Args:
         tool: BaseTool instance or callable function
         name: Optional override name
+        trust_level: Optional trust level for the tool ("trusted" or "external")
         dynamic_schema_overrides: Optional function to dynamically modify tool schema
     """
-    register_tool(tool, name=name, dynamic_schema_overrides=dynamic_schema_overrides)
+    register_tool(tool, name=name, trust_level=trust_level, dynamic_schema_overrides=dynamic_schema_overrides)
 
 
 def has_tool(name: str) -> bool:
