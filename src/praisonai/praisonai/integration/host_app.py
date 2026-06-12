@@ -36,7 +36,10 @@ def reset_configuration() -> None:
         # Clear backends registry if it exists
         try:
             import praisonaiui.backends as backends
-            backends.clear_backends()
+            if hasattr(backends, 'clear_backends'):
+                backends.clear_backends()
+            elif hasattr(backends, '_backends'):
+                backends._backends.clear()
         except (ImportError, AttributeError):
             pass
     except ImportError:
@@ -135,42 +138,33 @@ def configure_host(
         from praisonaiui.providers import PraisonAIProvider
         from praisonaiui.server import set_provider
         
-        # Check if we're in a test environment where the provider will be overridden
-        is_test_env = False
-        try:
-            import praisonaiui.server as srv
-            # If set_provider has been monkeypatched (common test pattern), defer provider setup
-            if hasattr(set_provider, '__name__') and set_provider.__name__ == '<lambda>':
-                is_test_env = True
-        except:
-            pass
-        
-        if not is_test_env:
-            kwargs = dict(agent_kwargs or {})
-            if agents:
-                set_provider(PraisonAIProvider(agents=list(agents), **kwargs))
-            else:
-                # Load context files if specified
-                instructions = kwargs.pop("instructions", "You are a helpful assistant.")
-                if context_paths:
-                    try:
-                        from praisonai.integration.context_files import load_context_files
-                        context = load_context_files(list(context_paths))
-                        if context:
-                            instructions = f"{instructions}\n\nContext:\n{context}"
-                    except ImportError:
-                        pass  # Context files helper is optional
-                
-                set_provider(
-                    PraisonAIProvider(
-                        name=kwargs.pop("name", "PraisonAI"),
-                        instructions=instructions,
-                        llm=kwargs.pop(
-                            "llm", os.getenv("PRAISONAI_MODEL", "gpt-4o-mini")
-                        ),
-                        **kwargs,
-                    )
+        # Always proceed with provider setup unless explicitly skipped by legacy mode
+        # Tests that need to override providers should do so after configure_host() completes
+        kwargs = dict(agent_kwargs or {})
+        if agents:
+            set_provider(PraisonAIProvider(agents=list(agents), **kwargs))
+        else:
+            # Load context files if specified
+            instructions = kwargs.pop("instructions", "You are a helpful assistant.")
+            if context_paths:
+                try:
+                    from praisonai.integration.context_files import load_context_files
+                    context = load_context_files(list(context_paths))
+                    if context:
+                        instructions = f"{instructions}\n\nContext:\n{context}"
+                except ImportError:
+                    pass  # Context files helper is optional
+            
+            set_provider(
+                PraisonAIProvider(
+                    name=kwargs.pop("name", "PraisonAI"),
+                    instructions=instructions,
+                    llm=kwargs.pop(
+                        "llm", os.getenv("PRAISONAI_MODEL", "gpt-4o-mini")
+                    ),
+                    **kwargs,
                 )
+            )
         setup_bridges()
 
     # Register L3 dashboard pages
