@@ -347,11 +347,11 @@ class TestSecurityRegressions:
     @pytest.mark.asyncio
     async def test_no_host_env_leakage_regression(self):
         """Regression: Ensure host environment doesn't leak into sandbox."""
-        # Set some sensitive host environment variables
+        # Set some sensitive host environment variables (using clearly fake test values)
         sensitive_env = {
-            "AWS_SECRET_ACCESS_KEY": "secret123",
-            "DATABASE_PASSWORD": "dbpass456", 
-            "API_TOKEN": "token789"
+            "AWS_SECRET_ACCESS_KEY": "fake-aws-key-for-testing",
+            "DATABASE_PASSWORD": "fake-db-password-for-testing", 
+            "API_TOKEN": "fake-api-token-for-testing"
         }
         
         with patch.dict(os.environ, sensitive_env):
