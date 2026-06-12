@@ -34,6 +34,7 @@ def run_main(
     approval: Optional[str] = typer.Option(None, "--approval", help="Approval backend: console, slack, telegram, discord, webhook, http, agent, auto, none"),
     approve_all_tools: bool = typer.Option(False, "--approve-all-tools", help="Require approval for ALL tool calls, not just dangerous tools"),
     approval_timeout: Optional[str] = typer.Option(None, "--approval-timeout", help="Seconds to wait for approval. Use 'none' for indefinite wait"),
+    no_rules: bool = typer.Option(False, "--no-rules", help="Disable auto-injection of project instruction files"),
 ):
     """
     Run agents from a file or prompt.
@@ -131,6 +132,7 @@ def run_main(
             approval=approval,
             approve_all_tools=approve_all_tools,
             approval_timeout=approval_timeout,
+            no_rules=no_rules,
         )
 
 
@@ -195,6 +197,7 @@ def _run_prompt(
     approval: Optional[str] = None,
     approve_all_tools: bool = False,
     approval_timeout: Optional[str] = None,
+    no_rules: bool = False,
 ):
     """Run a direct prompt."""
     output = get_output_controller()
@@ -261,7 +264,8 @@ def _run_prompt(
         args.user_id = None
         args.auto_save = None
         args.history = None
-        args.include_rules = None
+        args.include_rules = None if no_rules else "auto"
+        args.no_rules = no_rules
         args.workflow = None
         args.workflow_var = None
         args.claude_memory = False

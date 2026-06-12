@@ -4286,6 +4286,51 @@ Do NOT add any explanations or formatting."""
         if mention_context:
             prompt = f"{mention_context}# Task:\n{prompt}"
         
+        # Auto-inject project instruction files unless disabled
+        rules_context = ""
+        try:
+            should_load_rules = False
+            max_chars = 32000  # Default cap
+            
+            # Check if rules should be loaded based on args and config
+            if hasattr(self, 'args') and getattr(self.args, 'include_rules', None) == "auto":
+                should_load_rules = True
+            
+            # Check config for rules settings
+            try:
+                from praisonai.cli.configuration.loader import load_config
+                config = load_config()
+                if config.rules.auto and not getattr(self.args, 'no_rules', False):
+                    should_load_rules = True
+                    max_chars = config.rules.max_chars
+                elif getattr(self.args, 'no_rules', False):
+                    should_load_rules = False
+            except:
+                pass  # Config not available, use defaults
+            
+            if should_load_rules:
+                from praisonaiagents.memory import RulesManager
+                rules_manager = RulesManager(workspace_path=os.getcwd(), verbose=getattr(self.args, 'verbose', 0))
+                rules_context = rules_manager.build_rules_context(max_chars=max_chars)
+                if rules_context and getattr(self.args, 'verbose', 0):
+                    # Show loaded files in verbose mode
+                    active_rules = rules_manager.get_active_rules()
+                    loaded_files = []
+                    for rule in active_rules:
+                        if rule.file_path and rule.priority >= 500:  # Root instruction files
+                            loaded_files.append(os.path.basename(rule.file_path))
+                    if loaded_files:
+                        print(f"[cyan]Loaded project instructions: {', '.join(loaded_files)}[/cyan]")
+        except ImportError:
+            pass  # RulesManager not available
+        except Exception as e:
+            if hasattr(self, 'args') and getattr(self.args, 'verbose', 0):
+                logging.debug(f"Error loading rules: {e}")
+        
+        # Prepend rules context to prompt
+        if rules_context:
+            prompt = f"{rules_context}\n\n# Task:\n{prompt}"
+        
         if PRAISONAI_AVAILABLE:
             from praisonaiagents import Agent as PraisonAgent
             
