@@ -8,7 +8,7 @@ import time
 import logging
 from typing import List, Optional, Dict, Any
 from .message_queue import AgentMessageQueue, MessagePriority
-from .message_steering_protocols import (
+from .protocols import (
     MessageSteeringProtocol, 
     SteeringMessage, 
     SteeringPriority,
@@ -263,7 +263,9 @@ class SteeringMixin:
                 priority = latest["priority"]
                 
                 # Format as system message
-                if priority in ("HIGH", "URGENT", "INTERRUPT"):
+                if priority == "INTERRUPT":
+                    return f"\n[INTERRUPT USER GUIDANCE]: {content}\nPlease stop current work and follow this guidance immediately."
+                elif priority in ("HIGH", "URGENT"):
                     return f"\n[URGENT USER GUIDANCE]: {content}\nPlease acknowledge and adjust your approach accordingly."
                 else:
                     return f"\n[USER GUIDANCE]: {content}\nPlease consider this feedback as you continue."

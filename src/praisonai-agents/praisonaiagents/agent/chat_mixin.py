@@ -1427,6 +1427,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # body before any backend/LLM call.
         prompt = self._resolve_skill_invocation(prompt)
 
+        # Check for steering messages before processing
+        if hasattr(self, '_check_steering_messages'):
+            try:
+                steering_msg = self._check_steering_messages()
+                if steering_msg:
+                    # Inject steering message into prompt with clear separator
+                    prompt = f"{prompt}\n\n{steering_msg}"
+            except Exception as e:
+                logger.warning(f"Steering check failed, continuing without steering: {e}")
+
         # Check if external managed backend is configured
         if hasattr(self, 'backend') and self.backend is not None:
             # Extract kwargs for delegation, excluding 'self' and function locals
@@ -2000,6 +2010,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """
         # Slash-command invocation: /skill-name [args] renders the skill body.
         prompt = self._resolve_skill_invocation(prompt)
+
+        # Check for steering messages before processing
+        if hasattr(self, '_check_steering_messages'):
+            try:
+                steering_msg = self._check_steering_messages()
+                if steering_msg:
+                    # Inject steering message into prompt with clear separator
+                    prompt = f"{prompt}\n\n{steering_msg}"
+            except Exception as e:
+                logger.warning(f"Steering check failed, continuing without steering: {e}")
 
         # Emit context trace event (zero overhead when not set)
         from ..trace.context_events import get_context_emitter

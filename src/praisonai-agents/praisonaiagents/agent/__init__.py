@@ -172,8 +172,8 @@ def __getattr__(name):
     }
     if name in _steering_names:
         if name in {'MessageSteeringProtocol', 'AgentSteeringProtocol', 'SteeringPriority', 'SteeringMessage'}:
-            from . import message_steering_protocols as _steering_protocols_module
-            value = getattr(_steering_protocols_module, name)
+            from . import protocols as _protocols_module
+            value = getattr(_protocols_module, name)
         else:
             from . import message_steering as _steering_module
             value = getattr(_steering_module, name)

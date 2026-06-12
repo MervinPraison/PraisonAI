@@ -82,11 +82,12 @@ def test_message_steering_live_execution():
     
     # Container to capture agent response
     result_container = {}
+    steering_applied = {}
     
     def run_agent():
         """Execute agent in background thread."""
         try:
-            result = agent.start("Explain quantum computing in detail")
+            result = agent.start("Write a very long detailed explanation of quantum computing covering all aspects")
             result_container["response"] = result
             result_container["success"] = True
         except Exception as e:
@@ -100,12 +101,17 @@ def test_message_steering_live_execution():
     # Allow execution to start
     time.sleep(0.5)
     
-    # Send steering message while agent is running
-    msg_id = agent.steer("Keep your explanation under 100 words and focus on practical applications", priority=10)
+    # Send steering message with specific constraint
+    steering_keyword = "BREVITY_CONSTRAINT_APPLIED"
+    msg_id = agent.steer(f"IMPORTANT: Keep your explanation under 100 words and include the phrase '{steering_keyword}' to confirm you received this guidance", priority=10)
     assert msg_id, "Should queue steering message"
     
+    # Add another steering message to test multiple messages
+    msg_id2 = agent.steer("Focus only on practical applications, not theory", priority=20)
+    assert msg_id2, "Should queue second steering message"
+    
     # Wait for execution to complete (with timeout)
-    thread.join(timeout=30)
+    thread.join(timeout=45)
     
     # Verify execution completed successfully
     assert result_container.get("success", False), f"Agent execution failed: {result_container.get('error', 'Unknown error')}"
@@ -114,13 +120,37 @@ def test_message_steering_live_execution():
     assert response, "Should return non-empty response from LLM"
     assert len(response) > 10, "Response should be substantial"
     
-    # Print response for manual verification
+    # **CRITICAL: Verify steering was actually applied**
+    # Check that the response acknowledges steering guidance
+    response_lower = response.lower()
+    
+    # Evidence that steering was processed:
+    # 1. Response should be shorter than typical (under 300 words due to 100-word constraint)
+    word_count = len(response.split())
+    print(f"\n📏 Response word count: {word_count}")
+    
+    # 2. Should contain steering confirmation keyword OR be significantly shortened
+    steering_acknowledged = steering_keyword in response
+    response_shortened = word_count < 300  # Much shorter than typical detailed explanation
+    
+    # Print response for verification
     print(f"\n🤖 Agent Response:\n{response}")
+    print(f"\n✅ Steering acknowledged (has keyword): {steering_acknowledged}")
+    print(f"\n✂️ Response shortened (< 300 words): {response_shortened}")
+    
+    # At least one form of steering evidence should be present
+    assert steering_acknowledged or response_shortened, (
+        f"No evidence of steering application. "
+        f"Response should either contain '{steering_keyword}' or be significantly shortened "
+        f"(got {word_count} words, expected < 300 for abbreviated response)"
+    )
     
     # Verify steering status after execution
     final_status = agent.get_steering_status()
-    # Note: Message may have been processed during execution
     print(f"\n📊 Final steering status: {final_status}")
+    
+    # Should have processed messages (pending count should be lower)
+    assert final_status["enabled"], "Steering should remain enabled"
 
 
 def test_message_steering_priority_handling():
