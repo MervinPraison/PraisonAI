@@ -10,7 +10,7 @@ Unified Handoff System:
 - Replaces/absorbs Agent.delegate() and SubagentDelegator functionality
 """
 
-from typing import Optional, Any, Callable, Dict, List, Union, TYPE_CHECKING, TypeVar, Type, Generic
+from typing import Optional, Any, Callable, Dict, List, Union, TYPE_CHECKING, Literal, TypeVar, Type, Generic
 from dataclasses import dataclass, field
 from enum import Enum
 import inspect
@@ -49,6 +49,24 @@ class ContextPolicy(Enum):
     LAST_N = "last_n"   # Share last N messages
 
 @dataclass
+class HandoffToolPolicy:
+    """
+    Policy for tool boundary enforcement during handoff.
+    
+    Defines how tools are filtered when handing off to a target agent.
+    Default mode is 'intersect' for security by default - sub-agents only
+    get tools that both they and the source agent have access to.
+    
+    Attributes:
+        mode: Tool filtering mode
+            - "intersect": Target gets intersection of source and target tools (DEFAULT - secure)
+            - "passthrough": Target keeps its full tool set (legacy behavior - opt-in)
+        blocked_tools: List of tool names to always strip, regardless of intersection
+    """
+    mode: Literal["intersect", "passthrough"] = "intersect"
+    blocked_tools: List[str] = field(default_factory=list)
+
+@dataclass
 class HandoffConfig:
     """
     Unified configuration for handoff behavior.
@@ -61,6 +79,7 @@ class HandoffConfig:
         max_context_tokens: Maximum tokens to include in context
         max_context_messages: Maximum messages to include (for LAST_N policy)
         preserve_system: Whether to preserve system messages in context
+        tool_policy: Tool boundary enforcement policy (NEW - security by default)
         timeout_seconds: Timeout for handoff execution
         max_concurrent: Maximum concurrent handoffs (0 = unlimited)
         detect_cycles: Enable cycle detection to prevent infinite loops
@@ -76,6 +95,9 @@ class HandoffConfig:
     max_context_tokens: int = 4000
     max_context_messages: int = 10
     preserve_system: bool = True
+    
+    # Tool security boundary (NEW)
+    tool_policy: HandoffToolPolicy = field(default_factory=HandoffToolPolicy)
     
     # Execution control
     timeout_seconds: float = 300.0
@@ -101,6 +123,10 @@ class HandoffConfig:
             "max_context_tokens": self.max_context_tokens,
             "max_context_messages": self.max_context_messages,
             "preserve_system": self.preserve_system,
+            "tool_policy": {
+                "mode": self.tool_policy.mode,
+                "blocked_tools": self.tool_policy.blocked_tools.copy()
+            },
             "timeout_seconds": self.timeout_seconds,
             "max_concurrent": self.max_concurrent,
             "detect_cycles": self.detect_cycles,
@@ -112,9 +138,21 @@ class HandoffConfig:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'HandoffConfig':
         """Create config from dictionary."""
-        if "context_policy" in data and isinstance(data["context_policy"], str):
-            data["context_policy"] = ContextPolicy(data["context_policy"])
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        data_copy = data.copy()
+        
+        # Handle context_policy enum conversion
+        if "context_policy" in data_copy and isinstance(data_copy["context_policy"], str):
+            data_copy["context_policy"] = ContextPolicy(data_copy["context_policy"])
+        
+        # Handle tool_policy conversion
+        if "tool_policy" in data_copy and isinstance(data_copy["tool_policy"], dict):
+            tool_policy_data = data_copy["tool_policy"]
+            data_copy["tool_policy"] = HandoffToolPolicy(
+                mode=tool_policy_data.get("mode", "intersect"),
+                blocked_tools=tool_policy_data.get("blocked_tools", [])
+            )
+        
+        return cls(**{k: v for k, v in data_copy.items() if k in cls.__dataclass_fields__})
 
 # Import structured error hierarchy from central errors module
 from ..errors import (
@@ -321,6 +359,52 @@ class Handoff:
             agent_desc += f" - {self.agent.goal}"
         return agent_desc
         
+    def _compute_effective_tools(self, source_agent: 'Agent') -> List[Any] | None:
+        """
+        Compute the effective tool set for the target agent based on tool policy.
+        
+        Args:
+            source_agent: The agent initiating the handoff
+            
+        Returns:
+            List of tools the target agent should have access to during handoff.
+            Returns None to indicate unrestricted access (for passthrough mode without blocked tools).
+            Returns [] to indicate no tools allowed (for intersect mode with empty intersection).
+        """
+        policy = self.config.tool_policy
+        
+        if policy.mode == "passthrough":
+            # Legacy behavior - target keeps its full tool set, minus blocked tools
+            if not policy.blocked_tools:
+                # No restrictions - return None so chat() uses the agent's configured tools
+                return None
+            else:
+                # Filter out blocked tools
+                target_tools = getattr(self.agent, 'tools', None) or []
+                effective_tools = [
+                    tool for tool in target_tools
+                    if getattr(tool, 'name', getattr(tool, '__name__', str(tool))) not in policy.blocked_tools
+                ]
+                return effective_tools
+        else:  # intersect mode (default)
+            # Security by default - intersection of source and target tools
+            source_tools = getattr(source_agent, 'tools', None) or []
+            source_tool_names = {
+                getattr(tool, 'name', getattr(tool, '__name__', str(tool)))
+                for tool in source_tools
+            }
+            
+            target_tools = getattr(self.agent, 'tools', None) or []
+            effective_tools = []
+            for tool in target_tools:
+                tool_name = getattr(tool, 'name', getattr(tool, '__name__', str(tool)))
+                if (tool_name in source_tool_names and 
+                    tool_name not in policy.blocked_tools):
+                    effective_tools.append(tool)
+            
+            # In intersect mode, empty list means no tools allowed - this is the security boundary
+            return effective_tools
+    
     def _check_safety(self, source_agent: 'Agent') -> None:
         """
         Check safety constraints before handoff.
@@ -482,8 +566,11 @@ class Handoff:
             
             logger.info(f"Programmatic handoff to {self.agent.name}")
             
-            # Execute with timeout if sync
-            response = self.agent.chat(full_prompt)
+            # Compute effective tools based on tool policy
+            effective_tools = self._compute_effective_tools(source_agent)
+            
+            # Execute with tool boundary enforcement
+            response = self.agent.chat(full_prompt, tools=effective_tools)
             
             result = HandoffResult(
                 success=True,
@@ -585,13 +672,16 @@ class Handoff:
                 
                 logger.info(f"Async handoff to {self.agent.name}")
                 
-                # Execute - check for async chat method
+                # Compute effective tools based on tool policy
+                effective_tools = self._compute_effective_tools(source_agent)
+                
+                # Execute with tool boundary enforcement - check for async chat method
                 if hasattr(self.agent, 'achat'):
-                    response = await self.agent.achat(full_prompt)
+                    response = await self.agent.achat(full_prompt, tools=effective_tools)
                 else:
-                    # Run sync chat in executor
+                    # Run sync chat in executor with tool constraint
                     loop = asyncio.get_event_loop()
-                    response = await loop.run_in_executor(None, self.agent.chat, full_prompt)
+                    response = await loop.run_in_executor(None, lambda: self.agent.chat(full_prompt, tools=effective_tools))
                 
                 result = HandoffResult(
                     success=True,
@@ -719,11 +809,15 @@ class Handoff:
                 if kwargs and self.input_type:
                     context_info += f"Context: {kwargs} "
                 
-                # Execute the target agent
+                # Execute the target agent with tool boundary enforcement
                 if last_message:
                     prompt = context_info + last_message
                     logger.info(f"Handing off to {self.agent.name} with prompt: {prompt}")
-                    response = self.agent.chat(prompt)
+                    
+                    # Compute effective tools based on tool policy
+                    effective_tools = self._compute_effective_tools(source_agent)
+                    
+                    response = self.agent.chat(prompt, tools=effective_tools)
                     
                     result = HandoffResult(
                         success=True,
@@ -806,13 +900,16 @@ def handoff(
     max_concurrent: Optional[int] = None,
     detect_cycles: Optional[bool] = None,
     max_depth: Optional[int] = None,
+    # Tool security boundary kwargs (NEW)
+    tool_policy_mode: Optional[Literal["intersect", "passthrough"]] = None,
+    blocked_tools: Optional[List[str]] = None,
 ) -> Handoff:
     """
     Create a handoff configuration for delegating tasks to another agent.
     
     This is a convenience function that creates a Handoff instance with the
     specified configuration. It supports both the legacy API and the new
-    unified HandoffConfig.
+    unified HandoffConfig with tool security boundary enforcement.
     
     Args:
         agent: The target agent to hand off to
@@ -827,29 +924,39 @@ def handoff(
         max_concurrent: Shorthand for config.max_concurrent
         detect_cycles: Shorthand for config.detect_cycles
         max_depth: Shorthand for config.max_depth
+        tool_policy_mode: Tool boundary mode ("intersect" = secure by default, "passthrough" = legacy)
+        blocked_tools: List of tool names to always block regardless of intersection
         
     Returns:
         A configured Handoff instance
         
     Example:
         ```python
-        from praisonaiagents import Agent, handoff, HandoffConfig
+        from praisonaiagents import Agent, handoff, HandoffConfig, HandoffToolPolicy
         
         billing_agent = Agent(name="Billing Agent")
-        refund_agent = Agent(name="Refund Agent")
+        refund_agent = Agent(name="Refund Agent") 
         
-        # Simple usage
+        # Simple usage (secure by default - tools intersected)
         triage_agent = Agent(
             name="Triage Agent",
             handoffs=[billing_agent, handoff(refund_agent)]
         )
         
-        # With config
+        # With tool security config
         triage_agent = Agent(
-            name="Triage Agent",
+            name="Triage Agent", 
             handoffs=[
-                handoff(billing_agent, context_policy="summary", timeout_seconds=60),
-                handoff(refund_agent, config=HandoffConfig(detect_cycles=True))
+                handoff(billing_agent, 
+                        tool_policy_mode="intersect",  # Only shared tools
+                        blocked_tools=["execute_code", "shell_tools"]),
+                handoff(refund_agent,
+                        config=HandoffConfig(
+                            tool_policy=HandoffToolPolicy(
+                                mode="passthrough",  # Legacy behavior
+                                blocked_tools=["dangerous_tool"]
+                            )
+                        ))
             ]
         )
         ```
@@ -869,6 +976,14 @@ def handoff(
         config.detect_cycles = detect_cycles
     if max_depth is not None:
         config.max_depth = max_depth
+    
+    # Apply tool policy kwargs to config
+    if tool_policy_mode is not None or blocked_tools is not None:
+        # Create new tool policy with updated values
+        config.tool_policy = HandoffToolPolicy(
+            mode=tool_policy_mode if tool_policy_mode is not None else config.tool_policy.mode,
+            blocked_tools=blocked_tools if blocked_tools is not None else config.tool_policy.blocked_tools
+        )
     
     return Handoff(
         agent=agent,

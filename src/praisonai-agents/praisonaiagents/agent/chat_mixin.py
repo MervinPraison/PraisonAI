@@ -239,7 +239,7 @@ Your Goal: {self.goal}"""
         try:
             from ..llm.model_capabilities import supports_structured_outputs
         except ImportError:
-            return False  # Module genuinely not available — acceptable
+            return False  # Module genuinely not available - acceptable
 
         try:
             return supports_structured_outputs(self.llm)
@@ -343,13 +343,19 @@ Your Goal: {self.goal}"""
         - Tool Search progressive disclosure (if enabled)
         
         Args:
-            tools: List of tools in various formats or None to use self.tools
+            tools: List of tools in various formats or None to use self.tools.
+                  Note: [] (empty list) means explicitly no tools (security boundary),
+                        None means inherit from self.tools
             
         Returns:
             List of formatted tools or empty list
         """
+        # Security fix: Distinguish None (inherit) vs [] (explicit deny)
         if tools is None:
             tools = self.tools
+        elif isinstance(tools, list) and len(tools) == 0:
+            # Explicit empty list - return immediately to enforce boundary
+            return []
         
         if not tools:
             return []
@@ -900,7 +906,7 @@ Your Goal: {self.goal}"""
             temperature=temperature
         )
         self._hook_runner.execute_sync(HookEvent.BEFORE_LLM, before_llm_input)
-        # C7 — honour any BEFORE_LLM hook that mutated the message stream
+        # C7 - honour any BEFORE_LLM hook that mutated the message stream
         # (e.g. PII redactor). The runner applies modified_input in-place on
         # before_llm_input.messages; adopt that value for the actual LLM call.
         messages = before_llm_input.messages
@@ -1958,7 +1964,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
         
         try:
-            # C2 — cooperative cancellation: abort early if a pre-set token is given
+            # C2 - cooperative cancellation: abort early if a pre-set token is given
             _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
             if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
                 reason = getattr(_cancel, "reason", None) or "cancelled before LLM call"
@@ -2089,9 +2095,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if self._using_custom_llm:
             try:
                 # Special handling for MCP tools when using provider/model format
-                # Fix: Handle empty tools list properly - use self.tools if tools is None or empty
-                if tools is None or (isinstance(tools, list) and len(tools) == 0):
+                # Security fix: Distinguish None (inherit) vs [] (explicit deny)
+                if tools is None:
+                    # None means inherit agent's configured tools
                     tool_param = self.tools
+                elif isinstance(tools, list) and len(tools) == 0:
+                    # Empty list means explicitly deny all tools (security boundary)
+                    tool_param = []
                 else:
                     tool_param = tools
                 
@@ -2208,11 +2218,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if effective_tool_choice:
                         llm_kwargs['tool_choice'] = effective_tool_choice
 
-                    # C1 — per-call seed overrides llm_instance.seed for determinism
+                    # C1 - per-call seed overrides llm_instance.seed for determinism
                     if seed is not None:
                         llm_kwargs['seed'] = seed
 
-                    # C2 — last-chance cancel check before handing to the LLM
+                    # C2 - last-chance cancel check before handing to the LLM
                     if cancel_token is not None and getattr(cancel_token, 'is_set', lambda: False)():
                         reason = getattr(cancel_token, 'reason', None) or 'cancelled'
                         raise InterruptedError(f"Agent chat cancelled: {reason}")
@@ -2323,7 +2333,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     agent_tools=agent_tools
                                 )
 
-                        response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=stream, task_name=task_name, task_description=task_description, task_id=task_id, response_format=response_format)
+                        response = self._chat_completion(messages, temperature=temperature, tools=tools, reasoning_steps=reasoning_steps, stream=stream, task_name=task_name, task_description=task_description, task_id=task_id, response_format=response_format)
                         if not response:
                             # Rollback chat history on response failure
                             self._truncate_chat_history(chat_history_length)
@@ -2543,7 +2553,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     async def _achat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None, seed=None, cancel_token=None):
         """Internal async chat implementation (extracted for trace wrapping)."""
-        # C2 — cooperative cancellation: abort early if a pre-set token is given
+        # C2 - cooperative cancellation: abort early if a pre-set token is given
         _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
         if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
             reason = getattr(_cancel, "reason", None) or "cancelled before LLM call"
@@ -2661,7 +2671,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     pass
 
                 try:
-                    # C1 — per-call seed forwarding (async path)  
+                    # C1 - per-call seed forwarding (async path)  
                     llm_kwargs = {
                         'prompt': prompt,
                         'system_prompt': self._build_system_prompt(tools),
@@ -2688,11 +2698,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         'stream': stream
                     }
                     
-                    # C1 — per-call seed overrides llm_instance.seed for determinism  
+                    # C1 - per-call seed overrides llm_instance.seed for determinism  
                     if seed is not None:
                         llm_kwargs['seed'] = seed
                     
-                    # C2 — last-chance cancel check before handing to the LLM
+                    # C2 - last-chance cancel check before handing to the LLM
                     if _cancel is not None and getattr(_cancel, 'is_set', lambda: False)():
                         reason = getattr(_cancel, 'reason', None) or 'cancelled'
                         raise InterruptedError(f"Agent chat cancelled: {reason}")
