@@ -723,12 +723,16 @@ Methods:
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">verbose</a>(value: bool)</code>
 * <code title="class AgentOSProtocol">AgentOSProtocol.<a href="./src/praisonai-agents/praisonaiagents/app/protocols.py">get_app</a>() -> Any</code>
 * <code title="class AgentOSProtocol">AgentOSProtocol.<a href="./src/praisonai-agents/praisonaiagents/app/protocols.py">serve</a>(host: Optional[str] = None, port: Optional[int] = None, reload: bool = False, **kwargs: Any) -> None</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">aannounce_completion</a>(agent_id: str, task_id: str, result: Any, success: bool = True, error: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> None</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">add_task</a>(task)</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">aexecute_task</a>(task_id)</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">announce_completion</a>(agent_id: str, task_id: str, result: Any, success: bool = True, error: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> None</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">append_to_state</a>(key: str, value: Any, max_length: Optional[int] = None) -> List[Any]</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">arun_all_tasks</a>()</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">arun_task</a>(task_id)</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">aspawn_sub_agent</a>(agent: Agent, task: Any, completion_callback: Optional[Callable[[SubAgentCompletionEvent], Any]] = None, metadata: Optional[Dict[str, Any]] = None) -> SpawnedSubAgent</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">astart</a>(content = None, return_dict = False, **kwargs)</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">await_for_completions</a>(timeout: Optional[float] = None, agent_ids: Optional[List[str]] = None) -> List[SubAgentCompletionEvent]</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">clean_json_output</a>(output: str) -> str</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">clear_state</a>() -> None</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">close</a>() -> None</code>
@@ -743,6 +747,7 @@ Methods:
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_all_tasks_status</a>()</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_detailed_token_report</a>() -> Dict[str, Any]</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_plan_markdown</a>() -> str</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_spawned_agents</a>() -> List[SpawnedSubAgent]</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_state</a>(key: str, default: Any = None) -> Any</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_task_details</a>(task_id)</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_task_result</a>(task_id)</code>
@@ -759,10 +764,12 @@ Methods:
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">save_output_to_file</a>(task, task_output)</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">save_session_state</a>(session_id: str, include_memory: bool = True) -> None</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">set_state</a>(key: str, value: Any) -> None</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">spawn_sub_agent</a>(agent: Agent, task: Any, completion_callback: Optional[Callable[[SubAgentCompletionEvent], Any]] = None, metadata: Optional[Dict[str, Any]] = None) -> SpawnedSubAgent</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">start</a>(content = None, return_dict = False, output = None, **kwargs)</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">todo_list</a>()</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">update_plan_step_status</a>(step_id: str, status: str) -> bool</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">update_state</a>(updates: Dict) -> None</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">wait_for_completions</a>(timeout: Optional[float] = None, agent_ids: Optional[List[str]] = None) -> List[SubAgentCompletionEvent]</code>
 * <code title="class AutoApproveBackend">AutoApproveBackend.<a href="./src/praisonai-agents/praisonaiagents/approval/backends.py">request_approval</a>(request: ApprovalRequest) -> ApprovalDecision</code>
 * <code title="class AutoApproveBackend">AutoApproveBackend.<a href="./src/praisonai-agents/praisonaiagents/approval/backends.py">request_approval_sync</a>(request: ApprovalRequest) -> ApprovalDecision</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/embedding/embed.py">aembedding</a>(input: Union[str, List[str]], model: str = 'text-embedding-3-small', dimensions: Optional[int] = None, encoding_format: str = 'float', timeout: float = 600.0, api_key: Optional[str] = None, api_base: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None, **kwargs) -> EmbeddingResult</code>
