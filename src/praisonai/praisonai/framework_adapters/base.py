@@ -92,7 +92,6 @@ class FrameworkAdapter(Protocol):
         """
         ...
     
-    
     def cleanup(self) -> None:
         """Clean up any resources after execution."""
         ...

@@ -132,6 +132,10 @@ class AutoGenAdapter(BaseFrameworkAdapter):
         response = user_proxy.initiate_chats(tasks)
         result = "### AutoGen v0.2 Output ###\n" + (response[-1].summary if hasattr(response[-1], 'summary') else "")
         
+        # Close observability session
+        from ..observability.hooks import finalize_observability
+        finalize_observability(self.name, status="Success")
+        
         logger.info("AutoGen v0.2 execution completed")
         return result
     
@@ -299,6 +303,10 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
             # Run the group chat
             result = await group_chat.run(task=task_description)
             
+            # Close observability session on success
+            from ..observability.hooks import finalize_observability
+            finalize_observability(self.name, status="Success")
+            
             # Extract the final message content
             if result.messages:
                 final_message = result.messages[-1]
@@ -310,6 +318,9 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
                 return "### AutoGen v0.4 Output ###\nNo messages generated"
                 
         except Exception as e:
+            # Close observability session on failure
+            from ..observability.hooks import finalize_observability
+            finalize_observability(self.name, status="Failure")
             logger.error(f"Error in AutoGen v0.4 async execution: {str(e)}")
             return f"### AutoGen v0.4 Error ###\n{str(e)}"
         
@@ -505,7 +516,14 @@ class AG2Adapter(BaseFrameworkAdapter):
 
         try:
             chat_result = user_proxy.initiate_chat(manager, message=initial_message)
+            
+            # Close observability session on success
+            from ..observability.hooks import finalize_observability
+            finalize_observability(self.name, status="Success")
         except Exception as e:
+            # Close observability session on failure
+            from ..observability.hooks import finalize_observability
+            finalize_observability(self.name, status="Failure")
             return f"### AG2 Error ###\n{str(e)}"
 
         # Prefer ChatResult.summary if available, otherwise scan messages

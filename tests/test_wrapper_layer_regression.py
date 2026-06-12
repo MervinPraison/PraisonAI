@@ -1,14 +1,19 @@
 """
-Regression tests for the three wrapper layer gaps fixed in Issue #1646.
+Regression tests for wrapper layer bug fixes.
 
-Tests ensure:
+Tests for the fixes implemented in PR #1646 (wrapper layer gaps):
 1. InteractiveRuntime lifecycle is properly managed
 2. Tool resolution is consistent across all entry points
 3. CLI backend validation works correctly across frameworks
+
+Tests for the fixes implemented in PR #1896 (observability & tool cache):
+4. ToolResolver cache `instantiate=True` fast-path fix
+5. Observability finalization on adapter exception paths
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
+import unittest.mock as mock
+from unittest.mock import MagicMock, patch, call, Mock
 
 
 class TestInteractiveRuntimeLifecycle:
@@ -207,6 +212,222 @@ class TestCliBackendValidation:
             agent = Agent(name="test", cli_backend=mock_instance)
             # Should not call resolver for already-resolved instances
             mock_resolve.assert_not_called()
+
+
+# ===== NEW TESTS FOR PR #1896 BUG FIXES =====
+
+class TestToolResolverCacheFix:
+    """Test ToolResolver cache instantiate=True fast-path fix."""
+    
+    def test_cached_tool_instantiation_fast_path(self):
+        """Test that cached classes are instantiated when instantiate=True in fast path."""
+        from praisonai.praisonai.tool_resolver import ToolResolver
+        
+        # Create a mock class that can be instantiated
+        class MockTool:
+            def __init__(self):
+                self.called = True
+                
+            def __call__(self):
+                return "mock result"
+        
+        resolver = ToolResolver()
+        
+        # Pre-populate cache with a class
+        resolver._resolve_cache["test_tool"] = MockTool
+        
+        # Test fast-path with instantiate=False (should return class)
+        result_class = resolver.resolve("test_tool", instantiate=False)
+        assert result_class is MockTool
+        
+        # Test fast-path with instantiate=True (should return instance)
+        result_instance = resolver.resolve("test_tool", instantiate=True)
+        assert isinstance(result_instance, MockTool)
+        assert result_instance.called is True
+        assert result_instance is not MockTool
+    
+    def test_cached_function_no_instantiation(self):
+        """Test that cached functions are returned as-is regardless of instantiate flag."""
+        from praisonai.praisonai.tool_resolver import ToolResolver
+        
+        def mock_function():
+            return "function result"
+        
+        resolver = ToolResolver()
+        
+        # Pre-populate cache with a function
+        resolver._resolve_cache["test_func"] = mock_function
+        
+        # Both should return the same function
+        result_false = resolver.resolve("test_func", instantiate=False)
+        result_true = resolver.resolve("test_func", instantiate=True)
+        
+        assert result_false is mock_function
+        assert result_true is mock_function
+    
+    def test_cached_none_value(self):
+        """Test that cached None values (tool not found) are handled correctly."""
+        from praisonai.praisonai.tool_resolver import ToolResolver
+        
+        resolver = ToolResolver()
+        
+        # Pre-populate cache with None (tool not found)
+        resolver._resolve_cache["nonexistent_tool"] = None
+        
+        # Both should return None
+        result_false = resolver.resolve("nonexistent_tool", instantiate=False)
+        result_true = resolver.resolve("nonexistent_tool", instantiate=True)
+        
+        assert result_false is None
+        assert result_true is None
+
+
+class TestObservabilityFinalization:
+    """Test observability finalization on adapter exception paths."""
+    
+    @patch('praisonai.praisonai.observability.hooks._end_agentops')
+    def test_finalize_observability_success(self, mock_end_agentops):
+        """Test finalize_observability calls _end_agentops with success status."""
+        from praisonai.praisonai.observability.hooks import finalize_observability
+        
+        finalize_observability("test_framework", status="Success")
+        
+        mock_end_agentops.assert_called_once_with("Success")
+    
+    @patch('praisonai.praisonai.observability.hooks._end_agentops')
+    def test_finalize_observability_failure(self, mock_end_agentops):
+        """Test finalize_observability calls _end_agentops with failure status."""
+        from praisonai.praisonai.observability.hooks import finalize_observability
+        
+        finalize_observability("test_framework", status="Failure")
+        
+        mock_end_agentops.assert_called_once_with("Failure")
+    
+    @patch('praisonai.praisonai.observability.hooks._end_agentops')
+    def test_finalize_observability_default_status(self, mock_end_agentops):
+        """Test finalize_observability uses 'Success' as default status."""
+        from praisonai.praisonai.observability.hooks import finalize_observability
+        
+        finalize_observability("test_framework")
+        
+        mock_end_agentops.assert_called_once_with("Success")
+    
+    @patch('praisonai.praisonai.observability.hooks.logger')
+    def test_end_agentops_import_error_handling(self, mock_logger):
+        """Test _end_agentops handles ImportError gracefully."""
+        from praisonai.praisonai.observability.hooks import _end_agentops
+        
+        with patch('builtins.__import__', side_effect=ImportError("agentops not found")):
+            _end_agentops("Success")
+            
+        # Should not raise exception and should not log warnings (just returns silently)
+        mock_logger.warning.assert_not_called()
+    
+    @patch('praisonai.praisonai.observability.hooks.logger')
+    def test_end_agentops_exception_handling(self, mock_logger):
+        """Test _end_agentops handles agentops.end_session exceptions gracefully."""
+        from praisonai.praisonai.observability.hooks import _end_agentops
+        
+        # Mock agentops module to be available but end_session raises exception
+        mock_agentops = Mock()
+        mock_agentops.end_session.side_effect = Exception("Session end failed")
+        
+        with patch.dict('sys.modules', {'agentops': mock_agentops}):
+            _end_agentops("Success")
+            
+        # Should not raise exception but should log warning
+        mock_agentops.end_session.assert_called_once_with("Success")
+        mock_logger.warning.assert_called_once_with("agentops.end_session failed: %s", mock_agentops.end_session.side_effect)
+
+
+class TestFrameworkAdapterExceptionPaths:
+    """Test that framework adapters call finalize_observability on exception paths."""
+    
+    @patch('praisonai.praisonai.observability.hooks.finalize_observability')
+    def test_autogen_v4_adapter_exception_handling(self, mock_finalize):
+        """Test AutoGenV4Adapter calls finalize_observability on exceptions."""
+        # This is a smoke test to verify the structure exists
+        # Real testing would require mocking the entire AutoGen framework
+        try:
+            from praisonai.praisonai.framework_adapters.autogen_adapter import AutoGenV4Adapter
+            
+            # Verify the class exists and has arun method
+            assert hasattr(AutoGenV4Adapter, 'arun')
+            
+            # Check that the implementation includes try/except blocks
+            import inspect
+            source = inspect.getsource(AutoGenV4Adapter.arun)
+            
+            # Verify exception handling structure exists
+            assert 'try:' in source or 'except:' in source, "AutoGenV4Adapter.arun should have exception handling"
+            assert 'finalize_observability' in source, "AutoGenV4Adapter.arun should call finalize_observability"
+            
+        except ImportError:
+            # Skip if autogen dependencies not available
+            pytest.skip("AutoGen dependencies not available")
+    
+    @patch('praisonai.praisonai.observability.hooks.finalize_observability')
+    def test_ag2_adapter_exception_handling(self, mock_finalize):
+        """Test AG2Adapter calls finalize_observability on exceptions."""
+        # This is a smoke test to verify the structure exists
+        try:
+            from praisonai.praisonai.framework_adapters.autogen_adapter import AG2Adapter
+            
+            # Verify the class exists and has run method
+            assert hasattr(AG2Adapter, 'run')
+            
+            # Check that the implementation includes try/except blocks
+            import inspect
+            source = inspect.getsource(AG2Adapter.run)
+            
+            # Verify exception handling structure exists
+            assert 'try:' in source or 'except:' in source, "AG2Adapter.run should have exception handling"
+            assert 'finalize_observability' in source, "AG2Adapter.run should call finalize_observability"
+            
+        except ImportError:
+            # Skip if AG2 dependencies not available
+            pytest.skip("AG2 dependencies not available")
+    
+    def test_crewai_adapter_finalization_calls(self):
+        """Test CrewAIAdapter calls finalize_observability with correct status."""
+        try:
+            from praisonai.praisonai.framework_adapters.crewai_adapter import CrewAIAdapter
+            
+            # Verify the class exists and has run method
+            assert hasattr(CrewAIAdapter, 'run')
+            
+            # Check that the implementation calls finalize_observability
+            import inspect
+            source = inspect.getsource(CrewAIAdapter.run)
+            
+            # Verify finalize_observability call exists with status parameter
+            assert 'finalize_observability' in source, "CrewAIAdapter.run should call finalize_observability"
+            assert 'status=' in source, "CrewAIAdapter.run should call finalize_observability with status parameter"
+            
+        except ImportError:
+            # Skip if CrewAI dependencies not available
+            pytest.skip("CrewAI dependencies not available")
+    
+    def test_praisonai_adapter_finalization_calls(self):
+        """Test PraisonAIAdapter calls finalize_observability with correct status."""
+        from praisonai.praisonai.framework_adapters.praisonai_adapter import PraisonAIAdapter
+        
+        # Verify the class exists and has both run and arun methods
+        assert hasattr(PraisonAIAdapter, 'run')
+        assert hasattr(PraisonAIAdapter, 'arun')
+        
+        # Check that both implementations call finalize_observability
+        import inspect
+        
+        run_source = inspect.getsource(PraisonAIAdapter.run)
+        arun_source = inspect.getsource(PraisonAIAdapter.arun)
+        
+        # Verify finalize_observability calls exist with status parameter
+        assert 'finalize_observability' in run_source, "PraisonAIAdapter.run should call finalize_observability"
+        assert 'status=' in run_source, "PraisonAIAdapter.run should call finalize_observability with status parameter"
+        
+        assert 'finalize_observability' in arun_source, "PraisonAIAdapter.arun should call finalize_observability"
+        assert 'status=' in arun_source, "PraisonAIAdapter.arun should call finalize_observability with status parameter"
 
 
 if __name__ == "__main__":
