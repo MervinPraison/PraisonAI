@@ -19,18 +19,32 @@ Mandatory coverage (10+ scenarios):
 from pathlib import Path
 from typing import List, Optional
 import subprocess
+import sys
 
-from ..runner import Scenario, build_cli_env
+from ..runner import Scenario, build_isolated_pytest_env
 
 
 def check_pytest_passes(test_filter: Optional[str] = None):
     """Check that pytest passes for given filter."""
     def check(project_dir: Path) -> tuple:
-        cmd = ["python", "-m", "pytest", "-v", "--tb=short"]
+        cmd = [sys.executable, "-m", "pytest", "-v", "--tb=short"]
         if test_filter:
-            cmd.extend(["-k", test_filter])
-        env = build_cli_env()
-        result = subprocess.run(cmd, cwd=project_dir, capture_output=True, text=True, timeout=60, env=env)
+            # Use node ID if it looks like a file path, otherwise use -k pattern
+            if "::" in test_filter or test_filter.endswith(".py"):
+                cmd.append(test_filter)  # Node ID
+            else:
+                cmd.extend(["-k", test_filter])  # Pattern
+        env = build_isolated_pytest_env()
+        result = subprocess.run(
+            cmd, 
+            cwd=project_dir, 
+            capture_output=True, 
+            text=True, 
+            timeout=60, 
+            env=env,
+            encoding="utf-8",
+            errors="replace"
+        )
         if result.returncode == 0:
             return True, "Tests passed"
         # Include more context in failure message
@@ -50,7 +64,7 @@ def check_file_contains(filepath: str, text: str):
         path = project_dir / filepath
         if not path.exists():
             return False, f"File {filepath} does not exist"
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         if text in content:
             return True, f"Found '{text}' in {filepath}"
         return False, f"'{text}' not found in {filepath}"
@@ -63,7 +77,7 @@ def check_file_not_contains(filepath: str, text: str):
         path = project_dir / filepath
         if not path.exists():
             return False, f"File {filepath} does not exist"
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         if text not in content:
             return True, f"'{text}' correctly removed from {filepath}"
         return False, f"'{text}' still present in {filepath}"
@@ -76,7 +90,7 @@ def check_function_exists(filepath: str, func_name: str):
         path = project_dir / filepath
         if not path.exists():
             return False, f"File {filepath} does not exist"
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         if f"def {func_name}" in content:
             return True, f"Function {func_name} exists in {filepath}"
         return False, f"Function {func_name} not found in {filepath}"
@@ -86,9 +100,18 @@ def check_function_exists(filepath: str, func_name: str):
 def check_cli_command_works(cmd_args: List[str], expected_output: Optional[str] = None):
     """Check that a CLI command works."""
     def check(project_dir: Path) -> tuple:
-        cmd = ["python", "-m", "mathlib.cli"] + cmd_args
-        env = build_cli_env()
-        result = subprocess.run(cmd, cwd=project_dir / "src", capture_output=True, text=True, timeout=30, env=env)
+        cmd = [sys.executable, "-m", "mathlib.cli"] + cmd_args
+        env = build_isolated_pytest_env()
+        result = subprocess.run(
+            cmd, 
+            cwd=project_dir / "src", 
+            capture_output=True, 
+            text=True, 
+            timeout=30, 
+            env=env,
+            encoding="utf-8",
+            errors="replace"
+        )
         if result.returncode != 0:
             return False, f"CLI command failed: {result.stderr}"
         if expected_output and expected_output not in result.stdout:
@@ -100,14 +123,16 @@ def check_cli_command_works(cmd_args: List[str], expected_output: Optional[str] 
 def check_ruff_clean():
     """Check that ruff reports no errors."""
     def check(project_dir: Path) -> tuple:
-        env = build_cli_env()
+        env = build_isolated_pytest_env()
         result = subprocess.run(
-            ["python", "-m", "ruff", "check", "."],
+            [sys.executable, "-m", "ruff", "check", "."],
             cwd=project_dir,
             capture_output=True,
             text=True,
             timeout=30,
             env=env,
+            encoding="utf-8",
+            errors="replace"
         )
         if result.returncode == 0:
             return True, "Ruff clean"
@@ -121,7 +146,7 @@ def check_file_modified(filepath: str):
         path = project_dir / filepath
         if not path.exists():
             return False, f"File {filepath} does not exist"
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         if len(content) > 0:
             return True, f"File {filepath} exists and has content"
         return False, f"File {filepath} is empty"
@@ -135,7 +160,7 @@ def check_grep_pattern(filepath: str, pattern: str):
         path = project_dir / filepath
         if not path.exists():
             return False, f"File {filepath} does not exist"
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
         if re.search(pattern, content):
             return True, f"Pattern '{pattern}' found in {filepath}"
         return False, f"Pattern '{pattern}' not found in {filepath}"
@@ -149,7 +174,7 @@ SCENARIO_1_IMPLEMENT_CONVERTER = Scenario(
     acceptance_checks=[
         check_function_exists("src/mathlib/converter.py", "celsius_to_fahrenheit"),
         check_grep_pattern("src/mathlib/converter.py", r"9.*5.*32|1\.8.*32"),  # Accept 9/5, 9.0/5.0, or 1.8
-        check_pytest_passes("celsius"),
+        check_pytest_passes("tests/test_converter.py::test_celsius_to_fahrenheit"),
     ],
     check_names=["function_exists", "has_formula", "tests_pass"],
 )
@@ -213,7 +238,7 @@ SCENARIO_7_IMPLEMENT_FAHRENHEIT = Scenario(
     prompt="Implement fahrenheit_to_celsius in src/mathlib/converter.py. Formula: C = (F - 32) * 5/9. Run pytest tests/test_converter.py -k fahrenheit to verify.",
     acceptance_checks=[
         check_function_exists("src/mathlib/converter.py", "fahrenheit_to_celsius"),
-        check_pytest_passes("fahrenheit"),
+        check_pytest_passes("tests/test_converter.py::test_fahrenheit_to_celsius"),
     ],
     check_names=["function_exists", "tests_pass"],
 )

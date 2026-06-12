@@ -98,7 +98,7 @@ def get_file_snapshot(project_dir: Path) -> dict:
     snapshot = {}
     for py_file in project_dir.rglob("*.py"):
         rel_path = py_file.relative_to(project_dir)
-        snapshot[str(rel_path)] = py_file.read_text()
+        snapshot[str(rel_path)] = py_file.read_text(encoding="utf-8")
     return snapshot
 
 
@@ -127,10 +127,13 @@ def build_cli_env(extra_env: Optional[dict] = None) -> dict:
     existing = run_env.get("PYTHONPATH", "")
     if existing:
         paths.append(existing)
-    run_env["PYTHONPATH"] = ":".join(paths)
+    run_env["PYTHONPATH"] = os.pathsep.join(paths)
     
     # CRITICAL: Enable auto-approval for non-interactive execution
     run_env["PRAISON_APPROVAL_MODE"] = "auto"
+    
+    # Set UTF-8 encoding for subprocess I/O (Windows compatibility)
+    run_env.setdefault("PYTHONIOENCODING", "utf-8")
     
     if extra_env:
         run_env.update(extra_env)
@@ -154,6 +157,8 @@ def run_command(
             text=True,
             timeout=timeout,
             env=run_env,
+            encoding="utf-8",
+            errors="replace",
         )
         return result.returncode, mask_secrets(result.stdout), mask_secrets(result.stderr)
     except subprocess.TimeoutExpired:
@@ -202,6 +207,10 @@ def run_praisonai_cli(
     # Add workspace flag
     cmd.extend(["-w", str(workspace)])
     
+    # Add --no-acp for automated runs on Windows
+    if os.name == "nt":
+        cmd.append("--no-acp")
+    
     # Add the prompt as the final argument
     cmd.append(prompt)
     
@@ -219,6 +228,8 @@ def run_praisonai_cli(
             text=True,
             timeout=timeout,
             env=run_env,
+            encoding="utf-8",
+            errors="replace",
         )
         return (
             result.returncode,
@@ -232,20 +243,54 @@ def run_praisonai_cli(
         return -1, "", str(e), cli_command
 
 
+def build_isolated_pytest_env() -> dict:
+    """Build isolated environment for pytest without dev PYTHONPATH."""
+    env = os.environ.copy()
+    # Remove dev PYTHONPATH to ensure pytest uses only the copied project
+    env.pop("PYTHONPATH", None)
+    # Set UTF-8 encoding for Windows compatibility
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    return env
+
+
 def run_pytest(project_dir: Path, test_filter: Optional[str] = None) -> tuple:
     """Run pytest and return (passed, output)."""
-    cmd = ["python", "-m", "pytest", "-v", "--tb=short"]
+    import sys
+    cmd = [sys.executable, "-m", "pytest", "-v", "--tb=short"]
     if test_filter:
-        cmd.extend(["-k", test_filter])
-    exit_code, stdout, stderr = run_command(cmd, project_dir, timeout=60)
-    output = stdout + stderr
-    passed = exit_code == 0
-    return passed, output
+        # Use node ID if it looks like a file path, otherwise use -k pattern
+        if "::" in test_filter or test_filter.endswith(".py"):
+            cmd.append(test_filter)  # Node ID
+        else:
+            cmd.extend(["-k", test_filter])  # Pattern
+    
+    # Use isolated environment to prevent inheritance of dev PYTHONPATH
+    env = build_isolated_pytest_env()
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=env,
+            encoding="utf-8",
+            errors="replace",
+        )
+        output = result.stdout + result.stderr
+        passed = result.returncode == 0
+        return passed, output
+    except subprocess.TimeoutExpired:
+        return False, "Pytest timed out after 60s"
+    except Exception as e:
+        return False, str(e)
 
 
 def run_ruff(project_dir: Path, fix: bool = False) -> tuple:
     """Run ruff linter and return (clean, output)."""
-    cmd = ["python", "-m", "ruff", "check", "."]
+    import sys
+    cmd = [sys.executable, "-m", "ruff", "check", "."]
     if fix:
         cmd.append("--fix")
     exit_code, stdout, stderr = run_command(cmd, project_dir, timeout=30)
