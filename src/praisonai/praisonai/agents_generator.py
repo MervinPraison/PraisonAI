@@ -372,7 +372,7 @@ class AgentsGenerator:
             config (dict): The parsed YAML configuration
         """
         known_fields = {
-            'role', 'goal', 'instructions', 'backstory', 'tools', 'tasks', 'llm',
+            'role', 'goal', 'instructions', 'backstory', 'tools', 'toolsets', 'tasks', 'llm',
             'function_calling_llm', 'allow_delegation', 'max_iter', 'max_rpm',
             'max_execution_time', 'verbose', 'cache', 'system_template',
             'prompt_template', 'response_template', 'tool_timeout', 'planning_tools',

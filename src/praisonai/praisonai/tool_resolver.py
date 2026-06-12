@@ -412,13 +412,13 @@ class ToolResolver:
         return available
     
     def validate_yaml_tools(self, yaml_config: Dict[str, Any]) -> List[str]:
-        """Validate that all tools referenced in YAML config can be resolved.
+        """Validate that all tools and toolsets referenced in YAML config can be resolved.
         
         Args:
             yaml_config: Parsed YAML configuration dict
             
         Returns:
-            List of tool names that could not be resolved (empty if all valid)
+            List of tool/toolset names that could not be resolved (empty if all valid)
         """
         missing = []
         
@@ -431,15 +431,32 @@ class ToolResolver:
             if not isinstance(role_config, dict):
                 continue
             
+            # Validate tools
             tools = role_config.get('tools', [])
-            if not tools:
-                continue
+            if tools:
+                for tool_name in tools:
+                    if not tool_name or not isinstance(tool_name, str):
+                        continue
+                    if not self.has_tool(tool_name.strip()):
+                        missing.append(tool_name)
             
-            for tool_name in tools:
-                if not tool_name or not isinstance(tool_name, str):
-                    continue
-                if not self.has_tool(tool_name.strip()):
-                    missing.append(tool_name)
+            # Validate toolsets
+            toolsets = role_config.get('toolsets', [])
+            if toolsets:
+                try:
+                    from praisonaiagents.toolsets import list_toolsets
+                    available_toolsets = set(list_toolsets())
+                    
+                    for toolset_name in toolsets:
+                        if not toolset_name or not isinstance(toolset_name, str):
+                            continue
+                        if toolset_name.strip() not in available_toolsets:
+                            missing.append(f"toolset:{toolset_name}")
+                except ImportError:
+                    # If toolsets module not available, mark all as missing
+                    for toolset_name in toolsets:
+                        if toolset_name and isinstance(toolset_name, str):
+                            missing.append(f"toolset:{toolset_name}")
         
         return list(set(missing))  # Remove duplicates
     

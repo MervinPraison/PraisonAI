@@ -1685,8 +1685,10 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
                     "Verify names with praisonaiagents.toolsets.list_toolsets()."
                 ) from e
             except ImportError as e:
-                logging.warning(f"Failed to resolve toolsets {toolsets}: {e}")
-                # Continue without toolsets if module is unavailable
+                raise ImportError(
+                    f"Agent '{getattr(self, 'display_name', 'unknown')}' failed to import toolsets module: {e}. "
+                    "Ensure praisonaiagents is properly installed."
+                ) from e
         
         # Inject default tools for autonomy mode (after self.tools is initialized)
         # ONLY inject if caller didn't provide tools - avoid duplicates with CLI/wrapper tools
