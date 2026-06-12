@@ -20,6 +20,8 @@ import inspect
 import logging
 import copy
 
+from .schema import annotation_to_json_schema, get_parameter_requirements
+
 
 class ToolValidationError(Exception):
     """Raised when a tool fails validation."""
@@ -129,18 +131,17 @@ class BaseTool(ABC):
                 
                 # Get type hint
                 param_type = hints.get(param_name, Any)
-                json_type = self._python_type_to_json(param_type)
                 
-                # Build property schema
-                prop_schema = {"type": json_type}
+                # Use new schema utility for proper type handling
+                prop_schema = annotation_to_json_schema(param_type)
                 
                 # Add description from docstring if available
                 # (Could parse docstring for param descriptions)
                 
                 schema["properties"][param_name] = prop_schema
                 
-                # Check if required (no default value)
-                if param.default is inspect.Parameter.empty:
+                # Check if required using improved logic
+                if get_parameter_requirements(sig, param_name):
                     schema["required"].append(param_name)
         except Exception as e:
             logging.debug(f"Could not generate schema for {self.name}: {e}")
@@ -149,28 +150,15 @@ class BaseTool(ABC):
     
     @staticmethod
     def _python_type_to_json(python_type: Type) -> str:
-        """Convert Python type to JSON Schema type."""
-        type_map = {
-            str: "string",
-            int: "integer",
-            float: "number",
-            bool: "boolean",
-            list: "array",
-            dict: "object",
-            type(None): "null"
-        }
+        """Convert Python type to JSON Schema type.
         
-        # Handle Optional, Union, etc.
-        origin = getattr(python_type, '__origin__', None)
-        if origin is not None:
-            # For List[X], return "array"
-            if origin is list:
-                return "array"
-            # For Dict[X, Y], return "object"
-            if origin is dict:
-                return "object"
-        
-        return type_map.get(python_type, "string")
+        DEPRECATED: Use annotation_to_json_schema() from schema.py instead.
+        This method is kept for backward compatibility but will be removed.
+        """
+        # Legacy fallback - delegate to new schema utility and extract type
+        from .schema import annotation_to_json_schema
+        schema = annotation_to_json_schema(python_type)
+        return schema.get("type", "string")
     
     @abstractmethod
     def run(self, **kwargs) -> Any:
