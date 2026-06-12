@@ -4,20 +4,21 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 349,
+    "pythonCoreFeatures": 358,
     "pythonWrapperFeatures": 99,
     "typescriptFeatures": 1192,
-    "gapCount": 57,
+    "gapCount": 66,
     "priorityP0": 1,
     "priorityP1": 0,
     "priorityP2": 0,
-    "priorityP3": 56
+    "priorityP3": 65
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
     "exports": [
       "A2A",
       "A2UI",
+      "AGGRESSIVE_POLICY",
       "AGUI",
       "AUTONOMY_PRESETS",
       "Agent",
@@ -44,6 +45,7 @@
       "AutoRagConfig",
       "AutonomyConfig",
       "AutonomyLevel",
+      "BALANCED_POLICY",
       "BaseTool",
       "BotChannel",
       "BotConfig",
@@ -54,6 +56,7 @@
       "BotUser",
       "BudgetExceededError",
       "CACHING_PRESETS",
+      "CONSERVATIVE_POLICY",
       "CONTEXT_PRESETS",
       "CachingConfig",
       "Chunking",
@@ -68,10 +71,15 @@
       "CodeAgent",
       "CodeConfig",
       "CodeExecutionStep",
+      "CompactionRoute",
+      "CompactionStrategy",
       "ConditionProtocol",
       "ConfigValidationError",
       "ConsoleBackend",
       "ContextAgent",
+      "ContextBudgetResult",
+      "ContextCompactionPolicy",
+      "ContextCompactionPolicyProtocol",
       "ContextConfig",
       "ContextEvent",
       "ContextEventType",
@@ -304,6 +312,7 @@
       "get_config_path",
       "get_default",
       "get_default_plugin_dirs",
+      "get_default_policy",
       "get_defaults_config",
       "get_dimensions",
       "get_logger",
@@ -592,17 +601,25 @@
         "Memory"
       ],
       "other": [
+        "AGGRESSIVE_POLICY",
         "AgentMessageEvent",
         "AgentRunOutcome",
         "Agents",
         "AsyncLearnProtocol",
         "AutonomyConfig",
+        "BALANCED_POLICY",
         "BudgetExceededError",
+        "CONSERVATIVE_POLICY",
         "CliBackendConfig",
         "CliBackendDelta",
         "CliBackendProtocol",
         "CliBackendResult",
         "CliSessionBinding",
+        "CompactionRoute",
+        "CompactionStrategy",
+        "ContextBudgetResult",
+        "ContextCompactionPolicy",
+        "ContextCompactionPolicyProtocol",
         "CustomToolUseEvent",
         "DoomLoopDetector",
         "ErrorContextProtocol",
@@ -640,6 +657,7 @@
         "configure_structured_logging",
         "embedding",
         "embeddings",
+        "get_default_policy",
         "get_logger",
         "get_toolset",
         "get_toolset_registry",
@@ -3951,6 +3969,15 @@
         "category": "ui"
       },
       {
+        "feature": "AGGRESSIVE_POLICY",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "AGUI",
         "python": true,
         "typescript": true,
@@ -4140,6 +4167,15 @@
         "category": "config"
       },
       {
+        "feature": "BALANCED_POLICY",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "BotChannel",
         "python": true,
         "typescript": true,
@@ -4221,6 +4257,15 @@
         "category": "config"
       },
       {
+        "feature": "CONSERVATIVE_POLICY",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "CONTEXT_PRESETS",
         "python": true,
         "typescript": true,
@@ -4293,6 +4338,24 @@
         "category": "other"
       },
       {
+        "feature": "CompactionRoute",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "CompactionStrategy",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "ConditionProtocol",
         "python": true,
         "typescript": true,
@@ -4318,6 +4381,33 @@
         "effort": "high",
         "status": "TODO",
         "category": "app"
+      },
+      {
+        "feature": "ContextBudgetResult",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "ContextCompactionPolicy",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "ContextCompactionPolicyProtocol",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "medium",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "ContextEvent",
@@ -5632,6 +5722,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "plugins"
+      },
+      {
+        "feature": "get_default_policy",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "get_defaults_config",

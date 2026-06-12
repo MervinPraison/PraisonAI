@@ -7,14 +7,14 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 349 |
+| Python Core Features | 358 |
 | Python Wrapper Features | 99 |
 | TypeScript Features | 1192 |
-| **Gap Count** | **57** |
+| **Gap Count** | **66** |
 | P0 (Critical) | 1 |
 | P1 (High) | 0 |
 | P2 (Medium) | 0 |
-| P3 (Low) | 56 |
+| P3 (Low) | 65 |
 
 ## Gap Matrix
 
@@ -147,23 +147,31 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (179 done, 56 todo)
+### P3_Advanced (179 done, 65 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
 | `A2UI` | ✅ | ❌ | low | ⏳ TODO |
+| `AGGRESSIVE\_POLICY` | ✅ | ❌ | low | ⏳ TODO |
 | `AgentMessageEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `AgentRunOutcome` | ✅ | ❌ | high | ⏳ TODO |
 | `AsyncLearnProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `AutoApproveBackend` | ✅ | ❌ | high | ⏳ TODO |
+| `BALANCED\_POLICY` | ✅ | ❌ | low | ⏳ TODO |
 | `BotOSConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `BotOSProtocol` | ✅ | ❌ | medium | ⏳ TODO |
+| `CONSERVATIVE\_POLICY` | ✅ | ❌ | low | ⏳ TODO |
 | `CliBackendConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `CliBackendDelta` | ✅ | ❌ | high | ⏳ TODO |
 | `CliBackendProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `CliBackendResult` | ✅ | ❌ | low | ⏳ TODO |
 | `CliSessionBinding` | ✅ | ❌ | high | ⏳ TODO |
+| `CompactionRoute` | ✅ | ❌ | high | ⏳ TODO |
+| `CompactionStrategy` | ✅ | ❌ | high | ⏳ TODO |
 | `ConsoleBackend` | ✅ | ❌ | high | ⏳ TODO |
+| `ContextBudgetResult` | ✅ | ❌ | low | ⏳ TODO |
+| `ContextCompactionPolicy` | ✅ | ❌ | high | ⏳ TODO |
+| `ContextCompactionPolicyProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `CustomToolUseEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `DoomLoopDetector` | ✅ | ❌ | high | ⏳ TODO |
 | `ErrorContextProtocol` | ✅ | ❌ | medium | ⏳ TODO |
@@ -197,6 +205,7 @@
 | `ToolsetSpec` | ✅ | ❌ | high | ⏳ TODO |
 | `ValidationError` | ✅ | ❌ | low | ⏳ TODO |
 | `configure\_structured\_logging` | ✅ | ❌ | low | ⏳ TODO |
+| `get\_default\_policy` | ✅ | ❌ | low | ⏳ TODO |
 | `get\_logger` | ✅ | ❌ | low | ⏳ TODO |
 | `get\_toolset` | ✅ | ❌ | low | ⏳ TODO |
 | `get\_toolset\_registry` | ✅ | ❌ | low | ⏳ TODO |
@@ -545,10 +554,10 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (61 exports)</summary>
+<summary><strong>other</strong> (70 exports)</summary>
 
 ```python
-from praisonaiagents import AgentMessageEvent, AgentRunOutcome, Agents, AsyncLearnProtocol, AutonomyConfig, BudgetExceededError, CliBackendConfig, CliBackendDelta, CliBackendProtocol, CliBackendResult...
+from praisonaiagents import AGGRESSIVE_POLICY, AgentMessageEvent, AgentRunOutcome, Agents, AsyncLearnProtocol, AutonomyConfig, BALANCED_POLICY, BudgetExceededError, CONSERVATIVE_POLICY, CliBackendConfig...
 ```
 
 </details>

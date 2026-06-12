@@ -5,15 +5,16 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 349,
+    "pythonCoreFeatures": 358,
     "rustFeatures": 667,
-    "gapCount": 70,
-    "parityPercentage": 191.1
+    "gapCount": 79,
+    "parityPercentage": 186.3
   },
   "pythonCoreSDK": {
     "exports": [
       "A2A",
       "A2UI",
+      "AGGRESSIVE_POLICY",
       "AGUI",
       "AUTONOMY_PRESETS",
       "Agent",
@@ -40,6 +41,7 @@
       "AutoRagConfig",
       "AutonomyConfig",
       "AutonomyLevel",
+      "BALANCED_POLICY",
       "BaseTool",
       "BotChannel",
       "BotConfig",
@@ -50,6 +52,7 @@
       "BotUser",
       "BudgetExceededError",
       "CACHING_PRESETS",
+      "CONSERVATIVE_POLICY",
       "CONTEXT_PRESETS",
       "CachingConfig",
       "Chunking",
@@ -64,10 +67,15 @@
       "CodeAgent",
       "CodeConfig",
       "CodeExecutionStep",
+      "CompactionRoute",
+      "CompactionStrategy",
       "ConditionProtocol",
       "ConfigValidationError",
       "ConsoleBackend",
       "ContextAgent",
+      "ContextBudgetResult",
+      "ContextCompactionPolicy",
+      "ContextCompactionPolicyProtocol",
       "ContextConfig",
       "ContextEvent",
       "ContextEventType",
@@ -300,6 +308,7 @@
       "get_config_path",
       "get_default",
       "get_default_plugin_dirs",
+      "get_default_policy",
       "get_defaults_config",
       "get_dimensions",
       "get_logger",
@@ -2844,6 +2853,15 @@
         "category": "ui"
       },
       {
+        "feature": "AGGRESSIVE_POLICY",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "AGUI",
         "python": true,
         "rust": true,
@@ -3033,6 +3051,15 @@
         "category": "config"
       },
       {
+        "feature": "BALANCED_POLICY",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "BotChannel",
         "python": true,
         "rust": true,
@@ -3114,6 +3141,15 @@
         "category": "config"
       },
       {
+        "feature": "CONSERVATIVE_POLICY",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "CONTEXT_PRESETS",
         "python": true,
         "rust": true,
@@ -3186,6 +3222,24 @@
         "category": "other"
       },
       {
+        "feature": "CompactionRoute",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "CompactionStrategy",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "ConditionProtocol",
         "python": true,
         "rust": true,
@@ -3211,6 +3265,33 @@
         "effort": "high",
         "status": "TODO",
         "category": "app"
+      },
+      {
+        "feature": "ContextBudgetResult",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "ContextCompactionPolicy",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "ContextCompactionPolicyProtocol",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "medium",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "ContextEvent",
@@ -4525,6 +4606,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "plugins"
+      },
+      {
+        "feature": "get_default_policy",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "get_defaults_config",

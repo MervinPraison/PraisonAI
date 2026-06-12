@@ -1,16 +1,16 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 349 | **Rust Features:** 667 | **Parity:** 81.7%
+> **Python Features:** 358 | **Rust Features:** 667 | **Parity:** 79.6%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 349 |
+| Python Core Features | 358 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **64** |
+| **Actual Gap Count** | **73** |
 | Language Limitations (N/A) | 5 |
-| **Parity** | **81.7%** |
+| **Parity** | **79.6%** |
 
 ## Implemented Features
 
@@ -695,20 +695,28 @@ These Python features cannot be directly implemented in Rust due to reserved key
 ## Missing Features
 
 - ❌ `A2UI`
+- ❌ `AGGRESSIVE_POLICY`
 - ❌ `AgentMessageEvent`
 - ❌ `AgentRunOutcome`
 - ❌ `AsyncLearnProtocol`
 - ❌ `AutoApproveBackend`
+- ❌ `BALANCED_POLICY`
 - ❌ `BaseTool`
 - ❌ `BotOSConfig`
 - ❌ `BotOSProtocol`
 - ❌ `BudgetExceededError`
+- ❌ `CONSERVATIVE_POLICY`
 - ❌ `CliBackendConfig`
 - ❌ `CliBackendDelta`
 - ❌ `CliBackendProtocol`
 - ❌ `CliBackendResult`
 - ❌ `CliSessionBinding`
+- ❌ `CompactionRoute`
+- ❌ `CompactionStrategy`
 - ❌ `ConsoleBackend`
+- ❌ `ContextBudgetResult`
+- ❌ `ContextCompactionPolicy`
+- ❌ `ContextCompactionPolicyProtocol`
 - ❌ `CustomToolUseEvent`
 - ❌ `DoomLoopDetector`
 - ❌ `ErrorContextProtocol`
@@ -743,6 +751,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `ToolsetRegistry`
 - ❌ `ToolsetSpec`
 - ❌ `configure_structured_logging`
+- ❌ `get_default_policy`
 - ❌ `get_logger`
 - ❌ `get_registry`
 - ❌ `get_tool`
