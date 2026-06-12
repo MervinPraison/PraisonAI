@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 import logging
@@ -66,7 +67,7 @@ class RateLimiter:
         self._config = config or RateLimitConfig()
         self._tokens = float(self._config.burst_size)
         self._last_refill = time.monotonic()
-        self._channel_last_send: Dict[str, float] = {}
+        self._channel_last_send: "OrderedDict[str, float]" = OrderedDict()
         self._lock = asyncio.Lock()
     
     @classmethod
@@ -88,6 +89,7 @@ class RateLimiter:
         Args:
             channel_id: Optional channel ID for per-channel limiting
         """
+        # Phase 1: under lock, compute waits + reserve token + update last_send.
         async with self._lock:
             now = time.monotonic()
             
@@ -99,25 +101,32 @@ class RateLimiter:
             )
             self._last_refill = now
             
-            # Wait for global token
+            global_wait = 0.0
             if self._tokens < 1.0:
-                wait_time = (1.0 - self._tokens) / self._config.messages_per_second
-                logger.debug(f"Rate limit: waiting {wait_time:.3f}s for global token")
-                await asyncio.sleep(wait_time)
-                self._tokens = 1.0
-            
-            # Consume token
+                global_wait = (1.0 - self._tokens) / self._config.messages_per_second
+                self._tokens = 1.0  # reserve one future token
+                # Move refill anchor forward to the reservation time so
+                # concurrent callers cannot reuse the same future interval.
+                self._last_refill = now + global_wait
             self._tokens -= 1.0
             
-            # Per-channel delay
+            channel_wait = 0.0
             if channel_id:
-                last_send = self._channel_last_send.get(channel_id, 0.0)
-                channel_elapsed = now - last_send
-                if channel_elapsed < self._config.per_channel_delay:
-                    wait_time = self._config.per_channel_delay - channel_elapsed
-                    logger.debug(f"Rate limit: waiting {wait_time:.3f}s for channel {channel_id}")
-                    await asyncio.sleep(wait_time)
-                self._channel_last_send[channel_id] = time.monotonic()
+                last = self._channel_last_send.pop(channel_id, 0.0)
+                projected_now = now + global_wait
+                elapsed = projected_now - last
+                if elapsed < self._config.per_channel_delay:
+                    channel_wait = self._config.per_channel_delay - elapsed
+                # LRU touch + bounded insertion
+                self._channel_last_send[channel_id] = projected_now + channel_wait
+                while len(self._channel_last_send) > 4096:
+                    self._channel_last_send.popitem(last=False)
+
+        # Phase 2: sleep OUTSIDE the lock so other channels proceed concurrently.
+        total_wait = global_wait + channel_wait
+        if total_wait > 0:
+            logger.debug(f"Rate limit: waiting {total_wait:.3f}s for channel {channel_id}")
+            await asyncio.sleep(total_wait)
     
     def reset(self) -> None:
         """Reset rate limiter state."""
