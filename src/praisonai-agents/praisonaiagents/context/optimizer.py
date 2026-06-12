@@ -4,11 +4,14 @@ Context Optimizer for PraisonAI Agents.
 Provides strategies for reducing context size when approaching limits.
 """
 
-from typing import Dict, List, Any, Optional
+import logging
+from typing import Dict, List, Any, Optional, Tuple
 from abc import ABC, abstractmethod
 from .models import ContextLedger, OptimizerStrategy, OptimizationResult
 from .tokens import estimate_messages_tokens, get_estimator
 from .compressor import ContextCompressor
+
+logger = logging.getLogger(__name__)
 
 
 class BaseOptimizer(ABC):
@@ -925,6 +928,127 @@ class SmartOptimizer(BaseOptimizer):
         )
 
 
+class ConversationOptimizer(BaseOptimizer):
+    """
+    Conversation-aware compaction optimizer using intelligent analysis.
+    
+    Uses conversation analysis to understand context and create
+    structured summaries that preserve conversation continuity.
+    Implements the conversation compaction strategy from AGENTS.md.
+    """
+    
+    def __init__(
+        self,
+        llm_analyze_fn: Optional[callable] = None,
+        min_compaction_ratio: float = 0.3,
+        analyzer_strategy: str = "hybrid",
+        preserve_recent: int = 5,
+        llm_summarize_fn: Optional[callable] = None,
+    ):
+        """
+        Initialize conversation optimizer.
+        
+        Args:
+            llm_analyze_fn: Optional LLM function for conversation analysis
+            min_compaction_ratio: Minimum compression ratio to attempt compaction
+            analyzer_strategy: Strategy for conversation analysis ("hybrid", "rule_based", "keyword")
+            preserve_recent: Number of recent messages to keep intact
+            llm_summarize_fn: Optional LLM function for summarization
+        """
+        self.llm_analyze_fn = llm_analyze_fn
+        self.min_compaction_ratio = min_compaction_ratio
+        self.analyzer_strategy = analyzer_strategy
+        self.preserve_recent = preserve_recent
+        self.llm_summarize_fn = llm_summarize_fn
+        
+        # Lazy load conversation implementations
+        self._analyzer = None
+        self._compactor = None
+    
+    def optimize(
+        self,
+        messages: List[Dict[str, Any]],
+        target_tokens: int,
+        ledger: Optional[ContextLedger] = None,
+    ) -> Tuple[List[Dict[str, Any]], OptimizationResult]:
+        """
+        Optimize using conversation-aware compaction.
+        
+        Args:
+            messages: Messages to optimize
+            target_tokens: Target token count
+            ledger: Optional context ledger (unused)
+            
+        Returns:
+            Tuple of (optimized_messages, OptimizationResult)
+        """
+        original_tokens = estimate_messages_tokens(messages)
+        
+        if original_tokens <= target_tokens:
+            return messages, OptimizationResult(
+                original_tokens=original_tokens,
+                optimized_tokens=original_tokens,
+                tokens_saved=0,
+                strategy_used=OptimizerStrategy.CONVERSATION,
+            )
+        
+        # Check if compaction ratio would be meaningful
+        target_ratio = target_tokens / original_tokens
+        if target_ratio > (1 - self.min_compaction_ratio):
+            # Not enough reduction needed, fall back to smart optimizer
+            fallback = SmartOptimizer(preserve_recent=self.preserve_recent)
+            return fallback.optimize(messages, target_tokens, ledger)
+        
+        try:
+            # Lazy load conversation components
+            if self._analyzer is None:
+                self._load_conversation_components()
+            
+            # Perform conversation compaction
+            compacted_messages, _ = self._compactor.compact_conversation(
+                messages=messages,
+                target_tokens=target_tokens,
+                preserve_recent=self.preserve_recent
+            )
+            
+            optimized_tokens = estimate_messages_tokens(compacted_messages)
+            
+            return compacted_messages, OptimizationResult(
+                original_tokens=original_tokens,
+                optimized_tokens=optimized_tokens,
+                tokens_saved=original_tokens - optimized_tokens,
+                strategy_used=OptimizerStrategy.CONVERSATION,
+                summary_added=len(compacted_messages) != len(messages),
+            )
+            
+        except Exception as e:
+            # Fall back to smart optimizer on any error
+            logger.warning(
+                "ConversationOptimizer compaction failed, falling back to SmartOptimizer: %s", 
+                str(e)
+            )
+            fallback = SmartOptimizer(preserve_recent=self.preserve_recent)
+            return fallback.optimize(messages, target_tokens, ledger)
+    
+    def _load_conversation_components(self):
+        """Lazy load conversation analysis and compaction components."""
+        # Import conversation implementations (lazy to avoid circular imports)
+        from .conversation import HybridConversationAnalyzer, IntelligentConversationCompactor
+        
+        # Initialize analyzer
+        self._analyzer = HybridConversationAnalyzer(
+            llm_analyze_fn=self.llm_analyze_fn,
+            fallback_strategy=self.analyzer_strategy if self.analyzer_strategy != "hybrid" else "rule_based"
+        )
+        
+        # Initialize compactor
+        self._compactor = IntelligentConversationCompactor(
+            analyzer=self._analyzer,
+            llm_summarize_fn=self.llm_summarize_fn,
+            min_compaction_ratio=self.min_compaction_ratio,
+        )
+
+
 # Strategy registry
 OPTIMIZER_REGISTRY: Dict[OptimizerStrategy, type] = {
     OptimizerStrategy.TRUNCATE: TruncateOptimizer,
@@ -932,6 +1056,7 @@ OPTIMIZER_REGISTRY: Dict[OptimizerStrategy, type] = {
     OptimizerStrategy.PRUNE_TOOLS: PruneToolsOptimizer,
     OptimizerStrategy.NON_DESTRUCTIVE: NonDestructiveOptimizer,
     OptimizerStrategy.SUMMARIZE: SummarizeOptimizer,
+    OptimizerStrategy.CONVERSATION: ConversationOptimizer,
     OptimizerStrategy.SMART: SmartOptimizer,
 }
 

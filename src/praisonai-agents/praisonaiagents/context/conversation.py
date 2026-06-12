@@ -16,7 +16,7 @@ import logging
 from typing import Dict, List, Any, Optional, Tuple, Set
 from dataclasses import dataclass
 
-from .protocols import ConversationAnalyzer, ConversationCompactor, ConversationContext
+from .protocols import ConversationAnalyzerProtocol, ConversationCompactorProtocol, ConversationContext
 from .tokens import estimate_messages_tokens, estimate_message_tokens
 
 
@@ -423,7 +423,7 @@ class IntelligentConversationCompactor:
     
     def __init__(
         self,
-        analyzer: ConversationAnalyzer,
+        analyzer: ConversationAnalyzerProtocol,
         llm_summarize_fn: Optional[callable] = None,
         min_compaction_ratio: float = 0.3,
         preserve_system_messages: bool = True,
@@ -551,7 +551,7 @@ class IntelligentConversationCompactor:
 def get_conversation_analyzer(
     strategy: str = "hybrid",
     llm_analyze_fn: Optional[callable] = None
-) -> ConversationAnalyzer:
+) -> ConversationAnalyzerProtocol:
     """
     Get conversation analyzer implementation.
     
@@ -560,7 +560,7 @@ def get_conversation_analyzer(
         llm_analyze_fn: Optional LLM function for analysis
         
     Returns:
-        ConversationAnalyzer implementation
+        ConversationAnalyzerProtocol implementation
     """
     if strategy == "hybrid" or strategy == "rule_based":
         return HybridConversationAnalyzer(
@@ -579,10 +579,10 @@ def get_conversation_analyzer(
 
 
 def get_conversation_compactor(
-    analyzer: ConversationAnalyzer,
+    analyzer: ConversationAnalyzerProtocol,
     llm_summarize_fn: Optional[callable] = None,
     min_compaction_ratio: float = 0.3
-) -> ConversationCompactor:
+) -> ConversationCompactorProtocol:
     """
     Get conversation compactor implementation.
     
@@ -592,7 +592,7 @@ def get_conversation_compactor(
         min_compaction_ratio: Minimum compression ratio
         
     Returns:
-        ConversationCompactor implementation
+        ConversationCompactorProtocol implementation
     """
     return IntelligentConversationCompactor(
         analyzer=analyzer,

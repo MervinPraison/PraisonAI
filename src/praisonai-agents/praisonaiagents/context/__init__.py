@@ -139,8 +139,10 @@ __all__ = [
     "cleanup_orphaned_parents",
     # Conversation Compaction (NEW)
     "ConversationContext",
-    "ConversationAnalyzer", 
-    "ConversationCompactor",
+    "ConversationAnalyzerProtocol", 
+    "ConversationCompactorProtocol",
+    "ConversationAnalyzer",  # backward compatibility
+    "ConversationCompactor",  # backward compatibility
     "HybridConversationAnalyzer",
     "IntelligentConversationCompactor",
     "get_conversation_analyzer",
@@ -248,6 +250,7 @@ def __getattr__(name: str):
     if name in ("ContextView", "ContextMutator", "ContextMessage",
                 "MessageMetadata", "MessageRole", "validate_message_schema",
                 "cleanup_orphaned_parents", "ConversationContext", 
+                "ConversationAnalyzerProtocol", "ConversationCompactorProtocol",
                 "ConversationAnalyzer", "ConversationCompactor"):
         from . import protocols
         return getattr(protocols, name)

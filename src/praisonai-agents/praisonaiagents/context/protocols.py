@@ -574,7 +574,7 @@ class ConversationContext:
 
 
 @runtime_checkable
-class ConversationAnalyzer(Protocol):
+class ConversationAnalyzerProtocol(Protocol):
     """
     Protocol for analyzing conversation messages to extract structured context.
     
@@ -608,7 +608,7 @@ class ConversationAnalyzer(Protocol):
 
 
 @runtime_checkable
-class ConversationCompactor(Protocol):
+class ConversationCompactorProtocol(Protocol):
     """
     Protocol for intelligent conversation compaction that preserves continuity.
     
@@ -645,16 +645,21 @@ class ConversationCompactor(Protocol):
 
 
 # Default implementation hint for lazy loading
-def get_conversation_analyzer(strategy: str = "hybrid") -> ConversationAnalyzer:
+def get_conversation_analyzer(strategy: str = "hybrid") -> ConversationAnalyzerProtocol:
     """Get conversation analyzer implementation (lazy loaded)."""
     # Implementation will be in manager.py to avoid circular imports
     raise NotImplementedError("Use get_conversation_analyzer from manager module")
 
 
 def get_conversation_compactor(
-    analyzer: ConversationAnalyzer,
+    analyzer: ConversationAnalyzerProtocol,
     llm_summarize_fn: Optional[callable] = None
-) -> ConversationCompactor:
+) -> ConversationCompactorProtocol:
     """Get conversation compactor implementation (lazy loaded)."""
     # Implementation will be in manager.py to avoid circular imports  
     raise NotImplementedError("Use get_conversation_compactor from manager module")
+
+
+# Backward compatibility aliases (deprecated)
+ConversationAnalyzer = ConversationAnalyzerProtocol
+ConversationCompactor = ConversationCompactorProtocol
