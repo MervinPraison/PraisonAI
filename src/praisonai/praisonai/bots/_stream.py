@@ -72,6 +72,7 @@ class ChannelStreamConsumer:
         self._state: Optional[StreamEditState] = None
         self._pending_edit_task: Optional[asyncio.Task] = None
         self._emitter: Optional["StreamEventEmitter"] = None
+        self._event_loop: Optional[asyncio.AbstractEventLoop] = None
         
         # Check if adapter supports editing
         self._supports_editing = hasattr(adapter, 'edit_message') and callable(adapter.edit_message)
@@ -97,6 +98,8 @@ class ChannelStreamConsumer:
             logger.debug("Streaming not supported for %s, falling back to blocking mode", self._platform)
             return
             
+        # Capture the current event loop for thread-safe scheduling
+        self._event_loop = asyncio.get_running_loop()
         self._emitter = emitter
         self._state = StreamEditState(message_id=placeholder_message_id)
         
@@ -148,7 +151,7 @@ class ChannelStreamConsumer:
     
     def _on_stream_event(self, event: "StreamEvent") -> None:
         """Handle incoming stream events (sync callback from agent thread)."""
-        if not self._state or self._state.is_finalized:
+        if not self._state or self._state.is_finalized or not self._event_loop:
             return
             
         # Import here to avoid circular imports
@@ -167,11 +170,16 @@ class ChannelStreamConsumer:
             time_since_last_edit = current_time - self._state.last_edit_time
             
             if time_since_last_edit >= self._edit_interval_ms:
-                # Schedule async edit from sync callback
-                asyncio.create_task(self._perform_edit())
+                # Schedule async edit from worker thread using thread-safe scheduling
+                try:
+                    self._event_loop.call_soon_threadsafe(
+                        self._schedule_edit_task
+                    )
+                except Exception as e:
+                    logger.debug("Failed to schedule edit from worker thread: %s", e)
     
-    async def _perform_edit(self) -> None:
-        """Perform the actual message edit with accumulated content."""
+    def _schedule_edit_task(self) -> None:
+        """Schedule a new edit task (called from event loop thread)."""
         if not self._state or self._state.is_finalized:
             return
             
@@ -179,9 +187,17 @@ class ChannelStreamConsumer:
         if self._pending_edit_task and not self._pending_edit_task.done():
             self._pending_edit_task.cancel()
             
+        # Create new edit task
+        self._pending_edit_task = asyncio.create_task(self._perform_edit())
+    
+    async def _perform_edit(self) -> None:
+        """Perform the actual message edit with accumulated content."""
+        if not self._state or self._state.is_finalized:
+            return
+            
         try:
-            self._pending_edit_task = asyncio.create_task(self._edit_with_content())
-            await self._pending_edit_task
+            # Direct await instead of nested task creation
+            await self._edit_with_content()
         except asyncio.CancelledError:
             pass
         except Exception as e:
