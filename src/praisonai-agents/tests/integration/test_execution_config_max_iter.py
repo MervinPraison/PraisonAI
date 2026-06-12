@@ -82,10 +82,9 @@ class TestExecutionConfigMaxIter:
             api_key="test-key"
         )
         
-        # Currently defaults to 10, should be aligned with ExecutionConfig default (20)
+        # Verifies alignment with ExecutionConfig default
         assert hasattr(llm, 'max_iter')
-        # This documents current behavior - will be fixed in implementation
-        assert llm.max_iter == 10  # TODO: Should be 20 to match ExecutionConfig
+        assert llm.max_iter == 20  # Default aligned with ExecutionConfig
     
     @patch('praisonaiagents.agent.agent.LLM')
     def test_agent_without_execution_config_uses_llm_default(self, MockLLM):

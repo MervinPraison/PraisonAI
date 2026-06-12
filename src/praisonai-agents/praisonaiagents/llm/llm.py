@@ -694,6 +694,9 @@ Respond with ONLY a valid JSON tool call in this format:
         decision = self.resolve_failover_decision(error, {"attempt": attempt, "max_retries": self._max_retries})
         return decision.reason, decision.is_retryable, decision.backoff_ms / 1000.0
     
+    # Backward compatibility alias for existing code
+    _classify_error_and_should_retry = _classify_error_and_should_retry_legacy
+    
     def classify_error_kind(self, error: Exception) -> AgentErrorKind:
         """
         Classify error into typed AgentErrorKind instead of freeform strings.
@@ -722,6 +725,13 @@ Respond with ONLY a valid JSON tool call in this format:
             "invalid_request_error", "openai_error"
         ]):
             return "auth"
+        
+        # Billing/quota issues (must be checked before generic 429/rate-limit)
+        if any(indicator in error_str for indicator in [
+            "insufficient quota", "quota exceeded", "billing", "credit",
+            "payment required", "subscription required", "plan limit"
+        ]):
+            return "billing"
         
         # Rate limiting 
         if any(indicator in error_str for indicator in [
@@ -758,13 +768,6 @@ Respond with ONLY a valid JSON tool call in this format:
             "server overloaded", "503", "502", "500"
         ]):
             return "overloaded"
-        
-        # Billing/quota issues
-        if any(indicator in error_str for indicator in [
-            "insufficient quota", "quota exceeded", "billing", "credit",
-            "payment required", "subscription required", "plan limit"
-        ]):
-            return "billing"
         
         # Timeout (potential idle timeout)
         if any(indicator in error_str for indicator in [

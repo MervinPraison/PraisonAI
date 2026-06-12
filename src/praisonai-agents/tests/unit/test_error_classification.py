@@ -260,7 +260,7 @@ class TestResolveFailoverDecision:
     
     def test_non_retryable_errors_surface_immediately(self):
         """Test that non-retryable errors surface immediately."""
-        non_retryable_kinds = ["auth_permanent", "model_not_found", "format_error"]
+        non_retryable_kinds = ["auth_permanent", "model_not_found", "format_error", "billing"]
         
         for kind in non_retryable_kinds:
             with patch.object(self.llm, 'classify_error_kind', return_value=kind):
@@ -355,8 +355,8 @@ class TestResolveFailoverDecision:
             
             assert decision.action == "retry"
             assert decision.reason == "overloaded"
-            # Should have exponential backoff: 2^(2-1) = 2 seconds * 1000 = 2000ms
-            assert decision.backoff_ms == 2000
+            # Formula: 2000 * (2 ** (attempt - 1)); attempt=2 → 2000 * 2 = 4000ms
+            assert decision.backoff_ms == 4000
             assert decision.is_retryable is True
     
     def test_unknown_errors_retry_within_limit(self):
