@@ -5,10 +5,10 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 358,
+    "pythonCoreFeatures": 359,
     "rustFeatures": 667,
-    "gapCount": 79,
-    "parityPercentage": 186.3
+    "gapCount": 80,
+    "parityPercentage": 185.8
   },
   "pythonCoreSDK": {
     "exports": [
@@ -133,6 +133,7 @@
       "HandoffInputData",
       "HandoffResult",
       "HandoffTimeoutError",
+      "HandoffToolPolicy",
       "Heartbeat",
       "HeartbeatConfig",
       "HookPluginProtocol",
@@ -1989,6 +1990,15 @@
         "priority": "P0",
         "effort": "low",
         "status": "DONE",
+        "category": "agent"
+      },
+      {
+        "feature": "HandoffToolPolicy",
+        "python": true,
+        "rust": false,
+        "priority": "P0",
+        "effort": "high",
+        "status": "TODO",
         "category": "agent"
       },
       {

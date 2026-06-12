@@ -4,11 +4,11 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 358,
+    "pythonCoreFeatures": 359,
     "pythonWrapperFeatures": 99,
     "typescriptFeatures": 1192,
-    "gapCount": 66,
-    "priorityP0": 1,
+    "gapCount": 67,
+    "priorityP0": 2,
     "priorityP1": 0,
     "priorityP2": 0,
     "priorityP3": 65
@@ -137,6 +137,7 @@
       "HandoffInputData",
       "HandoffResult",
       "HandoffTimeoutError",
+      "HandoffToolPolicy",
       "Heartbeat",
       "HeartbeatConfig",
       "HookPluginProtocol",
@@ -396,6 +397,7 @@
         "HandoffConfig",
         "HandoffInputData",
         "HandoffResult",
+        "HandoffToolPolicy",
         "ImageAgent",
         "MCPCall",
         "OCRAgent",
@@ -3105,6 +3107,15 @@
         "priority": "P0",
         "effort": "low",
         "status": "DONE",
+        "category": "agent"
+      },
+      {
+        "feature": "HandoffToolPolicy",
+        "python": true,
+        "typescript": false,
+        "priority": "P0",
+        "effort": "high",
+        "status": "TODO",
         "category": "agent"
       },
       {
