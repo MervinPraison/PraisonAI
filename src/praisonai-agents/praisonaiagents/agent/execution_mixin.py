@@ -1397,8 +1397,12 @@ Write the complete compiled report:"""
             if hasattr(hook_runner, 'execute_async'):
                 await hook_runner.execute_async(HookEvent.ON_RETRY, retry_input, target=tool_name)
             else:
-                # Fallback to sync execution
-                hook_runner.execute_sync(HookEvent.ON_RETRY, retry_input, target=tool_name)
+                # Fallback to sync execution in executor to avoid blocking event loop
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(
+                    None,
+                    lambda: hook_runner.execute_sync(HookEvent.ON_RETRY, retry_input, target=tool_name)
+                )
             
         except Exception as e:
             # Don't let hook failures break retry logic

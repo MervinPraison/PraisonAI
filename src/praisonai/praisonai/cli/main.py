@@ -1095,6 +1095,16 @@ class PraisonAI:
         parser.add_argument("--tool-timeout", type=int, default=60,
                           help="Timeout in seconds for each tool call (default: 60)")
         
+        # Tool retry policy - handle transient failures with exponential backoff
+        parser.add_argument("--tool-retry-attempts", type=int, default=3,
+                          help="Maximum retry attempts for tool failures (default: 3)")
+        parser.add_argument("--tool-retry-delay", type=int, default=1000,
+                          help="Initial retry delay in milliseconds (default: 1000)")
+        parser.add_argument("--tool-retry-backoff", type=float, default=2.0,
+                          help="Retry backoff multiplier (default: 2.0)")
+        parser.add_argument("--tool-retry-on", type=str, default="timeout,rate_limit,connection_error",
+                          help="Error types to retry (comma-separated, default: timeout,rate_limit,connection_error)")
+        
         # Tool Approval - control tool execution approval
         parser.add_argument("--trust", action="store_true", help="Auto-approve all tool executions (skip approval prompts)")
         parser.add_argument("--approve-level", type=str, choices=["low", "medium", "high", "critical"], 
@@ -4141,6 +4151,22 @@ Do NOT add any explanations or formatting."""
         tool_timeout = getattr(self.args, 'tool_timeout', None)
         if tool_timeout is not None:
             cli_config['tool_timeout'] = tool_timeout
+        
+        # Extract --tool-retry-* flags for retry policy
+        retry_attempts = getattr(self.args, 'tool_retry_attempts', 3)
+        retry_delay = getattr(self.args, 'tool_retry_delay', 1000)
+        retry_backoff = getattr(self.args, 'tool_retry_backoff', 2.0)
+        retry_on_str = getattr(self.args, 'tool_retry_on', "timeout,rate_limit,connection_error")
+        retry_on = set(error_type.strip() for error_type in retry_on_str.split(',') if error_type.strip())
+        
+        if retry_attempts > 1:  # Only create retry policy if retries are enabled
+            from praisonaiagents.tools.retry import RetryPolicy
+            cli_config['tool_retry_policy'] = RetryPolicy(
+                max_attempts=retry_attempts,
+                initial_delay_ms=retry_delay,
+                backoff_factor=retry_backoff,
+                retry_on=retry_on
+            )
             
         # Extract --planning-tools flag
         planning_tools = getattr(self.args, 'planning_tools', None)
@@ -4398,6 +4424,22 @@ Do NOT add any explanations or formatting."""
                 tool_timeout = getattr(self.args, 'tool_timeout', 60)
                 if tool_timeout and tool_timeout > 0:
                     agent_config["tool_timeout"] = tool_timeout
+                
+                # Tool retry policy - handle transient failures with exponential backoff
+                retry_attempts = getattr(self.args, 'tool_retry_attempts', 3)
+                retry_delay = getattr(self.args, 'tool_retry_delay', 1000)
+                retry_backoff = getattr(self.args, 'tool_retry_backoff', 2.0)
+                retry_on_str = getattr(self.args, 'tool_retry_on', "timeout,rate_limit,connection_error")
+                retry_on = set(error_type.strip() for error_type in retry_on_str.split(',') if error_type.strip())
+                
+                if retry_attempts > 1:  # Only create retry policy if retries are enabled
+                    from praisonaiagents.tools.retry import RetryPolicy
+                    agent_config["tool_retry_policy"] = RetryPolicy(
+                        max_attempts=retry_attempts,
+                        initial_delay_ms=retry_delay,
+                        backoff_factor=retry_backoff,
+                        retry_on=retry_on
+                    )
                 
                 # Memory
                 if getattr(self.args, 'memory', False):

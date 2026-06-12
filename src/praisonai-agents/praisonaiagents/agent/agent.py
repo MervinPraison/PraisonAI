@@ -252,6 +252,7 @@ if TYPE_CHECKING:
     from .handoff import Handoff, HandoffConfig, HandoffResult
     from ..rag.models import RAGResult, ContextPack
     from ..eval.results import EvaluationLoopResult
+    from ..tools.retry import RetryPolicy
 
 # Import structured error from central errors module
 from ..errors import BudgetExceededError
@@ -2115,6 +2116,7 @@ Your Goal: {self.goal}
             
             # Tool configuration
             'tool_timeout': getattr(self, '_tool_timeout', None),
+            'tool_retry_policy': getattr(self, '_tool_retry_policy', None),
             'parallel_tool_calls': getattr(self, 'parallel_tool_calls', False),
             
             # CLI backend

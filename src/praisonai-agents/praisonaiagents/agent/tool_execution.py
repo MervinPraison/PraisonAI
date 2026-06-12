@@ -782,13 +782,13 @@ class ToolExecutionMixin:
                 
                 # Check if retryable and not last attempt
                 if not is_retryable or attempt == retry_policy.max_attempts - 1:
-                    raise wrapped_error
+                    raise wrapped_error from e
                 
                 # Determine error type  
                 error_type = self._classify_error_type(None, wrapped_error)
                 
                 if not retry_policy.should_retry(error_type, attempt):
-                    raise wrapped_error
+                    raise wrapped_error from e
                 
                 # Emit retry hook event
                 delay_ms = retry_policy.get_delay_ms(attempt)
@@ -1227,7 +1227,11 @@ class ToolExecutionMixin:
         from ..tools.retry import RetryPolicy
         
         # Check for tool-level retry policy first
-        for tool in getattr(self, 'tools', []):
+        tools = getattr(self, 'tools', [])
+        # Handle non-iterable tools (e.g., single MCP instance)
+        if not isinstance(tools, (list, tuple)):
+            tools = []  # MCP or single tool instance - no tool-level policy lookup
+        for tool in tools:
             if (callable(tool) and 
                 getattr(tool, '__name__', '') == tool_name and
                 hasattr(tool, 'retry_policy')):
