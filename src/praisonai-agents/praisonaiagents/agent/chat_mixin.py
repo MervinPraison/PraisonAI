@@ -1280,6 +1280,45 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             return messages, None
         
         try:
+            # First check if compression will be needed
+            self.context_manager._ledger.reset()
+            if system_prompt:
+                self.context_manager._ledger.track_system_prompt(system_prompt)
+            if tools:
+                self.context_manager._ledger.track_tools(tools or [])
+            self.context_manager._ledger.track_history(messages)
+            
+            utilization = self.context_manager._ledger.get_utilization()
+            needs_optimization = utilization >= self.context_manager.config.compact_threshold
+            
+            # Only call on_pre_compress hook when compression will actually occur
+            if needs_optimization and self._memory_instance:
+                try:
+                    # Try async version first if in async context, fallback to sync
+                    import asyncio
+                    summary = ""
+                    try:
+                        loop = asyncio.get_running_loop()
+                        # In async context - run async hook if available
+                        if hasattr(self._memory_instance, 'aon_pre_compress'):
+                            # Schedule async hook without blocking
+                            task = asyncio.create_task(self._memory_instance.aon_pre_compress(messages))
+                            # For now, we'll run sync hook to avoid blocking
+                            # TODO: Make this method async-aware or run async hook in background
+                            if hasattr(self._memory_instance, 'on_pre_compress'):
+                                summary = self._memory_instance.on_pre_compress(messages)
+                        elif hasattr(self._memory_instance, 'on_pre_compress'):
+                            summary = self._memory_instance.on_pre_compress(messages)
+                    except RuntimeError:
+                        # Not in async context - use sync hook
+                        if hasattr(self._memory_instance, 'on_pre_compress'):
+                            summary = self._memory_instance.on_pre_compress(messages)
+                    
+                    if summary:
+                        logging.debug(f"[{self.name}] Memory provider extracted: {summary[:100]}...")
+                except Exception as e:
+                    logging.warning(f"[{self.name}] Memory on_pre_compress hook failed: {e}")
+            
             # Process through context manager
             result = self.context_manager.process(
                 messages=messages,

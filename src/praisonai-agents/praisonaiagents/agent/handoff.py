@@ -432,6 +432,20 @@ class Handoff:
             # Execute on_complete callback
             self._execute_callback(self.config.on_complete, source_agent, kwargs, result)
             
+            # Call on_delegation hook on source agent's memory
+            if (hasattr(source_agent, '_memory_instance') and 
+                source_agent._memory_instance and
+                hasattr(source_agent._memory_instance, 'on_delegation')):
+                try:
+                    source_agent._memory_instance.on_delegation(
+                        task=full_prompt,
+                        result=result.response or "",
+                        agent_name=self.agent.name,
+                        metadata={"handoff_depth": result.handoff_depth}
+                    )
+                except Exception as e:
+                    logger.warning(f"[{source_agent.name}] Memory on_delegation hook failed: {e}")
+            
             return result
             
         except (HandoffCycleError, HandoffDepthError, HandoffTimeoutError) as e:
@@ -514,7 +528,7 @@ class Handoff:
                     loop = asyncio.get_event_loop()
                     response = await loop.run_in_executor(None, self.agent.chat, full_prompt)
                 
-                return HandoffResult(
+                result = HandoffResult(
                     success=True,
                     response=str(response) if response else "",
                     target_agent=self.agent.name,
@@ -522,6 +536,22 @@ class Handoff:
                     duration_seconds=time.time() - start_time,
                     handoff_depth=_get_handoff_depth(),
                 )
+                
+                # Call on_delegation hook on source agent's memory
+                if (hasattr(source_agent, '_memory_instance') and 
+                    source_agent._memory_instance and
+                    hasattr(source_agent._memory_instance, 'on_delegation')):
+                    try:
+                        source_agent._memory_instance.on_delegation(
+                            task=full_prompt,
+                            result=result.response or "",
+                            agent_name=self.agent.name,
+                            metadata={"handoff_depth": result.handoff_depth}
+                        )
+                    except Exception as e:
+                        logger.warning(f"[{source_agent.name}] Memory on_delegation hook failed: {e}")
+                
+                return result
             finally:
                 _pop_handoff()
         
@@ -639,6 +669,20 @@ class Handoff:
                         handoff_depth=_get_handoff_depth(),
                     )
                     self._execute_callback(self.config.on_complete, source_agent, kwargs, result)
+                    
+                    # Call on_delegation hook on source agent's memory
+                    if (hasattr(source_agent, '_memory_instance') and 
+                        source_agent._memory_instance and
+                        hasattr(source_agent._memory_instance, 'on_delegation')):
+                        try:
+                            source_agent._memory_instance.on_delegation(
+                                task=prompt,
+                                result=result.response or "",
+                                agent_name=self.agent.name,
+                                metadata={"handoff_depth": result.handoff_depth}
+                            )
+                        except Exception as e:
+                            logger.warning(f"[{source_agent.name}] Memory on_delegation hook failed: {e}")
                     
                     return f"Handoff successful. {self.agent.name} response: {response}"
                 

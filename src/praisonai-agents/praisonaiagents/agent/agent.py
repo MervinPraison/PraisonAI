@@ -4245,33 +4245,95 @@ Summary:"""
         
         return ""
     
-    def store_memory(self, content: str, memory_type: str = "short_term", **kwargs: Any) -> None:
+    def store_memory(self, content: str, memory_type: str = "short_term", action: str = "add", **kwargs: Any) -> None:
         """
         Store content in memory.
         
         Args:
             content: Content to store
             memory_type: Type of memory (short_term, long_term, entity, episodic)
+            action: Type of operation ("add", "replace", "remove")
             **kwargs: Additional arguments for the memory method
         """
         if not self._memory_instance:
             return
         
-        # Use protocol names first (store_*), fallback to legacy names (add_*)
-        if memory_type == "short_term":
-            if hasattr(self._memory_instance, 'store_short_term'):
-                self._memory_instance.store_short_term(content, **kwargs)
-            elif hasattr(self._memory_instance, 'add_short_term'):
-                self._memory_instance.add_short_term(content, **kwargs)
-        elif memory_type == "long_term":
-            if hasattr(self._memory_instance, 'store_long_term'):
-                self._memory_instance.store_long_term(content, **kwargs)
-            elif hasattr(self._memory_instance, 'add_long_term'):
-                self._memory_instance.add_long_term(content, **kwargs)
-        elif memory_type == "entity" and hasattr(self._memory_instance, 'add_entity'):
-            self._memory_instance.add_entity(content, **kwargs)
-        elif memory_type == "episodic" and hasattr(self._memory_instance, 'add_episodic'):
-            self._memory_instance.add_episodic(content, **kwargs)
+        # Validate memory_type
+        supported_types = ["short_term", "long_term", "entity", "episodic"]
+        if memory_type not in supported_types:
+            raise ValueError(f"Unsupported memory_type '{memory_type}'. Supported: {supported_types}")
+        
+        # Perform the actual storage operation first
+        storage_success = False
+        try:
+            if action == "add":
+                # Use protocol names first (store_*), fallback to legacy names (add_*)
+                if memory_type == "short_term":
+                    if hasattr(self._memory_instance, 'store_short_term'):
+                        self._memory_instance.store_short_term(content, **kwargs)
+                        storage_success = True
+                    elif hasattr(self._memory_instance, 'add_short_term'):
+                        self._memory_instance.add_short_term(content, **kwargs)
+                        storage_success = True
+                elif memory_type == "long_term":
+                    if hasattr(self._memory_instance, 'store_long_term'):
+                        self._memory_instance.store_long_term(content, **kwargs)
+                        storage_success = True
+                    elif hasattr(self._memory_instance, 'add_long_term'):
+                        self._memory_instance.add_long_term(content, **kwargs)
+                        storage_success = True
+                elif memory_type == "entity" and hasattr(self._memory_instance, 'add_entity'):
+                    self._memory_instance.add_entity(content, **kwargs)
+                    storage_success = True
+                elif memory_type == "episodic" and hasattr(self._memory_instance, 'add_episodic'):
+                    self._memory_instance.add_episodic(content, **kwargs)
+                    storage_success = True
+            elif action == "replace":
+                # For replace operations - look for replace_ or update_ methods
+                method_name = f"replace_{memory_type}" if hasattr(self._memory_instance, f'replace_{memory_type}') else f"update_{memory_type}"
+                if hasattr(self._memory_instance, method_name):
+                    getattr(self._memory_instance, method_name)(content, **kwargs)
+                    storage_success = True
+                else:
+                    raise ValueError(f"Memory provider does not support 'replace' for {memory_type}")
+            elif action == "remove":
+                # For remove operations - look for remove_ or delete_ methods  
+                method_name = f"remove_{memory_type}" if hasattr(self._memory_instance, f'remove_{memory_type}') else f"delete_{memory_type}"
+                if hasattr(self._memory_instance, method_name):
+                    getattr(self._memory_instance, method_name)(content, **kwargs)
+                    storage_success = True
+                else:
+                    raise ValueError(f"Memory provider does not support 'remove' for {memory_type}")
+            else:
+                raise ValueError(f"Unsupported action '{action}'. Supported: add, replace, remove")
+                
+            if not storage_success:
+                raise ValueError(f"Memory provider does not support {memory_type} storage")
+                
+        except Exception as e:
+            logging.warning(f"[{self.name}] Memory storage failed: {e}")
+            raise
+        
+        # Only call on_memory_write hook AFTER successful storage
+        if storage_success:
+            try:
+                metadata = kwargs.get('metadata', None)
+                # Try async version first if in async context, fallback to sync
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                    # In async context - prefer async hook if available
+                    if hasattr(self._memory_instance, 'aon_memory_write'):
+                        # Schedule async hook without blocking (fire and forget)
+                        asyncio.create_task(self._memory_instance.aon_memory_write(action, memory_type, content, metadata))
+                    elif hasattr(self._memory_instance, 'on_memory_write'):
+                        self._memory_instance.on_memory_write(action, memory_type, content, metadata)
+                except RuntimeError:
+                    # Not in async context - use sync hook
+                    if hasattr(self._memory_instance, 'on_memory_write'):
+                        self._memory_instance.on_memory_write(action, memory_type, content, metadata)
+            except Exception as e:
+                logging.warning(f"[{self.name}] Memory on_memory_write hook failed: {e}")
     
     def _display_memory_info(self):
         """Display memory information to user in a friendly format."""
