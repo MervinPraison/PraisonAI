@@ -75,7 +75,7 @@ Methods:
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">run_until</a>(prompt: str, criteria: str, threshold: float = 8.0, max_iterations: int = 5, mode: str = 'optimize', on_iteration: Optional[Callable[[Any], None]] = None, verbose: bool = False) -> 'EvaluationLoopResult'</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">run_until_async</a>(prompt: str, criteria: str, threshold: float = 8.0, max_iterations: int = 5, mode: str = 'optimize', on_iteration: Optional[Callable[[Any], None]] = None, verbose: bool = False) -> 'EvaluationLoopResult'</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">skill_manager</a>() -> Optional[Any]</code>
-* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">store_memory</a>(content: str, memory_type: str = 'short_term', **kwargs: Any) -> None</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">store_memory</a>(content: str, memory_type: str = 'short_term', action: str = 'add', **kwargs: Any) -> None</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">stream_emitter</a>() -> Optional[Any]</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">stream_emitter</a>(value: Optional[Any]) -> None</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">thinking_budget</a>() -> Optional[int]</code>
