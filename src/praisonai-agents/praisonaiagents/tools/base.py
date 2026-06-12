@@ -17,6 +17,7 @@ Usage:
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Type, get_type_hints
 import inspect
+import json
 import logging
 
 
@@ -441,7 +442,6 @@ def get_sorted_tool_schemas(tools: List[Any]) -> List[Dict[str, Any]]:
     # First validate all tools (reuse existing validation logic)
     validate_tool_schema_consistency(tools)
     
-    import json
     from .decorator import get_tool_schema
     schemas = []
     

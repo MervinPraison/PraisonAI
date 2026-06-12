@@ -19,7 +19,6 @@ def test_memory_stable_sorting():
     """Test that memory context is assembled deterministically."""
     print("Testing memory stable sorting...")
     
-    # Test the sorting function directly
     from praisonaiagents.memory.memory import Memory
     
     # Create test data that simulates memory search results
@@ -29,42 +28,46 @@ def test_memory_stable_sorting():
         {"text": "Third memory", "timestamp": 1500, "id": "3"}
     ]
     
-    # Create a memory instance and manually test the sorting function
-    # by calling the internal method we added
+    # Create a memory instance and stub the search methods to return controlled data
     memory = Memory(config={})
     
-    # We need to access the internal sorting function defined in build_context_for_task
-    # For testing, let's just verify the sorting logic manually
-    def _sort_memory_results(results):
-        """Same logic as implemented in memory.py"""
-        if not results:
-            return results
+    # Mock the search methods to return our test data
+    original_search_short = memory.search_short_term
+    original_search_long = memory.search_long_term
+    original_search_entity = memory.search_entity
+    original_search_user = memory.search_user_memory
+    
+    try:
+        memory.search_short_term = lambda q, limit=3: test_results.copy()
+        memory.search_long_term = lambda q, limit=3: []
+        memory.search_entity = lambda q, limit=3: []
+        memory.search_user_memory = lambda user_id, q, limit=3: []
         
-        def sort_key(r):
-            timestamp = -(r.get("timestamp") or 0) if isinstance(r, dict) else 0
-            content = r.get("text", "") if isinstance(r, dict) else str(r)
-            content_hash = content[:50] if content else ""
-            return (timestamp, content_hash)
+        # Test multiple runs produce identical context strings
+        context1 = memory.build_context_for_task("test task", include_in_output=True)
+        context2 = memory.build_context_for_task("test task", include_in_output=True)
         
-        return sorted(results, key=sort_key)
-    
-    # Test multiple runs produce identical results
-    sorted1 = _sort_memory_results(test_results.copy())
-    sorted2 = _sort_memory_results(test_results.copy())
-    
-    assert sorted1 == sorted2, "Memory sorting should be deterministic"
-    
-    # Verify the sort order is correct (newest first, then by content)
-    expected_order = ["Second memory", "Third memory", "First memory"]  # 2000, 1500, 1000
-    actual_order = [r["text"] for r in sorted1]
-    assert actual_order == expected_order, f"Expected {expected_order}, got {actual_order}"
-    
-    print("✓ Memory sorting function is deterministic")
+        assert context1 == context2, "Memory context should be deterministic"
+        
+        # Verify the order is correct in the actual context (newest first)
+        lines = context1.split('\n')
+        second_idx = next((i for i, line in enumerate(lines) if "Second memory" in line), -1)
+        third_idx = next((i for i, line in enumerate(lines) if "Third memory" in line), -1) 
+        first_idx = next((i for i, line in enumerate(lines) if "First memory" in line), -1)
+        
+        assert second_idx < third_idx < first_idx, "Memory should be ordered newest first"
+        print("✓ Memory context is deterministic and correctly ordered")
+        
+    finally:
+        # Restore original methods
+        memory.search_short_term = original_search_short
+        memory.search_long_term = original_search_long
+        memory.search_entity = original_search_entity
+        memory.search_user_memory = original_search_user
     
     # Test cache boundary constants are available
-    from praisonaiagents.memory.memory import CACHE_BOUNDARY, STABLE_SECTION_ORDER
+    from praisonaiagents.memory.memory import CACHE_BOUNDARY
     assert CACHE_BOUNDARY is not None, "CACHE_BOUNDARY should be defined"
-    assert STABLE_SECTION_ORDER is not None, "STABLE_SECTION_ORDER should be defined"
     print("✓ Cache boundary constants are available")
 
 def test_tool_schema_sorting():
@@ -116,10 +119,26 @@ def test_cache_boundary_markers():
     assert len(CACHE_BOUNDARY) > 0
     print("✓ Cache boundary constant is defined")
     
-    # Verify the method exists
+    # Test the cache-optimized context method actually works
     memory = Memory(config={})
-    assert hasattr(memory, 'build_cache_optimized_context'), "build_cache_optimized_context method should exist"
-    print("✓ Cache optimization method exists")
+    
+    # Mock search methods to return empty results for simpler test
+    memory.search_short_term = lambda q, limit=3: []
+    memory.search_long_term = lambda q, limit=3: []
+    memory.search_entity = lambda q, limit=3: []
+    memory.search_user_memory = lambda user_id, q, limit=3: []
+    
+    # Test with cache boundary enabled
+    result = memory.build_cache_optimized_context("test task", include_cache_boundary=True, include_in_output=True)
+    assert "stable_prefix" in result, "Result should have stable_prefix"
+    assert "cache_boundary" in result, "Result should have cache_boundary"
+    assert result["cache_boundary"] == CACHE_BOUNDARY, "Cache boundary should match constant"
+    
+    # Test with cache boundary disabled
+    result2 = memory.build_cache_optimized_context("test task", include_cache_boundary=False, include_in_output=True)
+    assert result2["cache_boundary"] == "", "Cache boundary should be empty when disabled"
+    
+    print("✓ Cache optimization method works correctly")
 
 if __name__ == "__main__":
     try:

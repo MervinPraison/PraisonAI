@@ -30,7 +30,6 @@ TRACE_LEVEL = 5
 logging.addLevelName(TRACE_LEVEL, 'TRACE')
 
 # Cache boundary constants for prompt prefix caching optimization
-STABLE_SECTION_ORDER = ["system", "rules", "skills", "memory", "tools"]
 CACHE_BOUNDARY = "\n\n<!-- CACHE_BOUNDARY -->\n\n"
 
 
@@ -1712,15 +1711,27 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
         # Sort by timestamp descending, then by content hash for stable ordering
         def _sort_memory_results(results: List[Any]) -> List[Any]:
             """Stable sort so identical query sets produce identical context strings."""
+            import hashlib
             if not results:
                 return results
             
             def sort_key(r):
-                # Extract timestamp (negative for descending order)
-                timestamp = -(r.get("timestamp") or 0) if isinstance(r, dict) else 0
-                # Use content hash as secondary sort key for stable ordering
+                if not isinstance(r, dict):
+                    return (0.0, hashlib.sha256(str(r).encode()).hexdigest())
+                
+                # Prefer created_at over timestamp for better determinism
+                timestamp = r.get("created_at") or r.get("timestamp") or 0
+                if isinstance(timestamp, str):
+                    try:
+                        from datetime import datetime
+                        timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).timestamp()
+                    except ValueError:
+                        timestamp = 0.0
+                timestamp = -(float(timestamp))  # Negative for descending order
+                
+                # Use full content hash for true deterministic ordering
                 content = r.get("text", "") if isinstance(r, dict) else str(r)
-                content_hash = content[:50] if content else ""  # First 50 chars for stability
+                content_hash = hashlib.sha256(content.encode()).hexdigest()
                 return (timestamp, content_hash)
             
             return sorted(results, key=sort_key)
@@ -1767,6 +1778,10 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
         Returns:
             Dict with 'stable_prefix' and 'cache_boundary' keys
         """
+        # Cache-optimized API should include stable content unless explicitly disabled
+        if include_in_output is None:
+            include_in_output = True
+            
         # Build the stable context using existing method
         stable_context = self.build_context_for_task(
             task_descr=task_descr,
@@ -1778,10 +1793,7 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
         
         result = {"stable_prefix": stable_context}
         
-        if include_cache_boundary:
-            result["cache_boundary"] = CACHE_BOUNDARY
-        else:
-            result["cache_boundary"] = ""
+        result["cache_boundary"] = CACHE_BOUNDARY if include_cache_boundary else ""
             
         return result
 
