@@ -5,12 +5,12 @@ Demonstrates web search with consolidated params.
 Presets: duckduckgo, tavily, google, bing, serper, search_only, fetch_only
 """
 
-from praisonaiagents import Agent
+from praisonaiagents import Agent, WebConfig
 
-# Basic: Enable web search with preset
+# Basic: Enable web search with preset (search only — fetch needs Claude)
 agent = Agent(
     instructions="You are a research assistant with web access.",
-    web="duckduckgo",  # Presets: duckduckgo, tavily, google, bing, serper
+    web=WebConfig(search=True, fetch=False, search_provider="duckduckgo"),
 )
 
 if __name__ == "__main__":
