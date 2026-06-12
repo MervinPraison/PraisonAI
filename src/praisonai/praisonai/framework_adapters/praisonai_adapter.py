@@ -218,7 +218,7 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             
             # Close observability session
             from ..observability.hooks import finalize_observability
-            finalize_observability(self.name)
+            finalize_observability(self.name, status="Success")
             
             logger.info("PraisonAI execution completed")
             return result
@@ -398,7 +398,7 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             
             # Close observability session
             from ..observability.hooks import finalize_observability
-            finalize_observability(self.name)
+            finalize_observability(self.name, status="Success")
             
             logger.info("PraisonAI async execution completed")
             return result

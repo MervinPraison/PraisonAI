@@ -28,7 +28,7 @@ def init_observability(framework_tag: str, *, tags: Optional[List[str]] = None) 
     # _init_wandb(framework_tag, tags)
 
 
-def finalize_observability(framework_tag: str, *, status: str = "Success") -> None:
+def finalize_observability(_framework_tag: str, *, status: str = "Success") -> None:
     """
     Close observability providers (AgentOps, etc.) if available.
 
@@ -37,7 +37,7 @@ def finalize_observability(framework_tag: str, *, status: str = "Success") -> No
     telemetry must never crash a user run.
     
     Args:
-        framework_tag: Framework name for context (not currently used but available for future)
+        _framework_tag: Framework name for context (reserved for future observability providers)
         status: Session status ("Success", "Failure", etc.)
     """
     _end_agentops(status)

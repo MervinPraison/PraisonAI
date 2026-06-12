@@ -189,7 +189,7 @@ class CrewAIAdapter(BaseFrameworkAdapter):
             
             # Close observability session
             from ..observability.hooks import finalize_observability
-            finalize_observability(self.name)
+            finalize_observability(self.name, status="Success")
                 
             return result
     
