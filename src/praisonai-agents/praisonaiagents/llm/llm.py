@@ -406,7 +406,7 @@ Respond with ONLY a valid JSON tool call in this format:
         self.claude_memory = claude_memory
         self._claude_memory_tool = None  # Lazy initialized
         self._console = None  # Lazy load console when needed
-        self.max_iter = max_iter or 10  # Default to 10 if not specified
+        self.max_iter = max_iter or 20  # Default to 20 to match ExecutionConfig default
         self._idle_timeout_breaker = IdleTimeoutBreaker()  # Circuit breaker for idle timeouts
         self.chat_history = []
         self.verbose = extra_settings.get('verbose', True)
@@ -668,14 +668,13 @@ Respond with ONLY a valid JSON tool call in this format:
             'ratelimit',
             'too many request',
             'resource_exhausted',
-            'quota exceeded',
             'tokens per minute',
         ]
 
         return any(indicator in error_str or indicator in error_type for indicator in indicators)
 
-    def _classify_error_and_should_retry(self, error: Exception, attempt: int = 1) -> tuple[str, bool, float]:
-        """Classify error and determine retry strategy using G5 error classifier.
+    def _classify_error_and_should_retry_legacy(self, error: Exception, attempt: int = 1) -> tuple[str, bool, float]:
+        """Legacy error classification - deprecated, use resolve_failover_decision() instead.
         
         Args:
             error: Exception to classify
@@ -684,30 +683,19 @@ Respond with ONLY a valid JSON tool call in this format:
         Returns:
             Tuple of (category, should_retry, retry_delay)
         """
-        try:
-            from .error_classifier import classify_error, should_retry, get_retry_delay, extract_retry_after
-            
-            category = classify_error(error)
-            can_retry = should_retry(category)
-            
-            if not can_retry:
-                return category.value, False, 0.0
-            
-            # For rate limits, try to extract specific retry-after first
-            if category.value == "rate_limit":
-                retry_after = extract_retry_after(error)
-                if retry_after:
-                    return category.value, True, retry_after
-            
-            # Use category-specific delay calculation with proper attempt
-            delay = get_retry_delay(category, attempt=attempt, base_delay=self._retry_delay)
-            return category.value, True, delay
-            
-        except ImportError:
-            # Fallback to legacy rate limit detection
-            is_rate_limit = self._is_rate_limit_error(error)
-            delay = self._parse_retry_delay(str(error)) if is_rate_limit else 0.0
-            return "rate_limit" if is_rate_limit else "unknown", is_rate_limit, delay
+        import warnings
+        warnings.warn(
+            "_classify_error_and_should_retry is deprecated, use resolve_failover_decision() instead",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        
+        # Delegate to new typed classification system
+        decision = self.resolve_failover_decision(error, {"attempt": attempt, "max_retries": self._max_retries})
+        return decision.reason, decision.is_retryable, decision.backoff_ms / 1000.0
+    
+    # Backward compatibility alias for existing code
+    _classify_error_and_should_retry = _classify_error_and_should_retry_legacy
     
     def classify_error_kind(self, error: Exception) -> AgentErrorKind:
         """
@@ -737,6 +725,13 @@ Respond with ONLY a valid JSON tool call in this format:
             "invalid_request_error", "openai_error"
         ]):
             return "auth"
+        
+        # Billing/quota issues (must be checked before generic 429/rate-limit)
+        if any(indicator in error_str for indicator in [
+            "insufficient quota", "quota exceeded", "billing", "credit",
+            "payment required", "subscription required", "plan limit"
+        ]):
+            return "billing"
         
         # Rate limiting 
         if any(indicator in error_str for indicator in [
@@ -774,13 +769,6 @@ Respond with ONLY a valid JSON tool call in this format:
         ]):
             return "overloaded"
         
-        # Billing/quota issues
-        if any(indicator in error_str for indicator in [
-            "insufficient quota", "quota exceeded", "billing", "credit",
-            "payment required", "subscription required", "plan limit"
-        ]):
-            return "billing"
-        
         # Timeout (potential idle timeout)
         if any(indicator in error_str for indicator in [
             "timeout", "timed out", "connection timeout", "read timeout",
@@ -816,8 +804,8 @@ Respond with ONLY a valid JSON tool call in this format:
         attempt = attempt_state.get("attempt", 1)
         max_retries = attempt_state.get("max_retries", self._max_retries)
         
-        # Non-retryable errors
-        if error_kind in ["auth_permanent", "model_not_found", "format_error"]:
+        # Non-retryable errors (includes billing errors)
+        if error_kind in ["auth_permanent", "model_not_found", "format_error", "billing"]:
             return FailoverDecision(
                 action="surface_error",
                 reason=error_kind,
