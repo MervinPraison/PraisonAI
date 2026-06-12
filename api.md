@@ -15,6 +15,7 @@ Methods:
 * <code title="class GuardrailResult">GuardrailResult.<a href="./src/praisonai-agents/praisonaiagents/guardrails/guardrail_result.py">from_tuple</a>(result: Tuple[bool, Any]) -> 'GuardrailResult'</code>
 * <code title="class HandoffConfig">HandoffConfig.<a href="./src/praisonai-agents/praisonaiagents/agent/handoff.py">from_dict</a>(data: Dict[str, Any]) -> 'HandoffConfig'</code>
 * <code title="class HandoffConfig">HandoffConfig.<a href="./src/praisonai-agents/praisonaiagents/agent/handoff.py">to_dict</a>() -> Dict[str, Any]</code>
+* <code title="class HandoffResult">HandoffResult.<a href="./src/praisonai-agents/praisonaiagents/agent/handoff.py">from_outcome</a>(outcome: AgentRunOutcome, target_agent: Optional[str] = None, source_agent: Optional[str] = None, handoff_depth: int = 0) -> 'HandoffResult'</code>
 * <code title="class TaskOutput">TaskOutput.<a href="./src/praisonai-agents/praisonaiagents/main.py">json</a>() -> Optional[str]</code>
 * <code title="class TaskOutput">TaskOutput.<a href="./src/praisonai-agents/praisonaiagents/main.py">to_dict</a>() -> dict</code>
 * <code title="class ToolResult">ToolResult.<a href="./src/praisonai-agents/praisonaiagents/tools/base.py">to_dict</a>() -> Dict[str, Any]</code>
