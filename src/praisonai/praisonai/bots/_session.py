@@ -64,6 +64,7 @@ class BotSessionManager:
         platform: str = "",
         dlq: Optional[Any] = None,
         identity_resolver: Optional[Any] = None,
+        ingress_journal: Optional[Any] = None,
     ) -> None:
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
         self._locks: Dict[str, asyncio.Lock] = {}
@@ -80,6 +81,10 @@ class BotSessionManager:
         # session key is the resolver-returned unified user id, so the
         # same human pinging from multiple platforms shares one history.
         self._identity_resolver = identity_resolver
+        # Ingress journal: optional durable message processing with dedup.
+        # When set, messages are journaled before agent processing for
+        # crash recovery and webhook redelivery protection.
+        self._ingress_journal = ingress_journal
 
     def _storage_key(self, user_id: str) -> str:
         """Resolve a raw platform user id to the in-memory/store key.
@@ -171,6 +176,8 @@ class BotSessionManager:
         chat_id: str = "",
         thread_id: str = "",
         user_name: str = "",
+        message_id: str = "",
+        account: str = "",
     ) -> str:
         """Run ``agent.chat(prompt)`` with *user_id*-scoped history.
 
@@ -186,7 +193,32 @@ class BotSessionManager:
         This makes the error visible to the caller (so the bot adapter
         can log / show the user a friendly message) while preserving
         the message for later replay.
+        
+        Ingress Journal: if an ``ingress_journal`` was passed to ``__init__``
+        and ``message_id`` is provided, the message is journaled with deduplication
+        and claim/complete semantics for crash-safe, exactly-once processing.
         """
+        # Handle ingress journaling for durable message processing
+        journal_key = None
+        if self._ingress_journal is not None and message_id:
+            payload = {
+                "user_id": user_id,
+                "prompt": prompt,
+                "chat_id": chat_id,
+                "thread_id": thread_id,
+                "user_name": user_name,
+            }
+            journal_key = self._ingress_journal.receive(
+                platform=self._platform or "unknown",
+                account=account or "default",
+                channel_id=chat_id or user_id,
+                message_id=message_id,
+                payload=payload
+            )
+            if journal_key is None:
+                # Duplicate message - return empty response
+                return ""
+                
         self._last_active[self._storage_key(user_id)] = time.monotonic()
         user_lock = self._get_lock(user_id)
         agent_lock = self._get_agent_lock(agent)
@@ -213,62 +245,79 @@ class BotSessionManager:
             _clear_ctx = None  # type: ignore[assignment]
 
         try:
-            async with user_lock:
-                # Load history (may hit disk via run_in_executor for async safety)
-                loop = asyncio.get_running_loop()
-                user_history = await loop.run_in_executor(
-                    None, self._load_history, user_id
-                )
+            # Claim journal entry if we have one
+            if journal_key is not None:
+                claim_ctx = self._ingress_journal.aclaim(journal_key)
+                await claim_ctx.__aenter__()
+            else:
+                claim_ctx = None
+                
+            try:
+                async with user_lock:
+                    # Load history (may hit disk via run_in_executor for async safety)
+                    loop = asyncio.get_running_loop()
+                    user_history = await loop.run_in_executor(
+                        None, self._load_history, user_id
+                    )
 
-                # W1 robustness: hold ``agent_lock`` across the FULL LLM call
-                # (not only the history swap) so concurrent users on a shared
-                # Agent instance never observe each other's chat_history.
-                async with agent_lock:
-                    saved_history = agent.chat_history
-                    agent.chat_history = user_history
-                    try:
-                        # Copy current task's contextvars (incl. SessionContext)
-                        # into the worker thread so tools the agent invokes can
-                        # read platform/user metadata.
-                        import contextvars
-                        _ctx = contextvars.copy_context()
-                        response = await loop.run_in_executor(
-                            None, _ctx.run, agent.chat, prompt
-                        )
-                        # Capture updated history before restoring caller's.
-                        updated_history = agent.chat_history
-                    except Exception as exc:
-                        # N4: persist the failed inbound message before bubbling.
-                        if self._dlq is not None:
-                            try:
-                                await loop.run_in_executor(
-                                    None,
-                                    lambda: self._dlq.enqueue(
-                                        platform=self._platform,
-                                        user_id=user_id,
-                                        prompt=prompt,
-                                        error=f"{type(exc).__name__}: {exc}",
-                                        chat_id=chat_id,
-                                        thread_id=thread_id,
-                                        user_name=user_name,
+                    # W1 robustness: hold ``agent_lock`` across the FULL LLM call
+                    # (not only the history swap) so concurrent users on a shared
+                    # Agent instance never observe each other's chat_history.
+                    async with agent_lock:
+                        saved_history = agent.chat_history
+                        agent.chat_history = user_history
+                        try:
+                            # Copy current task's contextvars (incl. SessionContext)
+                            # into the worker thread so tools the agent invokes can
+                            # read platform/user metadata.
+                            import contextvars
+                            _ctx = contextvars.copy_context()
+                            response = await loop.run_in_executor(
+                                None, _ctx.run, agent.chat, prompt
+                            )
+                            # Capture updated history before restoring caller's.
+                            updated_history = agent.chat_history
+                        except Exception as exc:
+                            # N4: persist the failed inbound message before bubbling.
+                            if self._dlq is not None:
+                                try:
+                                    await loop.run_in_executor(
+                                        None,
+                                        lambda: self._dlq.enqueue(
+                                            platform=self._platform,
+                                            user_id=user_id,
+                                            prompt=prompt,
+                                            error=f"{type(exc).__name__}: {exc}",
+                                            chat_id=chat_id,
+                                            thread_id=thread_id,
+                                            user_name=user_name,
+                                        )
                                     )
-                                )
-                            except Exception as dlq_exc:  # pragma: no cover — defensive
-                                logger.error(
-                                    "Failed to enqueue inbound DLQ entry: %s", dlq_exc
-                                )
-                        agent.chat_history = saved_history
-                        raise
-                    finally:
-                        agent.chat_history = saved_history
+                                except Exception as dlq_exc:  # pragma: no cover — defensive
+                                    logger.error(
+                                        "Failed to enqueue inbound DLQ entry: %s", dlq_exc
+                                    )
+                            agent.chat_history = saved_history
+                            raise
+                        finally:
+                            agent.chat_history = saved_history
 
-                # Persist outside the agent_lock — it's per-user and the agent
-                # is no longer touched.
-                await loop.run_in_executor(
-                    None, self._save_history, user_id, updated_history
-                )
+                    # Persist outside the agent_lock — it's per-user and the agent
+                    # is no longer touched.
+                    await loop.run_in_executor(
+                        None, self._save_history, user_id, updated_history
+                    )
 
-                return response
+                    # Mark journal entry as completed on success
+                    if journal_key is not None:
+                        self._ingress_journal.complete(journal_key)
+
+                    return response
+                    
+            finally:
+                # Always release journal claim
+                if claim_ctx is not None:
+                    await claim_ctx.__aexit__(None, None, None)
         finally:
             # Always clear task-local session context, even if an exception occurred.
             if ctx_token is not None and _clear_ctx is not None:
