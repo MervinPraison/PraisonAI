@@ -30,6 +30,15 @@ def reset_configuration() -> None:
             srv._provider = None
         if hasattr(srv, '_datastore'):
             srv._datastore = None
+        # Clear any other potentially cached state
+        if hasattr(srv, '_app'):
+            srv._app = None
+        # Clear backends registry if it exists
+        try:
+            import praisonaiui.backends as backends
+            backends.clear_backends()
+        except (ImportError, AttributeError):
+            pass
     except ImportError:
         pass
 
