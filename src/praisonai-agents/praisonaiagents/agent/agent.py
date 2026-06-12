@@ -554,9 +554,6 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         skills: Optional[Union[List[str], str, Dict[str, Any], 'SkillsConfig']] = None,
         approval: Optional[Union[bool, str, Dict[str, Any], 'ApprovalConfig', 'ApprovalProtocol']] = None,
         tool_config: Optional[Union[bool, 'ToolConfig']] = None,  # Tool execution configuration (timeout, retry, parallel)
-        tool_timeout: Optional[int] = None,  # **Deprecated**: use tool_config=ToolConfig(timeout=60)
-        tool_retry_policy: Optional['RetryPolicy'] = None,  # **Deprecated**: use tool_config=ToolConfig(retry_policy=policy)
-        parallel_tool_calls: bool = False,  # **Deprecated**: use tool_config=ToolConfig(parallel=True)
         learn: Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
         backend: Optional[Any] = None,  # External managed agent backend (e.g., ManagedAgentIntegration)
         cli_backend: Optional[Union[str, Any]] = None,  # CLI backend for delegating turns (e.g., "claude-code")
@@ -654,11 +651,7 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
             tool_config: Tool execution configuration. Accepts:
                 - bool: True enables defaults, False disables
                 - ToolConfig: Custom configuration for timeout, retry policy, parallel execution
-                Consolidates tool_timeout, tool_retry_policy, and parallel_tool_calls settings.
-            tool_retry_policy: **Deprecated** — use ``tool_config=ToolConfig(retry_policy=policy)`` instead.
-                Still works for backward compatibility.
-            parallel_tool_calls: **Deprecated** — use ``tool_config=ToolConfig(parallel=True)`` instead.
-                Still works for backward compatibility.
+                Consolidates tool timeout, retry policy, and parallel execution settings.
             backend: External managed agent backend for hybrid execution. Accepts:
                 - ManagedAgentIntegration: External managed agent service
                 - None: Use local execution (default)
@@ -698,7 +691,7 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
             - auto_save → memory=MemoryConfig(auto_save=)
             - rate_limiter → execution=ExecutionConfig(rate_limiter=)
             - verification_hooks → autonomy=AutonomyConfig(verification_hooks=)
-            - tool_timeout, tool_retry_policy, parallel_tool_calls → tool_config=ToolConfig(...)
+            - Use tool_config=ToolConfig(...) for tool execution configuration
         """
         # Add check at start if memory is requested
         if memory is not None:
@@ -809,8 +802,7 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
                 alternative="use 'execution=ExecutionConfig(rate_limiter=obj)' instead",
                 stacklevel=3
             )
-        # Note: parallel_tool_calls is NOT deprecated - it's a new Gap 2 feature
-        # Both direct parameter and ExecutionConfig.parallel_tool_calls are supported
+        # Note: parallel_tool_calls moved to tool_config pattern
         if verification_hooks is not None:
             warn_deprecated_param(
                 "verification_hooks",
@@ -986,8 +978,8 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
                 allow_code_execution = True
             if _exec_config.code_mode != "safe":
                 code_execution_mode = _exec_config.code_mode
-            # Get parallel_tool_calls from ExecutionConfig, fall back to parameter
-            parallel_tool_calls = getattr(_exec_config, 'parallel_tool_calls', parallel_tool_calls)
+            # Get parallel_tool_calls from ExecutionConfig
+            parallel_tool_calls = getattr(_exec_config, 'parallel_tool_calls', False)
             # Budget guard extraction
             _max_budget = getattr(_exec_config, 'max_budget', None)
             _on_budget_exceeded = getattr(_exec_config, 'on_budget_exceeded', 'stop') or 'stop'
@@ -995,7 +987,8 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
             max_iter, max_rpm, max_execution_time, max_retry_limit = 20, None, None, 2
             _max_budget = None
             _on_budget_exceeded = 'stop'
-            # Keep parallel_tool_calls parameter value when no ExecutionConfig provided
+            # Default to False when no ExecutionConfig provided
+            parallel_tool_calls = False
             # (already set from parameter, no need to override)
         
         # ─────────────────────────────────────────────────────────────────────
@@ -1523,16 +1516,13 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         
         self.instructions = instructions
         
-        # Resolve tool_config early for immediate use in parallel_tool_calls
+        # Resolve tool_config for tool execution settings
         _tool_config = Agent._resolve_tool_config(
-            tool_config=tool_config,
-            tool_timeout=tool_timeout,
-            tool_retry_policy=tool_retry_policy, 
-            parallel_tool_calls=parallel_tool_calls
+            tool_config=tool_config
         )
         
         # Gap 2: Store parallel tool calls setting for ToolCallExecutor selection
-        self.parallel_tool_calls = _tool_config.parallel if _tool_config else parallel_tool_calls
+        self.parallel_tool_calls = _tool_config.parallel if _tool_config else False
         # G2: Store interrupt controller for cooperative cancellation
         self.interrupt_controller = interrupt_controller
         # Check for model name in environment variable if not provided
@@ -1935,10 +1925,10 @@ Your Goal: {self.goal}
         self._tool_config = _tool_config
         
         # P8/G11: Tool timeout - prevent slow tools from blocking
-        self._tool_timeout = _tool_config.timeout if _tool_config else tool_timeout
+        self._tool_timeout = _tool_config.timeout if _tool_config else None
         
         # Store tool retry policy for tool execution with exponential backoff
-        self._tool_retry_policy = _tool_config.retry_policy if _tool_config else tool_retry_policy
+        self._tool_retry_policy = _tool_config.retry_policy if _tool_config else None
         
         # Cache for system prompts and formatted tools with eager thread-safe lock
         # Use OrderedDict for LRU behavior
@@ -2055,7 +2045,7 @@ Your Goal: {self.goal}
         super().__init__(sandbox=sandbox)
 
     @staticmethod
-    def _resolve_tool_config(tool_config, tool_timeout, tool_retry_policy, parallel_tool_calls):
+    def _resolve_tool_config(tool_config):
         """Resolve tool_config parameter with backward compatibility."""
         # Import here to avoid circular imports
         from ..config.feature_configs import ToolConfig, resolve_tools
@@ -2063,30 +2053,7 @@ Your Goal: {self.goal}
         # Handle the new consolidated parameter
         if tool_config is not None:
             resolved_config = resolve_tools(tool_config)
-            if resolved_config:
-                # Apply deprecated parameter overrides if specified
-                if tool_timeout is not None:
-                    resolved_config.timeout = tool_timeout
-                if tool_retry_policy is not None:  
-                    resolved_config.retry_policy = tool_retry_policy
-                if parallel_tool_calls:
-                    resolved_config.parallel = parallel_tool_calls
-                return resolved_config
-        
-        # Fallback: create config from deprecated parameters if any are specified
-        if tool_timeout is not None or tool_retry_policy is not None or parallel_tool_calls:
-            import warnings
-            warnings.warn(
-                "tool_timeout, tool_retry_policy, and parallel_tool_calls are deprecated. "
-                "Use tool_config=ToolConfig(timeout=60, retry_policy=policy, parallel=True) instead.",
-                DeprecationWarning,
-                stacklevel=4  # Increased to account for static method call
-            )
-            return ToolConfig(
-                timeout=tool_timeout,
-                retry_policy=tool_retry_policy,
-                parallel=parallel_tool_calls
-            )
+            return resolved_config
         
         return None
 
@@ -2168,10 +2135,6 @@ Your Goal: {self.goal}
             
             # Tool configuration - use consolidated config when available  
             'tool_config': getattr(self, '_tool_config', None),
-            # Backward compatibility - always include for now
-            'tool_timeout': getattr(self, '_tool_timeout', None),
-            'tool_retry_policy': getattr(self, '_tool_retry_policy', None),
-            'parallel_tool_calls': getattr(self, 'parallel_tool_calls', False),
             
             # CLI backend
             'cli_backend': getattr(self, '_cli_backend', None),

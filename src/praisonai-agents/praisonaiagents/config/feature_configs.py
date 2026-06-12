@@ -848,7 +848,7 @@ class ToolConfig:
     """
     Configuration for tool execution behavior.
     
-    Consolidates: tool_timeout, tool_retry_policy, parallel_tool_calls
+    Configuration for tool execution behavior including timeout, retry policy, and parallel execution.
     
     Usage:
         # Simple enable with defaults

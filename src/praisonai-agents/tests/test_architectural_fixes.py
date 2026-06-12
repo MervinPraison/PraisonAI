@@ -217,10 +217,11 @@ class TestGap2ParallelToolExecution:
         """Test that Agent respects parallel_tool_calls parameter."""
         
         # Test agent creation with parallel tool calls enabled
+        from praisonaiagents.config.feature_configs import ToolConfig
         agent = Agent(
             name="parallel_test",
             instructions="You are a test agent",
-            parallel_tool_calls=True
+            tool_config=ToolConfig(parallel=True)
         )
         
         assert hasattr(agent, 'parallel_tool_calls')
@@ -366,11 +367,12 @@ class TestRealAgenticIntegration:
             return f"Latest news about {topic}: All good!"
         
         # Create agent with all architectural fixes enabled
+        from praisonaiagents.config.feature_configs import ToolConfig
         agent = Agent(
             name="integration_test",
             instructions="You are a helpful assistant. Use tools when needed.",
             tools=[get_weather, get_time, get_news],
-            parallel_tool_calls=True,  # Gap 2: Enable parallel execution
+            tool_config=ToolConfig(parallel=True),  # Gap 2: Enable parallel execution
             llm="gpt-4o-mini",  # Use a real model
             stream=True  # Gap 3: Enable streaming
         )
