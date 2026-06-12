@@ -8,7 +8,7 @@ Tests ensure:
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 class TestInteractiveRuntimeLifecycle:
@@ -109,6 +109,39 @@ class TestToolResolutionConsistency:
             # Verify ToolResolver was used
             MockResolver.assert_called_once()
             mock_resolver.resolve.assert_called_once_with('test_tool', instantiate=True)
+
+    def test_arun_framework_uses_instantiate_true(self):
+        """Async YAML tool resolution must mirror sync instantiate=True behaviour."""
+        import asyncio
+        from praisonai.praisonai.agents_generator import AgentsGenerator
+
+        generator = AgentsGenerator(agent_file="agents.yaml")
+        config = {
+            "roles": {
+                "researcher": {
+                    "role": "Researcher",
+                    "goal": "Research",
+                    "backstory": "You research",
+                    "tools": ["test_tool"],
+                }
+            }
+        }
+
+        adapter = MagicMock()
+        adapter.arun = AsyncMock(return_value="ok")
+        generator.framework_adapter = adapter
+        generator.framework = "praisonaiagents"
+
+        with patch.object(generator, "tool_resolver") as mock_resolver, \
+             patch("praisonai.praisonai.agents_generator.is_available", return_value=True), \
+             patch("praisonai.praisonai.framework_adapters.validators.assert_framework_available"), \
+             patch.object(generator, "_validate_cli_backend_compatibility"):
+            mock_resolver.resolve.return_value = MagicMock()
+            mock_resolver.get_local_tool_classes.return_value = {}
+
+            asyncio.run(generator._arun_framework(config))
+
+            mock_resolver.resolve.assert_called_once_with("test_tool", instantiate=True)
 
     def test_job_workflow_uses_tool_resolver(self):
         """Test that job_workflow uses ToolResolver for tool resolution"""

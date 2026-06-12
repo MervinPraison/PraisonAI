@@ -263,6 +263,32 @@ class TestUnifiedSessionStore:
         
         assert session is None
 
+    def test_load_invalidates_stale_cache_after_external_write(self, temp_session_dir):
+        """Cross-process writes must not be overwritten by stale in-memory cache."""
+        store_a = UnifiedSessionStore(session_dir=temp_session_dir)
+        store_b = UnifiedSessionStore(session_dir=temp_session_dir)
+
+        session = UnifiedSession(session_id="shared-session")
+        session.add_user_message("first message")
+        store_a.save(session)
+
+        # Process A keeps a warm cache
+        cached = store_a.load("shared-session")
+        assert cached is not None
+        assert len(cached.messages) == 1
+
+        # Process B appends a message and saves
+        updated = store_b.load("shared-session")
+        assert updated is not None
+        updated.add_user_message("second message")
+        store_b.save(updated)
+
+        # Process A must see B's write instead of returning stale cache
+        reloaded = store_a.load("shared-session")
+        assert reloaded is not None
+        assert len(reloaded.messages) == 2
+        assert reloaded.messages[1]["content"] == "second message"
+
 
 class TestGlobalSessionStore:
     """Tests for global session store."""

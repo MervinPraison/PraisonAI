@@ -200,6 +200,20 @@ class PairingCallbackHandler:
                 success=False,
                 message="Invalid or tampered callback data"
             )
+
+        # Only the configured bot owner may approve or deny pairing requests
+        config = getattr(bot_adapter, "config", None)
+        expected_owner = getattr(config, "owner_user_id", None) if config else None
+        if expected_owner and str(expected_owner) != str(owner_user_id):
+            logger.warning(
+                "Rejected pairing callback from non-owner user %s (expected %s)",
+                owner_user_id,
+                expected_owner,
+            )
+            return PairingApprovalResult(
+                success=False,
+                message="Only the bot owner can approve pairing requests",
+            )
         
         action = parsed["action"]
         channel = parsed["channel"]
