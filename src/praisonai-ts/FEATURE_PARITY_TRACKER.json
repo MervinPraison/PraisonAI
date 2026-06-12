@@ -4,14 +4,14 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 336,
+    "pythonCoreFeatures": 339,
     "pythonWrapperFeatures": 99,
     "typescriptFeatures": 1192,
-    "gapCount": 44,
+    "gapCount": 47,
     "priorityP0": 1,
     "priorityP1": 0,
     "priorityP2": 0,
-    "priorityP3": 43
+    "priorityP3": 46
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -29,6 +29,7 @@
       "AgentOSConfig",
       "AgentOSProtocol",
       "AgentPluginProtocol",
+      "AgentRunOutcome",
       "AgentTeam",
       "Agents",
       "ApprovalCallback",
@@ -222,6 +223,7 @@
       "RewriteStrategy",
       "Route",
       "RoutingConditionProtocol",
+      "RunStatus",
       "SandboxConfig",
       "SandboxProtocol",
       "SandboxResult",
@@ -349,6 +351,7 @@
       "trace_context",
       "track_workflow",
       "validate_config",
+      "validate_decision_string",
       "validate_tool",
       "when",
       "workflows"
@@ -580,6 +583,7 @@
       ],
       "other": [
         "AgentMessageEvent",
+        "AgentRunOutcome",
         "Agents",
         "AsyncLearnProtocol",
         "AutonomyConfig",
@@ -612,6 +616,7 @@
         "ObservabilityHooks",
         "PraisonAIConfigError",
         "PraisonAIError",
+        "RunStatus",
         "SessionErrorEvent",
         "SessionIdleEvent",
         "StopReason",
@@ -626,6 +631,7 @@
         "get_logger",
         "memory",
         "tools",
+        "validate_decision_string",
         "workflows"
       ],
       "planning": [
@@ -4006,6 +4012,15 @@
         "category": "plugins"
       },
       {
+        "feature": "AgentRunOutcome",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "AgentTeam",
         "python": true,
         "typescript": true,
@@ -5113,6 +5128,15 @@
         "category": "conditions"
       },
       {
+        "feature": "RunStatus",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "SandboxConfig",
         "python": true,
         "typescript": true,
@@ -5894,6 +5918,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "validate_decision_string",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "workflows",
