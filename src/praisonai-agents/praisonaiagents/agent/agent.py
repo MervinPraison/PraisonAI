@@ -1522,7 +1522,7 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         )
         
         # Gap 2: Store parallel tool calls setting for ToolCallExecutor selection
-        self.parallel_tool_calls = _tool_config.parallel if _tool_config else False
+        self.parallel_tool_calls = _tool_config.parallel if _tool_config else parallel_tool_calls
         # G2: Store interrupt controller for cooperative cancellation
         self.interrupt_controller = interrupt_controller
         # Check for model name in environment variable if not provided

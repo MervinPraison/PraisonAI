@@ -18,6 +18,7 @@ import asyncio
 import time
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 from praisonaiagents import Agent, tool
+from praisonaiagents.config.feature_configs import ToolConfig
 from praisonaiagents.agent.unified_execution_mixin import UnifiedExecutionMixin
 from praisonaiagents.llm.streaming_protocol import (
     get_streaming_adapter, 
@@ -217,7 +218,6 @@ class TestGap2ParallelToolExecution:
         """Test that Agent respects parallel_tool_calls parameter."""
         
         # Test agent creation with parallel tool calls enabled
-        from praisonaiagents.config.feature_configs import ToolConfig
         agent = Agent(
             name="parallel_test",
             instructions="You are a test agent",
@@ -367,7 +367,6 @@ class TestRealAgenticIntegration:
             return f"Latest news about {topic}: All good!"
         
         # Create agent with all architectural fixes enabled
-        from praisonaiagents.config.feature_configs import ToolConfig
         agent = Agent(
             name="integration_test",
             instructions="You are a helpful assistant. Use tools when needed.",

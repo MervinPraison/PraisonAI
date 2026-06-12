@@ -852,17 +852,17 @@ class ToolConfig:
     
     Usage:
         # Simple enable with defaults
-        Agent(tools=ToolConfig())
+        Agent(tool_config=ToolConfig())
         
         # With custom settings
-        Agent(tools=ToolConfig(
+        Agent(tool_config=ToolConfig(
             timeout=60,
             retry_policy=RetryPolicy(max_attempts=5),
             parallel=True,
         ))
         
         # With timeout only
-        Agent(tools=ToolConfig(timeout=30))
+        Agent(tool_config=ToolConfig(timeout=30))
     """
     # Tool execution timeout in seconds  
     timeout: Optional[int] = None
