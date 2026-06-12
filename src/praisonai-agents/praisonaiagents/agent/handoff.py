@@ -380,20 +380,23 @@ class Handoff:
                 return None
             else:
                 # Filter out blocked tools
+                target_tools = getattr(self.agent, 'tools', None) or []
                 effective_tools = [
-                    tool for tool in getattr(self.agent, 'tools', [])
+                    tool for tool in target_tools
                     if getattr(tool, 'name', getattr(tool, '__name__', str(tool))) not in policy.blocked_tools
                 ]
                 return effective_tools
         else:  # intersect mode (default)
             # Security by default - intersection of source and target tools
+            source_tools = getattr(source_agent, 'tools', None) or []
             source_tool_names = {
                 getattr(tool, 'name', getattr(tool, '__name__', str(tool)))
-                for tool in getattr(source_agent, 'tools', [])
+                for tool in source_tools
             }
             
+            target_tools = getattr(self.agent, 'tools', None) or []
             effective_tools = []
-            for tool in getattr(self.agent, 'tools', []):
+            for tool in target_tools:
                 tool_name = getattr(tool, 'name', getattr(tool, '__name__', str(tool)))
                 if (tool_name in source_tool_names and 
                     tool_name not in policy.blocked_tools):

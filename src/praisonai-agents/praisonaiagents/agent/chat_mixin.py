@@ -343,13 +343,19 @@ Your Goal: {self.goal}"""
         - Tool Search progressive disclosure (if enabled)
         
         Args:
-            tools: List of tools in various formats or None to use self.tools
+            tools: List of tools in various formats or None to use self.tools.
+                  Note: [] (empty list) means explicitly no tools (security boundary),
+                        None means inherit from self.tools
             
         Returns:
             List of formatted tools or empty list
         """
+        # Security fix: Distinguish None (inherit) vs [] (explicit deny)
         if tools is None:
             tools = self.tools
+        elif isinstance(tools, list) and len(tools) == 0:
+            # Explicit empty list - return immediately to enforce boundary
+            return []
         
         if not tools:
             return []
@@ -2089,9 +2095,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if self._using_custom_llm:
             try:
                 # Special handling for MCP tools when using provider/model format
-                # Fix: Handle empty tools list properly - use self.tools if tools is None or empty
-                if tools is None or (isinstance(tools, list) and len(tools) == 0):
+                # Security fix: Distinguish None (inherit) vs [] (explicit deny)
+                if tools is None:
+                    # None means inherit agent's configured tools
                     tool_param = self.tools
+                elif isinstance(tools, list) and len(tools) == 0:
+                    # Empty list means explicitly deny all tools (security boundary)
+                    tool_param = []
                 else:
                     tool_param = tools
                 
@@ -2323,7 +2333,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     agent_tools=agent_tools
                                 )
 
-                        response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=stream, task_name=task_name, task_description=task_description, task_id=task_id, response_format=response_format)
+                        response = self._chat_completion(messages, temperature=temperature, tools=tools, reasoning_steps=reasoning_steps, stream=stream, task_name=task_name, task_description=task_description, task_id=task_id, response_format=response_format)
                         if not response:
                             # Rollback chat history on response failure
                             self._truncate_chat_history(chat_history_length)
