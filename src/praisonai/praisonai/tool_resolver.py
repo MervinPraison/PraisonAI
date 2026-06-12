@@ -107,8 +107,7 @@ class ToolResolver:
                 cache: Dict[str, Callable] = {}
                 for name, obj in inspect.getmembers(module):
                     if (not name.startswith('_') and 
-                        callable(obj) and 
-                        not inspect.isclass(obj)):
+                        callable(obj)):
                         cache[name] = obj
                         logger.debug(f"Loaded local tool: {name}")
                 
@@ -246,7 +245,7 @@ class ToolResolver:
         
         return None
     
-    def resolve(self, name: str) -> Optional[Callable]:
+    def resolve(self, name: str, instantiate: bool = False) -> Optional[Callable]:
         """Resolve a tool name to a callable.
         
         Resolution order:
@@ -258,6 +257,7 @@ class ToolResolver:
         
         Args:
             name: Tool name to resolve
+            instantiate: If True, instantiate class tools automatically
             
         Returns:
             Callable if found, None if not found
@@ -281,6 +281,9 @@ class ToolResolver:
             # Double-check inside lock
             cached = self._resolve_cache.get(name, _SENTINEL)
             if cached is not _SENTINEL:
+                # Apply instantiation to cached result if needed
+                if instantiate and self._is_class(cached):
+                    return cached()
                 return cached
 
             # 1. Check local tools.py first (highest priority)
@@ -288,36 +291,51 @@ class ToolResolver:
                 logger.debug(f"Resolved '{name}' from local tools.py")
                 tool = local_tools[name]
                 self._resolve_cache[name] = tool
+                if instantiate and self._is_class(tool):
+                    return tool()
                 return tool
             
             # 2. Check wrapper ToolRegistry (NEW - ahead of SDK paths)
             tool = self._resolve_from_wrapper_registry(name)
             if tool is not None:
                 self._resolve_cache[name] = tool
+                if instantiate and self._is_class(tool):
+                    return tool()
                 return tool
             
             # 3. Check praisonaiagents.tools
             tool = self._resolve_from_praisonaiagents(name)
             if tool is not None:
                 self._resolve_cache[name] = tool
+                if instantiate and self._is_class(tool):
+                    return tool()
                 return tool
             
             # 4. Check praisonai-tools package
             tool = self._resolve_from_praisonai_tools(name)
             if tool is not None:
                 self._resolve_cache[name] = tool
+                if instantiate and self._is_class(tool):
+                    return tool()
                 return tool
             
             # 5. Check core SDK tool registry
             tool = self._resolve_from_registry(name)
             if tool is not None:
                 self._resolve_cache[name] = tool
+                if instantiate and self._is_class(tool):
+                    return tool()
                 return tool
             
             # Cache the None result to avoid repeated failed lookups
             logger.warning(f"Tool '{name}' not found in any source")
             self._resolve_cache[name] = None
             return None
+    
+    def _is_class(self, obj) -> bool:
+        """Check if object is a class (not an instance)."""
+        import inspect
+        return inspect.isclass(obj)
     
     def resolve_many(self, names: List[str]) -> List[Callable]:
         """Resolve multiple tool names to callables.

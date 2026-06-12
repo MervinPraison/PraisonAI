@@ -65,9 +65,32 @@ async def arun(agent_file: str,
                tools: list | None = None,
                agent_yaml: str | None = None,
                cli_config: dict | None = None) -> str:
-    """Async equivalent of `run()` for FastAPI / Jupyter async callers."""
-    import asyncio
-    return await asyncio.to_thread(
-        run, agent_file, framework,
-        tools=tools, agent_yaml=agent_yaml, cli_config=cli_config,
+    """Async equivalent of `run()` using native async framework adapters."""
+    from .agents_generator import AgentsGenerator
+    from ._framework_availability import is_available
+
+    if framework is None:
+        # Mirror the CLI default-resolution order
+        for candidate in ("crewai", "praisonaiagents", "autogen", "ag2"):
+            if is_available(candidate):
+                framework = "praisonai" if candidate == "praisonaiagents" else candidate
+                break
+        else:
+            raise RuntimeError(
+                "No supported framework installed. "
+                "Install one of: crewai, praisonaiagents, autogen, ag2."
+            )
+    else:
+        # Validate explicit framework like CLI does
+        from .framework_adapters.validators import assert_framework_available
+        assert_framework_available(framework)
+
+    gen = AgentsGenerator(
+        agent_file=agent_file,
+        framework=framework,
+        config_list=_build_config_list(),
+        tools=tools,
+        agent_yaml=agent_yaml,
+        cli_config=cli_config,
     )
+    return await gen.agenerate_crew_and_kickoff()

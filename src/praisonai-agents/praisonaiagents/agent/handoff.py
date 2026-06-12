@@ -10,7 +10,7 @@ Unified Handoff System:
 - Replaces/absorbs Agent.delegate() and SubagentDelegator functionality
 """
 
-from typing import Optional, Any, Callable, Dict, List, Union, TYPE_CHECKING
+from typing import Optional, Any, Callable, Dict, List, Union, TYPE_CHECKING, TypeVar, Type, Generic
 from dataclasses import dataclass, field
 from enum import Enum
 import inspect
@@ -19,6 +19,22 @@ from praisonaiagents._logging import get_logger
 import asyncio
 import threading
 import time
+import json
+
+try:
+    from pydantic import BaseModel, ValidationError as PydanticValidationError
+    PYDANTIC_AVAILABLE = True
+except ImportError:
+    PYDANTIC_AVAILABLE = False
+    if TYPE_CHECKING:
+        from pydantic import BaseModel, ValidationError as PydanticValidationError
+    else:
+        # Provide a safe sentinel for runtime
+        class BaseModel:  # type: ignore
+            pass
+        PydanticValidationError = Exception
+
+from ..run_outcome import AgentRunOutcome, RunStatus
 
 if TYPE_CHECKING:
     from .agent import Agent
@@ -105,7 +121,8 @@ from ..errors import (
     HandoffError, 
     HandoffCycleError, 
     HandoffDepthError, 
-    HandoffTimeoutError
+    HandoffTimeoutError,
+    HandoffValidationError
 )
 
 # Thread-local storage for tracking handoff chains
@@ -147,7 +164,12 @@ class HandoffInputData:
 
 @dataclass 
 class HandoffResult:
-    """Result of a handoff operation."""
+    """
+    Result of a handoff operation.
+    
+    Now includes typed outcome information while maintaining backward
+    compatibility with the legacy boolean success field.
+    """
     success: bool
     response: Optional[str] = None
     target_agent: Optional[str] = None
@@ -155,6 +177,64 @@ class HandoffResult:
     duration_seconds: float = 0.0
     error: Optional[str] = None
     handoff_depth: int = 0
+    
+    # New typed outcome field
+    outcome: Optional[AgentRunOutcome] = None
+    
+    def __post_init__(self):
+        """Initialize outcome field if not provided."""
+        if self.outcome is None:
+            # Create outcome based on legacy success field
+            if self.success:
+                self.outcome = AgentRunOutcome.success(
+                    output=self.response or "",
+                    elapsed_s=self.duration_seconds,
+                    agent_name=self.target_agent,
+                    context={
+                        "source_agent": self.source_agent,
+                        "handoff_depth": self.handoff_depth,
+                    }
+                )
+            else:
+                error_text = (self.error or "").lower()
+                context = {
+                    "source_agent": self.source_agent,
+                    "handoff_depth": self.handoff_depth,
+                }
+                if any(keyword in error_text for keyword in ["timeout", "timed out"]):
+                    self.outcome = AgentRunOutcome.timeout(
+                        error=self.error or "Handoff failed",
+                        elapsed_s=self.duration_seconds,
+                        agent_name=self.target_agent,
+                        context=context,
+                    )
+                else:
+                    self.outcome = AgentRunOutcome.failure(
+                        error=self.error or "Handoff failed",
+                        elapsed_s=self.duration_seconds,
+                        agent_name=self.target_agent,
+                        context=context,
+                    )
+    
+    @classmethod
+    def from_outcome(
+        cls,
+        outcome: AgentRunOutcome,
+        target_agent: Optional[str] = None,
+        source_agent: Optional[str] = None,
+        handoff_depth: int = 0,
+    ) -> "HandoffResult":
+        """Create HandoffResult from AgentRunOutcome."""
+        return cls(
+            success=outcome.is_success(),
+            response=outcome.output,
+            target_agent=target_agent or outcome.agent_name,
+            source_agent=source_agent,
+            duration_seconds=outcome.elapsed_s,
+            error=outcome.error,
+            handoff_depth=handoff_depth,
+            outcome=outcome,
+        )
     
     
 class Handoff:
@@ -417,6 +497,20 @@ class Handoff:
             # Execute on_complete callback
             self._execute_callback(self.config.on_complete, source_agent, kwargs, result)
             
+            # Call on_delegation hook on source agent's memory
+            if (hasattr(source_agent, '_memory_instance') and 
+                source_agent._memory_instance and
+                hasattr(source_agent._memory_instance, 'on_delegation')):
+                try:
+                    source_agent._memory_instance.on_delegation(
+                        task=full_prompt,
+                        result=result.response or "",
+                        agent_name=self.agent.name,
+                        metadata={"handoff_depth": result.handoff_depth}
+                    )
+                except Exception as e:
+                    logger.warning(f"[{source_agent.name}] Memory on_delegation hook failed: {e}")
+            
             return result
             
         except (HandoffCycleError, HandoffDepthError, HandoffTimeoutError) as e:
@@ -499,7 +593,7 @@ class Handoff:
                     loop = asyncio.get_event_loop()
                     response = await loop.run_in_executor(None, self.agent.chat, full_prompt)
                 
-                return HandoffResult(
+                result = HandoffResult(
                     success=True,
                     response=str(response) if response else "",
                     target_agent=self.agent.name,
@@ -507,6 +601,22 @@ class Handoff:
                     duration_seconds=time.time() - start_time,
                     handoff_depth=_get_handoff_depth(),
                 )
+                
+                # Call on_delegation hook on source agent's memory
+                if (hasattr(source_agent, '_memory_instance') and 
+                    source_agent._memory_instance and
+                    hasattr(source_agent._memory_instance, 'on_delegation')):
+                    try:
+                        source_agent._memory_instance.on_delegation(
+                            task=full_prompt,
+                            result=result.response or "",
+                            agent_name=self.agent.name,
+                            metadata={"handoff_depth": result.handoff_depth}
+                        )
+                    except Exception as e:
+                        logger.warning(f"[{source_agent.name}] Memory on_delegation hook failed: {e}")
+                
+                return result
             finally:
                 _pop_handoff()
         
@@ -624,6 +734,20 @@ class Handoff:
                         handoff_depth=_get_handoff_depth(),
                     )
                     self._execute_callback(self.config.on_complete, source_agent, kwargs, result)
+                    
+                    # Call on_delegation hook on source agent's memory
+                    if (hasattr(source_agent, '_memory_instance') and 
+                        source_agent._memory_instance and
+                        hasattr(source_agent._memory_instance, 'on_delegation')):
+                        try:
+                            source_agent._memory_instance.on_delegation(
+                                task=prompt,
+                                result=result.response or "",
+                                agent_name=self.agent.name,
+                                metadata={"handoff_depth": result.handoff_depth}
+                            )
+                        except Exception as e:
+                            logger.warning(f"[{source_agent.name}] Memory on_delegation hook failed: {e}")
                     
                     return f"Handoff successful. {self.agent.name} response: {response}"
                 
@@ -922,6 +1046,402 @@ async def parallel_handoffs(
             ))
     
     return processed_results
+
+
+# Type variable for generic typed handoff
+T = TypeVar("T", bound=BaseModel)
+
+
+class TypedHandoff(Handoff, Generic[T]):
+    """
+    Typed handoff with schema validation using Pydantic models.
+    
+    This class extends the base Handoff to add type safety through Pydantic schema validation.
+    The sender declares an output schema, the receiver expects that schema, and the framework
+    validates the payload at the boundary, raising HandoffValidationError if validation fails.
+    
+    The receiving agent's prompt is constructed from validated JSON rather than raw string
+    concatenation, enabling proper deserialization of structured data.
+    
+    Example:
+        ```python
+        from pydantic import BaseModel
+        from praisonaiagents.agent.handoff import TypedHandoff, HandoffValidationError
+        
+        class ResearchResult(BaseModel):
+            summary: str
+            citations: list[str] 
+            confidence: float
+            
+        # Create typed handoff
+        typed_handoff = TypedHandoff(
+            agent=writer_agent,
+            input_schema=ResearchResult
+        )
+        
+        # Valid payload
+        result = ResearchResult(
+            summary="AI research findings", 
+            citations=["ref1", "ref2"], 
+            confidence=0.92
+        )
+        response = typed_handoff.execute_programmatic(source_agent, result)
+        
+        # Invalid payload raises HandoffValidationError
+        bad_payload = {"summary": "...", "citations": "not-a-list"}
+        typed_handoff.execute_programmatic(source_agent, bad_payload)  # Raises error
+        ```
+    """
+    
+    def __init__(
+        self,
+        agent: 'Agent',
+        input_schema: Type[T],
+        tool_name_override: Optional[str] = None,
+        tool_description_override: Optional[str] = None,
+        on_handoff: Optional[Callable] = None,
+        input_filter: Optional[Union[Callable[[HandoffInputData], HandoffInputData], List[Callable[[HandoffInputData], HandoffInputData]]]] = None,
+        config: Optional[HandoffConfig] = None,
+    ):
+        """
+        Initialize a TypedHandoff with schema validation.
+        
+        Args:
+            agent: The target agent to hand off to
+            input_schema: Pydantic model class for payload validation
+            tool_name_override: Custom tool name (defaults to transfer_to_<agent_name>)
+            tool_description_override: Custom tool description
+            on_handoff: Callback function executed when handoff is invoked
+            input_filter: Function or list of functions to filter/transform input
+            config: HandoffConfig for advanced settings (context policy, timeouts, etc.)
+            
+        Raises:
+            ImportError: If Pydantic is not available
+            TypeError: If input_schema is not a Pydantic model
+        """
+        if not PYDANTIC_AVAILABLE:
+            raise ImportError(
+                "Pydantic is required for TypedHandoff. Install with: pip install pydantic"
+            )
+            
+        if not (inspect.isclass(input_schema) and issubclass(input_schema, BaseModel)):
+            raise TypeError(
+                f"input_schema must be a Pydantic BaseModel class, got {type(input_schema)}"
+            )
+        
+        super().__init__(
+            agent=agent,
+            tool_name_override=tool_name_override,
+            tool_description_override=tool_description_override,
+            on_handoff=on_handoff,
+            input_type=None,  # We handle typing ourselves
+            input_filter=input_filter,
+            config=config,
+        )
+        self._input_schema = input_schema
+    
+    def _validate_payload(self, payload: Union[T, dict, Any]) -> T:
+        """
+        Validate payload against the input schema.
+        
+        Args:
+            payload: The payload to validate - can be a Pydantic model instance,
+                    dict, or any object with model_dump() method
+                    
+        Returns:
+            Validated Pydantic model instance
+            
+        Raises:
+            HandoffValidationError: If validation fails
+        """
+        try:
+            if isinstance(payload, self._input_schema):
+                # Already the correct type, validate by re-parsing
+                validated = self._input_schema.model_validate(payload.model_dump())
+            elif isinstance(payload, dict):
+                # Dictionary - validate directly
+                validated = self._input_schema.model_validate(payload)
+            elif hasattr(payload, 'model_dump'):
+                # Another Pydantic model - convert via dict
+                validated = self._input_schema.model_validate(payload.model_dump())
+            else:
+                # Try to convert to dict first
+                if hasattr(payload, '__dict__'):
+                    payload_dict = payload.__dict__
+                else:
+                    payload_dict = dict(payload) if hasattr(payload, '__iter__') else {}
+                validated = self._input_schema.model_validate(payload_dict)
+                
+            return validated
+            
+        except PydanticValidationError as exc:
+            validation_errors = [
+                f"{err['loc']}: {err['msg']}" for err in exc.errors()
+            ] if hasattr(exc, 'errors') else [str(exc)]
+            
+            raise HandoffValidationError(
+                f"Handoff to '{self.agent.name}' received an invalid payload: {exc}",
+                source_agent="unknown",
+                target_agent=self.agent.name,
+                agent_id="unknown",
+                validation_errors=validation_errors
+            ) from exc
+        except Exception as exc:
+            raise HandoffValidationError(
+                f"Handoff to '{self.agent.name}' failed to validate payload: {exc}",
+                source_agent="unknown", 
+                target_agent=self.agent.name,
+                agent_id="unknown"
+            ) from exc
+    
+    def execute_programmatic(
+        self,
+        source_agent: 'Agent',
+        payload: Union[T, dict, str],
+        context: Optional[Dict[str, Any]] = None,
+    ) -> HandoffResult:
+        """
+        Execute typed handoff programmatically with schema validation.
+        
+        Args:
+            source_agent: The agent initiating the handoff
+            payload: The typed payload (Pydantic model instance or dict) OR
+                    a string prompt (for backward compatibility)
+            context: Optional additional context
+            
+        Returns:
+            HandoffResult with response or error
+            
+        Raises:
+            HandoffValidationError: If payload validation fails
+        """
+        # Handle backward compatibility: if payload is a string, treat as regular handoff
+        if isinstance(payload, str):
+            return super().execute_programmatic(source_agent, payload, context)
+        
+        start_time = time.time()
+        kwargs = context or {}
+        
+        try:
+            # Safety checks
+            self._check_safety(source_agent)
+            
+            # Track handoff chain
+            _push_handoff(source_agent.name)
+            
+            # Execute on_handoff callback
+            self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
+            
+            # Apply input filter if provided (fixes Greptile P1 issue)
+            _ = self._prepare_context(source_agent, kwargs)
+            
+            # Validate payload against schema
+            try:
+                validated_payload = self._validate_payload(payload)
+            except HandoffValidationError as e:
+                # Update error context with proper agent info (fixes Greptile P2 issue)
+                e.source_agent = source_agent.name
+                e.agent_id = source_agent.name
+                e.context["source_agent"] = source_agent.name
+                e.context["agent_id"] = source_agent.name
+                raise
+            
+            # Convert validated payload to structured JSON for the prompt
+            payload_json = validated_payload.model_dump_json(indent=2)
+            
+            # Build prompt with structured JSON instead of string concatenation
+            context_prefix = f"[Handoff from {source_agent.name}] "
+            if kwargs:
+                context_prefix += f"Additional context: {json.dumps(kwargs, indent=2)}\n"
+            
+            # The key improvement: structured JSON instead of str() concatenation
+            full_prompt = f"{context_prefix}Payload:\n{payload_json}"
+            
+            logger.info(f"Typed handoff to {self.agent.name} with validated payload")
+            
+            # Execute with timeout if sync
+            response = self.agent.chat(full_prompt)
+            
+            result = HandoffResult(
+                success=True,
+                response=str(response) if response else "",
+                target_agent=self.agent.name,
+                source_agent=source_agent.name,
+                duration_seconds=time.time() - start_time,
+                handoff_depth=_get_handoff_depth(),
+            )
+            
+            # Execute on_complete callback
+            self._execute_callback(self.config.on_complete, source_agent, kwargs, result)
+            
+            return result
+            
+        except (HandoffCycleError, HandoffDepthError, HandoffTimeoutError, HandoffValidationError) as e:
+            result = HandoffResult(
+                success=False,
+                target_agent=self.agent.name,
+                source_agent=source_agent.name,
+                duration_seconds=time.time() - start_time,
+                error=str(e),
+                handoff_depth=_get_handoff_depth(),
+            )
+            self._execute_callback(self.config.on_error, source_agent, kwargs, result)
+            raise
+        except Exception as e:
+            result = HandoffResult(
+                success=False,
+                target_agent=self.agent.name,
+                source_agent=source_agent.name,
+                duration_seconds=time.time() - start_time,
+                error=str(e),
+                handoff_depth=_get_handoff_depth(),
+            )
+            self._execute_callback(self.config.on_error, source_agent, kwargs, result)
+            logger.error(f"Typed handoff error: {e}")
+            return result
+        finally:
+            _pop_handoff()
+    
+    async def execute_async(
+        self,
+        source_agent: 'Agent',
+        payload: Union[T, dict, str],
+        context: Optional[Dict[str, Any]] = None,
+    ) -> HandoffResult:
+        """
+        Execute typed handoff asynchronously with schema validation.
+        
+        Args:
+            source_agent: The agent initiating the handoff
+            payload: The typed payload (Pydantic model instance or dict) OR
+                    a string prompt (for backward compatibility)
+            context: Optional additional context
+            
+        Returns:
+            HandoffResult with response or error
+            
+        Raises:
+            HandoffValidationError: If payload validation fails
+        """
+        # Handle backward compatibility: if payload is a string, treat as regular handoff
+        if isinstance(payload, str):
+            return await super().execute_async(source_agent, payload, context)
+        
+        # Initialize semaphore if needed (thread-safe)
+        if self.config.max_concurrent > 0 and Handoff._semaphore is None:
+            with Handoff._semaphore_lock:
+                if Handoff._semaphore is None:
+                    Handoff._semaphore = asyncio.Semaphore(self.config.max_concurrent)
+        
+        start_time = time.time()
+        kwargs = context or {}
+        
+        async def _execute():
+            try:
+                # Safety checks
+                self._check_safety(source_agent)
+                _push_handoff(source_agent.name)
+                
+                # Execute callback
+                self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
+                
+                # Apply input filter if provided (fixes Greptile P1 issue)
+                _ = self._prepare_context(source_agent, kwargs)
+                
+                # Validate payload against schema
+                try:
+                    validated_payload = self._validate_payload(payload)
+                except HandoffValidationError as e:
+                    # Update error context with proper agent info (fixes Greptile P2 issue)
+                    e.source_agent = source_agent.name
+                    e.agent_id = source_agent.name
+                    e.context["source_agent"] = source_agent.name
+                    e.context["agent_id"] = source_agent.name
+                    raise
+                
+                # Convert to structured JSON
+                payload_json = validated_payload.model_dump_json(indent=2)
+                
+                # Build prompt
+                context_prefix = f"[Handoff from {source_agent.name}] "
+                if kwargs:
+                    context_prefix += f"Additional context: {json.dumps(kwargs, indent=2)}\n"
+                
+                full_prompt = f"{context_prefix}Payload:\n{payload_json}"
+                
+                logger.info(f"Async typed handoff to {self.agent.name}")
+                
+                # Execute - check for async chat method
+                if hasattr(self.agent, 'achat'):
+                    response = await self.agent.achat(full_prompt)
+                else:
+                    # Run sync chat in executor
+                    loop = asyncio.get_event_loop()
+                    response = await loop.run_in_executor(None, self.agent.chat, full_prompt)
+                
+                return HandoffResult(
+                    success=True,
+                    response=str(response) if response else "",
+                    target_agent=self.agent.name,
+                    source_agent=source_agent.name,
+                    duration_seconds=time.time() - start_time,
+                    handoff_depth=_get_handoff_depth(),
+                )
+            finally:
+                _pop_handoff()
+        
+        try:
+            if self.config.max_concurrent > 0 and Handoff._semaphore:
+                async with Handoff._semaphore:
+                    if self.config.timeout_seconds > 0:
+                        result = await asyncio.wait_for(
+                            _execute(),
+                            timeout=self.config.timeout_seconds
+                        )
+                    else:
+                        result = await _execute()
+            else:
+                if self.config.timeout_seconds > 0:
+                    result = await asyncio.wait_for(
+                        _execute(),
+                        timeout=self.config.timeout_seconds
+                    )
+                else:
+                    result = await _execute()
+            
+            self._execute_callback(self.config.on_complete, source_agent, kwargs, result)
+            return result
+            
+        except asyncio.TimeoutError as err:
+            result = HandoffResult(
+                success=False,
+                target_agent=self.agent.name,
+                source_agent=source_agent.name,
+                duration_seconds=time.time() - start_time,
+                error=f"Timeout after {self.config.timeout_seconds}s",
+                handoff_depth=_get_handoff_depth(),
+            )
+            self._execute_callback(self.config.on_error, source_agent, kwargs, result)
+            raise HandoffTimeoutError(
+                f"Typed handoff to {self.agent.name} timed out after {self.config.timeout_seconds}s",
+                timeout_seconds=self.config.timeout_seconds,
+                source_agent=source_agent.name,
+                target_agent=self.agent.name,
+                agent_id=source_agent.name
+            ) from err
+        except Exception as e:
+            result = HandoffResult(
+                success=False,
+                target_agent=self.agent.name,
+                source_agent=source_agent.name,
+                duration_seconds=time.time() - start_time,
+                error=str(e),
+                handoff_depth=_get_handoff_depth(),
+            )
+            self._execute_callback(self.config.on_error, source_agent, kwargs, result)
+            if isinstance(e, (HandoffCycleError, HandoffDepthError, HandoffValidationError)):
+                raise
+            return result
 
 
 def prompt_with_handoff_instructions(base_prompt: str, agent: 'Agent') -> str:

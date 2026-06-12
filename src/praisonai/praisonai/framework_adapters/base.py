@@ -92,6 +92,34 @@ class FrameworkAdapter(Protocol):
         """
         ...
     
+    async def arun(
+        self,
+        config: Dict[str, Any],
+        llm_config: List[Dict],
+        topic: str,
+        *,
+        tools_dict: Optional[Dict[str, Any]] = None,
+        agent_callback: Optional[Callable] = None,
+        task_callback: Optional[Callable] = None,
+        cli_config: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Run the framework asynchronously with given configuration.
+        
+        Args:
+            config: Framework configuration
+            llm_config: LLM configuration list
+            topic: Topic for the tasks
+            tools_dict: Available tools dictionary
+            agent_callback: Callback for agent events
+            task_callback: Callback for task events
+            cli_config: CLI configuration
+            
+        Returns:
+            Execution result as string
+        """
+        ...
+    
     def cleanup(self) -> None:
         """Clean up any resources after execution."""
         ...
@@ -116,20 +144,41 @@ class BaseFrameworkAdapter:
         return list(self._tool_registry.keys())
     
     def _format_template(self, template: str, **kwargs) -> str:
-        """Safely format template string with given kwargs."""
-        try:
-            return template.format(**kwargs)
-        except KeyError as e:
-            # Import logger here to avoid circular imports
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning("Template formatting failed for key %s; returning original template", e)
+        """Safely format template string with given kwargs, preserving JSON-like braces."""
+        if not isinstance(template, str):
             return template
-        except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning("Template formatting error: %s; returning original template", e)
-            return template
+        
+        import re
+        
+        def _sub(m):
+            name = m.group(1)
+            return str(kwargs[name]) if name in kwargs else m.group(0)
+        
+        # Only substitute simple variable names like {topic}, not JSON like {"level":2}
+        return re.sub(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', _sub, template)
+    
+    async def arun(
+        self,
+        config: Dict[str, Any],
+        llm_config: List[Dict],
+        topic: str,
+        *,
+        tools_dict: Optional[Dict[str, Any]] = None,
+        agent_callback: Optional[Callable] = None,
+        task_callback: Optional[Callable] = None,
+        cli_config: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Default async implementation that falls back to thread-offloaded sync.
+        
+        Framework adapters with native async support should override this method.
+        """
+        import asyncio
+        return await asyncio.to_thread(
+            self.run, config, llm_config, topic,
+            tools_dict=tools_dict, agent_callback=agent_callback,
+            task_callback=task_callback, cli_config=cli_config
+        )
     
     def resolve(self) -> "FrameworkAdapter":
         """Default implementation returns self."""

@@ -52,7 +52,7 @@ def example_with_config():
         instructions="You are a research assistant",
         memory=MemoryConfig(
             backend="file",
-            user_id="researcher_001",
+            memory={"user_id": "researcher_001"},
             auto_memory=True,
         ),
         reflection=ReflectionConfig(

@@ -189,8 +189,8 @@ def main():
     business_system = AgentTeam(
         agents=[data_manager, knowledge_curator, business_analyst, customer_service],
         tasks=business_tasks,
-        memory=True,
-        memory=mongodb_memory_config, output="verbose"
+        memory=mongodb_memory_config,
+        output="verbose",
     )
     
     # Execute the comprehensive business pipeline

@@ -22,7 +22,7 @@ custom_modes = {
 }
 
 # Create handler with verbose output
-handler = CompareHandler(output="verbose")
+handler = CompareHandler(verbose=True)
 
 # Example: Manually create comparison results for analysis
 # (useful for testing without API calls)

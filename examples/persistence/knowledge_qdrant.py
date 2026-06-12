@@ -50,10 +50,10 @@ print("=== Qdrant Knowledge Store Demo (Agent-First) ===")
 agent = Agent(
     name="KnowledgeAssistant",
     instructions="You are a helpful assistant with access to technical documentation.",
-    knowledge=[doc_path],
     knowledge={
+        "sources": [doc_path],
         "vector_store": "qdrant",
-        "url": "http://localhost:6333"
+        "url": "http://localhost:6333",
     }
 )
 

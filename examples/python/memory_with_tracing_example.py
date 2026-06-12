@@ -30,7 +30,7 @@ def main():
     try:
         # Create memory instance
         memory = Memory(config={
-            "provider": "rag",
+            "backend": "sqlite",
             "use_embedding": False,
             "agent_name": "demo_agent",  # Used in trace events
         })

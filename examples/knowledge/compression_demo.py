@@ -184,7 +184,7 @@ Answer questions based ONLY on the provided knowledge context.
 When asked about codes, provide the EXACT code from the documents.
 Be concise but accurate.""",
             knowledge=[temp_dir],
-            user_id="compression_demo_user",
+            memory={"user_id": "compression_demo_user"},
             output="verbose",
         )
         

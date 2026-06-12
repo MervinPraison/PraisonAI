@@ -139,6 +139,11 @@ _LAZY_IMPORTS = {
     'unregister_toolset': ('praisonaiagents.toolsets', 'unregister_toolset'),
     'has_toolset': ('praisonaiagents.toolsets', 'has_toolset'),
     
+    # Run outcomes - typed validation and agent execution results
+    'AgentRunOutcome': ('praisonaiagents.run_outcome', 'AgentRunOutcome'),
+    'RunStatus': ('praisonaiagents.run_outcome', 'RunStatus'),
+    'validate_decision_string': ('praisonaiagents.run_outcome', 'validate_decision_string'),
+    
     # Main display utilities (imports rich)
     'TaskOutput': ('praisonaiagents.main', 'TaskOutput'),
     'ReflectionOutput': ('praisonaiagents.main', 'ReflectionOutput'),

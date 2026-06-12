@@ -15,9 +15,10 @@ Usage:
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Type, get_type_hints
+from typing import Any, Callable, Dict, List, Optional, Type, get_type_hints
 import inspect
 import logging
+import copy
 
 
 class ToolValidationError(Exception):
@@ -89,8 +90,12 @@ class BaseTool(ABC):
     version: str = "1.0.0"
     parameters: Optional[Dict[str, Any]] = None  # JSON Schema, auto-generated if None
     
-    def __init__(self):
-        """Initialize the tool and validate configuration."""
+    def __init__(self, dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None):
+        """Initialize the tool and validate configuration.
+        
+        Args:
+            dynamic_schema_overrides: Optional function to dynamically modify tool schema at runtime
+        """
         if not self.name:
             # Use class name as default
             self.name = self.__class__.__name__.lower().replace("tool", "")
@@ -98,6 +103,9 @@ class BaseTool(ABC):
         if not self.description:
             # Use docstring as default
             self.description = self.__class__.__doc__ or f"Tool: {self.name}"
+        
+        # Store dynamic schema override function
+        self._schema_override = dynamic_schema_overrides
         
         # Auto-generate parameters schema if not provided
         if self.parameters is None:
@@ -196,15 +204,28 @@ class BaseTool(ABC):
             )
     
     def get_schema(self) -> Dict[str, Any]:
-        """Get OpenAI-compatible function schema for this tool."""
-        return {
+        """Get OpenAI-compatible function schema for this tool.
+        
+        Applies dynamic schema overrides if present.
+        """
+        base_schema = {
             "type": "function",
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": self.parameters
+                "parameters": copy.deepcopy(self.parameters)
             }
         }
+        
+        # Apply dynamic override if present
+        if hasattr(self, '_schema_override') and self._schema_override is not None:
+            try:
+                return self._schema_override(base_schema)
+            except Exception as e:
+                logging.warning(f"Dynamic schema override failed for tool '{self.name}': {e}")
+                return base_schema
+        
+        return base_schema
     
     def __str__(self) -> str:
         return f"{self.__class__.__name__}(name='{self.name}')"

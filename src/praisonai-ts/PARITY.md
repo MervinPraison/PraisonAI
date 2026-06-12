@@ -1,20 +1,20 @@
 # Feature Parity Tracker
 
-> **Version:** 1.5.87 | **Last Updated:** 2026-06-03
+> **Version:** 1.5.87 | **Last Updated:** 2026-06-12
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 336 |
+| Python Core Features | 339 |
 | Python Wrapper Features | 99 |
 | TypeScript Features | 1192 |
-| **Gap Count** | **44** |
+| **Gap Count** | **47** |
 | P0 (Critical) | 1 |
 | P1 (High) | 0 |
 | P2 (Medium) | 0 |
-| P3 (Low) | 43 |
+| P3 (Low) | 46 |
 
 ## Gap Matrix
 
@@ -147,12 +147,13 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (179 done, 43 todo)
+### P3_Advanced (179 done, 46 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
 | `A2UI` | ✅ | ❌ | low | ⏳ TODO |
 | `AgentMessageEvent` | ✅ | ❌ | high | ⏳ TODO |
+| `AgentRunOutcome` | ✅ | ❌ | high | ⏳ TODO |
 | `AsyncLearnProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `AutoApproveBackend` | ✅ | ❌ | high | ⏳ TODO |
 | `BotOSConfig` | ✅ | ❌ | low | ⏳ TODO |
@@ -184,6 +185,7 @@
 | `ObservabilityHooks` | ✅ | ❌ | high | ⏳ TODO |
 | `PraisonAIConfigError` | ✅ | ❌ | low | ⏳ TODO |
 | `PraisonAIError` | ✅ | ❌ | low | ⏳ TODO |
+| `RunStatus` | ✅ | ❌ | high | ⏳ TODO |
 | `SessionErrorEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `SessionIdleEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `StopReason` | ✅ | ❌ | high | ⏳ TODO |
@@ -194,6 +196,7 @@
 | `ValidationError` | ✅ | ❌ | low | ⏳ TODO |
 | `configure\_structured\_logging` | ✅ | ❌ | low | ⏳ TODO |
 | `get\_logger` | ✅ | ❌ | low | ⏳ TODO |
+| `validate\_decision\_string` | ✅ | ❌ | low | ⏳ TODO |
 | `A2A` | ✅ | ✅ | low | ✅ DONE |
 | `AGUI` | ✅ | ✅ | low | ✅ DONE |
 | `AUTONOMY\_PRESETS` | ✅ | ✅ | low | ✅ DONE |
@@ -532,10 +535,10 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (48 exports)</summary>
+<summary><strong>other</strong> (51 exports)</summary>
 
 ```python
-from praisonaiagents import AgentMessageEvent, Agents, AsyncLearnProtocol, AutonomyConfig, BudgetExceededError, CliBackendConfig, CliBackendDelta, CliBackendProtocol, CliBackendResult, CliSessionBinding...
+from praisonaiagents import AgentMessageEvent, AgentRunOutcome, Agents, AsyncLearnProtocol, AutonomyConfig, BudgetExceededError, CliBackendConfig, CliBackendDelta, CliBackendProtocol, CliBackendResult...
 ```
 
 </details>

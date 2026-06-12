@@ -22,7 +22,7 @@ modes = parse_modes("basic,tools,planning")
 print(f"\nParsed modes: {modes}")
 
 # Create compare handler
-handler = CompareHandler(output="verbose")
+handler = CompareHandler(verbose=True)
 
 # Compare modes (this will run actual agent calls)
 # Uncomment to run:

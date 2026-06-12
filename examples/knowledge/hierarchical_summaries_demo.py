@@ -164,7 +164,7 @@ Answer questions based ONLY on the provided knowledge context.
 When asked about department codes, provide the EXACT code from the documents.
 Be specific about which department you're referring to.""",
             knowledge=[temp_dir],
-            user_id="hierarchy_demo_user",
+            memory={"user_id": "hierarchy_demo_user"},
             output="verbose",
         )
         

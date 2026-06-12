@@ -88,9 +88,8 @@ def main():
     workflow = AgentTeam(
         agents=[researcher, analyzer, writer],
         tasks=[research_task, analysis_task, report_task],
-        memory=True,
+        memory={"user_id": "research_project_001"},
         process="workflow",
-        user_id="research_project_001",
     )
     
     print(f"🤖 Created workflow with {len(workflow.agents)} agents and {len(workflow.tasks)} tasks")
