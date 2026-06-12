@@ -425,7 +425,6 @@ class PraisonAI:
             
             # Handle backends command
             elif args.command == "backends":
-                from rich import print
                 subcommand = unknown_args[0] if unknown_args and not unknown_args[0].startswith('-') else None
                 
                 if subcommand == "list" or subcommand is None:
