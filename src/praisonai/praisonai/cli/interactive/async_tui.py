@@ -200,20 +200,20 @@ class AsyncTUI:
                 
                 # Auto-inject project instruction files unless disabled
                 instructions = "You are Praison AI, a helpful assistant. Be concise and helpful. You have access to tools for file operations, code execution, and web search."
-                should_load_rules = not self.config.no_rules
                 max_chars = 32000  # Default cap
                 
-                # Check config for rules settings
+                # Check config for rules settings with proper precedence
                 try:
                     from praisonai.cli.configuration.loader import load_config
                     config = load_config()
-                    if config.rules.auto and not self.config.no_rules:
-                        should_load_rules = True
-                        max_chars = config.rules.max_chars
-                    elif self.config.no_rules:
+                    if self.config.no_rules:
                         should_load_rules = False
-                except:
-                    pass  # Config not available, use defaults
+                    else:
+                        should_load_rules = config.rules.auto
+                        max_chars = config.rules.max_chars
+                except Exception:
+                    # Config not available, use defaults
+                    should_load_rules = not self.config.no_rules
                 
                 if should_load_rules:
                     try:
