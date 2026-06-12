@@ -5,7 +5,8 @@ Manages context window by compacting messages when needed.
 """
 
 import re
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable, Awaitable
+import asyncio
 
 from .config import CompactionConfig, COMPACTION_PREFIX, SUMMARY_TEMPLATE
 from .strategy import CompactionStrategy
@@ -32,7 +33,8 @@ class ContextCompactor:
         strategy: CompactionStrategy = CompactionStrategy.TRUNCATE,
         preserve_system: bool = True,
         preserve_recent: int = 5,
-        config: Optional[CompactionConfig] = None
+        config: Optional[CompactionConfig] = None,
+        llm_summarize_fn: Optional[Callable[[str], Awaitable[str]]] = None
     ):
         """
         Initialize the compactor.
@@ -43,7 +45,9 @@ class ContextCompactor:
             strategy: Compaction strategy to use
             preserve_system: Keep system messages
             preserve_recent: Number of recent messages to preserve
+<<<<<<< HEAD
             config: Optional CompactionConfig to override defaults
+            llm_summarize_fn: Async function to call LLM for summarization
         """
         # Initialize config first
         self.config = config or CompactionConfig()
@@ -61,6 +65,7 @@ class ContextCompactor:
             self.preserve_recent = preserve_recent
             
         self.strategy = strategy
+        self.llm_summarize_fn = llm_summarize_fn
         
         # Track previous summaries for iterative update
         self._previous_summary: Optional[str] = None
@@ -99,7 +104,10 @@ class ContextCompactor:
         messages: List[Dict[str, Any]]
     ) -> tuple[List[Dict[str, Any]], CompactionResult]:
         """
-        Compact messages to fit within token limit.
+        Compact messages to fit within token limit (synchronous version).
+        
+        For LLM_SUMMARIZE strategy, falls back to naive summarization if no LLM function provided.
+        Use compact_async for proper LLM integration.
         
         Args:
             messages: List of messages to compact
@@ -129,7 +137,73 @@ class ContextCompactor:
         elif self.strategy == CompactionStrategy.PRUNE:
             compacted = self._prune(messages)
         elif self.strategy == CompactionStrategy.LLM_SUMMARIZE:
-            compacted = self._llm_summarize(messages)
+            if self.llm_summarize_fn:
+                # For sync calls with LLM function, we need to run async
+                try:
+                    # Check if we're already in an async context
+                    try:
+                        loop = asyncio.get_running_loop()
+                        # If in async context, fallback to naive summarization
+                        compacted = self._summarize(messages)
+                    except RuntimeError:
+                        # No running loop, safe to create one
+                        compacted = asyncio.run(self._llm_summarize_async(messages))
+                except Exception:
+                    # Fallback to naive summarization if async fails
+                    compacted = self._summarize(messages)
+            else:
+                compacted = self._llm_summarize(messages)
+        else:
+            compacted = self._truncate(messages)
+        
+        compacted_tokens = self.count_total_tokens(compacted)
+        
+        result = CompactionResult(
+            original_tokens=original_tokens,
+            compacted_tokens=compacted_tokens,
+            messages_removed=len(messages) - len(compacted),
+            messages_kept=len(compacted),
+            strategy_used=self.strategy
+        )
+        
+        return compacted, result
+
+    async def compact_async(
+        self,
+        messages: List[Dict[str, Any]]
+    ) -> tuple[List[Dict[str, Any]], CompactionResult]:
+        """
+        Compact messages to fit within token limit (asynchronous version).
+        
+        Args:
+            messages: List of messages to compact
+            
+        Returns:
+            Tuple of (compacted messages, result)
+        """
+        original_tokens = self.count_total_tokens(messages)
+        
+        if original_tokens <= self.max_tokens:
+            return messages, CompactionResult(
+                original_tokens=original_tokens,
+                compacted_tokens=original_tokens,
+                messages_removed=0,
+                messages_kept=len(messages),
+                strategy_used=self.strategy
+            )
+        
+        if self.strategy == CompactionStrategy.TRUNCATE:
+            compacted = self._truncate(messages)
+        elif self.strategy == CompactionStrategy.SLIDING:
+            compacted = self._sliding_window(messages)
+        elif self.strategy == CompactionStrategy.SUMMARIZE:
+            compacted = self._summarize(messages)
+        elif self.strategy == CompactionStrategy.SMART:
+            compacted = self._smart_compact(messages)
+        elif self.strategy == CompactionStrategy.PRUNE:
+            compacted = self._prune(messages)
+        elif self.strategy == CompactionStrategy.LLM_SUMMARIZE:
+            compacted = await self._llm_summarize_async(messages)
         else:
             compacted = self._truncate(messages)
         
@@ -344,6 +418,135 @@ class ContextCompactor:
         
         result.extend(recent)
         return result
+
+    async def _llm_summarize_async(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Use LLM to intelligently summarize older messages.
+        
+        This method invokes the agent's LLM to create a meaningful summary
+        that preserves key facts, identifiers, and the user's intent.
+        """
+        result = []
+        
+        # Keep system messages
+        system_msgs = [m for m in messages if m.get("role") == "system"]
+        other_msgs = [m for m in messages if m.get("role") != "system"]
+        
+        result.extend(system_msgs)
+        
+        # Keep recent messages
+        recent = other_msgs[-self.preserve_recent:]
+        older = other_msgs[:-self.preserve_recent] if len(other_msgs) > self.preserve_recent else []
+        
+        if older and self.llm_summarize_fn:
+            try:
+                # Format messages for summarization
+                history_text = self._format_messages_for_summary(older)
+                
+                # Create summarization prompt that preserves important information
+                prompt = (
+                    "Summarise the following conversation history. Preserve verbatim: "
+                    "all file paths, IDs, hashes, URLs, task references, error messages, "
+                    "tool outputs, and the user's requests. Be concise but complete. "
+                    "Focus on facts and actions taken, not general conversation.\n\n"
+                    f"{history_text}"
+                )
+                
+                # Call the LLM for summarization
+                summary = await self.llm_summarize_fn(prompt)
+                
+                # Add the LLM-generated summary as a system message
+                result.append({
+                    "role": "system",
+                    "content": f"[Previous conversation summary]\n{summary}",
+                    "_compacted": True,
+                    "_original_count": len(older),
+                    "_llm_generated": True,
+                })
+            except Exception as e:
+                # Fallback to naive summarization if LLM call fails
+                import logging
+                logging.warning(f"LLM summarization failed, falling back to naive: {e}")
+                summary_parts = []
+                for msg in older:
+                    role = msg.get("role", "unknown")
+                    content = str(msg.get("content", ""))
+                    if content:
+                        # Extract key information
+                        summary_parts.append(f"[{role}]: {content[:150]}...")
+                
+                if summary_parts:
+                    summary = (
+                        "[Compacted conversation history - LLM summarization failed]\n"
+                        + "\n".join(summary_parts[:10])
+                    )
+                    result.append({
+                        "role": "system",
+                        "content": summary,
+                        "_compacted": True,
+                        "_original_count": len(older),
+                        "_fallback": True,
+                    })
+        elif older:
+            # Fallback to naive summarization if no LLM function
+            summary_parts = []
+            for msg in older:
+                role = msg.get("role", "unknown")
+                content = str(msg.get("content", ""))
+                if content:
+                    summary_parts.append(f"[{role}]: {content[:150]}...")
+            
+            if summary_parts:
+                summary = (
+                    "[Compacted conversation history - no LLM function]\n"
+                    + "\n".join(summary_parts[:10])
+                )
+                result.append({
+                    "role": "system",
+                    "content": summary,
+                    "_compacted": True,
+                    "_original_count": len(older),
+                })
+        
+        result.extend(recent)
+        return result
+
+    def _format_messages_for_summary(self, messages: List[Dict[str, Any]]) -> str:
+        """Format messages for LLM summarization."""
+        formatted = []
+        for i, msg in enumerate(messages):
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            
+            # Handle tool calls
+            if msg.get("tool_calls"):
+                tool_calls = msg.get("tool_calls", [])
+                tool_names = [tc.get("function", {}).get("name", "unknown") for tc in tool_calls]
+                formatted.append(f"{i+1}. {role}: Called tools: {', '.join(tool_names)}")
+            
+            # Handle content
+            if isinstance(content, str) and content.strip():
+                # Truncate very long content but preserve structure
+                if len(content) > 1000:
+                    content = content[:800] + "...[truncated]..." + content[-200:]
+                formatted.append(f"{i+1}. {role}: {content}")
+            elif isinstance(content, list):
+                # Handle multi-part content
+                parts = []
+                for part in content[:3]:  # Limit to first 3 parts
+                    if isinstance(part, dict):
+                        text = part.get("text", "")
+                        if text:
+                            parts.append(text[:200] + "..." if len(text) > 200 else text)
+                if parts:
+                    formatted.append(f"{i+1}. {role}: {' | '.join(parts)}")
+            
+            # Handle tool results with IDs
+            if msg.get("tool_call_id"):
+                tool_id = msg.get("tool_call_id", "")
+                formatted.append(f"{i+1}. {role} (tool {tool_id}): {str(content)[:500]}...")
+        
+        return "\n".join(formatted)
     
     def _build_structured_summary(self, messages: List[Dict[str, Any]]) -> str:
         """
