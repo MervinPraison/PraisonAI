@@ -29,6 +29,9 @@ logger = get_logger(__name__, extra_data={"subsystem": "memory"})
 TRACE_LEVEL = 5
 logging.addLevelName(TRACE_LEVEL, 'TRACE')
 
+# Cache boundary constants for prompt prefix caching optimization
+CACHE_BOUNDARY = "\n\n<!-- CACHE_BOUNDARY -->\n\n"
+
 
 
 class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
@@ -1704,6 +1707,41 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
         entities = self.search_entity(q, limit=max_items)
         user_mem = self.search_user_memory(user_id, q, limit=max_items) if user_id else []
 
+        # Apply stable sorting to ensure deterministic order for prompt caching
+        # Sort by timestamp descending, then by content hash for stable ordering
+        def _sort_memory_results(results: List[Any]) -> List[Any]:
+            """Stable sort so identical query sets produce identical context strings."""
+            import hashlib
+            if not results:
+                return results
+            
+            def sort_key(r):
+                if not isinstance(r, dict):
+                    return (0.0, hashlib.sha256(str(r).encode()).hexdigest())
+                
+                # Prefer created_at over timestamp for better determinism
+                timestamp = r.get("created_at") or r.get("timestamp") or 0
+                if isinstance(timestamp, str):
+                    try:
+                        from datetime import datetime
+                        timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).timestamp()
+                    except ValueError:
+                        timestamp = 0.0
+                timestamp = -(float(timestamp))  # Negative for descending order
+                
+                # Use full content hash for true deterministic ordering
+                content = r.get("text", "") if isinstance(r, dict) else str(r)
+                content_hash = hashlib.sha256(content.encode()).hexdigest()
+                return (timestamp, content_hash)
+            
+            return sorted(results, key=sort_key)
+
+        # Apply stable sorting to all memory results
+        short_term = _sort_memory_results(short_term)
+        long_term = _sort_memory_results(long_term)
+        entities = _sort_memory_results(entities)
+        user_mem = _sort_memory_results(user_mem)
+
         # Add sections in order of priority
         add_section("Short-term Memory Context", short_term)
         add_section("Long-term Memory Context", long_term)
@@ -1712,6 +1750,52 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
             add_section("User Context", user_mem)
 
         return "\n".join(lines) if lines else ""
+
+    def build_cache_optimized_context(
+        self,
+        task_descr: str,
+        user_id: Optional[str] = None,
+        additional: str = "",
+        max_items: int = 3,
+        include_cache_boundary: bool = True,
+        include_in_output: Optional[bool] = None
+    ) -> Dict[str, str]:
+        """
+        Build context with cache boundary markers for prompt prefix caching optimization.
+        
+        Returns a dictionary with 'stable_prefix' and 'cache_boundary' keys.
+        The stable prefix contains deterministically ordered content that should
+        remain constant between turns for effective prompt caching.
+        
+        Args:
+            task_descr: Task description for memory search
+            user_id: Optional user ID for personalized memory
+            additional: Additional context to include in search
+            max_items: Maximum items per memory category
+            include_cache_boundary: Whether to include cache boundary marker
+            include_in_output: Whether to include memory content in output
+            
+        Returns:
+            Dict with 'stable_prefix' and 'cache_boundary' keys
+        """
+        # Cache-optimized API should include stable content unless explicitly disabled
+        if include_in_output is None:
+            include_in_output = True
+            
+        # Build the stable context using existing method
+        stable_context = self.build_context_for_task(
+            task_descr=task_descr,
+            user_id=user_id,
+            additional=additional,
+            max_items=max_items,
+            include_in_output=include_in_output
+        )
+        
+        result = {"stable_prefix": stable_context}
+        
+        result["cache_boundary"] = CACHE_BOUNDARY if include_cache_boundary else ""
+            
+        return result
 
     # -------------------------------------------------------------------------
     #                      Master Reset (Everything)

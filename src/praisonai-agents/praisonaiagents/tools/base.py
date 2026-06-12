@@ -17,6 +17,7 @@ Usage:
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Type, get_type_hints
 import inspect
+import json
 import logging
 import copy
 
@@ -428,6 +429,50 @@ def validate_tool_schema_consistency(tools: List[Any]) -> bool:
         names.add(name)
     
     return True
+
+
+def get_sorted_tool_schemas(tools: List[Any]) -> List[Dict[str, Any]]:
+    """Get tool schemas sorted by function name for deterministic ordering.
+    
+    This ensures tool schemas are always ordered consistently for prompt caching optimization.
+    
+    Args:
+        tools: List of tool objects (BaseTool instances, callables, etc.)
+        
+    Returns:
+        List of tool schemas sorted alphabetically by function name
+        
+    Raises:
+        ToolValidationError: If validation fails
+    """
+    if not tools:
+        return []
+        
+    # First validate all tools (reuse existing validation logic)
+    validate_tool_schema_consistency(tools)
+    
+    from .decorator import get_tool_schema
+    schemas = []
+    
+    for tool in tools:
+        # Get schema from different tool types
+        if isinstance(tool, BaseTool):
+            schema = tool.get_schema()
+        elif hasattr(tool, 'get_schema') and callable(getattr(tool, 'get_schema')):
+            schema = tool.get_schema()
+        elif callable(tool):
+            schema = get_tool_schema(tool)
+        else:
+            continue  # Skip invalid tools (validation already happened)
+            
+        if schema:
+            schemas.append(schema)
+    
+    # Sort schemas by function name for deterministic ordering
+    def sort_key(schema):
+        return schema.get("function", {}).get("name", "")
+    
+    return sorted(schemas, key=sort_key)
 
 
 # For backward compatibility - tools can also just be functions
