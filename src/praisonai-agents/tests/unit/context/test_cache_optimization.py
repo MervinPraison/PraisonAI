@@ -9,12 +9,6 @@ This test verifies that:
 4. Multiple runs produce identical context strings for caching
 """
 
-import sys
-import os
-
-# Add the praisonai-agents package to the path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src', 'praisonai-agents'))
-
 def test_memory_stable_sorting():
     """Test that memory context is assembled deterministically."""
     print("Testing memory stable sorting...")
@@ -29,7 +23,7 @@ def test_memory_stable_sorting():
     ]
     
     # Create a memory instance and stub the search methods to return controlled data
-    memory = Memory(config={})
+    memory = Memory(config={"provider": "none"})
     
     # Mock the search methods to return our test data
     original_search_short = memory.search_short_term
@@ -120,7 +114,7 @@ def test_cache_boundary_markers():
     print("✓ Cache boundary constant is defined")
     
     # Test the cache-optimized context method actually works
-    memory = Memory(config={})
+    memory = Memory(config={"provider": "none"})
     
     # Mock search methods to return empty results for simpler test
     memory.search_short_term = lambda q, limit=3: []
@@ -141,6 +135,8 @@ def test_cache_boundary_markers():
     print("✓ Cache optimization method works correctly")
 
 if __name__ == "__main__":
+    import sys
+
     try:
         test_memory_stable_sorting()
         test_tool_schema_sorting()
