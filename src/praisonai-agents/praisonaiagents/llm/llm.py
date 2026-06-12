@@ -21,6 +21,7 @@ from pydantic import BaseModel
 import time
 import json
 import xml.etree.ElementTree as ET
+from ..errors import AgentErrorKind, FailoverDecision, IdleTimeoutBreaker
 # Gap 2: Tool call execution imports
 from ..tools.call_executor import ToolCall, create_tool_call_executor
 # Display functions - lazy loaded to avoid importing rich at startup
@@ -362,6 +363,7 @@ Respond with ONLY a valid JSON tool call in this format:
         claude_memory: Optional[Union[bool, Any]] = None,
         failover_manager: Optional[FailoverManagerProtocol] = None,
         auth: Optional[str] = None,           # NEW: "claude-code", "codex", "gemini-cli", "qwen-cli"
+        max_iter: Optional[int] = None,       # NEW: maximum iterations for tool calling loops
         **extra_settings
     ):
         # Configure logging only once at the class level
@@ -404,6 +406,8 @@ Respond with ONLY a valid JSON tool call in this format:
         self.claude_memory = claude_memory
         self._claude_memory_tool = None  # Lazy initialized
         self._console = None  # Lazy load console when needed
+        self.max_iter = max_iter or 10  # Default to 10 if not specified
+        self._idle_timeout_breaker = IdleTimeoutBreaker()  # Circuit breaker for idle timeouts
         self.chat_history = []
         self.verbose = extra_settings.get('verbose', True)
         self.markdown = extra_settings.get('markdown', True)
@@ -704,6 +708,187 @@ Respond with ONLY a valid JSON tool call in this format:
             is_rate_limit = self._is_rate_limit_error(error)
             delay = self._parse_retry_delay(str(error)) if is_rate_limit else 0.0
             return "rate_limit" if is_rate_limit else "unknown", is_rate_limit, delay
+    
+    def classify_error_kind(self, error: Exception) -> AgentErrorKind:
+        """
+        Classify error into typed AgentErrorKind instead of freeform strings.
+        
+        Replaces scattered regex checks with systematic classification.
+        
+        Args:
+            error: Exception to classify
+            
+        Returns:
+            AgentErrorKind: Typed error classification
+        """
+        error_str = str(error).lower()
+        error_type = type(error).__name__.lower()
+        
+        # Check for permanent auth errors first (non-retryable)
+        if any(indicator in error_str for indicator in [
+            "invalid api key", "api key not found", "invalid_api_key", 
+            "incorrect api key", "authentication_error"
+        ]):
+            return "auth_permanent"
+        
+        # Retryable authentication errors
+        if any(indicator in error_str for indicator in [
+            "unauthorized", "api key", "authentication failed",
+            "invalid_request_error", "openai_error"
+        ]):
+            return "auth"
+        
+        # Rate limiting 
+        if any(indicator in error_str for indicator in [
+            "rate limit", "ratelimit", "too many request", "resource_exhausted",
+            "usage limit", "429"
+        ]) or "429" in str(getattr(error, "status_code", "")):
+            return "rate_limit"
+        
+        # Context length exceeded
+        if any(indicator in error_str for indicator in [
+            "maximum context length", "context window is too long", 
+            "context length exceeded", "context_length_exceeded",
+            "input too long", "prompt too long"
+        ]):
+            return "context_overflow"
+        
+        # Model not found/available
+        if any(indicator in error_str for indicator in [
+            "model not found", "model_not_found", "unknown model",
+            "invalid model", "model does not exist", "model not available"
+        ]):
+            return "model_not_found"
+        
+        # Empty or malformed responses
+        if any(indicator in error_str for indicator in [
+            "empty response", "no response", "invalid response format",
+            "json decode error", "unexpected end of json", "malformed response"
+        ]):
+            return "empty_response"
+        
+        # Service overloaded
+        if any(indicator in error_str for indicator in [
+            "overloaded", "service unavailable", "temporarily unavailable",
+            "server overloaded", "503", "502", "500"
+        ]):
+            return "overloaded"
+        
+        # Billing/quota issues
+        if any(indicator in error_str for indicator in [
+            "insufficient quota", "quota exceeded", "billing", "credit",
+            "payment required", "subscription required", "plan limit"
+        ]):
+            return "billing"
+        
+        # Timeout (potential idle timeout)
+        if any(indicator in error_str for indicator in [
+            "timeout", "timed out", "connection timeout", "read timeout",
+            "request timeout", "deadline exceeded"
+        ]):
+            return "idle_timeout"
+        
+        # Format errors
+        if any(indicator in error_str for indicator in [
+            "validation error", "invalid format", "parse error",
+            "malformed", "invalid json", "schema error"
+        ]):
+            return "format_error"
+        
+        # Default fallback
+        return "unknown"
+    
+    def resolve_failover_decision(self, error: Exception, attempt_state: dict) -> FailoverDecision:
+        """
+        Resolve failover decision based on error kind and attempt state.
+        
+        Separates classification (error kind) from action (what to do),
+        making the policy independently testable and overridable.
+        
+        Args:
+            error: Exception that occurred
+            attempt_state: Dict with attempt info like {"attempt": 1, "max_retries": 3}
+            
+        Returns:
+            FailoverDecision: Action to take with reasoning
+        """
+        error_kind = self.classify_error_kind(error)
+        attempt = attempt_state.get("attempt", 1)
+        max_retries = attempt_state.get("max_retries", self._max_retries)
+        
+        # Non-retryable errors
+        if error_kind in ["auth_permanent", "model_not_found", "format_error"]:
+            return FailoverDecision(
+                action="surface_error",
+                reason=error_kind,
+                is_retryable=False
+            )
+        
+        # Exceeded retry limit
+        if attempt > max_retries:
+            return FailoverDecision(
+                action="surface_error", 
+                reason=error_kind,
+                is_retryable=False
+            )
+        
+        # Rate limiting - extract retry delay
+        if error_kind == "rate_limit":
+            backoff = self._parse_retry_delay(str(error))  # Returns seconds
+            if backoff == 0:  # No specific delay found, use exponential backoff
+                backoff = min(2 ** (attempt - 1), 60)  # 1s, 2s, 4s, ... cap at 60s
+            return FailoverDecision(
+                action="retry",
+                reason=error_kind, 
+                backoff_ms=int(backoff * 1000),
+                is_retryable=True
+            )
+        
+        # Auth errors - try profile rotation if available
+        if error_kind == "auth" and self._failover_manager:
+            return FailoverDecision(
+                action="rotate_profile",
+                reason=error_kind,
+                backoff_ms=1000,  # Brief delay before trying new profile
+                is_retryable=True
+            )
+        
+        # Overloaded/timeout - retry with exponential backoff
+        if error_kind in ["overloaded", "idle_timeout"]:
+            # For idle timeouts, check circuit breaker
+            if error_kind == "idle_timeout":
+                breaker_hit = self._idle_timeout_breaker.record_idle_timeout()
+                if breaker_hit:
+                    return FailoverDecision(
+                        action="surface_error",
+                        reason="idle_timeout", 
+                        is_retryable=False
+                    )
+            
+            backoff = min(2000 * (2 ** (attempt - 1)), 30000)  # 2s, 4s, 8s, ... cap at 30s
+            return FailoverDecision(
+                action="retry",
+                reason=error_kind,
+                backoff_ms=backoff,
+                is_retryable=True
+            )
+        
+        # Context overflow - non-retryable without intervention
+        if error_kind == "context_overflow":
+            return FailoverDecision(
+                action="surface_error",
+                reason=error_kind,
+                is_retryable=False
+            )
+        
+        # Unknown/other errors - limited retry with short backoff
+        backoff = 1000 * attempt  # Linear backoff: 1s, 2s, 3s
+        return FailoverDecision(
+            action="retry" if attempt <= 2 else "surface_error",
+            reason=error_kind,
+            backoff_ms=backoff,
+            is_retryable=attempt <= 2
+        )
 
     def _switch_to_profile(self, profile: "AuthProfile") -> None:
         """Switch to a new auth profile for failover.
@@ -776,14 +961,23 @@ Respond with ONLY a valid JSON tool call in this format:
                 # Mark success if failover is configured
                 if self._failover_manager and self._current_profile:
                     self._failover_manager.mark_success(self._current_profile)
+                
+                # Reset idle timeout circuit breaker on success
+                self._idle_timeout_breaker.reset()
                     
                 return result
 
             except Exception as e:
-                category, can_retry, retry_delay = self._classify_error_and_should_retry(e, attempt + 1)
+                # Use new typed failover decision instead of old classification
+                decision = self.resolve_failover_decision(e, {"attempt": attempt + 1, "max_retries": self._max_retries})
                 
                 last_error = e
                 error_str = str(e)
+                
+                # Map decision to old variables for compatibility with existing logic
+                category = decision.reason
+                can_retry = decision.is_retryable
+                retry_delay = decision.backoff_ms / 1000.0  # Convert ms to seconds
 
                 # Check for auth errors and try refreshing subscription credentials
                 if category == "auth" and self._auth_provider_id and attempt == 0:
@@ -800,8 +994,27 @@ Respond with ONLY a valid JSON tool call in this format:
                     except Exception as refresh_error:
                         logging.warning(f"Failed to refresh subscription credentials: {refresh_error}")
 
-                # Failover: mark failure and try next profile (do this before early exit)
-                if self._failover_manager and self._current_profile:
+                # Handle different failover decision actions
+                if decision.action == "rotate_profile" and self._failover_manager:
+                    if self._current_profile:
+                        is_rate_limit = (category == "rate_limit")
+                        self._failover_manager.mark_failure(
+                            self._current_profile, error_str, is_rate_limit=is_rate_limit
+                        )
+                    next_profile = self._failover_manager.get_next_profile()
+                    if next_profile and next_profile != self._current_profile:
+                        self._switch_to_profile(next_profile)
+                        self._current_profile = next_profile
+                        # Update the kwargs with new profile values for the next retry
+                        if "api_key" in kwargs:
+                            kwargs["api_key"] = self.api_key
+                        if "base_url" in kwargs:
+                            kwargs["base_url"] = self.base_url
+                        if "model" in kwargs:
+                            kwargs["model"] = self.model
+                        logging.info(f"Failover: switched to profile '{next_profile.name}'")
+                # Legacy failover for compatibility (when decision is retry but failover is configured)
+                elif self._failover_manager and self._current_profile and decision.action == "retry":
                     is_rate_limit = (category == "rate_limit")
                     self._failover_manager.mark_failure(
                         self._current_profile, error_str, is_rate_limit=is_rate_limit
@@ -822,7 +1035,7 @@ Respond with ONLY a valid JSON tool call in this format:
                         retry_delay = 0.0
                         logging.info(f"Failover: switched to profile '{next_profile.name}'")
                 
-                if not can_retry:
+                if decision.action == "surface_error" or not can_retry:
                     raise
 
                 if attempt < self._max_retries:
@@ -880,14 +1093,23 @@ Respond with ONLY a valid JSON tool call in this format:
                 # Mark success if failover is configured
                 if self._failover_manager and self._current_profile:
                     self._failover_manager.mark_success(self._current_profile)
+                
+                # Reset idle timeout circuit breaker on success
+                self._idle_timeout_breaker.reset()
                     
                 return result
 
             except Exception as e:
-                category, can_retry, retry_delay = self._classify_error_and_should_retry(e, attempt + 1)
+                # Use new typed failover decision instead of old classification
+                decision = self.resolve_failover_decision(e, {"attempt": attempt + 1, "max_retries": self._max_retries})
                 
                 last_error = e
                 error_str = str(e)
+                
+                # Map decision to old variables for compatibility with existing logic
+                category = decision.reason
+                can_retry = decision.is_retryable
+                retry_delay = decision.backoff_ms / 1000.0  # Convert ms to seconds
 
                 # Check for auth errors and try refreshing subscription credentials
                 if category == "auth" and self._auth_provider_id and attempt == 0:
@@ -904,8 +1126,27 @@ Respond with ONLY a valid JSON tool call in this format:
                     except Exception as refresh_error:
                         logging.warning(f"Failed to refresh subscription credentials: {refresh_error}")
 
-                # Failover: mark failure and try next profile (do this before early exit)
-                if self._failover_manager and self._current_profile:
+                # Handle different failover decision actions
+                if decision.action == "rotate_profile" and self._failover_manager:
+                    if self._current_profile:
+                        is_rate_limit = (category == "rate_limit")
+                        self._failover_manager.mark_failure(
+                            self._current_profile, error_str, is_rate_limit=is_rate_limit
+                        )
+                    next_profile = self._failover_manager.get_next_profile()
+                    if next_profile and next_profile != self._current_profile:
+                        self._switch_to_profile(next_profile)
+                        self._current_profile = next_profile
+                        # Update the kwargs with new profile values for the next retry
+                        if "api_key" in kwargs:
+                            kwargs["api_key"] = self.api_key
+                        if "base_url" in kwargs:
+                            kwargs["base_url"] = self.base_url
+                        if "model" in kwargs:
+                            kwargs["model"] = self.model
+                        logging.info(f"Failover: switched to profile '{next_profile.name}'")
+                # Legacy failover for compatibility (when decision is retry but failover is configured)
+                elif self._failover_manager and self._current_profile and decision.action == "retry":
                     is_rate_limit = (category == "rate_limit")
                     self._failover_manager.mark_failure(
                         self._current_profile, error_str, is_rate_limit=is_rate_limit
@@ -926,7 +1167,7 @@ Respond with ONLY a valid JSON tool call in this format:
                         retry_delay = 0.0
                         logging.info(f"Failover: switched to profile '{next_profile.name}'")
                 
-                if not can_retry:
+                if decision.action == "surface_error" or not can_retry:
                     raise
 
                 if attempt < self._max_retries:
@@ -1534,7 +1775,7 @@ Now provide your final answer using this result. Summarize the information natur
             should_summarize = self._provider_adapter.should_summarize_tools(iteration_count)
         else:
             # Conservative fallback without provider detection
-            should_summarize = iteration_count >= 5  # Conservative default
+            should_summarize = iteration_count >= self.max_iter  # Use configurable max_iter
             
         if not should_summarize:
             return False, None, iteration_count
@@ -1959,7 +2200,7 @@ Now provide your final answer using this result. Summarize the information natur
                     )
 
             # Sequential tool calling loop - similar to agent.py
-            max_iterations = 10  # Prevent infinite loops
+            max_iterations = self.max_iter  # Use configurable iteration limit
             iteration_count = 0
             final_response_text = ""
             response_text = ""  # Initialize to prevent UnboundLocalError on API errors
@@ -2140,8 +2381,8 @@ Now provide your final answer using this result. Summarize the information natur
                                     "content": content,
                                 })
 
-                            # Safety: break after 5 iterations
-                            if iteration_count >= 5:
+                            # Safety: break after max_iter iterations
+                            if iteration_count >= self.max_iter:
                                 final_response_text = response_text.strip() if response_text else "Task completed."
                                 break
 
@@ -2934,7 +3175,7 @@ Now provide your final answer using this result. Summarize the information natur
                             continue
                         
                         # Safety check: prevent infinite loops for any provider
-                        if iteration_count >= 5:
+                        if iteration_count >= self.max_iter:
                             if tool_results:
                                 final_response_text = "Task completed successfully based on tool execution results."
                             else:
@@ -3750,7 +3991,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             formatted_tools = self._format_tools_for_litellm(tools)
 
             # Initialize variables for iteration loop
-            max_iterations = 50  # Prevent infinite loops
+            max_iterations = self.max_iter  # Use configurable iteration limit
             iteration_count = 0
             final_response_text = ""
             stored_reasoning_content = None  # Store reasoning content from tool execution
@@ -3851,7 +4092,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 "content": content,
                             })
 
-                        if iteration_count >= 5:
+                        if iteration_count >= self.max_iter:
                             final_response_text = response_text.strip() if response_text else "Task completed."
                             break
 
@@ -4231,7 +4472,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         continue
                     
                     # Safety check: prevent infinite loops for any provider
-                    if iteration_count >= 20:
+                    if iteration_count >= self.max_iter:
                         if tool_results:
                             final_response_text = "Task completed successfully based on tool execution results."
                         else:
