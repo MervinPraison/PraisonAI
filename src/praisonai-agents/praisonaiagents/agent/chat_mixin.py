@@ -883,72 +883,9 @@ Your Goal: {self.goal}"""
             logging.debug(f"[proactive-context] fallback to original messages: {_ce}")
         
         # --- Context compaction (opt-in via ExecutionConfig.context_compaction) ---
-        # Additional compaction logic for LLM_SUMMARIZE strategy
-        _execution_cfg = getattr(self, 'execution', None)
-        if _execution_cfg and getattr(_execution_cfg, 'context_compaction', False):
-            _strategy = getattr(_execution_cfg, 'compaction_strategy', None) or CompactionStrategy.TRUNCATE
-            if _strategy == CompactionStrategy.LLM_SUMMARIZE:
-                try:
-                    from ..compaction import ContextCompactor
-                    from ..compaction.strategy import CompactionStrategy
-                    from ..hooks import HookEvent as _HookEvent
-                    _max_tok = getattr(_execution_cfg, 'max_context_tokens', None) or 8000
-                    
-                    # Create LLM summarization function if strategy is LLM_SUMMARIZE
-                    _llm_fn = None
-                    try:
-                        _llm_fn = self._create_llm_summarize_function()
-                    except Exception as e:
-                        logging.warning(f"Failed to create LLM summarize function: {e}")
-                    
-                    _compactor = ContextCompactor(
-                        max_tokens=_max_tok,
-                        strategy=_strategy,
-                        llm_summarize_fn=_llm_fn
-                    )
-                    if _compactor.needs_compaction(messages):
-                        try:
-                            self._hook_runner.execute_sync(_HookEvent.BEFORE_COMPACTION, None)
-                        except Exception as e:
-                            logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
-                            if getattr(self, '_strict_hooks', False):
-                                raise
-                        
-                        # Use async compaction for LLM_SUMMARIZE strategy
-                        if _strategy == CompactionStrategy.LLM_SUMMARIZE and _llm_fn:
-                            import asyncio
-                            try:
-                                # Check if we're already in an async context
-                                try:
-                                    loop = asyncio.get_running_loop()
-                                    # If in async context, fall back to sync (naive) compaction
-                                    logging.warning("LLM_SUMMARIZE in sync context - falling back to naive summarization")
-                                    compacted_msgs, _cr = _compactor.compact(messages)
-                                except RuntimeError:
-                                    # No running loop, safe to create one
-                                    compacted_msgs, _cr = asyncio.run(_compactor.compact_async(messages))
-                            except Exception:
-                                # If async fails, fall back to sync (naive) compaction
-                                logging.warning("Async LLM summarization failed, falling back to naive")
-                                compacted_msgs, _cr = _compactor.compact(messages)
-                        else:
-                            compacted_msgs, _cr = _compactor.compact(messages)
-                        
-                        messages[:] = compacted_msgs  # in-place update so callers see the change
-                        logging.info(
-                            f"[compaction] {self.name}: {_cr.original_tokens}→{_cr.compacted_tokens} tokens "
-                            f"({_cr.messages_removed} messages removed, strategy={(_cr.strategy_used.value if _cr.strategy_used else 'TRUNCATE')})"
-                        )
-                        try:
-                            self._hook_runner.execute_sync(_HookEvent.AFTER_COMPACTION, None)
-                        except Exception as e:
-                            logging.warning(f"AFTER_COMPACTION hook failed: {e}")
-                            if getattr(self, '_strict_hooks', False):
-                                raise
-                except Exception as _ce:
-                    if getattr(self, '_strict_hooks', False):
-                        raise
-                    logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
+        # Compacts message history before sending to LLM. Zero overhead when disabled.
+        from ..hooks import HookEvent as _HookEvent
+        self._apply_context_compaction(messages, _HookEvent)
 
         # Trigger BEFORE_LLM hook
         from ..hooks import HookEvent, BeforeLLMInput
@@ -2717,57 +2654,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     effective_history = self.chat_history
                     
                 # --- Context compaction (async custom LLM path) ---
-                _exec_cfg = getattr(self, 'execution', None)
-                if _exec_cfg and getattr(_exec_cfg, 'context_compaction', False):
-                    _strategy = getattr(_exec_cfg, 'compaction_strategy', None) or CompactionStrategy.TRUNCATE
-                    if _strategy == CompactionStrategy.LLM_SUMMARIZE:
-                        try:
-                            from ..compaction import ContextCompactor
-                            from ..compaction.strategy import CompactionStrategy
-                            from ..hooks import HookEvent as _HE
-                            _mtok = getattr(_exec_cfg, 'max_context_tokens', None) or 8000
-                            
-                            # Create LLM summarization function if strategy is LLM_SUMMARIZE
-                            _llm_fn = None
-                            try:
-                                _llm_fn = self._create_llm_summarize_function()
-                            except Exception as e:
-                                logging.warning(f"Failed to create LLM summarize function: {e}")
-                            
-                            _cw = ContextCompactor(
-                                max_tokens=_mtok,
-                                strategy=_strategy,
-                                llm_summarize_fn=_llm_fn
-                            )
-                            if _cw.needs_compaction(self.chat_history):
-                                try:
-                                    await self._hook_runner.execute(_HE.BEFORE_COMPACTION, None)
-                                except Exception as e:
-                                    logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
-                                    if getattr(self, '_strict_hooks', False):
-                                        raise
-                                
-                                # Use async compaction if LLM summarization is enabled
-                                if _strategy == CompactionStrategy.LLM_SUMMARIZE and _llm_fn:
-                                    _ch, _cr = await _cw.compact_async(self.chat_history)
-                                else:
-                                    _ch, _cr = _cw.compact(self.chat_history)
-                                    
-                                self._replace_chat_history(_ch)
-                                logging.info(
-                                    f"[compaction] {self.name}: {_cr.original_tokens}→{_cr.compacted_tokens} tokens "
-                                    f"({_cr.messages_removed} messages removed, strategy={(_cr.strategy_used.value if _cr.strategy_used else 'TRUNCATE')})"
-                                )
-                                try:
-                                    await self._hook_runner.execute(_HE.AFTER_COMPACTION, None)
-                                except Exception as e:
-                                    logging.warning(f"AFTER_COMPACTION hook failed: {e}")
-                                    if getattr(self, '_strict_hooks', False):
-                                        raise
-                        except Exception as _ce:
-                            if getattr(self, '_strict_hooks', False):
-                                raise
-                            logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
+                from ..hooks import HookEvent as _HE
+                compacted = await self._apply_context_compaction_async(self.chat_history, _HE)
+                if compacted:
+                    # Use the modified chat_history after compaction
+                    pass
 
                 try:
                     # C1 — per-call seed forwarding (async path)  
@@ -2872,57 +2763,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 logging.debug(f"[proactive-context-async-standard] fallback: {_ce2}")
                 
             # --- Context compaction (async standard OpenAI path) ---
-            _exec_cfg2 = getattr(self, 'execution', None)
-            if _exec_cfg2 and getattr(_exec_cfg2, 'context_compaction', False):
-                _strategy2 = getattr(_exec_cfg2, 'compaction_strategy', None) or CompactionStrategy.TRUNCATE
-                if _strategy2 == CompactionStrategy.LLM_SUMMARIZE:
-                    try:
-                        from ..compaction import ContextCompactor
-                        from ..compaction.strategy import CompactionStrategy
-                        from ..hooks import HookEvent as _HE2
-                        _mtok2 = getattr(_exec_cfg2, 'max_context_tokens', None) or 8000
-                        
-                        # Create LLM summarization function if strategy is LLM_SUMMARIZE
-                        _llm_fn2 = None
-                        try:
-                            _llm_fn2 = self._create_llm_summarize_function()
-                        except Exception as e:
-                            logging.warning(f"Failed to create LLM summarize function: {e}")
-                        
-                        _cw2 = ContextCompactor(
-                            max_tokens=_mtok2,
-                            strategy=_strategy2,
-                            llm_summarize_fn=_llm_fn2
-                        )
-                        if _cw2.needs_compaction(messages):
-                            try:
-                                await self._hook_runner.execute(_HE2.BEFORE_COMPACTION, None)
-                            except Exception as e:
-                                logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
-                                if getattr(self, '_strict_hooks', False):
-                                    raise
-                            
-                            # Use async compaction if LLM summarization is enabled
-                            if _strategy2 == CompactionStrategy.LLM_SUMMARIZE and _llm_fn2:
-                                _cm2, _cr2 = await _cw2.compact_async(messages)
-                            else:
-                                _cm2, _cr2 = _cw2.compact(messages)
-                                
-                            messages[:] = _cm2
-                            logging.info(
-                                f"[compaction] {self.name}: {_cr2.original_tokens}→{_cr2.compacted_tokens} tokens "
-                                f"({_cr2.messages_removed} messages removed, strategy={(_cr2.strategy_used.value if _cr2.strategy_used else 'TRUNCATE')})"
-                            )
-                            try:
-                                await self._hook_runner.execute(_HE2.AFTER_COMPACTION, None)
-                            except Exception as e:
-                                logging.warning(f"AFTER_COMPACTION hook failed: {e}")
-                                if getattr(self, '_strict_hooks', False):
-                                    raise
-                    except Exception as _ce2:
-                        if getattr(self, '_strict_hooks', False):
-                            raise
-                        logging.debug(f"[compaction] skipped (non-fatal): {_ce2}")
+            from ..hooks import HookEvent as _HE2
+            await self._apply_context_compaction_async(messages, _HE2)
 
             reflection_count = 0
             start_time = time.time()
@@ -3846,3 +3688,168 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 raise
         
         return llm_summarize_async
+
+    def _apply_context_compaction(self, messages, hook_event_class):
+        """
+        Apply context compaction to messages if enabled (sync version).
+        
+        Args:
+            messages: List of messages to potentially compact
+            hook_event_class: Hook event class to use for before/after hooks
+            
+        Returns:
+            bool: True if compaction was applied, False otherwise
+        """
+        _execution_cfg = getattr(self, 'execution', None)
+        if not (_execution_cfg and getattr(_execution_cfg, 'context_compaction', False)):
+            return False
+            
+        try:
+            from ..compaction import ContextCompactor
+            from ..compaction.strategy import CompactionStrategy
+            
+            _max_tok = getattr(_execution_cfg, 'max_context_tokens', None) or 8000
+            _strategy = getattr(_execution_cfg, 'compaction_strategy', None) or CompactionStrategy.TRUNCATE
+            
+            # Create LLM summarization function if strategy is LLM_SUMMARIZE
+            _llm_fn = None
+            if _strategy == CompactionStrategy.LLM_SUMMARIZE:
+                try:
+                    _llm_fn = self._create_llm_summarize_function()
+                except Exception as e:
+                    logging.warning(f"Failed to create LLM summarize function: {e}")
+            
+            _compactor = ContextCompactor(
+                max_tokens=_max_tok,
+                strategy=_strategy,
+                llm_summarize_fn=_llm_fn
+            )
+            
+            if not _compactor.needs_compaction(messages):
+                return False
+                
+            # Execute BEFORE_COMPACTION hook
+            try:
+                self._hook_runner.execute_sync(hook_event_class.BEFORE_COMPACTION, None)
+            except Exception as e:
+                logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
+                if getattr(self, '_strict_hooks', False):
+                    raise
+            
+            # Perform compaction
+            if _strategy == CompactionStrategy.LLM_SUMMARIZE and _llm_fn:
+                import asyncio
+                try:
+                    # Run async compaction in event loop
+                    compacted_msgs, _cr = asyncio.run(_compactor.compact_async(messages))
+                except RuntimeError:
+                    # If already in async context, fall back to sync (naive) compaction
+                    logging.warning(
+                        f"[compaction] {self.name}: LLM_SUMMARIZE fell back to naive summarization "
+                        f"(asyncio.run not available in sync context)"
+                    )
+                    compacted_msgs, _cr = _compactor.compact(messages)
+            else:
+                compacted_msgs, _cr = _compactor.compact(messages)
+            
+            messages[:] = compacted_msgs  # in-place update so callers see the change
+            logging.info(
+                f"[compaction] {self.name}: {_cr.original_tokens}→{_cr.compacted_tokens} tokens "
+                f"({_cr.messages_removed} messages removed, strategy={_cr.strategy_used.value})"
+            )
+            
+            # Execute AFTER_COMPACTION hook  
+            try:
+                self._hook_runner.execute_sync(hook_event_class.AFTER_COMPACTION, None)
+            except Exception as e:
+                logging.warning(f"AFTER_COMPACTION hook failed: {e}")
+                if getattr(self, '_strict_hooks', False):
+                    raise
+                    
+            return True
+            
+        except Exception as _ce:
+            if getattr(self, '_strict_hooks', False):
+                raise
+            logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
+            return False
+
+    async def _apply_context_compaction_async(self, messages, hook_event_class):
+        """
+        Apply context compaction to messages if enabled (async version).
+        
+        Args:
+            messages: List of messages to potentially compact
+            hook_event_class: Hook event class to use for before/after hooks
+            
+        Returns:
+            bool: True if compaction was applied, False otherwise
+        """
+        _execution_cfg = getattr(self, 'execution', None)
+        if not (_execution_cfg and getattr(_execution_cfg, 'context_compaction', False)):
+            return False
+            
+        try:
+            from ..compaction import ContextCompactor
+            from ..compaction.strategy import CompactionStrategy
+            
+            _max_tok = getattr(_execution_cfg, 'max_context_tokens', None) or 8000
+            _strategy = getattr(_execution_cfg, 'compaction_strategy', None) or CompactionStrategy.TRUNCATE
+            
+            # Create LLM summarization function if strategy is LLM_SUMMARIZE
+            _llm_fn = None
+            if _strategy == CompactionStrategy.LLM_SUMMARIZE:
+                try:
+                    _llm_fn = self._create_llm_summarize_function()
+                except Exception as e:
+                    logging.warning(f"Failed to create LLM summarize function: {e}")
+            
+            _compactor = ContextCompactor(
+                max_tokens=_max_tok,
+                strategy=_strategy,
+                llm_summarize_fn=_llm_fn
+            )
+            
+            if not _compactor.needs_compaction(messages):
+                return False
+                
+            # Execute BEFORE_COMPACTION hook
+            try:
+                await self._hook_runner.execute(hook_event_class.BEFORE_COMPACTION, None)
+            except Exception as e:
+                logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
+                if getattr(self, '_strict_hooks', False):
+                    raise
+            
+            # Perform compaction (use async version when available)
+            if _strategy == CompactionStrategy.LLM_SUMMARIZE and _llm_fn:
+                compacted_msgs, _cr = await _compactor.compact_async(messages)
+            else:
+                compacted_msgs, _cr = _compactor.compact(messages)
+            
+            # If messages is the same object as chat_history, replace chat history
+            # Otherwise, update the passed messages list in-place
+            if messages is self.chat_history:
+                self._replace_chat_history(compacted_msgs)
+            else:
+                messages[:] = compacted_msgs
+            logging.info(
+                f"[compaction] {self.name}: {_cr.original_tokens}→{_cr.compacted_tokens} tokens "
+                f"({_cr.messages_removed} messages removed, strategy={_cr.strategy_used.value})"
+            )
+            
+            # Execute AFTER_COMPACTION hook  
+            try:
+                await self._hook_runner.execute(hook_event_class.AFTER_COMPACTION, None)
+            except Exception as e:
+                logging.warning(f"AFTER_COMPACTION hook failed: {e}")
+                if getattr(self, '_strict_hooks', False):
+                    raise
+                    
+            return True
+            
+        except Exception as _ce:
+            if getattr(self, '_strict_hooks', False):
+                raise
+            logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
+            return False
