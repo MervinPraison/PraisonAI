@@ -90,6 +90,8 @@ def configure_host(
     **kwargs: Any,
 ) -> None:
     """Apply PraisonAIUI host settings and wire L1 backends (unless legacy mode)."""
+    global _configured_global
+    
     # Check if already configured in this context to avoid duplicate configuration
     if _configured_context.get() or _configured_global:
         return
@@ -177,7 +179,6 @@ def configure_host(
     except ImportError:
         pass  # L3 pages are optional
 
-    global _configured_global
     _configured_context.set(True)
     _configured_global = True
 
