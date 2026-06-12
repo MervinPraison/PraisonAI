@@ -419,11 +419,13 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         reply_to: Optional[str] = None,
         thread_id: Optional[str] = None,
     ) -> BotMessage:
-        """Send an email message.
+        """Send an email message with optional CC and BCC recipients.
         
         Args:
             channel_id: Recipient email address
-            content: Message content (str or {"subject": ..., "body": ...})
+            content: Message content. Can be:
+                - str: Plain text message body
+                - dict: {"subject": str, "body": str, "html": str, "cc": str/list, "bcc": str/list}
             reply_to: Message-ID to reply to (sets In-Reply-To header)
             thread_id: References chain (sets References header)
             
@@ -439,10 +441,14 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
             subject = content.get("subject", "Message from PraisonAI")
             body = content.get("body", "")
             html = content.get("html")
+            cc = content.get("cc")
+            bcc = content.get("bcc")
         else:
             subject = "Message from PraisonAI"
             body = str(content)
             html = None
+            cc = None
+            bcc = None
         
         # Build email
         if html:
@@ -455,6 +461,18 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         msg["From"] = self._email_address
         msg["To"] = channel_id
         msg["Subject"] = subject
+        
+        # Add CC and BCC headers if provided
+        from praisonaiagents.tools.email_tools import _parse_email_list
+        all_recipients = [channel_id]
+        if cc:
+            cc_list = _parse_email_list(cc)
+            msg["CC"] = ", ".join(cc_list)
+            all_recipients.extend(cc_list)
+        if bcc:
+            bcc_list = _parse_email_list(bcc)
+            all_recipients.extend(bcc_list)
+            # Note: BCC is not added to headers (by design)
         
         # Generate unique Message-ID
         domain = self._email_address.split("@")[-1]
@@ -473,7 +491,7 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         
         # Send via SMTP
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, self._send_smtp, msg)
+        await loop.run_in_executor(None, self._send_smtp, msg, all_recipients)
         
         # Create BotMessage for return
         bot_message = BotMessage(
@@ -492,12 +510,12 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         
         return bot_message
     
-    def _send_smtp(self, msg: MIMEText) -> None:
+    def _send_smtp(self, msg: MIMEText, to_addrs: List[str]) -> None:
         """Send email via SMTP (sync, runs in executor)."""
         with smtplib.SMTP(self._smtp_server, self._smtp_port) as server:
             server.starttls()
             server.login(self._email_address, self._token)
-            server.send_message(msg)
+            server.send_message(msg, to_addrs=to_addrs)
     
     async def edit_message(
         self,

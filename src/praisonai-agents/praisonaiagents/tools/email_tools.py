@@ -21,12 +21,27 @@ from __future__ import annotations
 import logging
 from praisonaiagents._logging import get_logger
 import os
-from typing import Optional
+from typing import Optional, Union, List
 
 logger = get_logger(__name__)
 
 # Lazy-loaded AgentMail client (module-level singleton)
 _client = None
+
+def _parse_email_list(emails: Union[str, List[str]]) -> List[str]:
+    """Parse email addresses from string or list format.
+    
+    Args:
+        emails: Email address(es) as string (comma-separated) or list
+        
+    Returns:
+        List of individual email addresses
+    """
+    if not emails:
+        return []
+    if isinstance(emails, str):
+        return [email.strip() for email in emails.split(',') if email.strip()]
+    return [email.strip() for email in emails if email and email.strip()]
 
 def _detect_backend() -> str:
     """Detect which email backend is available.
@@ -83,15 +98,28 @@ def _normalize_message_id(message_id: str) -> str:
         return f"<{message_id}>"
     return message_id
 
-def _agentmail_send_email(to: str, subject: str, body: str) -> str:
+def _agentmail_send_email(to: str, subject: str, body: str, cc: Optional[Union[str, List[str]]] = None, bcc: Optional[Union[str, List[str]]] = None) -> str:
     client = _get_client()
     inbox_id = _get_inbox_id()
     try:
-        result = client.inboxes.messages.send(inbox_id, to=to, subject=subject, text=body)
+        kwargs = {"to": to, "subject": subject, "text": body}
+        
+        cc_list = _parse_email_list(cc) if cc else []
+        bcc_list = _parse_email_list(bcc) if bcc else []
+        
+        if cc_list:
+            kwargs["cc"] = cc_list
+        if bcc_list:
+            kwargs["bcc"] = bcc_list
+        
+        result = client.inboxes.messages.send(inbox_id, **kwargs)
         msg_id = getattr(result, "message_id", "unknown")
         thread_id = getattr(result, "thread_id", "")
-        logger.info(f"Email sent to {to}: {msg_id}")
-        return f"Email sent successfully to {to}. Message ID: {msg_id}, Thread ID: {thread_id}"
+        
+        recipients = [to] + cc_list + bcc_list
+        
+        logger.info(f"Email sent to {', '.join(recipients)}: {msg_id}")
+        return f"Email sent successfully to {', '.join(recipients)}. Message ID: {msg_id}, Thread ID: {thread_id}"
     except Exception as e:
         logger.error(f"Failed to send email to {to}: {e}")
         return f"Failed to send email: {e}"
@@ -232,11 +260,21 @@ def _agentmail_forward_email(message_id: str, to: str, note: Optional[str] = Non
         logger.error(f"Failed to forward email {message_id}: {e}")
         return f"Failed to forward email: {e}"
 
-def _agentmail_draft_email(to: str, subject: str, body: str) -> str:
+def _agentmail_draft_email(to: str, subject: str, body: str, cc: Optional[Union[str, List[str]]] = None, bcc: Optional[Union[str, List[str]]] = None) -> str:
     client = _get_client()
     inbox_id = _get_inbox_id()
     try:
-        result = client.inboxes.drafts.create(inbox_id, to=[to], subject=subject, text=body)
+        kwargs = {"to": [to] if isinstance(to, str) else to, "subject": subject, "text": body}
+        
+        cc_list = _parse_email_list(cc) if cc else []
+        bcc_list = _parse_email_list(bcc) if bcc else []
+        
+        if cc_list:
+            kwargs["cc"] = cc_list
+        if bcc_list:
+            kwargs["bcc"] = bcc_list
+        
+        result = client.inboxes.drafts.create(inbox_id, **kwargs)
         draft_id = getattr(result, "draft_id", "unknown")
         logger.info(f"Draft created: {draft_id}")
         return f"Draft created (ID: {draft_id}). Use send_draft to send it."
@@ -349,7 +387,7 @@ def _extract_body_preview(msg, max_len: int = 100) -> str:
             )[:max_len]
     return ""
 
-def _smtp_send_email(to: str, subject: str, body: str) -> str:
+def _smtp_send_email(to: str, subject: str, body: str, cc: Optional[Union[str, List[str]]] = None, bcc: Optional[Union[str, List[str]]] = None) -> str:
     import smtplib
     from email.mime.text import MIMEText
     try:
@@ -358,12 +396,27 @@ def _smtp_send_email(to: str, subject: str, body: str) -> str:
         msg["From"] = email_addr
         msg["To"] = to
         msg["Subject"] = subject
+        
+        # Parse CC and BCC lists
+        cc_list = _parse_email_list(cc) if cc else []
+        bcc_list = _parse_email_list(bcc) if bcc else []
+        
+        # Add CC header if provided (BCC is not added to headers by design)
+        all_recipients = [to]
+        if cc_list:
+            msg["CC"] = ", ".join(cc_list)
+            all_recipients.extend(cc_list)
+        if bcc_list:
+            all_recipients.extend(bcc_list)
+        
         with smtplib.SMTP(smtp_server, smtp_port) as server:
             server.starttls()
             server.login(email_addr, password)
-            server.send_message(msg)
-        logger.info(f"SMTP email sent to {to}")
-        return f"Email sent successfully to {to} from {email_addr}"
+            # Send to all recipients (to, cc, bcc)
+            server.send_message(msg, to_addrs=all_recipients)
+        
+        logger.info(f"SMTP email sent to {', '.join(all_recipients)}")
+        return f"Email sent successfully to {', '.join(all_recipients)} from {email_addr}"
     except ValueError as e:
         return str(e)
     except Exception as e:
@@ -562,7 +615,7 @@ def _smtp_archive_email(message_id: str) -> str:
         logger.error(f"Failed to archive email {message_id}: {e}")
         return f"Failed to archive email: {e}"
 
-def _smtp_draft_email(to: str, subject: str, body: str) -> str:
+def _smtp_draft_email(to: str, subject: str, body: str, cc: Optional[Union[str, List[str]]] = None, bcc: Optional[Union[str, List[str]]] = None) -> str:
     import imaplib
     import time
     from email.mime.text import MIMEText
@@ -572,6 +625,17 @@ def _smtp_draft_email(to: str, subject: str, body: str) -> str:
         msg["From"] = email_addr
         msg["To"] = to
         msg["Subject"] = subject
+        
+        # Parse CC and BCC lists
+        cc_list = _parse_email_list(cc) if cc else []
+        bcc_list = _parse_email_list(bcc) if bcc else []
+        
+        # Add CC header if provided (BCC is not added to headers in drafts)
+        if cc_list:
+            msg["CC"] = ", ".join(cc_list)
+        if bcc_list:
+            msg["Bcc"] = ", ".join(bcc_list)
+        
         mail = imaplib.IMAP4_SSL(imap_server, imap_port)
         mail.login(email_addr, password)
         # Gmail uses [Gmail]/Drafts, others use Drafts or DRAFTS
@@ -582,8 +646,11 @@ def _smtp_draft_email(to: str, subject: str, body: str) -> str:
             drafts_folder = "Drafts"
         mail.append(drafts_folder, "\\Draft", imaplib.Time2Internaldate(time.time()), msg.as_bytes())
         mail.logout()
+        
+        recipients = [to] + cc_list + bcc_list
+        
         logger.info(f"Draft saved to {drafts_folder}")
-        return f"Draft saved to {drafts_folder} (To: {to}, Subject: {subject})"
+        return f"Draft saved to {drafts_folder} (To: {', '.join(recipients)}, Subject: {subject})"
     except ValueError as e:
         return str(e)
     except Exception as e:
@@ -594,8 +661,8 @@ def _smtp_draft_email(to: str, subject: str, body: str) -> str:
 # Generic Tools — Auto-detect backend
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def send_email(to: str, subject: str, body: str) -> str:
-    """Send an email to someone.
+def send_email(to: str, subject: str, body: str, cc: Optional[Union[str, List[str]]] = None, bcc: Optional[Union[str, List[str]]] = None) -> str:
+    """Send an email to someone with optional CC and BCC recipients.
 
     Auto-detects backend: AgentMail (if AGENTMAIL_API_KEY set) or
     SMTP (if EMAIL_ADDRESS + EMAIL_PASSWORD set).
@@ -604,14 +671,18 @@ def send_email(to: str, subject: str, body: str) -> str:
         to: Recipient email address (e.g. bob@example.com)
         subject: Email subject line
         body: Email body text content
+        cc: Optional CC (carbon copy) recipient(s). Can be a single email address or 
+            comma-separated string or list of email addresses
+        bcc: Optional BCC (blind carbon copy) recipient(s). Can be a single email address or 
+             comma-separated string or list of email addresses
 
     Returns:
         Confirmation message with the sent message ID
     """
     backend = _detect_backend()
     if backend == "agentmail":
-        return _agentmail_send_email(to, subject, body)
-    return _smtp_send_email(to, subject, body)
+        return _agentmail_send_email(to, subject, body, cc, bcc)
+    return _smtp_send_email(to, subject, body, cc, bcc)
 
 def list_emails(limit: int = 10) -> str:
     """List recent emails in the inbox.
@@ -730,8 +801,8 @@ def forward_email(message_id: str, to: str, note: Optional[str] = None) -> str:
         return _agentmail_forward_email(message_id, to, note)
     return "Forward not supported with IMAP. Use read_email + send_email as a workaround."
 
-def draft_email(to: str, subject: str, body: str) -> str:
-    """Create an email draft without sending it.
+def draft_email(to: str, subject: str, body: str, cc: Optional[Union[str, List[str]]] = None, bcc: Optional[Union[str, List[str]]] = None) -> str:
+    """Create an email draft without sending it, with optional CC and BCC.
 
     Auto-detects backend: AgentMail or IMAP.
     AgentMail: use send_draft() to send later.
@@ -741,14 +812,16 @@ def draft_email(to: str, subject: str, body: str) -> str:
         to: Recipient email address
         subject: Email subject line
         body: Email body text
+        cc: Optional CC (carbon copy) recipient email address or comma-separated list
+        bcc: Optional BCC (blind carbon copy) recipient email address or comma-separated list
 
     Returns:
         Confirmation with draft details
     """
     backend = _detect_backend()
     if backend == "agentmail":
-        return _agentmail_draft_email(to, subject, body)
-    return _smtp_draft_email(to, subject, body)
+        return _agentmail_draft_email(to, subject, body, cc, bcc)
+    return _smtp_draft_email(to, subject, body, cc, bcc)
 
 def send_draft(draft_id: str) -> str:
     """Send a previously created email draft.
@@ -827,8 +900,8 @@ def create_inbox(display_name: Optional[str] = None) -> str:
 # Backward-compatible aliases (smtp_ prefix)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def smtp_send_email(to: str, subject: str, body: str) -> str:
-    """Send an email using SMTP (Gmail, Outlook, etc.).
+def smtp_send_email(to: str, subject: str, body: str, cc: Optional[Union[str, List[str]]] = None, bcc: Optional[Union[str, List[str]]] = None) -> str:
+    """Send an email using SMTP (Gmail, Outlook, etc.) with optional CC/BCC.
 
     Uses EMAIL_ADDRESS and EMAIL_PASSWORD env vars.
 
@@ -836,11 +909,13 @@ def smtp_send_email(to: str, subject: str, body: str) -> str:
         to: Recipient email address
         subject: Email subject line
         body: Email body text
+        cc: Optional CC (carbon copy) recipient email address
+        bcc: Optional BCC (blind carbon copy) recipient email address
 
     Returns:
         Confirmation message
     """
-    return _smtp_send_email(to, subject, body)
+    return _smtp_send_email(to, subject, body, cc, bcc)
 
 def smtp_read_inbox(limit: int = 10, folder: str = "INBOX") -> str:
     """Read recent emails from your mailbox using IMAP.
@@ -890,8 +965,8 @@ def smtp_archive_email(message_id: str) -> str:
     """
     return _smtp_archive_email(message_id)
 
-def smtp_draft_email(to: str, subject: str, body: str) -> str:
-    """Save an email draft using IMAP APPEND.
+def smtp_draft_email(to: str, subject: str, body: str, cc: Optional[Union[str, List[str]]] = None, bcc: Optional[Union[str, List[str]]] = None) -> str:
+    """Save an email draft using IMAP APPEND with optional CC/BCC.
 
     Saves to Drafts folder ([Gmail]/Drafts for Gmail).
 
@@ -899,8 +974,10 @@ def smtp_draft_email(to: str, subject: str, body: str) -> str:
         to: Recipient email address
         subject: Email subject line
         body: Email body text
+        cc: Optional CC (carbon copy) recipient email address
+        bcc: Optional BCC (blind carbon copy) recipient email address
 
     Returns:
         Confirmation message
     """
-    return _smtp_draft_email(to, subject, body)
+    return _smtp_draft_email(to, subject, body, cc, bcc)
