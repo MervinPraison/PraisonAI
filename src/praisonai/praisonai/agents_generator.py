@@ -62,45 +62,6 @@ def __dir__():
 # Note: OTEL_SDK_DISABLED moved to CLI entry point per issue requirements
 
 
-def safe_format(template: str, **kwargs) -> str:
-    """
-    Safely format a string template, preserving JSON-like curly braces.
-    
-    This handles cases where templates contain Gutenberg block syntax like
-    {"level":2} which would cause KeyError with standard .format().
-    
-    Uses a two-pass approach:
-    1. Escape all {{ and }} (already escaped braces)
-    2. Only substitute known variable placeholders
-    
-    Args:
-        template: String template with {variable} placeholders
-        **kwargs: Variable substitutions to apply
-        
-    Returns:
-        Formatted string with variables substituted and JSON preserved
-        
-    Example:
-        >>> safe_format('Use <!-- wp:heading {"level":2} --> for {topic}', topic='AI')
-        'Use <!-- wp:heading {"level":2} --> for AI'
-    """
-    import re
-    
-    # Pattern to match {word} but not {"key": or {number} patterns
-    # This matches simple variable names like {topic}, {style}, etc.
-    def replace_var(match):
-        var_name = match.group(1)
-        if var_name in kwargs:
-            return str(kwargs[var_name])
-        # If not in kwargs, leave it as-is (don't raise KeyError)
-        return match.group(0)
-    
-    # Match {variable_name} where variable_name is a valid Python identifier
-    # but NOT {" (JSON start) or {number (like {2})
-    pattern = r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}'
-    
-    return re.sub(pattern, replace_var, template)
-
 
 def _wrap_with_timeout(tool, timeout_seconds: float):
     """Enforce per-call timeout on a tool, sync or async, without
@@ -208,47 +169,10 @@ def sanitize_agent_name_for_autogen_v4(name):
 
 def _resolve_yaml_cli_backend(cli_backend_config, logger):
     """Resolve a YAML ``cli_backend`` field to a CliBackendProtocol instance.
-
-    Accepts ``None`` (no backend), a string id (e.g. ``"claude-code"``), or a
-    dict of shape ``{"id": "claude-code", "overrides": {...}}``. Returns
-    ``None`` on any error after logging a warning, so YAML parsing never raises.
-
-    Kept at module scope so it is unit-testable without constructing a full
-    ``AgentsGenerator`` instance.
+    Deprecated wrapper. Use praisonai.cli_backends.resolve_cli_backend_config directly.
     """
-    if not cli_backend_config:
-        return None
-
-    # Pre-seed label from config before import so we can show it in error logs
-    if isinstance(cli_backend_config, str):
-        label = cli_backend_config
-    elif isinstance(cli_backend_config, dict):
-        label = cli_backend_config.get('id') or "<missing>"
-    else:
-        label = type(cli_backend_config).__name__
-
-    try:
-        from praisonai.cli_backends import resolve_cli_backend
-        if isinstance(cli_backend_config, str):
-            return resolve_cli_backend(cli_backend_config)
-        if isinstance(cli_backend_config, dict):
-            backend_id = cli_backend_config.get('id')
-            if not backend_id:
-                raise ValueError("cli_backend dict must contain an 'id' field")
-            overrides = cli_backend_config.get('overrides') or {}
-            return resolve_cli_backend(backend_id, overrides=overrides)
-        raise ValueError(
-            f"cli_backend must be string or dict, got: {type(cli_backend_config).__name__}"
-        )
-    except ImportError:
-        logger.warning(
-            "CLI backend '%s' requested but not available", label
-        )
-    except Exception as e:
-        logger.warning(
-            "Failed to resolve CLI backend '%s': %s", label, e
-        )
-    return None
+    from praisonai.cli_backends import resolve_cli_backend_config
+    return resolve_cli_backend_config(cli_backend_config)
 
 
 class AgentsGenerator:
@@ -418,6 +342,27 @@ class AgentsGenerator:
                 for field, value in agent_overrides.items():
                     agent_config[field] = value
                     self.logger.debug(f"CLI override for agent {agent_name}: {field} = {value}")
+
+    def _validate_cli_backend_compatibility(self, config, framework):
+        """Validate that cli_backend is only used with compatible frameworks."""
+        # Check if any agent/role defines cli_backend (support both key names)
+        all_entities = {
+            **config.get('roles', {}),
+            **config.get('agents', {}),
+        }
+        has_cli_backend = any(
+            isinstance(details, dict) and details.get('cli_backend')
+            for details in all_entities.values()
+        )
+        
+        if has_cli_backend and framework != 'praisonai':
+            self.logger.error(
+                f"cli_backend is not supported for framework='{framework}'. "
+                f"Remove cli_backend from your YAML or switch to framework='praisonai'."
+            )
+            raise ValueError(
+                f"cli_backend requires framework='praisonai', but framework='{framework}' was specified"
+            )
 
     def _validate_agents_config(self, config):
         """
@@ -610,18 +555,14 @@ class AgentsGenerator:
                             if isinstance(t, str) and t.strip():
                                 needed_tools.add(t.strip())
 
-                # Resolve only the tools actually referenced in YAML
+                # Resolve only the tools actually referenced in YAML using ToolResolver with instantiation
                 for tool_name in needed_tools:
                     try:
-                        resolved_tool = self.tool_resolver.resolve(tool_name)
-                        if resolved_tool is None:
-                            self.logger.warning(f"Tool '{tool_name}' not found")
-                            continue
-                        tools_dict[tool_name] = (
-                            resolved_tool() if inspect.isclass(resolved_tool) else resolved_tool
-                        )
+                        resolved_tool = self.tool_resolver.resolve(tool_name, instantiate=True)
+                        if resolved_tool is not None:
+                            tools_dict[tool_name] = resolved_tool
                     except Exception as e:
-                        self.logger.warning(f"Failed to initialize tool '{tool_name}': {e}")
+                        self.logger.warning(f"Failed to resolve or instantiate tool '{tool_name}': {e}")
                         continue
                             
             except Exception as e:
@@ -839,6 +780,9 @@ class AgentsGenerator:
         from .framework_adapters.validators import assert_framework_available
         assert_framework_available(framework)
         
+        # Validate cli_backend compatibility
+        self._validate_cli_backend_compatibility(config, framework)
+        
         self.logger.info(f"Using framework: {framework}")
         return await self.framework_adapter.arun(
             config,
@@ -851,10 +795,58 @@ class AgentsGenerator:
         )
 
     async def _arun_yaml_workflow(self, config):
-        """Async placeholder for workflow mode - currently delegates to sync version."""
-        # For now, delegate to sync version using asyncio.to_thread
-        import asyncio
-        return await asyncio.to_thread(self._run_yaml_workflow, config)
+        """
+        Async version of _run_yaml_workflow using YAMLWorkflowParser.
+        
+        This method handles agents.yaml files that have:
+        - process: workflow
+        
+        Args:
+            config: YAML configuration dictionary
+            
+        Returns:
+            str: Workflow execution result
+        """
+        if not is_available("praisonaiagents"):
+            raise ImportError("PraisonAI is not installed. Please install it with 'pip install praisonaiagents'")
+        
+        try:
+            from praisonaiagents.workflows import YAMLWorkflowParser
+        except ImportError as err:
+            raise ImportError("YAMLWorkflowParser not available. Please update praisonaiagents.") from err
+        
+        # Ensure name is present
+        if 'name' not in config:
+            config['name'] = config.get('topic', 'Workflow')
+        
+        # Pass model from config_list to workflow as default_llm
+        if self.config_list and self.config_list[0].get('model'):
+            model_from_cli = self.config_list[0]['model']
+            if 'workflow' not in config:
+                config['workflow'] = {}
+            if 'default_llm' not in config['workflow']:
+                config['workflow']['default_llm'] = model_from_cli
+        
+        import yaml as yaml_module
+        yaml_content = yaml_module.dump(config, default_flow_style=False)
+        
+        parser = YAMLWorkflowParser()
+        workflow = parser.parse_string(yaml_content)
+        
+        input_data = config.get('input', config.get('topic', ''))
+        
+        self.logger.info(f"Starting async YAML workflow with topic: {input_data}")
+        
+        if hasattr(workflow, 'astart'):
+            result = await workflow.astart(input_data)
+        else:
+            import asyncio
+            result = await asyncio.to_thread(workflow.start, input_data)
+            
+        if result.get("status") == "completed":
+            return result.get("output", "Workflow completed successfully")
+        else:
+            return f"Workflow failed: {result.get('error', 'Unknown error')}"
 
     def _run_yaml_workflow(self, config):
         """
@@ -911,3 +903,27 @@ class AgentsGenerator:
             return result.get("output", "Workflow completed successfully")
         else:
             return f"Workflow failed: {result.get('error', 'Unknown error')}"
+
+
+# Standalone function for backward compatibility with tests
+def safe_format(template, **kwargs):
+    """
+    Safe string formatting that preserves JSON/dict literals while substituting variables.
+    
+    This function only substitutes placeholders that look like identifiers (e.g., {topic})
+    while preserving JSON structures like {"level": 2}.
+    
+    Args:
+        template (str): Template string with placeholders
+        **kwargs: Values to substitute
+        
+    Returns:
+        str: Formatted string with safe substitutions
+    """
+    # Use the same regex-based substitution logic as BaseFrameworkAdapter._format_template
+    def replace_placeholder(match):
+        placeholder = match.group(1)
+        return str(kwargs.get(placeholder, match.group(0)))
+    
+    # Only replace placeholders that look like identifiers
+    return re.sub(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', replace_placeholder, template)

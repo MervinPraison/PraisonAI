@@ -29,8 +29,8 @@ class MCPToolRunner(threading.Thread):
         super().__init__(daemon=True)
         self.server_params = server_params
         self.queue = queue.Queue()
-        self.result_queue = queue.Queue()
         self.initialized = threading.Event()
+        self._init_error = None
         self.tools = []
         self.timeout = timeout
         self._tool_timings = {}
@@ -66,12 +66,12 @@ class MCPToolRunner(threading.Thread):
                                 if item is None:  # Shutdown signal
                                     break
                                 
-                                tool_name, arguments = item
+                                response_queue, tool_name, arguments = item
                                 try:
                                     result = await session.call_tool(tool_name, arguments)
-                                    self.result_queue.put((True, result))
+                                    response_queue.put((True, result))
                                 except Exception as e:
-                                    self.result_queue.put((False, str(e)))
+                                    response_queue.put((False, str(e)))
                             except queue.Empty:
                                 pass
                             
@@ -80,8 +80,8 @@ class MCPToolRunner(threading.Thread):
                         except asyncio.CancelledError:
                             break
         except Exception as e:
+            self._init_error = f"MCP initialization error: {str(e)}"
             self.initialized.set()  # Ensure we don't hang
-            self.result_queue.put((False, f"MCP initialization error: {str(e)}"))
     
     def call_tool(self, tool_name, arguments):
         """Call an MCP tool and wait for the result."""
@@ -100,16 +100,25 @@ class MCPToolRunner(threading.Thread):
                 if telemetry:
                     telemetry.track_tool_usage(tool_name, success=False, execution_time=0)
                 return f"Error: MCP initialization timed out after {self.timeout} seconds"
+
+        if self._init_error:
+            if telemetry:
+                telemetry.track_tool_usage(tool_name, success=False, execution_time=0)
+            return f"Error: {self._init_error}"
         
         # Start timing after initialization check
         start_time = time.time()
         is_success = False
+        response_queue = queue.Queue(maxsize=1)
         try:
-            # Put request in queue
-            self.queue.put((tool_name, arguments))
+            # Put request in queue with caller-specific response channel
+            self.queue.put((response_queue, tool_name, arguments))
             
-            # Wait for result
-            success, result = self.result_queue.get()
+            # Wait for result with timeout
+            try:
+                success, result = response_queue.get(timeout=self.timeout)
+            except queue.Empty:
+                return f"Error: MCP tool call timed out after {self.timeout} seconds"
             if not success:
                 return f"Error: {result}"
             

@@ -264,13 +264,12 @@ agents = AgentTeam(
     tasks=[tool_query_task, pentester_analysis_task, ciso_review_task],
     process="hierarchical",
     manager_llm="gpt-4o-mini",
-    memory=True,  # Enable shared memory for domain context
     memory={
-        "provider": "rag",
+        "backend": "sqlite",
         "config": {
             "collection_name": f"{domain.replace('.', '_')}_security_analysis"
-        }
-    }
+        },
+    },
 )
 
 # Main Execution Workflow

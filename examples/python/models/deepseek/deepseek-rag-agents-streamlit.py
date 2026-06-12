@@ -32,9 +32,8 @@ def init_agent():
     return Agent(
         name="Knowledge Agent",
         instructions="You answer questions based on the provided knowledge.",
-        knowledge=["kag-research-paper.pdf"],
-        knowledge=config,
-        user_id="user1",
+        knowledge={**config, "sources": ["kag-research-paper.pdf"]},
+        memory={"user_id": "user1"},
         llm="deepseek-r1"
     )
 

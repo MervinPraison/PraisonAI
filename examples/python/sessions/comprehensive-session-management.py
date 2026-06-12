@@ -172,7 +172,7 @@ print("="*70)
 # Create sessions for different users working on the same project
 reviewer_session = Session(
     session_id="peer_review_001",
-    user_id="user_reviewer_01",  # Different user
+    user_id="user_reviewer_01",
     storage_path=session_dir
 )
 

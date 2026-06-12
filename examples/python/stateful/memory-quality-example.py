@@ -14,13 +14,12 @@ def main():
     
     # Initialize memory with quality-based configuration
     memory_config = {
-        "provider": "rag",
-        "use_embedding": True,
-        "rag_db_path": "quality_memory_db"
+        "backend": "sqlite",
+        "user_id": "quality_demo_user",
     }
     
     memory = Memory(config=memory_config, verbose=5)
-    print(f"📦 Initialized memory system with provider: {memory_config['provider']}")
+    print(f"📦 Initialized memory system with backend: {memory_config['backend']}")
     
     # Create agent with memory
     agent = Agent(
@@ -28,7 +27,6 @@ def main():
         role="Information Quality Specialist",
         instructions="Store and retrieve information with quality assessment",
         memory=memory,
-        user_id="quality_demo_user"
     )
     
     print(f"🤖 Created agent: {agent.name}")
@@ -181,7 +179,7 @@ def main():
     
     context = memory.build_context_for_task(
         task_descr="Explain AI alignment challenges",
-        user_id="quality_demo_user",
+        memory={"user_id": "quality_demo_user"},
         max_items=3
     )
     

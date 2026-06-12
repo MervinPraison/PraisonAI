@@ -138,8 +138,7 @@ def main():
     agent = Agent(
         name="AI Research Assistant",
         instructions="You are an AI research assistant. Use your knowledge base to answer questions about artificial intelligence topics.",
-        knowledge=sample_documents,  # Will use default knowledge config
-        knowledge=rerank_config,  # Use reranking config
+        knowledge={**rerank_config, "sources": sample_documents},
         llm="gpt-4o-mini"
     )
     

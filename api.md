@@ -15,6 +15,7 @@ Methods:
 * <code title="class GuardrailResult">GuardrailResult.<a href="./src/praisonai-agents/praisonaiagents/guardrails/guardrail_result.py">from_tuple</a>(result: Tuple[bool, Any]) -> 'GuardrailResult'</code>
 * <code title="class HandoffConfig">HandoffConfig.<a href="./src/praisonai-agents/praisonaiagents/agent/handoff.py">from_dict</a>(data: Dict[str, Any]) -> 'HandoffConfig'</code>
 * <code title="class HandoffConfig">HandoffConfig.<a href="./src/praisonai-agents/praisonaiagents/agent/handoff.py">to_dict</a>() -> Dict[str, Any]</code>
+* <code title="class HandoffResult">HandoffResult.<a href="./src/praisonai-agents/praisonaiagents/agent/handoff.py">from_outcome</a>(outcome: AgentRunOutcome, target_agent: Optional[str] = None, source_agent: Optional[str] = None, handoff_depth: int = 0) -> 'HandoffResult'</code>
 * <code title="class TaskOutput">TaskOutput.<a href="./src/praisonai-agents/praisonaiagents/main.py">json</a>() -> Optional[str]</code>
 * <code title="class TaskOutput">TaskOutput.<a href="./src/praisonai-agents/praisonaiagents/main.py">to_dict</a>() -> dict</code>
 * <code title="class ToolResult">ToolResult.<a href="./src/praisonai-agents/praisonaiagents/tools/base.py">to_dict</a>() -> Dict[str, Any]</code>
@@ -75,7 +76,7 @@ Methods:
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">run_until</a>(prompt: str, criteria: str, threshold: float = 8.0, max_iterations: int = 5, mode: str = 'optimize', on_iteration: Optional[Callable[[Any], None]] = None, verbose: bool = False) -> 'EvaluationLoopResult'</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">run_until_async</a>(prompt: str, criteria: str, threshold: float = 8.0, max_iterations: int = 5, mode: str = 'optimize', on_iteration: Optional[Callable[[Any], None]] = None, verbose: bool = False) -> 'EvaluationLoopResult'</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">skill_manager</a>() -> Optional[Any]</code>
-* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">store_memory</a>(content: str, memory_type: str = 'short_term', **kwargs: Any) -> None</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">store_memory</a>(content: str, memory_type: str = 'short_term', action: str = 'add', **kwargs: Any) -> None</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">stream_emitter</a>() -> Optional[Any]</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">stream_emitter</a>(value: Optional[Any]) -> None</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">thinking_budget</a>() -> Optional[int]</code>
@@ -175,6 +176,7 @@ Methods:
 * <code title="class BaseTool">BaseTool.<a href="./src/praisonai-agents/praisonaiagents/tools/base.py">validate_schema_roundtrip</a>() -> bool</code>
 * <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">__call__</a>(*args, **kwargs) -> Any</code>
 * <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">check_availability</a>() -> tuple[bool, str]</code>
+* <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">get_schema</a>() -> Dict[str, Any]</code>
 * <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">injected_params</a>() -> Dict[str, Any]</code>
 * <code title="class FunctionTool">FunctionTool.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">run</a>(**kwargs) -> Any</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">clear</a>() -> None</code>
@@ -182,16 +184,17 @@ Methods:
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">discover_single_file_plugins</a>() -> int</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get</a>(name: str) -> Optional[Union[BaseTool, Callable]]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get_all</a>() -> Dict[str, Union[BaseTool, Callable]]</code>
+* <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get_tool_definitions</a>() -> List[Dict[str, Any]]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_available_tools</a>(context: Optional[Dict[str, Any]] = None) -> List[Union[BaseTool, Callable]]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_base_tools</a>() -> List[BaseTool]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_tools</a>() -> List[str]</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">list_tools_with_allowed_filter</a>(context: Optional[Dict[str, Any]] = None) -> List[str]</code>
-* <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">register</a>(tool: Union[BaseTool, Callable], name: Optional[str] = None, overwrite: bool = False) -> None</code>
+* <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">register</a>(tool: Union[BaseTool, Callable], name: Optional[str] = None, overwrite: bool = False, dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None) -> None</code>
 * <code title="class ToolRegistry">ToolRegistry.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">unregister</a>(name: str) -> bool</code>
 * <code title="class Tools">Tools.<a href="./src/praisonai-agents/praisonaiagents/tools/tools.py">internet_search</a>(*args, **kwargs)</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get_registry</a>() -> ToolRegistry</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">get_tool</a>(name: str) -> Optional[Union[BaseTool, Callable]]</code>
-* <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">register_tool</a>(tool: Union[BaseTool, Callable], name: Optional[str] = None) -> None</code>
+* <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/tools/registry.py">register_tool</a>(tool: Union[BaseTool, Callable], name: Optional[str] = None, dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None) -> None</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/tools/decorator.py">tool</a>(func: Optional[Callable] = None) -> Union[FunctionTool, Callable[[Callable], FunctionTool]]</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/tools/base.py">validate_tool</a>(tool: Any) -> bool</code>
 

@@ -1,14 +1,14 @@
 {
   "version": "1.5.87",
-  "lastUpdated": "2026-06-02",
+  "lastUpdated": "2026-06-12",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 336,
+    "pythonCoreFeatures": 339,
     "rustFeatures": 667,
-    "gapCount": 57,
-    "parityPercentage": 198.5
+    "gapCount": 60,
+    "parityPercentage": 196.8
   },
   "pythonCoreSDK": {
     "exports": [
@@ -25,6 +25,7 @@
       "AgentOSConfig",
       "AgentOSProtocol",
       "AgentPluginProtocol",
+      "AgentRunOutcome",
       "AgentTeam",
       "Agents",
       "ApprovalCallback",
@@ -218,6 +219,7 @@
       "RewriteStrategy",
       "Route",
       "RoutingConditionProtocol",
+      "RunStatus",
       "SandboxConfig",
       "SandboxProtocol",
       "SandboxResult",
@@ -345,6 +347,7 @@
       "trace_context",
       "track_workflow",
       "validate_config",
+      "validate_decision_string",
       "validate_tool",
       "when",
       "workflows"
@@ -2912,6 +2915,15 @@
         "category": "plugins"
       },
       {
+        "feature": "AgentRunOutcome",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "AgentTeam",
         "python": true,
         "rust": true,
@@ -4019,6 +4031,15 @@
         "category": "conditions"
       },
       {
+        "feature": "RunStatus",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "SandboxConfig",
         "python": true,
         "rust": true,
@@ -4800,6 +4821,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "validate_decision_string",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "workflows",

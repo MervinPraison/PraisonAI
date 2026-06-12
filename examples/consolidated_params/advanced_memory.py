@@ -15,7 +15,7 @@ agent = Agent(
 # With array [preset, overrides]
 agent_override = Agent(
     instructions="You are a helpful assistant.",
-    memory=["redis", {"user_id": "custom_user"}],
+    memory=MemoryConfig(backend="redis", user_id="custom_user"),
 )
 
 if __name__ == "__main__":
