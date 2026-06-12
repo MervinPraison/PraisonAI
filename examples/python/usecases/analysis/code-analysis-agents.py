@@ -2,6 +2,7 @@ from praisonaiagents import Agent, Task, AgentTeam
 from pydantic import BaseModel
 from typing import List, Dict
 from gitingest import ingest
+import sys
 
 class CodeMetrics(BaseModel):
     category: str
@@ -60,7 +61,10 @@ def analyze_code(code_source: str) -> CodeAnalysisReport:
     Analyze code from directory path or GitHub URL
     """
     # Ingest code content
-    summary, tree, content = ingest(code_source)
+    try:
+        summary, tree, content = ingest(code_source)
+    except Exception as exc:
+        raise RuntimeError(f"Failed to ingest code source: {exc}") from exc
     
     # Concatenate context into structured format
     context_text = f"""
@@ -86,10 +90,22 @@ def analyze_code(code_source: str) -> CodeAnalysisReport:
         tasks=[code_analysis_task]
     )
     
-    return agents.start(context_text)
+    result = agents.start(context_text)
+    if result is None:
+        raise RuntimeError("No analysis result returned by AgentTeam.start()")
+    return result
 
-if __name__ == "__main__":
+
+def main() -> None:
     # Example usage
     code_source = "https://github.com/openai/openai-python/tree/main/src/openai/cli/_api/chat"  # GitHub URL or local directory
-    result = analyze_code(code_source)
+    try:
+        result = analyze_code(code_source)
+    except RuntimeError as exc:
+        print(f"Code analysis failed: {exc}")
+        sys.exit(1)
     print(result) 
+
+
+if __name__ == "__main__":
+    main()

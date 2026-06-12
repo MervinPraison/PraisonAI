@@ -12,7 +12,8 @@ Expected output:
     - Export shows full session data
 """
 
-from praisonaiagents import Agent, db
+from praisonaiagents import Agent
+from praisonaiagents.db import db
 
 def get_weather(city: str) -> str:
     """Get weather for a city."""
@@ -29,8 +30,10 @@ agent = Agent(
     name="WeatherBot",
     instructions="You help with weather. Use the get_weather tool when asked.",
     tools=[get_weather],
-    db=my_db,
-    session_id="weather-session-001"
+    memory={
+        "db": my_db,
+        "session_id": "weather-session-001",
+    },
 )
 
 # First chat - triggers run tracking

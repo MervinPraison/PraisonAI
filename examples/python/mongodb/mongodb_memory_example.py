@@ -28,8 +28,8 @@ if not os.environ.get("OPENAI_API_KEY"):
 def main():
     # MongoDB memory configuration
     mongodb_memory_config = {
-        "provider": "mongodb",
         "config": {
+            "provider": "mongodb",
             "connection_string": "mongodb://localhost:27017/",  # Replace with your MongoDB connection string
             "database": "praisonai_memory",
             "use_vector_search": True,  # Enable Atlas Vector Search (requires MongoDB Atlas)

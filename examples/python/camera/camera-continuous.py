@@ -75,7 +75,7 @@ class ContinuousCameraMonitor:
             agents=[self.vision_agent],
             tasks=[task],
             process="sequential",
-            verbose=0  # Reduced verbosity for continuous monitoring
+            output="silent",  # Reduced verbosity for continuous monitoring
         )
         
         return agents.start()

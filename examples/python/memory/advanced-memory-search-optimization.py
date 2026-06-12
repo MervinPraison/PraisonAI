@@ -12,8 +12,8 @@ print("=== Advanced Memory Search and Optimization Example ===\n")
 
 # Configure optimized memory settings
 memory_config = {
-    "provider": "mem0",
     "config": {
+        "provider": "mem0",
         "vector_store": {
             "provider": "chroma",
             "config": {

@@ -4,7 +4,7 @@ WebConfig Example
 Demonstrates using WebConfig for fine-grained control.
 """
 import os
-from praisonaiagents import Agent, WebConfig
+from praisonaiagents import Agent
 
 # Ensure API key is set from environment
 assert os.getenv("OPENAI_API_KEY"), "OPENAI_API_KEY must be set"
@@ -12,21 +12,13 @@ assert os.getenv("OPENAI_API_KEY"), "OPENAI_API_KEY must be set"
 # Custom web configuration
 agent = Agent(
     instructions="You are a research assistant.",
-    web=WebConfig(
-        search=True,
-        fetch=True,
-        search_provider="duckduckgo",
-        max_results=5,
-    ),
+    web="search_only",
 )
 
 # Search only (no fetch)
 agent_search_only = Agent(
     instructions="You are a research assistant.",
-    web=WebConfig(
-        search=True,
-        fetch=False,
-    ),
+    web="search_only",
 )
 
 if __name__ == "__main__":

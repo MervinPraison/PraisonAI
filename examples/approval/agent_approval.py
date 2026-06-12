@@ -12,8 +12,13 @@ from praisonaiagents import Agent
 from praisonaiagents.approval import AgentApproval
 from praisonaiagents.tools.shell_tools import execute_command
 
-reviewer = AgentApproval(
+reviewer_agent = Agent(
+    name="CommandReviewer",
     instructions="Only approve read-only commands like 'ls' or 'cat'. Deny destructive commands.",
+)
+
+reviewer = AgentApproval(
+    approver_agent=reviewer_agent,
 )
 
 agent = Agent(

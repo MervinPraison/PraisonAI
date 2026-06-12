@@ -16,7 +16,8 @@ agents = AgentTeam(
     agents=[agent],
     tasks=[task],
     process="workflow",
-    max_iter=30
+    execution={"max_iter": 30},
 )
 
-agents.start()
+if __name__ == "__main__":
+    agents.start()

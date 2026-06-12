@@ -86,13 +86,13 @@ def main():
         agents=[researcher, retriever],
         tasks=[store_task, retrieve_task],
         memory={
-            "backend": "sqlite",
             "embedder": {
                 "provider": "gemini",
                 "config": {
                     "model": "text-embedding-004",
                 }
-            }
+            },
+            "config": {"provider": "sqlite"},
         }
     )
     

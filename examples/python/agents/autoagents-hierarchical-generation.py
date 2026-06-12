@@ -60,9 +60,10 @@ agents_system = AgentTeam(
     process="sequential", output="verbose"
 )
 
-print("Starting hierarchical agent generation...")
-result = agents_system.start()
+if __name__ == "__main__":
+    print("Starting hierarchical agent generation...")
+    result = agents_system.start()
 
-print(f"\nHierarchical Result: {result[:200]}...")
-print("\n✅ AutoAgents hierarchical generation complete!")
-print("Demonstrated coordinated hierarchical workflow between manager and specialist agents.")
+    print(f"\nHierarchical Result: {str(result)[:200]}...")
+    print("\n✅ AutoAgents hierarchical generation complete!")
+    print("Demonstrated coordinated hierarchical workflow between manager and specialist agents.")

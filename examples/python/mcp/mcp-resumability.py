@@ -15,13 +15,6 @@ Protocol: MCP 2025-11-25
 
 from praisonaiagents import Agent, MCP
 
-# Agent with resumability support (automatic)
-agent = Agent(
-    name="Resumable Assistant",
-    instructions="You are a helpful assistant with resumable connections.",
-    tools=MCP("https://api.example.com/mcp")
-)
-
 # Resumability is automatic - the MCP client:
 # 1. Tracks event IDs from SSE streams (id: field)
 # 2. Stores last event ID per stream
@@ -29,6 +22,12 @@ agent = Agent(
 # 4. Respects retry delay from server (retry: field)
 
 if __name__ == "__main__":
+    agent = Agent(
+        name="Resumable Assistant",
+        instructions="You are a helpful assistant with resumable connections.",
+        tools=MCP("https://api.example.com/mcp"),
+    )
+
     print("MCP Resumability Example")
     print("=" * 40)
     print()
