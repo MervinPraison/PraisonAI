@@ -19,8 +19,10 @@ Usage:
     # Register custom integration
     registry.register('my-agent', MyCustomIntegration)
     
-    # Create integration
-    agent = registry.create('claude', workspace="/path/to/project")
+    # Create integration (use try_create for optional behavior)
+    agent = registry.try_create('claude', workspace="/path/to/project")
+    if agent is None:
+        print("Integration 'claude' not found or unavailable")
     
     # List available integrations
     available = await registry.get_available()
@@ -104,9 +106,9 @@ class ExternalAgentRegistry(PluginRegistry[BaseCLIIntegration]):
         """
         return self.list_names()
         
-    def create(self, name: str, **kwargs: Any) -> Optional[BaseCLIIntegration]:
+    def try_create(self, name: str, **kwargs: Any) -> Optional[BaseCLIIntegration]:
         """
-        Create an instance of the specified integration.
+        Try to create an instance of the specified integration.
         
         Args:
             name: Name of the integration
@@ -217,7 +219,7 @@ def create_integration(name: str, **kwargs: Any) -> Optional[BaseCLIIntegration]
         BaseCLIIntegration: Instance of the integration, or None if not found
     """
     registry = get_default_registry()
-    return registry.create(name, **kwargs)
+    return registry.try_create(name, **kwargs)
 
 
 def get_available_integrations() -> Dict[str, bool]:
