@@ -60,16 +60,16 @@ jobs:
     - name: Run PraisonAI integration tests
       run: |
         cd PraisonAI/src/praisonai
-        python -m pytest tests/integration/test_aiui_* -v --timeout=300
+        python -m pytest tests/integration/test_aiui_* -v
         
     - name: Run PraisonAIUI integration tests
       run: |
         cd PraisonAIUI
         if [ -f tests/integration/test_agentic_roundtrip.py ]; then
-          python -m pytest tests/integration/test_agentic_roundtrip.py -v --timeout=300
+          python -m pytest tests/integration/test_agentic_roundtrip.py -v
         fi
         if [ -f tests/test_feature_sdk_backends.py ]; then
-          python -m pytest tests/test_feature_sdk_backends.py -v --timeout=300
+          python -m pytest tests/test_feature_sdk_backends.py -v
         fi
         
     - name: Test Pattern C CLI
@@ -152,7 +152,7 @@ jobs:
       run: |
         cd PraisonAI/src/praisonai
         if [ -n "$OPENAI_API_KEY" ]; then
-          python -m pytest tests/integration/test_aiui_host_agentic.py -v --timeout=600
+          python -m pytest tests/integration/test_aiui_host_agentic.py -v
         else
           echo "OPENAI_API_KEY not available, skipping agentic tests"
         fi
