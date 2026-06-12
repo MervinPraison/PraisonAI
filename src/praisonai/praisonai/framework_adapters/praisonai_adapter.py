@@ -216,13 +216,9 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             response = team.start()
             result = f"### PraisonAI Output ###\n{response}" if response else "### PraisonAI Output ###\nTask completed."
             
-            # AgentOps integration if available
-            if is_available("agentops"):
-                import agentops
-                try:
-                    agentops.end_session("Success")
-                except Exception as e:  # noqa: BLE001 -- agentops errors must not crash the caller
-                    logger.warning(f"agentops.end_session failed: {e}")
+            # Close observability session
+            from ..observability.hooks import finalize_observability
+            finalize_observability(self.name)
             
             logger.info("PraisonAI execution completed")
             return result
@@ -400,13 +396,9 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             response = await team.astart()
             result = f"### PraisonAI Output ###\n{response}" if response else "### PraisonAI Output ###\nTask completed."
             
-            # AgentOps integration if available
-            if is_available("agentops"):
-                import agentops
-                try:
-                    agentops.end_session("Success")
-                except Exception as e:  # noqa: BLE001 -- agentops errors must not crash the caller
-                    logger.warning(f"agentops.end_session failed: {e}")
+            # Close observability session
+            from ..observability.hooks import finalize_observability
+            finalize_observability(self.name)
             
             logger.info("PraisonAI async execution completed")
             return result

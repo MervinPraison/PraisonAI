@@ -132,6 +132,10 @@ class AutoGenAdapter(BaseFrameworkAdapter):
         response = user_proxy.initiate_chats(tasks)
         result = "### AutoGen v0.2 Output ###\n" + (response[-1].summary if hasattr(response[-1], 'summary') else "")
         
+        # Close observability session
+        from ..observability.hooks import finalize_observability
+        finalize_observability(self.name)
+        
         logger.info("AutoGen v0.2 execution completed")
         return result
     
@@ -298,6 +302,10 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
             
             # Run the group chat
             result = await group_chat.run(task=task_description)
+            
+            # Close observability session
+            from ..observability.hooks import finalize_observability
+            finalize_observability(self.name)
             
             # Extract the final message content
             if result.messages:
@@ -507,6 +515,10 @@ class AG2Adapter(BaseFrameworkAdapter):
             chat_result = user_proxy.initiate_chat(manager, message=initial_message)
         except Exception as e:
             return f"### AG2 Error ###\n{str(e)}"
+
+        # Close observability session
+        from ..observability.hooks import finalize_observability
+        finalize_observability(self.name)
 
         # Prefer ChatResult.summary if available, otherwise scan messages
         result_content = ""
