@@ -30,7 +30,7 @@ class TestHostAppBootstrap:
         from praisonaiui.providers import PraisonAIProvider
 
         importlib.reload(host_app)
-        host_app._CONFIGURED = False
+        host_app.reset_configuration()
         srv._provider = None
 
         seen = []
@@ -53,7 +53,7 @@ class TestHostAppBootstrap:
         from praisonai.integration import host_app
 
         importlib.reload(host_app)
-        host_app._CONFIGURED = False
+        host_app.reset_configuration()
 
         seen = []
 
@@ -71,7 +71,7 @@ class TestHostAppBootstrap:
         from praisonai.integration import host_app
 
         importlib.reload(host_app)
-        host_app._CONFIGURED = False
+        host_app.reset_configuration()
 
         app = host_app.build_host_app(pages=["chat"])
         assert app is not None

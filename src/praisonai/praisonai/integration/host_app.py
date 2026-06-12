@@ -13,6 +13,15 @@ from typing import Any, Dict, List, Optional, Sequence
 # Use context variable instead of module-level global for multi-agent safety
 _configured_context: contextvars.ContextVar[bool] = contextvars.ContextVar('host_configured', default=False)
 
+# Backward compatibility for tests
+def reset_configuration() -> None:
+    """Reset configuration state for testing. Use instead of host_app._CONFIGURED = False."""
+    _configured_context.set(False)
+
+def is_configured() -> bool:
+    """Check if configuration has been applied in current context."""
+    return _configured_context.get()
+
 # Backward compatibility shim for tests that assign host_app._CONFIGURED = False
 class _ConfiguredShim:
     """Backward compatibility shim that proxies to the ContextVar."""
@@ -21,6 +30,9 @@ class _ConfiguredShim:
     
     def __set__(self, obj, value):
         _configured_context.set(bool(value))
+        
+    def __bool__(self):
+        return _configured_context.get()
 
 # Expose the shim so tests can still use host_app._CONFIGURED = False 
 _CONFIGURED = _ConfiguredShim()
