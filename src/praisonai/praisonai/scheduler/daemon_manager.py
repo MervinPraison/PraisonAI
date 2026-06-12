@@ -5,6 +5,7 @@ import os
 import sys
 import signal
 import subprocess
+import asyncio
 from pathlib import Path
 from typing import Optional, Dict, List
 from datetime import datetime
@@ -146,6 +147,41 @@ class DaemonManager:
             try:
                 os.kill(pid, signal.SIGKILL)
                 time.sleep(0.2)  # Give it time to die
+            except (OSError, ProcessLookupError):
+                pass
+            
+            return True
+            
+        except (OSError, ProcessLookupError):
+            return False
+
+    async def astop_daemon(self, pid: int, timeout: int = 10) -> bool:
+        """
+        Async variant of stop_daemon — never blocks the event loop.
+        
+        Args:
+            pid: Process ID
+            timeout: Timeout in seconds
+            
+        Returns:
+            True if stopped successfully
+        """
+        try:
+            # Try graceful shutdown first (SIGTERM)
+            os.kill(pid, signal.SIGTERM)
+            
+            # Wait for process to terminate
+            for _ in range(timeout * 10):
+                try:
+                    os.kill(pid, 0)  # Check if still alive
+                    await asyncio.sleep(0.1)  # cooperative wait
+                except (OSError, ProcessLookupError):
+                    return True  # Process terminated
+            
+            # Force kill if still alive
+            try:
+                os.kill(pid, signal.SIGKILL)
+                await asyncio.sleep(0.2)  # Give it time to die
             except (OSError, ProcessLookupError):
                 pass
             
