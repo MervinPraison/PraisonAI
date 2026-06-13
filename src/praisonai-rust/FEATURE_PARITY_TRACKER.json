@@ -5,10 +5,10 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 359,
+    "pythonCoreFeatures": 360,
     "rustFeatures": 667,
-    "gapCount": 80,
-    "parityPercentage": 185.8
+    "gapCount": 81,
+    "parityPercentage": 185.3
   },
   "pythonCoreSDK": {
     "exports": [
@@ -275,6 +275,7 @@
       "WebSearchProvider",
       "Workflow",
       "WorkflowContext",
+      "__version__",
       "aembed",
       "aembedding",
       "aembeddings",
@@ -4373,6 +4374,15 @@
         "effort": "high",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "__version__",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "aembed",

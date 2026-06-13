@@ -45,13 +45,10 @@ class CredentialStore:
         else:
             home = Path.home()
             self.credentials_path = home / ".praison" / "credentials.json"
-        
-        # Ensure parent directory exists
+    
+    def _ensure_directory_exists(self) -> None:
+        """Ensure parent directory exists, creating it if necessary."""
         self.credentials_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Create empty file with proper permissions if it doesn't exist
-        if not self.credentials_path.exists():
-            self._write_credentials({})
     
     def _read_credentials(self) -> Dict[str, Dict[str, Any]]:
         """Read and parse credentials file."""
@@ -73,6 +70,9 @@ class CredentialStore:
     
     def _write_credentials(self, credentials: Dict[str, Dict[str, Any]]) -> None:
         """Write credentials to file atomically with proper permissions."""
+        # Ensure parent directory exists before writing
+        self._ensure_directory_exists()
+        
         # Use atomic write: write to temp file, then rename
         temp_fd = None
         temp_path = None
@@ -88,9 +88,12 @@ class CredentialStore:
             os.chmod(temp_path, 0o600)
             
             # Write JSON data
-            with os.fdopen(temp_fd, 'w') as f:
+            # Transfer ownership to the file object; clear fd so the except
+            # handler won't attempt a double-close if json.dump raises.
+            f = os.fdopen(temp_fd, 'w')
+            temp_fd = None
+            with f:
                 json.dump(credentials, f, indent=2)
-                temp_fd = None  # File handle is now closed
             
             # Atomic rename
             os.rename(temp_path, self.credentials_path)

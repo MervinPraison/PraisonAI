@@ -7,7 +7,7 @@ from environment variables, ensuring consistent precedence across all components
 
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Callable
 
 
 @dataclass(frozen=True)
@@ -18,11 +18,23 @@ class LLMEndpoint:
     api_key: Optional[str]
 
 
+# Map well-known model prefixes to their (env-var, default base_url).
+_PROVIDER_MAP = {
+    "anthropic/":  ("ANTHROPIC_API_KEY",  "https://api.anthropic.com/v1"),
+    "google/":     ("GOOGLE_API_KEY",     "https://generativelanguage.googleapis.com/v1beta"),
+    "gemini/":     ("GEMINI_API_KEY",     "https://generativelanguage.googleapis.com/v1beta"),
+    "groq/":       ("GROQ_API_KEY",       "https://api.groq.com/openai/v1"),
+    "cohere/":     ("COHERE_API_KEY",     "https://api.cohere.ai/v1"),
+    "openrouter/": ("OPENROUTER_API_KEY", "https://openrouter.ai/api/v1"),
+    "ollama/":     ("OLLAMA_API_KEY",     "http://localhost:11434/v1"),
+}
+
 # Documented, single precedence list. Add new providers here only.
 _MODEL_VARS = ("MODEL_NAME", "OPENAI_MODEL_NAME")
 _BASE_URL_VARS = ("OPENAI_BASE_URL", "OPENAI_API_BASE", "OLLAMA_API_BASE")
 _DEFAULT_MODEL = "gpt-4o-mini"
 _DEFAULT_BASE = "https://api.openai.com/v1"
+_DEFAULT_KEY_VAR = "OPENAI_API_KEY"
 
 
 def _first_set(*names: str) -> Optional[str]:
@@ -34,14 +46,26 @@ def _first_set(*names: str) -> Optional[str]:
     return None
 
 
-def resolve_llm_endpoint(*, default_base: str = _DEFAULT_BASE, fallback_lookup: callable = None) -> LLMEndpoint:
+def _provider_from_model(model: str) -> tuple[str, str | None]:
+    """Get provider-specific API key environment variable and base URL for a model."""
+    for prefix, (key_var, default_base) in _PROVIDER_MAP.items():
+        if model.startswith(prefix):
+            return key_var, default_base
+    return _DEFAULT_KEY_VAR, None
+
+
+def resolve_llm_endpoint(
+    *, 
+    default_base: str = _DEFAULT_BASE, 
+    fallback_lookup: Optional[Callable[[str], Optional[dict]]] = None
+) -> LLMEndpoint:
     """
     Resolve LLM endpoint configuration from environment variables.
     
     Precedence order:
     - Model: MODEL_NAME > OPENAI_MODEL_NAME > fallback > default
-    - Base URL: OPENAI_BASE_URL > OPENAI_API_BASE > OLLAMA_API_BASE > fallback > default
-    - API Key: OPENAI_API_KEY > fallback > None
+    - Base URL: OPENAI_BASE_URL > OPENAI_API_BASE > OLLAMA_API_BASE > provider default > fallback > default
+    - API Key: provider-specific key (e.g., ANTHROPIC_API_KEY) > OPENAI_API_KEY fallback > stored credentials > None
     
     Args:
         default_base: Default base URL if none found in environment variables
@@ -50,16 +74,28 @@ def resolve_llm_endpoint(*, default_base: str = _DEFAULT_BASE, fallback_lookup: 
     Returns:
         LLMEndpoint with resolved configuration
     """
-    # Resolve API key with fallback
-    api_key = os.environ.get("OPENAI_API_KEY")
+    model = _first_set(*_MODEL_VARS) or _DEFAULT_MODEL
+    key_var, provider_base = _provider_from_model(model)
+
+    base_url = (
+        _first_set(*_BASE_URL_VARS)
+        or provider_base
+        or default_base
+    )
+    
+    # Try provider-specific key first; fall back to OPENAI_API_KEY only for
+    # OpenAI-compatible proxies that may use a single shared key.
+    api_key = os.environ.get(key_var) or (
+        os.environ.get("OPENAI_API_KEY") if key_var == "OPENAI_API_KEY" else None
+    )
+    
+    # If no env API key found and fallback lookup provided, try stored credentials
     fallback_model = None
     fallback_base = None
-    
-    # Try fallback lookup if no env API key and fallback function provided
     if not api_key and fallback_lookup:
         try:
             # Try common provider names
-            for provider in ["openai", "anthropic", "google", "gemini"]:
+            for provider in ["openai", "anthropic", "google", "gemini", "groq", "cohere"]:
                 cred = fallback_lookup(provider)
                 if cred and cred.get("api_key"):
                     api_key = cred["api_key"]
@@ -71,7 +107,7 @@ def resolve_llm_endpoint(*, default_base: str = _DEFAULT_BASE, fallback_lookup: 
             pass
     
     return LLMEndpoint(
-        model=_first_set(*_MODEL_VARS) or fallback_model or _DEFAULT_MODEL,
-        base_url=_first_set(*_BASE_URL_VARS) or fallback_base or default_base,
+        model=fallback_model or model,
+        base_url=fallback_base or base_url,
         api_key=api_key,
     )

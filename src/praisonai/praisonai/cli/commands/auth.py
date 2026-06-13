@@ -47,12 +47,7 @@ def _validate_with_live_call(provider: str, api_key: str, base_url: Optional[str
             return True, "API key verified"
             
         elif provider.lower() == "anthropic":
-            # Use a cheap Anthropic API call
-            import anthropic
-            client = anthropic.Anthropic(api_key=api_key)
-            
-            # For Anthropic, we can't easily validate without making a request
-            # that might consume credits, so just do format validation
+            # Live validation would require a billable request; skip it.
             return True, "Format valid (live test skipped for Anthropic)"
             
         elif provider.lower() in ("google", "gemini"):
@@ -160,7 +155,7 @@ def auth_login(
 
 @app.command("logout")
 def auth_logout(
-    provider: str = typer.Argument(help="Provider name to remove"),
+    provider: Optional[str] = typer.Argument(None, help="Provider name to remove"),
     all_providers: bool = typer.Option(False, "--all", help="Remove all stored credentials"),
 ):
     """
@@ -189,6 +184,11 @@ def auth_logout(
                 
         else:
             # Remove specific provider
+            if provider is None:
+                output.print_error("Provider name is required when not using --all")
+                output.print_info("Use 'praisonai auth logout <provider>' or 'praisonai auth logout --all'")
+                raise typer.Exit(1)
+            
             if not store.has_credential(provider):
                 output.print_warning(f"No credentials found for {provider}")
                 raise typer.Exit(1)

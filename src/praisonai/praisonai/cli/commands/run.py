@@ -25,20 +25,26 @@ def _check_api_key_available() -> bool:
     """
     import os
     
-    # Check if we already have an environment API key
-    if os.environ.get("OPENAI_API_KEY"):
+    # Check all known provider env vars first
+    known_keys = (
+        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY",
+        "GEMINI_API_KEY", "GROQ_API_KEY", "COHERE_API_KEY",
+    )
+    if any(os.environ.get(k) for k in known_keys):
         return True
     
-    # Try to inject stored credentials
+    # Try to inject stored credentials into env, then re-check any known provider key
     try:
         from ...llm.credentials import inject_credentials_into_env
-        if inject_credentials_into_env():
-            # Check again after injection
-            return bool(os.environ.get("OPENAI_API_KEY"))
+        inject_credentials_into_env()
     except ImportError:
         # Fallback if credential module not available
         pass
-    
+
+    # Check all known provider env vars after potential injection
+    if any(os.environ.get(k) for k in known_keys):
+        return True
+
     # Final check using LLM resolution with credential fallback
     try:
         from ...llm.credentials import resolve_llm_endpoint_with_credentials
