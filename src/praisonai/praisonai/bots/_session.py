@@ -180,6 +180,7 @@ class BotSessionManager:
         chat_id: str = "",
         thread_id: str = "",
         user_name: str = "",
+        stream_callback: Optional[Any] = None,
     ) -> str:
         """Run ``agent.chat(prompt)`` with *user_id*-scoped history.
 
@@ -188,6 +189,10 @@ class BotSessionManager:
 
         Uses both a per-user lock (serialise same user) and a per-agent
         lock (prevent concurrent history swaps on a shared Agent).
+
+        Args:
+            stream_callback: Optional async callback for streaming events.
+                            If provided, will be passed to agent.astart() for streaming.
 
         N4 — Inbound DLQ: if a ``dlq`` was passed to ``__init__`` and
         ``agent.chat()`` raises, the failing message is persisted to
@@ -249,30 +254,47 @@ class BotSessionManager:
                         self._active_runs[storage_key] = controller
                     
                     try:
-                        # Copy current task's contextvars (incl. SessionContext)
-                        # into the worker thread so tools the agent invokes can
-                        # read platform/user metadata.
-                        import contextvars
-                        from functools import partial
-                        _ctx = contextvars.copy_context()
-                        
-                        # Create agent.chat call with cancel_token if supported
-                        if controller and hasattr(agent, 'chat') and 'cancel_token' in agent.chat.__code__.co_varnames:
-                            chat_call = partial(agent.chat, prompt, cancel_token=controller)
+                        # Choose streaming vs non-streaming path based on callback
+                        if stream_callback:
+                            # Streaming path: use agent.astart() with stream callback and timeout
+                            try:
+                                # astart is async so we can use asyncio.wait_for directly 
+                                response = await asyncio.wait_for(
+                                    agent.astart(prompt, stream_callback=stream_callback),
+                                    timeout=self._run_timeout if self._run_timeout > 0 else None,
+                                )
+                                # Handle AutonomyResult when autonomy is enabled in caller mode
+                                if hasattr(response, 'output'):
+                                    response = response.output
+                            except asyncio.TimeoutError:
+                                if controller:
+                                    controller.request("run timeout")
+                                raise BotRunTimeout(f"Agent run timed out after {self._run_timeout}s")
                         else:
-                            chat_call = partial(agent.chat, prompt)
-                        
-                        # Run with timeout and interruption support
-                        try:
-                            response = await asyncio.wait_for(
-                                loop.run_in_executor(None, _ctx.run, chat_call),
-                                timeout=self._run_timeout if self._run_timeout > 0 else None,
-                            )
-                        except asyncio.TimeoutError:
-                            if controller:
-                                controller.request("run timeout")
-                            raise BotRunTimeout(f"Agent run timed out after {self._run_timeout}s")
-                        
+                            # Legacy non-streaming path: use agent.chat() in executor with cancel_token and timeout
+                            import contextvars
+                            import inspect
+                            from functools import partial
+                            _ctx = contextvars.copy_context()
+                            
+                            # Create agent.chat call with cancel_token if supported
+                            # Use inspect.signature for safer parameter checking
+                            _chat_params = inspect.signature(agent.chat).parameters if (controller and hasattr(agent, 'chat')) else {}
+                            if controller and 'cancel_token' in _chat_params:
+                                chat_call = partial(agent.chat, prompt, cancel_token=controller)
+                            else:
+                                chat_call = partial(agent.chat, prompt)
+                            
+                            # Run with timeout and interruption support
+                            try:
+                                response = await asyncio.wait_for(
+                                    loop.run_in_executor(None, _ctx.run, chat_call),
+                                    timeout=self._run_timeout if self._run_timeout > 0 else None,
+                                )
+                            except asyncio.TimeoutError:
+                                if controller:
+                                    controller.request("run timeout")
+                                raise BotRunTimeout(f"Agent run timed out after {self._run_timeout}s")
                         # Capture updated history before restoring caller's.
                         updated_history = agent.chat_history
                     except Exception as exc:

@@ -30,6 +30,7 @@ from praisonaiagents.gateway import (
 logger = logging.getLogger(__name__)
 
 from .unicode_utils import safe_error_message, safe_log_message, extract_root_cause_from_error
+from .supervisor import ChannelSupervisor
 
 
 @dataclass
@@ -278,6 +279,9 @@ class WebSocketGateway:
         
         # PID lock for single-instance enforcement
         self._pid_lock: Optional[Any] = None
+        
+        # Channel supervisor for resilient bot management
+        self._channel_supervisor = ChannelSupervisor()
     
     @property
     def is_running(self) -> bool:
@@ -718,6 +722,43 @@ class WebSocketGateway:
                     status_code=500
                 )
         
+        # Channel control endpoints
+        async def pause_channel_handler(request) -> JSONResponse:
+            """POST /api/channels/{name}/pause — pause a channel."""
+            auth_err = _check_auth(request)
+            if auth_err:
+                return auth_err
+            channel_name = request.path_params["name"]
+            success = self.pause_channel(channel_name)
+            return JSONResponse({
+                "success": success,
+                "message": f"Channel '{channel_name}' {'paused' if success else 'could not be paused'}"
+            })
+        
+        async def resume_channel_handler(request) -> JSONResponse:
+            """POST /api/channels/{name}/resume — resume a paused channel."""
+            auth_err = _check_auth(request)
+            if auth_err:
+                return auth_err
+            channel_name = request.path_params["name"]
+            success = self.resume_channel(channel_name)
+            return JSONResponse({
+                "success": success,
+                "message": f"Channel '{channel_name}' {'resumed' if success else 'could not be resumed'}"
+            })
+        
+        async def reconnect_channel_handler(request) -> JSONResponse:
+            """POST /api/channels/{name}/reconnect — reconnect a channel."""
+            auth_err = _check_auth(request)
+            if auth_err:
+                return auth_err
+            channel_name = request.path_params["name"]
+            success = self.reconnect_channel(channel_name)
+            return JSONResponse({
+                "success": success,
+                "message": f"Channel '{channel_name}' {'reconnected' if success else 'could not be reconnected'}"
+            })
+        
         routes = [
             Route("/", magic_link_handler, methods=["GET"]),
             Route("/health", health, methods=["GET"]),
@@ -728,6 +769,9 @@ class WebSocketGateway:
             Route("/api/pairing/pending", _pairing_routes["pending"], methods=["GET"]),
             Route("/api/pairing/approve", _pairing_routes["approve"], methods=["POST"]),
             Route("/api/pairing/revoke", _pairing_routes["revoke"], methods=["POST"]),
+            Route("/api/channels/{name}/pause", pause_channel_handler, methods=["POST"]),
+            Route("/api/channels/{name}/resume", resume_channel_handler, methods=["POST"]),
+            Route("/api/channels/{name}/reconnect", reconnect_channel_handler, methods=["POST"]),
             WebSocketRoute("/ws", websocket_endpoint),
         ]
         
@@ -1189,16 +1233,36 @@ class WebSocketGateway:
                     logger.error(f"Broadcast error to {client_id}: {e}")
     
     def health(self) -> Dict[str, Any]:
-        """Get gateway health status including per-channel bot status."""
+        """Get gateway health status including per-channel bot status and supervision state."""
         uptime = time.time() - self._started_at if self._started_at else 0
         channel_status = {}
+        supervision_status = self._channel_supervisor.get_all_status()
+        
         for name, bot in self._channel_bots.items():
             running = getattr(bot, "is_running", False)
             platform = getattr(bot, "platform", "unknown")
-            channel_status[name] = {
-                "platform": platform,
-                "running": running,
-            }
+            
+            # Get supervision state
+            sup_status = supervision_status.get(name)
+            if sup_status:
+                channel_status[name] = {
+                    "platform": platform,
+                    "running": running,
+                    "supervision": {
+                        "state": sup_status.state.value,
+                        "last_error": sup_status.last_error,
+                        "last_error_time": sup_status.last_error_time,
+                        "next_retry_at": sup_status.next_retry_at,
+                        "total_recoveries": sup_status.total_recoveries,
+                        "manual_pause": sup_status.manual_pause,
+                    }
+                }
+            else:
+                channel_status[name] = {
+                    "platform": platform,
+                    "running": running,
+                }
+                
         result = {
             "status": "healthy" if self._is_running else "stopped",
             "uptime": uptime,
@@ -1769,44 +1833,29 @@ class WebSocketGateway:
             return None
 
     async def _run_bot_safe(self, name: str, bot: Any) -> None:
-        """Run a single bot, catching errors so other bots stay alive.
+        """Run a single bot with supervision and resilient error handling.
 
-        For TelegramBot, uses the low-level initialize/start/start_polling
-        API to avoid event-loop conflicts with ``run_polling()``.
-        For Discord/Slack, injects a routing-aware message handler before
-        starting so the gateway's routing rules are respected.
+        Uses the channel supervisor for unlimited retries with error classification,
+        exponential backoff, and operator controls.
         """
-        max_retries = 5
-        base_delay = 5  # seconds
-        for attempt in range(max_retries + 1):
-            try:
-                logger.info(f"Starting bot for channel '{name}'..." + (f" (retry {attempt})" if attempt else ""))
-
-                # TelegramBot special handling: run_polling() tries to manage
-                # its own event loop which conflicts with our gateway loop.
-                # Use the lower-level API instead.
-                if self._is_telegram_bot(bot):
-                    await self._start_telegram_bot_polling(name, bot)
-                elif type(bot).__name__ in ("WhatsAppBot", "LinearBot"):
-                    # WhatsApp/Linear run their own aiohttp webhook servers
-                    self._inject_routing_handler(name, bot)
-                    await bot.start()
-                else:
-                    # Inject routing-aware handler for Discord/Slack
-                    self._inject_routing_handler(name, bot)
-                    await bot.start()
-                break  # clean exit
-            except asyncio.CancelledError:
-                logger.info(f"Bot '{name}' cancelled")
-                break
-            except Exception as e:
-                logger.error(f"Bot '{name}' crashed: {e}")
-                if attempt < max_retries:
-                    delay = base_delay * (2 ** attempt)
-                    logger.info(f"Reconnecting '{name}' in {delay}s...")
-                    await asyncio.sleep(delay)
-                else:
-                    logger.error(f"Bot '{name}' failed after {max_retries} retries, giving up")
+        async def start_bot(name: str, bot: Any) -> None:
+            """Start function for the supervisor."""
+            # TelegramBot special handling: run_polling() tries to manage
+            # its own event loop which conflicts with our gateway loop.
+            # Use the lower-level API instead.
+            if self._is_telegram_bot(bot):
+                await self._start_telegram_bot_polling(name, bot)
+            elif type(bot).__name__ in ("WhatsAppBot", "LinearBot"):
+                # WhatsApp/Linear run their own aiohttp webhook servers
+                self._inject_routing_handler(name, bot)
+                await bot.start()
+            else:
+                # Inject routing-aware handler for Discord/Slack
+                self._inject_routing_handler(name, bot)
+                await bot.start()
+        
+        # Use supervisor for resilient channel management
+        await self._channel_supervisor.run(name, bot, start_bot)
 
     @staticmethod
     def _is_telegram_bot(bot: Any) -> bool:
@@ -2028,6 +2077,10 @@ class WebSocketGateway:
             except Exception as e:
                 logger.error(f"Error stopping bot '{name}': {e}")
 
+        # Clean up supervisor state for all channels
+        for name in list(self._channel_bots.keys()):
+            self._channel_supervisor.cleanup(name)
+
         self._channel_bots.clear()
         self._routing_rules.clear()
 
@@ -2086,6 +2139,59 @@ class WebSocketGateway:
                 break
             except Exception as e:
                 logger.warning(f"Config watch error: {e}")
+
+    # Channel supervision control methods
+    
+    def pause_channel(self, name: str) -> bool:
+        """Pause a channel.
+        
+        Args:
+            name: Channel name
+            
+        Returns:
+            True if channel was paused, False if not found or not running
+        """
+        return self._channel_supervisor.pause(name)
+    
+    def resume_channel(self, name: str) -> bool:
+        """Resume a paused channel.
+        
+        Args:
+            name: Channel name
+            
+        Returns:
+            True if channel was resumed, False if not found or not paused
+        """
+        return self._channel_supervisor.resume(name)
+    
+    def reconnect_channel(self, name: str) -> bool:
+        """Force reconnect a channel.
+        
+        Args:
+            name: Channel name
+            
+        Returns:
+            True if channel exists, False otherwise
+        """
+        return self._channel_supervisor.reconnect(name)
+    
+    def get_channel_supervision_status(self) -> Dict[str, Any]:
+        """Get supervision status for all channels.
+        
+        Returns:
+            Dictionary mapping channel names to their supervision status
+        """
+        status_dict = {}
+        for name, status in self._channel_supervisor.get_all_status().items():
+            status_dict[name] = {
+                "state": status.state.value,
+                "last_error": status.last_error,
+                "last_error_time": status.last_error_time,
+                "next_retry_at": status.next_retry_at,
+                "total_recoveries": status.total_recoveries,
+                "manual_pause": status.manual_pause,
+            }
+        return status_dict
 
     async def start_with_config(self, config_path: str) -> None:
         """Start the gateway with a gateway.yaml configuration.

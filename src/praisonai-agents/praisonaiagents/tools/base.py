@@ -17,8 +17,11 @@ Usage:
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Type, get_type_hints
 import inspect
+import json
 import logging
 import copy
+
+from .schema import annotation_to_json_schema, get_parameter_requirements
 
 
 class ToolValidationError(Exception):
@@ -129,18 +132,17 @@ class BaseTool(ABC):
                 
                 # Get type hint
                 param_type = hints.get(param_name, Any)
-                json_type = self._python_type_to_json(param_type)
                 
-                # Build property schema
-                prop_schema = {"type": json_type}
+                # Use new schema utility for proper type handling
+                prop_schema = annotation_to_json_schema(param_type)
                 
                 # Add description from docstring if available
                 # (Could parse docstring for param descriptions)
                 
                 schema["properties"][param_name] = prop_schema
                 
-                # Check if required (no default value)
-                if param.default is inspect.Parameter.empty:
+                # Check if required using improved logic
+                if get_parameter_requirements(sig, param_name):
                     schema["required"].append(param_name)
         except Exception as e:
             logging.debug(f"Could not generate schema for {self.name}: {e}")
@@ -149,28 +151,15 @@ class BaseTool(ABC):
     
     @staticmethod
     def _python_type_to_json(python_type: Type) -> str:
-        """Convert Python type to JSON Schema type."""
-        type_map = {
-            str: "string",
-            int: "integer",
-            float: "number",
-            bool: "boolean",
-            list: "array",
-            dict: "object",
-            type(None): "null"
-        }
+        """Convert Python type to JSON Schema type.
         
-        # Handle Optional, Union, etc.
-        origin = getattr(python_type, '__origin__', None)
-        if origin is not None:
-            # For List[X], return "array"
-            if origin is list:
-                return "array"
-            # For Dict[X, Y], return "object"
-            if origin is dict:
-                return "object"
-        
-        return type_map.get(python_type, "string")
+        DEPRECATED: Use annotation_to_json_schema() from schema.py instead.
+        This method is kept for backward compatibility but will be removed.
+        """
+        # Legacy fallback - delegate to new schema utility and extract type
+        from .schema import annotation_to_json_schema
+        schema = annotation_to_json_schema(python_type)
+        return schema.get("type", "string")
     
     @abstractmethod
     def run(self, **kwargs) -> Any:
@@ -440,6 +429,50 @@ def validate_tool_schema_consistency(tools: List[Any]) -> bool:
         names.add(name)
     
     return True
+
+
+def get_sorted_tool_schemas(tools: List[Any]) -> List[Dict[str, Any]]:
+    """Get tool schemas sorted by function name for deterministic ordering.
+    
+    This ensures tool schemas are always ordered consistently for prompt caching optimization.
+    
+    Args:
+        tools: List of tool objects (BaseTool instances, callables, etc.)
+        
+    Returns:
+        List of tool schemas sorted alphabetically by function name
+        
+    Raises:
+        ToolValidationError: If validation fails
+    """
+    if not tools:
+        return []
+        
+    # First validate all tools (reuse existing validation logic)
+    validate_tool_schema_consistency(tools)
+    
+    from .decorator import get_tool_schema
+    schemas = []
+    
+    for tool in tools:
+        # Get schema from different tool types
+        if isinstance(tool, BaseTool):
+            schema = tool.get_schema()
+        elif hasattr(tool, 'get_schema') and callable(getattr(tool, 'get_schema')):
+            schema = tool.get_schema()
+        elif callable(tool):
+            schema = get_tool_schema(tool)
+        else:
+            continue  # Skip invalid tools (validation already happened)
+            
+        if schema:
+            schemas.append(schema)
+    
+    # Sort schemas by function name for deterministic ordering
+    def sort_key(schema):
+        return schema.get("function", {}).get("name", "")
+    
+    return sorted(schemas, key=sort_key)
 
 
 # For backward compatibility - tools can also just be functions

@@ -33,6 +33,10 @@ __all__ = [
     "CompactionStrategy",
     # Results
     "CompactionResult",
+    # Protocols
+    "ToolResultPrunerProtocol",
+    "MessageFormatterProtocol", 
+    "SummaryBuilderProtocol",
 ]
 
 
@@ -53,5 +57,17 @@ def __getattr__(name: str):
     if name == "CompactionResult":
         from .result import CompactionResult
         return CompactionResult
+    
+    if name == "ToolResultPrunerProtocol":
+        from .protocols import ToolResultPrunerProtocol
+        return ToolResultPrunerProtocol
+    
+    if name == "MessageFormatterProtocol":
+        from .protocols import MessageFormatterProtocol
+        return MessageFormatterProtocol
+    
+    if name == "SummaryBuilderProtocol":
+        from .protocols import SummaryBuilderProtocol
+        return SummaryBuilderProtocol
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

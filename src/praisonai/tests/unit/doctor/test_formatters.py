@@ -1,6 +1,8 @@
 """Unit tests for doctor formatters."""
 
 import json
+import sys
+from unittest.mock import patch
 
 from praisonai.cli.features.doctor.models import (
     CheckCategory,
@@ -156,6 +158,41 @@ class TestTextFormatter:
         output = formatter.format_report(report)
         # Should not have header in quiet mode
         assert "PraisonAI Doctor" not in output
+    
+    def test_unicode_encoding_safety_with_utf8(self):
+        """Test that Unicode symbols are used when UTF-8 is supported."""
+        formatter = TextFormatter(no_color=True)
+        
+        # Mock sys.stdout to report UTF-8 encoding
+        with patch.object(sys.stdout, 'encoding', 'utf-8'):
+            result = CheckResult(
+                id="test",
+                title="Test Check",
+                category=CheckCategory.ENVIRONMENT,
+                status=CheckStatus.PASS,
+                message="OK",
+            )
+            output = formatter.format_result(result)
+            # Should use Unicode symbol for pass
+            assert "✓" in output
+    
+    def test_unicode_encoding_safety_with_cp1252(self):
+        """Test that ASCII symbols are used when encoding doesn't support Unicode."""
+        formatter = TextFormatter(no_color=True)
+        
+        # Mock sys.stdout to report cp1252 encoding (Windows default)
+        with patch.object(sys.stdout, 'encoding', 'cp1252'):
+            result = CheckResult(
+                id="test",
+                title="Test Check", 
+                category=CheckCategory.ENVIRONMENT,
+                status=CheckStatus.PASS,
+                message="OK",
+            )
+            output = formatter.format_result(result)
+            # Should use ASCII symbol for pass instead of Unicode
+            assert "[OK]" in output
+            assert "✓" not in output
 
 
 class TestJsonFormatter:

@@ -20,6 +20,7 @@ from praisonaiagents.sandbox import (
     SandboxStatus,
     ResourceLimits,
 )
+from praisonaiagents.sandbox.config import SecurityPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,48 @@ class SubprocessSandbox:
         self.config = config or SandboxConfig.subprocess()
         self._is_running = False
         self._temp_dir: Optional[str] = None
+    
+    def _build_child_env(self, policy: SecurityPolicy, overrides: Dict[str, str] | None) -> Dict[str, str]:
+        """Construct a minimal, policy-driven env for the child process."""
+        # Start with the explicit env from SandboxConfig and the per-call overrides only.
+        env = dict(self.config.env)
+        if overrides:
+            env.update(overrides)
+
+        # If the policy allows network, pass through proxy-related vars so the child can
+        # reach the outside world; otherwise withhold them.
+        if policy.allow_network:
+            for var in ("HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy",
+                        "https_proxy", "no_proxy"):
+                if var in os.environ:
+                    env[var] = os.environ[var]
+
+        # Always pass a minimal PATH (so /usr/bin/python resolves) — never the host's.
+        env.setdefault("PATH", "/usr/local/bin:/usr/bin:/bin")
+        # HOME uses temp_dir which is set during start() - /tmp is defensive fallback  # noqa: S108
+        env.setdefault("HOME", self._temp_dir or "/tmp")
+        return env
+    
+    def _apply_rlimits(self, limits: ResourceLimits):
+        """Apply resource limits via POSIX setrlimit (Linux/macOS only)."""
+        if os.name != "posix":
+            logger.warning("Resource limits not supported on Windows - sandbox isolation is weaker")
+            return
+            
+        try:
+            import resource
+            if limits.memory_mb and limits.memory_mb > 0:
+                bytes_ = limits.memory_mb * 1024 * 1024
+                resource.setrlimit(resource.RLIMIT_AS, (bytes_, bytes_))
+            if limits.max_processes and limits.max_processes > 0:
+                resource.setrlimit(resource.RLIMIT_NPROC, (limits.max_processes, limits.max_processes))
+            if limits.max_open_files and limits.max_open_files > 0:
+                resource.setrlimit(resource.RLIMIT_NOFILE, (limits.max_open_files, limits.max_open_files))
+            # Note: RLIMIT_CPU is process CPU time, not wall clock time - timeout is handled separately
+        except ImportError:
+            logger.warning("Resource module not available - resource limits not enforced")
+        except (OSError, ValueError) as e:
+            logger.warning(f"Failed to set resource limits: {e}")
     
     @property
     def is_available(self) -> bool:
@@ -107,26 +150,42 @@ class SubprocessSandbox:
         else:
             cmd = ["python", code_file]
         
-        process_env = os.environ.copy()
-        if env:
-            process_env.update(env)
+        # Build environment based on security policy instead of copying host environment
+        process_env = self._build_child_env(self.config.security_policy, env)
         
         started_at = time.time()
         
+        # preexec_fn is POSIX-only; omit on Windows
+        popen_kwargs = {
+            "stdout": asyncio.subprocess.PIPE,
+            "stderr": asyncio.subprocess.PIPE,
+            "cwd": working_dir or self._temp_dir,
+            "env": process_env,
+        }
+        if os.name == "posix":
+            popen_kwargs["start_new_session"] = True
+            popen_kwargs["preexec_fn"] = lambda: self._apply_rlimits(limits)
+        else:
+            logger.warning("Resource limits and session isolation not available on Windows")
+
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=working_dir or self._temp_dir,
-                env=process_env,
-            )
+            proc = await asyncio.create_subprocess_exec(*cmd, **popen_kwargs)
             
             try:
+                # Truncate output to max_output_size after reading
+                max_output_size = self.config.security_policy.max_output_size
+                
                 stdout, stderr = await asyncio.wait_for(
                     proc.communicate(),
                     timeout=limits.timeout_seconds,
                 )
+                
+                # Truncate output if it exceeds max_output_size
+                if max_output_size and max_output_size > 0:
+                    if len(stdout) > max_output_size:
+                        stdout = stdout[:max_output_size] + b"\n[OUTPUT TRUNCATED]"
+                    if len(stderr) > max_output_size:
+                        stderr = stderr[:max_output_size] + b"\n[OUTPUT TRUNCATED]"
                 
                 completed_at = time.time()
                 
@@ -141,7 +200,15 @@ class SubprocessSandbox:
                     completed_at=completed_at,
                 )
             except asyncio.TimeoutError:
-                proc.kill()
+                # Kill the whole process group, not just the leader
+                try:
+                    if os.name == "posix":
+                        import signal
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    else:
+                        proc.kill()
+                except (ProcessLookupError, PermissionError, OSError):
+                    proc.kill()
                 await proc.wait()
                 
                 return SandboxResult(
@@ -211,26 +278,40 @@ class SubprocessSandbox:
         from ._shell import build_argv
         cmd = build_argv(command, shell=shell)
         
-        process_env = os.environ.copy()
-        if env:
-            process_env.update(env)
+        # Build environment based on security policy instead of copying host environment
+        process_env = self._build_child_env(self.config.security_policy, env)
         
         started_at = time.time()
         
+        # preexec_fn is POSIX-only; omit on Windows
+        popen_kwargs = {
+            "stdout": asyncio.subprocess.PIPE,
+            "stderr": asyncio.subprocess.PIPE,
+            "cwd": working_dir or self._temp_dir,
+            "env": process_env,
+        }
+        if os.name == "posix":
+            popen_kwargs["start_new_session"] = True
+            popen_kwargs["preexec_fn"] = lambda: self._apply_rlimits(limits)
+        else:
+            logger.warning("Resource limits and session isolation not available on Windows")
+
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=working_dir or self._temp_dir,
-                env=process_env,
-            )
+            proc = await asyncio.create_subprocess_exec(*cmd, **popen_kwargs)
             
             try:
                 stdout, stderr = await asyncio.wait_for(
                     proc.communicate(),
                     timeout=limits.timeout_seconds,
                 )
+                
+                # Truncate output if it exceeds max_output_size
+                max_output_size = self.config.security_policy.max_output_size
+                if max_output_size and max_output_size > 0:
+                    if len(stdout) > max_output_size:
+                        stdout = stdout[:max_output_size] + b"\n[OUTPUT TRUNCATED]"
+                    if len(stderr) > max_output_size:
+                        stderr = stderr[:max_output_size] + b"\n[OUTPUT TRUNCATED]"
                 
                 completed_at = time.time()
                 
@@ -245,7 +326,15 @@ class SubprocessSandbox:
                     completed_at=completed_at,
                 )
             except asyncio.TimeoutError:
-                proc.kill()
+                # Kill the whole process group, not just the leader
+                try:
+                    if os.name == "posix":
+                        import signal
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    else:
+                        proc.kill()
+                except (ProcessLookupError, PermissionError, OSError):
+                    proc.kill()
                 await proc.wait()
                 
                 return SandboxResult(
