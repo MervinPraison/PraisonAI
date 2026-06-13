@@ -92,8 +92,24 @@ class CliBackendProtocol(Protocol):
     
     Any object implementing these methods can serve as an Agent backend.
     Follows typing.Protocol pattern from AGENTS.md.
+    
+    Note: Starting with runtime capability system, all CLI backends must
+    declare their capabilities via the capabilities() method for compatibility
+    validation at config/selection time.
     """
     config: CliBackendConfig
+    
+    def capabilities(self) -> Any:  # RuntimeCapabilityMatrix, avoiding import
+        """Report capabilities supported by this CLI backend.
+        
+        Required for integration with the runtime capability validation system.
+        CLI backends should honestly declare their capabilities to enable
+        fail-fast validation when agents require specific features.
+        
+        Returns:
+            RuntimeCapabilityMatrix with supported capabilities
+        """
+        ...
     
     async def execute(
         self, 

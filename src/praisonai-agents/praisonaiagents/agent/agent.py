@@ -557,6 +557,7 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         learn: Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
         backend: Optional[Any] = None,  # External managed agent backend (e.g., ManagedAgentIntegration)
         cli_backend: Optional[Union[str, Any]] = None,  # CLI backend for delegating turns (e.g., "claude-code")
+        runtime: Optional[Union[bool, str, Dict[str, Any], 'RuntimeConfig']] = None,  # Runtime capability requirements and preferences
         interrupt_controller: Optional['InterruptController'] = None,  # G2: Cooperative cancellation
         tool_search: Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']] = False,  # Progressive tool disclosure
         message_steering: Optional[Union[bool, 'MessageSteeringProtocol']] = False,  # Real-time message steering during execution
@@ -664,6 +665,13 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
                 When provided, agent delegates entire conversation turns to the CLI tool
                 instead of using the built-in LLM. Enables session continuity and 
                 tool integration through external AI coding assistants.
+            runtime: Runtime capability requirements and preferences. Accepts:
+                - bool: False=disabled (default), True=basic validation
+                - str: Preferred runtime name ("native", "plugin-harness", etc.)
+                - Dict[str, Any]: Config with required_capabilities, preferred_runtime, etc.
+                - RuntimeConfig: Full configuration object
+                Enables fail-fast validation of runtime capabilities at config time
+                instead of discovering incompatibilities during agent execution.
             tool_search: Progressive tool disclosure configuration. Accepts:
                 - bool: False=disabled (default), True=auto mode
                 - str: Mode ("auto", "on", "off")  
@@ -2036,6 +2044,14 @@ Your Goal: {self.goal}
         self._cli_backend = None
         if cli_backend is not None:
             self._cli_backend = self._resolve_cli_backend(cli_backend)
+        
+        # Runtime Configuration - capability requirements and preferences
+        self._runtime_config = None
+        if runtime is not None:
+            self._runtime_config = self._resolve_runtime_config(runtime)
+            # Perform validation if enabled
+            if self._runtime_config and self._runtime_config.validate_on_creation:
+                self._validate_runtime_capabilities()
 
         # Telemetry - lazy initialized via property for performance
         self.__telemetry = None
@@ -4010,6 +4026,71 @@ Summary:"""
             return Agent(
                 name=f"subagent_{profile}",
                 instructions=f"You are a {profile} assistant.",
+            )
+    
+    # -------------------------------------------------------------------------
+    #                     Runtime Capability Management
+    # -------------------------------------------------------------------------
+    
+    def _resolve_runtime_config(self, runtime):
+        """Resolve runtime configuration parameter.
+        
+        Args:
+            runtime: Runtime parameter (bool, str, dict, or RuntimeConfig)
+            
+        Returns:
+            RuntimeConfig instance or None
+        """
+        try:
+            from ..config import resolve_runtime
+            return resolve_runtime(runtime)
+        except ImportError:
+            raise ImportError(
+                "Runtime capability features requested but configuration not available. "
+                "This should not happen in a properly installed praisonaiagents package."
+            )
+    
+    def _validate_runtime_capabilities(self):
+        """Validate that current runtime supports required capabilities.
+        
+        Performs fail-fast validation of runtime capabilities against
+        agent requirements at config/creation time.
+        
+        Raises:
+            CapabilityValidationError: If validation fails
+        """
+        if not self._runtime_config or not self._runtime_config.required_capabilities:
+            return  # No requirements to validate
+        
+        try:
+            from ..runtime import RuntimeCapability, validate_capabilities, get_native_runtime_capabilities
+            
+            # Convert string capability names to enum values
+            required_set = set()
+            for cap in self._runtime_config.required_capabilities:
+                if isinstance(cap, str):
+                    # Convert string to enum value
+                    cap_upper = cap.upper()
+                    if hasattr(RuntimeCapability, cap_upper):
+                        required_set.add(getattr(RuntimeCapability, cap_upper))
+                    else:
+                        raise ValueError(f"Unknown capability: {cap}")
+                else:
+                    # Assume it's already a RuntimeCapability enum
+                    required_set.add(cap)
+            
+            # For now, validate against native runtime capabilities
+            # TODO: In future, this should check against the actual selected runtime
+            runtime_matrix = get_native_runtime_capabilities()
+            runtime_name = self._runtime_config.preferred_runtime or "native"
+            
+            # Perform validation
+            validate_capabilities(runtime_matrix, required_set, runtime_name)
+            
+        except ImportError:
+            raise ImportError(
+                "Runtime capability validation requested but runtime module not available. "
+                "This should not happen in a properly installed praisonaiagents package."
             )
     
     def _run_verification_hooks(self) -> List[Dict[str, Any]]:
