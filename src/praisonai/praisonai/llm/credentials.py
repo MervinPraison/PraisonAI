@@ -78,6 +78,7 @@ def inject_credentials_into_env() -> bool:
             "gemini": "GEMINI_API_KEY",
             "tavily": "TAVILY_API_KEY",
             "groq": "GROQ_API_KEY",
+            "cohere": "COHERE_API_KEY",
         }
         
         for provider in providers:

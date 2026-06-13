@@ -95,8 +95,8 @@ class CredentialStore:
             with f:
                 json.dump(credentials, f, indent=2)
             
-            # Atomic rename
-            os.rename(temp_path, self.credentials_path)
+            # Atomic rename (os.replace handles existing dest on Windows)
+            os.replace(temp_path, self.credentials_path)
             temp_path = None  # Successfully moved
             
         except Exception:

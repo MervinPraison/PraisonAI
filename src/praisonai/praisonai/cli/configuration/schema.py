@@ -66,19 +66,9 @@ class MCPConfig:
     servers: Dict[str, MCPServerConfig] = field(default_factory=dict)
 
 
-@dataclass 
-class LLMConfig:
-    """LLM configuration for default model and provider settings."""
-    model: str = "gpt-4o-mini"
-    provider: Optional[str] = None
-    base_url: Optional[str] = None
-    temperature: float = 0.7
-    max_tokens: int = 16000
-
-
 @dataclass
 class ModelConfig:
-    """Model configuration (deprecated - use LLMConfig)."""
+    """Model configuration."""
     default: str = "gpt-4o-mini"
     temperature: float = 0.7
     max_tokens: int = 16000
@@ -89,6 +79,23 @@ class SessionConfig:
     """Session configuration."""
     auto_save: bool = False
     history_limit: int = 10
+
+
+@dataclass
+class LLMConfig:
+    """LLM configuration for default model and provider settings."""
+    model: str = "gpt-4o-mini"
+    provider: Optional[str] = None
+    base_url: Optional[str] = None
+    temperature: float = 0.7
+    max_tokens: int = 16000
+
+
+@dataclass
+class RulesConfig:
+    """Rules/instructions configuration."""
+    auto: bool = True  # Auto-inject project instruction files
+    max_chars: int = 32000  # Maximum total characters from rules
 
 
 @dataclass
@@ -104,6 +111,7 @@ class ConfigSchema:
     model: ModelConfig = field(default_factory=ModelConfig)  # Deprecated
     llm: LLMConfig = field(default_factory=LLMConfig)
     session: SessionConfig = field(default_factory=SessionConfig)
+    rules: RulesConfig = field(default_factory=RulesConfig)
     
     # Additional settings stored as dict for flexibility
     extra: Dict[str, Any] = field(default_factory=dict)
@@ -145,6 +153,10 @@ class ConfigSchema:
                 "auto_save": self.session.auto_save,
                 "history_limit": self.session.history_limit,
             },
+            "rules": {
+                "auto": self.rules.auto,
+                "max_chars": self.rules.max_chars,
+            },
             **self.extra,
         }
     
@@ -185,9 +197,10 @@ class ConfigSchema:
         model_data = data.get("model", {})
         llm_data = data.get("llm", {})
         session_data = data.get("session", {})
+        rules_data = data.get("rules", {})
         
         # Extract known keys
-        known_keys = {"output", "traces", "mcp", "model", "llm", "session"}
+        known_keys = {"output", "traces", "mcp", "model", "llm", "session", "rules"}
         extra = {k: v for k, v in data.items() if k not in known_keys}
         
         # Parse MCP servers
@@ -250,6 +263,10 @@ class ConfigSchema:
             session=SessionConfig(
                 auto_save=session_data.get("auto_save", False),
                 history_limit=session_data.get("history_limit", 10),
+            ),
+            rules=RulesConfig(
+                auto=rules_data.get("auto", True),
+                max_chars=rules_data.get("max_chars", 32000),
             ),
             extra=extra,
         )
