@@ -749,8 +749,9 @@ class Task:
                                 include_cache_boundary=False  # Don't include boundary for task context
                             )
                             context = cache_result.get('stable_prefix', '')
-                        except Exception:
+                        except Exception as e:
                             # Fall back to standard context building
+                            logger.debug(f"Cache-optimized context failed for task '{self.id}', falling back to standard: {e}")
                             context = self.memory.build_context_for_task(
                                 task_descr=task_output.raw,
                                 max_items=5

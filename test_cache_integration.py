@@ -54,13 +54,16 @@ def test_tool_sorting():
         return False
 
 def test_cache_optimized_context():
-    """Test cache-optimized context building."""
+    """Test cache-optimized context building API structure."""
     try:
         from praisonaiagents.memory.memory import Memory
         
-        # Create a memory instance with proper config
-        config = {}  # Empty config for basic testing
+        # Create a basic memory instance for API testing
+        config = {}
         memory = Memory(config)
+        
+        # Mock the underlying methods to avoid database dependencies in unit test
+        memory.build_context_for_task = lambda task_descr, **kwargs: "test context"
         
         # Test cache-optimized context building
         result = memory.build_cache_optimized_context(
@@ -69,8 +72,13 @@ def test_cache_optimized_context():
         )
         
         if isinstance(result, dict) and 'stable_prefix' in result and 'cache_boundary' in result:
-            print("✓ Cache-optimized context building works")
-            return True
+            # Verify the cache boundary is now empty (our fix)
+            if result['cache_boundary'] == "":
+                print("✓ Cache-optimized context building works (cache boundary properly empty)")
+                return True
+            else:
+                print(f"✗ Cache boundary should be empty but got: '{result['cache_boundary']}'")
+                return False
         else:
             print(f"✗ Cache-optimized context building failed. Got: {result}")
             return False

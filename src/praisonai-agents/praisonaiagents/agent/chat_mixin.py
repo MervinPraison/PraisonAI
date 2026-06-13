@@ -106,8 +106,8 @@ Your Goal: {self.goal}"""
                         # Display memory info to user if verbose
                         if self.verbose:
                             self._display_memory_info()
-                except Exception:
-                    # Fall back to standard memory context
+                except (AttributeError, KeyError, TypeError) as e:
+                    # Fall back to standard memory context if cache optimization fails
                     memory_context = self.get_memory_context()
                     if memory_context:
                         system_prompt += f"\n\n## Memory (Information you remember about the user)\n{memory_context}"

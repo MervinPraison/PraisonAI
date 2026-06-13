@@ -30,7 +30,9 @@ TRACE_LEVEL = 5
 logging.addLevelName(TRACE_LEVEL, 'TRACE')
 
 # Cache boundary constants for prompt prefix caching optimization
-CACHE_BOUNDARY = "\n\n<!-- CACHE_BOUNDARY -->\n\n"
+# NOTE: This is a placeholder - current implementation does not provide
+# functional prompt caching as it requires structured API metadata
+CACHE_BOUNDARY = ""
 
 
 
@@ -1778,9 +1780,8 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
         Returns:
             Dict with 'stable_prefix' and 'cache_boundary' keys
         """
-        # Cache-optimized API should include stable content unless explicitly disabled
-        if include_in_output is None:
-            include_in_output = True
+        # Preserve original behavior: include_in_output=None means debug-level-only
+        # Don't change the default behavior for backward compatibility
             
         # Build the stable context using existing method
         stable_context = self.build_context_for_task(

@@ -14,6 +14,10 @@ import time
 import threading
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
+from .utils.logger import get_logger
+
+logger = get_logger(__name__)
+
 if TYPE_CHECKING:
     from .memory.memory import Memory
     from .knowledge.knowledge import Knowledge
@@ -514,9 +518,9 @@ class Session:
                     include_cache_boundary=False  # Don't include boundary for session context
                 )
                 return cache_result.get('stable_prefix', '')
-            except Exception:
+            except Exception as e:
                 # Fall back to standard context building
-                pass
+                logger.debug(f"Cache-optimized context failed for session '{self.id or self.user_id}', falling back to standard: {e}")
         
         return self.memory.build_context_for_task(
             task_descr=query,

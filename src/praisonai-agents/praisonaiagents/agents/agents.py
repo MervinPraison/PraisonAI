@@ -253,8 +253,9 @@ Expected Output: {task.expected_output}."""
                         include_cache_boundary=False  # Don't include boundary for agent task context
                     )
                     memory_context = cache_result.get('stable_prefix', '')
-                except Exception:
+                except Exception as e:
                     # Fall back to standard context building
+                    logger.debug(f"Cache-optimized context failed for task '{task.description or task.id}', falling back to standard: {e}")
                     memory_context = task.memory.build_context_for_task(task.description)
             else:
                 memory_context = task.memory.build_context_for_task(task.description)
