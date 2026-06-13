@@ -238,18 +238,19 @@ class Process:
                         if decision_mode:
                             # For start tasks: create decision-type tasks with conditions and inherited next_tasks
                             inherited_next_tasks = loop_task.next_tasks if loop_task.next_tasks else []
+                            row_name = f"{loop_task.name}_{task_count}" if loop_task.name else task_desc
                             row_task = Task(
                                 description=f"{loop_task.description}\n{task_desc}" if loop_task.description else task_desc,
                                 agent=loop_task.agent,
-                                name=f"{loop_task.name}_{task_count}" if loop_task.name else task_desc,
+                                name=row_name,
                                 expected_output=getattr(loop_task, 'expected_output', None),
                                 on_task_complete=loop_task.callback,  # Inherit callback from parent loop task
                                 is_start=(task_count == 1),
                                 task_type="decision",  # Change to decision type for start tasks
                                 next_tasks=inherited_next_tasks,  # Inherit parent's next tasks
                                 condition={
-                                    "done": inherited_next_tasks if inherited_next_tasks else ["next"],  # Use full inherited_next_tasks
-                                    "retry": ["current"],
+                                    "done": inherited_next_tasks if inherited_next_tasks else [],
+                                    "retry": [row_name],
                                     "exit": []  # Empty list for exit condition
                                 }
                             )
@@ -1170,17 +1171,20 @@ Provide a JSON with the structure:
         # --- If loop + input_file, read file & create tasks using consolidated helper
         if start_task and start_task.task_type == "loop" and getattr(start_task, "input_file", None):
             try:
-                self._create_loop_subtasks(start_task, decision_mode=True)
+                parent_loop_task = start_task
+                parent_input_file = parent_loop_task.input_file
+                self._create_loop_subtasks(parent_loop_task, decision_mode=True)
                 # Get the first created subtask as the new start task
                 subtasks = [
                     t for t in self.tasks.values()
-                    if t.name.startswith(start_task.name + "_")
+                    if t.name.startswith(parent_loop_task.name + "_")
                 ]
                 if subtasks:
-                    # Sort by name to get the first subtask
-                    subtasks.sort(key=lambda t: t.name)
-                    start_task = subtasks[0]
-                    logging.info(f"Created {len(subtasks)} tasks from: {start_task.input_file}")
+                    # Mark parent loop task as completed and find start subtask
+                    parent_loop_task.status = "completed"
+                    parent_loop_task._subtasks_created = True
+                    start_task = next((t for t in subtasks if t.is_start), subtasks[0])
+                    logging.info(f"Created {len(subtasks)} tasks from: {parent_input_file}")
             except Exception as e:
                 logging.error(f"Failed to read file tasks: {e}")
 
@@ -1251,9 +1255,9 @@ Tasks by type:
                             if t.name.startswith(current_task.name + "_")
                         ]
                         if subtasks:
-                            # Sort by name to get the first subtask
-                            subtasks.sort(key=lambda t: t.name)
-                            current_task.next_tasks = [subtasks[0].name]
+                            # Find first subtask by is_start flag or first in list
+                            first_subtask = next((t for t in subtasks if t.is_start), subtasks[0])
+                            current_task.next_tasks = [first_subtask.name]
                             current_task._subtasks_created = True
                             logging.info(f"Created {len(subtasks)} tasks from: {current_task.input_file} for loop task {current_task.name}")
                     except Exception as e:
