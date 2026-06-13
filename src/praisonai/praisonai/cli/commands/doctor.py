@@ -376,7 +376,7 @@ def doctor_fix(
     if not backup:
         args.append("--no-backup") 
     if config_path:
-        args.extend(["--config", config_path])
+        args.extend(["--file", config_path])
     raise typer.Exit(_run_doctor(args))
 
 

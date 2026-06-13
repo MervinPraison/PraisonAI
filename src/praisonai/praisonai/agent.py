@@ -30,6 +30,7 @@ class Agent(CoreAgent):
                 - None: No CLI backend
             **kwargs: Keyword arguments for core Agent
         """
+        # Deprecation warning will be emitted by the core Agent class
         # Resolve CLI backend configuration using unified resolver
         if cli_backend is not None and not self._is_protocol_instance(cli_backend):
             from .cli_backends import resolve_cli_backend_config

@@ -2043,7 +2043,7 @@ Your Goal: {self.goal}
                 "cli_backend",
                 since="1.0.0",
                 removal="2.0.0",
-                alternative="use 'runtime=' instead for model-scoped runtime configuration",
+                alternative="use 'runtime=' instead for model-scoped runtime configuration. For migration assistance, run: praisonai doctor fix --execute",
                 stacklevel=3
             )
             self._cli_backend = self._resolve_cli_backend(cli_backend)
