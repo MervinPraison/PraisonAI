@@ -7,8 +7,6 @@ from urllib.parse import urlparse
 import importlib.util
 
 logger = logging.getLogger(__name__)
-_loglevel = os.environ.get('LOGLEVEL', 'INFO').strip().upper() or 'INFO'
-logging.basicConfig(level=_loglevel, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Constants
 LOCAL_SERVER_API_KEY_PLACEHOLDER = "not-needed"

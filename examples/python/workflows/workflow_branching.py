@@ -6,7 +6,6 @@ to different next steps based on output content.
 """
 
 from praisonaiagents import AgentFlow, Task
-from praisonaiagents import AgentFlowManager
 
 # Create a workflow with branching
 workflow = AgentFlow(
@@ -36,16 +35,9 @@ workflow = AgentFlow(
 )
 
 if __name__ == "__main__":
-    # Create manager and register workflow
-    manager = WorkflowManager()
-    manager.workflows["Decision Workflow"] = workflow
-    
-    # Execute - will branch to success_handler since 42 is positive
-    result = manager.execute(
-        "Decision Workflow",
-        default_llm="gpt-4o-mini"
-    )
-    
+    result = workflow.run("", llm="gpt-4o-mini", verbose=True)
     print("Workflow completed!")
-    for step_result in result["results"]:
-        print(f"  {step_result['step']}: {step_result['status']}")
+    for step in result.get("steps", []):
+        name = step.get("step", step.get("name", "unknown"))
+        status = step.get("status", "completed")
+        print(f"  {name}: {status}")

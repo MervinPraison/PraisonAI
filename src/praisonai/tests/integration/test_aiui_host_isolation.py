@@ -28,7 +28,7 @@ def isolated_client(monkeypatch):
     import praisonaiui.server as srv
     from praisonai.integration import host_app
 
-    host_app._CONFIGURED = False
+    host_app.reset_configuration()
     provider = _SessionProvider()
     monkeypatch.setattr(srv, "set_provider", lambda p: setattr(srv, "_provider", p))
     app = host_app.build_host_app(pages=["chat"])

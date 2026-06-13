@@ -144,6 +144,17 @@ class BaseFormatter:
 class TextFormatter(BaseFormatter):
     """Text formatter with optional color support."""
     
+    def __init__(
+        self,
+        no_color: bool = False,
+        quiet: bool = False,
+        redact: bool = True,
+        show_prefix_suffix: bool = False,
+    ):
+        super().__init__(no_color, quiet, redact, show_prefix_suffix)
+        # Cache encoding detection result at initialization
+        self._unicode_supported = self._can_encode_unicode()
+    
     # ANSI color codes
     COLORS = {
         "reset": "\033[0m",
@@ -173,15 +184,49 @@ class TextFormatter(BaseFormatter):
         CheckStatus.ERROR: "✗",
     }
     
+    # ASCII fallback symbols for systems that don't support UTF-8
+    STATUS_SYMBOLS_ASCII = {
+        CheckStatus.PASS: "[OK]",
+        CheckStatus.WARN: "[!]",
+        CheckStatus.FAIL: "[X]",
+        CheckStatus.SKIP: "[-]",
+        CheckStatus.ERROR: "[X]",
+    }
+    
     def _color(self, text: str, color: str) -> str:
         """Apply color to text if colors are enabled."""
         if self.no_color:
             return text
         return f"{self.COLORS.get(color, '')}{text}{self.COLORS['reset']}"
     
+    def _can_encode_unicode(self) -> bool:
+        """Check if stdout can encode Unicode symbols."""
+        try:
+            # Get stdout encoding
+            encoding = getattr(sys.stdout, 'encoding', 'ascii') or 'ascii'
+            
+            # UTF-8 always supports Unicode
+            if encoding.lower() in ('utf-8', 'utf8'):
+                return True
+                
+            # Test if we can encode our specific Unicode symbols
+            test_symbols = ["✓", "⚠", "✗", "○"]
+            for symbol in test_symbols:
+                try:
+                    symbol.encode(encoding, errors='strict')
+                except (UnicodeEncodeError, LookupError):
+                    return False
+            return True
+        except (AttributeError, TypeError):
+            # If we can't determine encoding, assume ASCII-only is safer
+            return False
+    
     def _status_symbol(self, status: CheckStatus) -> str:
-        """Get colored status symbol."""
-        symbol = self.STATUS_SYMBOLS.get(status, "?")
+        """Get colored status symbol with encoding safety."""
+        if self._unicode_supported:
+            symbol = self.STATUS_SYMBOLS.get(status, "?")
+        else:
+            symbol = self.STATUS_SYMBOLS_ASCII.get(status, "[?]")
         color = self.STATUS_COLORS.get(status, "white")
         return self._color(symbol, color)
     

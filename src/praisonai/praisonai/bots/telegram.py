@@ -33,6 +33,8 @@ from ._debounce import InboundDebouncer
 from ._ack import AckReactor
 from ._unknown_user import UnknownUserHandler, BotContext
 from ._pairing_ui import PairingUIBuilder, PairingCallbackHandler
+from ._streaming import StreamingConfig, StreamingMode, DraftStreamer
+from ._rate_limit import RateLimiter
 from ..gateway.unicode_utils import safe_error_message, safe_log_message, extract_root_cause_from_error
 from ..gateway.pairing import PairingStore
 
@@ -82,6 +84,10 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._agent = agent
         self.config = config or BotConfig(token=token)
         
+        # Initialize streaming config (None means streaming disabled)
+        self._streaming_config = None
+        self._rate_limiter = RateLimiter.for_platform("telegram")
+        
         self._is_running = False
         self._bot_user: Optional[BotUser] = None
         self._application = None
@@ -119,6 +125,15 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._monitor = None  # Lazy: ConnectionMonitor
         self._stop_event: Optional[asyncio.Event] = None
     
+    
+    def configure_streaming(self, config: StreamingConfig) -> None:
+        """Configure streaming reply mode.
+        
+        Args:
+            config: Streaming configuration. Set mode=StreamingMode.OFF to disable.
+        """
+        self._streaming_config = config
+        logger.debug("TelegramBot: streaming configured, mode=%s", config.mode)
     
     def enable_stt(self, enabled: bool = True) -> None:
         """Enable STT for voice message transcription."""
@@ -226,61 +241,51 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 ) if update.message.from_user else ""
                 try:
                     message_text = await self._debouncer.debounce(user_id, message.content)
-                    placeholder_msg = None  # Track placeholder for cleanup on error
                     
-                    # Choose streaming or blocking mode based on config
-                    if self.config.streaming:
-                        # Progressive streaming mode
-                        from ._stream import create_stream_consumer
-                        
-                        chat_id_str = str(update.message.chat_id) if update.message.chat_id else ""
-                        
-                        # Create streaming consumer
-                        stream_consumer = create_stream_consumer(
+                    # Check if streaming is enabled and configured
+                    streaming_enabled = (
+                        self._streaming_config and 
+                        self._streaming_config.mode != StreamingMode.OFF
+                    )
+                    
+                    if streaming_enabled:
+                        # Streaming path
+                        streamer = DraftStreamer(
                             adapter=self,
-                            channel_id=chat_id_str,
-                            config=self.config.to_dict(),
-                            platform="telegram"
+                            channel_id=str(update.message.chat_id),
+                            config=self._streaming_config,
+                            rate_limiter=self._rate_limiter,
                         )
                         
-                        # Send placeholder message for progressive editing
-                        placeholder_msg = await self._application.bot.send_message(
-                            chat_id=update.message.chat_id,
-                            text="🤖 Thinking...",
-                            reply_to_message_id=update.message.message_id,
-                        )
+                        # Start streaming (send placeholder)
+                        await streamer.start()
                         
-                        # Run agent with streaming
-                        response = await self._session.chat_with_streaming(
+                        # Get response with streaming callback
+                        response = await self._session.chat(
                             self._agent, user_id, message_text,
-                            stream_consumer=stream_consumer,
-                            placeholder_message_id=str(placeholder_msg.message_id),
-                            chat_id=chat_id_str,
+                            chat_id=str(update.message.chat_id) if update.message.chat_id else "",
                             user_name=user_name,
+                            stream_callback=streamer.on_event,
                         )
                         
-                        # Apply message sending hook for streaming mode too
+                        # Apply message hooks to final response (same as non-streaming path)
                         send_result = self.fire_message_sending(
                             str(update.message.chat_id), str(response),
                             reply_to=str(update.message.message_id),
                         )
                         if send_result["cancel"]:
-                            # If cancelled, clear the placeholder message
-                            try:
-                                await self._application.bot.delete_message(
-                                    chat_id=update.message.chat_id,
-                                    message_id=placeholder_msg.message_id,
-                                )
-                            except Exception:
-                                pass  # Ignore deletion errors
                             return
-                            
-                        # Finalize with potentially modified content
-                        if send_result["content"] != str(response):
-                            await stream_consumer.finalize(send_result["content"])
-                        # If content unchanged, stream_consumer was already finalized in chat_with_streaming
+                        
+                        # Finalize with complete response (after hook processing)
+                        await streamer.finalize(send_result["content"])
+                        
+                        # Fire sent hooks
+                        self.fire_message_sent(
+                            str(update.message.chat_id), send_result["content"],
+                        )
+                        
                     else:
-                        # Traditional blocking mode
+                        # Legacy non-streaming path
                         # Show typing indicator with renewal during long operation
                         if self.config.typing_indicator:
                             from ._typing_indicator import with_typing_renewal
@@ -302,20 +307,8 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                                 chat_id=str(update.message.chat_id) if update.message.chat_id else "",
                                 user_name=user_name,
                             )
-                    # Handle message sending differently for streaming vs blocking mode
-                    if self.config.streaming:
-                        # For streaming mode, send_result was already handled in streaming block above
-                        # fire_message_sent with the final content that went through hooks
-                        try:
-                            final_content = send_result["content"]
-                        except NameError:
-                            # Fallback if send_result wasn't set (shouldn't happen)
-                            final_content = str(response)
-                        self.fire_message_sent(
-                            str(update.message.chat_id), final_content,
-                        )
-                    else:
-                        # Traditional blocking mode
+                        
+                        # Normal send flow for non-streaming
                         send_result = self.fire_message_sending(
                             str(update.message.chat_id), str(response),
                             reply_to=str(update.message.message_id),
@@ -335,17 +328,6 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                         await self._ack.done(ack_ctx, react_fn=_tg_react, unreact_fn=_tg_unreact)
                 except Exception as e:
                     logger.error(f"Agent error: {safe_log_message(e)}")
-                    
-                    # Clean up placeholder message in streaming mode
-                    if self.config.streaming and placeholder_msg is not None:
-                        try:
-                            await self._application.bot.delete_message(
-                                chat_id=update.message.chat_id,
-                                message_id=placeholder_msg.message_id,
-                            )
-                        except Exception:
-                            pass  # Ignore deletion errors
-                    
                     user_error = extract_root_cause_from_error(str(e))
                     await update.message.reply_text(f"Error: {safe_error_message(user_error)}")
         

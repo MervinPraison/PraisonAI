@@ -21,6 +21,39 @@ class AgentConfigSchema(BaseModel):
     tools: List[str] = Field(default_factory=list)
 
 
+class StreamingConfigSchema(BaseModel):
+    """Schema for streaming reply configuration."""
+    mode: str = "off"  # off | draft | progress
+    min_interval: float = 1.5  # Minimum seconds between edits
+    min_delta: int = 120  # Minimum character delta before edit
+    placeholder_text: str = "🤔 Thinking..."
+    progress_prefix: str = "🤔 "
+    
+    @field_validator("mode")
+    @classmethod
+    def validate_streaming_mode(cls, v: str) -> str:
+        allowed = {"off", "draft", "progress"}
+        if v not in allowed:
+            raise ValueError(
+                f"Invalid streaming mode '{v}'. Must be one of: {', '.join(sorted(allowed))}"
+            )
+        return v
+    
+    @field_validator("min_interval")
+    @classmethod
+    def validate_min_interval(cls, v: float) -> float:
+        if v < 0.1:
+            raise ValueError("min_interval must be at least 0.1 seconds")
+        return v
+    
+    @field_validator("min_delta")
+    @classmethod
+    def validate_min_delta(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("min_delta must be at least 1 character")
+        return v
+
+
 class ChannelConfigSchema(BaseModel):
     """Schema for a single channel configuration."""
     platform: Optional[str] = None
@@ -33,6 +66,7 @@ class ChannelConfigSchema(BaseModel):
     routes: Dict[str, str] = Field(default_factory=dict)
     webhook_url: Optional[str] = None
     webhook_port: int = 8080
+    streaming: Optional[StreamingConfigSchema] = None
     
     @field_validator("mode")
     @classmethod

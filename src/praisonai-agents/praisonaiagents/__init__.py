@@ -114,6 +114,9 @@ def _get_lazy_cache():
 # ============================================================================
 
 _LAZY_IMPORTS = {
+    # Version information (lazy loaded to avoid file I/O on import)
+    '__version__': ('praisonaiagents._version', '__version__'),
+    
     # Tools (moved from eager imports for lazy loading)
     'Tools': ('praisonaiagents.tools.tools', 'Tools'),
     'BaseTool': ('praisonaiagents.tools.base', 'BaseTool'),
@@ -775,6 +778,9 @@ def warmup(include_litellm: bool = False, include_openai: bool = True) -> dict:
 # ============================================================================
 
 __all__ = [
+    # Version information
+    '__version__',
+    
     # Core classes - the essentials
     'Agent',
     'AgentTeam',  # Primary class for multi-agent coordination (v1.0+)
