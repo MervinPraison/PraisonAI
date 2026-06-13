@@ -4,14 +4,14 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 359,
+    "pythonCoreFeatures": 360,
     "pythonWrapperFeatures": 99,
     "typescriptFeatures": 1192,
-    "gapCount": 67,
+    "gapCount": 68,
     "priorityP0": 2,
     "priorityP1": 0,
     "priorityP2": 0,
-    "priorityP3": 65
+    "priorityP3": 66
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -279,6 +279,7 @@
       "WebSearchProvider",
       "Workflow",
       "WorkflowContext",
+      "__version__",
       "aembed",
       "aembedding",
       "aembeddings",
@@ -655,6 +656,7 @@
         "ToolsetRegistry",
         "ToolsetSpec",
         "ValidationError",
+        "__version__",
         "config",
         "configure_structured_logging",
         "embedding",
@@ -5490,6 +5492,15 @@
         "effort": "high",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "__version__",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "aembed",

@@ -6,10 +6,18 @@ It includes self-reflection for improving code quality and multiple specialized 
 """
 
 from praisonaiagents import Agent, Task, AgentTeam
-from praisonaiagents.tools import CodeInterpreter
 
-# Initialize code execution tool
-code_interpreter = CodeInterpreter()
+def run_python_code(code: str) -> str:
+    """Execute Python code safely and return stdout or errors."""
+    import io
+    import contextlib
+    try:
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            exec(code, {"__builtins__": __builtins__})
+        return buf.getvalue() or "Executed successfully (no output)"
+    except Exception as e:
+        return f"Execution error: {e}"
 
 # Custom code analysis tool
 def analyze_code_complexity(code: str) -> str:
@@ -32,9 +40,7 @@ code_writer = Agent(
     goal="Write clean, efficient, and well-documented Python code",
     backstory="You are a senior Python developer with 10+ years of experience in writing production-quality code.",
     instructions="Write Python code that follows PEP 8 standards, includes proper error handling, and has clear documentation.",
-    reflection=True,
-    
-    
+    output="silent",
 )
 
 code_reviewer = Agent(
@@ -52,7 +58,7 @@ code_executor = Agent(
     goal="Safely execute and test Python code",
     backstory="You are responsible for running code and reporting results or errors.",
     instructions="Execute the provided code safely and report the output or any errors encountered.",
-    tools=[code_interpreter]
+    tools=[run_python_code]
 )
 
 # Example tasks
@@ -87,7 +93,7 @@ def demonstrate_code_agent():
     workflow = AgentTeam(
         agents=[code_writer, code_reviewer, code_executor],
         tasks=[write_task, review_task, execute_task],
-        process="sequential", output="verbose"
+        process="sequential", output="silent"
     )
     
     # Run the workflow
@@ -106,10 +112,8 @@ general_code_agent = Agent(
 3. Explain code concepts
 4. Refactor code for better performance
 5. Add tests and documentation""",
-    tools=[code_interpreter, analyze_code_complexity],
-    reflection=True,
-    
-    
+    tools=[run_python_code, analyze_code_complexity],
+    output="silent",
 )
 
 if __name__ == "__main__":

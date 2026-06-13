@@ -4,7 +4,7 @@ Version bump script for PraisonAI package.
 
 This script updates the version number in all required locations:
 - praisonai/version.py (single source of truth for Python package)
-- praisonai/deploy.py (Dockerfile template)
+- praisonai/deploy/docker.py (Docker deployment scripts)
 - ../../docker/Dockerfile, Dockerfile.chat, Dockerfile.dev, Dockerfile.ui
 - praisonai.rb (Homebrew formula)
 
@@ -63,12 +63,16 @@ def bump_version(new_version: str, agents_version: str | None = None):
         [(r'__version__ = "[^"]+"', f'__version__ = "{new_version}"')]
     )
     
-    # 2. Update deploy.py (Dockerfile template)
-    print("\n🐳 Deploy Script:")
-    update_file(
-        praisonai_dir / "praisonai/deploy.py",
-        [(r'praisonai==[0-9.]+', f'praisonai=={new_version}')]
-    )
+    # 2. Update deploy/docker.py (Docker deployment scripts)
+    print("\n🐳 Deploy Scripts:")
+    docker_deploy_file = praisonai_dir / "praisonai/deploy/docker.py"
+    if docker_deploy_file.exists():
+        update_file(
+            docker_deploy_file,
+            [(r'praisonai==[0-9.]+', f'praisonai=={new_version}')]
+        )
+    else:
+        print(f"  ⏭️  Docker deploy script not found: {docker_deploy_file.relative_to(get_project_root())}")
     
     # 3. Update Dockerfiles
     print("\n🐳 Dockerfiles:")

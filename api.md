@@ -240,6 +240,7 @@ from praisonaiagents import Memory, MemoryBackend, MemoryConfig
 
 Methods:
 
+* <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">build_cache_optimized_context</a>(task_descr: str, user_id: Optional[str] = None, additional: str = '', max_items: int = 3, include_cache_boundary: bool = True, include_in_output: Optional[bool] = None) -> Dict[str, str]</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">build_context_for_task</a>(task_descr: str, user_id: Optional[str] = None, additional: str = '', max_items: int = 3, include_in_output: Optional[bool] = None) -> str</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">calculate_quality_metrics</a>(output: str, expected_output: str, llm: Optional[str] = None, custom_prompt: Optional[str] = None) -> Dict[str, float]</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">close_connections</a>()</code>
@@ -698,7 +699,7 @@ Methods:
 
 Types:
 ```python
-from praisonaiagents import AgentAppConfig, AgentAppProtocol, AgentFlow, AgentManager, AgentOSConfig, AgentOSProtocol, AgentTeam, AutoApproveBackend, EmbeddingResult, aembedding, aembeddings, embedding, embeddings, get_dimensions
+from praisonaiagents import AgentAppConfig, AgentAppProtocol, AgentFlow, AgentManager, AgentOSConfig, AgentOSProtocol, AgentTeam, AutoApproveBackend, EmbeddingResult, __version__, aembedding, aembeddings, embedding, embeddings, get_dimensions
 ```
 
 Methods:
@@ -914,6 +915,9 @@ Methods:
 * <code title="cli">praisonai gateway install <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway logs <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway mint-link <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
+* <code title="cli">praisonai gateway pause <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
+* <code title="cli">praisonai gateway reconnect <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
+* <code title="cli">praisonai gateway resume <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway send <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway start <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>
 * <code title="cli">praisonai gateway status <a href="./src/praisonai/praisonai/cli/commands/gateway.py">--help</a></code>

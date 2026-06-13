@@ -126,3 +126,119 @@ class TestLLMEndpointDataclass:
         assert hasattr(ep, "model")
         assert hasattr(ep, "base_url")
         assert hasattr(ep, "api_key")
+
+
+class TestProviderMapping:
+    """Tests for provider-specific API key and base URL resolution."""
+
+    def test_anthropic_model_uses_anthropic_key(self):
+        env = {"ANTHROPIC_API_KEY": "sk-anthropic-test"}
+        with patch.dict(os.environ, env, clear=True):
+            ep = resolve_llm_endpoint()
+            # Use direct function call to test provider mapping
+            from praisonai.llm.env import _provider_from_model
+            key_var, base_url = _provider_from_model("anthropic/claude-3-5-sonnet")
+            assert key_var == "ANTHROPIC_API_KEY"
+            assert base_url == "https://api.anthropic.com/v1"
+
+    def test_anthropic_model_with_custom_env(self):
+        env = {
+            "MODEL_NAME": "anthropic/claude-3-5-sonnet",
+            "ANTHROPIC_API_KEY": "sk-anthropic-test"
+        }
+        with patch.dict(os.environ, env, clear=True):
+            ep = resolve_llm_endpoint()
+            assert ep.model == "anthropic/claude-3-5-sonnet"
+            assert ep.api_key == "sk-anthropic-test"
+            assert ep.base_url == "https://api.anthropic.com/v1"
+
+    def test_anthropic_model_no_fallback_to_openai(self):
+        """Critical security test: Anthropic models should NOT fall back to OPENAI_API_KEY."""
+        env = {
+            "MODEL_NAME": "anthropic/claude-3-5-sonnet", 
+            "OPENAI_API_KEY": "sk-openai-test"
+            # ANTHROPIC_API_KEY intentionally missing
+        }
+        with patch.dict(os.environ, env, clear=True):
+            ep = resolve_llm_endpoint()
+            assert ep.model == "anthropic/claude-3-5-sonnet"
+            assert ep.api_key is None  # Should NOT use OPENAI_API_KEY
+            assert ep.base_url == "https://api.anthropic.com/v1"
+
+    def test_groq_model_mapping(self):
+        env = {
+            "MODEL_NAME": "groq/llama-3.1-70b-versatile",
+            "GROQ_API_KEY": "gsk-test-key"
+        }
+        with patch.dict(os.environ, env, clear=True):
+            ep = resolve_llm_endpoint()
+            assert ep.model == "groq/llama-3.1-70b-versatile"
+            assert ep.api_key == "gsk-test-key"
+            assert ep.base_url == "https://api.groq.com/openai/v1"
+
+    def test_openai_model_uses_openai_key(self):
+        """OpenAI models should use OPENAI_API_KEY normally."""
+        env = {
+            "MODEL_NAME": "gpt-4o",
+            "OPENAI_API_KEY": "sk-openai-test"
+        }
+        with patch.dict(os.environ, env, clear=True):
+            ep = resolve_llm_endpoint()
+            assert ep.model == "gpt-4o"
+            assert ep.api_key == "sk-openai-test"
+            assert ep.base_url == "https://api.openai.com/v1"
+
+    def test_ollama_model_mapping(self):
+        env = {
+            "MODEL_NAME": "ollama/llama3", 
+            "OLLAMA_API_KEY": "ollama-test"
+        }
+        with patch.dict(os.environ, env, clear=True):
+            ep = resolve_llm_endpoint()
+            assert ep.model == "ollama/llama3"
+            assert ep.api_key == "ollama-test"
+            assert ep.base_url == "http://localhost:11434/v1"
+
+    def test_google_model_mapping(self):
+        env = {
+            "MODEL_NAME": "google/gemini-pro",
+            "GOOGLE_API_KEY": "google-test-key"
+        }
+        with patch.dict(os.environ, env, clear=True):
+            ep = resolve_llm_endpoint()
+            assert ep.model == "google/gemini-pro"
+            assert ep.api_key == "google-test-key"
+            assert ep.base_url == "https://generativelanguage.googleapis.com/v1beta"
+
+    def test_all_providers_have_correct_base_urls(self):
+        """Ensure all provider mappings have proper base URLs (not None)."""
+        from praisonai.llm.env import _PROVIDER_MAP
+        
+        expected_urls = {
+            "anthropic/": "https://api.anthropic.com/v1",
+            "google/": "https://generativelanguage.googleapis.com/v1beta",
+            "gemini/": "https://generativelanguage.googleapis.com/v1beta", 
+            "groq/": "https://api.groq.com/openai/v1",
+            "cohere/": "https://api.cohere.ai/v1",
+            "openrouter/": "https://openrouter.ai/api/v1",
+            "ollama/": "http://localhost:11434/v1",
+        }
+        
+        for prefix, (key_var, base_url) in _PROVIDER_MAP.items():
+            assert base_url is not None, f"Provider {prefix} has None base URL"
+            assert base_url == expected_urls[prefix], f"Provider {prefix} has unexpected URL {base_url}"
+
+    def test_provider_key_precedence_no_cross_contamination(self):
+        """Ensure providers don't accidentally use other providers' keys.""" 
+        env = {
+            "MODEL_NAME": "anthropic/claude-3-5-sonnet",
+            "GROQ_API_KEY": "gsk-groq-key",
+            "GOOGLE_API_KEY": "google-key", 
+            "OPENAI_API_KEY": "sk-openai-key"
+            # ANTHROPIC_API_KEY intentionally missing
+        }
+        with patch.dict(os.environ, env, clear=True):
+            ep = resolve_llm_endpoint()
+            assert ep.model == "anthropic/claude-3-5-sonnet"
+            # Should be None, not any other provider's key
+            assert ep.api_key is None

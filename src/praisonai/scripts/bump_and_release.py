@@ -139,13 +139,17 @@ def bump_version(new_version: str, agents_version: Optional[str] = None):
         root
     )
     
-    # 2. Update deploy.py (Dockerfile template)
-    print("\n🐳 Deploy Script:")
-    update_file(
-        praisonai_dir / "praisonai/deploy.py",
-        [(r'praisonai==[0-9.]+', f'praisonai=={new_version}')],
-        root
-    )
+    # 2. Update deploy/docker.py (Docker deployment scripts)
+    print("\n🐳 Deploy Scripts:")
+    docker_deploy_file = praisonai_dir / "praisonai/deploy/docker.py"
+    if docker_deploy_file.exists():
+        update_file(
+            docker_deploy_file,
+            [(r'praisonai==[0-9.]+', f'praisonai=={new_version}')],
+            root
+        )
+    else:
+        print(f"  ⏭️  Docker deploy script not found: {docker_deploy_file.relative_to(root)}")
     
     # 3. Update Dockerfiles
     print("\n🐳 Dockerfiles:")
@@ -240,7 +244,7 @@ def release(version: str, use_frozen_lock: bool = False, no_add_all: bool = Fals
     
     release_files = [
         "src/praisonai/praisonai/version.py",
-        "src/praisonai/praisonai/deploy.py",
+        "src/praisonai/praisonai/deploy/docker.py",
         "docker/Dockerfile", 
         "docker/Dockerfile.chat",
         "docker/Dockerfile.dev", 

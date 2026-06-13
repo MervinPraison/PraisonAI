@@ -41,21 +41,25 @@ def calculate_statistics(numbers: list) -> str:
     """Calculate basic statistics for a list of numbers."""
     if not numbers:
         return "No numbers provided"
-    
-    n = len(numbers)
-    mean = sum(numbers) / n
-    sorted_nums = sorted(numbers)
+    try:
+        nums = [float(x) for x in numbers]
+    except (TypeError, ValueError):
+        return "Error: all values must be numbers"
+
+    n = len(nums)
+    mean = sum(nums) / n
+    sorted_nums = sorted(nums)
     median = sorted_nums[n//2] if n % 2 else (sorted_nums[n//2-1] + sorted_nums[n//2]) / 2
-    variance = sum((x - mean)**2 for x in numbers) / n
+    variance = sum((x - mean)**2 for x in nums) / n
     std_dev = math.sqrt(variance)
-    
+
     return f"""Statistics:
 - Count: {n}
 - Mean: {mean:.4f}
 - Median: {median:.4f}
 - Standard Deviation: {std_dev:.4f}
-- Min: {min(numbers)}
-- Max: {max(numbers)}"""
+- Min: {min(nums)}
+- Max: {max(nums)}"""
 
 # Create specialized math agents
 calculation_agent = Agent(
@@ -66,8 +70,7 @@ calculation_agent = Agent(
     instructions="Perform the requested calculations step by step, showing your work clearly.",
     tools=[basic_calculator, solve_quadratic, calculate_statistics],
     reflection=True,
-    
-    
+    output="silent",
 )
 
 problem_solver_agent = Agent(
@@ -82,8 +85,7 @@ problem_solver_agent = Agent(
 4. Show each step of the solution
 5. Verify the answer makes sense""",
     reflection=True,
-    
-    
+    output="silent",
 )
 
 math_tutor_agent = Agent(
@@ -91,7 +93,8 @@ math_tutor_agent = Agent(
     role="Mathematics tutor and explainer",
     goal="Explain mathematical concepts clearly and help users understand math",
     backstory="You are a patient math tutor who can explain concepts at any level from elementary to advanced.",
-    instructions="Explain mathematical concepts using simple language, provide examples, and check for understanding."
+    instructions="Explain mathematical concepts using simple language, provide examples, and check for understanding.",
+    output="silent",
 )
 
 # Example workflow for solving complex problems
@@ -126,7 +129,8 @@ def solve_math_problem_workflow():
     workflow = AgentTeam(
         agents=[problem_solver_agent, calculation_agent, math_tutor_agent],
         tasks=[understand_task, solve_task, verify_task],
-        process="sequential", output="verbose"
+        process="sequential",
+        output="silent",
     )
     
     return workflow.start()
@@ -148,8 +152,7 @@ math_assistant = Agent(
 Always show your work step by step.""",
     tools=[basic_calculator, solve_quadratic, calculate_statistics],
     reflection=True,
-    
-    
+    output="silent",
 )
 
 if __name__ == "__main__":

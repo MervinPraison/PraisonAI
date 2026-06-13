@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from ._discord_approval import DiscordApproval
     from ._webhook_approval import WebhookApproval
     from ._http_approval import HTTPApproval
+    from ._streaming import StreamingConfig, StreamingMode, DraftStreamer
 
 def __getattr__(name: str):
     """Lazy loading of bot components."""
@@ -91,6 +92,16 @@ def __getattr__(name: str):
     if name == "JournalEntry":
         from ._ingress import JournalEntry
         return JournalEntry
+    # Streaming components
+    if name == "StreamingConfig":
+        from ._streaming import StreamingConfig
+        return StreamingConfig
+    if name == "StreamingMode":
+        from ._streaming import StreamingMode
+        return StreamingMode
+    if name == "DraftStreamer":
+        from ._streaming import DraftStreamer
+        return DraftStreamer
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
@@ -101,6 +112,8 @@ __all__ = [
     "InboundJournal", "JournalEntry",
     "SlackApproval", "TelegramApproval", "DiscordApproval",
     "WebhookApproval", "HTTPApproval",
+    # Streaming
+    "StreamingConfig", "StreamingMode", "DraftStreamer",
     # W1
     "mirror_to_session", "BotSessionManager",
 ]
