@@ -26,7 +26,7 @@ from praisonaiagents.bots import (
 )
 
 from .media import split_media_from_output, is_audio_file
-from ._commands import format_status, format_help
+from ._commands import format_status, format_help, handle_stop_command
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
 from ._ack import AckReactor
@@ -212,6 +212,11 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                 return
             elif text == "/help":
                 await say(text=self._format_help(), thread_ts=event.get("ts"))
+                return
+            elif text == "/stop":
+                user_id = event.get("user", "unknown")
+                response = handle_stop_command(self._session, user_id)
+                await say(text=response, thread_ts=event.get("ts"))
                 return
             
             for handler in self._message_handlers:
