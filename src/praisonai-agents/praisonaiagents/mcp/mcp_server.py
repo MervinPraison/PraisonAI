@@ -242,12 +242,18 @@ class ToolsMCPServer:
         
         mcp.run()
     
-    def run_sse(self, host: str = "0.0.0.0", port: int = 8080) -> None:
+    def run_sse(
+        self,
+        host: str = "0.0.0.0",
+        port: int = 8080,
+        security: "Optional[SecurityConfig]" = None,
+    ) -> None:
         """Run the MCP server using SSE transport.
         
         Args:
             host: Host to bind to
             port: Port to listen on
+            security: Optional security config; when unset, reads MCP_SSE_* env vars
         """
         try:
             import uvicorn
@@ -260,6 +266,8 @@ class ToolsMCPServer:
                 f"SSE dependencies not available: {e}. "
                 "Install with: pip install uvicorn starlette"
             )
+
+        from .mcp_security import SecurityConfig, build_sse_security_app
         
         mcp = self.get_fastmcp()
         
@@ -286,7 +294,8 @@ class ToolsMCPServer:
                 Mount(messages_path, app=sse_transport.handle_post_message),
             ]
         )
-        
+
+        app = build_sse_security_app(app, security)
         print(f"🚀 Starting MCP server '{self.name}' with SSE transport")
         print(f"📡 SSE endpoint: http://{host}:{port}{sse_path}")
         print(f"🛠️  Available tools: {', '.join(self.get_tool_names())}")

@@ -57,6 +57,7 @@ _SANDBOX_BLOCKED_CALLS = frozenset({
     'exec', 'eval', 'compile', '__import__',
     'open', 'input', 'breakpoint',
     'setattr', 'delattr', 'dir', 'vars',
+    'format', 'format_map',
 })
 
 

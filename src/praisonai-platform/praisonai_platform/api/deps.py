@@ -95,6 +95,25 @@ async def require_workspace_owner(
     )
 
 
+async def require_delete_permission(
+    workspace_id: str,
+    user: AuthIdentity,
+    session: AsyncSession,
+    *,
+    resource_owner_id: Optional[str] = None,
+) -> None:
+    """Allow delete when user is admin/owner or owns the resource."""
+    member_svc = MemberService(session)
+    if await member_svc.has_role(workspace_id, user.id, "admin"):
+        return
+    if resource_owner_id and resource_owner_id == user.id:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Insufficient permission to delete this resource",
+    )
+
+
 def ensure_resource_in_workspace(
     resource_workspace_id: str | None,
     workspace_id: str,

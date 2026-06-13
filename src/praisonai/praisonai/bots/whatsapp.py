@@ -585,12 +585,16 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
         try:
             body = await request.read()
 
-            # Verify signature if app_secret is configured
+            from praisonai.bots.webhook_security import webhooks_require_verification
+
             if self._app_secret:
                 signature = request.headers.get("X-Hub-Signature-256", "")
                 if not self._verify_signature(body, signature):
                     logger.warning("Invalid webhook signature")
                     return web.Response(status=403, text="Invalid signature")
+            elif webhooks_require_verification():
+                logger.warning("Webhook rejected: app secret not configured")
+                return web.Response(status=403, text="Webhook verification not configured")
 
             data = json.loads(body)
         except Exception as e:

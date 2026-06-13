@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from praisonaiagents.auth import AuthIdentity
 
-from ..deps import ensure_resource_in_workspace, get_db, require_workspace_member
+from ..deps import ensure_resource_in_workspace, get_db, require_delete_permission, require_workspace_member
 from ..schemas import (
     CommentCreate,
     CommentResponse,
@@ -133,6 +133,12 @@ async def delete_issue(
     session: AsyncSession = Depends(get_db),
 ):
     svc = IssueService(session)
+    issue = await svc.get(issue_id, workspace_id=workspace_id)
+    if issue is None:
+        raise HTTPException(status_code=404, detail="Issue not found")
+    await require_delete_permission(
+        workspace_id, user, session, resource_owner_id=issue.creator_id
+    )
     deleted = await svc.delete(issue_id, workspace_id=workspace_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Issue not found")

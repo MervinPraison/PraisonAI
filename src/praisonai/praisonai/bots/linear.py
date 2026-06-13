@@ -240,12 +240,16 @@ class LinearBot(ChatCommandMixin, MessageHookMixin):
             # Read raw body for signature verification
             raw_body = await request.read()
             
-            # Verify signature if secret is configured
+            from praisonai.bots.webhook_security import webhooks_require_verification
+
             if self._signing_secret:
                 signature = request.headers.get("Linear-Signature", "")
                 if not self._verify_signature(raw_body, signature):
                     logger.warning("Invalid webhook signature")
                     return web.Response(status=401, text="Invalid signature")
+            elif webhooks_require_verification():
+                logger.warning("Webhook rejected: signing secret not configured")
+                return web.Response(status=401, text="Webhook verification not configured")
             
             # Parse JSON body
             try:

@@ -12,6 +12,7 @@ from praisonaiagents.auth import AuthIdentity
 from ..deps import (
     ensure_resource_in_workspace,
     get_db,
+    require_delete_permission,
     require_issue_in_workspace,
     require_workspace_member,
 )
@@ -75,6 +76,7 @@ async def delete_label(
     if label is None:
         raise HTTPException(status_code=404, detail="Label not found")
     ensure_resource_in_workspace(label.workspace_id, workspace_id, label="Label")
+    await require_delete_permission(workspace_id, user, session)
     deleted = await svc.delete(label_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Label not found")
