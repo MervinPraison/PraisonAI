@@ -507,24 +507,59 @@ class AgentsGenerator:
         return framework
     
     def _validate_cli_backend_compatibility(self, config, framework):
-        """Validate that cli_backend is only used with compatible frameworks."""
-        # Check if any agent/role defines cli_backend (support both key names)
+        """Validate that cli_backend and runtime are only used with compatible frameworks."""
+        # Check if any agent/role defines cli_backend or runtime
         all_entities = {
             **config.get('roles', {}),
             **config.get('agents', {}),
         }
+        
         has_cli_backend = any(
             isinstance(details, dict) and details.get('cli_backend')
             for details in all_entities.values()
         )
         
-        if has_cli_backend and framework != 'praisonai':
+        has_runtime = any(
+            isinstance(details, dict) and details.get('runtime')
+            for details in all_entities.values()
+        )
+        
+        # Check for model-scoped runtime in models section
+        has_model_runtime = False
+        models_config = config.get('models', {})
+        if isinstance(models_config, dict):
+            has_model_runtime = any(
+                isinstance(model_config, dict) and model_config.get('runtime')
+                for model_config in models_config.values()
+            )
+        
+        # Check for provider-scoped runtime in providers section
+        has_provider_runtime = False
+        providers_config = config.get('providers', {})
+        if isinstance(providers_config, dict):
+            has_provider_runtime = any(
+                isinstance(provider_config, dict) and provider_config.get('runtime_default')
+                for provider_config in providers_config.values()
+            )
+        
+        if (has_cli_backend or has_runtime or has_model_runtime or has_provider_runtime) and framework != 'praisonai':
+            runtime_features = []
+            if has_cli_backend:
+                runtime_features.append('cli_backend')
+            if has_runtime:
+                runtime_features.append('runtime')
+            if has_model_runtime:
+                runtime_features.append('models.*.runtime')
+            if has_provider_runtime:
+                runtime_features.append('providers.*.runtime_default')
+            
+            features_str = ', '.join(runtime_features)
             self.logger.error(
-                f"cli_backend is not supported for framework='{framework}'. "
-                f"Remove cli_backend from your YAML or switch to framework='praisonai'."
+                f"Runtime features ({features_str}) are not supported for framework='{framework}'. "
+                f"Remove these fields from your YAML or switch to framework='praisonai'."
             )
             raise ValueError(
-                f"cli_backend requires framework='praisonai', but framework='{framework}' was specified"
+                f"Runtime features require framework='praisonai', but framework='{framework}' was specified"
             )
 
     def _validate_agents_config(self, config):
@@ -540,7 +575,7 @@ class AgentsGenerator:
             'max_execution_time', 'verbose', 'cache', 'system_template',
             'prompt_template', 'response_template', 'tool_timeout', 'tool_retry_policy',
             'planning_tools', 'planning', 'autonomy', 'guardrails', 'streaming', 'stream',
-            'approval', 'skills', 'cli_backend', 'reflection', 'handoff', 'web', 'web_fetch'
+            'approval', 'skills', 'cli_backend', 'runtime', 'reflection', 'handoff', 'web', 'web_fetch'
         }
 
         for section_name in ('agents', 'roles'):
