@@ -1529,7 +1529,8 @@ class PraisonAI:
             elif args.command == 'profile':
                 # Profile command - delegate to Typer CLI for new profiler
                 # This routes to commands/profile.py which has query, imports, startup subcommands
-                from .app import app as typer_app
+                from .app import app as typer_app, register_commands
+                register_commands()
                 import sys as _sys
                 _sys.argv = ['praisonai', 'profile'] + unknown_args
                 typer_app()

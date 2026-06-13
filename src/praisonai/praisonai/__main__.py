@@ -37,14 +37,8 @@ def _get_typer_commands():
             return _typer_commands_cache
 
         try:
-            from praisonai.cli.app import app, register_commands
-            register_commands()
-
-            import typer.main
-            import click
-            click_app = typer.main.get_command(app)
-            ctx = click.Context(click_app, info_name="praisonai")
-            commands = set(click_app.list_commands(ctx))
+            from praisonai.cli.app import get_command_names
+            commands = get_command_names()
         except Exception:
             # Do NOT poison the cache on failure — let the next caller retry.
             import logging
