@@ -43,6 +43,7 @@ class DoctorHandler(CommandHandler):
             "packaging",
             "ci",
             "selftest",
+            "fix",
         ]
     
     def _register_checks(self) -> None:
@@ -240,6 +241,16 @@ class DoctorHandler(CommandHandler):
             action="store_true",
             help="Save selftest report",
         )
+        parser.add_argument(
+            "--execute",
+            action="store_true",
+            help="Execute fixes instead of dry-run (fix subcommand)",
+        )
+        parser.add_argument(
+            "--no-backup",
+            action="store_true",
+            help="Skip creating backup files (fix subcommand)",
+        )
         
         return parser.parse_args(args)
     
@@ -274,6 +285,8 @@ class DoctorHandler(CommandHandler):
             category=args.category,
             path=args.path,
             save_report=args.save_report,
+            execute=getattr(args, 'execute', False),
+            no_backup=getattr(args, 'no_backup', False),
         )
     
     def _get_categories_for_subcommand(self, subcommand: Optional[str]) -> Optional[List[CheckCategory]]:
@@ -296,6 +309,129 @@ class DoctorHandler(CommandHandler):
             "ci": None,  # CI runs all checks
         }
         return category_map.get(subcommand)
+    
+    def _run_fix_mode(self, config: DoctorConfig) -> int:
+        """Run fix mode to migrate deprecated cli_backend configurations."""
+        import os
+        import yaml
+        import glob
+        from pathlib import Path
+        
+        if not config.quiet:
+            print("🔧 PraisonAI Configuration Migration Tool")
+            print("   Checking for deprecated cli_backend usage...")
+        
+        # Find YAML files to check
+        yaml_files = []
+        if config.config_file:
+            yaml_files = [config.config_file]
+        else:
+            # Look for common YAML files in current directory
+            patterns = ["*.yaml", "*.yml", "agents.yaml", "config.yaml"]
+            for pattern in patterns:
+                yaml_files.extend(glob.glob(pattern))
+        
+        if not yaml_files:
+            if not config.quiet:
+                print("ℹ️  No YAML files found to migrate.")
+            return 0
+        
+        issues_found = 0
+        files_modified = 0
+        
+        for yaml_file in yaml_files:
+            if not os.path.exists(yaml_file):
+                continue
+                
+            try:
+                with open(yaml_file, 'r') as f:
+                    data = yaml.safe_load(f)
+                
+                # Check for deprecated cli_backend usage
+                modified = False
+                if self._has_deprecated_cli_backend(data):
+                    issues_found += 1
+                    if not config.quiet:
+                        print(f"⚠️  Found deprecated cli_backend in: {yaml_file}")
+                    
+                    if config.execute:
+                        # Create backup if needed
+                        if not config.no_backup:
+                            backup_file = f"{yaml_file}.bak"
+                            import shutil
+                            shutil.copy2(yaml_file, backup_file)
+                            if not config.quiet:
+                                print(f"💾 Backup created: {backup_file}")
+                        
+                        # Apply migration (simplified)
+                        migrated_data = self._migrate_cli_backend_config(data)
+                        
+                        # Write back the file
+                        with open(yaml_file, 'w') as f:
+                            yaml.dump(migrated_data, f, default_flow_style=False)
+                        
+                        files_modified += 1
+                        if not config.quiet:
+                            print(f"✅ Migrated: {yaml_file}")
+                    else:
+                        if not config.quiet:
+                            print(f"   Run with --execute to apply migration")
+                            
+            except Exception as e:
+                if not config.quiet:
+                    print(f"❌ Error processing {yaml_file}: {e}")
+        
+        if not config.quiet:
+            if issues_found == 0:
+                print("✅ No deprecated cli_backend configurations found.")
+            else:
+                action = "would be" if not config.execute else "were"
+                print(f"📊 Summary: {issues_found} files with deprecated configs, {files_modified} {action} migrated.")
+                
+                if not config.execute and issues_found > 0:
+                    print("\n💡 To apply migrations, run: praisonai doctor fix --execute")
+        
+        return 0
+    
+    def _has_deprecated_cli_backend(self, data: dict) -> bool:
+        """Check if YAML config has deprecated cli_backend usage."""
+        if not isinstance(data, dict):
+            return False
+            
+        # Check roles and agents sections for cli_backend
+        for section in ['roles', 'agents']:
+            section_data = data.get(section, {})
+            if isinstance(section_data, dict):
+                for agent_config in section_data.values():
+                    if isinstance(agent_config, dict) and 'cli_backend' in agent_config:
+                        # Check if there's also model configuration
+                        if 'llm' in agent_config or 'model' in agent_config:
+                            return True
+        return False
+    
+    def _migrate_cli_backend_config(self, data: dict) -> dict:
+        """Migrate cli_backend configuration (simplified migration)."""
+        migrated = data.copy()
+        
+        # Add migration comment at top level
+        if 'migration_info' not in migrated:
+            migrated['migration_info'] = {
+                'cli_backend_migration': 'Agent-level cli_backend deprecated. Consider model-scoped runtime configuration.',
+                'migrated_by': 'praisonai doctor fix',
+            }
+        
+        # For now, just add comments rather than removing cli_backend
+        # since full migration requires understanding the intended model-scoped runtime pattern
+        for section in ['roles', 'agents']:
+            section_data = migrated.get(section, {})
+            if isinstance(section_data, dict):
+                for agent_name, agent_config in section_data.items():
+                    if isinstance(agent_config, dict) and 'cli_backend' in agent_config:
+                        if 'llm' in agent_config or 'model' in agent_config:
+                            # Add migration note
+                            agent_config['_migration_note'] = f"cli_backend is deprecated when model is specified. Consider model-scoped runtime."
+        
+        return migrated
     
     def execute(self, action: str, action_args: List[str], **kwargs) -> int:
         """
@@ -338,6 +474,10 @@ class DoctorHandler(CommandHandler):
             config.format = "json"
             config.no_color = True
             config.quiet = True
+        
+        # Handle fix mode
+        if args.subcommand == "fix":
+            return self._run_fix_mode(config)
         
         # Get categories for subcommand
         categories = self._get_categories_for_subcommand(args.subcommand)

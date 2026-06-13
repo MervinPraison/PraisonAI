@@ -264,3 +264,7 @@ class DoctorConfig:
     category: Optional[str] = None
     path: Optional[str] = None
     save_report: bool = False
+    
+    # Fix subcommand options
+    execute: bool = False
+    no_backup: bool = False
