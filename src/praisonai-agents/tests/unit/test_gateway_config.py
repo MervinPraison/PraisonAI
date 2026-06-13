@@ -19,6 +19,7 @@ class TestSessionConfig:
         assert config.persist is False
         assert config.persist_path is None
         assert config.metadata == {}
+        assert config.mirror_runtime_state is False  # Issue #1943 - Default off
 
     def test_session_config_custom(self):
         """Test SessionConfig with custom values."""
@@ -28,19 +29,22 @@ class TestSessionConfig:
             persist=True,
             persist_path="/tmp/sessions",
             metadata={"env": "test"},
+            mirror_runtime_state=True,
         )
         assert config.timeout == 7200
         assert config.max_messages == 500
         assert config.persist is True
         assert config.persist_path == "/tmp/sessions"
         assert config.metadata == {"env": "test"}
+        assert config.mirror_runtime_state is True  # Issue #1943
 
     def test_session_config_to_dict(self):
         """Test SessionConfig serialization."""
-        config = SessionConfig(timeout=1800, persist=True)
+        config = SessionConfig(timeout=1800, persist=True, mirror_runtime_state=True)
         d = config.to_dict()
         assert d["timeout"] == 1800
         assert d["persist"] is True
+        assert d["mirror_runtime_state"] is True  # Issue #1943
         assert "max_messages" in d
         assert "metadata" in d
 

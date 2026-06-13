@@ -132,6 +132,70 @@ class SessionStoreProtocol(Protocol):
 
 
 @runtime_checkable
+class RuntimeStateMirroringProtocol(Protocol):
+    """Protocol for runtime state mirroring in sessions (Issue #1943).
+    
+    Enables native runtime to persist lightweight runtime-specific execution 
+    artifacts for replay, debugging, or cross-turn mirroring when users mix 
+    runtimes in one session.
+    """
+    
+    def set_runtime_state(
+        self, 
+        session_id: str, 
+        runtime_id: str, 
+        turn_id: str, 
+        state: Dict[str, Any]
+    ) -> bool:
+        """Set runtime state for a specific runtime and turn.
+        
+        Args:
+            session_id: Session identifier
+            runtime_id: Runtime identifier (e.g., "native", "plugin_harness") 
+            turn_id: Turn identifier within the runtime
+            state: Runtime state data (tool call ids, transcript slices, etc.)
+            
+        Returns:
+            True if saved successfully
+        """
+        ...
+    
+    def get_runtime_state(
+        self, 
+        session_id: str, 
+        runtime_id: str, 
+        turn_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Get runtime state for a specific runtime and optionally a turn.
+        
+        Args:
+            session_id: Session identifier
+            runtime_id: Runtime identifier
+            turn_id: Optional turn identifier (if None, returns all turns for runtime)
+            
+        Returns:
+            Runtime state data
+        """
+        ...
+    
+    def clear_runtime_state(
+        self, 
+        session_id: str, 
+        runtime_id: Optional[str] = None
+    ) -> bool:
+        """Clear runtime state for a session, optionally filtered by runtime_id.
+        
+        Args:
+            session_id: Session identifier
+            runtime_id: Optional runtime identifier (if None, clears all runtime state)
+            
+        Returns:
+            True if cleared successfully
+        """
+        ...
+
+
+@runtime_checkable
 class CheckpointQueryProtocol(Protocol):
     """Read path for session checkpoints / rollback snapshots."""
 

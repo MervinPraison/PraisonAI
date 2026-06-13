@@ -581,3 +581,225 @@ class TestAgentSessionIntegration:
         
         # Agent should be created successfully
         assert agent is not None
+
+
+class TestRuntimeStateMirroring:
+    """Tests for runtime state mirroring functionality (Issue #1943)."""
+    
+    @pytest.fixture
+    def temp_store(self):
+        """Create a temporary session store."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = DefaultSessionStore(session_dir=tmpdir)
+            yield store
+    
+    def test_session_data_runtime_state_field(self):
+        """Test that SessionData includes runtime_state field."""
+        session = SessionData(session_id="test-123")
+        assert hasattr(session, 'runtime_state')
+        assert session.runtime_state == {}
+        assert isinstance(session.runtime_state, dict)
+    
+    def test_session_data_runtime_state_serialization(self):
+        """Test that runtime_state is included in to_dict/from_dict."""
+        session = SessionData(session_id="test-123")
+        session.runtime_state = {
+            "native": {"turn-1": {"tool_calls": ["call-1", "call-2"]}},
+            "plugin": {"turn-1": {"transcript": "some data"}}
+        }
+        
+        # Test to_dict includes runtime_state
+        d = session.to_dict()
+        assert "runtime_state" in d
+        assert d["runtime_state"] == session.runtime_state
+        
+        # Test from_dict preserves runtime_state
+        restored = SessionData.from_dict(d)
+        assert restored.runtime_state == session.runtime_state
+    
+    def test_session_data_runtime_state_backward_compatibility(self):
+        """Test that sessions without runtime_state load correctly."""
+        # Simulate old session data without runtime_state
+        old_data = {
+            "session_id": "old-session",
+            "messages": [],
+            "metadata": {},
+            # No runtime_state field
+        }
+        
+        session = SessionData.from_dict(old_data)
+        assert session.runtime_state == {}  # Should default to empty dict
+    
+    def test_set_runtime_state(self, temp_store):
+        """Test setting runtime state for a session."""
+        session_id = "test-session"
+        runtime_id = "native"
+        turn_id = "turn-1"
+        state = {"tool_calls": ["call-1", "call-2"], "transcript": "some data"}
+        
+        result = temp_store.set_runtime_state(session_id, runtime_id, turn_id, state)
+        assert result is True
+        
+        # Verify state was saved
+        retrieved_state = temp_store.get_runtime_state(session_id, runtime_id, turn_id)
+        assert retrieved_state == state
+    
+    def test_get_runtime_state_single_turn(self, temp_store):
+        """Test getting runtime state for a specific turn."""
+        session_id = "test-session"
+        runtime_id = "native"
+        turn_id = "turn-1"
+        state = {"tool_calls": ["call-1"]}
+        
+        temp_store.set_runtime_state(session_id, runtime_id, turn_id, state)
+        
+        retrieved_state = temp_store.get_runtime_state(session_id, runtime_id, turn_id)
+        assert retrieved_state == state
+    
+    def test_get_runtime_state_all_turns(self, temp_store):
+        """Test getting runtime state for all turns of a runtime."""
+        session_id = "test-session"
+        runtime_id = "native"
+        
+        # Add multiple turns
+        temp_store.set_runtime_state(session_id, runtime_id, "turn-1", {"data": "turn1"})
+        temp_store.set_runtime_state(session_id, runtime_id, "turn-2", {"data": "turn2"})
+        
+        all_turns = temp_store.get_runtime_state(session_id, runtime_id)
+        assert len(all_turns) == 2
+        assert all_turns["turn-1"] == {"data": "turn1"}
+        assert all_turns["turn-2"] == {"data": "turn2"}
+    
+    def test_get_runtime_state_nonexistent(self, temp_store):
+        """Test getting runtime state for nonexistent session/runtime/turn."""
+        # Nonexistent session
+        state = temp_store.get_runtime_state("nonexistent", "native", "turn-1")
+        assert state == {}
+        
+        # Nonexistent runtime
+        temp_store.add_user_message("test-session", "Hello")
+        state = temp_store.get_runtime_state("test-session", "nonexistent", "turn-1")
+        assert state == {}
+        
+        # Nonexistent turn
+        temp_store.set_runtime_state("test-session", "native", "turn-1", {"data": "test"})
+        state = temp_store.get_runtime_state("test-session", "native", "nonexistent")
+        assert state == {}
+    
+    def test_clear_runtime_state_specific_runtime(self, temp_store):
+        """Test clearing runtime state for a specific runtime."""
+        session_id = "test-session"
+        
+        # Add state for multiple runtimes
+        temp_store.set_runtime_state(session_id, "native", "turn-1", {"data": "native1"})
+        temp_store.set_runtime_state(session_id, "plugin", "turn-1", {"data": "plugin1"})
+        
+        # Clear only native runtime
+        result = temp_store.clear_runtime_state(session_id, "native")
+        assert result is True
+        
+        # Verify native is cleared but plugin remains
+        native_state = temp_store.get_runtime_state(session_id, "native")
+        plugin_state = temp_store.get_runtime_state(session_id, "plugin")
+        assert native_state == {}
+        assert plugin_state == {"turn-1": {"data": "plugin1"}}
+    
+    def test_clear_runtime_state_all(self, temp_store):
+        """Test clearing all runtime state for a session."""
+        session_id = "test-session"
+        
+        # Add state for multiple runtimes
+        temp_store.set_runtime_state(session_id, "native", "turn-1", {"data": "native1"})
+        temp_store.set_runtime_state(session_id, "plugin", "turn-1", {"data": "plugin1"})
+        
+        # Clear all runtime state
+        result = temp_store.clear_runtime_state(session_id)
+        assert result is True
+        
+        # Verify all state is cleared
+        session = temp_store.get_session(session_id)
+        assert session.runtime_state == {}
+    
+    def test_runtime_state_persistence_across_instances(self, temp_store):
+        """Test that runtime state persists across store instances."""
+        session_dir = temp_store.session_dir
+        session_id = "test-session"
+        runtime_id = "native"
+        turn_id = "turn-1"
+        state = {"tool_calls": ["call-1", "call-2"], "transcript": "data"}
+        
+        # Set state with first store
+        temp_store.set_runtime_state(session_id, runtime_id, turn_id, state)
+        
+        # Create new store instance
+        store2 = DefaultSessionStore(session_dir=session_dir)
+        
+        # Verify state is restored
+        retrieved_state = store2.get_runtime_state(session_id, runtime_id, turn_id)
+        assert retrieved_state == state
+    
+    def test_runtime_state_with_concurrent_operations(self, temp_store):
+        """Test runtime state operations don't interfere with messages."""
+        session_id = "test-session"
+        
+        # Add messages
+        temp_store.add_user_message(session_id, "Hello")
+        temp_store.add_assistant_message(session_id, "Hi!")
+        
+        # Add runtime state
+        temp_store.set_runtime_state(session_id, "native", "turn-1", {"tool_calls": ["call-1"]})
+        
+        # Verify both messages and runtime state are preserved
+        history = temp_store.get_chat_history(session_id)
+        assert len(history) == 2
+        
+        runtime_state = temp_store.get_runtime_state(session_id, "native", "turn-1")
+        assert runtime_state == {"tool_calls": ["call-1"]}
+    
+    def test_runtime_state_file_format(self, temp_store):
+        """Test that runtime state is properly saved to session file."""
+        session_id = "test-session"
+        runtime_id = "native"
+        turn_id = "turn-1"
+        state = {"tool_calls": ["call-1"], "metadata": {"timestamp": 123}}
+        
+        temp_store.set_runtime_state(session_id, runtime_id, turn_id, state)
+        
+        # Check file contents
+        filepath = os.path.join(temp_store.session_dir, "test-session.json")
+        assert os.path.exists(filepath)
+        
+        with open(filepath, "r") as f:
+            data = json.load(f)
+        
+        assert "runtime_state" in data
+        assert data["runtime_state"][runtime_id][turn_id] == state
+    
+    def test_multiple_runtimes_and_turns(self, temp_store):
+        """Test complex scenario with multiple runtimes and turns."""
+        session_id = "complex-session"
+        
+        # Add state for multiple runtimes and turns
+        states = {
+            ("native", "turn-1"): {"tool_calls": ["call-1"], "status": "completed"},
+            ("native", "turn-2"): {"tool_calls": ["call-2", "call-3"], "status": "completed"},
+            ("plugin", "turn-1"): {"transcript": "plugin data", "version": "1.0"},
+            ("plugin", "turn-2"): {"transcript": "more plugin data", "version": "1.1"},
+        }
+        
+        for (runtime_id, turn_id), state in states.items():
+            temp_store.set_runtime_state(session_id, runtime_id, turn_id, state)
+        
+        # Verify all states can be retrieved
+        for (runtime_id, turn_id), expected_state in states.items():
+            retrieved_state = temp_store.get_runtime_state(session_id, runtime_id, turn_id)
+            assert retrieved_state == expected_state
+        
+        # Verify runtime-level retrieval
+        native_states = temp_store.get_runtime_state(session_id, "native")
+        plugin_states = temp_store.get_runtime_state(session_id, "plugin")
+        
+        assert len(native_states) == 2
+        assert len(plugin_states) == 2
+        assert native_states["turn-1"]["status"] == "completed"
+        assert plugin_states["turn-1"]["version"] == "1.0"

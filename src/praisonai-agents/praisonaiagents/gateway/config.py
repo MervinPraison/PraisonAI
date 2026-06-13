@@ -18,6 +18,7 @@ class SessionConfig:
         persist: Whether to persist session state
         persist_path: Path for session persistence
         metadata: Additional session metadata
+        mirror_runtime_state: Enable runtime state mirroring for native transcript replay (Issue #1943)
     """
     
     timeout: int = 3600  # 1 hour default
@@ -25,6 +26,7 @@ class SessionConfig:
     persist: bool = False
     persist_path: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    mirror_runtime_state: bool = False  # Opt-in to avoid storage bloat
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -34,6 +36,7 @@ class SessionConfig:
             "persist": self.persist,
             "persist_path": self.persist_path,
             "metadata": self.metadata,
+            "mirror_runtime_state": self.mirror_runtime_state,
         }
 
 

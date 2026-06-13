@@ -78,6 +78,8 @@ class SessionData:
     # Gap S3: Gateway integration - link session to gateway session
     gateway_session_id: Optional[str] = None
     agent_id: Optional[str] = None  # Gateway agent ID (different from agent_name)
+    # Runtime state for native transcript mirroring - Issue #1943
+    runtime_state: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # {runtime_id: {turn_id: state}}
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -91,6 +93,7 @@ class SessionData:
             "metadata": self.metadata,
             "gateway_session_id": self.gateway_session_id,
             "agent_id": self.agent_id,
+            "runtime_state": self.runtime_state,
         }
         for key in ("model", "llm", "total_tokens", "token_count", "cost", "source"):
             if key in self.metadata:
@@ -114,6 +117,7 @@ class SessionData:
             metadata=data.get("metadata", {}),
             gateway_session_id=data.get("gateway_session_id"),
             agent_id=data.get("agent_id"),
+            runtime_state=data.get("runtime_state", {}),
         )
     
     def get_chat_history(self, max_messages: Optional[int] = None) -> List[Dict[str, str]]:
@@ -801,6 +805,98 @@ class DefaultSessionStore:
                 self._cache.pop(session_id, None)
             else:
                 self._cache.clear()
+    
+    # ── Runtime State Management (Issue #1943) ────────────────────────────
+    # 
+    # Runtime state mirroring allows native runtime to persist lightweight
+    # execution artifacts for replay, debugging, and cross-turn mirroring.
+    #
+    # SIZE LIMITS & REDACTION POLICY:
+    # - Keep runtime state lightweight (tool call IDs, not full outputs)
+    # - Recommended max: 1KB per turn, 10KB per runtime
+    # - Redact sensitive data (API keys, credentials, PII) before storage
+    # - Use transcript slices, not full conversation history
+    # - Consider compression for larger state objects
+    
+    def set_runtime_state(
+        self, 
+        session_id: str, 
+        runtime_id: str, 
+        turn_id: str, 
+        state: Dict[str, Any]
+    ) -> bool:
+        """Set runtime state for a specific runtime and turn.
+        
+        Args:
+            session_id: Session identifier
+            runtime_id: Runtime identifier (e.g., "native", "plugin_harness") 
+            turn_id: Turn identifier within the runtime
+            state: Runtime state data (tool call ids, transcript slices, etc.)
+                  Should be lightweight - avoid storing large outputs or sensitive data
+            
+        Returns:
+            True if saved successfully
+            
+        Note:
+            Keep state lightweight (<1KB per turn recommended). Redact sensitive
+            data before storage. This is for handoff replay, not full state dumps.
+        """
+        def _apply(session: SessionData) -> None:
+            if runtime_id not in session.runtime_state:
+                session.runtime_state[runtime_id] = {}
+            session.runtime_state[runtime_id][turn_id] = state
+
+        return self._modify_session_locked(
+            session_id, _apply, error_label="set runtime state"
+        )
+    
+    def get_runtime_state(
+        self, 
+        session_id: str, 
+        runtime_id: str, 
+        turn_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Get runtime state for a specific runtime and optionally a turn.
+        
+        Args:
+            session_id: Session identifier
+            runtime_id: Runtime identifier
+            turn_id: Optional turn identifier (if None, returns all turns for runtime)
+            
+        Returns:
+            Runtime state data
+        """
+        session = self._read_session_fresh(session_id)
+        runtime_state = session.runtime_state.get(runtime_id, {})
+        
+        if turn_id is not None:
+            return runtime_state.get(turn_id, {})
+        
+        return runtime_state
+    
+    def clear_runtime_state(
+        self, 
+        session_id: str, 
+        runtime_id: Optional[str] = None
+    ) -> bool:
+        """Clear runtime state for a session, optionally filtered by runtime_id.
+        
+        Args:
+            session_id: Session identifier
+            runtime_id: Optional runtime identifier (if None, clears all runtime state)
+            
+        Returns:
+            True if cleared successfully
+        """
+        def _apply(session: SessionData) -> None:
+            if runtime_id is None:
+                session.runtime_state.clear()
+            else:
+                session.runtime_state.pop(runtime_id, None)
+
+        return self._modify_session_locked(
+            session_id, _apply, error_label="clear runtime state"
+        )
 
 # Global session store instance (lazy initialized)
 _default_store: Optional[DefaultSessionStore] = None
