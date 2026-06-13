@@ -2952,22 +2952,36 @@ CONCISE SUMMARY:"""
                     "variables": all_variables
                 }
             
-            # Load tools from the recipe's tools.py if present
+            # Load tools from the recipe's tools.py if present (opt-in only)
             tool_registry = {}
             tools_py = recipe_path / "tools.py"
             if tools_py.exists():
                 try:
-                    import importlib.util
-                    spec = importlib.util.spec_from_file_location("recipe_tools", tools_py)
-                    recipe_module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(recipe_module)
-                    
-                    # Extract callable tools
-                    for name in dir(recipe_module):
-                        if not name.startswith("_"):
-                            obj = getattr(recipe_module, name)
-                            if callable(obj):
-                                tool_registry[name] = obj
+                    import os
+                    _local_ok = os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS", "").strip().lower() in (
+                        "1", "true", "yes", "on"
+                    )
+                    _template_ok = os.environ.get("PRAISONAI_ALLOW_TEMPLATE_TOOLS", "").strip().lower() in (
+                        "1", "true", "yes", "on"
+                    )
+                    if _local_ok or _template_ok:
+                        import importlib.util
+                        spec = importlib.util.spec_from_file_location("recipe_tools", tools_py)
+                        recipe_module = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(recipe_module)
+                    else:
+                        logger.warning(
+                            "Skipping included recipe tools.py: set PRAISONAI_ALLOW_LOCAL_TOOLS "
+                            "or PRAISONAI_ALLOW_TEMPLATE_TOOLS to enable."
+                        )
+                        recipe_module = None
+                    if recipe_module is not None:
+                        # Extract callable tools
+                        for name in dir(recipe_module):
+                            if not name.startswith("_"):
+                                obj = getattr(recipe_module, name)
+                                if callable(obj):
+                                    tool_registry[name] = obj
                 except Exception as e:
                     logger.warning(f"Failed to load tools from {tools_py}: {e}")
             

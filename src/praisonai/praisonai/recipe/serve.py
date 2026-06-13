@@ -330,8 +330,10 @@ def create_auth_middleware(auth_type: str, api_key: Optional[str] = None, jwt_se
             expected_key = api_key or os.environ.get("PRAISONAI_API_KEY")
             
             if not expected_key:
-                # No key configured, allow request
-                return await call_next(request)
+                return JSONResponse(
+                    {"error": {"code": "misconfigured", "message": "API key authentication is enabled but no key is configured"}},
+                    status_code=503,
+                )
             
             if not provided_key or not hmac.compare_digest(provided_key, expected_key):
                 return JSONResponse(
@@ -352,7 +354,10 @@ def create_auth_middleware(auth_type: str, api_key: Optional[str] = None, jwt_se
             # Get JWT secret
             secret = jwt_secret or os.environ.get("PRAISONAI_JWT_SECRET")
             if not secret:
-                return await call_next(request)
+                return JSONResponse(
+                    {"error": {"code": "misconfigured", "message": "JWT authentication is enabled but no secret is configured"}},
+                    status_code=503,
+                )
             
             # Check Authorization header
             auth_header = request.headers.get("Authorization", "")

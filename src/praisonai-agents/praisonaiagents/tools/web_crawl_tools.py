@@ -130,17 +130,64 @@ def _crawl_with_crawl4ai(urls: List[str]) -> List[Dict[str, Any]]:
     except RuntimeError:
         return asyncio.run(_crawl_async())
 
+def _is_safe_crawl_url(url: str) -> bool:
+    """Return True when a URL passes SSRF checks for crawling."""
+    import urllib.parse
+    import socket
+    import ipaddress
+
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        if os.environ.get("ALLOW_LOCAL_CRAWL") == "true":
+            return True
+        for info in socket.getaddrinfo(hostname, None):
+            ip = ipaddress.ip_address(info[4][0])
+            if (
+                ip.is_loopback
+                or ip.is_private
+                or ip.is_link_local
+                or ip.is_multicast
+                or ip.is_unspecified
+            ):
+                return False
+        return True
+    except (socket.gaierror, ValueError, OSError):
+        return False
+
+
 def _crawl_with_httpx(urls: List[str]) -> List[Dict[str, Any]]:
     """Crawl URLs using basic HTTP fetch with httpx or urllib."""
+    import urllib.parse
     results = []
-    
+    redirect_statuses = {301, 302, 303, 307, 308}
+    max_redirects = 5
+
     for url in urls:
         try:
             # Try httpx first
             try:
                 import httpx
-                with httpx.Client(follow_redirects=True, timeout=30.0) as client:
-                    response = client.get(url)
+                current = url
+                response = None
+                with httpx.Client(follow_redirects=False, timeout=30.0) as client:
+                    for _ in range(max_redirects + 1):
+                        if not _is_safe_crawl_url(current):
+                            raise ValueError("Redirect target failed SSRF validation")
+                        response = client.get(current)
+                        if response.status_code not in redirect_statuses:
+                            break
+                        location = response.headers.get("Location")
+                        if not location:
+                            break
+                        current = urllib.parse.urljoin(current, location)
+                    else:
+                        raise ValueError("Too many redirects")
+                if response is not None:
                     response.raise_for_status()
                     content = response.text
             except ImportError:
@@ -210,37 +257,12 @@ def web_crawl(
         raw_url_list = [urls] if single_url else urls
 
     # Validate URLs to prevent SSRF and Local File Read
-    import urllib.parse
-    import socket
-    import ipaddress
-    
     url_list = []
     for u in raw_url_list:
-        try:
-            parsed = urllib.parse.urlparse(u)
-            if parsed.scheme not in ('http', 'https'):
-                logger.warning(f"Rejected non-http/https URL: {u}")
-                continue
-            hostname = parsed.hostname
-            if not hostname:
-                continue
-                
-            # Allow opting out of SSRF protection for advanced use cases
-            if os.environ.get("ALLOW_LOCAL_CRAWL") != "true":
-                try:
-                    ip_str = socket.gethostbyname(hostname)
-                    ip = ipaddress.ip_address(ip_str)
-                    if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_multicast or ip.is_unspecified:
-                        logger.warning(f"Rejected SSRF or private IP attempt: {u}")
-                        continue
-                except socket.gaierror:
-                    logger.warning(f"Could not resolve hostname for: {u}")
-                    continue
-                
+        if _is_safe_crawl_url(u):
             url_list.append(u)
-        except Exception as e:
-            logger.warning(f"URL validation failed for {u}: {e}")
-            continue
+        else:
+            logger.warning(f"Rejected unsafe crawl URL: {u}")
             
     if not url_list:
         return {"error": "No valid or safe URLs provided. Local and non-http(s) URLs are blocked for security."}

@@ -115,6 +115,16 @@ class FileMemory:
         "importance_threshold": 0.7,   # Min importance for long-term
         "auto_promote": True,          # Auto-promote important short-term to long-term
     }
+
+    @staticmethod
+    def _sanitise_user_id(user_id: str) -> str:
+        """Reject path traversal in user_id before using it as a directory name."""
+        if not user_id or not isinstance(user_id, str):
+            return "default"
+        if ".." in user_id or "/" in user_id or "\\" in user_id:
+            raise ValueError("user_id must not contain path separators or parent references")
+        safe = user_id.strip()
+        return safe or "default"
     
     def __init__(
         self,
@@ -132,7 +142,7 @@ class FileMemory:
             config: Configuration overrides
             verbose: Verbosity level (0=quiet, 1=info, 2+=debug)
         """
-        self.user_id = user_id
+        self.user_id = self._sanitise_user_id(user_id)
         self.verbose = verbose
         
         # Set up paths
