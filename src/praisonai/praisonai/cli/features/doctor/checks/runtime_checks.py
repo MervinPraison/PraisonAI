@@ -5,10 +5,8 @@ Provides preflight validation for team YAML configurations to detect
 runtime conflicts, missing capabilities, and handoff compatibility issues.
 """
 
-import json
 import yaml
 import os
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Iterator
 from dataclasses import dataclass
 
@@ -141,7 +139,7 @@ class RuntimeCompatibilityChecker:
         try:
             import autogen
             version = getattr(autogen, '__version__', '0.0.0')
-            return version.startswith('0.4') or version.startswith('0.5')
+            return version.startswith(('0.4', '0.5'))
         except ImportError:
             return False
     
@@ -176,7 +174,13 @@ class RuntimeCompatibilityChecker:
             handoff_config = role_config.get('handoff', {})
             if handoff_config:
                 if isinstance(handoff_config, dict):
-                    handoff_targets = handoff_config.get('to', [])
+                    raw_targets = handoff_config.get('to', [])
+                    if isinstance(raw_targets, str):
+                        handoff_targets = [raw_targets]
+                    elif isinstance(raw_targets, list):
+                        handoff_targets = raw_targets
+                    else:
+                        handoff_targets = []
                 elif isinstance(handoff_config, str):
                     handoff_targets = [handoff_config]
                 elif isinstance(handoff_config, list):
@@ -226,14 +230,17 @@ class RuntimeCompatibilityChecker:
                 config.get('autogen_version', os.environ.get('AUTOGEN_VERSION', 'auto'))
             ).lower()
             
-            if autogen_version == 'v0.4' and self.known_runtimes.get('autogen_v4', {}).available:
+            autogen_v4_runtime = self.known_runtimes.get('autogen_v4')
+            autogen_runtime = self.known_runtimes.get('autogen')
+            
+            if autogen_version == 'v0.4' and autogen_v4_runtime and autogen_v4_runtime.available:
                 return 'autogen_v4'
-            elif autogen_version == 'v0.2' and self.known_runtimes.get('autogen', {}).available:
+            elif autogen_version == 'v0.2' and autogen_runtime and autogen_runtime.available:
                 return 'autogen'
             elif autogen_version == 'auto':
-                if self.known_runtimes.get('autogen_v4', {}).available:
+                if autogen_v4_runtime and autogen_v4_runtime.available:
                     return 'autogen_v4'
-                elif self.known_runtimes.get('autogen', {}).available:
+                elif autogen_runtime and autogen_runtime.available:
                     return 'autogen'
         
         return framework
@@ -433,7 +440,6 @@ def lint_runtime_team(yaml_path: str) -> List[CheckResult]:
 
 
 # Register the runtime checks with the doctor framework
-from ..registry import CheckRegistry
 
 
 def runtime_team_check(config):
@@ -471,7 +477,30 @@ def runtime_team_check(config):
             message=f"No runtime compatibility issues found in {team_file}"
         )
     
-    return results
+    # Aggregate results into a single CheckResult as expected by the doctor engine
+    has_failures = any(r.status in (CheckStatus.FAIL, CheckStatus.ERROR) for r in results)
+    has_warnings = any(r.status == CheckStatus.WARN for r in results)
+    
+    if has_failures:
+        status = CheckStatus.FAIL
+        severity = CheckSeverity.HIGH
+    elif has_warnings:
+        status = CheckStatus.WARN
+        severity = CheckSeverity.MEDIUM
+    else:
+        status = CheckStatus.PASS
+        severity = CheckSeverity.LOW
+    
+    return CheckResult(
+        id="runtime.team_validation_aggregate",
+        title="Runtime Team Compatibility",
+        category=CheckCategory.RUNTIME,
+        status=status,
+        message=f"Found {len(results)} runtime compatibility issue(s) in {team_file}",
+        details="\n".join(f"- {r.id}: {r.message}" for r in results) if results else "No issues found",
+        severity=severity,
+        metadata={"findings": [r.to_dict() for r in results]}
+    )
 
 
 def workflow_runtime_check(config):
@@ -502,24 +531,25 @@ try:
     
     # Register team runtime check
     registry.register(
-        'runtime.team',
-        runtime_team_check,
+        id='runtime.team',
         title='Runtime Team Compatibility',
         description='Validate runtime compatibility for team YAML configurations',
         category=CheckCategory.RUNTIME,
+        implementation=runtime_team_check,
         requires_deep=False
     )
     
     # Register workflow runtime check (placeholder)
     registry.register(
-        'runtime.workflow',
-        workflow_runtime_check,
+        id='runtime.workflow',
         title='Workflow Runtime Compatibility',
         description='Validate runtime compatibility for workflow YAML configurations',
         category=CheckCategory.RUNTIME,
+        implementation=workflow_runtime_check,
         requires_deep=False
     )
     
-except Exception:
-    # If registry is not available during import, checks will be registered later
-    pass
+except Exception as e:
+    # Log registration failure but don't crash the module
+    import logging
+    logging.getLogger(__name__).warning(f"Failed to register runtime checks: {e}")

@@ -5,6 +5,7 @@ import subprocess
 import sys
 import os
 from pathlib import Path
+import pytest
 
 def run_doctor_runtime(*args, timeout=60):
     """Run doctor runtime CLI with proper PYTHONPATH."""
@@ -43,8 +44,8 @@ class TestDoctorRuntimeCLI:
         """Test doctor runtime without --team flag."""
         result = run_doctor_runtime(timeout=30)
         
-        # Should complete (possibly with skip status)
-        assert result.returncode in [0, 1, 2]
+        # Should complete (0=success, 1=issues found)
+        assert result.returncode in [0, 1]
         # Should mention needing team file
         output = result.stdout + result.stderr
         # Allow for various output formats
@@ -55,7 +56,7 @@ class TestDoctorRuntimeCLI:
         result = run_doctor_runtime("--team", "/nonexistent/file.yaml", timeout=30)
         
         # Should fail with error about missing file
-        assert result.returncode in [1, 2]
+        assert result.returncode == 1
         output = result.stdout + result.stderr
         assert "not found" in output.lower() or "error" in output.lower()
     
@@ -63,12 +64,11 @@ class TestDoctorRuntimeCLI:
         """Test doctor runtime with valid team YAML."""
         team_file = self.fixtures_dir / "team_valid.yaml"
         if not team_file.exists():
-            # Skip if fixture doesn't exist
-            return
+            pytest.skip(f"Missing fixture: {team_file}")
         
         result = run_doctor_runtime("--team", str(team_file), timeout=30)
         
-        # Should complete successfully
+        # Should complete successfully (0=no issues, 1=issues found but handled)
         assert result.returncode in [0, 1]
         output = result.stdout + result.stderr
         assert len(output) > 0
@@ -77,13 +77,12 @@ class TestDoctorRuntimeCLI:
         """Test doctor runtime with invalid team YAML."""
         team_file = self.fixtures_dir / "team_invalid.yaml"
         if not team_file.exists():
-            # Skip if fixture doesn't exist
-            return
+            pytest.skip(f"Missing fixture: {team_file}")
         
         result = run_doctor_runtime("--team", str(team_file), timeout=30)
         
-        # Should detect issues
-        assert result.returncode in [0, 1, 2]
+        # Should detect issues (1=issues found)
+        assert result.returncode == 1
         output = result.stdout + result.stderr
         assert len(output) > 0
     
@@ -91,13 +90,12 @@ class TestDoctorRuntimeCLI:
         """Test doctor runtime with mixed runtime team YAML."""
         team_file = self.fixtures_dir / "team_mixed_runtime.yaml"
         if not team_file.exists():
-            # Skip if fixture doesn't exist
-            return
+            pytest.skip(f"Missing fixture: {team_file}")
         
         result = run_doctor_runtime("--team", str(team_file), timeout=30)
         
-        # Should detect mixed runtime issues
-        assert result.returncode in [0, 1, 2]
+        # Should detect mixed runtime issues (1=issues found)
+        assert result.returncode == 1
         output = result.stdout + result.stderr
         assert len(output) > 0
     
@@ -105,13 +103,12 @@ class TestDoctorRuntimeCLI:
         """Test doctor runtime --json output."""
         team_file = self.fixtures_dir / "team_valid.yaml"
         if not team_file.exists():
-            # Skip if fixture doesn't exist
-            return
+            pytest.skip(f"Missing fixture: {team_file}")
         
         result = run_doctor_runtime("--team", str(team_file), "--json", timeout=30)
         
-        # Should complete
-        assert result.returncode in [0, 1, 2]
+        # Should complete (0=no issues, 1=issues found)
+        assert result.returncode in [0, 1]
         
         # Output should be valid JSON (or may be in stderr)
         try:
@@ -126,13 +123,12 @@ class TestDoctorRuntimeCLI:
         """Test doctor runtime --deep mode."""
         team_file = self.fixtures_dir / "team_valid.yaml"
         if not team_file.exists():
-            # Skip if fixture doesn't exist
-            return
+            pytest.skip(f"Missing fixture: {team_file}")
         
         result = run_doctor_runtime("--team", str(team_file), "--deep", timeout=60)
         
-        # Should complete
-        assert result.returncode in [0, 1, 2]
+        # Should complete (0=no issues, 1=issues found)
+        assert result.returncode in [0, 1]
         output = result.stdout + result.stderr
         assert len(output) > 0
     
@@ -140,8 +136,8 @@ class TestDoctorRuntimeCLI:
         """Test doctor runtime --workflow (placeholder functionality)."""
         result = run_doctor_runtime("--workflow", "dummy.yaml", timeout=30)
         
-        # Should complete (workflow feature is placeholder)
-        assert result.returncode in [0, 1, 2]
+        # Should complete (workflow feature is placeholder, 0=skip)
+        assert result.returncode == 0
         output = result.stdout + result.stderr
         # Should mention workflow or placeholder
         # Allow for various output formats
@@ -161,8 +157,7 @@ class TestDoctorRuntimeExitCodes:
         """Test that exit codes are deterministic."""
         team_file = self.fixtures_dir / "team_valid.yaml"
         if not team_file.exists():
-            # Skip if fixture doesn't exist
-            return
+            pytest.skip(f"Missing fixture: {team_file}")
         
         results = []
         for _ in range(2):  # Run fewer times for CI performance
@@ -177,4 +172,4 @@ class TestDoctorRuntimeExitCodes:
         result = run_doctor_runtime("--team", "/definitely/nonexistent.yaml", timeout=30)
         
         # Should return error exit code
-        assert result.returncode in [1, 2]
+        assert result.returncode == 1
