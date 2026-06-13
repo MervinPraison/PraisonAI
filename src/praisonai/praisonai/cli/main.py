@@ -4518,11 +4518,27 @@ Do NOT add any explanations or formatting."""
                 if resume_session_id:
                     from praisonaiagents import MemoryConfig
                     save_name = getattr(self.args, 'auto_save', None) or resume_session_id
-                    agent_config["memory"] = MemoryConfig(
-                        session_id=resume_session_id,
-                        auto_save=save_name,
-                        history=True,
-                    )
+                    
+                    # Preserve existing memory configuration fields
+                    existing_memory = agent_config.get("memory")
+                    if isinstance(existing_memory, MemoryConfig):
+                        existing_memory.session_id = resume_session_id
+                        existing_memory.auto_save = save_name
+                        existing_memory.history = True
+                    elif isinstance(existing_memory, dict):
+                        # Convert dict to MemoryConfig while preserving fields
+                        existing_memory.update({
+                            "session_id": resume_session_id,
+                            "auto_save": save_name,
+                            "history": True,
+                        })
+                        agent_config["memory"] = MemoryConfig(**existing_memory)
+                    else:
+                        agent_config["memory"] = MemoryConfig(
+                            session_id=resume_session_id,
+                            auto_save=save_name,
+                            history=True,
+                        )
                     print(f"[bold cyan]Resuming session '{resume_session_id}'[/bold cyan]")
                 
                 if getattr(self.args, 'history', None):

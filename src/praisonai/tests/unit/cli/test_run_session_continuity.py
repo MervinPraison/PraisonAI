@@ -131,3 +131,55 @@ def test_handle_direct_prompt_wires_project_session(monkeypatch):
     assert memory.session_id == "saved-session"
     assert memory.history is True
     assert captured["continuity"] == "saved-session"
+
+
+def test_run_prompt_actions_mode_wires_session_continuity(monkeypatch):
+    """Actions mode must wire resume_session to project session continuity."""
+    from praisonai.cli.commands.run import _run_prompt
+
+    captured = {}
+
+    class FakeAgent:
+        def __init__(self, **kwargs):
+            self.chat_history = []
+            self._session_store = None
+            self._session_id = None
+            self.auto_save = None
+            self._auto_save_last_index = 0
+            captured["agent_config"] = kwargs
+
+        def start(self, prompt):
+            captured["prompt"] = prompt
+            return "actions complete"
+
+    monkeypatch.setattr("praisonaiagents.Agent", FakeAgent)
+    monkeypatch.setattr(
+        "praisonai.cli.state.project_sessions.apply_cli_session_continuity",
+        lambda agent, session_id, project_path=None: captured.setdefault("continuity", session_id),
+    )
+    
+    # Mock output controller
+    class MockOutput:
+        def emit_result(self, result, status="success", metadata=None):
+            captured["output_result"] = result
+            
+        def print_info(self, msg):
+            pass
+            
+        def print_warning(self, msg):
+            pass
+
+    monkeypatch.setattr("praisonai.cli.commands.run.get_output_controller", lambda: MockOutput())
+
+    result = _run_prompt(
+        "follow up question",
+        output_mode="actions",
+        session="saved-session",
+    )
+
+    memory = captured["agent_config"]["memory"]
+    assert isinstance(memory, MemoryConfig)
+    assert memory.session_id == "saved-session"
+    assert memory.history is True
+    assert captured["continuity"] == "saved-session"
+    assert captured["prompt"] == "follow up question"
