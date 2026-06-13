@@ -9,6 +9,7 @@ Key Components:
 - Agent runtime registry: AgentRuntimeProtocol, RuntimeRegistry
 - Tool result middleware: RuntimeToolResultMiddleware, NormalizedToolResult
 - Registry patterns for runtime resolution and middleware management
+- Agent runtime selection and registry for auto-selection
 """
 
 from .._lazy import create_lazy_getattr_with_groups
