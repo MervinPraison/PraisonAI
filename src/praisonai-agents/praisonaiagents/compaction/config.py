@@ -65,7 +65,7 @@ class CompactionConfig:
     def __post_init__(self):
         """Validate and normalize configuration values."""
         # Normalize min_savings_pct to 0-100 scale if provided as ratio
-        if self.min_savings_pct <= 1.0:
+        if self.min_savings_pct < 1.0:
             self.min_savings_pct *= 100.0
         
         # Validate ranges
