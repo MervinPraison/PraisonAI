@@ -230,6 +230,12 @@ _LAZY_IMPORTS = {
     'CliBackendResult': ('praisonaiagents.cli_backend.protocols', 'CliBackendResult'),
     'CliBackendDelta': ('praisonaiagents.cli_backend.protocols', 'CliBackendDelta'),
     
+    # Runtime Selection (Auto harness selection and registry)
+    'AgentRuntimeProtocol': ('praisonaiagents.runtime.protocols', 'AgentRuntimeProtocol'),
+    'resolve_runtime': ('praisonaiagents.runtime.resolve', 'resolve_runtime'),
+    'register_runtime': ('praisonaiagents.runtime.registry', 'register_runtime'),
+    'list_runtimes': ('praisonaiagents.runtime.registry', 'list_runtimes'),
+    
     # Agent classes
     'Agent': ('praisonaiagents.agent.agent', 'Agent'),
     'BudgetExceededError': ('praisonaiagents.errors', 'BudgetExceededError'),
