@@ -82,6 +82,13 @@ class SessionConfig:
 
 
 @dataclass
+class RulesConfig:
+    """Rules/instructions configuration."""
+    auto: bool = True  # Auto-inject project instruction files
+    max_chars: int = 32000  # Maximum total characters from rules
+
+
+@dataclass
 class ConfigSchema:
     """
     Complete configuration schema.
@@ -93,6 +100,7 @@ class ConfigSchema:
     mcp: MCPConfig = field(default_factory=MCPConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     session: SessionConfig = field(default_factory=SessionConfig)
+    rules: RulesConfig = field(default_factory=RulesConfig)
     
     # Additional settings stored as dict for flexibility
     extra: Dict[str, Any] = field(default_factory=dict)
@@ -126,6 +134,10 @@ class ConfigSchema:
             "session": {
                 "auto_save": self.session.auto_save,
                 "history_limit": self.session.history_limit,
+            },
+            "rules": {
+                "auto": self.rules.auto,
+                "max_chars": self.rules.max_chars,
             },
             **self.extra,
         }
@@ -166,9 +178,10 @@ class ConfigSchema:
         mcp_data = data.get("mcp", {})
         model_data = data.get("model", {})
         session_data = data.get("session", {})
+        rules_data = data.get("rules", {})
         
         # Extract known keys
-        known_keys = {"output", "traces", "mcp", "model", "session"}
+        known_keys = {"output", "traces", "mcp", "model", "session", "rules"}
         extra = {k: v for k, v in data.items() if k not in known_keys}
         
         # Parse MCP servers
@@ -224,6 +237,10 @@ class ConfigSchema:
             session=SessionConfig(
                 auto_save=session_data.get("auto_save", False),
                 history_limit=session_data.get("history_limit", 10),
+            ),
+            rules=RulesConfig(
+                auto=rules_data.get("auto", True),
+                max_chars=rules_data.get("max_chars", 32000),
             ),
             extra=extra,
         )

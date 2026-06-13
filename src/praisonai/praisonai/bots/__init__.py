@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from .botos import BotOS
     from ._session import BotSessionManager
     from ._dlq import InboundDLQ, DLQEntry
+    from ._ingress import InboundJournal, JournalEntry
     from ._slack_approval import SlackApproval
     from ._telegram_approval import TelegramApproval
     from ._discord_approval import DiscordApproval
@@ -84,6 +85,13 @@ def __getattr__(name: str):
     if name == "DLQEntry":
         from ._dlq import DLQEntry
         return DLQEntry
+    # Inbound message journal for durable processing
+    if name == "InboundJournal":
+        from ._ingress import InboundJournal
+        return InboundJournal
+    if name == "JournalEntry":
+        from ._ingress import JournalEntry
+        return JournalEntry
     # Streaming components
     if name == "StreamingConfig":
         from ._streaming import StreamingConfig
@@ -101,6 +109,7 @@ __all__ = [
     "Bot", "BotOS",
     "BotSessionManager",
     "InboundDLQ", "DLQEntry",
+    "InboundJournal", "JournalEntry",
     "SlackApproval", "TelegramApproval", "DiscordApproval",
     "WebhookApproval", "HTTPApproval",
     # Streaming

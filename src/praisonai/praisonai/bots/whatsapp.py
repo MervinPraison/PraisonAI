@@ -450,7 +450,11 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
                 if self._agent and content:
                     try:
                         response = await self._session_mgr.chat(
-                            self._agent, sender_jid, content
+                            self._agent, sender_jid, content,
+                            chat_id=chat_jid,
+                            user_name=sender_name or "",
+                            message_id=msg_id,
+                            account=self._config.get("account", "default"),
                         )
                         if response:
                             send_result = self.fire_message_sending(chat_jid, str(response))
@@ -740,7 +744,11 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
             
             try:
                 response = await self._session_mgr.chat(
-                    self._agent, sender_id, content
+                    self._agent, sender_id, content,
+                    chat_id=sender_id,
+                    user_name=sender_name or "",
+                    message_id=msg_id,
+                    account=self._config.get("account", "default"),
                 )
                 if response:
                     send_result = self.fire_message_sending(sender_id, str(response))

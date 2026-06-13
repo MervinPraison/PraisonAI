@@ -117,6 +117,16 @@ class AgentServer:
         self._server_thread: Optional[threading.Thread] = None
         self._app = None
         self._server = None
+
+    def _authorise_request(self, request) -> bool:
+        """Verify bearer token when auth_token is configured."""
+        token = self.config.auth_token
+        if not token:
+            return True
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer ") and auth[7:] == token:
+            return True
+        return request.headers.get("X-Auth-Token") == token
     
     def _create_app(self):
         """Create the ASGI application."""
@@ -137,6 +147,8 @@ class AgentServer:
             })
         
         async def events(request):
+            if not self._authorise_request(request):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
             client_id = str(uuid.uuid4())
             client = SSEClient(client_id)
             self._clients[client_id] = client
@@ -162,6 +174,8 @@ class AgentServer:
             )
         
         async def publish(request):
+            if not self._authorise_request(request):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
             try:
                 data = await request.json()
                 event_type = data.get("type", "message")

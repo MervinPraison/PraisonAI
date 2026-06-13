@@ -55,19 +55,75 @@ def session_list(
         "--storage-path",
         help="Path for storage backend",
     ),
+    all_projects: bool = typer.Option(
+        False,
+        "--all",
+        help="Show sessions from all projects (default: current project only)",
+    ),
+    project_id: Optional[str] = typer.Option(
+        None,
+        "--project",
+        help="Show sessions for specific project ID",
+    ),
 ):
     """List all sessions."""
     output = get_output_controller()
     
-    # Configure backend if specified
-    if storage_backend:
-        backend = _create_backend(storage_backend, storage_path)
-        if backend:
-            set_session_backend(backend)
-    
-    manager = get_session_manager()
-    
-    sessions = manager.list(limit=limit)
+    # Handle project-scoped session listing
+    if not all_projects and not storage_backend:
+        # Use project-scoped session store by default
+        from ..state.project_sessions import get_project_session_store
+        from ..utils.project import get_project_id, get_project_name
+        
+        # List sessions for specific or current project
+        project_store = get_project_session_store(project_id=project_id)
+            
+        sessions_data = project_store.list_sessions(limit=limit)
+        
+        # Convert to expected format
+        class SessionInfo:
+            def __init__(self, data):
+                from datetime import datetime
+                
+                self.session_id = data.get("session_id", data.get("id", ""))
+                self.name = data.get("agent_name", "")
+                self.status = data.get("status")  # Use actual status from data if available
+                self.event_count = data.get("message_count", 0)
+                
+                # Parse updated_at string
+                updated_str = data.get("updated_at", "")
+                try:
+                    self.updated_at = datetime.fromisoformat(updated_str.replace('Z', '+00:00')) if updated_str else datetime.now()
+                except ValueError:
+                    self.updated_at = datetime.now()
+                
+            def to_dict(self):
+                return {
+                    "session_id": self.session_id,
+                    "name": self.name,
+                    "status": self.status,
+                    "event_count": self.event_count,
+                    "updated_at": self.updated_at.isoformat(),
+                }
+        
+        sessions = [SessionInfo(data) for data in sessions_data]
+        
+        # Add project info to output
+        if not project_id:
+            current_project = get_project_name()
+            current_id = get_project_id()
+            output.print_info(f"Project: {current_project} (ID: {current_id})")
+        
+    else:
+        # Use global session manager
+        # Configure backend if specified
+        if storage_backend:
+            backend = _create_backend(storage_backend, storage_path)
+            if backend:
+                set_session_backend(backend)
+        
+        manager = get_session_manager()
+        sessions = manager.list(limit=limit)
     
     if output.is_json_mode:
         output.print_json({

@@ -256,6 +256,8 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                             self._agent, user_id, text_to_send,
                             chat_id=str(message.channel.id),
                             user_name=str(getattr(message.author, "name", "")),
+                            message_id=str(message.id),
+                            account=self._config.get("account", "default"),
                         )
                         send_result = self.fire_message_sending(
                             str(message.channel.id), str(response),

@@ -31,6 +31,8 @@ import logging
 from praisonaiagents._logging import get_logger
 from typing import Optional, List
 
+from ..approval import require_approval
+
 logger = get_logger(__name__)
 
 # Availability cache for performance (checked once per process)
@@ -146,6 +148,7 @@ def ast_grep_search(
         logger.exception("Unexpected error in ast_grep_search")
         return f"Error: {e}"
 
+@require_approval(risk_level="high")
 def ast_grep_rewrite(
     pattern: str,
     replacement: str,

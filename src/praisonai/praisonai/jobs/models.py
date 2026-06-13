@@ -61,7 +61,7 @@ class JobSubmitRequest(BaseModel):
             if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_multicast:
                 raise ValueError("Webhook URL resolves to a private or restricted network address")
         except socket.gaierror:
-            pass
+            raise ValueError("Webhook URL hostname could not be resolved")
             
         return v
 
@@ -162,7 +162,7 @@ class Job(BaseModel):
             if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_multicast:
                 raise ValueError("Webhook URL resolves to a private or restricted network address")
         except socket.gaierror:
-            pass
+            raise ValueError("Webhook URL hostname could not be resolved")
             
         return v
     

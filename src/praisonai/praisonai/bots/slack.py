@@ -278,6 +278,8 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                         self._agent, user_id, text,
                         chat_id=str(channel_id) if channel_id else "",
                         thread_id=event.get("thread_ts", "") or "",
+                        message_id=event.get("ts", ""),
+                        account=self._config.get("account", "default"),
                     )
                     logger.info(f"Response sent: {response[:100]}...")
                     
@@ -325,6 +327,8 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                         self._agent, user_id, text,
                         chat_id=str(event.get("channel", "")),
                         thread_id=event.get("thread_ts", "") or "",
+                        message_id=event.get("ts", ""),
+                        account=self._config.get("account", "default"),
                     )
                     logger.info(f"Response sent: {response[:100]}...")
                     

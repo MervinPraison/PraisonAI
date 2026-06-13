@@ -136,6 +136,7 @@ def chat_main(
     no_color: bool = typer.Option(False, "--no-color", help="Disable colors"),
     theme: str = typer.Option("default", "--theme", help="UI theme: default, dark, light, minimal"),
     compact: bool = typer.Option(False, "--compact", help="Compact output mode"),
+    no_rules: bool = typer.Option(False, "--no-rules", help="Disable auto-injection of project instruction files"),
 ):
     """
     Start terminal-native interactive chat mode.
@@ -209,6 +210,7 @@ def chat_main(
         workspace=workspace,
         debug=debug,
         autonomy_mode=autonomy,
+        no_rules=no_rules,
     )
     
     tui = AsyncTUI(config=tui_config)
