@@ -248,9 +248,9 @@ def is_path_within_directory(file_path: str, directory: str) -> bool:
     Returns:
         True if file_path is within directory
     """
-    # Resolve to absolute paths
-    abs_file = os.path.abspath(file_path)
-    abs_dir = os.path.abspath(directory)
+    # Resolve to real paths so symlinks cannot escape the workspace
+    abs_file = os.path.realpath(file_path)
+    abs_dir = os.path.realpath(directory)
     
     # Ensure directory ends with separator for proper prefix matching
     if not abs_dir.endswith(os.sep):

@@ -107,9 +107,22 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             _store = get_default_session_store()
         except Exception:
             _store = None
+        # Create run control if busy mode is configured
+        run_control = None
+        if hasattr(self.config, 'busy_mode') and self.config.busy_mode != "queue":
+            try:
+                from ._run_control import SessionRunControl
+                run_control = SessionRunControl(
+                    busy_mode=self.config.busy_mode,
+                    busy_ack_template=getattr(self.config, 'busy_ack', "⏳ {action} — will be considered next")
+                )
+            except ImportError:
+                logger.warning("Run control not available, falling back to basic session management")
+        
         self._session: BotSessionManager = BotSessionManager(
             store=_store,
             platform="telegram",
+            run_control=run_control,
         )
         self._debouncer: InboundDebouncer = InboundDebouncer(
             debounce_ms=self.config.debounce_ms,
@@ -268,11 +281,13 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                         placeholder_message_id = await streamer.start()
                         
                         try:
-                            # Get response with streaming callback
+                            # Get response with streaming callback - include message_id and account for durability
                             response = await self._session.chat(
                                 self._agent, user_id, message_text,
                                 chat_id=str(update.message.chat_id) if update.message.chat_id else "",
                                 user_name=user_name,
+                                message_id=str(update.message.message_id),
+                                account=self.config.get("account", "default"),
                                 stream_callback=streamer.on_event,
                             )
                             
@@ -350,6 +365,8 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                                     self._agent, user_id, message_text,
                                     chat_id=str(update.message.chat_id) if update.message.chat_id else "",
                                     user_name=user_name,
+                                    message_id=str(update.message.message_id),
+                                    account=self.config.get("account", "default"),
                                 )
                             )
                         else:
@@ -357,6 +374,8 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                                 self._agent, user_id, message_text,
                                 chat_id=str(update.message.chat_id) if update.message.chat_id else "",
                                 user_name=user_name,
+                                message_id=str(update.message.message_id),
+                                account=self.config.get("account", "default"),
                             )
                         
                         # Normal send flow for non-streaming

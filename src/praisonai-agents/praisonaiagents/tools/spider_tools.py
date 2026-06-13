@@ -58,9 +58,11 @@ def _host_is_blocked(hostname: str) -> bool:
         pass
 
     try:
-        return _ip_blocked(ipaddress.ip_address(socket.inet_aton(host)))
-    except OSError:
-        pass
+        for info in socket.getaddrinfo(host, None):
+            if _ip_blocked(ipaddress.ip_address(info[4][0])):
+                return True
+    except socket.gaierror:
+        return True
 
     return False
 

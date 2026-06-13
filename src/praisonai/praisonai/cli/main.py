@@ -922,6 +922,8 @@ class PraisonAI:
             default_args.call = False
             default_args.public = False
             default_args.chat_mode = False
+            default_args.include_rules = None
+            default_args.no_rules = False
             return default_args
         
         # Define special commands
@@ -996,6 +998,7 @@ class PraisonAI:
         
         # Rules arguments
         parser.add_argument("--include-rules", type=str, help="Include manual rules by name (comma-separated)")
+        parser.add_argument("--no-rules", action="store_true", help="Disable automatic project rule injection")
         
         # Workflow arguments (uses global --memory, --save, --verbose, --planning flags)
         parser.add_argument("--workflow", type=str, help="Run inline workflow steps (format: 'step1:action1,step2:action2')")
@@ -4281,9 +4284,64 @@ Do NOT add any explanations or formatting."""
         # Apply prompt expansion if enabled
         prompt = self._expand_prompt_if_enabled(prompt)
         
-        # Prepend mention context to prompt
-        if mention_context:
+        # Auto-inject project instruction files unless disabled
+        rules_context = ""
+        try:
+            should_load_rules = False
+            max_chars = 32000  # Default cap
+            include_manual = None
+            
+            # First check for explicit --no-rules flag
+            if hasattr(self, 'args') and getattr(self.args, 'no_rules', False):
+                should_load_rules = False
+            else:
+                # Check for manual include_rules
+                include_rules = getattr(self.args, 'include_rules', None) if hasattr(self, 'args') else None
+                if include_rules:
+                    if include_rules == "auto":
+                        should_load_rules = True
+                    else:
+                        include_manual = [name.strip() for name in include_rules.split(",") if name.strip()]
+                        should_load_rules = bool(include_manual)
+                else:
+                    # Check config for auto rules
+                    try:
+                        from praisonai.cli.configuration.loader import load_config
+                        config = load_config()
+                        should_load_rules = config.rules.auto
+                        max_chars = config.rules.max_chars
+                    except Exception:
+                        pass  # Config not available, use defaults
+            
+            if should_load_rules:
+                from praisonaiagents.memory import RulesManager
+                rules_manager = RulesManager(workspace_path=os.getcwd(), verbose=getattr(self.args, 'verbose', 0))
+                rules_context = rules_manager.build_rules_context(
+                    include_manual=include_manual,
+                    max_chars=max_chars
+                )
+                if rules_context and getattr(self.args, 'verbose', 0):
+                    # Show loaded files in verbose mode
+                    active_rules = rules_manager.get_active_rules()
+                    loaded_files = []
+                    for rule in active_rules:
+                        if rule.file_path and rule.priority >= 500:  # Root instruction files
+                            loaded_files.append(os.path.basename(rule.file_path))
+                    if loaded_files:
+                        print(f"[cyan]Loaded project instructions: {', '.join(loaded_files)}[/cyan]")
+        except ImportError:
+            pass  # RulesManager not available
+        except Exception as e:
+            if hasattr(self, 'args') and getattr(self.args, 'verbose', 0):
+                logging.debug(f"Error loading rules: {e}")
+        
+        # Prepend mention context and rules context to prompt
+        if mention_context and rules_context:
+            prompt = f"{mention_context}{rules_context}\n\n# Task:\n{prompt}"
+        elif mention_context:
             prompt = f"{mention_context}# Task:\n{prompt}"
+        elif rules_context:
+            prompt = f"{rules_context}\n\n# Task:\n{prompt}"
         
         if PRAISONAI_AVAILABLE:
             from praisonaiagents import Agent as PraisonAgent

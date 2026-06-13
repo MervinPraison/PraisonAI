@@ -120,7 +120,7 @@ class BrowserServer:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=cors_origins,
-            allow_origin_regex=r"chrome-extension://[a-z0-9]{32}",
+            allow_origin_regex=r"chrome-extension://[a-z0-9]{32}$",
             allow_credentials=True,
             allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
             allow_headers=["Authorization", "Content-Type", "Origin", "Accept"],
@@ -183,7 +183,7 @@ class BrowserServer:
             if origin in cors_origins:
                 is_allowed = True
             # Check chrome extension regex pattern (same as CORS middleware)
-            elif parsed_origin.scheme == "chrome-extension" and re.match(r"chrome-extension://[a-z0-9]{32}", origin):
+            elif parsed_origin.scheme == "chrome-extension" and re.match(r"chrome-extension://[a-z0-9]{32}$", origin):
                 is_allowed = True
             
             if not is_allowed:
