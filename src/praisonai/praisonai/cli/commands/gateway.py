@@ -192,6 +192,132 @@ def gateway_channels(
             print(f"{name:<20} {platform:<12} {has_token:<12}")
 
 
+@app.command("pause")
+def gateway_pause_channel(
+    name: str = typer.Argument(help="Channel name to pause"),
+    url: str = typer.Option("ws://127.0.0.1:8765", "--url", help="Gateway WebSocket URL"),
+):
+    """Pause a gateway channel.
+    
+    Examples:
+        praisonai gateway pause telegram
+        praisonai gateway pause discord --url ws://localhost:8000
+    """
+    import requests
+    import sys
+    from urllib.parse import urlparse, urlunparse
+    
+    try:
+        # Parse URL and convert WebSocket to HTTP
+        parsed = urlparse(url)
+        scheme = "https" if parsed.scheme == "wss" else "http"
+        # Reconstruct base URL preserving path and query
+        rest_url = urlunparse((
+            scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment
+        ))
+        if not rest_url.endswith("/"):
+            rest_url += "/"
+        
+        response = requests.post(f"{rest_url}api/channels/{name}/pause", timeout=10)
+        response.raise_for_status()
+        
+        result = response.json()
+        if result.get("success"):
+            print(f"✅ Channel '{name}' paused successfully")
+        else:
+            message = result.get("message", result.get("error", "Unknown error"))
+            print(f"❌ Failed to pause channel '{name}': {message}")
+            sys.exit(1)
+    
+    except Exception as e:
+        print(f"❌ Error pausing channel '{name}': {str(e)}")
+        sys.exit(1)
+
+
+@app.command("resume")
+def gateway_resume_channel(
+    name: str = typer.Argument(help="Channel name to resume"),
+    url: str = typer.Option("ws://127.0.0.1:8765", "--url", help="Gateway WebSocket URL"),
+):
+    """Resume a paused gateway channel.
+    
+    Examples:
+        praisonai gateway resume telegram
+        praisonai gateway resume discord --url ws://localhost:8000
+    """
+    import requests
+    import sys
+    from urllib.parse import urlparse, urlunparse
+    
+    try:
+        # Parse URL and convert WebSocket to HTTP
+        parsed = urlparse(url)
+        scheme = "https" if parsed.scheme == "wss" else "http"
+        # Reconstruct base URL preserving path and query
+        rest_url = urlunparse((
+            scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment
+        ))
+        if not rest_url.endswith("/"):
+            rest_url += "/"
+        
+        response = requests.post(f"{rest_url}api/channels/{name}/resume", timeout=10)
+        response.raise_for_status()
+        
+        result = response.json()
+        if result.get("success"):
+            print(f"✅ Channel '{name}' resumed successfully")
+        else:
+            message = result.get("message", result.get("error", "Unknown error"))
+            print(f"❌ Failed to resume channel '{name}': {message}")
+            sys.exit(1)
+    
+    except Exception as e:
+        print(f"❌ Error resuming channel '{name}': {str(e)}")
+        sys.exit(1)
+
+
+@app.command("reconnect")
+def gateway_reconnect_channel(
+    name: str = typer.Argument(help="Channel name to reconnect"),
+    url: str = typer.Option("ws://127.0.0.1:8765", "--url", help="Gateway WebSocket URL"),
+):
+    """Reconnect a gateway channel.
+    
+    Examples:
+        praisonai gateway reconnect telegram
+        praisonai gateway reconnect discord --url ws://localhost:8000
+    """
+    import requests
+    import sys
+    from urllib.parse import urlparse, urlunparse
+    
+    try:
+        # Parse URL and convert WebSocket to HTTP
+        parsed = urlparse(url)
+        scheme = "https" if parsed.scheme == "wss" else "http"
+        # Reconstruct base URL preserving path and query
+        rest_url = urlunparse((
+            scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment
+        ))
+        if not rest_url.endswith("/"):
+            rest_url += "/"
+        
+        response = requests.post(f"{rest_url}api/channels/{name}/reconnect", timeout=10)
+        response.raise_for_status()
+        
+        result = response.json()
+        if result.get("success"):
+            print(f"✅ Channel '{name}' reconnected successfully")
+        else:
+            message = result.get("message", result.get("error", "Unknown error"))
+            print(f"❌ Failed to reconnect channel '{name}': {message}")
+            sys.exit(1)
+    
+    except Exception as e:
+        print(f"❌ Error reconnecting channel '{name}': {str(e)}")
+        sys.exit(1)
+
+
 @app.command("install")
 def gateway_install(
     config: str = typer.Option(
