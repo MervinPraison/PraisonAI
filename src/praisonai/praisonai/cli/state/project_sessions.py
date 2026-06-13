@@ -99,3 +99,25 @@ def find_last_session(project_path: Optional[str] = None) -> Optional[str]:
     """
     store = get_project_session_store(project_path)
     return store.get_last_session_id()
+
+
+def apply_cli_session_continuity(agent, session_id: str, project_path: Optional[str] = None) -> None:
+    """
+    Bind an agent to the project-scoped session store and restore prior turns.
+
+    CLI ``run --continue/--session`` discovers sessions in the project store but
+    agents default to the global store unless explicitly wired here.
+    """
+    store = get_project_session_store(project_path)
+    agent._session_store = store
+    agent._session_id = session_id
+    if not getattr(agent, "auto_save", None):
+        agent.auto_save = session_id
+
+    history = store.get_chat_history(session_id)
+    if history and not agent.chat_history:
+        agent.chat_history = [
+            {"role": msg.get("role", "user"), "content": msg.get("content", "")}
+            for msg in history
+        ]
+        agent._auto_save_last_index = len(agent.chat_history)

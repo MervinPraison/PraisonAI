@@ -4513,6 +4513,33 @@ Do NOT add any explanations or formatting."""
                     from praisonaiagents import MemoryConfig
                     agent_config["memory"] = MemoryConfig(auto_save=self.args.auto_save)
                     print(f"[bold cyan]Auto-save enabled - session will be saved as '{self.args.auto_save}'[/bold cyan]")
+
+                resume_session_id = getattr(self.args, 'resume_session', None)
+                if resume_session_id:
+                    from praisonaiagents import MemoryConfig
+                    save_name = getattr(self.args, 'auto_save', None) or resume_session_id
+                    
+                    # Preserve existing memory configuration fields
+                    existing_memory = agent_config.get("memory")
+                    if isinstance(existing_memory, MemoryConfig):
+                        existing_memory.session_id = resume_session_id
+                        existing_memory.auto_save = save_name
+                        existing_memory.history = True
+                    elif isinstance(existing_memory, dict):
+                        # Convert dict to MemoryConfig while preserving fields
+                        existing_memory.update({
+                            "session_id": resume_session_id,
+                            "auto_save": save_name,
+                            "history": True,
+                        })
+                        agent_config["memory"] = MemoryConfig(**existing_memory)
+                    else:
+                        agent_config["memory"] = MemoryConfig(
+                            session_id=resume_session_id,
+                            auto_save=save_name,
+                            history=True,
+                        )
+                    print(f"[bold cyan]Resuming session '{resume_session_id}'[/bold cyan]")
                 
                 if getattr(self.args, 'history', None):
                     if agent_config.get("memory") is None:
@@ -4792,6 +4819,15 @@ Do NOT add any explanations or formatting."""
                 flow.display_workflow_start("Direct Prompt", ["DirectAgent"])
             
             agent = PraisonAgent(**agent_config)
+
+            continuity_id = None
+            if hasattr(self, 'args'):
+                continuity_id = getattr(self.args, 'resume_session', None) or getattr(
+                    self.args, 'auto_save', None
+                )
+            if continuity_id:
+                from praisonai.cli.state.project_sessions import apply_cli_session_continuity
+                apply_cli_session_continuity(agent, continuity_id)
             
             # AutoRag - Automatic RAG retrieval decision
             if hasattr(self, 'args') and getattr(self.args, 'auto_rag', False):
