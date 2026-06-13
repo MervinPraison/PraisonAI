@@ -632,6 +632,37 @@ class AgentsGenerator:
         return tools_dict
 
 
+    def _load_config(self):
+        """Load configuration from agent file or agent_yaml."""
+        if self.agent_yaml:
+            config = yaml.safe_load(self.agent_yaml)
+        else:
+            if self.agent_file in ('/app/api:app', 'api:app'):
+                self.agent_file = 'agents.yaml'
+            try:
+                with open(self.agent_file, 'r') as f:
+                    config = yaml.safe_load(f)
+            except FileNotFoundError:
+                print(f"File not found: {self.agent_file}")
+                return None
+        
+        # Apply CLI config overrides to both paths (agent_yaml and agent_file)
+        if self.cli_config:
+            self._merge_cli_config(config, self.cli_config)
+        return config
+
+    def _is_workflow_yaml(self, config):
+        """Check if configuration is workflow mode YAML."""
+        process_type = config.get('process', 'sequential')
+        has_steps = 'steps' in config
+        has_workflow_config = 'workflow' in config
+        workflow_type = config.get('type')
+        return (
+            process_type == 'workflow'
+            or (has_steps and has_workflow_config)
+            or workflow_type in {'job', 'hybrid'}
+        )
+
     def generate_crew_and_kickoff(self):
         """
         Generates a crew of agents and initiates tasks based on the provided configuration.
@@ -649,30 +680,10 @@ class AgentsGenerator:
 
         This function first loads the agent configuration from the specified file. It then initializes the tools required for the agents based on the specified framework. If the specified framework is "autogen", it loads the LLM configuration dynamically and creates an AssistantAgent for each role in the configuration. It then adds tools to the agents if specified in the configuration. Finally, it prepares tasks for the agents based on the configuration and initiates the tasks using the crew of agents. If the specified framework is not "autogen", it creates a crew of agents and initiates tasks based on the configuration.
         """
-        if self.agent_yaml:
-            config = yaml.safe_load(self.agent_yaml)
-        else:
-            if self.agent_file == '/app/api:app' or self.agent_file == 'api:app':
-                self.agent_file = 'agents.yaml'
-            try:
-                with open(self.agent_file, 'r') as f:
-                    config = yaml.safe_load(f)
-            except FileNotFoundError:
-                print(f"File not found: {self.agent_file}")
-                return
-
-        # Apply CLI configuration overrides to YAML config
-        if self.cli_config:
-            # Merge CLI configuration with YAML config
-            self._merge_cli_config(config, self.cli_config)
-
-        # Check if this is a workflow-mode YAML (process: workflow or has steps section)
-        process_type = config.get('process', 'sequential')
-        has_steps = 'steps' in config
-        has_workflow_config = 'workflow' in config
-        
-        if process_type == 'workflow' or (has_steps and has_workflow_config):
-            # Route to YAMLWorkflowParser for advanced workflow patterns
+        config = self._load_config()
+        if config is None:
+            return
+        if self._is_workflow_yaml(config):
             return self._run_yaml_workflow(config)
 
         # Use shared preparation logic
@@ -694,35 +705,12 @@ class AgentsGenerator:
         Async version of generate_crew_and_kickoff.
         Generates a crew of agents and initiates tasks based on the provided configuration.
         """
-        if self.agent_yaml:
-            config = yaml.safe_load(self.agent_yaml)
-        else:
-            if self.agent_file == '/app/api:app' or self.agent_file == 'api:app':
-                self.agent_file = 'agents.yaml'
-            try:
-                with open(self.agent_file, 'r') as f:
-                    config = yaml.safe_load(f)
-            except FileNotFoundError:
-                print(f"File not found: {self.agent_file}")
-                return
-
-        # Apply CLI configuration overrides to YAML config
-        if self.cli_config:
-            # Merge CLI configuration with YAML config
-            self._merge_cli_config(config, self.cli_config)
-
-        # Check if this is a workflow-mode YAML (process: workflow or has steps section)
-        process_type = config.get('process', 'sequential')
-        has_steps = 'steps' in config
-        has_workflow_config = 'workflow' in config
-        
-        if process_type == 'workflow' or (has_steps and has_workflow_config):
+        config = self._load_config()
+        if config is None:
+            return
+        if self._is_workflow_yaml(config):
             return await self._arun_yaml_workflow(config)
-        else:
-            return await self._arun_framework(config)
 
-    async def _arun_framework(self, config):
-        """Async version of _run_framework with shared preparation logic."""
         # Use shared preparation logic
         prep = self._prepare_for_run(config)
         
@@ -736,6 +724,7 @@ class AgentsGenerator:
             task_callback=getattr(self, 'task_callback', None),
             cli_config=getattr(self, 'cli_config', None),
         )
+
 
     async def _arun_yaml_workflow(self, config):
         """
