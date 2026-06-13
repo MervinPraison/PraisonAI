@@ -194,6 +194,10 @@ class EventBus:
         """
         logger.debug(f"Publishing event: {event.type}")
         
+        # Fast path: if no subscribers, skip expensive work
+        if not self._subscribers:
+            return event
+        
         # Store in history
         with self._lock:
             self._event_history.append(event)
@@ -253,6 +257,10 @@ class EventBus:
         )
         
         logger.debug(f"Publishing async event: {event.type}")
+        
+        # Fast path: if no subscribers, skip expensive work
+        if not self._subscribers:
+            return event
         
         # Store in history
         with self._lock:
@@ -320,6 +328,11 @@ class EventBus:
         """Get the number of subscribers."""
         with self._lock:
             return len(self._subscribers)
+    
+    @property 
+    def has_subscribers(self) -> bool:
+        """Check if there are any subscribers (lock-free for performance)."""
+        return bool(self._subscribers)
     
     def __repr__(self) -> str:
         return f"EventBus(subscribers={self.subscriber_count})"

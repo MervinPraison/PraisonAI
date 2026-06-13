@@ -360,6 +360,69 @@ class TestDefaultBus:
         set_default_bus(original)
 
 
+class TestEventBusOptimization:
+    """Tests for EventBus performance optimizations."""
+    
+    def test_has_subscribers_property(self):
+        """Test has_subscribers property."""
+        bus = EventBus()
+        
+        # Should be False when empty
+        assert not bus.has_subscribers
+        
+        # Add a subscriber
+        bus.subscribe(lambda e: None)
+        assert bus.has_subscribers
+        
+        # Remove subscriber
+        bus.clear_subscribers()
+        assert not bus.has_subscribers
+    
+    def test_publish_fast_path_no_subscribers(self):
+        """Test that publishing with no subscribers skips expensive work."""
+        bus = EventBus()
+        
+        # Mock the Event class to track if it gets instantiated
+        from unittest.mock import patch
+        
+        with patch('praisonaiagents.bus.bus.Event') as mock_event_class:
+            # Create a real event for the test
+            real_event = Event(type="test.event", data={})
+            
+            # Test publish_event directly (skips Event construction in publish())
+            result = bus.publish_event(real_event)
+            
+            # Should return the event without storing in history
+            assert result is real_event
+            assert len(bus.get_history()) == 0  # No history when no subscribers
+    
+    def test_publish_normal_path_with_subscribers(self):
+        """Test that publishing with subscribers works normally."""
+        bus = EventBus()
+        received = []
+        
+        bus.subscribe(lambda e: received.append(e))
+        
+        event = Event(type="test.event", data={"key": "value"})
+        result = bus.publish_event(event)
+        
+        # Should store in history and call subscribers
+        assert result is event
+        assert len(bus.get_history()) == 1
+        assert len(received) == 1
+    
+    @pytest.mark.asyncio
+    async def test_publish_async_fast_path_no_subscribers(self):
+        """Test that async publishing with no subscribers skips expensive work."""
+        bus = EventBus()
+        
+        result = await bus.publish_async("test.event", {"key": "value"})
+        
+        # Should return event but not store in history
+        assert isinstance(result, Event)
+        assert len(bus.get_history()) == 0  # No history when no subscribers
+
+
 class TestEventType:
     """Tests for EventType enum."""
     
