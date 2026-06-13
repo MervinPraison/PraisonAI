@@ -35,6 +35,11 @@ _PROBES: dict[str, Callable[[], bool]] = {
     "rich":              lambda: importlib.util.find_spec("rich") is not None,
     "gradio":            lambda: importlib.util.find_spec("gradio") is not None,
     "unsloth":           lambda: importlib.util.find_spec("unsloth") is not None,
+    # Vector store probes for Gap 3 fix
+    "chromadb":          lambda: importlib.util.find_spec("chromadb") is not None,
+    "pinecone":          lambda: importlib.util.find_spec("pinecone") is not None,
+    "qdrant_client":     lambda: importlib.util.find_spec("qdrant_client") is not None,
+    "weaviate":          lambda: importlib.util.find_spec("weaviate") is not None,
 }
 
 def is_available(name: str) -> bool:

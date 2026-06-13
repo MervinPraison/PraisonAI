@@ -20,8 +20,11 @@ class FrameworkAdapter(Protocol):
         """Check if the framework is available for import."""
         ...
     
-    def resolve(self) -> "FrameworkAdapter":
+    def resolve(self, *, config: Optional[Dict[str, Any]] = None) -> "FrameworkAdapter":
         """Pick the concrete adapter variant (e.g. autogen v0.2 vs v0.4).
+        
+        Args:
+            config: YAML configuration that may contain version preferences
         
         Returns:
             The resolved adapter instance (self or a different adapter)
@@ -161,7 +164,7 @@ class BaseFrameworkAdapter:
         # Only substitute simple variable names like {topic}, not JSON like {"level":2}
         return re.sub(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', _sub, template)
     
-    def resolve(self) -> "FrameworkAdapter":
+    def resolve(self, *, config: Optional[Dict[str, Any]] = None) -> "FrameworkAdapter":
         """Default implementation returns self."""
         return self
     
