@@ -15,6 +15,12 @@ from praisonaiagents.sandbox import ResourceLimits, SandboxConfig, SandboxStatus
 
 def _make_sandbox(mock_sandlock):
     """Instantiate SandlockSandbox with *mock_sandlock* injected via sys.modules."""
+    # The SDK gates on landlock_abi_version() >= min_landlock_abi(); give the
+    # mock a concrete minimum (sandlock currently requires ABI 6) so the
+    # numeric comparison in __init__/is_available works.  Tests that exercise
+    # the "unsupported" path set landlock_abi_version below this.
+    if not isinstance(mock_sandlock.min_landlock_abi.return_value, int):
+        mock_sandlock.min_landlock_abi.return_value = 6
     # Remove any cached version so the import block inside __init__ re-runs.
     sys.modules.pop("praisonai.sandbox.sandlock", None)
     with patch.dict("sys.modules", {"sandlock": mock_sandlock}):
@@ -42,58 +48,53 @@ class TestSandlockSandbox:
             with pytest.raises(ImportError, match="sandlock package required"):
                 SandlockSandbox()
 
-    def test_fallback_to_subprocess_when_unavailable(self):
-        """Test fallback to subprocess when sandlock is not available."""
+    def test_raises_when_landlock_unavailable(self):
+        """Instantiation must fail loud on kernels without Landlock support.
+
+        Silent degradation to SubprocessSandbox would violate the caller's
+        explicit choice of kernel-level isolation — a SandlockSandbox that
+        isn't actually using Landlock is a security footgun.
+        """
         mock_sandlock = Mock()
-        mock_sandlock.landlock_abi_version.return_value = 0  # < 1, so unavailable
+        mock_sandlock.landlock_abi_version.return_value = 0  # unsupported
 
-        sandbox = _make_sandbox(mock_sandlock)
-        assert not sandbox.is_available
-        assert sandbox.sandbox_type == "sandlock"
+        with pytest.raises(RuntimeError, match="requires Landlock"):
+            _make_sandbox(mock_sandlock)
 
-    @pytest.mark.asyncio
-    async def test_fallback_execution(self):
-        """Test that execution falls back to subprocess when sandlock unavailable."""
+    def test_sandbox_kwargs_with_minimal_limits(self):
+        """Sandbox kwargs are built directly from resource limits.
+
+        sandlock dropped the ``Policy`` object; config is now passed straight
+        to ``Sandbox(**kwargs)``.
+        """
         mock_sandlock = Mock()
-        mock_sandlock.landlock_abi_version.return_value = 0  # < 1, so unavailable
-
-        sandbox = _make_sandbox(mock_sandlock)
-
-        mock_subprocess_instance = AsyncMock()
-        mock_subprocess_instance.execute.return_value = Mock(
-            status=SandboxStatus.COMPLETED,
-            exit_code=0,
-            stdout="Hello, World!",
-            stderr="",
-        )
-
-        with patch("praisonai.sandbox.subprocess.SubprocessSandbox") as mock_subprocess:
-            mock_subprocess.return_value = mock_subprocess_instance
-            result = await sandbox.execute("print('Hello, World!')")
-
-            mock_subprocess.assert_called_once()
-            mock_subprocess_instance.execute.assert_called_once()
-
-    def test_policy_creation_with_minimal_limits(self):
-        """Test policy creation with minimal resource limits."""
-        mock_sandlock = Mock()
-        mock_policy = Mock()
-        mock_sandlock.Policy.return_value = mock_policy
+        mock_sandlock.landlock_abi_version.return_value = 6  # supported
 
         sandbox = _make_sandbox(mock_sandlock)
 
         limits = ResourceLimits.minimal()
-        sandbox._create_policy(limits, "/tmp/workspace")
-
-        mock_sandlock.Policy.assert_called_once()
-        call_kwargs = mock_sandlock.Policy.call_args[1]
+        call_kwargs = sandbox._build_sandbox_kwargs(limits, "/tmp/workspace")
 
         assert "fs_readable" in call_kwargs
         assert "fs_writable" in call_kwargs
-        assert "max_memory" in call_kwargs
         assert call_kwargs["max_memory"] == "128M"  # From minimal limits
         assert call_kwargs["max_processes"] == 5
-        assert call_kwargs["net_allow_hosts"] == []  # Network disabled
+        assert call_kwargs["max_cpu"] == 50  # From minimal limits
+        # Network disabled → deny all outbound (empty allowlist).
+        assert call_kwargs["net_allow"] == []
+
+    def test_sandbox_kwargs_network_enabled(self):
+        """Network-enabled limits open all TCP plus UDP DNS."""
+        mock_sandlock = Mock()
+        mock_sandlock.landlock_abi_version.return_value = 6
+
+        sandbox = _make_sandbox(mock_sandlock)
+
+        limits = ResourceLimits(network_enabled=True)
+        call_kwargs = sandbox._build_sandbox_kwargs(limits)
+
+        assert "*:*" in call_kwargs["net_allow"]
+        assert "udp://*:53" in call_kwargs["net_allow"]
 
     def test_status_reporting(self):
         """Test sandbox status reporting."""
@@ -116,11 +117,12 @@ class TestSandlockSandbox:
         """Test successful code execution with sandlock."""
         mock_sandlock = Mock()
         mock_result = Mock()
+        mock_result.success = True
         mock_result.exit_code = 0
-        mock_result.stdout = "Hello, World!"
-        mock_result.stderr = ""
+        # Real sandlock returns bytes; exercise the _decode() byte path.
+        mock_result.stdout = b"Hello, World!"
+        mock_result.stderr = b""
 
-        mock_sandlock.Policy.return_value = Mock()
         mock_sandlock.Sandbox.return_value = Mock(run=Mock(return_value=mock_result))
         mock_sandlock.landlock_abi_version.return_value = 6  # >= 6, so available
 
@@ -140,54 +142,53 @@ class TestSandlockSandbox:
 
     @pytest.mark.asyncio
     async def test_sandlock_execution_timeout(self):
-        """Test timeout handling in sandlock execution."""
+        """Timeout is detected via exit_code == -1 (ExitStatus::Timeout)."""
         mock_sandlock = Mock()
-        mock_sandlock.Policy.return_value = Mock()
         mock_sandlock.Sandbox.return_value = Mock()
-        mock_sandlock.landlock_abi_version.return_value = 6  # >= 6, so available
+        mock_sandlock.landlock_abi_version.return_value = 6
 
         sandbox = _make_sandbox(mock_sandlock)
 
-        # Create a mock Result object indicating timeout
         mock_timeout_result = Mock()
         mock_timeout_result.success = False
-        mock_timeout_result.exit_code = 124  # Common timeout exit code
-        mock_timeout_result.stdout = ""
-        mock_timeout_result.stderr = "Process timed out"
+        # sandlock's timeout sentinel — Sandbox.run() does not populate
+        # result.error on timeout, so we rely on the exit_code instead.
+        mock_timeout_result.exit_code = -1
+        mock_timeout_result.stdout = b""
+        mock_timeout_result.stderr = b""
+        mock_timeout_result.error = None
 
-        # Simulate timeout by returning failed Result after enough time
-        with patch("asyncio.get_running_loop") as mock_loop, \
-             patch("time.time", side_effect=[0, 11, 11]):  # Started at 0, ended at 11s (> 10s timeout)
+        with patch("asyncio.get_running_loop") as mock_loop:
             mock_loop.return_value.run_in_executor = AsyncMock(
                 return_value=mock_timeout_result
             )
 
             await sandbox.start()
-            result = await sandbox.execute("import time; time.sleep(100)", limits=ResourceLimits(timeout_seconds=10))
+            result = await sandbox.execute(
+                "import time; time.sleep(100)",
+                limits=ResourceLimits(timeout_seconds=10),
+            )
 
         assert result.status == SandboxStatus.TIMEOUT
         assert "timed out" in result.error.lower()
 
     @pytest.mark.asyncio
     async def test_sandlock_execution_failure(self):
-        """Test general execution failure handling."""
+        """Non-timeout failures keep the FAILED status and surface stderr."""
         mock_sandlock = Mock()
-        mock_sandlock.Policy.return_value = Mock()
         mock_sandlock.Sandbox.return_value = Mock()
-        mock_sandlock.landlock_abi_version.return_value = 6  # >= 6, so available
+        mock_sandlock.landlock_abi_version.return_value = 6
 
         sandbox = _make_sandbox(mock_sandlock)
 
-        # Create a mock Result object indicating non-zero exit
         mock_failed_result = Mock()
         mock_failed_result.success = False
-        mock_failed_result.exit_code = 1  # Non-zero exit code
-        mock_failed_result.stdout = ""
-        mock_failed_result.stderr = "Permission denied"
+        mock_failed_result.exit_code = 1
+        mock_failed_result.stdout = b""
+        mock_failed_result.stderr = b"Permission denied"
+        mock_failed_result.error = None  # not a timeout
 
-        # Simulate execution failure (not timeout) 
-        with patch("asyncio.get_running_loop") as mock_loop, \
-             patch("time.time", side_effect=[0, 2, 2]):  # Started at 0, ended at 2s (< 10s timeout)
+        with patch("asyncio.get_running_loop") as mock_loop:
             mock_loop.return_value.run_in_executor = AsyncMock(
                 return_value=mock_failed_result
             )
@@ -247,14 +248,18 @@ class TestSandlockSandbox:
         try:
             # Try to import real sandlock
             import sandlock
-            
-            # Only run if Landlock is actually supported on this system
-            if sandlock.landlock_abi_version() < 1:
-                pytest.skip("Landlock not supported on this system")
-            
+
+            # SandlockSandbox.__init__ raises RuntimeError unless the kernel's
+            # Landlock ABI meets sandlock's own minimum (min_landlock_abi()).
+            # Skip on anything below that threshold so this test cleanly skips
+            # on intermediate-ABI kernels instead of hard-failing in the
+            # constructor.
+            if sandlock.landlock_abi_version() < sandlock.min_landlock_abi():
+                pytest.skip("Landlock ABI below sandlock's minimum on this system")
+
             # Test with real sandlock package
             from praisonai.sandbox.sandlock import SandlockSandbox
-            
+
             sandbox = SandlockSandbox()
             assert sandbox.is_available
             

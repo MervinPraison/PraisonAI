@@ -74,12 +74,32 @@ class SandlockSandbox:
                 "sandlock package required for SandlockSandbox. "
                 "Install with: pip install 'praisonai[sandbox]' or pip install sandlock"
             )
-    
+
+        # Fail loud if Landlock isn't supported on this kernel.  sandlock
+        # requires a minimum Landlock ABI (currently v6, which shipped in
+        # Linux 6.12); query it rather than hard-coding so we track the SDK's
+        # own requirement.
+        try:
+            abi = self._sandlock.landlock_abi_version()
+            min_abi = self._sandlock.min_landlock_abi()
+        except Exception as e:
+            raise RuntimeError(
+                f"failed to query Landlock ABI version: {e}"
+            ) from e
+        if abi < min_abi:
+            raise RuntimeError(
+                "SandlockSandbox requires Landlock ABI >= "
+                f"{min_abi} (Linux kernel >= 6.12 with "
+                "CONFIG_SECURITY_LANDLOCK=y).  This kernel reports Landlock "
+                f"ABI version {abi}.  Use SubprocessSandbox explicitly if "
+                "weaker isolation is acceptable."
+            )
+
     @property
     def is_available(self) -> bool:
         """Whether sandlock backend is available."""
         try:
-            return self._sandlock.landlock_abi_version() >= 1
+            return self._sandlock.landlock_abi_version() >= self._sandlock.min_landlock_abi()
         except (AttributeError, ImportError):
             return False
     
@@ -108,24 +128,30 @@ class SandlockSandbox:
         self._is_running = False
         logger.info("Sandlock sandbox stopped")
     
-    def _create_policy(
+    def _build_sandbox_kwargs(
         self,
         limits: ResourceLimits,
         working_dir: Optional[str] = None,
-    ) -> Any:
-        """Create sandlock policy from resource limits.
-        
+        extra_readable: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Build sandlock ``Sandbox`` keyword arguments from resource limits.
+
+        sandlock dropped the separate ``Policy`` object; configuration is now
+        passed directly to ``Sandbox(**kwargs)``.  This returns that kwargs
+        dict.
+
         Args:
             limits: Resource limits configuration
-            working_dir: Working directory for execution
-            
-        Returns:
-            Sandlock Policy object
+            working_dir: Working directory for execution (added to the
+                writable allowlist).
+            extra_readable: Additional directories to add to the Landlock
+                read allowlist (e.g. the parent of a script passed to
+                ``execute_file``).
         """
-        Policy = self._sandlock.Policy
-        
-        # Determine allowed paths
-        allowed_read_paths = [
+        # Landlock requires every path in the allowlist to exist at rule-
+        # attach time; passing a missing directory makes sandlock_spawn
+        # fail outright.  Filter to paths that actually exist on this host.
+        _candidate_read_paths = [
             "/usr/lib/python3",
             "/usr/local/lib/python3",
             "/lib",
@@ -133,36 +159,82 @@ class SandlockSandbox:
             "/bin",
             "/usr/bin",
         ]
-        
+        allowed_read_paths = [p for p in _candidate_read_paths if os.path.isdir(p)]
+        if extra_readable:
+            # extra_readable may name individual files (e.g. the single script
+            # passed to execute_file), so accept any path that exists — not
+            # just directories.  Landlock grants read on a named file without
+            # exposing its siblings.
+            allowed_read_paths.extend(
+                p for p in extra_readable if os.path.exists(p)
+            )
+
         allowed_write_paths = []
         if working_dir:
             allowed_write_paths.append(working_dir)
         if self._temp_dir:
             allowed_write_paths.append(self._temp_dir)
-        
+
+        # Landlock does not imply read access from write access: a path that
+        # is only in fs_writable can be written but not read back.  The
+        # sandboxed process needs to read its own working directory (e.g. to
+        # import a file it just wrote, or to stat the cwd), so mirror the
+        # writable dirs into the read allowlist.  De-duplicate to keep the
+        # rule set minimal.
+        for p in (working_dir, self._temp_dir):
+            if p and os.path.isdir(p) and p not in allowed_read_paths:
+                allowed_read_paths.append(p)
+
         # Add any configured allowed paths from security policy
         if hasattr(self.config, 'security_policy') and self.config.security_policy:
             allowed_write_paths.extend(self.config.security_policy.allowed_paths)
         
-        # Create policy with kernel-level restrictions
-        policy = Policy(
+        # Network policy.
+        #
+        # sandlock collapsed network config into a single ``net_allow``
+        # endpoint allowlist:
+        #   []                    -> deny all outbound (the default)
+        #   ["*:*", ...]          -> allow rules; "*:*" = any TCP host:port
+        #
+        # Protocol gating falls out of rule presence: with no UDP rule, UDP
+        # sockets are denied at the seccomp layer.  To make an enabled network
+        # actually usable we open all outbound TCP plus UDP DNS (port 53) so
+        # the sandboxed process can resolve hostnames.  To block the network
+        # we leave the allowlist empty (deny all).
+        if limits.network_enabled:
+            net_allow = ["*:*", "udp://*:53"]
+        else:
+            net_allow = []
+
+        return {
             # Filesystem restrictions (Landlock)
-            fs_readable=allowed_read_paths,
-            fs_writable=allowed_write_paths,
-            
-            # Network restrictions
-            net_allow_hosts=[] if not limits.network_enabled else None,
-            
+            "fs_readable": allowed_read_paths,
+            "fs_writable": allowed_write_paths,
+
             # Resource limits
-            max_memory=f"{limits.memory_mb}M",
-            max_processes=limits.max_processes,
-            max_open_files=limits.max_open_files,
-            
-            # Note: CPU throttle percentage, not time limit
-            # Execution timeout is handled via Sandbox.run(timeout=...)
-        )
-        
-        return policy
+            "max_memory": f"{limits.memory_mb}M",
+            "max_processes": limits.max_processes,
+            "max_open_files": limits.max_open_files,
+            # max_cpu is a throttle percentage of one core, not a time budget.
+            # Execution timeout is handled via Sandbox.run(timeout=...).
+            "max_cpu": limits.cpu_percent,
+
+            # Network (deny-all by default)
+            "net_allow": net_allow,
+        }
+
+    @staticmethod
+    def _decode(buf: Any) -> str:
+        """Decode a sandlock Result stdout/stderr buffer to str.
+
+        sandlock returns ``bytes`` from ``Sandbox.run()``; PraisonAI's
+        ``SandboxResult`` uses ``str`` throughout.  Invalid UTF-8 is
+        replaced rather than raised so downstream consumers never see
+        binary artefacts.
+        """
+        if isinstance(buf, bytes):
+            return buf.decode("utf-8", errors="replace")
+        return buf or ""
 
     def _safe_sandbox_path(self, path: str) -> Optional[str]:
         """Resolve a caller-supplied path to an absolute path inside _temp_dir.
@@ -190,98 +262,83 @@ class SandlockSandbox:
         limits: ResourceLimits,
         env: Optional[Dict[str, str]],
         working_dir: Optional[str],
+        extra_readable: Optional[List[str]] = None,
     ) -> SandboxResult:
         """Execute *cmd* inside a sandlock Sandbox and return a SandboxResult.
 
-        Centralises all sandlock Sandbox/Policy construction and error handling
-        so that ``execute`` and ``run_command`` share a single code path.
+        Centralises all sandlock Sandbox construction and error handling so
+        that ``execute`` and ``run_command`` share a single code path.
 
-        Note: ``env`` is accepted for API compatibility but sandlock's
-        ``Sandbox.run()`` does not support per-run environment injection;
-        callers requiring custom env vars should set them in the policy or
-        prior to sandbox creation.  ``working_dir`` is applied via the policy
-        (added to the writable-path allow-list).
+        ``env`` variables are injected via the ``Sandbox`` ``env`` field
+        (set/overridden in the child).  ``working_dir`` is applied to the
+        sandbox config (added to the writable-path allow-list).
         """
-        policy = self._create_policy(limits, working_dir)
+        sandbox_kwargs = self._build_sandbox_kwargs(
+            limits, working_dir, extra_readable
+        )
+        if env:
+            sandbox_kwargs["env"] = dict(env)
 
         started_at = time.time()
 
+        def _run() -> Any:
+            # Context manager ensures the sandbox handle is released even
+            # if .run() raises partway through.
+            with self._sandlock.Sandbox(**sandbox_kwargs) as sb:
+                return sb.run(cmd, timeout=limits.timeout_seconds)
+
         try:
-            sandbox = self._sandlock.Sandbox(policy)
-
-            result = await asyncio.get_running_loop().run_in_executor(
-                None,
-                lambda: sandbox.run(cmd, timeout=limits.timeout_seconds)
-            )
-
+            result = await asyncio.get_running_loop().run_in_executor(None, _run)
+        except Exception as e:  # noqa: BLE001 — broad catch keeps the sandbox
+            # resilient: any sandlock/spawn failure is surfaced as a FAILED
+            # result rather than propagating.  Log the full traceback so the
+            # underlying cause isn't lost.
+            logger.exception("sandlock execution failed for %s", execution_id)
             completed_at = time.time()
-            duration = completed_at - started_at
-
-            # Check result.success and exit_code to determine actual status
-            if not result.success:
-                # Check if this was a timeout based on duration
-                if duration >= limits.timeout_seconds:
-                    return SandboxResult(
-                        execution_id=execution_id,
-                        status=SandboxStatus.TIMEOUT,
-                        error=f"Execution timed out after {limits.timeout_seconds}s",
-                        exit_code=result.exit_code,
-                        stdout=result.stdout,
-                        stderr=result.stderr,
-                        duration_seconds=duration,
-                        started_at=started_at,
-                        completed_at=completed_at,
-                    )
-                else:
-                    # Non-zero exit or other failure
-                    return SandboxResult(
-                        execution_id=execution_id,
-                        status=SandboxStatus.FAILED,
-                        error=f"Execution failed with exit code {result.exit_code}: {result.stderr}",
-                        exit_code=result.exit_code,
-                        stdout=result.stdout,
-                        stderr=result.stderr,
-                        duration_seconds=duration,
-                        started_at=started_at,
-                        completed_at=completed_at,
-                    )
-
-            return SandboxResult(
-                execution_id=execution_id,
-                status=SandboxStatus.COMPLETED,
-                exit_code=result.exit_code,
-                stdout=result.stdout,
-                stderr=result.stderr,
-                duration_seconds=duration,
-                started_at=started_at,
-                completed_at=completed_at,
-                metadata={
-                    "sandbox_type": "sandlock",
-                    "landlock_enabled": True,
-                    "seccomp_enabled": True,
-                },
-            )
-
-        except Exception as e:
-            completed_at = time.time()
-            duration = completed_at - started_at
-            if duration >= limits.timeout_seconds:
-                return SandboxResult(
-                    execution_id=execution_id,
-                    status=SandboxStatus.TIMEOUT,
-                    error=f"Execution timed out after {limits.timeout_seconds}s",
-                    duration_seconds=duration,
-                    started_at=started_at,
-                    completed_at=completed_at,
-                )
             return SandboxResult(
                 execution_id=execution_id,
                 status=SandboxStatus.FAILED,
                 error=f"Execution failed: {e}",
-                duration_seconds=duration,
+                duration_seconds=completed_at - started_at,
                 started_at=started_at,
                 completed_at=completed_at,
             )
+
+        completed_at = time.time()
+        duration = completed_at - started_at
+        stdout = self._decode(result.stdout)
+        stderr = self._decode(result.stderr)
+
+        # sandlock uses exit_code == -1 as the ExitStatus::Timeout sentinel
+        # (see sandlock's python/src/sandlock/_sdk.py).  This is a
+        # structural signal — Sandbox.run() doesn't populate result.error
+        # for timeouts, so string-matching on it is unreliable.
+        if result.success:
+            status = SandboxStatus.COMPLETED
+            error = None
+        elif result.exit_code == -1:
+            status = SandboxStatus.TIMEOUT
+            error = f"Execution timed out after {limits.timeout_seconds}s"
+        else:
+            status = SandboxStatus.FAILED
+            error = f"Execution failed with exit code {result.exit_code}: {stderr}"
+
+        return SandboxResult(
+            execution_id=execution_id,
+            status=status,
+            exit_code=result.exit_code,
+            stdout=stdout,
+            stderr=stderr,
+            duration_seconds=duration,
+            started_at=started_at,
+            completed_at=completed_at,
+            error=error,
+            metadata={
+                "sandbox_type": "sandlock",
+                "landlock_enabled": True,
+                "seccomp_enabled": True,
+            },
+        )
 
     async def execute(
         self,
@@ -294,14 +351,7 @@ class SandlockSandbox:
         """Execute code in the sandlock-isolated sandbox."""
         if not self._is_running:
             await self.start()
-        
-        if not self.is_available:
-            # Fallback to subprocess sandbox if sandlock not available
-            logger.warning("Sandlock not available, falling back to subprocess")
-            from .subprocess import SubprocessSandbox
-            fallback = SubprocessSandbox(self.config)
-            return await fallback.execute(code, language, limits, env, working_dir)
-        
+
         limits = limits or self.config.resource_limits
         execution_id = str(uuid.uuid4())
         
@@ -325,22 +375,39 @@ class SandlockSandbox:
         limits: Optional[ResourceLimits] = None,
         env: Optional[Dict[str, str]] = None,
     ) -> SandboxResult:
-        """Execute a file in the sandbox."""
+        """Execute a file in the sandbox.
+
+        The script is passed to the interpreter by path rather than slurped
+        through ``-c``, so large scripts don't hit ARG_MAX.  Only the script
+        file itself — not its parent directory — is added to the Landlock
+        read allowlist, so sibling files on the host are never exposed.
+        """
+        if not self._is_running:
+            await self.start()
+
         if not os.path.exists(file_path):
             return SandboxResult(
                 status=SandboxStatus.FAILED,
                 error=f"File not found: {file_path}",
             )
-        
-        with open(file_path, "r") as f:
-            code = f.read()
-        
-        # Determine language from file extension
-        language = "python"
-        if file_path.endswith(".sh") or file_path.endswith(".bash"):
-            language = "bash"
-        
-        return await self.execute(code, language=language, limits=limits, env=env)
+
+        limits = limits or self.config.resource_limits
+        execution_id = str(uuid.uuid4())
+
+        abs_path = os.path.realpath(file_path)
+        interp = "bash" if file_path.endswith((".sh", ".bash")) else "python3"
+        cmd: List[str] = [interp, abs_path]
+        if args:
+            cmd.extend(args)
+
+        return await self._run_sandlocked(
+            cmd,
+            execution_id=execution_id,
+            limits=limits,
+            env=env,
+            working_dir=self._temp_dir,
+            extra_readable=[abs_path],
+        )
     
     async def run_command(
         self,
@@ -352,13 +419,7 @@ class SandlockSandbox:
         """Run a shell command in the sandbox."""
         if not self._is_running:
             await self.start()
-        
-        if not self.is_available:
-            logger.warning("Sandlock not available, falling back to subprocess")
-            from .subprocess import SubprocessSandbox
-            fallback = SubprocessSandbox(self.config)
-            return await fallback.run_command(command, limits, env, working_dir)
-        
+
         limits = limits or self.config.resource_limits
         execution_id = str(uuid.uuid4())
         
