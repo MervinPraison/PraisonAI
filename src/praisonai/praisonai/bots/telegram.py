@@ -84,8 +84,15 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._agent = agent
         self.config = config or BotConfig(token=token)
         
-        # Initialize streaming config (None means streaming disabled)
-        self._streaming_config = None
+        # Initialize streaming config based on BotConfig
+        if self.config.streaming:
+            self._streaming_config = StreamingConfig(
+                mode=StreamingMode.DRAFT,
+                min_interval=self.config.stream_edit_interval_ms / 1000.0,  # Convert ms to seconds
+                min_delta=50,  # Reasonable default for character delta
+            )
+        else:
+            self._streaming_config = None
         self._rate_limiter = RateLimiter.for_platform("telegram")
         
         self._is_running = False
@@ -258,31 +265,75 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                         )
                         
                         # Start streaming (send placeholder)
-                        await streamer.start()
+                        placeholder_message_id = await streamer.start()
                         
-                        # Get response with streaming callback
-                        response = await self._session.chat(
-                            self._agent, user_id, message_text,
-                            chat_id=str(update.message.chat_id) if update.message.chat_id else "",
-                            user_name=user_name,
-                            stream_callback=streamer.on_event,
-                        )
-                        
-                        # Apply message hooks to final response (same as non-streaming path)
-                        send_result = self.fire_message_sending(
-                            str(update.message.chat_id), str(response),
-                            reply_to=str(update.message.message_id),
-                        )
-                        if send_result["cancel"]:
-                            return
-                        
-                        # Finalize with complete response (after hook processing)
-                        await streamer.finalize(send_result["content"])
-                        
-                        # Fire sent hooks
-                        self.fire_message_sent(
-                            str(update.message.chat_id), send_result["content"],
-                        )
+                        try:
+                            # Get response with streaming callback
+                            response = await self._session.chat(
+                                self._agent, user_id, message_text,
+                                chat_id=str(update.message.chat_id) if update.message.chat_id else "",
+                                user_name=user_name,
+                                stream_callback=streamer.on_event,
+                            )
+                            
+                            # Apply message hooks to final response (same as non-streaming path)
+                            send_result = self.fire_message_sending(
+                                str(update.message.chat_id), str(response),
+                                reply_to=str(update.message.message_id),
+                            )
+                            if send_result["cancel"]:
+                                # Cancel: delete the placeholder message
+                                try:
+                                    await self.delete_message(
+                                        str(update.message.chat_id), placeholder_message_id
+                                    )
+                                except Exception:
+                                    pass  # Ignore deletion errors
+                                return
+                            
+                            # Handle media content before finalizing (extract MEDIA: markers)
+                            from .media import split_media_from_output
+                            parsed = split_media_from_output(send_result["content"])
+                            text_content = parsed["text"]
+                            media_urls = parsed.get("media_urls", [])
+                            
+                            # Finalize with text content (after hook processing and media extraction)
+                            await streamer.finalize(text_content if text_content else send_result["content"])
+                            
+                            # Send media files separately (same as non-streaming path)
+                            if media_urls:
+                                for media_path in media_urls:
+                                    if os.path.exists(media_path):
+                                        try:
+                                            from .media import is_audio_file
+                                            if is_audio_file(media_path):
+                                                with open(media_path, "rb") as f:
+                                                    if parsed.get("audio_as_voice", False):
+                                                        await self._application.bot.send_voice(
+                                                            chat_id=update.message.chat_id, voice=f
+                                                        )
+                                                    else:
+                                                        await self._application.bot.send_audio(
+                                                            chat_id=update.message.chat_id, audio=f
+                                                        )
+                                        except Exception as e:
+                                            logger.error(f"Failed to send media: {e}")
+                            
+                            # Fire sent hooks
+                            self.fire_message_sent(
+                                str(update.message.chat_id), send_result["content"],
+                            )
+                            
+                        except Exception as agent_error:
+                            # Agent failed: clean up placeholder message
+                            try:
+                                await self.delete_message(
+                                    str(update.message.chat_id), placeholder_message_id
+                                )
+                            except Exception:
+                                pass  # Ignore deletion errors
+                            # Re-raise the original error to be handled below
+                            raise agent_error
                         
                     else:
                         # Legacy non-streaming path
