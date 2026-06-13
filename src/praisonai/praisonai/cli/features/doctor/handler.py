@@ -315,7 +315,6 @@ class DoctorHandler(CommandHandler):
         import os
         import yaml
         import glob
-        from pathlib import Path
         
         if not config.quiet:
             print("🔧 PraisonAI Configuration Migration Tool")
@@ -330,6 +329,7 @@ class DoctorHandler(CommandHandler):
             patterns = ["*.yaml", "*.yml", "agents.yaml", "config.yaml"]
             for pattern in patterns:
                 yaml_files.extend(glob.glob(pattern))
+            yaml_files = list(dict.fromkeys(yaml_files))  # Remove duplicates while preserving order
         
         if not yaml_files:
             if not config.quiet:
@@ -338,6 +338,7 @@ class DoctorHandler(CommandHandler):
         
         issues_found = 0
         files_modified = 0
+        files_failed = 0
         
         for yaml_file in yaml_files:
             if not os.path.exists(yaml_file):
@@ -348,7 +349,6 @@ class DoctorHandler(CommandHandler):
                     data = yaml.safe_load(f)
                 
                 # Check for deprecated cli_backend usage
-                modified = False
                 if self._has_deprecated_cli_backend(data):
                     issues_found += 1
                     if not config.quiet:
@@ -375,9 +375,10 @@ class DoctorHandler(CommandHandler):
                             print(f"✅ Migrated: {yaml_file}")
                     else:
                         if not config.quiet:
-                            print(f"   Run with --execute to apply migration")
+                            print("   Run with --execute to apply migration")
                             
             except Exception as e:
+                files_failed += 1
                 if not config.quiet:
                     print(f"❌ Error processing {yaml_file}: {e}")
         
@@ -391,7 +392,7 @@ class DoctorHandler(CommandHandler):
                 if not config.execute and issues_found > 0:
                     print("\n💡 To apply migrations, run: praisonai doctor fix --execute")
         
-        return 0
+        return 1 if files_failed > 0 else 0
     
     def _has_deprecated_cli_backend(self, data: dict) -> bool:
         """Check if YAML config has deprecated cli_backend usage."""

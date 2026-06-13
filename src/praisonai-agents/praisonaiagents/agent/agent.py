@@ -2041,8 +2041,7 @@ Your Goal: {self.goal}
                 warnings.warn(
                     "Agent-level 'cli_backend' parameter is deprecated when model configuration is available. "
                     "Consider using model-scoped runtime configuration instead. "
-                    "Use 'allow_legacy_runtime_pin=True' to suppress this warning. "
-                    "For migration assistance, run: praisonai doctor --fix",
+                    "For migration assistance, run: praisonai doctor fix --execute",
                     DeprecationWarning,
                     stacklevel=2
                 )

@@ -30,20 +30,7 @@ class Agent(CoreAgent):
                 - None: No CLI backend
             **kwargs: Keyword arguments for core Agent
         """
-        # Check for deprecation warning in wrapper layer
-        if cli_backend is not None:
-            # Check if model/llm is specified in kwargs
-            if 'model' in kwargs or 'llm' in kwargs:
-                import warnings
-                warnings.warn(
-                    "Agent-level 'cli_backend' parameter is deprecated when model configuration is available. "
-                    "Consider using model-scoped runtime configuration instead. "
-                    "Use 'allow_legacy_runtime_pin=True' to suppress this warning. "
-                    "For migration assistance, run: praisonai doctor --fix",
-                    DeprecationWarning,
-                    stacklevel=2
-                )
-        
+        # Deprecation warning will be emitted by the core Agent class
         # Resolve CLI backend configuration using unified resolver
         if cli_backend is not None and not self._is_protocol_instance(cli_backend):
             from .cli_backends import resolve_cli_backend_config
