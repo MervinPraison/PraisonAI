@@ -248,14 +248,18 @@ class TestSandlockSandbox:
         try:
             # Try to import real sandlock
             import sandlock
-            
-            # Only run if Landlock is actually supported on this system
-            if sandlock.landlock_abi_version() < 1:
-                pytest.skip("Landlock not supported on this system")
-            
+
+            # SandlockSandbox.__init__ raises RuntimeError unless the kernel's
+            # Landlock ABI meets sandlock's own minimum (min_landlock_abi()).
+            # Skip on anything below that threshold so this test cleanly skips
+            # on intermediate-ABI kernels instead of hard-failing in the
+            # constructor.
+            if sandlock.landlock_abi_version() < sandlock.min_landlock_abi():
+                pytest.skip("Landlock ABI below sandlock's minimum on this system")
+
             # Test with real sandlock package
             from praisonai.sandbox.sandlock import SandlockSandbox
-            
+
             sandbox = SandlockSandbox()
             assert sandbox.is_available
             
