@@ -1,0 +1,12 @@
+framework: praisonai
+topic: test
+roles:
+  tester:
+    role: Test Agent
+    goal: Test deprecated cli_backend
+    llm: gpt-4o-mini
+    cli_backend: claude-code
+    tasks:
+      test_task:
+        description: Test task
+        expected_output: Test output

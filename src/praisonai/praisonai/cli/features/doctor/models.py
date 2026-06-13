@@ -269,3 +269,7 @@ class DoctorConfig:
     # Runtime-specific options
     team_file: Optional[str] = None
     workflow_file: Optional[str] = None
+    
+    # Fix subcommand options
+    execute: bool = False
+    no_backup: bool = False
