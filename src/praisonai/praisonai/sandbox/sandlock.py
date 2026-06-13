@@ -175,6 +175,16 @@ class SandlockSandbox:
         if self._temp_dir:
             allowed_write_paths.append(self._temp_dir)
 
+        # Landlock does not imply read access from write access: a path that
+        # is only in fs_writable can be written but not read back.  The
+        # sandboxed process needs to read its own working directory (e.g. to
+        # import a file it just wrote, or to stat the cwd), so mirror the
+        # writable dirs into the read allowlist.  De-duplicate to keep the
+        # rule set minimal.
+        for p in (working_dir, self._temp_dir):
+            if p and os.path.isdir(p) and p not in allowed_read_paths:
+                allowed_read_paths.append(p)
+
         # Add any configured allowed paths from security policy
         if hasattr(self.config, 'security_policy') and self.config.security_policy:
             allowed_write_paths.extend(self.config.security_policy.allowed_paths)
@@ -279,7 +289,11 @@ class SandlockSandbox:
 
         try:
             result = await asyncio.get_running_loop().run_in_executor(None, _run)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — broad catch keeps the sandbox
+            # resilient: any sandlock/spawn failure is surfaced as a FAILED
+            # result rather than propagating.  Log the full traceback so the
+            # underlying cause isn't lost.
+            logger.exception("sandlock execution failed for %s", execution_id)
             completed_at = time.time()
             return SandboxResult(
                 execution_id=execution_id,
