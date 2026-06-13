@@ -100,9 +100,22 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             _store = get_default_session_store()
         except Exception:
             _store = None
+        # Create run control if busy mode is configured
+        run_control = None
+        if hasattr(self.config, 'busy_mode') and self.config.busy_mode != "queue":
+            try:
+                from ._run_control import SessionRunControl
+                run_control = SessionRunControl(
+                    busy_mode=self.config.busy_mode,
+                    busy_ack_template=getattr(self.config, 'busy_ack', "⏳ {action} — will be considered next")
+                )
+            except ImportError:
+                logger.warning("Run control not available, falling back to basic session management")
+        
         self._session: BotSessionManager = BotSessionManager(
             store=_store,
             platform="telegram",
+            run_control=run_control,
         )
         self._debouncer: InboundDebouncer = InboundDebouncer(
             debounce_ms=self.config.debounce_ms,

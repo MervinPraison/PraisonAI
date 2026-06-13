@@ -91,6 +91,16 @@ class BotConfig:
     # When set, stale sessions older than this are auto-reaped.
     session_ttl: int = 0
     
+    # In-flight run control settings for mid-run message handling
+    # busy_mode: Policy for handling messages during active runs
+    #   - "queue": Queue message for next turn (default)
+    #   - "interrupt": Cancel current run and start new one  
+    #   - "steer": Inject message into current run via steering
+    busy_mode: str = "queue"
+    
+    # Template for busy acknowledgment messages (use {action} placeholder)
+    busy_ack: str = "⏳ {action} — will be considered next"
+    
     # Workspace settings for file operation containment and security
     workspace_dir: Optional[str] = None  # default: ~/.praisonai/workspaces/<scope>/<session_key>
     workspace_access: str = "rw"  # "rw" (read-write) | "ro" (read-only) | "none" (copy-on-write sandbox)
@@ -136,6 +146,8 @@ class BotConfig:
             "ack_emoji": self.ack_emoji,
             "done_emoji": self.done_emoji,
             "session_ttl": self.session_ttl,
+            "busy_mode": self.busy_mode,
+            "busy_ack": self.busy_ack,
             "workspace_dir": self.workspace_dir,
             "workspace_access": self.workspace_access,
             "workspace_scope": self.workspace_scope,
