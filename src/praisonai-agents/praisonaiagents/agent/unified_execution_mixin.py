@@ -82,8 +82,33 @@ class UnifiedExecutionMixin:
             self._loop_guard.reset_turn()
         
         try:
-            # CLI Backend routing - delegate entire turn if configured
-            if hasattr(self, '_cli_backend') and self._cli_backend is not None:
+            # Runtime resolution - check for model-scoped runtime before legacy CLI backend
+            runtime_instance = None
+            if hasattr(self, '_runtime_config') or hasattr(self, '_runtime_resolver'):
+                runtime_instance = await self._resolve_turn_runtime()
+            
+            # Legacy CLI Backend routing - delegate entire turn if configured (with deprecation)
+            if runtime_instance is not None:
+                return await self._chat_via_runtime(
+                    runtime_instance=runtime_instance,
+                    prompt=prompt,
+                    temperature=temperature,
+                    tools=tools,
+                    output_json=output_json,
+                    output_pydantic=output_pydantic,
+                    reasoning_steps=reasoning_steps,
+                    stream=stream,
+                    task_name=task_name,
+                    task_description=task_description,
+                    task_id=task_id,
+                    config=config,
+                    force_retrieval=force_retrieval,
+                    skip_retrieval=skip_retrieval,
+                    attachments=attachments,
+                    tool_choice=tool_choice
+                )
+            elif hasattr(self, '_cli_backend') and self._cli_backend is not None:
+                # Legacy CLI backend with deprecation warning (emitted in Agent.__init__)
                 return await self._chat_via_cli_backend(
                     prompt=prompt,
                     temperature=temperature,
