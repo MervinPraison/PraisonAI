@@ -35,6 +35,11 @@ def run_main(
     approve_all_tools: bool = typer.Option(False, "--approve-all-tools", help="Require approval for ALL tool calls, not just dangerous tools"),
     approval_timeout: Optional[str] = typer.Option(None, "--approval-timeout", help="Seconds to wait for approval. Use 'none' for indefinite wait"),
     no_rules: bool = typer.Option(False, "--no-rules", help="Disable auto-injection of project instruction files"),
+    # Session continuity options
+    continue_session: bool = typer.Option(False, "--continue", "-c", help="Continue the most recent session for this project"),
+    session: Optional[str] = typer.Option(None, "--session", "-s", help="Resume a specific session ID"),
+    fork: bool = typer.Option(False, "--fork", help="Fork from the specified session (requires --session)"),
+    no_save: bool = typer.Option(False, "--no-save", help="Don't auto-save session after execution"),
 ):
     """
     Run agents from a file or prompt.
@@ -42,11 +47,22 @@ def run_main(
     Examples:
         praisonai run agents.yaml
         praisonai run "What is the weather?"
+        praisonai run "What is the weather?" --continue
+        praisonai run "Add tests" --session abc123
         praisonai run agents.yaml --interactive
         praisonai run "What is 2+2?" --profile
     """
     output = get_output_controller()
     _ = get_current_context()  # Initialize context
+    
+    # Validate session options
+    if fork and not session:
+        output.print_error("--fork requires --session to specify which session to fork from")
+        raise typer.Exit(1)
+    
+    if continue_session and session:
+        output.print_error("Cannot use both --continue and --session together")
+        raise typer.Exit(1)
     
     if not target:
         output.print_panel(
@@ -54,6 +70,8 @@ def run_main(
             "Usage:\n"
             "  praisonai run agents.yaml\n"
             "  praisonai run \"What is the weather?\"\n"
+            "  praisonai run \"What is the weather?\" --continue\n"
+            "  praisonai run \"Add tests\" --session abc123\n"
             "  praisonai run agents.yaml --interactive\n\n"
             "Options:\n"
             "  --model, -m       LLM model to use\n"
@@ -61,7 +79,11 @@ def run_main(
             "  --interactive, -i Interactive mode\n"
             "  --verbose, -v     Verbose output\n"
             "  --trace           Enable tracing\n"
-            "  --memory          Enable memory",
+            "  --memory          Enable memory\n"
+            "  --continue, -c    Continue the most recent session\n"
+            "  --session, -s     Resume a specific session ID\n"
+            "  --fork            Fork from specified session\n"
+            "  --no-save         Don't auto-save session",
             title="Run Command"
         )
         return
@@ -90,6 +112,10 @@ def run_main(
                 framework=framework,
                 verbose=verbose,
                 profile_deep=profile_deep,
+                continue_session=continue_session,
+                session=session,
+                fork=fork,
+                no_save=no_save,
             )
         else:
             # Profiling for direct prompt
@@ -98,6 +124,10 @@ def run_main(
                 model=model,
                 verbose=verbose,
                 profile_deep=profile_deep,
+                continue_session=continue_session,
+                session=session,
+                fork=fork,
+                no_save=no_save,
             )
         return
     
@@ -115,6 +145,10 @@ def run_main(
             tools=tools,
             max_tokens=max_tokens,
             output_mode=output_mode,
+            continue_session=continue_session,
+            session=session,
+            fork=fork,
+            no_save=no_save,
         )
     else:
         # Run as prompt
@@ -133,6 +167,10 @@ def run_main(
             approve_all_tools=approve_all_tools,
             approval_timeout=approval_timeout,
             no_rules=no_rules,
+            continue_session=continue_session,
+            session=session,
+            fork=fork,
+            no_save=no_save,
         )
 
 
@@ -148,6 +186,10 @@ def _run_from_file(
     tools: Optional[str] = None,
     max_tokens: int = 16000,
     output_mode: Optional[str] = None,
+    continue_session: bool = False,
+    session: Optional[str] = None,
+    fork: bool = False,
+    no_save: bool = False,
 ):
     """Run agents from a YAML file."""
     output = get_output_controller()
@@ -164,6 +206,58 @@ def _run_from_file(
         # Set model if provided
         if model:
             praison.config_list[0]['model'] = model
+        
+        # Handle session continuity for YAML files
+        session_id = None
+        auto_save_name = None
+        
+        if continue_session or session or fork:
+            from ..state.project_sessions import get_project_session_store, find_last_session
+            
+            if continue_session:
+                # Find last session for this project
+                session_id = find_last_session()
+                if session_id:
+                    output.print_info(f"Continuing session: {session_id}")
+                else:
+                    output.print_warning("No previous sessions found. Starting new session.")
+                    
+            elif session:
+                # Use specific session
+                project_store = get_project_session_store()
+                if project_store.session_exists(session):
+                    session_id = session
+                    output.print_info(f"Resuming session: {session_id}")
+                else:
+                    output.print_error(f"Session not found: {session}")
+                    raise typer.Exit(1)
+                
+                # Handle forking
+                if fork:
+                    from praisonaiagents.session.hierarchy import HierarchicalSessionStore
+                    from ..utils.project import get_project_sessions_dir
+                    
+                    # Create hierarchical store for forking
+                    hierarchical_store = HierarchicalSessionStore(str(get_project_sessions_dir()))
+                    forked_session_id = hierarchical_store.fork_session(session_id)
+                    session_id = forked_session_id
+                    output.print_info(f"Forked session {session} -> {forked_session_id}")
+        
+        # Enable auto-save if not disabled
+        if not no_save:
+            import uuid
+            auto_save_name = session_id or "session-" + str(uuid.uuid4())[:8]
+        
+        # Create args-like object for session configuration
+        if session_id or auto_save_name:
+            class Args:
+                pass
+            
+            args = Args()
+            args.auto_save = auto_save_name
+            args.resume_session = session_id
+            
+            praison.args = args
         
         # Run
         result = praison.run()
@@ -198,11 +292,64 @@ def _run_prompt(
     approve_all_tools: bool = False,
     approval_timeout: Optional[str] = None,
     no_rules: bool = False,
+    continue_session: bool = False,
+    session: Optional[str] = None,
+    fork: bool = False,
+    no_save: bool = False,
 ):
     """Run a direct prompt."""
     output = get_output_controller()
     
     try:
+        # Handle session continuity first (before any execution mode)
+        from praisonai.cli.main import PraisonAI
+        
+        praison = PraisonAI()
+        
+        if model:
+            praison.config_list[0]['model'] = model
+        
+        # Handle session continuity
+        session_id = None
+        auto_save_name = None
+        
+        if continue_session or session or fork:
+            from ..state.project_sessions import get_project_session_store, find_last_session
+            
+            if continue_session:
+                # Find last session for this project
+                session_id = find_last_session()
+                if session_id:
+                    output.print_info(f"Continuing session: {session_id}")
+                else:
+                    output.print_warning("No previous sessions found. Starting new session.")
+                    
+            elif session:
+                # Use specific session
+                project_store = get_project_session_store()
+                if project_store.session_exists(session):
+                    session_id = session
+                    output.print_info(f"Resuming session: {session_id}")
+                else:
+                    output.print_error(f"Session not found: {session}")
+                    raise typer.Exit(1)
+                
+                # Handle forking
+                if fork:
+                    from praisonaiagents.session.hierarchy import HierarchicalSessionStore
+                    from ..utils.project import get_project_sessions_dir
+                    
+                    # Create hierarchical store for forking
+                    hierarchical_store = HierarchicalSessionStore(str(get_project_sessions_dir()))
+                    forked_session_id = hierarchical_store.fork_session(session_id)
+                    session_id = forked_session_id
+                    output.print_info(f"Forked session {session} -> {forked_session_id}")
+
+        # Enable auto-save if not disabled (for all runs, not just session continuity)
+        if not no_save:
+            import uuid
+            auto_save_name = session_id or "session-" + str(uuid.uuid4())[:8]
+
         # If output_mode is "actions", use direct Agent with actions preset
         if output_mode == "actions":
             from praisonaiagents import Agent
@@ -223,6 +370,12 @@ def _run_prompt(
                     approval, all_tools=approve_all_tools, timeout=approval_timeout,
                 )
             
+            # Add session support to Agent if needed
+            if session_id:
+                agent_config["resume_session"] = session_id
+            if auto_save_name:
+                agent_config["auto_save"] = auto_save_name
+            
             agent = Agent(**agent_config)
             result = agent.start(prompt)
             
@@ -234,14 +387,8 @@ def _run_prompt(
             # Don't print result again - actions mode already shows output
             return
         
-        # Use existing handle_direct_prompt for other modes
-        from praisonai.cli.main import PraisonAI
-        
-        praison = PraisonAI()
-        
-        if model:
-            praison.config_list[0]['model'] = model
-        
+        # Use handle_direct_prompt for other modes
+
         # Create args-like object for handle_direct_prompt
         class Args:
             pass
@@ -262,8 +409,10 @@ def _run_prompt(
         args.auto_approve_plan = False
         args.final_agent = None
         args.user_id = None
-        args.auto_save = None
+        # Enable session features based on flags
+        args.auto_save = auto_save_name
         args.history = None
+        args.resume_session = session_id
         args.include_rules = None if no_rules else "auto"
         args.no_rules = no_rules
         args.workflow = None
@@ -290,6 +439,45 @@ def _run_prompt(
         args.approval = approval
         
         praison.args = args
+        
+        # If output_mode is "actions", use direct Agent with actions preset
+        if output_mode == "actions":
+            from praisonaiagents import Agent
+            
+            agent_config = {
+                "name": "RunAgent",
+                "role": "Assistant", 
+                "goal": "Complete the task",
+                "output": "actions",  # Use actions preset
+            }
+            if model:
+                agent_config["llm"] = model
+            
+            # Resolve approval backend if specified
+            if approval:
+                from praisonai.cli.features.approval import resolve_approval_config
+                agent_config["approval"] = resolve_approval_config(
+                    approval, all_tools=approve_all_tools, timeout=approval_timeout,
+                )
+            
+            # Add session support to Agent if needed
+            if session_id:
+                agent_config["resume_session"] = session_id
+            if auto_save_name:
+                agent_config["auto_save"] = auto_save_name
+            
+            agent = Agent(**agent_config)
+            result = agent.start(prompt)
+            
+            output.emit_result(
+                message="Prompt completed",
+                data={"result": str(result) if result else None}
+            )
+            
+            # Don't print result again - actions mode already shows output
+            return
+        
+        # Use handle_direct_prompt for other modes
         result = praison.handle_direct_prompt(prompt)
         
         output.emit_result(
@@ -312,6 +500,10 @@ def _run_from_file_profiled(
     framework: Optional[str] = None,
     verbose: bool = False,
     profile_deep: bool = False,
+    continue_session: bool = False,
+    session: Optional[str] = None,
+    fork: bool = False,
+    no_save: bool = False,
 ):
     """Run agents from a YAML file with profiling enabled."""
     from praisonai.cli.features.cli_profiler import (
@@ -366,6 +558,10 @@ def _run_prompt_profiled(
     model: Optional[str] = None,
     verbose: bool = False,
     profile_deep: bool = False,
+    continue_session: bool = False,
+    session: Optional[str] = None,
+    fork: bool = False,
+    no_save: bool = False,
 ):
     """Run a direct prompt with profiling enabled."""
     from praisonai.cli.features.cli_profiler import (
