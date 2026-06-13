@@ -73,12 +73,8 @@ def _should_redact(key: str) -> bool:
     if normalized in REDACT_KEYS:
         return True
     
-    # Check if any redact key is contained in the normalized key
-    for redact_key in REDACT_KEYS:
-        if redact_key in normalized:
-            return True
-    
-    return False
+    # Use compiled regex for substring matching instead of O(N) loop
+    return bool(_REDACT_PATTERN.search(normalized))
 
 
 def redact_dict(data: Dict[str, Any], enabled: bool = True) -> Dict[str, Any]:
