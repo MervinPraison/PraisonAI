@@ -396,6 +396,10 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
                     self._agent,
                     message.sender.user_id,
                     body,
+                    chat_id=message.sender.user_id,
+                    user_name=message.sender.display_name or "",
+                    message_id=message.message_id,
+                    account=self._config.get("account", "default"),
                 )
                 
                 if response:

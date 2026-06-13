@@ -265,6 +265,8 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                             self._agent, user_id, message_text,
                             chat_id=str(update.message.chat_id) if update.message.chat_id else "",
                             user_name=user_name,
+                            message_id=str(update.message.message_id),
+                            account=self.config.get("account", "default"),
                             stream_callback=streamer.on_event,
                         )
                         
@@ -299,6 +301,8 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                                     self._agent, user_id, message_text,
                                     chat_id=str(update.message.chat_id) if update.message.chat_id else "",
                                     user_name=user_name,
+                                    message_id=str(update.message.message_id),
+                                    account=self.config.get("account", "default"),
                                 )
                             )
                         else:
@@ -306,6 +310,8 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                                 self._agent, user_id, message_text,
                                 chat_id=str(update.message.chat_id) if update.message.chat_id else "",
                                 user_name=user_name,
+                                message_id=str(update.message.message_id),
+                                account=self.config.get("account", "default"),
                             )
                         
                         # Normal send flow for non-streaming
