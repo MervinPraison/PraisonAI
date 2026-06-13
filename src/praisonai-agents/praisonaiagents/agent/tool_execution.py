@@ -300,6 +300,35 @@ class ToolExecutionMixin:
                     with with_injection_context(state):
                         result = self._execute_tool_with_circuit_breaker(function_name, arguments)
             
+            # Apply runtime-scoped middleware normalization BEFORE hooks fire
+            # Plugin harnesses can register middleware to normalize vendor-specific results
+            runtime_id = getattr(self, '_runtime_id', 'praisonai')  # Default to native runtime
+            if runtime_id != 'praisonai':  # Skip for native runtime to avoid allocation
+                try:
+                    from ..runtime import get_middleware, MiddlewareContext
+                    middleware = get_middleware(runtime_id)
+                    
+                    ctx = MiddlewareContext(
+                        tool_name=function_name,
+                        runtime_id=runtime_id,
+                        agent_id=self.name,
+                        session_id=getattr(self, '_session_id', None),
+                        execution_time_ms=(_time.time() - _tool_start_time) * 1000,
+                        metadata={'original_result_type': type(result).__name__}
+                    )
+                    
+                    normalized = middleware.normalize(result, function_name, ctx)
+                    # Use normalized content as the result for downstream processing
+                    result = normalized.content
+                    
+                    logging.debug(f"Applied runtime middleware for {runtime_id}: {function_name}")
+                except ImportError:
+                    # Runtime middleware not available - continue without normalization
+                    logging.debug("Runtime middleware not available, skipping normalization")
+                except Exception as e:
+                    # Don't let middleware failures break tool execution
+                    logging.warning(f"Runtime middleware failed for {runtime_id}: {e}")
+            
             # Apply prompt injection protection for external tools
             # Zero-cost for trusted tools, wraps external content in security markers
             result = wrap_if_external(function_name, result)
