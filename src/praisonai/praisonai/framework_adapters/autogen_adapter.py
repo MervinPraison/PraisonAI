@@ -24,21 +24,26 @@ class AutoGenAdapter(BaseFrameworkAdapter):
         from .._framework_availability import is_available
         return is_available("autogen")
     
-    def resolve(self) -> "BaseFrameworkAdapter":
-        """Pick the concrete AutoGen adapter variant based on environment and availability."""
-        autogen_version = os.environ.get("AUTOGEN_VERSION", "auto").lower()
+    def resolve(self, *, config: Optional[Dict[str, Any]] = None) -> "BaseFrameworkAdapter":
+        """Pick the concrete AutoGen adapter variant based on config and environment."""
+        # Priority: config['autogen_version'] > environment > 'auto'
+        version = "auto"
+        if config and config.get("autogen_version"):
+            version = str(config["autogen_version"]).lower()
+        else:
+            version = os.environ.get("AUTOGEN_VERSION", "auto").lower()
         
         # Import the specific adapters
         v4_adapter = AutoGenV4Adapter()
         v2_adapter = self  # Current instance is v0.2
         
-        if autogen_version == "v0.4" and v4_adapter.is_available():
+        if version == "v0.4" and v4_adapter.is_available():
             logger.info("AutoGen version resolution: Using v0.4 (explicitly requested)")
             return v4_adapter
-        elif autogen_version == "v0.2" and v2_adapter.is_available():
+        elif version == "v0.2" and v2_adapter.is_available():
             logger.info("AutoGen version resolution: Using v0.2 (explicitly requested)")
             return v2_adapter
-        elif autogen_version == "auto":
+        elif version == "auto":
             # Auto-detect: prefer v0.4 if available, fallback to v0.2
             if v4_adapter.is_available():
                 logger.info("AutoGen version resolution: Using v0.4 (auto-detected)")

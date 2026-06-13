@@ -376,14 +376,12 @@ class AgentsGenerator:
         # Build tools dictionary using shared logic
         tools_dict = self._build_tools_dict(config)
         
-        # Select framework with AutoGen version logic
-        framework = self._select_autogen_version(
-            self.framework or config.get('framework', 'praisonai'),
-            config,
-        )
+        # Get base framework and resolve adapter with config
+        framework = self.framework or config.get('framework', 'praisonai')
+        adapter = self._get_framework_adapter(framework).resolve(config=config)
         
-        # Get and resolve adapter
-        adapter = self._get_framework_adapter(framework).resolve()
+        # Initialize AgentOps if configured
+        self._maybe_init_agentops(adapter.name)
         
         # Validate framework availability
         from .framework_adapters.validators import assert_framework_available
@@ -473,38 +471,15 @@ class AgentsGenerator:
         
         return tools_dict
     
-    def _select_autogen_version(self, framework, config):
-        """Shared AutoGen version selection logic for sync and async paths."""
-        if framework == "autogen":
-            autogen_v4_adapter = self._get_framework_adapter("autogen_v4")
-            autogen_v2_adapter = self._get_framework_adapter("autogen")
-            
-            autogen_version = str(
-                config.get('autogen_version', os.environ.get("AUTOGEN_VERSION", "auto"))
-            ).lower()
-            use_v4 = False
-            
-            if autogen_version == "v0.4" and autogen_v4_adapter.is_available():
-                use_v4 = True
-            elif autogen_version == "v0.2" and autogen_v2_adapter.is_available():
-                use_v4 = False
-            elif autogen_version == "auto":
-                use_v4 = autogen_v4_adapter.is_available()
-            else:
-                use_v4 = autogen_v4_adapter.is_available() and not autogen_v2_adapter.is_available()
-            
-            framework = "autogen_v4" if use_v4 else "autogen"
-        
-        # Initialize AgentOps if configured
+    def _maybe_init_agentops(self, framework_name: str) -> None:
+        """Initialize AgentOps if configured, extracted from _select_autogen_version."""
         agentops_api_key = os.getenv("AGENTOPS_API_KEY")
         if agentops_api_key:
             try:
                 import agentops
-                agentops.init(agentops_api_key, default_tags=[framework])
+                agentops.init(agentops_api_key, default_tags=[framework_name])
             except ImportError:
                 pass
-        
-        return framework
     
     def _validate_cli_backend_compatibility(self, config, framework):
         """Validate that cli_backend is only used with compatible frameworks."""
