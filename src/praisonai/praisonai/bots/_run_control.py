@@ -69,6 +69,7 @@ class SessionRunState:
         self.pending_message: Optional[str] = None
         self.interrupt_controller: Optional["InterruptController"] = None
         self.start_time: Optional[float] = None
+        self.last_activity: float = time.time()  # Always track activity for cleanup
 
 
 class SessionRunControl:
@@ -125,6 +126,7 @@ class SessionRunControl:
         lock = self._get_lock(user_id)
         async with lock:
             session = self._get_session(user_id)
+            session.last_activity = time.time()  # Update activity timestamp
             
             if not session.is_running:
                 # No active run, start immediately
@@ -165,7 +167,7 @@ class SessionRunControl:
                 # Try to inject into running agent via steering
                 # Note: This requires the agent to have steering enabled
                 # For now, we'll fall back to queueing
-                logger.debug(f"Steer mode not fully implemented, falling back to queue")
+                logger.warning("Steer mode is not yet implemented, falling back to queue mode")
                 # TODO: Implement steering integration when agent reference is available
                 
             # Default to queue mode (or steer fallback)
@@ -261,6 +263,7 @@ class SessionRunControl:
         lock = self._get_lock(user_id)
         async with lock:
             session = self._get_session(user_id)
+            session.last_activity = time.time()  # Update activity timestamp
             
             # Race protection: only clear if this is the current generation
             if run_generation is None or run_generation == session.run_generation:
@@ -329,7 +332,8 @@ class SessionRunControl:
         stale_users = []
         
         for user_id, session in self._sessions.items():
-            if session.start_time and (now - session.start_time) > max_age_seconds:
+            # Clean up based on last activity instead of only active runs
+            if (now - session.last_activity) > max_age_seconds:
                 stale_users.append(user_id)
                 
         for user_id in stale_users:
