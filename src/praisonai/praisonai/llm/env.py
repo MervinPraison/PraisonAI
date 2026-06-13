@@ -7,7 +7,7 @@ from environment variables, ensuring consistent precedence across all components
 
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Callable
 
 
 @dataclass(frozen=True)
@@ -54,17 +54,22 @@ def _provider_from_model(model: str) -> tuple[str, str | None]:
     return _DEFAULT_KEY_VAR, None
 
 
-def resolve_llm_endpoint(*, default_base: str = _DEFAULT_BASE) -> LLMEndpoint:
+def resolve_llm_endpoint(
+    *, 
+    default_base: str = _DEFAULT_BASE, 
+    fallback_lookup: Optional[Callable[[str], Optional[dict]]] = None
+) -> LLMEndpoint:
     """
     Resolve LLM endpoint configuration from environment variables.
     
     Precedence order:
-    - Model: MODEL_NAME > OPENAI_MODEL_NAME > default
-    - Base URL: OPENAI_BASE_URL > OPENAI_API_BASE > OLLAMA_API_BASE > provider default > default
-    - API Key: provider-specific key (e.g., ANTHROPIC_API_KEY) > OPENAI_API_KEY fallback
+    - Model: MODEL_NAME > OPENAI_MODEL_NAME > fallback > default
+    - Base URL: OPENAI_BASE_URL > OPENAI_API_BASE > OLLAMA_API_BASE > provider default > fallback > default
+    - API Key: provider-specific key (e.g., ANTHROPIC_API_KEY) > OPENAI_API_KEY fallback > stored credentials > None
     
     Args:
         default_base: Default base URL if none found in environment variables
+        fallback_lookup: Optional callable to get stored credentials (provider_name) -> dict
         
     Returns:
         LLMEndpoint with resolved configuration
@@ -84,4 +89,25 @@ def resolve_llm_endpoint(*, default_base: str = _DEFAULT_BASE) -> LLMEndpoint:
         os.environ.get("OPENAI_API_KEY") if key_var == "OPENAI_API_KEY" else None
     )
     
-    return LLMEndpoint(model=model, base_url=base_url, api_key=api_key)
+    # If no env API key found and fallback lookup provided, try stored credentials
+    fallback_model = None
+    fallback_base = None
+    if not api_key and fallback_lookup:
+        try:
+            # Try common provider names
+            for provider in ["openai", "anthropic", "google", "gemini", "groq", "cohere"]:
+                cred = fallback_lookup(provider)
+                if cred and cred.get("api_key"):
+                    api_key = cred["api_key"]
+                    fallback_model = cred.get("model")
+                    fallback_base = cred.get("base_url")
+                    break
+        except Exception:
+            # Ignore fallback lookup errors
+            pass
+    
+    return LLMEndpoint(
+        model=fallback_model or model,
+        base_url=fallback_base or base_url,
+        api_key=api_key,
+    )
