@@ -1553,6 +1553,75 @@ def resolve_tools(value: ToolParam) -> Optional[ToolConfig]:
     return value
 
 
+@dataclass
+class RuntimeConfig:
+    """
+    Configuration for agent runtime capabilities and requirements.
+    
+    Used to declare what capabilities an agent requires and validate
+    against runtime implementations at config/selection time.
+    
+    Usage:
+        # Agent that requires native hooks and streaming
+        Agent(
+            instructions="...",
+            runtime=RuntimeConfig(
+                required_capabilities={"native_hooks", "streaming_deltas"}
+            )
+        )
+        
+        # Agent with runtime preference  
+        Agent(
+            runtime=RuntimeConfig(
+                preferred_runtime="native",
+                required_capabilities={"tool_loop", "mcp_tools"},
+                fallback_allowed=True
+            )
+        )
+    """
+    # Required capabilities for this agent (capability names or enum values)
+    required_capabilities: Optional[Union[List[str], FrozenSet[str], List[Any], FrozenSet[Any]]] = None
+    
+    # Preferred runtime implementation name
+    preferred_runtime: Optional[str] = None
+    
+    # Whether to allow fallback to other runtimes if preferred is unavailable
+    fallback_allowed: bool = True
+    
+    # Fail fast validation (validate at agent creation vs first execution) 
+    validate_on_creation: bool = True
+    
+    # Additional runtime metadata/hints
+    metadata: Optional[Dict[str, Any]] = field(default_factory=dict)
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "required_capabilities": list(self.required_capabilities) if self.required_capabilities else None,
+            "preferred_runtime": self.preferred_runtime,
+            "fallback_allowed": self.fallback_allowed,
+            "validate_on_creation": self.validate_on_creation,
+            "metadata": self.metadata,
+        }
+
+
+# Type aliases for runtime parameters
+RuntimeParam = Union[bool, str, Dict[str, Any], RuntimeConfig, None]
+
+
+def resolve_runtime(value: RuntimeParam) -> Optional[RuntimeConfig]:
+    """Resolve runtime= parameter following precedence ladder."""
+    if value is None or value is False:
+        return None
+    if value is True:
+        return RuntimeConfig()
+    if isinstance(value, str):
+        return RuntimeConfig(preferred_runtime=value)
+    if isinstance(value, dict):
+        return RuntimeConfig(**value)
+    if isinstance(value, RuntimeConfig):
+        return value
+    return value
 
 
 __all__ = [
@@ -1582,6 +1651,7 @@ __all__ = [
     "SkillsConfig",
     "AutonomyConfig",
     "ToolSearchConfig",
+    "RuntimeConfig",
     # Config classes (Multi-Agent)
     "MultiAgentHooksConfig",
     "MultiAgentOutputConfig",
@@ -1604,7 +1674,7 @@ __all__ = [
     "AutonomyParam",
     "ToolSearchParam", 
     "ToolParam",
-    "ToolOutputParam",
+    "RuntimeParam",
     # Precedence ladder resolvers
     "resolve_memory",
     "resolve_knowledge",
@@ -1616,5 +1686,5 @@ __all__ = [
     "resolve_autonomy",
     "resolve_tool_search",
     "resolve_tools",
-    "resolve_tool_output",
+    "resolve_runtime",
 ]
