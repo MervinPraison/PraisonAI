@@ -7,7 +7,6 @@ standardizing agent execution across different harness types.
 
 from .turn_context import (
     PreparedTurnContext, 
-    TurnRuntimeProtocol,
     ModelReference,
     ToolSchema,
     TranscriptWindow,
@@ -19,11 +18,13 @@ from .turn_context import (
     create_default_delivery,
     create_session_correlation,
 )
+from .protocols import TurnRuntimeProtocol, TurnContextBuilderProtocol
 from .context_builder import DefaultTurnContextBuilder, default_context_builder
 
 __all__ = [
     'PreparedTurnContext',
     'TurnRuntimeProtocol',
+    'TurnContextBuilderProtocol',
     'ModelReference',
     'ToolSchema', 
     'TranscriptWindow',

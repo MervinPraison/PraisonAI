@@ -9,6 +9,7 @@ from chat_mixin.py, chat_handler.py, and other execution paths.
 
 from __future__ import annotations
 
+import copy
 import logging
 import time
 import uuid
@@ -22,8 +23,8 @@ from .turn_context import (
     DeliveryChannels,
     SessionCorrelation,
     RuntimeMode,
-    TurnContextBuilderProtocol,
 )
+from .protocols import TurnContextBuilderProtocol
 
 if TYPE_CHECKING:
     from ..agent.protocols import AgentProtocol
@@ -142,16 +143,14 @@ class DefaultTurnContextBuilder:
         supports_tools = len(getattr(agent, 'tools', [])) > 0
         supports_system_prompts = getattr(agent, 'use_system_prompt', True)
         
-        # Build model config
+        # Build model config - agent defaults first, kwargs override
         model_config = {}
+        if hasattr(agent, 'model_config'):
+            model_config.update(agent.model_config)
         if 'temperature' in kwargs:
             model_config['temperature'] = kwargs['temperature']
         if 'max_tokens' in kwargs:
             model_config['max_tokens'] = kwargs['max_tokens']
-            
-        # Add agent-specific config
-        if hasattr(agent, 'model_config'):
-            model_config.update(agent.model_config)
         
         return ModelReference(
             model_id=model_id,
@@ -188,8 +187,12 @@ class DefaultTurnContextBuilder:
         kwargs: Dict[str, Any]
     ) -> List[ToolSchema]:
         """Build normalized tool schemas from agent tools."""
-        # Get tools from kwargs override or agent
-        raw_tools = kwargs.get('tools') or getattr(agent, 'tools', [])
+        # Get tools from kwargs override or agent - respect explicit empty list
+        if 'tools' in kwargs:
+            raw_tools = kwargs['tools']
+        else:
+            raw_tools = getattr(agent, 'tools', [])
+        
         if not raw_tools:
             return []
         
@@ -327,10 +330,10 @@ class DefaultTurnContextBuilder:
             except Exception as e:
                 logger.warning(f"Failed to build system prompt: {e}")
         
-        # Get conversation history
+        # Get conversation history - deep copy to prevent cross-agent mutations
         messages = []
         if hasattr(agent, 'chat_history') and agent.chat_history:
-            messages = list(agent.chat_history)
+            messages = copy.deepcopy(agent.chat_history)
         
         # Add current prompt as user message
         if prompt:

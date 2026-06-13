@@ -20,6 +20,7 @@ from .turn_context import (
     RuntimeMode,
 )
 from .context_builder import default_context_builder
+from ..streaming.events import StreamEvent, StreamEventType
 
 if TYPE_CHECKING:
     from ..agent.protocols import AgentProtocol
@@ -148,8 +149,7 @@ Response: I understand your request and would process it using the plugin infras
             # Use prepared stream emitter
             for chunk in response.split():
                 await context.delivery.stream_emitter.emit_async(
-                    # Would need actual StreamEvent here
-                    {"type": "delta_text", "content": chunk + " "}
+                    StreamEvent(type=StreamEventType.DELTA_TEXT, content=chunk + " ")
                 )
                 await asyncio.sleep(0.01)  # Simulate streaming delay
         

@@ -16,7 +16,8 @@ Design Goals:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable, Union, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING, Tuple, Mapping
+from types import MappingProxyType
 from enum import Enum
 import time
 import logging
@@ -51,14 +52,18 @@ class ModelReference:
     supports_system_prompts: bool = True
     max_tokens: Optional[int] = None
     temperature: Optional[float] = None
-    model_config: Dict[str, Any] = field(default_factory=dict)
+    model_config: Mapping[str, Any] = field(default_factory=dict)
     
     def __post_init__(self):
-        """Validate model reference."""
+        """Validate model reference and ensure immutability."""
         if not self.model_id:
             raise ValueError("model_id is required")
         if not self.provider:
             raise ValueError("provider is required")
+        
+        # Make model_config immutable
+        if not isinstance(self.model_config, MappingProxyType):
+            object.__setattr__(self, 'model_config', MappingProxyType(self.model_config))
 
 
 @dataclass(frozen=True)
@@ -74,14 +79,18 @@ class ToolSchema:
     parameters: Dict[str, Any]
     callable: Optional[Any] = None
     source_type: str = "unknown"  # function, openai, custom, etc.
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=dict)
     
     def __post_init__(self):
-        """Validate tool schema."""
+        """Validate tool schema and ensure immutability."""
         if not self.name:
             raise ValueError("Tool name is required")
         if not self.description:
             raise ValueError("Tool description is required")
+        
+        # Make metadata immutable
+        if not isinstance(self.metadata, MappingProxyType):
+            object.__setattr__(self, 'metadata', MappingProxyType(self.metadata))
 
 
 @dataclass(frozen=True)
@@ -92,15 +101,24 @@ class TranscriptWindow:
     Contains the conversation history slice to be included in the current
     turn, with token budgeting and context optimization applied.
     """
-    messages: List[Dict[str, Any]]
+    messages: Tuple[Mapping[str, Any], ...]
     total_tokens: int = 0
     system_prompt: Optional[str] = None
-    context_metadata: Dict[str, Any] = field(default_factory=dict)
+    context_metadata: Mapping[str, Any] = field(default_factory=dict)
     
     def __post_init__(self):
-        """Validate transcript window."""
-        if not isinstance(self.messages, list):
-            raise ValueError("messages must be a list")
+        """Validate transcript window and ensure immutability."""
+        # Convert to tuple of immutable mappings if needed
+        if not isinstance(self.messages, tuple):
+            immutable_messages = tuple(
+                MappingProxyType(msg) if isinstance(msg, dict) else msg
+                for msg in self.messages
+            )
+            object.__setattr__(self, 'messages', immutable_messages)
+        
+        # Make context_metadata immutable
+        if not isinstance(self.context_metadata, MappingProxyType):
+            object.__setattr__(self, 'context_metadata', MappingProxyType(self.context_metadata))
 
 
 @dataclass(frozen=True)
@@ -113,10 +131,18 @@ class DeliveryChannels:
     """
     stream_emitter: Optional[StreamEventEmitter] = None
     output_formatter: Optional[Any] = None
-    callbacks: List[Any] = field(default_factory=list)
-    async_callbacks: List[Any] = field(default_factory=list)
+    callbacks: Tuple[Any, ...] = field(default_factory=tuple)
+    async_callbacks: Tuple[Any, ...] = field(default_factory=tuple)
     enable_streaming: bool = False
     enable_metrics: bool = False
+    
+    def __post_init__(self):
+        """Ensure immutability of list fields."""
+        # Convert lists to tuples if needed
+        if isinstance(self.callbacks, list):
+            object.__setattr__(self, 'callbacks', tuple(self.callbacks))
+        if isinstance(self.async_callbacks, list):
+            object.__setattr__(self, 'async_callbacks', tuple(self.async_callbacks))
     
     def has_streaming(self) -> bool:
         """Check if streaming is configured and enabled."""
@@ -136,7 +162,12 @@ class SessionCorrelation:
     agent_id: Optional[str] = None
     run_id: Optional[str] = None
     parent_id: Optional[str] = None
-    trace_metadata: Dict[str, Any] = field(default_factory=dict)
+    trace_metadata: Mapping[str, Any] = field(default_factory=dict)
+    
+    def __post_init__(self):
+        """Ensure immutability of metadata fields."""
+        if not isinstance(self.trace_metadata, MappingProxyType):
+            object.__setattr__(self, 'trace_metadata', MappingProxyType(self.trace_metadata))
 
 
 @dataclass(frozen=True)
@@ -166,18 +197,23 @@ class PreparedTurnContext:
     """
     model_ref: ModelReference
     agent_runtime: AgentProtocol
-    tools: List[ToolSchema]
+    tools: Tuple[ToolSchema, ...]
     transcript: TranscriptWindow
     delivery: DeliveryChannels
     correlation: SessionCorrelation
     runtime_mode: RuntimeMode = RuntimeMode.SYNC
-    turn_metadata: Dict[str, Any] = field(default_factory=dict)
+    turn_metadata: Mapping[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
     
     def __post_init__(self):
-        """Validate the prepared turn context."""
-        if not isinstance(self.tools, list):
-            raise ValueError("tools must be a list")
+        """Validate the prepared turn context and ensure immutability."""
+        # Convert tools to tuple if needed
+        if not isinstance(self.tools, tuple):
+            object.__setattr__(self, 'tools', tuple(self.tools))
+        
+        # Make turn_metadata immutable
+        if not isinstance(self.turn_metadata, MappingProxyType):
+            object.__setattr__(self, 'turn_metadata', MappingProxyType(self.turn_metadata))
         
         # Validate runtime mode compatibility
         if self.runtime_mode in (RuntimeMode.STREAM, RuntimeMode.ASYNC_STREAM):
@@ -227,100 +263,6 @@ class PreparedTurnContext:
             "created_at": self.created_at,
         }
 
-
-@runtime_checkable
-class TurnRuntimeProtocol(Protocol):
-    """
-    Protocol for turn-based runtime execution.
-    
-    This protocol defines the interface that runtimes must implement to
-    execute prepared turn contexts. It standardizes the execution contract
-    across different runtime types (native, plugin, managed, etc.).
-    
-    Example:
-        ```python
-        class MyRuntime:
-            async def run_turn(self, context: PreparedTurnContext) -> str:
-                # Execute the turn using the prepared context
-                return "response"
-        
-        # Use with prepared context
-        context = PreparedTurnContext(...)
-        runtime = MyRuntime()
-        result = await runtime.run_turn(context)
-        ```
-    """
-    
-    async def run_turn(self, context: PreparedTurnContext) -> str:
-        """
-        Execute a single turn using the prepared context.
-        
-        This is the main execution entry point for all runtime types.
-        The context is immutable and contains all necessary configuration
-        for the turn execution.
-        
-        Args:
-            context: The prepared turn context containing model, tools,
-                    transcript, delivery channels, and correlation IDs
-                    
-        Returns:
-            The agent's response as a string
-            
-        Raises:
-            RuntimeError: If execution fails
-            ValueError: If context is invalid or incompatible
-        """
-        ...
-    
-    def supports_runtime_mode(self, mode: RuntimeMode) -> bool:
-        """
-        Check if this runtime supports the given execution mode.
-        
-        Args:
-            mode: The runtime mode to check
-            
-        Returns:
-            True if the mode is supported, False otherwise
-        """
-        ...
-    
-    def get_supported_modes(self) -> List[RuntimeMode]:
-        """
-        Get all runtime modes supported by this implementation.
-        
-        Returns:
-            List of supported RuntimeMode values
-        """
-        ...
-
-
-@runtime_checkable  
-class TurnContextBuilderProtocol(Protocol):
-    """
-    Protocol for building PreparedTurnContext instances.
-    
-    This protocol defines the interface for context builders that prepare
-    turn contexts from agent configuration and request parameters.
-    """
-    
-    def build_context(
-        self,
-        agent: AgentProtocol,
-        prompt: str,
-        **kwargs: Any
-    ) -> PreparedTurnContext:
-        """
-        Build a prepared turn context from agent and request.
-        
-        Args:
-            agent: The agent instance
-            prompt: The user prompt for this turn
-            **kwargs: Additional request parameters
-            
-        Returns:
-            A prepared turn context ready for execution
-        """
-        ...
 
 
 # Utility functions for context building

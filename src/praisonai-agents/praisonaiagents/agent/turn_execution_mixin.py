@@ -127,14 +127,18 @@ class TurnExecutionMixin:
         Returns:
             Agent response
         """
-        # Run the async implementation in sync context
-        if hasattr(self, '_is_async_context') and self._is_async_context:
-            # We're already in an async context, use existing event loop
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # Create a task and run it
-                task = loop.create_task(self._execute_with_prepared_context(prompt, **kwargs))
-                return asyncio.run_coroutine_threadsafe(task, loop).result()
+        # Check if we're already in a running event loop
+        try:
+            loop = asyncio.get_running_loop()
+            # If we get here, there's already a running loop
+            agent_id = getattr(self, 'id', getattr(self, 'session_id', getattr(self, 'name', 'unknown')))
+            raise RuntimeError(
+                f"Cannot call chat_with_context from within a running event loop. "
+                f"Use achat_with_context instead. Agent: {agent_id}"
+            )
+        except RuntimeError:
+            # No running loop, safe to call asyncio.run
+            pass
         
         # Run in new event loop
         return asyncio.run(self._execute_with_prepared_context(prompt, **kwargs))
@@ -233,7 +237,7 @@ class DefaultAgentRuntime:
         system_prompt = context.transcript.system_prompt
         
         # Execute based on runtime mode
-        if context.runtime_mode == RuntimeMode.STREAM:
+        if context.runtime_mode in (RuntimeMode.STREAM, RuntimeMode.ASYNC_STREAM):
             return await self._execute_streaming(
                 llm_client, prompt, system_prompt, chat_history, tools, model_config, context
             )
@@ -262,8 +266,9 @@ class DefaultAgentRuntime:
                 **model_config
             )
         else:
-            # Fallback to sync method
-            return llm_client.get_response(
+            # Fallback to sync method - wrap in thread to avoid blocking event loop
+            return await asyncio.to_thread(
+                llm_client.get_response,
                 prompt=prompt,
                 system_prompt=system_prompt,
                 chat_history=chat_history,
@@ -298,7 +303,8 @@ class DefaultAgentRuntime:
                 **model_config
             )
         else:
-            response = llm_client.get_response(
+            response = await asyncio.to_thread(
+                llm_client.get_response,
                 prompt=prompt,
                 system_prompt=system_prompt,
                 chat_history=chat_history,

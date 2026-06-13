@@ -230,12 +230,18 @@ def test_context_immutability():
     
     context = builder.build_context(agent=agent, prompt="Test")
     
-    # Should not be able to modify the context
+    # Should not be able to modify the context attributes
     with pytest.raises(AttributeError):
         context.model_ref = create_default_model_ref("gpt-4")
     
-    with pytest.raises(AttributeError):
-        context.tools.append(ToolSchema("new", "desc", {}))
+    # Tools should be a tuple (immutable)
+    assert isinstance(context.tools, tuple)
+    
+    # Messages should be tuple of immutable mappings
+    assert isinstance(context.transcript.messages, tuple)
+    if context.transcript.messages:
+        # Each message should be immutable
+        assert hasattr(context.transcript.messages[0], 'keys')  # Is mapping-like
 
 
 @pytest.mark.asyncio
@@ -285,25 +291,15 @@ def test_utility_functions():
 
 def test_runtime_mode_validation():
     """Test runtime mode validation in context."""
-    builder = DefaultTurnContextBuilder()
-    agent = MockAgent()
-    
     # Test that streaming mode requires streaming configuration
     with pytest.raises(ValueError, match="requires streaming configuration"):
-        context = builder.build_context(
-            agent=agent,
-            prompt="Test",
-            stream=True  # This should enable streaming in delivery
-        )
-        
-        # Manually break the delivery to test validation
-        broken_context = PreparedTurnContext(
-            model_ref=context.model_ref,
-            agent_runtime=context.agent_runtime,
-            tools=context.tools,
-            transcript=context.transcript,
+        PreparedTurnContext(
+            model_ref=create_default_model_ref(),
+            agent_runtime=MockAgent(),
+            tools=(),
+            transcript=create_empty_transcript(),
             delivery=create_default_delivery(),  # No streaming
-            correlation=context.correlation,
+            correlation=create_session_correlation(),
             runtime_mode=RuntimeMode.STREAM  # But stream mode requested
         )
 

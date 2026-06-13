@@ -194,6 +194,19 @@ class PreparedTurnMixin:
         if hasattr(self, '_execute_sync'):
             return self._execute_sync(context)
         else:
+            # Check if we're already in a running event loop
+            try:
+                loop = asyncio.get_running_loop()
+                # If we get here, there's already a running loop
+                agent_id = getattr(self, 'id', getattr(self, 'session_id', getattr(self, 'name', 'unknown')))
+                raise RuntimeError(
+                    f"Cannot call chat_with_prepared_context from within a running event loop. "
+                    f"Use achat_with_prepared_context instead. Agent: {agent_id}"
+                )
+            except RuntimeError:
+                # No running loop, safe to call asyncio.run
+                pass
+            
             # Fallback to asyncio.run
             return asyncio.run(self.execute_prepared_turn(context))
 
@@ -283,7 +296,7 @@ class PreparedTurnMixin:
                     self._memory_instance.store_short_term(
                         f"User: {prompt}\nAssistant: {response}",
                         metadata={
-                            "agent_id": getattr(self, 'agent_id', self.name),
+                            "agent_id": getattr(self, 'agent_id', getattr(self, 'name', 'unknown_agent')),
                             "turn_id": context.correlation.turn_id,
                             "session_id": context.correlation.session_id
                         }
@@ -332,18 +345,16 @@ class PreparedTurnBridgeRuntime:
             if hasattr(self.agent, '_unified_chat_impl'):
                 # Use unified execution if available
                 response = await self.agent._unified_chat_impl(**execution_params)
-            elif hasattr(self.agent, 'get_response_async'):
-                # Use LLM client directly
-                llm_client = getattr(self.agent, 'llm_instance', None) or getattr(self.agent, 'llm', None)
-                if llm_client:
-                    response = await llm_client.get_response_async(**execution_params)
-                else:
-                    raise RuntimeError("No LLM client available")
             else:
-                # Fallback to sync method
-                if hasattr(self.agent, 'chat'):
+                # Get LLM client and check if it has async support
+                llm_client = getattr(self.agent, 'llm_instance', None) or getattr(self.agent, 'llm', None)
+                if llm_client and hasattr(llm_client, 'get_response_async'):
+                    response = await llm_client.get_response_async(**execution_params)
+                elif hasattr(self.agent, 'chat'):
+                    # Fallback to sync method - avoid duplicate prompt
                     prompt = execution_params.get('prompt', '')
-                    response = self.agent.chat(prompt, **execution_params)
+                    passthrough = {k: v for k, v in execution_params.items() if k != 'prompt'}
+                    response = self.agent.chat(prompt, **passthrough)
                 else:
                     raise RuntimeError("No execution method available")
             
@@ -392,8 +403,8 @@ class PreparedTurnBridgeRuntime:
             original_system = getattr(self.agent, 'use_system_prompt', True)
             params['system_prompt'] = context.transcript.system_prompt
             
-        # Add chat history
-        chat_history = [msg for msg in context.transcript.messages if msg.get('role') != 'user']
+        # Add chat history (exclude only the current user message, keep prior conversation)
+        chat_history = context.transcript.messages[:-1]  # Exclude current user message
         if chat_history:
             params['chat_history'] = chat_history
         
