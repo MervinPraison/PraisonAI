@@ -1041,6 +1041,87 @@ class AgentTeam(SpawnAnnounceProtocol):
         task_result = _process_task_result(self, context, agent_output)
         return task_result.task_output
 
+    def _apply_task_guardrail(self, task, task_id, task_output):
+        """Apply guardrail validation to task output.
+        
+        Returns:
+            tuple: (task_output, should_retry) where should_retry is True if task should be retried
+            
+        Raises:
+            Exception: If guardrail validation fails after max retries
+        """
+        if not task._guardrail_fn:
+            return task_output, False
+            
+        try:
+            guardrail_result = task._process_guardrail(task_output)
+            if not guardrail_result.success:
+                if task.retry_count >= task.max_retries:
+                    raise Exception(
+                        f"Task failed guardrail validation after {task.max_retries} retries. "
+                        f"Last error: {guardrail_result.error}"
+                    )
+                
+                task.retry_count += 1
+                task.status = "in progress"  # Keep task in progress for retry
+                logger.warning(f"Task {task_id}: Guardrail validation failed (retry {task.retry_count}/{task.max_retries}): {guardrail_result.error}")
+                return task_output, True  # Signal retry needed
+            
+            # If guardrail passed and returned a modified result
+            if guardrail_result.result is not None:
+                if isinstance(guardrail_result.result, str):
+                    # Update the task output with the modified result
+                    task_output.raw = guardrail_result.result
+                    # Clear structured fields to avoid stale cache
+                    if hasattr(task_output, 'json_dict'):
+                        task_output.json_dict = None
+                    if hasattr(task_output, 'pydantic'):
+                        task_output.pydantic = None
+                    task.result = task_output
+                elif hasattr(guardrail_result.result, 'raw'):
+                    # Replace with the new task output
+                    task_output = guardrail_result.result
+                    task.result = task_output
+            
+            logger.info(f"Task {task_id}: Guardrail validation passed")
+            return task_output, False  # No retry needed
+            
+        except Exception as e:
+            logger.error(f"Task {task_id}: Error in guardrail processing: {e}")
+            # Handle guardrail failure with retry logic
+            if task.retry_count >= task.max_retries:
+                raise Exception(
+                    f"Task failed due to guardrail processing error after {task.max_retries} retries. "
+                    f"Last error: {e}"
+                ) from e
+            task.retry_count += 1
+            task.status = "in progress"
+            logger.warning(f"Task {task_id}: Guardrail processing error (retry {task.retry_count}/{task.max_retries}): {e}")
+            return task_output, True  # Signal retry needed
+
+    def _run_task_callback(self, task, task_id, task_output):
+        """Execute task callback (handles both sync and async callbacks).
+        
+        Args:
+            task: The task object
+            task_id: Task identifier for logging
+            task_output: Task output to pass to callback
+        """
+        if not task.callback:
+            return
+            
+        try:
+            if asyncio.iscoroutinefunction(task.callback):
+                if run_coroutine_safely:
+                    run_coroutine_safely(task.callback(task_output))
+                else:
+                    logger.warning("run_coroutine_safely not available, skipping async callback")
+            else:
+                task.callback(task_output)
+        except Exception as e:
+            logger.error(f"Error executing task callback for task {task_id}: {e}")
+            logger.exception(e)
+
     async def arun_task(self, task_id):
         """Async version of run_task method"""
         if task_id not in self.tasks:
@@ -1059,53 +1140,11 @@ class AgentTeam(SpawnAnnounceProtocol):
             if task.status in ["not started", "in progress"]:
                 task_output = await self.aexecute_task(task_id)
                 if task_output and self.completion_checker(task, task_output.raw):
-                    # Run guardrail validation BEFORE marking task complete
-                    if task._guardrail_fn:
-                        try:
-                            guardrail_result = task._process_guardrail(task_output)
-                            if not guardrail_result.success:
-                                if task.retry_count >= task.max_retries:
-                                    raise Exception(
-                                        f"Task failed guardrail validation after {task.max_retries} retries. "
-                                        f"Last error: {guardrail_result.error}"
-                                    )
-                                
-                                task.retry_count += 1
-                                task.status = "in progress"  # Keep task in progress for retry
-                                logger.warning(f"Task {task_id}: Guardrail validation failed (retry {task.retry_count}/{task.max_retries}): {guardrail_result.error}")
-                                retries += 1
-                                continue  # Actually retry the task
-                            
-                            # If guardrail passed and returned a modified result
-                            if guardrail_result.result is not None:
-                                if isinstance(guardrail_result.result, str):
-                                    # Update the task output with the modified result
-                                    task_output.raw = guardrail_result.result
-                                    # Clear structured fields to avoid stale cache
-                                    if hasattr(task_output, 'json_dict'):
-                                        task_output.json_dict = None
-                                    if hasattr(task_output, 'pydantic'):
-                                        task_output.pydantic = None
-                                    task.result = task_output
-                                elif hasattr(guardrail_result.result, 'raw'):
-                                    # Replace with the new task output
-                                    task_output = guardrail_result.result
-                                    task.result = task_output
-                            
-                            logger.info(f"Task {task_id}: Guardrail validation passed")
-                        except Exception as e:
-                            logger.error(f"Task {task_id}: Error in guardrail processing: {e}")
-                            # Handle guardrail failure with retry logic
-                            if task.retry_count >= task.max_retries:
-                                raise Exception(
-                                    f"Task failed due to guardrail processing error after {task.max_retries} retries. "
-                                    f"Last error: {e}"
-                                ) from e
-                            task.retry_count += 1
-                            task.status = "in progress"
-                            logger.warning(f"Task {task_id}: Guardrail processing error (retry {task.retry_count}/{task.max_retries}): {e}")
-                            retries += 1
-                            continue  # Retry the task
+                    # Apply guardrail validation using shared helper
+                    task_output, should_retry = self._apply_task_guardrail(task, task_id, task_output)
+                    if should_retry:
+                        retries += 1
+                        continue
                     
                     task.status = "completed"
                     # Run execute_callback for memory operations
@@ -1120,19 +1159,8 @@ class AgentTeam(SpawnAnnounceProtocol):
                         if hasattr(task, 'fail_on_memory_error') and task.fail_on_memory_error:
                             raise
                     
-                    # Run task callback if exists
-                    if task.callback:
-                        try:
-                            if asyncio.iscoroutinefunction(task.callback):
-                                if run_coroutine_safely:
-                                    run_coroutine_safely(task.callback(task_output))
-                                else:
-                                    logger.warning("run_coroutine_safely not available, skipping async callback")
-                            else:
-                                task.callback(task_output)
-                        except Exception as e:
-                            logger.error(f"Error executing task callback for task {task_id}: {e}")
-                            logger.exception(e)
+                    # Run task callback using shared helper
+                    self._run_task_callback(task, task_id, task_output)
                             
                     self.save_output_to_file(task, task_output)
                     if self.verbose >= 1:
@@ -1347,52 +1375,11 @@ class AgentTeam(SpawnAnnounceProtocol):
             if task.status in ["not started", "in progress"]:
                 task_output = self.execute_task(task_id)
                 if task_output and self.completion_checker(task, task_output.raw):
-                    # Add guardrail validation (matches arun_task logic)
-                    if task._guardrail_fn:
-                        try:
-                            guardrail_result = task._process_guardrail(task_output)
-                            if not guardrail_result.success:
-                                if task.retry_count >= task.max_retries:
-                                    raise Exception(
-                                        f"Task failed guardrail validation after {task.max_retries} retries. "
-                                        f"Last error: {guardrail_result.error}"
-                                    )
-                                task.retry_count += 1
-                                task.status = "in progress"  # Keep task in progress for retry
-                                logger.warning(f"Task {task_id}: Guardrail validation failed (retry {task.retry_count}/{task.max_retries}): {guardrail_result.error}")
-                                retries += 1
-                                continue  # Retry the task
-                            
-                            # If guardrail passed and returned a modified result
-                            if guardrail_result.result is not None:
-                                if isinstance(guardrail_result.result, str):
-                                    # Update the task output with the modified result
-                                    task_output.raw = guardrail_result.result
-                                    # Clear structured fields to avoid stale cache
-                                    if hasattr(task_output, 'json_dict'):
-                                        task_output.json_dict = None
-                                    if hasattr(task_output, 'pydantic'):
-                                        task_output.pydantic = None
-                                    task.result = task_output
-                                elif hasattr(guardrail_result.result, 'raw'):
-                                    # Replace with the new task output
-                                    task_output = guardrail_result.result
-                                    task.result = task_output
-                            
-                            logger.info(f"Task {task_id}: Guardrail validation passed")
-                        except Exception as e:
-                            logger.error(f"Task {task_id}: Error in guardrail processing: {e}")
-                            # Handle guardrail failure with retry logic
-                            if task.retry_count >= task.max_retries:
-                                raise Exception(
-                                    f"Task failed due to guardrail processing error after {task.max_retries} retries. "
-                                    f"Last error: {e}"
-                                ) from e
-                            task.retry_count += 1
-                            task.status = "in progress"
-                            logger.warning(f"Task {task_id}: Guardrail processing error (retry {task.retry_count}/{task.max_retries}): {e}")
-                            retries += 1
-                            continue  # Retry the task
+                    # Apply guardrail validation using shared helper
+                    task_output, should_retry = self._apply_task_guardrail(task, task_id, task_output)
+                    if should_retry:
+                        retries += 1
+                        continue
                     
                     task.status = "completed"
                     # Run execute_callback for memory operations
@@ -1403,19 +1390,8 @@ class AgentTeam(SpawnAnnounceProtocol):
                         logger.error(f"Error executing memory callback for task {task_id}: {e}")
                         logger.exception(e)
                     
-                    # Run task callback if exists
-                    if task.callback:
-                        try:
-                            if asyncio.iscoroutinefunction(task.callback):
-                                if run_coroutine_safely:
-                                    run_coroutine_safely(task.callback(task_output))
-                                else:
-                                    logger.warning("run_coroutine_safely not available, skipping async callback")
-                            else:
-                                task.callback(task_output)
-                        except Exception as e:
-                            logger.error(f"Error executing task callback for task {task_id}: {e}")
-                            logger.exception(e)
+                    # Run task callback using shared helper
+                    self._run_task_callback(task, task_id, task_output)
                             
                     self.save_output_to_file(task, task_output)
                     
