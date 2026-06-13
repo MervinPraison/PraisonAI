@@ -104,10 +104,10 @@ class AgentRuntimeConfig:
         """
         return {
             "runtime": self.runtime,
-            "config_overrides": self.config_overrides,
+            "config_overrides": self.config_overrides.copy(),
             "provider_default": self.provider_default,
             "enable_auto_selection": self.enable_auto_selection,
-            "metadata": self.metadata
+            "metadata": self.metadata.copy()
         }
     
     def merge_overrides(self, overrides: Dict[str, Any]) -> "AgentRuntimeConfig":

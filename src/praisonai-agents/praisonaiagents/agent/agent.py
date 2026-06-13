@@ -2038,6 +2038,14 @@ Your Goal: {self.goal}
         # CLI Backend - external CLI backend for delegating full turns (DEPRECATED)
         self._cli_backend = None
         if cli_backend is not None:
+            from ..utils.deprecation import warn_deprecated_param
+            warn_deprecated_param(
+                "cli_backend",
+                since="1.0.0",
+                removal="2.0.0",
+                alternative="use 'runtime=' instead for model-scoped runtime configuration",
+                stacklevel=3
+            )
             self._cli_backend = self._resolve_cli_backend(cli_backend)
         
         # Runtime Configuration - model-scoped runtime selection
@@ -5168,10 +5176,18 @@ Answer:"""
             if result and result.runtime:
                 return result.runtime
             
-        except Exception:
-            # Silently fall back to non-runtime execution if resolution fails
-            # This ensures backward compatibility
-            pass
+        except (ValueError, RuntimeError) as e:
+            # Only fall back for registry not initialized, propagate configuration errors
+            if "not initialized" in str(e).lower():
+                # Registry not initialized - this is expected in SDK-only mode
+                pass
+            else:
+                # Configuration error (unknown runtime ID etc.) - fail closed
+                raise RuntimeError(
+                    f"Runtime resolution failed for agent={getattr(self, 'display_name', 'unknown')!r}, "
+                    f"model={getattr(self, 'llm', None)!r}: {e}. "
+                    "Fix the runtime ID/configuration or remove the runtime override."
+                ) from e
         
         return None
     
@@ -5222,27 +5238,23 @@ Answer:"""
             raise RuntimeError("Runtime instance is None")
         
         # Delegate to CLI backend implementation with runtime instance
-        # Save current CLI backend and temporarily replace it
-        original_cli_backend = getattr(self, '_cli_backend', None)
-        self._cli_backend = runtime_instance
-        
-        try:
-            return await self._chat_via_cli_backend(prompt=prompt, **kwargs)
-        finally:
-            # Restore original CLI backend
-            self._cli_backend = original_cli_backend
+        # Pass runtime instance directly to avoid mutating shared state
+        return await self._chat_via_cli_backend(prompt=prompt, cli_backend=runtime_instance, **kwargs)
     
-    async def _chat_via_cli_backend(self, prompt: str, **kwargs) -> Optional[str]:
+    async def _chat_via_cli_backend(self, prompt: str, cli_backend: Any = None, **kwargs) -> Optional[str]:
         """Chat implementation using CLI backend delegation.
         
         Args:
             prompt: User prompt
+            cli_backend: Optional specific backend instance to use (for runtime delegation)
             **kwargs: Additional chat parameters (passed through as metadata)
             
         Returns:
             CLI backend response content
         """
-        if not self._cli_backend:
+        # Use provided backend or fall back to instance backend
+        backend = cli_backend or self._cli_backend
+        if not backend:
             raise RuntimeError("CLI backend not configured")
         
         try:
@@ -5281,7 +5293,7 @@ Answer:"""
                     images = None
             
             # Execute CLI backend
-            result = await self._cli_backend.execute(
+            result = await backend.execute(
                 prompt=prompt,
                 session=session_binding,
                 images=images,

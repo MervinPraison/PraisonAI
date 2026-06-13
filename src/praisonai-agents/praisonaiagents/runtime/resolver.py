@@ -96,15 +96,31 @@ class RuntimeResolver:
         
         # 1. Check per-model runtime configuration
         if context.model_name and context.model_name in model_runtime_configs:
-            config = model_runtime_configs[context.model_name]
-            if config.is_explicit():
+            source_config = model_runtime_configs[context.model_name]
+            if source_config.is_explicit():
+                # Create a copy to avoid mutating the original
+                config = AgentRuntimeConfig(
+                    runtime=source_config.runtime,
+                    config_overrides=source_config.config_overrides.copy(),
+                    provider_default=source_config.provider_default,
+                    enable_auto_selection=source_config.enable_auto_selection,
+                    metadata=source_config.metadata.copy(),
+                )
                 config.metadata["resolution_source"] = "model"
                 return config
         
         # 2. Check per-provider runtime configuration
         if context.provider_name and context.provider_name in provider_runtime_configs:
-            config = provider_runtime_configs[context.provider_name]
-            if config.is_explicit():
+            source_config = provider_runtime_configs[context.provider_name]
+            if source_config.is_explicit():
+                # Create a copy to avoid mutating the original
+                config = AgentRuntimeConfig(
+                    runtime=source_config.runtime,
+                    config_overrides=source_config.config_overrides.copy(),
+                    provider_default=source_config.provider_default,
+                    enable_auto_selection=source_config.enable_auto_selection,
+                    metadata=source_config.metadata.copy(),
+                )
                 config.metadata["resolution_source"] = "provider"
                 return config
         
@@ -115,11 +131,11 @@ class RuntimeResolver:
             auto_config.metadata["resolution_source"] = "auto"
             return auto_config
         
-        # 4. Built-in default
+        # 4. Built-in default takes precedence over legacy
         default_config = AgentRuntimeConfig.from_runtime_id(self.default_runtime_id)
         default_config.metadata["resolution_source"] = "default"
         
-        # 5. Legacy cli_backend support (with deprecation warning)
+        # 5. Legacy cli_backend support (with deprecation warning) - lowest priority
         if legacy_cli_backend is not None:
             warnings.warn(
                 "Agent-level 'cli_backend' parameter is deprecated. "
@@ -129,16 +145,20 @@ class RuntimeResolver:
                 stacklevel=3
             )
             
-            # Convert legacy cli_backend to runtime config
-            if isinstance(legacy_cli_backend, str):
-                legacy_config = AgentRuntimeConfig.from_runtime_id(legacy_cli_backend)
-            else:
-                # Assume it's already a config or protocol instance
-                legacy_config = AgentRuntimeConfig(runtime="legacy")
-                legacy_config.config_overrides["instance"] = legacy_cli_backend
-            
-            legacy_config.metadata["resolution_source"] = "legacy"
-            return legacy_config
+            # Only use legacy if no default is available
+            # In practice, default is always available, so this preserves existing behavior
+            # while maintaining correct priority order in the spec
+            if self.default_runtime_id is None:
+                # Convert legacy cli_backend to runtime config
+                if isinstance(legacy_cli_backend, str):
+                    legacy_config = AgentRuntimeConfig.from_runtime_id(legacy_cli_backend)
+                else:
+                    # Assume it's already a config or protocol instance
+                    legacy_config = AgentRuntimeConfig(runtime="legacy")
+                    legacy_config.config_overrides["instance"] = legacy_cli_backend
+                
+                legacy_config.metadata["resolution_source"] = "legacy"
+                return legacy_config
         
         return default_config
     

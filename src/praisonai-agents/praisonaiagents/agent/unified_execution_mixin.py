@@ -84,10 +84,10 @@ class UnifiedExecutionMixin:
         try:
             # Runtime resolution - check for model-scoped runtime before legacy CLI backend
             runtime_instance = None
-            if hasattr(self, '_runtime_config') or hasattr(self, '_runtime_resolver'):
+            if getattr(self, '_runtime_config', None) is not None:
                 runtime_instance = await self._resolve_turn_runtime()
             
-            # Legacy CLI Backend routing - delegate entire turn if configured (with deprecation)
+            # Model-scoped runtime routing - delegate entire turn to resolved runtime
             if runtime_instance is not None:
                 return await self._chat_via_runtime(
                     runtime_instance=runtime_instance,
