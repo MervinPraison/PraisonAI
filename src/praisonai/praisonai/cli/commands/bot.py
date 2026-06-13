@@ -75,6 +75,8 @@ def bot_telegram(
     auto_tts: bool = typer.Option(False, "--auto-tts", help="Auto-convert all responses to speech"),
     stt: bool = typer.Option(False, "--stt", help="Enable STT tool for speech-to-text"),
     stt_model: Optional[str] = typer.Option(None, "--stt-model", help="STT model (default: openai/whisper-1)"),
+    stream: bool = typer.Option(False, "--stream", help="Enable progressive streaming responses (edit messages live)"),
+    stream_edit_interval: int = typer.Option(700, "--stream-edit-interval", help="Minimum interval between message edits in milliseconds"),
 ):
     """Start a Telegram bot with full agent capabilities.
     
@@ -109,6 +111,8 @@ def bot_telegram(
         auto_tts=auto_tts,
         stt=stt,
         stt_model=stt_model,
+        stream=stream,
+        stream_edit_interval=stream_edit_interval,
         session_id=session_id,
         user_id=user_id,
     )
