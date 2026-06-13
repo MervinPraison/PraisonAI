@@ -41,6 +41,7 @@ class DoctorHandler(CommandHandler):
             "network",
             "performance",
             "packaging",
+            "runtime",
             "ci",
             "selftest",
         ]
@@ -240,6 +241,16 @@ class DoctorHandler(CommandHandler):
             action="store_true",
             help="Save selftest report",
         )
+        parser.add_argument(
+            "--team",
+            type=str,
+            help="Team YAML file to validate (runtime subcommand)",
+        )
+        parser.add_argument(
+            "--workflow",
+            type=str,
+            help="Workflow YAML file to validate (runtime subcommand)",
+        )
         
         return parser.parse_args(args)
     
@@ -274,6 +285,8 @@ class DoctorHandler(CommandHandler):
             category=args.category,
             path=args.path,
             save_report=args.save_report,
+            team_file=args.team,
+            workflow_file=args.workflow,
         )
     
     def _get_categories_for_subcommand(self, subcommand: Optional[str]) -> Optional[List[CheckCategory]]:
@@ -292,6 +305,7 @@ class DoctorHandler(CommandHandler):
             "network": [CheckCategory.NETWORK],
             "performance": [CheckCategory.PERFORMANCE],
             "packaging": [CheckCategory.PACKAGING],
+            "runtime": [CheckCategory.RUNTIME],
             "selftest": [CheckCategory.SELFTEST],
             "ci": None,  # CI runs all checks
         }
