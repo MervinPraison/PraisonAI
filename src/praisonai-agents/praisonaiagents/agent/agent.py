@@ -2035,6 +2035,16 @@ Your Goal: {self.goal}
         # CLI Backend - external CLI backend for delegating full turns
         self._cli_backend = None
         if cli_backend is not None:
+            # Emit deprecation warning when model-scoped runtime is available
+            if llm is not None or model is not None:
+                import warnings
+                warnings.warn(
+                    "Agent-level 'cli_backend' parameter is deprecated when model configuration is available. "
+                    "Consider using model-scoped runtime configuration instead. "
+                    "For migration assistance, run: praisonai doctor fix --execute",
+                    DeprecationWarning,
+                    stacklevel=2
+                )
             self._cli_backend = self._resolve_cli_backend(cli_backend)
 
         # Telemetry - lazy initialized via property for performance
