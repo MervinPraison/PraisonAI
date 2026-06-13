@@ -1367,7 +1367,7 @@ Your Goal: {self.goal}"""
         """
         Execute unified chat completion using composition instead of runtime class mutation.
         
-        This method provides the same functionality as UnifiedChatMixin but uses
+        This method provides a unified dispatch for all LLM providers using
         composition for safety and maintainability.
         """
         from ..llm import create_llm_dispatcher
@@ -1491,7 +1491,7 @@ Your Goal: {self.goal}"""
         """
         Execute unified async chat completion using composition instead of runtime class mutation.
         
-        This method provides the same functionality as UnifiedChatMixin but uses
+        This method provides a unified async dispatch for all LLM providers using
         composition for safety and maintainability.
         """
         from ..llm import create_llm_dispatcher
