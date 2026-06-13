@@ -9,9 +9,20 @@ Key Components:
 - Agent runtime registry: AgentRuntimeProtocol, RuntimeRegistry
 - Tool result middleware: RuntimeToolResultMiddleware, NormalizedToolResult
 - Registry patterns for runtime resolution and middleware management
+- Doctor migration protocol: DoctorContractProtocol for config migration
 """
 
 from .._lazy import create_lazy_getattr_with_groups
+
+# Import doctor protocol components directly (not lazy)
+from .doctor_protocol import DoctorContractProtocol, Finding
+from .doctor_registry import (
+    get_default_registry,
+    register_rule,
+    get_rules,
+    collect_findings,
+    apply_fixes
+)
 
 __all__ = [
     # Runtime execution contexts
@@ -48,6 +59,14 @@ __all__ = [
     'register_runtime',
     'list_runtimes', 
     'resolve_runtime',
+    # Doctor migration protocol
+    "DoctorContractProtocol",
+    "Finding",
+    "get_default_registry",
+    "register_rule",
+    "get_rules",
+    "collect_findings",
+    "apply_fixes",
 ]
 
 # Grouped lazy imports for efficient loading
