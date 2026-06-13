@@ -5750,8 +5750,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if content:
                             response_text += content
                             live.update(_get_display_functions()['display_generating'](response_text, start_time))
-                        if content:
-                            response_text += content
             else:
                 # Use retry wrapper for non-streaming calls
                 response = self._completion_with_retry(**completion_params)
@@ -5847,8 +5845,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if content:
                             response_text += content
                             live.update(_get_display_functions()['display_generating'](response_text, start_time))
-                        if content:
-                            response_text += content
             else:
                 # Use retry wrapper for non-streaming async calls
                 response = await self._acompletion_with_retry(**completion_params)
