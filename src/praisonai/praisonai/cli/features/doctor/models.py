@@ -33,6 +33,7 @@ class CheckCategory(Enum):
     NETWORK = "network"
     PERFORMANCE = "performance"
     PACKAGING = "packaging"
+    RUNTIME = "runtime"
     SELFTEST = "selftest"
     BOTS = "bots"
 
@@ -264,3 +265,7 @@ class DoctorConfig:
     category: Optional[str] = None
     path: Optional[str] = None
     save_report: bool = False
+    
+    # Runtime migration options
+    fix: bool = False
+    execute: bool = False

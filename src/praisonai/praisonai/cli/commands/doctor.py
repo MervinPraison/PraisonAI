@@ -254,6 +254,26 @@ def doctor_skills(
     raise typer.Exit(_run_doctor(args))
 
 
+@app.command("runtime")
+def doctor_runtime(
+    fix: bool = typer.Option(False, "--fix", help="Apply migration fixes automatically"),
+    dry_run: bool = typer.Option(True, "--dry-run/--execute", help="Show what would be fixed without applying changes"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+    file: Optional[str] = typer.Option(None, "--file", "-f", help="Config file to check (default: search for agents.yaml)"),
+):
+    """Check runtime configuration and migrate legacy cli_backend settings."""
+    args = ["runtime"]
+    if fix:
+        args.append("--fix")
+    if not dry_run:
+        args.append("--execute")
+    if json_output:
+        args.append("--json")
+    if file:
+        args.extend(["--file", file])
+    raise typer.Exit(_run_doctor(args))
+
+
 @app.command("troubleshoot")
 def doctor_troubleshoot():
     """

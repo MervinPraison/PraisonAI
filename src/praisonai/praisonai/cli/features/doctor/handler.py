@@ -41,6 +41,7 @@ class DoctorHandler(CommandHandler):
             "network",
             "performance",
             "packaging",
+            "runtime",
             "ci",
             "selftest",
         ]
@@ -241,6 +242,18 @@ class DoctorHandler(CommandHandler):
             help="Save selftest report",
         )
         
+        # Runtime migration options
+        parser.add_argument(
+            "--fix",
+            action="store_true",
+            help="Apply migration fixes automatically (runtime subcommand)",
+        )
+        parser.add_argument(
+            "--execute",
+            action="store_true",
+            help="Execute fixes (runtime subcommand, default: dry-run)",
+        )
+        
         return parser.parse_args(args)
     
     def _build_config(self, args: argparse.Namespace) -> DoctorConfig:
@@ -274,6 +287,8 @@ class DoctorHandler(CommandHandler):
             category=args.category,
             path=args.path,
             save_report=args.save_report,
+            fix=getattr(args, 'fix', False),
+            execute=getattr(args, 'execute', False),
         )
     
     def _get_categories_for_subcommand(self, subcommand: Optional[str]) -> Optional[List[CheckCategory]]:
@@ -292,6 +307,7 @@ class DoctorHandler(CommandHandler):
             "network": [CheckCategory.NETWORK],
             "performance": [CheckCategory.PERFORMANCE],
             "packaging": [CheckCategory.PACKAGING],
+            "runtime": [CheckCategory.RUNTIME],
             "selftest": [CheckCategory.SELFTEST],
             "ci": None,  # CI runs all checks
         }
