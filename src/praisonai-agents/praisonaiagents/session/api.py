@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import uuid
 import json
+import time
 import logging
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
@@ -59,7 +60,8 @@ class Session:
         agent_url: Optional[str] = None,
         memory_config: Optional[Dict[str, Any]] = None,
         knowledge_config: Optional[Dict[str, Any]] = None,
-        timeout: int = 30
+        timeout: int = 30,
+        session_ttl: Optional[int] = None
     ):
         """
         Initialize a new session with optional persistence or remote agent connectivity.
@@ -71,12 +73,17 @@ class Session:
             memory_config: Configuration for memory system (defaults to RAG)
             knowledge_config: Configuration for knowledge base system  
             timeout: HTTP timeout for remote agent calls (default: 30 seconds)
+            session_ttl: Time-to-live in seconds after which session expires
         """
         self.session_id = session_id or str(uuid.uuid4())[:8]
         self.user_id = user_id or "default_user"
         self.agent_url = agent_url
         self.timeout = timeout
         self.is_remote = agent_url is not None
+        
+        # TTL (time-to-live) functionality
+        self.session_ttl = session_ttl
+        self._created_at = time.time()
 
         # Validate agent_url format
         if self.is_remote:
@@ -588,6 +595,46 @@ class Session:
             The agent's response
         """
         return self.chat(message, **kwargs)
+
+    def is_expired(self) -> bool:
+        """Check if the session has expired based on TTL."""
+        if self.session_ttl is None:
+            return False
+        return time.time() - self._created_at > self.session_ttl
+
+    def close(self) -> None:
+        """Close and cleanup the session."""
+        if self.is_remote:
+            return  # No cleanup needed for remote sessions
+        
+        # Properly cleanup memory
+        if hasattr(self, '_memory') and self._memory:
+            try:
+                # Call close_connections to properly cleanup memory adapters
+                if hasattr(self._memory, 'close_connections'):
+                    self._memory.close_connections()
+            except Exception as e:
+                logger.warning(f"Memory cleanup failed: {e}")
+            finally:
+                self._memory = None
+        
+        # Clear knowledge
+        if hasattr(self, '_knowledge') and self._knowledge:
+            try:
+                self._knowledge = None
+            except Exception:
+                pass  # Ignore cleanup errors
+        
+        # Clear agents
+        if hasattr(self, '_agents'):
+            self._agents.clear()
+
+    def time_to_expiry(self) -> Optional[float]:
+        """Get seconds until session expires, or None if no TTL set."""
+        if self.session_ttl is None:
+            return None
+        elapsed = time.time() - self._created_at
+        return max(0, self.session_ttl - elapsed)
 
     def __str__(self) -> str:
         if self.is_remote:
