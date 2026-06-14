@@ -4818,11 +4818,12 @@ Do NOT add any explanations or formatting."""
             
             agent = PraisonAgent(**agent_config)
 
-            if getattr(self.args, 'cli_project_sessions', False):
+            if hasattr(self, 'args') and getattr(self.args, 'cli_project_sessions', False):
                 session_id = getattr(self.args, 'resume_session', None) or getattr(self.args, 'auto_save', None)
+                auto_save = getattr(self.args, 'auto_save', None)
                 if session_id:
                     from .state.project_sessions import apply_cli_session_continuity
-                    apply_cli_session_continuity(agent, session_id)
+                    apply_cli_session_continuity(agent, session_id, auto_save=auto_save)
             
             # AutoRag - Automatic RAG retrieval decision
             if hasattr(self, 'args') and getattr(self.args, 'auto_rag', False):

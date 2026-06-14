@@ -112,19 +112,18 @@ def build_cli_memory_config(
     from praisonaiagents import MemoryConfig
 
     sid = session_id or auto_save
-    save_name = auto_save or sid
-    return MemoryConfig(session_id=sid, auto_save=save_name, history=True)
+    return MemoryConfig(session_id=sid, auto_save=auto_save, history=True)
 
 
-def apply_cli_session_continuity(agent, session_id: str, project_path: Optional[str] = None) -> None:
+def apply_cli_session_continuity(agent, session_id: str, project_path: Optional[str] = None, auto_save: Optional[str] = None) -> None:
     """Wire an agent to the project session store and restore prior history."""
     store = get_project_session_store(project_path)
     agent._session_store = store
     agent._session_id = session_id
     agent._history_enabled = True
     agent._history_session_id = session_id
-    if not getattr(agent, "auto_save", None):
-        agent.auto_save = session_id
+    if auto_save is not None:
+        agent.auto_save = auto_save
 
     history = store.get_chat_history(session_id)
     if history and not agent.chat_history:
