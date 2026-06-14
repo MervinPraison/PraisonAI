@@ -110,6 +110,7 @@ export {
   codeExecution, tavilySearch, tavilyExtract, tavilyCrawl,
   exaSearch, perplexitySearch, parallelSearch,
   firecrawlScrape, firecrawlCrawl,
+  crwScrape, crwCrawl,
   superagentGuard, superagentRedact, superagentVerify,
   valyuWebSearch, valyuFinanceSearch, valyuPaperSearch, valyuBioSearch,
   valyuPatentSearch, valyuSecSearch, valyuEconomicsSearch, valyuCompanyResearch,
