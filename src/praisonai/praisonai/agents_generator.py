@@ -495,15 +495,6 @@ class AgentsGenerator:
             
             framework = "autogen_v4" if use_v4 else "autogen"
         
-        # Initialize AgentOps if configured
-        agentops_api_key = os.getenv("AGENTOPS_API_KEY")
-        if agentops_api_key:
-            try:
-                import agentops
-                agentops.init(agentops_api_key, default_tags=[framework])
-            except ImportError:
-                pass
-        
         return framework
     
     def _validate_cli_backend_compatibility(self, config, framework):
