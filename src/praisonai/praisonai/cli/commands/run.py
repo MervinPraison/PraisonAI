@@ -256,6 +256,7 @@ def _run_from_file(
             args = Args()
             args.auto_save = auto_save_name
             args.resume_session = session_id
+            args.cli_project_sessions = bool(session_id or auto_save_name)
             
             praison.args = args
         
@@ -349,10 +350,9 @@ def _run_prompt(
         if not no_save:
             import uuid
             auto_save_name = session_id or "session-" + str(uuid.uuid4())[:8]
-
-        # If output_mode is "actions", use direct Agent with actions preset
         if output_mode == "actions":
             from praisonaiagents import Agent
+            from ..state.project_sessions import build_cli_memory_config, apply_cli_session_continuity
             
             agent_config = {
                 "name": "RunAgent",
@@ -370,13 +370,13 @@ def _run_prompt(
                     approval, all_tools=approve_all_tools, timeout=approval_timeout,
                 )
             
-            # Add session support to Agent if needed
-            if session_id:
-                agent_config["resume_session"] = session_id
-            if auto_save_name:
-                agent_config["auto_save"] = auto_save_name
+            memory_cfg = build_cli_memory_config(session_id, auto_save_name)
+            if memory_cfg is not None:
+                agent_config["memory"] = memory_cfg
             
             agent = Agent(**agent_config)
+            if session_id or auto_save_name:
+                apply_cli_session_continuity(agent, session_id or auto_save_name, auto_save=auto_save_name)
             result = agent.start(prompt)
             
             output.emit_result(
@@ -413,6 +413,7 @@ def _run_prompt(
         args.auto_save = auto_save_name
         args.history = None
         args.resume_session = session_id
+        args.cli_project_sessions = bool(session_id or auto_save_name)
         args.include_rules = None if no_rules else "auto"
         args.no_rules = no_rules
         args.workflow = None
@@ -440,44 +441,6 @@ def _run_prompt(
         
         praison.args = args
         
-        # If output_mode is "actions", use direct Agent with actions preset
-        if output_mode == "actions":
-            from praisonaiagents import Agent
-            
-            agent_config = {
-                "name": "RunAgent",
-                "role": "Assistant", 
-                "goal": "Complete the task",
-                "output": "actions",  # Use actions preset
-            }
-            if model:
-                agent_config["llm"] = model
-            
-            # Resolve approval backend if specified
-            if approval:
-                from praisonai.cli.features.approval import resolve_approval_config
-                agent_config["approval"] = resolve_approval_config(
-                    approval, all_tools=approve_all_tools, timeout=approval_timeout,
-                )
-            
-            # Add session support to Agent if needed
-            if session_id:
-                agent_config["resume_session"] = session_id
-            if auto_save_name:
-                agent_config["auto_save"] = auto_save_name
-            
-            agent = Agent(**agent_config)
-            result = agent.start(prompt)
-            
-            output.emit_result(
-                message="Prompt completed",
-                data={"result": str(result) if result else None}
-            )
-            
-            # Don't print result again - actions mode already shows output
-            return
-        
-        # Use handle_direct_prompt for other modes
         result = praison.handle_direct_prompt(prompt)
         
         output.emit_result(
@@ -536,6 +499,22 @@ def _run_from_file_profiled(
     )
     if model:
         praison.config_list[0]['model'] = model
+    
+    # Apply session continuity if requested
+    session_id, auto_save_name = resolve_session_params(
+        continue_session, session, fork, no_save
+    )
+    if session_id or auto_save_name:
+        class Args:
+            pass
+        
+        args = Args()
+        args.auto_save = auto_save_name
+        args.resume_session = session_id
+        args.cli_project_sessions = bool(session_id or auto_save_name)
+        
+        praison.args = args
+    
     profiler.mark_init_end()
     
     # Execution phase
@@ -597,7 +576,21 @@ def _run_prompt_profiled(
     if model:
         agent_config["llm"] = model
     
+    # Apply session continuity if requested
+    session_id, auto_save_name = resolve_session_params(
+        continue_session, session, fork, no_save
+    )
+    if session_id or auto_save_name:
+        from ..state.project_sessions import build_cli_memory_config, apply_cli_session_continuity
+        
+        memory_cfg = build_cli_memory_config(session_id, auto_save_name)
+        if memory_cfg is not None:
+            agent_config["memory"] = memory_cfg
+    
     agent = Agent(**agent_config)
+    if session_id or auto_save_name:
+        apply_cli_session_continuity(agent, session_id or auto_save_name, auto_save=auto_save_name)
+    
     profiler.mark_init_end()
     
     # Execution phase
