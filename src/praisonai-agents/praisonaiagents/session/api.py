@@ -82,8 +82,13 @@ class Session:
         self.is_remote = agent_url is not None
         
         # TTL (time-to-live) functionality
+        if session_ttl is not None and session_ttl < 0:
+            raise ValueError(
+                f"Invalid session_ttl={session_ttl} for session_id={self.session_id}. "
+                "Use None (no expiry) or a non-negative number of seconds."
+            )
         self.session_ttl = session_ttl
-        self._created_at = time.time()
+        self._created_at = time.monotonic()
 
         # Validate agent_url format
         if self.is_remote:
@@ -600,12 +605,15 @@ class Session:
         """Check if the session has expired based on TTL."""
         if self.session_ttl is None:
             return False
-        return time.time() - self._created_at > self.session_ttl
+        return time.monotonic() - self._created_at >= self.session_ttl
 
     def close(self) -> None:
         """Close and cleanup the session."""
         if self.is_remote:
             return  # No cleanup needed for remote sessions
+        
+        # Save agent chat histories before clearing agents
+        self._save_agent_chat_histories()
         
         # Properly cleanup memory
         if hasattr(self, '_memory') and self._memory:
@@ -620,10 +628,7 @@ class Session:
         
         # Clear knowledge
         if hasattr(self, '_knowledge') and self._knowledge:
-            try:
-                self._knowledge = None
-            except Exception:
-                pass  # Ignore cleanup errors
+            self._knowledge = None
         
         # Clear agents
         if hasattr(self, '_agents'):
@@ -633,7 +638,7 @@ class Session:
         """Get seconds until session expires, or None if no TTL set."""
         if self.session_ttl is None:
             return None
-        elapsed = time.time() - self._created_at
+        elapsed = time.monotonic() - self._created_at
         return max(0, self.session_ttl - elapsed)
 
     def __str__(self) -> str:
