@@ -99,3 +99,40 @@ def find_last_session(project_path: Optional[str] = None) -> Optional[str]:
     """
     store = get_project_session_store(project_path)
     return store.get_last_session_id()
+
+
+def build_cli_memory_config(
+    session_id: Optional[str] = None,
+    auto_save: Optional[str] = None,
+):
+    """Build MemoryConfig for ``praison run`` project-scoped session continuity."""
+    if not session_id and not auto_save:
+        return None
+
+    from praisonaiagents import MemoryConfig
+
+    sid = session_id or auto_save
+    save_name = auto_save or sid
+    return MemoryConfig(session_id=sid, auto_save=save_name, history=True)
+
+
+def apply_cli_session_continuity(agent, session_id: str, project_path: Optional[str] = None) -> None:
+    """Wire an agent to the project session store and restore prior history."""
+    store = get_project_session_store(project_path)
+    agent._session_store = store
+    agent._session_id = session_id
+    agent._history_enabled = True
+    agent._history_session_id = session_id
+    if not getattr(agent, "auto_save", None):
+        agent.auto_save = session_id
+
+    history = store.get_chat_history(session_id)
+    if history and not agent.chat_history:
+        for msg in history:
+            agent.chat_history.append({
+                "role": msg["role"],
+                "content": msg["content"],
+            })
+        agent._auto_save_last_index = len(agent.chat_history)
+
+    agent._session_store_initialized = True

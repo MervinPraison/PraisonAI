@@ -152,7 +152,7 @@ class FileMemory:
             from ..paths import get_project_data_dir
             self.base_path = get_project_data_dir() / "memory"
         
-        self.user_path = self.base_path / user_id
+        self.user_path = self.base_path / self.user_id
         self.episodic_path = self.user_path / "episodic"
         
         # Create directories
