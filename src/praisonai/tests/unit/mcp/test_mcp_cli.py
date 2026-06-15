@@ -1,11 +1,11 @@
 """
 Unit tests for MCP CLI commands.
 
-Tests the new CLI commands:
-- praisonai mcp tools search
-- praisonai mcp tools info
-- praisonai mcp tools schema
-- praisonai mcp list-tools (with pagination)
+Tests the CLI commands:
+- praisonai mcp tools (list tools)
+- praisonai mcp describe (tool schema)
+- praisonai mcp sync (sync tool schemas)
+- praisonai mcp list (list servers)
 """
 
 import json
@@ -203,12 +203,12 @@ class TestToolsSchemaCLI:
 
 
 class TestListToolsCLI:
-    """Test list-tools CLI command with pagination."""
+    """Test mcp tools CLI command."""
     
     @patch("praisonai.mcp_server.adapters.register_all_tools")
     @patch("praisonai.mcp_server.registry.get_tool_registry")
     def test_list_tools_json(self, mock_get_registry, mock_register, capsys):
-        """Test list-tools with JSON output."""
+        """Test mcp tools with JSON output."""
         mock_registry = MagicMock()
         mock_registry.list_paginated.return_value = (
             [{"name": "tool1"}, {"name": "tool2"}],
@@ -228,7 +228,7 @@ class TestListToolsCLI:
     @patch("praisonai.mcp_server.adapters.register_all_tools")
     @patch("praisonai.mcp_server.registry.get_tool_registry")
     def test_list_tools_with_cursor(self, mock_get_registry, mock_register):
-        """Test list-tools with pagination cursor."""
+        """Test mcp tools with pagination cursor."""
         mock_registry = MagicMock()
         mock_registry.list_paginated.return_value = ([], None)
         mock_registry.list_all.return_value = []

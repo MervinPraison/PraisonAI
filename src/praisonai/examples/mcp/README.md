@@ -32,25 +32,24 @@ python tool_annotations_example.py
 
 ### 3. CLI Tools (`cli_tools_example.sh`)
 
-Demonstrates the new CLI commands:
+Demonstrates the CLI commands:
 
 ```bash
-# List tools with pagination
-praisonai mcp list-tools --limit 10
-praisonai mcp list-tools --cursor <cursor> --json
+# List indexed tools
+praisonai mcp tools
+praisonai mcp tools --json
 
-# Search tools
-praisonai mcp tools search "query"
-praisonai mcp tools search --category memory
-praisonai mcp tools search --read-only
-praisonai mcp tools search --json
+# List tools from specific server  
+praisonai mcp tools <server-name>
 
-# Get tool info
-praisonai mcp tools info <tool-name>
-praisonai mcp tools info <tool-name> --json
+# Get full schema for a tool
+praisonai mcp describe <server-name> <tool-name>
 
-# Get tool schema
-praisonai mcp tools schema <tool-name>
+# Sync tool schemas to local index
+praisonai mcp sync
+
+# List configured servers
+praisonai mcp list
 ```
 
 ## API Reference
