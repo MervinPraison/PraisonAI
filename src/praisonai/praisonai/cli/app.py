@@ -310,6 +310,7 @@ def register_commands():
     from .commands.profile import app as profile_app
     from .commands.benchmark import app as benchmark_app
     from .commands.paths import app as paths_app
+    from .commands.audit import audit as audit_click_group
     
     # Import new command modules - Previously legacy-only commands
     from .commands.chat import app as chat_app
@@ -393,6 +394,36 @@ def register_commands():
     app.add_typer(profile_app, name="profile", help="Performance profiling and diagnostics")
     app.add_typer(benchmark_app, name="benchmark", help="Comprehensive performance benchmarking")
     app.add_typer(paths_app, name="paths", help="Storage path inspection and migration")
+    
+    # Register Click commands as Typer wrappers
+    audit_typer = typer.Typer(name="audit", help="Audit commands for compliance checking")
+    
+    @audit_typer.command("agent-centric")
+    def audit_agent_centric(
+        scan: str = typer.Option(None, "--scan", help="Scan path for compliance"),
+        fix: str = typer.Option(None, "--fix", help="Fix non-compliant files"),
+        check: str = typer.Option(None, "--check", help="Check and fail if non-compliant"),
+        json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+        line_limit: int = typer.Option(40, "--line-limit", help="Line limit for header scan"),
+        only_examples: bool = typer.Option(False, "--only-examples", help="Only scan Python examples"),
+        only_docs: bool = typer.Option(False, "--only-docs", help="Only scan documentation"),
+        verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    ):
+        """Audit agent-centric compliance for examples and docs."""
+        # Call the original Click function directly
+        from .commands.audit import agent_centric
+        agent_centric.callback(
+            scan_path=scan,
+            fix_path=fix,
+            check_path=check,
+            output_json=json_output,
+            line_limit=line_limit,
+            only_examples=only_examples,
+            only_docs=only_docs,
+            verbose=verbose,
+        )
+    
+    app.add_typer(audit_typer, name="audit")
     
     # Register sub-apps - Terminal-native commands
     app.add_typer(chat_app, name="chat", help="Terminal-native interactive chat (REPL)")
