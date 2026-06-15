@@ -35,21 +35,22 @@ python tool_annotations_example.py
 Demonstrates the CLI commands:
 
 ```bash
-# List indexed tools
-praisonai mcp tools
-praisonai mcp tools --json
+# List all available MCP tools
+praisonai mcp list-tools
+praisonai mcp list-tools --json
 
-# List tools from specific server  
-praisonai mcp tools <server-name>
+# Search for specific tools
+praisonai mcp tools search "memory"
+praisonai mcp tools search --category file
 
-# Get full schema for a tool
-praisonai mcp describe <server-name> <tool-name>
+# Get detailed tool information
+praisonai mcp tools info <tool-name>
 
-# Sync tool schemas to local index
-praisonai mcp sync
+# Get tool JSON schema
+praisonai mcp tools schema <tool-name>
 
-# List configured servers
-praisonai mcp list
+# List all tools (alias)
+praisonai mcp tools list
 ```
 
 ## API Reference
