@@ -153,7 +153,13 @@ class HookRunner:
                 "Use 'await runner.execute(event, input_data, target)' instead in async contexts."
             )
 
-        # No running loop — safe to create one
+        # Fast path: no hooks → no loop creation needed
+        # This mirrors the same check in execute() but avoids event loop creation overhead
+        hooks = self._registry.get_hooks(event, target)
+        if not hooks:
+            return []
+
+        # No running loop and hooks exist — safe to create one
         return asyncio.run(self.execute(event, input_data, target))
     
     async def _execute_parallel(
