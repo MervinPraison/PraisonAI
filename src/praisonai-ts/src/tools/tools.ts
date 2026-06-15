@@ -16,6 +16,7 @@ import { exaSearch, EXA_METADATA, createExaSearchTool } from './builtins/exa';
 import { perplexitySearch, PERPLEXITY_METADATA, createPerplexitySearchTool } from './builtins/perplexity';
 import { parallelSearch, PARALLEL_METADATA, createParallelSearchTool } from './builtins/parallel';
 import { firecrawlScrape, firecrawlCrawl, FIRECRAWL_METADATA, createFirecrawlScrapeTool, createFirecrawlCrawlTool } from './builtins/firecrawl';
+import { crwScrape, crwCrawl, CRW_METADATA, createCrwScrapeTool, createCrwCrawlTool } from './builtins/crw';
 import { superagentGuard, superagentRedact, superagentVerify, SUPERAGENT_METADATA, createSuperagentGuardTool, createSuperagentRedactTool, createSuperagentVerifyTool } from './builtins/superagent';
 import {
   valyuWebSearch, valyuFinanceSearch, valyuPaperSearch, valyuBioSearch,
@@ -42,6 +43,7 @@ import type { ExaSearchConfig } from './builtins/exa';
 import type { PerplexitySearchConfig } from './builtins/perplexity';
 import type { ParallelSearchConfig } from './builtins/parallel';
 import type { FirecrawlScrapeConfig, FirecrawlCrawlConfig } from './builtins/firecrawl';
+import type { CrwScrapeConfig, CrwCrawlConfig } from './builtins/crw';
 import type { GuardConfig, RedactConfig, VerifyConfig } from './builtins/superagent';
 import type { ValyuSearchConfig } from './builtins/valyu';
 import type { CodeInterpreterConfig, BrowserConfig } from './builtins/bedrock-agentcore';
@@ -76,6 +78,10 @@ export function registerBuiltinTools(): void {
   // Firecrawl
   registry.register({ ...FIRECRAWL_METADATA, id: 'firecrawl-scrape' }, createFirecrawlScrapeTool as ToolFactory);
   registry.register({ ...FIRECRAWL_METADATA, id: 'firecrawl-crawl' }, createFirecrawlCrawlTool as ToolFactory);
+
+  // fastCRW
+  registry.register({ ...CRW_METADATA, id: 'crw-scrape' }, createCrwScrapeTool as ToolFactory);
+  registry.register({ ...CRW_METADATA, id: 'crw-crawl' }, createCrwCrawlTool as ToolFactory);
 
   // Superagent
   registry.register({ ...SUPERAGENT_METADATA, id: 'superagent-guard' }, createSuperagentGuardTool as ToolFactory);
@@ -135,6 +141,11 @@ export const tools = {
   firecrawl: (config?: FirecrawlScrapeConfig) => firecrawlScrape(config),
   firecrawlScrape: (config?: FirecrawlScrapeConfig) => firecrawlScrape(config),
   firecrawlCrawl: (config?: FirecrawlCrawlConfig) => firecrawlCrawl(config),
+
+  // fastCRW
+  crw: (config?: CrwScrapeConfig) => crwScrape(config),
+  crwScrape: (config?: CrwScrapeConfig) => crwScrape(config),
+  crwCrawl: (config?: CrwCrawlConfig) => crwCrawl(config),
 
   // Superagent (Security)
   guard: (config?: GuardConfig) => superagentGuard(config),
