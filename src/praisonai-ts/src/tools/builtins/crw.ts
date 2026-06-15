@@ -97,7 +97,22 @@ async function loadCrwPackage() {
 }
 
 /**
- * Create a fastCRW Scrape tool
+ * Create a fastCRW Scrape tool.
+ *
+ * Scrapes a single web page using the Firecrawl-compatible fastCRW API,
+ * returning LLM-ready content in markdown and optionally HTML, links, and metadata.
+ *
+ * @param config - Optional scraping configuration (formats, content filters, wait time).
+ * @returns A PraisonTool that scrapes a single web page.
+ *
+ * @example
+ * ```typescript
+ * import { crwScrape } from 'praisonai';
+ *
+ * const scraper = crwScrape({ formats: ['markdown', 'links'], onlyMainContent: true });
+ * const result = await scraper.execute({ url: 'https://example.com' });
+ * console.log(result.content);
+ * ```
  */
 export function crwScrape(config?: CrwScrapeConfig): PraisonTool<CrwScrapeInput, CrwScrapeResult> {
   return {
@@ -139,7 +154,22 @@ export function crwScrape(config?: CrwScrapeConfig): PraisonTool<CrwScrapeInput,
 }
 
 /**
- * Create a fastCRW Crawl tool
+ * Create a fastCRW Crawl tool.
+ *
+ * Crawls a website starting from a URL, following links and extracting content
+ * from multiple pages using the Firecrawl-compatible fastCRW API.
+ *
+ * @param config - Optional crawl configuration (depth limits, path filters, link policies).
+ * @returns A PraisonTool that crawls a website and extracts content from multiple pages.
+ *
+ * @example
+ * ```typescript
+ * import { crwCrawl } from 'praisonai';
+ *
+ * const crawler = crwCrawl({ limit: 10, maxDepth: 2, includePaths: ['/docs'] });
+ * const result = await crawler.execute({ url: 'https://example.com' });
+ * console.log(result.pages.length, 'pages crawled');
+ * ```
  */
 export function crwCrawl(config?: CrwCrawlConfig): PraisonTool<CrwCrawlInput, CrwCrawlResult> {
   return {
