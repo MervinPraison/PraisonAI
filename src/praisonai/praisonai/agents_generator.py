@@ -4,9 +4,6 @@ import sys
 from .version import __version__
 import yaml, os
 from rich import print
-from dotenv import load_dotenv
-from .auto import AutoGenerator
-from .inc import PraisonAIModel
 import inspect
 from pathlib import Path
 import importlib

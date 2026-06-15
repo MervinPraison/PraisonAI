@@ -18,7 +18,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import weakref
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from .._lockmap import LockMap
 
 if TYPE_CHECKING:
     from praisonaiagents import Agent
@@ -68,8 +70,8 @@ class BotSessionManager:
         run_control: Optional[Any] = None,
     ) -> None:
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
-        self._locks: Dict[str, asyncio.Lock] = {}
-        self._agent_locks: Dict[int, asyncio.Lock] = {}
+        self._locks = LockMap()
+        self._agent_locks: "weakref.WeakKeyDictionary[Any, asyncio.Lock]" = weakref.WeakKeyDictionary()
         self._max_history = max_history
         self._store = store
         self._platform = platform
@@ -122,16 +124,15 @@ class BotSessionManager:
     def _get_lock(self, user_id: str) -> asyncio.Lock:
         """Get or create an asyncio.Lock for *user_id* (storage-keyed)."""
         key = self._storage_key(user_id)
-        if key not in self._locks:
-            self._locks[key] = asyncio.Lock()
-        return self._locks[key]
+        return self._locks.get(key)
 
     def _get_agent_lock(self, agent: "Agent") -> asyncio.Lock:
-        """Get or create a lock for the *agent* instance (by id)."""
-        agent_id = id(agent)
-        if agent_id not in self._agent_locks:
-            self._agent_locks[agent_id] = asyncio.Lock()
-        return self._agent_locks[agent_id]
+        """Get or create a lock for the *agent* instance (using WeakKeyDictionary)."""
+        lock = self._agent_locks.get(agent)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._agent_locks[agent] = lock
+        return lock
 
     def _load_history(self, user_id: str) -> List[Dict[str, Any]]:
         """Load user history from store (if available) or in-memory cache."""
@@ -487,7 +488,7 @@ class BotSessionManager:
         for storage_key in stale:
             self._histories.pop(storage_key, None)
             self._last_active.pop(storage_key, None)
-            self._locks.pop(storage_key, None)
+            self._locks.drop(storage_key)
             if self._store is not None:
                 key = self._persist_key(storage_key)
                 try:
