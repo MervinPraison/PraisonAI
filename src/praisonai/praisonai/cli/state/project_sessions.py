@@ -126,13 +126,15 @@ def apply_cli_session_continuity(agent, session_id: str, project_path: Optional[
     if not getattr(agent, "auto_save", None):
         agent.auto_save = session_id
 
-    history = store.get_chat_history(session_id)
-    if history and not agent.chat_history:
+    history = store.get_chat_history(session_id) or []
+    if history:
+        existing = {(m.get("role"), m.get("content")) for m in agent.chat_history}
         for msg in history:
-            agent.chat_history.append({
-                "role": msg["role"],
-                "content": msg["content"],
-            })
+            entry = {"role": msg["role"], "content": msg["content"]}
+            key = (entry["role"], entry["content"])
+            if key not in existing:
+                agent.chat_history.append(entry)
+                existing.add(key)
         agent._auto_save_last_index = len(agent.chat_history)
 
     agent._session_store_initialized = True

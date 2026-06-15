@@ -256,7 +256,7 @@ def _run_from_file(
             args = Args()
             args.auto_save = auto_save_name
             args.resume_session = session_id
-            args.cli_project_sessions = bool(auto_save_name)
+            args.cli_project_sessions = bool(session_id or auto_save_name)
             
             praison.args = args
         
@@ -415,7 +415,7 @@ def _run_prompt(
         args.auto_save = auto_save_name
         args.history = None
         args.resume_session = session_id
-        args.cli_project_sessions = bool(auto_save_name)
+        args.cli_project_sessions = bool(session_id or auto_save_name)
         args.include_rules = None if no_rules else "auto"
         args.no_rules = no_rules
         args.workflow = None
