@@ -522,7 +522,7 @@ class BotSessionManager:
         existed = storage_key in self._histories
         self._histories.pop(storage_key, None)
         self._last_active.pop(storage_key, None)
-        self._locks.pop(storage_key, None)
+        self._locks.drop(storage_key)
 
         if self._store is not None:
             persist_key = self._session_key(user_id)

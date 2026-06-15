@@ -11,10 +11,14 @@ from typing import Hashable
 
 
 class LockMap:
-    """Thread-safe per-key asyncio.Lock map with automatic cleanup.
+    """Asyncio-safe per-key asyncio.Lock map with automatic cleanup.
     
     Provides a lock per key with LRU eviction and TTL-based cleanup to prevent
     unbounded memory growth in long-running applications.
+    
+    Note: Safe for use within a single asyncio event loop (cooperative
+    multitasking means no interleaving between non-awaited calls), but NOT
+    safe for concurrent access from multiple OS threads.
     """
 
     def __init__(self, *, max_entries: int = 10_000, ttl_seconds: float = 3600.0):
@@ -68,8 +72,10 @@ class LockMap:
             if lock.locked():
                 # Don't evict locks currently held; bump them to the end
                 self._locks.move_to_end(k)
-                break
+                # Continue trying to evict other unlocked entries
+                continue
             self._locks.popitem(last=False)
+            break
 
     def drop(self, key: Hashable) -> None:
         """Manually remove a lock for the given key."""
