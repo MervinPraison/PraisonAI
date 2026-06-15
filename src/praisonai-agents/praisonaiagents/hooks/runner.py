@@ -83,7 +83,8 @@ class HookRunner:
         self,
         event: HookEvent,
         input_data: HookInput,
-        target: Optional[str] = None
+        target: Optional[str] = None,
+        _hooks: Optional[List["HookDefinition"]] = None
     ) -> List[HookExecutionResult]:
         """
         Execute all hooks for an event.
@@ -92,11 +93,12 @@ class HookRunner:
             event: The event to execute hooks for
             input_data: Input data for the hooks
             target: Optional target to filter hooks (e.g., tool name)
+            _hooks: Internal parameter to avoid duplicate get_hooks() calls
             
         Returns:
             List of execution results
         """
-        hooks = self._registry.get_hooks(event, target)
+        hooks = _hooks if _hooks is not None else self._registry.get_hooks(event, target)
         
         if not hooks:
             return []
@@ -160,7 +162,7 @@ class HookRunner:
             return []
 
         # No running loop and hooks exist — safe to create one
-        return asyncio.run(self.execute(event, input_data, target))
+        return asyncio.run(self.execute(event, input_data, target, _hooks=hooks))
     
     async def _execute_parallel(
         self,
