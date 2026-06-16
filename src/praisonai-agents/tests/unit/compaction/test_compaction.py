@@ -250,6 +250,19 @@ class TestContextCompactor:
         assert len(compacted) < len(messages)
         assert result.was_compacted
         assert result.strategy_used == CompactionStrategy.TRUNCATE
+
+    def test_truncate_does_not_infinite_loop_on_system_only_overflow(self):
+        """System-only messages over budget must not hang truncation."""
+        compactor = ContextCompactor(max_tokens=10, target_tokens=5, preserve_recent=0)
+        messages = [
+            {"role": "system", "content": "x" * 200},
+            {"role": "system", "content": "y" * 200},
+        ]
+
+        result = compactor._truncate(messages)
+
+        assert len(result) == 2
+        assert compactor.count_total_tokens(result) > compactor.target_tokens
     
     def test_compactor_compact_sliding(self, compactor, messages):
         """Test sliding window strategy."""

@@ -508,7 +508,9 @@ def _run_prompt(
                     approval, all_tools=approve_all_tools, timeout=approval_timeout,
                 )
             
-            memory_cfg = build_cli_memory_config(session_id, auto_save_name)
+            # Add session support to Agent if needed
+            from ..utils.project import build_cli_memory_config, apply_cli_session_continuity
+            memory_cfg = build_cli_memory_config(session_id=session_id, auto_save=auto_save_name)
             if memory_cfg is not None:
                 agent_config["memory"] = memory_cfg
             

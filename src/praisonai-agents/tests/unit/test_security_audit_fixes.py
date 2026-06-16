@@ -50,9 +50,15 @@ def test_file_memory_rejects_traversal_user_id():
 def test_file_memory_uses_sanitised_user_id_for_path(tmp_path):
     from praisonaiagents.memory.file_memory import FileMemory
 
+    # Test empty string defaults to "default"
     mem = FileMemory(user_id="", base_path=str(tmp_path / "memory"))
     assert mem.user_id == "default"
     assert mem.user_path == tmp_path / "memory" / "default"
+
+    # Test whitespace trimming
+    memory = FileMemory(user_id="  alice  ", base_path=str(tmp_path))
+    assert memory.user_id == "alice"
+    assert memory.user_path == tmp_path / "alice"
 
 
 def test_file_memory_rejects_path_object_user_id(tmp_path):
