@@ -135,6 +135,10 @@ export class AgentLoop {
       ...config,
     };
 
+    if (this.config.onToolCall && this.config.tools) {
+      this.config.tools = this.wrapToolsWithApproval(this.config.tools);
+    }
+
     // Add system message if provided
     if (config.system) {
       this.messages.push({ role: 'system', content: config.system });

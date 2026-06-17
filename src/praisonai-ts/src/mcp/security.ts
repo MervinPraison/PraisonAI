@@ -206,6 +206,39 @@ export class MCPSecurity {
     }
 
     /**
+     * Validate credentials for a given auth method (fail closed by default)
+     */
+    private async validateCredentials(
+        auth: { method: AuthMethod; validate?: (token: string) => Promise<boolean> },
+        token: string
+    ): Promise<boolean> {
+        switch (auth.method) {
+            case 'none':
+                return true;
+
+            case 'api-key':
+            case 'bearer':
+                if (auth.validate) {
+                    return auth.validate(token);
+                }
+                if (this.apiKeys.size === 0) {
+                    return false;
+                }
+                return this.validateApiKey(token);
+
+            case 'basic':
+            case 'oauth':
+                if (!auth.validate) {
+                    return false;
+                }
+                return auth.validate(token);
+
+            default:
+                return false;
+        }
+    }
+
+    /**
      * Match policy against request
      */
     private matchPolicy(policy: SecurityPolicy, request: { path?: string; method?: string }): boolean {
@@ -237,21 +270,18 @@ export class MCPSecurity {
                 return { allowed: true };
 
             case 'authenticate':
-                if (!policy.auth) return { allowed: true };
+                if (!policy.auth) {
+                    return { allowed: false, reason: 'Authentication policy misconfigured' };
+                }
 
                 const token = request.headers ? this.extractToken(request.headers) : null;
-                if (!token) {
+                if (!token || !token.trim()) {
                     return { allowed: false, reason: 'Authentication required' };
                 }
 
-                if (policy.auth.method === 'api-key' || policy.auth.method === 'bearer') {
-                    const valid = policy.auth.validate
-                        ? await policy.auth.validate(token)
-                        : this.validateApiKey(token);
-
-                    if (!valid) {
-                        return { allowed: false, reason: 'Invalid credentials' };
-                    }
+                const valid = await this.validateCredentials(policy.auth, token);
+                if (!valid) {
+                    return { allowed: false, reason: 'Invalid credentials' };
                 }
 
                 return { allowed: true, context: { authenticated: true } };

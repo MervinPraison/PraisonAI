@@ -201,6 +201,29 @@ export class AgentOS implements AgentOSProtocol {
             });
         }
 
+        // Optional API key middleware (except /health)
+        if (this.config.apiKey) {
+            app.use((req: any, res: any, next: any) => {
+                if (req.path === '/health') {
+                    return next();
+                }
+
+                const authHeader = req.headers.authorization;
+                if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+                    if (authHeader.slice(7) === this.config.apiKey) {
+                        return next();
+                    }
+                }
+
+                const xAuth = req.headers['x-auth-token'] ?? req.headers['X-Auth-Token'];
+                if (typeof xAuth === 'string' && xAuth === this.config.apiKey) {
+                    return next();
+                }
+
+                return res.status(401).json({ error: 'Unauthorized' });
+            });
+        }
+
         // Register routes
         this._registerRoutes(app);
 
