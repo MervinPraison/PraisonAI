@@ -305,7 +305,7 @@ class TestProjectService:
         await issue_svc.create(ws.id, "Issue1", user.id, project_id=project.id, status="todo")
         await issue_svc.create(ws.id, "Issue2", user.id, project_id=project.id, status="todo")
         await issue_svc.create(ws.id, "Issue3", user.id, project_id=project.id, status="done")
-        stats = await proj_svc.get_stats(project.id)
+        stats = await proj_svc.get_stats(project.id, workspace_id=ws.id)
         assert stats["total"] == 3
         assert stats["by_status"]["todo"] == 2
         assert stats["by_status"]["done"] == 1

@@ -9,7 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from praisonaiagents.auth import AuthIdentity
 
-from ..deps import ensure_resource_in_workspace, get_db, require_delete_permission, require_workspace_member
+from ..deps import (
+    ensure_resource_in_workspace,
+    get_db,
+    require_delete_permission,
+    require_workspace_member,
+    validate_issue_refs_in_workspace,
+)
 from ..schemas import (
     CommentCreate,
     CommentResponse,
@@ -31,6 +37,14 @@ async def create_issue(
     user: AuthIdentity = Depends(require_workspace_member),
     session: AsyncSession = Depends(get_db),
 ):
+    await validate_issue_refs_in_workspace(
+        workspace_id,
+        session,
+        project_id=body.project_id,
+        parent_issue_id=body.parent_issue_id,
+        assignee_type=body.assignee_type,
+        assignee_id=body.assignee_id,
+    )
     svc = IssueService(session)
     issue = await svc.create(
         workspace_id=workspace_id,
@@ -102,6 +116,20 @@ async def update_issue(
     session: AsyncSession = Depends(get_db),
 ):
     svc = IssueService(session)
+    existing = await svc.get(issue_id, workspace_id=workspace_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Issue not found")
+    fields = body.model_fields_set
+    assignee_type = body.assignee_type
+    if "assignee_id" in fields and body.assignee_id is not None and assignee_type is None:
+        assignee_type = existing.assignee_type
+    await validate_issue_refs_in_workspace(
+        workspace_id,
+        session,
+        project_id=body.project_id if "project_id" in fields else None,
+        assignee_type=assignee_type if "assignee_id" in fields else None,
+        assignee_id=body.assignee_id if "assignee_id" in fields else None,
+    )
     issue = await svc.update(
         issue_id,
         workspace_id=workspace_id,

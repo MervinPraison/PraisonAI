@@ -144,3 +144,55 @@ async def require_issue_in_workspace(
         )
     ensure_resource_in_workspace(issue.workspace_id, workspace_id, label="Issue")
     return issue
+
+
+async def validate_issue_refs_in_workspace(
+    workspace_id: str,
+    session: AsyncSession,
+    *,
+    project_id: Optional[str] = None,
+    parent_issue_id: Optional[str] = None,
+    assignee_type: Optional[str] = None,
+    assignee_id: Optional[str] = None,
+) -> None:
+    """Reject cross-workspace references in issue create/update bodies."""
+    from ..services.agent_service import AgentService
+    from ..services.issue_service import IssueService
+    from ..services.member_service import MemberService
+    from ..services.project_service import ProjectService
+
+    if project_id is not None:
+        project = await ProjectService(session).get(project_id, workspace_id=workspace_id)
+        if project is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Project not found",
+            )
+
+    if parent_issue_id is not None:
+        parent = await IssueService(session).get(
+            parent_issue_id, workspace_id=workspace_id
+        )
+        if parent is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Issue not found",
+            )
+
+    if assignee_id is not None:
+        if assignee_type == "member":
+            member = await MemberService(session).get(workspace_id, assignee_id)
+            if member is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Member not found",
+                )
+        elif assignee_type == "agent":
+            agent = await AgentService(session).get(
+                assignee_id, workspace_id=workspace_id
+            )
+            if agent is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Agent not found",
+                )
