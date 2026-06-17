@@ -24,12 +24,22 @@ class AutoGenAdapter(BaseFrameworkAdapter):
         from .._framework_availability import is_available
         return is_available("autogen")
     
-    def resolve(self) -> "BaseFrameworkAdapter":
-        """Pick the concrete AutoGen adapter variant based on environment and availability."""
-        autogen_version = os.environ.get("AUTOGEN_VERSION", "auto").lower()
+    def resolve_variant(self, config: Dict[str, Any], registry: Any) -> "BaseFrameworkAdapter":
+        """Pick the concrete AutoGen adapter variant based on config and availability.
         
-        # Import the specific adapters
-        v4_adapter = AutoGenV4Adapter()
+        Args:
+            config: Framework configuration that may contain 'autogen_version'
+            registry: The adapter registry for creating other adapters if needed
+            
+        Returns:
+            The resolved AutoGen adapter (v0.2 or v0.4)
+        """
+        autogen_version = str(
+            config.get('autogen_version', os.environ.get("AUTOGEN_VERSION", "auto"))
+        ).lower()
+        
+        # Get the v0.4 adapter from the registry
+        v4_adapter = registry.create("autogen_v4") if hasattr(registry, 'create') else AutoGenV4Adapter()
         v2_adapter = self  # Current instance is v0.2
         
         if autogen_version == "v0.4" and v4_adapter.is_available():
