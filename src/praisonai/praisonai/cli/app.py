@@ -4,10 +4,14 @@ PraisonAI CLI Typer Application.
 Main Typer app that registers all command groups and handles global options.
 """
 
+import importlib
 from enum import Enum
-from typing import Optional
+from typing import Optional, Dict, Tuple, List
 
 import typer
+import click
+from typer.core import TyperGroup
+from typer.main import get_command as typer_get_command
 
 from .output.console import OutputController, OutputMode, set_output_controller
 from .state.identifiers import create_context
@@ -106,13 +110,387 @@ class OutputFormat(str, Enum):
     stream_json = "stream-json"
 
 
-# Create main Typer app
+# Command registry for lazy loading
+_LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
+    # Core commands
+    "config": (".commands.config", "app", "Configuration management"),
+    "traces": (".commands.traces", "app", "Trace collection management"),
+    "env": (".commands.environment", "app", "Environment and diagnostics"),
+    "session": (".commands.session", "app", "Session management"),
+    "completion": (".commands.completion", "app", "Shell completion scripts"),
+    "version": (".commands.version", "app", "Version information"),
+    "debug": (".commands.debug", "app", "Debug and test interactive flows"),
+    "lsp": (".commands.lsp", "app", "LSP service lifecycle"),
+    "diag": (".commands.diag", "app", "Diagnostics export"),
+    "doctor": (".commands.doctor", "app", "Health checks and diagnostics"),
+    "setup": (".commands.setup", "app", "Interactive onboarding / configuration wizard"),
+    "onboard": (".commands.onboard", "app", "Messaging bot onboarding wizard"),
+    "obs": (".commands.obs", "app", "Observability diagnostics and management"),
+    "acp": (".commands.acp", "app", "Agent Client Protocol server"),
+    "mcp": (".commands.mcp", "app", "MCP server management"),
+    "serve": (".commands.serve", "app", "API server management"),
+    "schedule": (".commands.schedule", "app", "Scheduler management"),
+    "kanban": (".commands.kanban", "app", "Kanban task management"),
+    "run": (".commands.run", "app", "Run agents"),
+    "profile": (".commands.profile", "app", "Performance profiling and diagnostics"),
+    "benchmark": (".commands.benchmark", "app", "Comprehensive performance benchmarking"),
+    "paths": (".commands.paths", "app", "Storage path inspection and migration"),
+    
+    # Terminal-native commands
+    "chat": (".commands.chat", "app", "Terminal-native interactive chat (REPL)"),
+    "code": (".commands.code", "app", "Terminal-native code assistant"),
+    "call": (".commands.call", "app", "Voice/call interaction mode"),
+    "realtime": (".commands.realtime", "app", "Realtime interaction mode"),
+    "train": (".commands.train", "app", "Model training and fine-tuning"),
+    "ui": (".commands.ui", "app", "🤖 Clean Chat UI (praisonaiui)"),
+    "context": (".commands.context", "app", "Context management"),
+    "research": (".commands.research", "app", "Research and analysis"),
+    "memory": (".commands.memory", "app", "Memory management"),
+    "workflow": (".commands.workflow", "app", "Workflow management"),
+    "tools": (".commands.tools", "app", "Tool management"),
+    "n8n": (".commands.n8n", "app", "n8n visual workflow editor integration"),
+    "knowledge": (".commands.knowledge", "app", "Knowledge base management (legacy)"),
+    "rag": (".commands.rag", "app", "RAG commands (legacy - use index/query instead)"),
+    "deploy": (".commands.deploy", "app", "Deployment management"),
+    "agents": (".commands.agents", "app", "Agent management"),
+    "skills": (".commands.skills", "app", "Skill management"),
+    "eval": (".commands.eval", "app", "Evaluation and testing"),
+    "templates": (".commands.templates", "app", "Template management"),
+    "recipe": (".commands.recipe", "app", "Recipe management"),
+    "todo": (".commands.todo", "app", "Todo/task management"),
+    "docs": (".commands.docs", "app", "Documentation management"),
+    "commit": (".commands.commit", "app", "AI-assisted git commits"),
+    "publish": (".commands.publish", "app", "Package publishing"),
+    "hooks": (".commands.hooks", "app", "Hook management"),
+    "rules": (".commands.rules", "app", "Rules management"),
+    "registry": (".commands.registry", "app", "Registry management"),
+    "package": (".commands.package", "app", "Package management"),
+    "endpoints": (".commands.endpoints", "app", "API endpoint management"),
+    "test": (".commands.test", "app", "Run test suite with tier and provider options"),
+    "examples": (".commands.examples", "app", "Run and manage example files"),
+    "batch": (".commands.batch", "app", "Run all PraisonAI scripts in current folder"),
+    "replay": (".commands.replay", "app", "Context replay for debugging agent execution"),
+    "loop": (".commands.loop", "app", "Autonomous agent execution loops"),
+    "tracker": (".commands.tracker", "app", "Autonomous agent tracking with step-by-step analysis"),
+    "github": (".commands.github", "app", "GitHub native context tracking and Issue triage"),
+    "managed": (".commands.managed", "app", "Managed Agents (Anthropic cloud-hosted backend)"),
+    
+    # Moltbot-inspired commands
+    "bot": (".commands.bot", "app", "Messaging bots with full agent capabilities"),
+    "gateway": (".commands.gateway", "app", "Multi-bot WebSocket gateway server"),
+    "pairing": (".commands.pairing", "app", "Manage bot user pairing"),
+    "browser": (".commands.browser", "app", "Browser control for agent automation"),
+    "plugins": (".commands.plugins", "app", "Plugin management and inspection"),
+    "sandbox": (".commands.sandbox", "app", "Sandbox container management"),
+    "claw": (".commands.claw", "app", "🦞 PraisonAI Dashboard (full UI)"),
+    "flow": (".commands.flow", "app", "Visual workflow builder (Langflow)"),
+    "dashboard": (".commands.dashboard", "app", "🌟 Unified Dashboard (Flow + Claw + UI)"),
+    "langfuse": (".commands.langfuse", "app", "🔍 Langfuse observability platform"),
+    "langextract": (".commands.langextract", "app", "🧠 Langextract visual trace layer"),
+    "port": (".commands.port", "app", "🔌 Manage port usage and resolve conflicts"),
+    "up": (".commands.up", "app", "🚀 Start unified PraisonAI stack (Langfuse + Langflow)"),
+}
+
+# Special commands that need custom handling
+_SPECIAL_COMMANDS = {
+    "tui": (".features.tui.debug", "create_debug_app", "Interactive TUI and simulation"),
+    "queue": (".features.tui.cli", "create_queue_app", "Queue management"),
+}
+
+
+class LazyCommandGroup(TyperGroup):
+    """Click Group that lazily loads subcommands from registry."""
+    
+    def list_commands(self, ctx: click.Context) -> List[str]:
+        """Return list of available commands without importing them."""
+        commands = list(_LAZY_COMMANDS.keys())
+        commands.extend(_SPECIAL_COMMANDS.keys())
+        
+        # Add special inline commands
+        commands.append("app")
+        
+        # Add retrieval commands
+        commands.extend(["index", "query", "delete"])
+        
+        # Add standardise/standardize
+        commands.extend(["standardise", "standardize"])
+        
+        return sorted(commands)
+    
+    def get_command(self, ctx: click.Context, name: str) -> Optional[click.Command]:
+        """Lazily import and return the command."""
+        # Check regular commands
+        if name in _LAZY_COMMANDS:
+            module_path, attr_name, _ = _LAZY_COMMANDS[name]
+            try:
+                module = importlib.import_module(module_path, __package__)
+                sub_app = getattr(module, attr_name)
+                return typer_get_command(sub_app)
+            except (ImportError, AttributeError) as e:
+                typer.echo(f"Error loading command '{name}': {e}", err=True)
+                return None
+        
+        # Check special commands
+        if name in _SPECIAL_COMMANDS:
+            module_path, func_name, _ = _SPECIAL_COMMANDS[name]
+            try:
+                module = importlib.import_module(module_path, __package__)
+                create_func = getattr(module, func_name)
+                sub_app = create_func()
+                if sub_app:
+                    return typer_get_command(sub_app)
+            except (ImportError, AttributeError) as e:
+                typer.echo(f"Error loading command '{name}': {e}", err=True)
+                return None
+        
+        # Handle retrieval commands
+        if name in ["index", "query", "delete"]:
+            try:
+                from .commands import retrieval as retrieval_module
+                # Get the command directly from the module
+                if hasattr(retrieval_module, name):
+                    return getattr(retrieval_module, name)
+            except ImportError as e:
+                typer.echo(f"Error loading retrieval command '{name}': {e}", err=True)
+                return None
+        
+        # Handle standardise/standardize
+        if name in ["standardise", "standardize"]:
+            return self._get_standardise_command()
+        
+        # Handle app command
+        if name == "app":
+            return self._get_app_command()
+        
+        return None
+    
+    def _get_standardise_command(self) -> Optional[click.Command]:
+        """Get the standardise command group."""
+        try:
+            standardise_app = typer.Typer()
+            
+            @standardise_app.command("check")
+            def standardise_check(
+                path: str = typer.Option(".", "--path", "-p", help="Project root path"),
+                feature: str = typer.Option(None, "--feature", help="Specific feature slug"),
+                scope: str = typer.Option("all", "--scope", help="Scope: all, docs, examples, sdk, cli"),
+                ci: bool = typer.Option(False, "--ci", help="CI mode"),
+            ):
+                """Check for standardisation issues."""
+                from .commands.standardise import _run_check
+                import argparse
+                args = argparse.Namespace(path=path, feature=feature, scope=scope, ci=ci, dry_run=True)
+                _run_check(args)
+            
+            @standardise_app.command("report")
+            def standardise_report(
+                path: str = typer.Option(".", "--path", "-p", help="Project root path"),
+                format: str = typer.Option("text", "--format", "-f", help="Format: text, json, markdown"),
+                output: str = typer.Option(None, "--output", "-o", help="Output file"),
+                ci: bool = typer.Option(False, "--ci", help="CI mode"),
+            ):
+                """Generate detailed report."""
+                from .commands.standardise import _run_report
+                import argparse
+                args = argparse.Namespace(path=path, format=format, output=output, ci=ci, feature=None, scope="all", dry_run=True)
+                _run_report(args)
+            
+            @standardise_app.command("fix")
+            def standardise_fix(
+                path: str = typer.Option(".", "--path", "-p", help="Project root path"),
+                feature: str = typer.Option(None, "--feature", help="Specific feature slug"),
+                apply: bool = typer.Option(False, "--apply", help="Actually apply changes"),
+                no_backup: bool = typer.Option(False, "--no-backup", help="Don't create backups"),
+            ):
+                """Fix standardisation issues."""
+                from .commands.standardise import _run_fix
+                import argparse
+                args = argparse.Namespace(path=path, feature=feature, apply=apply, no_backup=no_backup, scope="all", ci=False, dry_run=not apply)
+                _run_fix(args)
+            
+            @standardise_app.command("init")
+            def standardise_init(
+                feature: str = typer.Argument(..., help="Feature slug to initialise"),
+                path: str = typer.Option(".", "--path", "-p", help="Project root path"),
+                apply: bool = typer.Option(False, "--apply", help="Actually create files"),
+            ):
+                """Initialise a new feature with all required artifacts."""
+                from .commands.standardise import _run_init
+                import argparse
+                args = argparse.Namespace(feature=feature, path=path, apply=apply, scope="all", ci=False, dry_run=not apply)
+                _run_init(args)
+            
+            @standardise_app.command("ai")
+            def standardise_ai(
+                feature: str = typer.Argument(..., help="Feature slug to generate content for"),
+                gen_type: str = typer.Option("all", "--type", "-t", help="Type: docs, examples, all"),
+                apply: bool = typer.Option(False, "--apply", help="Actually create files"),
+                verify: bool = typer.Option(False, "--verify", help="Verify with AI"),
+                model: str = typer.Option("gpt-4o-mini", "--model", help="LLM model"),
+                path: str = typer.Option(".", "--path", "-p", help="Project root path"),
+            ):
+                """AI-powered generation of docs/examples."""
+                from .commands.standardise import _run_ai
+                import argparse
+                args = argparse.Namespace(feature=feature, type=gen_type, apply=apply, verify=verify, model=model, path=path, scope="all", ci=False, dry_run=not apply)
+                _run_ai(args)
+            
+            @standardise_app.command("checkpoint")
+            def standardise_checkpoint(
+                message: str = typer.Option(None, "--message", "-m", help="Checkpoint message"),
+                path: str = typer.Option(".", "--path", "-p", help="Repository path"),
+            ):
+                """Create an undo checkpoint."""
+                from .commands.standardise import _run_checkpoint
+                import argparse
+                args = argparse.Namespace(message=message, path=path)
+                _run_checkpoint(args)
+            
+            @standardise_app.command("undo")
+            def standardise_undo(
+                checkpoint: str = typer.Option(None, "--checkpoint", help="Checkpoint ID"),
+                list_checkpoints: bool = typer.Option(False, "--list", help="List checkpoints"),
+                path: str = typer.Option(".", "--path", "-p", help="Repository path"),
+            ):
+                """Undo to a previous checkpoint."""
+                from .commands.standardise import _run_undo
+                import argparse
+                args = argparse.Namespace(checkpoint=checkpoint, list=list_checkpoints, path=path)
+                _run_undo(args)
+            
+            @standardise_app.command("redo")
+            def standardise_redo(
+                path: str = typer.Option(".", "--path", "-p", help="Repository path"),
+            ):
+                """Redo after an undo."""
+                from .commands.standardise import _run_redo
+                import argparse
+                args = argparse.Namespace(path=path)
+                _run_redo(args)
+            
+            return typer_get_command(standardise_app)
+        except Exception:
+            return None
+    
+    def _get_app_command(self) -> Optional[click.Command]:
+        """Get the app command."""
+        @app.command(name="app", context_settings={"allow_interspersed_args": False})
+        def app_cmd(
+            port: int = typer.Option(8000, "--port", "-p", help="Port to listen on"),
+            host: str = typer.Option("0.0.0.0", "--host", "-h", help="Host to bind to"),
+            config: str = typer.Option(None, "--config", "-c", help="Path to config file (YAML)"),
+            reload: bool = typer.Option(False, "--reload", "-r", help="Enable auto-reload for development"),
+            debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode"),
+            name: str = typer.Option("PraisonAI App", "--name", "-n", help="Application name"),
+        ):
+            """
+            Start an AgentOS server for production deployment.
+            
+            AgentOS provides a FastAPI-based web service for deploying AI agents
+            with REST and WebSocket endpoints.
+            """
+            from rich.console import Console
+            console = Console()
+            
+            try:
+                from praisonai import AgentOS
+                from praisonaiagents import AgentOSConfig
+            except ImportError as e:
+                console.print(f"[red]Error importing AgentOS: {e}[/red]")
+                console.print("[yellow]Install with: pip install praisonai[api][/yellow]")
+                raise typer.Abort()
+            
+            # Load agents from config file if provided
+            agents = []
+            if config:
+                agents = self._load_agents_from_config_file(config, console)
+            
+            # Create config
+            app_config = AgentOSConfig(
+                name=name,
+                host=host,
+                port=port,
+                reload=reload,
+                debug=debug,
+            )
+            
+            # Create and start app
+            console.print(f"\n[bold green]🚀 Starting {name}[/bold green]")
+            console.print(f"[dim]Host: {host}:{port}[/dim]")
+            if agents:
+                console.print(f"[dim]Agents: {len(agents)}[/dim]")
+            if reload:
+                console.print("[yellow]Auto-reload enabled (development mode)[/yellow]")
+            console.print()
+            
+            try:
+                agent_app = AgentOS(
+                    name=name,
+                    agents=agents,
+                    config=app_config,
+                )
+                agent_app.serve()
+            except ImportError as e:
+                console.print(f"[red]Missing dependency: {e}[/red]")
+                console.print("[yellow]Install with: pip install praisonai[api][/yellow]")
+                raise typer.Abort()
+            except Exception as e:
+                console.print(f"[red]Error starting server: {e}[/red]")
+                raise typer.Abort()
+        
+        # Bind the helper method
+        app_cmd._load_agents_from_config_file = self._load_agents_from_config_file
+        return app_cmd
+    
+    def _load_agents_from_config_file(self, config_path: str, console) -> list:
+        """Load agents from a YAML config file."""
+        import yaml
+        
+        try:
+            with open(config_path, 'r') as f:
+                config_data = yaml.safe_load(f)
+        except Exception as e:
+            console.print(f"[red]Error loading config: {e}[/red]")
+            return []
+        
+        if not config_data:
+            return []
+        
+        agents = []
+        
+        # Try to load agents from config
+        agents_config = config_data.get('agents', [])
+        if not agents_config and 'agent' in config_data:
+            agents_config = [config_data['agent']]
+        
+        if agents_config:
+            try:
+                from praisonaiagents import Agent
+                
+                for agent_data in agents_config:
+                    if isinstance(agent_data, dict):
+                        agent = Agent(
+                            name=agent_data.get('name', 'Agent'),
+                            role=agent_data.get('role'),
+                            instructions=agent_data.get('instructions', agent_data.get('goal', '')),
+                            llm=agent_data.get('llm'),
+                        )
+                        agents.append(agent)
+                        console.print(f"[green]✓ Loaded agent: {agent.name}[/green]")
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not load agents from config: {e}[/yellow]")
+        
+        return agents
+
+
+# Create main Typer app with lazy loading group
 app = typer.Typer(
     name="praisonai",
     help="PraisonAI - AI Agents Framework CLI",
     add_completion=False,  # We handle completion manually
     no_args_is_help=False,  # Allow running without args for legacy compatibility
     rich_markup_mode="rich",
+    cls=LazyCommandGroup,  # Use our lazy loading command group
 )
 
 
@@ -279,405 +657,22 @@ _commands_registered = False
 def register_commands():
     """Register all command groups (idempotent).
 
-    The ``_commands_registered`` sentinel is intentionally flipped only after
-    every import and ``app.add_typer`` call has succeeded. Setting it before
-    would poison the registry on partial failure: a later caller would
-    short-circuit and dispatch against an incomplete command tree.
+    With lazy loading, this function now only registers the retrieval commands
+    that need special handling. All other commands are loaded on-demand through
+    the LazyCommandGroup.
     """
     global _commands_registered
     if _commands_registered:
         return
-    # Import command modules - Core commands
-    from .commands.config import app as config_app
-    from .commands.traces import app as traces_app
-    from .commands.environment import app as env_app
-    from .commands.session import app as session_app
-    from .commands.completion import app as completion_app
-    from .commands.version import app as version_app
-    from .commands.debug import app as debug_app
-    from .commands.lsp import app as lsp_app
-    from .commands.diag import app as diag_app
-    from .commands.doctor import app as doctor_app
-    from .commands.setup import app as setup_app
-    from .commands.onboard import app as onboard_app
-    from .commands.obs import app as obs_app
-    from .commands.acp import app as acp_app
-    from .commands.mcp import app as mcp_app
-    from .commands.serve import app as serve_app
-    from .commands.schedule import app as schedule_app
-    from .commands.kanban import app as kanban_app
-    from .commands.run import app as run_app
-    from .commands.profile import app as profile_app
-    from .commands.benchmark import app as benchmark_app
-    from .commands.paths import app as paths_app
     
-    # Import new command modules - Previously legacy-only commands
-    from .commands.chat import app as chat_app
-    from .commands.code import app as code_app
-    from .commands.call import app as call_app
-    from .commands.realtime import app as realtime_app
-    from .commands.train import app as train_app
-    from .commands.ui import app as ui_app
-    from .commands.context import app as context_app
-    from .commands.research import app as research_app
-    from .commands.memory import app as memory_app
-    from .commands.workflow import app as workflow_app
-    from .commands.tools import app as tools_app
-    from .commands.n8n import app as n8n_app
-    from .commands.knowledge import app as knowledge_app
-    from .commands.rag import app as rag_app
-    from .commands import retrieval as retrieval_module
-    from .commands.deploy import app as deploy_app
-    from .commands.agents import app as agents_app
-    from .commands.skills import app as skills_app
-    from .commands.eval import app as eval_app
-    from .commands.templates import app as templates_app
-    from .commands.recipe import app as recipe_app
-    from .commands.todo import app as todo_app
-    from .commands.docs import app as docs_app
-    from .commands.commit import app as commit_app
-    from .commands.publish import app as publish_app
-    from .commands.hooks import app as hooks_app
-    from .commands.rules import app as rules_app
-    from .commands.registry import app as registry_app
-    from .commands.package import app as package_app
-    from .commands.endpoints import app as endpoints_app
-    from .commands.test import app as test_app
-    from .commands.examples import app as examples_app
-    from .commands.batch import app as batch_app
-    from .commands.replay import app as replay_app
-    from .commands.loop import app as loop_app
-    from .commands.tracker import app as tracker_app
-    from .commands.github import app as github_app
-    
-    # Import new moltbot-inspired commands
-    from .commands.bot import app as bot_app
-    from .commands.gateway import app as gateway_app
-    from .commands.pairing import app as pairing_app
-    from .commands.browser import app as browser_app
-    from .commands.plugins import app as plugins_app
-    from .commands.sandbox import app as sandbox_app
-    from .commands.claw import app as claw_app
-    from .commands.flow import app as flow_app
-    from .commands.dashboard import app as unified_app
-    from .commands.langfuse import app as langfuse_app
-    from .commands.langextract import app as langextract_app
-    from .commands.port import app as port_app
-    from .commands.managed import app as managed_app
-    from .commands.up import app as up_app
-    
-    # Import TUI and queue commands
-    from .features.tui.debug import create_debug_app as create_tui_debug_app
-    from .features.tui.cli import create_queue_app
-    
-    # Register sub-apps - Core commands
-    app.add_typer(config_app, name="config", help="Configuration management")
-    app.add_typer(traces_app, name="traces", help="Trace collection management")
-    app.add_typer(env_app, name="env", help="Environment and diagnostics")
-    app.add_typer(session_app, name="session", help="Session management")
-    app.add_typer(completion_app, name="completion", help="Shell completion scripts")
-    app.add_typer(version_app, name="version", help="Version information")
-    app.add_typer(debug_app, name="debug", help="Debug and test interactive flows")
-    app.add_typer(lsp_app, name="lsp", help="LSP service lifecycle")
-    app.add_typer(diag_app, name="diag", help="Diagnostics export")
-    app.add_typer(doctor_app, name="doctor", help="Health checks and diagnostics")
-    app.add_typer(setup_app, name="setup", help="Interactive onboarding / configuration wizard")
-    app.add_typer(onboard_app, name="onboard", help="Messaging bot onboarding wizard")
-    app.add_typer(obs_app, name="obs", help="Observability diagnostics and management")
-    app.add_typer(acp_app, name="acp", help="Agent Client Protocol server")
-    app.add_typer(mcp_app, name="mcp", help="MCP server management")
-    app.add_typer(serve_app, name="serve", help="API server management")
-    app.add_typer(schedule_app, name="schedule", help="Scheduler management")
-    app.add_typer(kanban_app, name="kanban", help="Kanban task management")
-    app.add_typer(run_app, name="run", help="Run agents")
-    app.add_typer(profile_app, name="profile", help="Performance profiling and diagnostics")
-    app.add_typer(benchmark_app, name="benchmark", help="Comprehensive performance benchmarking")
-    app.add_typer(paths_app, name="paths", help="Storage path inspection and migration")
-    
-    # Register sub-apps - Terminal-native commands
-    app.add_typer(chat_app, name="chat", help="Terminal-native interactive chat (REPL)")
-    app.add_typer(code_app, name="code", help="Terminal-native code assistant")
-    app.add_typer(call_app, name="call", help="Voice/call interaction mode")
-    app.add_typer(realtime_app, name="realtime", help="Realtime interaction mode")
-    app.add_typer(train_app, name="train", help="Model training and fine-tuning")
-    app.add_typer(ui_app, name="ui", help="🤖 Clean Chat UI (praisonaiui)")
-    app.add_typer(context_app, name="context", help="Context management")
-    app.add_typer(research_app, name="research", help="Research and analysis")
-    app.add_typer(memory_app, name="memory", help="Memory management")
-    app.add_typer(workflow_app, name="workflow", help="Workflow management")
-    app.add_typer(tools_app, name="tools", help="Tool management")
-    app.add_typer(n8n_app, name="n8n", help="n8n visual workflow editor integration")
-    app.add_typer(knowledge_app, name="knowledge", help="Knowledge base management (legacy)")
-    app.add_typer(rag_app, name="rag", help="RAG commands (legacy - use index/query instead)")
-    
-    # Register unified retrieval commands (Agent-first)
-    retrieval_module.register_commands(app)
-    app.add_typer(deploy_app, name="deploy", help="Deployment management")
-    app.add_typer(agents_app, name="agents", help="Agent management")
-    app.add_typer(skills_app, name="skills", help="Skill management")
-    app.add_typer(eval_app, name="eval", help="Evaluation and testing")
-    app.add_typer(templates_app, name="templates", help="Template management")
-    app.add_typer(recipe_app, name="recipe", help="Recipe management")
-    app.add_typer(todo_app, name="todo", help="Todo/task management")
-    app.add_typer(docs_app, name="docs", help="Documentation management")
-    app.add_typer(commit_app, name="commit", help="AI-assisted git commits")
-    app.add_typer(publish_app, name="publish", help="Package publishing")
-    app.add_typer(hooks_app, name="hooks", help="Hook management")
-    app.add_typer(rules_app, name="rules", help="Rules management")
-    app.add_typer(registry_app, name="registry", help="Registry management")
-    app.add_typer(package_app, name="package", help="Package management")
-    app.add_typer(endpoints_app, name="endpoints", help="API endpoint management")
-    app.add_typer(test_app, name="test", help="Run test suite with tier and provider options")
-    app.add_typer(examples_app, name="examples", help="Run and manage example files")
-    app.add_typer(batch_app, name="batch", help="Run all PraisonAI scripts in current folder")
-    app.add_typer(replay_app, name="replay", help="Context replay for debugging agent execution")
-    app.add_typer(loop_app, name="loop", help="Autonomous agent execution loops")
-    app.add_typer(tracker_app, name="tracker", help="Autonomous agent tracking with step-by-step analysis")
-    app.add_typer(github_app, name="github", help="GitHub native context tracking and Issue triage")
-    app.add_typer(managed_app, name="managed", help="Managed Agents (Anthropic cloud-hosted backend)")
-    
-    # Helper function for loading agents from config
-    def _load_agents_from_config_file(config_path: str, console) -> list:
-        """Load agents from a YAML config file."""
-        import yaml
-        
-        try:
-            with open(config_path, 'r') as f:
-                config_data = yaml.safe_load(f)
-        except Exception as e:
-            console.print(f"[red]Error loading config: {e}[/red]")
-            return []
-        
-        if not config_data:
-            return []
-        
-        agents = []
-        
-        # Try to load agents from config
-        agents_config = config_data.get('agents', [])
-        if not agents_config and 'agent' in config_data:
-            agents_config = [config_data['agent']]
-        
-        if agents_config:
-            try:
-                from praisonaiagents import Agent
-                
-                for agent_data in agents_config:
-                    if isinstance(agent_data, dict):
-                        agent = Agent(
-                            name=agent_data.get('name', 'Agent'),
-                            role=agent_data.get('role'),
-                            instructions=agent_data.get('instructions', agent_data.get('goal', '')),
-                            llm=agent_data.get('llm'),
-                        )
-                        agents.append(agent)
-                        console.print(f"[green]✓ Loaded agent: {agent.name}[/green]")
-            except Exception as e:
-                console.print(f"[yellow]Warning: Could not load agents from config: {e}[/yellow]")
-        
-        return agents
-    
-    # Register app command directly using Typer
-    @app.command(name="app")
-    def app_cmd(
-        port: int = typer.Option(8000, "--port", "-p", help="Port to listen on"),
-        host: str = typer.Option("0.0.0.0", "--host", "-h", help="Host to bind to"),
-        config: str = typer.Option(None, "--config", "-c", help="Path to config file (YAML)"),
-        reload: bool = typer.Option(False, "--reload", "-r", help="Enable auto-reload for development"),
-        debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode"),
-        name: str = typer.Option("PraisonAI App", "--name", "-n", help="Application name"),
-    ):
-        """
-        Start an AgentOS server for production deployment.
-        
-        AgentOS provides a FastAPI-based web service for deploying AI agents
-        with REST and WebSocket endpoints.
-        """
-        from rich.console import Console
-        console = Console()
-        
-        try:
-            from praisonai import AgentOS
-            from praisonaiagents import AgentOSConfig
-        except ImportError as e:
-            console.print(f"[red]Error importing AgentOS: {e}[/red]")
-            console.print("[yellow]Install with: pip install praisonai[api][/yellow]")
-            raise typer.Abort()
-        
-        # Load agents from config file if provided
-        agents = []
-        if config:
-            agents = _load_agents_from_config_file(config, console)
-        
-        # Create config
-        app_config = AgentOSConfig(
-            name=name,
-            host=host,
-            port=port,
-            reload=reload,
-            debug=debug,
-        )
-        
-        # Create and start app
-        console.print(f"\n[bold green]🚀 Starting {name}[/bold green]")
-        console.print(f"[dim]Host: {host}:{port}[/dim]")
-        if agents:
-            console.print(f"[dim]Agents: {len(agents)}[/dim]")
-        if reload:
-            console.print("[yellow]Auto-reload enabled (development mode)[/yellow]")
-        console.print()
-        
-        try:
-            agent_app = AgentOS(
-                name=name,
-                agents=agents,
-                config=app_config,
-            )
-            agent_app.serve()
-        except ImportError as e:
-            console.print(f"[red]Missing dependency: {e}[/red]")
-            console.print("[yellow]Install with: pip install praisonai[api][/yellow]")
-            raise typer.Abort()
-        except Exception as e:
-            console.print(f"[red]Error starting server: {e}[/red]")
-            raise typer.Abort()
-    
-    # Register moltbot-inspired commands
-    app.add_typer(bot_app, name="bot", help="Messaging bots with full agent capabilities")
-    app.add_typer(gateway_app, name="gateway", help="Multi-bot WebSocket gateway server")
-    app.add_typer(pairing_app, name="pairing", help="Manage bot user pairing")
-    app.add_typer(browser_app, name="browser", help="Browser control for agent automation")
-    app.add_typer(plugins_app, name="plugins", help="Plugin management and inspection")
-    app.add_typer(sandbox_app, name="sandbox", help="Sandbox container management")
-    app.add_typer(claw_app, name="claw", help="🦞 PraisonAI Dashboard (full UI)")
-    app.add_typer(flow_app, name="flow", help="Visual workflow builder (Langflow)")
-    app.add_typer(unified_app, name="dashboard", help="🌟 Unified Dashboard (Flow + Claw + UI)")
-    app.add_typer(langfuse_app, name="langfuse", help="🔍 Langfuse observability platform")
-    app.add_typer(langextract_app, name="langextract", help="🧠 Langextract visual trace layer")
-    app.add_typer(port_app, name="port", help="🔌 Manage port usage and resolve conflicts")
-    app.add_typer(up_app, name="up", help="🚀 Start unified PraisonAI stack (Langfuse + Langflow)")
-    
-    # Register standardise command
+    # Register retrieval commands (these need special handling)
     try:
-        standardise_app = typer.Typer(name="standardise", help="Documentation and examples standardisation (FDEP)")
-        
-        @standardise_app.command("check")
-        def standardise_check(
-            path: str = typer.Option(".", "--path", "-p", help="Project root path"),
-            feature: str = typer.Option(None, "--feature", help="Specific feature slug"),
-            scope: str = typer.Option("all", "--scope", help="Scope: all, docs, examples, sdk, cli"),
-            ci: bool = typer.Option(False, "--ci", help="CI mode"),
-        ):
-            """Check for standardisation issues."""
-            from .commands.standardise import _run_check
-            import argparse
-            args = argparse.Namespace(path=path, feature=feature, scope=scope, ci=ci, dry_run=True)
-            _run_check(args)
-        
-        @standardise_app.command("report")
-        def standardise_report(
-            path: str = typer.Option(".", "--path", "-p", help="Project root path"),
-            format: str = typer.Option("text", "--format", "-f", help="Format: text, json, markdown"),
-            output: str = typer.Option(None, "--output", "-o", help="Output file"),
-            ci: bool = typer.Option(False, "--ci", help="CI mode"),
-        ):
-            """Generate detailed report."""
-            from .commands.standardise import _run_report
-            import argparse
-            args = argparse.Namespace(path=path, format=format, output=output, ci=ci, feature=None, scope="all", dry_run=True)
-            _run_report(args)
-        
-        @standardise_app.command("fix")
-        def standardise_fix(
-            path: str = typer.Option(".", "--path", "-p", help="Project root path"),
-            feature: str = typer.Option(None, "--feature", help="Specific feature slug"),
-            apply: bool = typer.Option(False, "--apply", help="Actually apply changes"),
-            no_backup: bool = typer.Option(False, "--no-backup", help="Don't create backups"),
-        ):
-            """Fix standardisation issues."""
-            from .commands.standardise import _run_fix
-            import argparse
-            args = argparse.Namespace(path=path, feature=feature, apply=apply, no_backup=no_backup, scope="all", ci=False, dry_run=not apply)
-            _run_fix(args)
-        
-        @standardise_app.command("init")
-        def standardise_init(
-            feature: str = typer.Argument(..., help="Feature slug to initialise"),
-            path: str = typer.Option(".", "--path", "-p", help="Project root path"),
-            apply: bool = typer.Option(False, "--apply", help="Actually create files"),
-        ):
-            """Initialise a new feature with all required artifacts."""
-            from .commands.standardise import _run_init
-            import argparse
-            args = argparse.Namespace(feature=feature, path=path, apply=apply, scope="all", ci=False, dry_run=not apply)
-            _run_init(args)
-        
-        @standardise_app.command("ai")
-        def standardise_ai(
-            feature: str = typer.Argument(..., help="Feature slug to generate content for"),
-            gen_type: str = typer.Option("all", "--type", "-t", help="Type: docs, examples, all"),
-            apply: bool = typer.Option(False, "--apply", help="Actually create files"),
-            verify: bool = typer.Option(False, "--verify", help="Verify with AI"),
-            model: str = typer.Option("gpt-4o-mini", "--model", help="LLM model"),
-            path: str = typer.Option(".", "--path", "-p", help="Project root path"),
-        ):
-            """AI-powered generation of docs/examples."""
-            from .commands.standardise import _run_ai
-            import argparse
-            args = argparse.Namespace(feature=feature, type=gen_type, apply=apply, verify=verify, model=model, path=path, scope="all", ci=False, dry_run=not apply)
-            _run_ai(args)
-        
-        @standardise_app.command("checkpoint")
-        def standardise_checkpoint(
-            message: str = typer.Option(None, "--message", "-m", help="Checkpoint message"),
-            path: str = typer.Option(".", "--path", "-p", help="Repository path"),
-        ):
-            """Create an undo checkpoint."""
-            from .commands.standardise import _run_checkpoint
-            import argparse
-            args = argparse.Namespace(message=message, path=path)
-            _run_checkpoint(args)
-        
-        @standardise_app.command("undo")
-        def standardise_undo(
-            checkpoint: str = typer.Option(None, "--checkpoint", help="Checkpoint ID"),
-            list_checkpoints: bool = typer.Option(False, "--list", help="List checkpoints"),
-            path: str = typer.Option(".", "--path", "-p", help="Repository path"),
-        ):
-            """Undo to a previous checkpoint."""
-            from .commands.standardise import _run_undo
-            import argparse
-            args = argparse.Namespace(checkpoint=checkpoint, list=list_checkpoints, path=path)
-            _run_undo(args)
-        
-        @standardise_app.command("redo")
-        def standardise_redo(
-            path: str = typer.Option(".", "--path", "-p", help="Repository path"),
-        ):
-            """Redo after an undo."""
-            from .commands.standardise import _run_redo
-            import argparse
-            args = argparse.Namespace(path=path)
-            _run_redo(args)
-        
-        app.add_typer(standardise_app, name="standardise", help="Documentation and examples standardisation (FDEP)")
-        # Also register as 'standardize' for US spelling
-        app.add_typer(standardise_app, name="standardize", help="Documentation and examples standardisation (FDEP)")
-    except Exception:
-        pass  # Graceful degradation if standardise module not available
+        from .commands import retrieval as retrieval_module
+        retrieval_module.register_commands(app)
+    except ImportError:
+        pass  # Graceful degradation
     
-    # Register TUI and queue commands
-    tui_app = create_tui_debug_app()
-    queue_app = create_queue_app()
-    if tui_app:
-        app.add_typer(tui_app, name="tui", help="Interactive TUI and simulation")
-    if queue_app:
-        app.add_typer(queue_app, name="queue", help="Queue management")
-
-    # Mark registration complete only after every import + add_typer above
-    # has succeeded. If anything raised, this line is skipped and the next
-    # caller will retry from scratch instead of dispatching against a
-    # half-built command tree.
+    # Mark registration complete
     _commands_registered = True
 
 
