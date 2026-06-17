@@ -1451,39 +1451,6 @@ def resolve_web(value: WebParam) -> Optional[WebConfig]:
     return value
 
 
-def resolve_output(value: OutputParam) -> Optional[OutputConfig]:
-    """Resolve output= parameter following precedence ladder."""
-    if value is None:
-        return None
-    if isinstance(value, str):
-        try:
-            preset = OutputPreset(value.lower())
-            return OutputConfig.from_preset(preset)
-        except ValueError:
-            return None
-    if isinstance(value, dict):
-        return OutputConfig(**value)
-    if isinstance(value, OutputConfig):
-        return value
-    return value
-
-
-def resolve_execution(value: ExecutionParam) -> Optional[ExecutionConfig]:
-    """Resolve execution= parameter following precedence ladder."""
-    if value is None:
-        return None
-    if isinstance(value, str):
-        try:
-            preset = ExecutionPreset(value.lower())
-            return ExecutionConfig.from_preset(preset)
-        except ValueError:
-            return None
-    if isinstance(value, dict):
-        return ExecutionConfig(**value)
-    if isinstance(value, ExecutionConfig):
-        return value
-    return value
-
 
 def resolve_caching(value: CachingParam) -> Optional[CachingConfig]:
     """Resolve caching= parameter following precedence ladder."""
@@ -1595,8 +1562,6 @@ __all__ = [
     "resolve_reflection",
     "resolve_guardrails",
     "resolve_web",
-    "resolve_output",
-    "resolve_execution",
     "resolve_caching",
     "resolve_autonomy",
     "resolve_tool_search",
