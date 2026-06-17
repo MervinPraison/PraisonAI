@@ -203,23 +203,32 @@ class LazyCommandGroup(TyperGroup):
     
     def list_commands(self, ctx: click.Context) -> List[str]:
         """Return list of available commands without importing them."""
-        commands = list(_LAZY_COMMANDS.keys())
-        commands.extend(_SPECIAL_COMMANDS.keys())
+        # Start with commands from parent (already registered commands)
+        commands = set(super().list_commands(ctx))
+        
+        # Add lazy-loaded commands
+        commands.update(_LAZY_COMMANDS.keys())
+        commands.update(_SPECIAL_COMMANDS.keys())
         
         # Add special inline commands
-        commands.append("app")
+        commands.add("app")
         
-        # Add retrieval commands
-        commands.extend(["index", "query", "delete"])
+        # Add retrieval commands (these are registered via register_commands)
+        commands.update(["index", "query", "search"])
         
         # Add standardise/standardize
-        commands.extend(["standardise", "standardize"])
+        commands.update(["standardise", "standardize"])
         
-        return sorted(commands)
+        return sorted(list(commands))
     
     def get_command(self, ctx: click.Context, name: str) -> Optional[click.Command]:
         """Lazily import and return the command."""
-        # Check regular commands
+        # First check if command is already registered (e.g., retrieval commands)
+        existing = super().get_command(ctx, name)
+        if existing is not None:
+            return existing
+        
+        # Check regular lazy commands
         if name in _LAZY_COMMANDS:
             module_path, attr_name, _ = _LAZY_COMMANDS[name]
             try:
@@ -241,17 +250,6 @@ class LazyCommandGroup(TyperGroup):
                     return typer_get_command(sub_app)
             except (ImportError, AttributeError) as e:
                 typer.echo(f"Error loading command '{name}': {e}", err=True)
-                return None
-        
-        # Handle retrieval commands
-        if name in ["index", "query", "delete"]:
-            try:
-                from .commands import retrieval as retrieval_module
-                # Get the command directly from the module
-                if hasattr(retrieval_module, name):
-                    return getattr(retrieval_module, name)
-            except ImportError as e:
-                typer.echo(f"Error loading retrieval command '{name}': {e}", err=True)
                 return None
         
         # Handle standardise/standardize
@@ -374,7 +372,10 @@ class LazyCommandGroup(TyperGroup):
     
     def _get_app_command(self) -> Optional[click.Command]:
         """Get the app command."""
-        @app.command(name="app", context_settings={"allow_interspersed_args": False})
+        # Create a local Typer app to avoid mutating the global app
+        app_group = typer.Typer(add_completion=False)
+        
+        @app_group.command(name="app", context_settings={"allow_interspersed_args": False})
         def app_cmd(
             port: int = typer.Option(8000, "--port", "-p", help="Port to listen on"),
             host: str = typer.Option("0.0.0.0", "--host", "-h", help="Host to bind to"),
@@ -438,9 +439,11 @@ class LazyCommandGroup(TyperGroup):
                 console.print(f"[red]Error starting server: {e}[/red]")
                 raise typer.Abort()
         
-        # Bind the helper method
+        # Bind the helper method to the function for later use
         app_cmd._load_agents_from_config_file = self._load_agents_from_config_file
-        return app_cmd
+        
+        # Return the click.Command object (not the raw function)
+        return typer_get_command(app_group)
     
     def _load_agents_from_config_file(self, config_path: str, console) -> list:
         """Load agents from a YAML config file."""
