@@ -59,6 +59,8 @@ Methods:
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">handoff_to</a>(target_agent: 'Agent', prompt: str, context: Optional[Dict[str, Any]] = None, config: Optional['HandoffConfig'] = None) -> 'HandoffResult'</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">handoff_to_async</a>(target_agent: 'Agent', prompt: str, context: Optional[Dict[str, Any]] = None, config: Optional['HandoffConfig'] = None) -> 'HandoffResult'</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">is_closed</a>() -> bool</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">llm_instance</a>()</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">llm_instance</a>(value)</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">llm_model</a>() -> Optional[str]</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">output_style</a>() -> Optional[str]</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">output_style</a>(value: Optional[str]) -> None</code>
