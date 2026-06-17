@@ -53,3 +53,4 @@ class AgentAppConfig:
     workers: int = 1
     timeout: int = 60
     metadata: Dict[str, Any] = field(default_factory=dict)
+    api_key: Optional[str] = None

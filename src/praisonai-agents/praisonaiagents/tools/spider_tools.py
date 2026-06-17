@@ -171,12 +171,31 @@ class SpiderTools:
                 return {"error": error_msg}
             from bs4 import BeautifulSoup
 
-            # Make request
-            response = session.get(
-                url,
-                timeout=timeout,
-                verify=verify_ssl
-            )
+            # Make request with manual redirect validation (SSRF-safe)
+            current_url = url
+            redirect_statuses = {301, 302, 303, 307, 308}
+            max_redirects = 5
+            response = None
+            for _ in range(max_redirects + 1):
+                if not self._validate_url(current_url):
+                    return {"error": f"Invalid or blocked redirect target: {current_url}"}
+                response = session.get(
+                    current_url,
+                    timeout=timeout,
+                    verify=verify_ssl,
+                    allow_redirects=False,
+                )
+                if response.status_code not in redirect_statuses:
+                    break
+                location = response.headers.get("Location")
+                if not location:
+                    break
+                current_url = urljoin(current_url, location)
+            else:
+                return {"error": "Too many redirects"}
+
+            if response is None:
+                return {"error": "Request failed"}
             response.raise_for_status()
             
             # Parse HTML
@@ -188,7 +207,7 @@ class SpiderTools:
             
             # Initialize result
             result = {
-                'url': url,
+                'url': current_url,
                 'status_code': response.status_code,
                 'encoding': response.encoding,
                 'headers': dict(response.headers),

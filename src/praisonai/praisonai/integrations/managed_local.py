@@ -404,22 +404,21 @@ class LocalManagedAgent:
             filepath = args[0] if args else kwargs.get("filepath", "")
             if not filepath:
                 return "Error: No filepath specified"
-            
-            command = f'cat "{filepath}"'
+            import shlex
+            command = f"cat {shlex.quote(filepath)}"
             
         elif tool_name == "write_file":
             filepath = args[0] if args else kwargs.get("filepath", "")
             content = args[1] if len(args) > 1 else kwargs.get("content", "")
             if not filepath:
                 return "Error: No filepath specified"
-            
-            # Escape content for shell
             import shlex
-            command = f'cat > "{filepath}" << "EOF"\n{content}\nEOF'
+            command = f'cat > {shlex.quote(filepath)} << "EOF"\n{content}\nEOF'
             
         elif tool_name == "list_files":
             directory = args[0] if args else kwargs.get("directory", ".")
-            command = f'ls -la "{directory}"'
+            import shlex
+            command = f"ls -la {shlex.quote(directory)}"
             
         else:
             return f"Error: Unsupported bridged tool: {tool_name}"

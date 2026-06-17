@@ -313,6 +313,38 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
                     cls._default_model_checked = True
         return cls._default_model
     
+    def _ensure_llm_instance(self):
+        """Lazy-create LLM instance from deferred init params (avoids import at Agent())."""
+        if self._llm_instance is not None:
+            return self._llm_instance
+        if self._llm_init_params:
+            try:
+                from ..llm.llm import LLM
+                self._llm_instance = LLM(**self._llm_init_params)
+            except ImportError as e:
+                raise ImportError(
+                    "LLM features requested but dependencies not installed. "
+                    "Please install with: pip install \"praisonaiagents[llm]\""
+                ) from e
+        return self._llm_instance
+
+    @property
+    def llm_instance(self):
+        return self._ensure_llm_instance()
+
+    @llm_instance.setter
+    def llm_instance(self, value):
+        self._llm_instance = value
+        if value is not None:
+            self._llm_init_params = None
+
+    def _ensure_loop_guard(self):
+        """Lazy-create loop guard on first tool execution."""
+        if self._loop_guard is None:
+            from ..escalation.loop_guard import LoopGuard, LoopGuardConfig
+            self._loop_guard = LoopGuard(LoopGuardConfig(enabled=True))
+        return self._loop_guard
+    
     @classmethod
     def _configure_logging(cls):
         """Configure logging settings once for all agent instances."""
@@ -718,16 +750,16 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         # Precedence: Explicit params > Config file > Built-in defaults
         # Only applies when param is None (not explicitly set)
         # ============================================================
-        from ..config.loader import apply_config_defaults, get_default
+        from ..config.loader import apply_config_defaults, get_default, _defaults_has_any_values
         
         # Apply config defaults for LLM if not explicitly set
-        if llm is None and model is None:
+        if llm is None and model is None and _defaults_has_any_values():
             config_model = get_default("model")
             if config_model:
                 llm = config_model
         
         # Apply config defaults for base_url if not explicitly set
-        if base_url is None:
+        if base_url is None and _defaults_has_any_values():
             config_base_url = get_default("base_url")
             if config_base_url:
                 base_url = config_base_url
@@ -1478,10 +1510,8 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         # Initialize autonomy features (agent-centric escalation/doom-loop)
         self._init_autonomy(autonomy, verification_hooks=verification_hooks)
         
-        # Initialize loop guard for all execution modes (not just autonomous)
-        # Provides idempotency-aware guardrails for tool execution loops
-        from ..escalation.loop_guard import LoopGuard, LoopGuardConfig
-        self._loop_guard = LoopGuard(LoopGuardConfig(enabled=True))
+        # Initialize loop guard lazily on first tool execution (zero init overhead)
+        self._loop_guard = None
 
         # If instructions are provided, use them to set role, goal, and backstory
         if instructions:
@@ -1527,6 +1557,8 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         self.interrupt_controller = interrupt_controller
         # Check for model name in environment variable if not provided
         self._using_custom_llm = False
+        self._llm_instance = None
+        self._llm_init_params = None
         # Flag to track if final result has been displayed to prevent duplicates
         self._final_display_shown = False
         
@@ -1565,99 +1597,67 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         self.base_url = base_url
         self.api_key = api_key
 
-        # If base_url is provided, always create a custom LLM instance
+        # If base_url is provided, defer custom LLM instance creation
         if base_url:
-            try:
-                from ..llm.llm import LLM
-                # Handle different llm parameter types with base_url
-                if isinstance(llm, dict):
-                    # Merge base_url and api_key into the dict
-                    llm_config = llm.copy()
-                    llm_config['base_url'] = base_url
-                    if api_key:
-                        llm_config['api_key'] = api_key
-                    if auth:
-                        llm_config['auth'] = auth
-                    llm_config['metrics'] = metrics
-                    llm_config['max_iter'] = max_iter
-                    self.llm_instance = LLM(**llm_config)
-                    self.llm = llm.get('model', Agent._get_default_model())
-                else:
-                    # Create LLM with model string and base_url (cached for performance)
-                    model_name = llm or Agent._get_default_model()
-                    self.llm_instance = LLM(
-                        model=model_name,
-                        base_url=base_url,
-                        api_key=api_key,
-                        auth=auth,
-                        metrics=metrics,
-                        max_iter=max_iter,
-                        web_search=web_search,
-                        web_fetch=web_fetch,
-                        prompt_caching=prompt_caching,
-                        claude_memory=claude_memory
-                    )
-                    self.llm = model_name
-                self._using_custom_llm = True
-            except ImportError as e:
-                raise ImportError(
-                    "LLM features requested but dependencies not installed. "
-                    "Please install with: pip install \"praisonaiagents[llm]\""
-                ) from e
+            if isinstance(llm, dict):
+                llm_config = llm.copy()
+                llm_config['base_url'] = base_url
+                if api_key:
+                    llm_config['api_key'] = api_key
+                if auth:
+                    llm_config['auth'] = auth
+                llm_config['metrics'] = metrics
+                llm_config['max_iter'] = max_iter
+                self._llm_init_params = llm_config
+                self.llm = llm.get('model', Agent._get_default_model())
+            else:
+                model_name = llm or Agent._get_default_model()
+                self._llm_init_params = {
+                    'model': model_name,
+                    'base_url': base_url,
+                    'api_key': api_key,
+                    'auth': auth,
+                    'metrics': metrics,
+                    'max_iter': max_iter,
+                    'web_search': web_search,
+                    'web_fetch': web_fetch,
+                    'prompt_caching': prompt_caching,
+                    'claude_memory': claude_memory,
+                }
+                self.llm = model_name
+            self._using_custom_llm = True
         # If the user passes a dictionary (for advanced configuration)
         elif isinstance(llm, dict) and "model" in llm:
-            try:
-                from ..llm.llm import LLM
-                # Add api_key if provided and not in dict
-                if api_key and 'api_key' not in llm:
-                    llm = llm.copy()
-                    llm['api_key'] = api_key
-                # Add auth if provided and not in dict
-                if auth and 'auth' not in llm:
-                    llm = llm.copy()
-                    llm['auth'] = auth
-                # Add metrics parameter
-                llm = llm.copy()
-                llm['metrics'] = metrics
-                llm['max_iter'] = max_iter
-                self.llm_instance = LLM(**llm)  # Pass all dict items as kwargs
-                self._using_custom_llm = True
-                self.llm = llm.get('model', Agent._get_default_model())
-            except ImportError as e:
-                raise ImportError(
-                    "LLM features requested but dependencies not installed. "
-                    "Please install with: pip install \"praisonaiagents[llm]\""
-                ) from e
-        # If the user passes a string with a slash (provider/model)
+            llm_config = llm.copy()
+            if api_key and 'api_key' not in llm_config:
+                llm_config['api_key'] = api_key
+            if auth and 'auth' not in llm_config:
+                llm_config['auth'] = auth
+            llm_config['metrics'] = metrics
+            llm_config['max_iter'] = max_iter
+            self._llm_init_params = llm_config
+            self._using_custom_llm = True
+            self.llm = llm_config.get('model', Agent._get_default_model())
+        # If the user passes a string with a slash (provider/model) — defer LiteLLM import
         elif isinstance(llm, str) and "/" in llm:
-            try:
-                from ..llm.llm import LLM
-                # Pass the entire string so LiteLLM can parse provider/model
-                llm_params = {'model': llm}
-                if api_key:
-                    llm_params['api_key'] = api_key
-                if auth:
-                    llm_params['auth'] = auth
-                llm_params['metrics'] = metrics
-                llm_params['web_search'] = web_search
-                llm_params['web_fetch'] = web_fetch
-                llm_params['prompt_caching'] = prompt_caching
-                llm_params['claude_memory'] = claude_memory
-                llm_params['max_iter'] = max_iter
-                self.llm_instance = LLM(**llm_params)
-                self._using_custom_llm = True
-                self.llm = llm
-                
-                # Ensure tools are properly accessible when using custom LLM
-                if tools:
-                    logging.debug(f"Tools passed to Agent with custom LLM: {tools}")
-                    # Store the tools for later use
-                    self.tools = tools
-            except ImportError as e:
-                raise ImportError(
-                    "LLM features requested but dependencies not installed. "
-                    "Please install with: pip install \"praisonaiagents[llm]\""
-                ) from e
+            llm_params = {'model': llm}
+            if api_key:
+                llm_params['api_key'] = api_key
+            if auth:
+                llm_params['auth'] = auth
+            llm_params['metrics'] = metrics
+            llm_params['web_search'] = web_search
+            llm_params['web_fetch'] = web_fetch
+            llm_params['prompt_caching'] = prompt_caching
+            llm_params['claude_memory'] = claude_memory
+            llm_params['max_iter'] = max_iter
+            self._llm_init_params = llm_params
+            self._using_custom_llm = True
+            self.llm = llm
+            
+            if tools:
+                logging.debug(f"Tools passed to Agent with custom LLM: {tools}")
+                self.tools = tools
         # Otherwise, fall back to OpenAI environment/name (cached for performance)
         else:
             self.llm = llm or Agent._get_default_model()

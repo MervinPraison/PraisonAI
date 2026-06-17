@@ -490,6 +490,15 @@ def run_stream(
                     },
                 )
                 return
+
+        if not options.get("allow_dangerous_tools", False):
+            policy_error = _check_tool_policy(recipe_config)
+            if policy_error:
+                yield RecipeEvent(
+                    event_type="error",
+                    data={"code": "policy_denied", "message": policy_error},
+                )
+                return
         
         # Dry run
         if options.get("dry_run", False):

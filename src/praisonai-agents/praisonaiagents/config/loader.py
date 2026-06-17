@@ -83,6 +83,7 @@ class ConfigValidationError(Exception):
 # Global config cache (lazy loaded)
 _config_cache: Optional[Dict[str, Any]] = None
 _config_loaded: bool = False
+_defaults_has_values: Optional[bool] = None
 
 
 def _default_project_plugins_dir():
@@ -418,11 +419,27 @@ def get_enabled_plugins() -> Optional[List[str]]:
     return None  # All plugins enabled
 
 
+def _defaults_has_any_values() -> bool:
+    """Return True if config file defines any defaults (cached after first check)."""
+    global _defaults_has_values
+    if _defaults_has_values is None:
+        defaults = get_defaults_config()
+        _defaults_has_values = any(
+            getattr(defaults, key, None) is not None
+            for key in (
+                "model", "base_url", "memory", "knowledge", "planning",
+                "reflection", "web", "output", "execution", "caching", "autonomy",
+            )
+        )
+    return _defaults_has_values
+
+
 def clear_config_cache() -> None:
     """Clear the config cache (for testing)."""
-    global _config_cache, _config_loaded
+    global _config_cache, _config_loaded, _defaults_has_values
     _config_cache = None
     _config_loaded = False
+    _defaults_has_values = None
 
 
 def validate_config(config: Dict[str, Any], raise_on_error: bool = False) -> List[str]:
@@ -603,6 +620,8 @@ def apply_config_defaults(
     if explicit_value is not None:
         # If True and we have config defaults, merge them
         if explicit_value is True:
+            if not _defaults_has_any_values():
+                return explicit_value
             config_defaults = get_default(param_name)
             if config_defaults and isinstance(config_defaults, dict):
                 if config_class:
@@ -611,6 +630,10 @@ def apply_config_defaults(
                         return config_class(**{k: v for k, v in config_defaults.items() if k != "enabled"})
                 return config_defaults
         return explicit_value
+    
+    # Fast path: no config defaults file values — skip lookups
+    if not _defaults_has_any_values():
+        return None
     
     # Check if config has defaults for this param
     config_defaults = get_default(param_name)

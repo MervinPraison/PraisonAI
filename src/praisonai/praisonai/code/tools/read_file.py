@@ -52,21 +52,21 @@ def read_file(
         >>> if result['success']:
         ...     print(result['content'])
     """
-    # Resolve path
+    # Resolve path — default workspace to cwd when unset (fail-closed boundary)
+    effective_workspace = workspace if workspace is not None else os.getcwd()
     if workspace and not os.path.isabs(path):
-        abs_path = os.path.abspath(os.path.join(workspace, path))
+        abs_path = os.path.abspath(os.path.join(effective_workspace, path))
     else:
         abs_path = os.path.abspath(path)
     
-    # Security check - ensure path is within workspace if specified
-    if workspace:
-        if not is_path_within_directory(abs_path, workspace):
-            return {
-                'success': False,
-                'error': f"Path '{path}' is outside the workspace",
-                'content': None,
-                'total_lines': 0,
-            }
+    # Security check - ensure path is within workspace
+    if not is_path_within_directory(abs_path, effective_workspace):
+        return {
+            'success': False,
+            'error': f"Path '{path}' is outside the workspace",
+            'content': None,
+            'total_lines': 0,
+        }
     
     # Check if file exists
     if not file_exists(abs_path):

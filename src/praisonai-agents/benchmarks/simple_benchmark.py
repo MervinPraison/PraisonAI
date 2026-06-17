@@ -14,6 +14,7 @@ import argparse
 
 
 ITERATIONS = 100
+WARMUP = 10
 
 
 def sample_tool(city: Literal['nyc', 'sf']):
@@ -23,8 +24,10 @@ def sample_tool(city: Literal['nyc', 'sf']):
     return 'sunny'
 
 
-def measure_instantiation(create_fn, iterations=ITERATIONS):
+def measure_instantiation(create_fn, iterations=ITERATIONS, warmup=WARMUP):
     """Measure average instantiation time in microseconds."""
+    for _ in range(warmup):
+        create_fn()
     times = []
     for _ in range(iterations):
         start = time.perf_counter()
@@ -48,11 +51,11 @@ def run_benchmark():
     from praisonaiagents import Agent as PraisonAgent
     
     results['PraisonAI'] = measure_instantiation(
-        lambda: PraisonAgent(name='Test', llm='gpt-4o-mini', output="silent")
+        lambda: PraisonAgent(name='Test', model='gpt-4o-mini', output="silent")
     )
     
     results['PraisonAI (LiteLLM)'] = measure_instantiation(
-        lambda: PraisonAgent(name='Test', llm='openai/gpt-4o-mini', output="silent")
+        lambda: PraisonAgent(name='Test', model='openai/gpt-4o-mini', output="silent")
     )
     
     # Other frameworks for comparison
