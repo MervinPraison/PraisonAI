@@ -174,23 +174,6 @@ def get_injected_params(func) -> Dict[str, Any]:
     return injected
 
 
-def filter_injected_from_schema(properties: Dict[str, Any], required: List[str], 
-                                 injected_params: Dict[str, Any]) -> tuple:
-    """Remove injected parameters from schema.
-    
-    Args:
-        properties: Schema properties dict
-        required: List of required param names
-        injected_params: Dict of injected param names
-        
-    Returns:
-        Tuple of (filtered_properties, filtered_required)
-    """
-    filtered_props = {k: v for k, v in properties.items() if k not in injected_params}
-    filtered_required = [r for r in required if r not in injected_params]
-    return filtered_props, filtered_required
-
-
 def inject_state_into_kwargs(kwargs: Dict[str, Any], injected_params: Dict[str, Any]) -> Dict[str, Any]:
     """Inject state values into kwargs for injected parameters.
     

@@ -53,9 +53,6 @@ def get_injected_params(func):
 def inject_state_into_kwargs(kwargs, injected_params):
     return _get_injected_module().inject_state_into_kwargs(kwargs, injected_params)
 
-def filter_injected_from_schema(schema, func):
-    return _get_injected_module().filter_injected_from_schema(schema, func)
-
 
 class FunctionTool(BaseTool):
     """A BaseTool wrapper for plain functions.
