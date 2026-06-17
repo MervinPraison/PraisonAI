@@ -237,7 +237,7 @@ export async function scrapeUrl(url: string): Promise<ToolResult<{ title: string
 // ============================================================================
 
 /** Shell metacharacters that enable command chaining or substitution */
-const SHELL_METACHAR_PATTERN = /[;|&`><]|$\([^)]*\)|\$\{/;
+const SHELL_METACHAR_PATTERN = /[;|&`><]|\$\([^)]*\)|\$\{/;
 
 function containsShellMetacharacters(command: string): boolean {
     return SHELL_METACHAR_PATTERN.test(command);

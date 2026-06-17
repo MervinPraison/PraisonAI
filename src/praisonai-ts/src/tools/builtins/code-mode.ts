@@ -112,6 +112,10 @@ export function codeMode(config?: CodeModeConfig): PraisonTool<CodeModeInput, Co
         /import\s+.*from\s+['"]child_process['"]/,
         /process\.exit/,
         /eval\s*\(/,
+        /Function\s*\(/,
+        /\.constructor/,
+        /globalThis/,
+        /\bprocess\b/,
       ];
 
       if (!settings.allowNetwork) {

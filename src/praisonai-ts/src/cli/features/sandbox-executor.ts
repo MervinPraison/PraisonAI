@@ -67,10 +67,8 @@ export const DEFAULT_BLOCKED_PATHS = [
   '/proc'
 ];
 
-];
-
 /** Shell metacharacters that enable command chaining or substitution */
-export const SHELL_METACHAR_PATTERN = /[;|&`><]|$\([^)]*\)|\$\{/;
+export const SHELL_METACHAR_PATTERN = /[;|&`><]|\$\([^)]*\)|\$\{/;
 
 /** Commands that typically require network access */
 export const NETWORK_COMMANDS = [

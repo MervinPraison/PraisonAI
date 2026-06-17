@@ -222,16 +222,9 @@ export class AgentLoop {
 
     // Handle tool calls
     if (step.toolCalls.length > 0) {
-      // Check for approval if callback provided
-      if (this.config.onToolCall) {
-        for (const toolCall of step.toolCalls) {
-          const approved = await this.config.onToolCall(toolCall);
-          if (!approved) {
-            this.complete = true;
-            step.finishReason = 'tool_rejected';
-            break;
-          }
-        }
+      // Rejection is handled in wrapped tool execute before execution
+      if (step.finishReason === 'tool_rejected') {
+        this.complete = true;
       }
 
       // Add tool call message
@@ -308,6 +301,35 @@ export class AgentLoop {
       totalUsage: this.totalUsage,
       finishReason: lastStep?.finishReason || 'unknown',
     };
+  }
+
+  /**
+   * Wrap tools so onToolCall approval runs before execution.
+   */
+  private wrapToolsWithApproval(tools: Record<string, AgentTool>): Record<string, AgentTool> {
+    const onToolCall = this.config.onToolCall;
+    if (!onToolCall) {
+      return tools;
+    }
+
+    const wrapped: Record<string, AgentTool> = {};
+    for (const [name, tool] of Object.entries(tools)) {
+      wrapped[name] = {
+        ...tool,
+        execute: async (args: any) => {
+          const approved = await onToolCall({
+            toolCallId: `pending-${name}`,
+            toolName: name,
+            args,
+          });
+          if (!approved) {
+            throw new Error(`Tool call rejected: ${name}`);
+          }
+          return tool.execute(args);
+        },
+      };
+    }
+    return wrapped;
   }
 
   /**

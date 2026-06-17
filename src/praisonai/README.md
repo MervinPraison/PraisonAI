@@ -770,11 +770,11 @@ agent.start('Write a movie script about a robot in Mars');
 
 ## ⚡ Performance
 
-PraisonAI is built for speed, with agent instantiation in under 4μs. This reduces overhead, improves responsiveness, and helps multi-agent systems scale efficiently in real-world production workloads.
+PraisonAI is built for speed, with agent instantiation in around 14μs. This reduces overhead, improves responsiveness, and helps multi-agent systems scale efficiently in real-world production workloads.
 
 | Performance Metric | PraisonAI |
 |--------------------|-----------|
-| Avg Instantiation Time | **3.77 μs** |
+| Avg Instantiation Time | **14 μs** |
 
 ---
 
