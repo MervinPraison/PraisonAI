@@ -892,9 +892,18 @@ class AutoGenerator(BaseAutoGenerator):
             if not existing_data:
                 # If existing file is empty, treat as new file
                 existing_data = {"roles": {}, "dependencies": []}
-        except (Exception, FileNotFoundError) as e:  # Catch any YAML error without importing early
+        except FileNotFoundError as e:
             logger.warning(f"Could not load existing agents file {self.agent_file}: {e}")
             logger.warning("Creating new file instead of merging")
+            existing_data = {"roles": {}, "dependencies": []}
+        except Exception as e:
+            # Only catch YAML parsing errors, not OS-level errors
+            if "yaml" in type(e).__module__.lower() or "YAML" in str(type(e)):
+                logger.warning(f"Could not parse existing agents file {self.agent_file}: {e}")
+                logger.warning("Creating new file instead of merging")
+            else:
+                # Re-raise OS-level errors like PermissionError, OSError, etc.
+                raise
             existing_data = {"roles": {}, "dependencies": []}
         
         # Start with existing data structure
@@ -1309,9 +1318,17 @@ Respond with:
             
             if not existing_data:
                 return new_data
-        except (Exception, FileNotFoundError) as e:  # Catch any YAML error without importing early
+        except FileNotFoundError as e:
             logger.warning(f"Could not load existing workflow file {self.workflow_file}: {e}")
             return new_data
+        except Exception as e:
+            # Only catch YAML parsing errors, not OS-level errors  
+            if "yaml" in type(e).__module__.lower() or "YAML" in str(type(e)):
+                logger.warning(f"Could not parse existing workflow file {self.workflow_file}: {e}")
+                return new_data
+            else:
+                # Re-raise OS-level errors like PermissionError, OSError, etc.
+                raise
         
         # Merge agents (avoid duplicates)
         merged_agents = existing_data.get('agents', {}).copy()

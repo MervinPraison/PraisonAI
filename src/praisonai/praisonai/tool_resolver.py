@@ -87,12 +87,12 @@ class ToolResolver:
         self._local_tools_lock = threading.Lock()
         self._registry = registry
         
-        # Initialize sources
+        # Initialize sources (future extension point)
         if sources is not None:
             self._sources = sources
         else:
             # Keep backward compatible sources inline for now
-            # Will be refactored to separate classes in future
+            # TODO: Will be refactored to separate classes and integrated in resolve() in future
             self._sources = None
         
         # Cache for resolved tools to avoid repeated resolution
