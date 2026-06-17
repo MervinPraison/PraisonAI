@@ -37,9 +37,14 @@ def searxng_search(
     
     try:
         import requests
+        from praisonaiagents.tools.url_safety import validate_searxng_url
         
         # Default URL for local SearxNG instance
         url = searxng_url or "http://localhost:32768/search"
+        if validate_searxng_url(url) is None:
+            error_msg = "SearxNG URL blocked by SSRF policy"
+            logging.error(error_msg)
+            return [{"error": error_msg}]
         
         params = {
             'q': query, 

@@ -242,7 +242,7 @@ def run(
         
         # Check tool permissions
         if not options.get("allow_dangerous_tools", False):
-            policy_error = _check_tool_policy(recipe_config)
+            policy_error = _check_tool_policy(recipe_config, options)
             if policy_error:
                 return RecipeResult(
                     run_id=run_id,
@@ -492,7 +492,7 @@ def run_stream(
                 return
 
         if not options.get("allow_dangerous_tools", False):
-            policy_error = _check_tool_policy(recipe_config)
+            policy_error = _check_tool_policy(recipe_config, options)
             if policy_error:
                 yield RecipeEvent(
                     event_type="error",
@@ -874,19 +874,59 @@ def _format_missing_deps(dep_result: Dict[str, Any]) -> List[str]:
     return missing
 
 
-def _check_tool_policy(recipe_config: RecipeConfig) -> Optional[str]:
+def _load_yaml_file(path: Path) -> Dict[str, Any]:
+    """Load a YAML file if it exists."""
+    if not path.exists():
+        return {}
+    try:
+        import yaml
+        with open(path, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _collect_workflow_declared_tools(recipe_config: RecipeConfig) -> set:
+    """Union tools from requires, workflow agents, and approve lists."""
+    tools: set = set(recipe_config.get_required_tools())
+    if not recipe_config.path:
+        return tools
+    base = Path(recipe_config.path)
+    workflow_raw = recipe_config.raw.get("workflow", "workflow.yaml")
+    agents_raw = recipe_config.raw.get("agents", "agents.yaml")
+    workflow_file = workflow_raw if isinstance(workflow_raw, str) else "workflow.yaml"
+    for fname in (workflow_file, "agents.yaml", "workflow.yaml"):
+        data = _load_yaml_file(base / fname)
+        if not data:
+            continue
+        approve = data.get("approve", [])
+        if isinstance(approve, str):
+            tools.add(approve)
+        elif isinstance(approve, list):
+            tools.update(str(t) for t in approve)
+        agents = data.get("agents", {})
+        if isinstance(agents, dict):
+            for agent_cfg in agents.values():
+                if isinstance(agent_cfg, dict):
+                    agent_tools = agent_cfg.get("tools", [])
+                    if isinstance(agent_tools, list):
+                        tools.update(str(t) for t in agent_tools)
+    return tools
+
+
+def _check_tool_policy(recipe_config: RecipeConfig, options: Optional[Dict[str, Any]] = None) -> Optional[str]:
     """Check if recipe uses denied tools. Returns error message or None."""
+    options = options or {}
+    if options.get("allow_dangerous_tools", False):
+        return None
     allowed = set(recipe_config.get_allowed_tools())
     denied = set(recipe_config.get_denied_tools())
-    required = set(recipe_config.get_required_tools())
+    declared = _collect_workflow_declared_tools(recipe_config)
     
-    # Check if any required tools are in default denied list
-    for tool in required:
+    for tool in declared:
         if tool in DEFAULT_DENIED_TOOLS and tool not in allowed:
             return f"Tool '{tool}' is denied by default. Use allow_dangerous_tools=True to override."
-    
-    # Check explicit denials
-    for tool in required:
         if tool in denied:
             return f"Tool '{tool}' is explicitly denied by recipe policy."
     
@@ -1087,6 +1127,7 @@ def _execute_steps_workflow(
         # This handles include steps, loops, variables, tools, etc.
         parser = YAMLWorkflowParser(tool_registry=tool_registry)
         workflow = parser.parse_file(workflow_file, extra_vars=extra_vars)
+        workflow.allow_dangerous_tools = options.get("allow_dangerous_tools", False)
         return workflow.start()
     
     # Fallback: Create workflow from config dict using parser
