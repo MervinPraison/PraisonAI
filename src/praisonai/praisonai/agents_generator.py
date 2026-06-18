@@ -1,12 +1,10 @@
 # praisonai/agents_generator.py
 
 import sys
+from typing import Dict, Any, Optional, List
 from .version import __version__
 import yaml, os
 from rich import print
-from dotenv import load_dotenv
-from .auto import AutoGenerator
-from .inc import PraisonAIModel
 import inspect
 from pathlib import Path
 import importlib
@@ -231,6 +229,9 @@ class AgentsGenerator:
         from .tool_resolver import ToolResolver
         self.tool_resolver = ToolResolver(registry=self.tool_registry)
         
+        # Wire resolver back to registry for cache invalidation
+        self.tool_registry.set_resolver(self.tool_resolver)
+        
         # DI-friendly: tests/multi-tenant runtimes pass their own registry;
         # CLI users get the process default.
         self._adapter_registry = adapter_registry or get_default_registry()
@@ -376,25 +377,23 @@ class AgentsGenerator:
         # Build tools dictionary using shared logic
         tools_dict = self._build_tools_dict(config)
         
-        # Select framework with AutoGen version logic
-        framework = self._select_autogen_version(
-            self.framework or config.get('framework', 'praisonai'),
-            config,
-        )
-        
-        # Get and resolve adapter
-        adapter = self._get_framework_adapter(framework).resolve()
+        # Select framework and resolve adapter variant
+        framework_name = self.framework or config.get('framework', 'praisonai')
+        adapter = self._select_framework(framework_name, config)
         
         # Validate framework availability
         from .framework_adapters.validators import assert_framework_available
         assert_framework_available(adapter.name)
         
         # Validate cli_backend compatibility
-        self._validate_cli_backend_compatibility(config, framework)
+        self._validate_cli_backend_compatibility(config, adapter)
         
         # Initialize observability hooks
         from .observability.hooks import init_observability
         init_observability(adapter.name)
+        
+        # Also initialize AgentOps if configured (separate from general observability)
+        self._init_observability(adapter.name)
         
         # Run adapter setup hooks
         adapter.setup(framework_tag=adapter.name)
@@ -473,29 +472,30 @@ class AgentsGenerator:
         
         return tools_dict
     
-    def _select_autogen_version(self, framework, config):
-        """Shared AutoGen version selection logic for sync and async paths."""
-        if framework == "autogen":
-            autogen_v4_adapter = self._get_framework_adapter("autogen_v4")
-            autogen_v2_adapter = self._get_framework_adapter("autogen")
-            
-            autogen_version = str(
-                config.get('autogen_version', os.environ.get("AUTOGEN_VERSION", "auto"))
-            ).lower()
-            use_v4 = False
-            
-            if autogen_version == "v0.4" and autogen_v4_adapter.is_available():
-                use_v4 = True
-            elif autogen_version == "v0.2" and autogen_v2_adapter.is_available():
-                use_v4 = False
-            elif autogen_version == "auto":
-                use_v4 = autogen_v4_adapter.is_available()
-            else:
-                use_v4 = autogen_v4_adapter.is_available() and not autogen_v2_adapter.is_available()
-            
-            framework = "autogen_v4" if use_v4 else "autogen"
+    def _select_framework(self, framework: str, config: Dict[str, Any]) -> Any:
+        """Select and resolve the appropriate framework adapter.
         
-        # Initialize AgentOps if configured
+        Args:
+            framework: The base framework name (e.g., "autogen", "crewai")
+            config: Framework configuration
+            
+        Returns:
+            The resolved FrameworkAdapter instance
+        """
+        # Get the base adapter
+        adapter = self._get_framework_adapter(framework)
+        
+        # Let the adapter resolve its own variant
+        resolved_adapter = adapter.resolve_variant(config, self._adapter_registry)
+        
+        return resolved_adapter
+    
+    def _init_observability(self, framework: str) -> None:
+        """Initialize observability tools if configured.
+        
+        Args:
+            framework: The framework name for tagging
+        """
         agentops_api_key = os.getenv("AGENTOPS_API_KEY")
         if agentops_api_key:
             try:
@@ -503,28 +503,61 @@ class AgentsGenerator:
                 agentops.init(agentops_api_key, default_tags=[framework])
             except ImportError:
                 pass
-        
-        return framework
     
     def _validate_cli_backend_compatibility(self, config, framework):
-        """Validate that cli_backend is only used with compatible frameworks."""
-        # Check if any agent/role defines cli_backend (support both key names)
+        """Validate that cli_backend and runtime are only used with compatible frameworks."""
+        # Check if any agent/role defines cli_backend or runtime
         all_entities = {
             **config.get('roles', {}),
             **config.get('agents', {}),
         }
+        
         has_cli_backend = any(
             isinstance(details, dict) and details.get('cli_backend')
             for details in all_entities.values()
         )
         
-        if has_cli_backend and framework != 'praisonai':
+        has_runtime = any(
+            isinstance(details, dict) and details.get('runtime')
+            for details in all_entities.values()
+        )
+        
+        # Check for model-scoped runtime in models section
+        has_model_runtime = False
+        models_config = config.get('models', {})
+        if isinstance(models_config, dict):
+            has_model_runtime = any(
+                isinstance(model_config, dict) and model_config.get('runtime')
+                for model_config in models_config.values()
+            )
+        
+        # Check for provider-scoped runtime in providers section
+        has_provider_runtime = False
+        providers_config = config.get('providers', {})
+        if isinstance(providers_config, dict):
+            has_provider_runtime = any(
+                isinstance(provider_config, dict) and provider_config.get('runtime_default')
+                for provider_config in providers_config.values()
+            )
+        
+        if (has_cli_backend or has_runtime or has_model_runtime or has_provider_runtime) and framework != 'praisonai':
+            runtime_features = []
+            if has_cli_backend:
+                runtime_features.append('cli_backend')
+            if has_runtime:
+                runtime_features.append('runtime')
+            if has_model_runtime:
+                runtime_features.append('models.*.runtime')
+            if has_provider_runtime:
+                runtime_features.append('providers.*.runtime_default')
+            
+            features_str = ', '.join(runtime_features)
             self.logger.error(
-                f"cli_backend is not supported for framework='{framework}'. "
-                f"Remove cli_backend from your YAML or switch to framework='praisonai'."
+                f"Runtime features ({features_str}) are not supported for framework='{framework}'. "
+                f"Remove these fields from your YAML or switch to framework='praisonai'."
             )
             raise ValueError(
-                f"cli_backend requires framework='praisonai', but framework='{framework}' was specified"
+                f"Runtime features require framework='praisonai', but framework='{framework}' was specified"
             )
 
     def _validate_agents_config(self, config):
@@ -540,7 +573,7 @@ class AgentsGenerator:
             'max_execution_time', 'verbose', 'cache', 'system_template',
             'prompt_template', 'response_template', 'tool_timeout', 'tool_retry_policy',
             'planning_tools', 'planning', 'autonomy', 'guardrails', 'streaming', 'stream',
-            'approval', 'skills', 'cli_backend', 'reflection', 'handoff', 'web', 'web_fetch'
+            'approval', 'skills', 'cli_backend', 'runtime', 'reflection', 'handoff', 'web', 'web_fetch'
         }
 
         for section_name in ('agents', 'roles'):

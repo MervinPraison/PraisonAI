@@ -518,10 +518,12 @@ Methods:
 * <code title="class Session">Session.<a href="./src/praisonai-agents/praisonaiagents/session/api.py">add_memory</a>(text: str, memory_type: str = 'long', **metadata) -> None</code>
 * <code title="class Session">Session.<a href="./src/praisonai-agents/praisonaiagents/session/api.py">chat</a>(message: str, **kwargs) -> str</code>
 * <code title="class Session">Session.<a href="./src/praisonai-agents/praisonaiagents/session/api.py">clear_memory</a>(memory_type: str = 'all') -> None</code>
+* <code title="class Session">Session.<a href="./src/praisonai-agents/praisonaiagents/session/api.py">close</a>() -> None</code>
 * <code title="class Session">Session.<a href="./src/praisonai-agents/praisonaiagents/session/api.py">create_agent</a>(*args, **kwargs) -> 'Agent'</code>
 * <code title="class Session">Session.<a href="./src/praisonai-agents/praisonaiagents/session/api.py">get_context</a>(query: str, max_items: int = 3) -> str</code>
 * <code title="class Session">Session.<a href="./src/praisonai-agents/praisonaiagents/session/api.py">get_state</a>(key: str, default: Any = None) -> Any</code>
 * <code title="class Session">Session.<a href="./src/praisonai-agents/praisonaiagents/session/api.py">increment_state</a>(key: str, increment: int = 1, default: int = 0) -> None</code>
+* <code title="class Session">Session.<a href="./src/praisonai-agents/praisonaiagents/session/api.py">is_expired</a>() -> bool</code>
 * <code title="class Session">Session.<a href="./src/praisonai-agents/praisonaiagents/session/api.py">knowledge</a>() -> 'Knowledge'</code>
 * <code title="class Session">Session.<a href="./src/praisonai-agents/praisonaiagents/session/api.py">memory</a>() -> 'Memory'</code>
 * <code title="class Session">Session.<a href="./src/praisonai-agents/praisonaiagents/session/api.py">restore_state</a>() -> Dict[str, Any]</code>
@@ -530,6 +532,7 @@ Methods:
 * <code title="class Session">Session.<a href="./src/praisonai-agents/praisonaiagents/session/api.py">search_memory</a>(query: str, memory_type: str = 'long', limit: int = 5) -> List[Dict[str, Any]]</code>
 * <code title="class Session">Session.<a href="./src/praisonai-agents/praisonaiagents/session/api.py">send_message</a>(message: str, **kwargs) -> str</code>
 * <code title="class Session">Session.<a href="./src/praisonai-agents/praisonaiagents/session/api.py">set_state</a>(key: str, value: Any) -> None</code>
+* <code title="class Session">Session.<a href="./src/praisonai-agents/praisonaiagents/session/api.py">time_to_expiry</a>() -> Optional[float]</code>
 
 # MCP
 
@@ -887,6 +890,7 @@ Methods:
 * <code title="cli">praisonai doctor network <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor packaging <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor performance <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
+* <code title="cli">praisonai doctor runtime <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor selftest <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor skills <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor tools <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>

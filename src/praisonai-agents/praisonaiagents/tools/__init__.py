@@ -1,11 +1,8 @@
 """Tools package for PraisonAI Agents - uses lazy loading for performance"""
 from importlib import import_module
 from typing import Any
-import threading
 
-# Thread-safe lazy loading cache
-_tools_lock = threading.Lock()
-_tools_lazy_cache = {}
+# Note: actual lazy loading cache is implemented with _loaded_classes in __getattr__
 
 # Export core tool items for organized imports (lightweight)
 from .base import BaseTool, ToolResult, ToolValidationError, validate_tool

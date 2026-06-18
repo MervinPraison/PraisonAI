@@ -1,11 +1,11 @@
 #!/bin/bash
 # MCP CLI Tools Examples
 #
-# Demonstrates the new CLI commands for MCP tool management:
-# - praisonai mcp tools search
-# - praisonai mcp tools info
-# - praisonai mcp tools schema
-# - praisonai mcp list-tools (with pagination)
+# Demonstrates the CLI commands for MCP tool management:
+# - praisonai mcp list-tools (list all tools)
+# - praisonai mcp tools search (search tools)
+# - praisonai mcp tools info (show tool details)
+# - praisonai mcp tools schema (show tool schema)
 #
 # Usage:
 #   chmod +x cli_tools_example.sh
@@ -17,34 +17,34 @@ echo "MCP Protocol Version: 2025-11-25"
 echo "========================================"
 
 echo ""
-echo "--- List Tools (with pagination) ---"
-echo "Command: praisonai mcp list-tools --limit 5"
-praisonai mcp list-tools --limit 5
+echo "--- List All Tools ---"
+echo "Command: praisonai mcp list-tools"
+praisonai mcp list-tools
 
 echo ""
 echo "--- List Tools (JSON output) ---"
-echo "Command: praisonai mcp list-tools --json --limit 3"
-praisonai mcp list-tools --json --limit 3
-
-echo ""
-echo "--- Tools Help ---"
-echo "Command: praisonai mcp tools --help"
-praisonai mcp tools --help
+echo "Command: praisonai mcp list-tools --json"
+praisonai mcp list-tools --json
 
 echo ""
 echo "--- Search Tools ---"
-echo "Command: praisonai mcp tools search 'workflow'"
-praisonai mcp tools search "workflow"
+echo "Command: praisonai mcp tools search 'memory'"
+praisonai mcp tools search "memory"
 
 echo ""
-echo "--- Search Read-Only Tools ---"
-echo "Command: praisonai mcp tools search --read-only"
-praisonai mcp tools search --read-only
+echo "--- List Tools via tools command ---"
+echo "Command: praisonai mcp tools list"
+praisonai mcp tools list
 
 echo ""
-echo "--- Search with JSON Output ---"
-echo "Command: praisonai mcp tools search 'memory' --json"
-praisonai mcp tools search "memory" --json
+echo "--- Tools Help ---"
+echo "Command: praisonai mcp tools help"
+praisonai mcp tools help
+
+echo ""
+echo "--- MCP Help ---"
+echo "Command: praisonai mcp --help"
+praisonai mcp --help
 
 echo ""
 echo "========================================"

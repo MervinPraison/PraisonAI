@@ -196,8 +196,13 @@ class Process:
         except (json.JSONDecodeError, ValueError, TypeError) as e:
             raise Exception(f"Failed to parse response: {response}") from e
 
-    def _create_loop_subtasks(self, loop_task: Task):
-        """Create subtasks for a loop task from input file."""
+    def _create_loop_subtasks(self, loop_task: Task, decision_mode: bool = False):
+        """Create subtasks for a loop task from input file.
+        
+        Args:
+            loop_task: The loop task to create subtasks for
+            decision_mode: If True, create decision-type subtasks with conditions (for start tasks)
+        """
         if not loop_task.input_file:
             logging.warning(f"_create_loop_subtasks called for {loop_task.name} but no input_file specified")
             return
@@ -229,20 +234,45 @@ class Process:
                         task_count += 1
                         logging.debug(f"Creating subtask from CSV row {i+1}: {task_desc}")
 
-                        row_task = Task(
-                            description=f"{loop_task.description}\n{task_desc}" if loop_task.description else task_desc,
-                            agent=loop_task.agent,
-                            name=f"{loop_task.name}_{task_count}" if loop_task.name else task_desc,
-                            expected_output=getattr(loop_task, 'expected_output', None),
-                            on_task_complete=loop_task.callback,  # Inherit callback from parent loop task
-                            is_start=(task_count == 1),
-                            task_type="task"
-                        )
+                        # Configure task based on decision_mode
+                        if decision_mode:
+                            # For start tasks: create decision-type tasks with conditions and inherited next_tasks
+                            inherited_next_tasks = loop_task.next_tasks if loop_task.next_tasks else []
+                            row_name = f"{loop_task.name}_{task_count}" if loop_task.name else task_desc
+                            row_task = Task(
+                                description=f"{loop_task.description}\n{task_desc}" if loop_task.description else task_desc,
+                                agent=loop_task.agent,
+                                name=row_name,
+                                expected_output=getattr(loop_task, 'expected_output', None),
+                                on_task_complete=loop_task.callback,  # Inherit callback from parent loop task
+                                is_start=(task_count == 1),
+                                task_type="decision",  # Change to decision type for start tasks
+                                next_tasks=inherited_next_tasks,  # Inherit parent's next tasks
+                                condition={
+                                    "done": inherited_next_tasks if inherited_next_tasks else [],
+                                    "retry": [row_name],
+                                    "exit": []  # Empty list for exit condition
+                                }
+                            )
+                        else:
+                            # For regular loop tasks: create basic task-type subtasks
+                            row_task = Task(
+                                description=f"{loop_task.description}\n{task_desc}" if loop_task.description else task_desc,
+                                agent=loop_task.agent,
+                                name=f"{loop_task.name}_{task_count}" if loop_task.name else task_desc,
+                                expected_output=getattr(loop_task, 'expected_output', None),
+                                on_task_complete=loop_task.callback,  # Inherit callback from parent loop task
+                                is_start=(task_count == 1),
+                                task_type="task"
+                            )
+                        
                         self.tasks[row_task.id] = row_task
                         new_tasks.append(row_task)
 
                         if previous_task:
                             previous_task.next_tasks = [row_task.name]
+                            if decision_mode:
+                                previous_task.condition["done"] = [row_task.name]  # Use "done" consistently for decision tasks
                         previous_task = row_task
 
                     logging.info(f"Created {task_count} subtasks from CSV file for {loop_task.name}")
@@ -254,21 +284,42 @@ class Process:
                     for i, line in enumerate(lines):
                         if not line.strip():  # Skip empty lines
                             continue
-                            
-                        row_task = Task(
-                            description=f"{loop_task.description}\n{line.strip()}" if loop_task.description else line.strip(),
-                            agent=loop_task.agent,
-                            name=f"{loop_task.name}_{i+1}" if loop_task.name else line.strip(),
-                            expected_output=getattr(loop_task, 'expected_output', None),
-                            on_task_complete=loop_task.callback,  # Inherit callback from parent loop task
-                            is_start=(i == 0),
-                            task_type="task"
-                        )
+                        
+                        # Configure task based on decision_mode
+                        if decision_mode:
+                            # For start tasks: create tasks with conditions 
+                            row_task = Task(
+                                description=f"{loop_task.description}\n{line.strip()}" if loop_task.description else line.strip(),
+                                agent=loop_task.agent,
+                                name=f"{loop_task.name}_{i+1}" if loop_task.name else line.strip(),
+                                expected_output=getattr(loop_task, 'expected_output', None),
+                                on_task_complete=loop_task.callback,  # Inherit callback from parent loop task
+                                is_start=(i == 0),
+                                task_type="task",
+                                condition={
+                                    "complete": ["next"],
+                                    "retry": ["current"]
+                                }
+                            )
+                        else:
+                            # For regular loop tasks: create basic tasks
+                            row_task = Task(
+                                description=f"{loop_task.description}\n{line.strip()}" if loop_task.description else line.strip(),
+                                agent=loop_task.agent,
+                                name=f"{loop_task.name}_{i+1}" if loop_task.name else line.strip(),
+                                expected_output=getattr(loop_task, 'expected_output', None),
+                                on_task_complete=loop_task.callback,  # Inherit callback from parent loop task
+                                is_start=(i == 0),
+                                task_type="task"
+                            )
+                        
                         self.tasks[row_task.id] = row_task
                         new_tasks.append(row_task)
 
                         if previous_task:
                             previous_task.next_tasks = [row_task.name]
+                            if decision_mode:
+                                previous_task.condition["complete"] = [row_task.name]
                         previous_task = row_task
 
                     logging.info(f"Created {len(new_tasks)} subtasks from text file for {loop_task.name}")
@@ -276,7 +327,12 @@ class Process:
             if new_tasks and loop_task.next_tasks:
                 # Connect last subtask to loop task's next tasks
                 last_task = new_tasks[-1]
-                last_task.next_tasks = loop_task.next_tasks
+                if decision_mode:
+                    # For decision mode, ensure the last task points to parent's next tasks
+                    if not last_task.next_tasks:
+                        last_task.next_tasks = loop_task.next_tasks
+                else:
+                    last_task.next_tasks = loop_task.next_tasks
 
         except Exception as e:
             logging.error(f"Failed to create subtasks for loop task {loop_task.name}: {e}")
@@ -1112,97 +1168,23 @@ Provide a JSON with the structure:
         if start_task and start_task.task_type == "loop" and not start_task.input_file:
             start_task.input_file = "tasks.csv"
 
-        # --- If loop + input_file, read file & create tasks
+        # --- If loop + input_file, read file & create tasks using consolidated helper
         if start_task and start_task.task_type == "loop" and getattr(start_task, "input_file", None):
             try:
-                file_ext = os.path.splitext(start_task.input_file)[1].lower()
-                new_tasks = []
-
-                if file_ext == ".csv":
-                    with open(start_task.input_file, "r", encoding="utf-8") as f:
-                        reader = csv.reader(f, quotechar='"', escapechar='\\')  # Handle quoted/escaped fields
-                        previous_task = None
-                        task_count = 0
-
-                        for i, row in enumerate(reader):
-                            if not row:  # Skip truly empty rows
-                                continue
-
-                            # Properly handle Q&A pairs with potential commas
-                            task_desc = row[0].strip() if row else ""
-                            if len(row) > 1:
-                                # Preserve all fields in case of multiple commas
-                                question = row[0].strip()
-                                answer = ",".join(field.strip() for field in row[1:])
-                                task_desc = f"Question: {question}\nAnswer: {answer}"
-
-                            if not task_desc:  # Skip rows with empty content
-                                continue
-
-                            task_count += 1
-                            logging.debug(f"Processing CSV row {i+1}: {task_desc}")
-
-                            # Inherit next_tasks from parent loop task
-                            inherited_next_tasks = start_task.next_tasks if start_task.next_tasks else []
-
-                            row_task = Task(
-                                description=f"{start_task.description}\n{task_desc}" if start_task.description else task_desc,
-                                agent=start_task.agent,
-                                name=f"{start_task.name}_{task_count}" if start_task.name else task_desc,
-                                expected_output=getattr(start_task, 'expected_output', None),
-                                on_task_complete=start_task.callback,  # Inherit callback from parent loop task
-                                is_start=(task_count == 1),
-                                task_type="decision",  # Change to decision type
-                                next_tasks=inherited_next_tasks,  # Inherit parent's next tasks
-                                condition={
-                                    "done": inherited_next_tasks if inherited_next_tasks else ["next"],  # Use full inherited_next_tasks
-                                    "retry": ["current"],
-                                    "exit": []  # Empty list for exit condition
-                                }
-                            )
-                            self.tasks[row_task.id] = row_task
-                            new_tasks.append(row_task)
-
-                            if previous_task:
-                                previous_task.next_tasks = [row_task.name]
-                                previous_task.condition["done"] = [row_task.name]  # Use "done" consistently
-                            previous_task = row_task
-
-                            # For the last task in the loop, ensure it points to parent's next tasks
-                            if task_count > 0 and not row_task.next_tasks:
-                                row_task.next_tasks = inherited_next_tasks
-
-                        logging.info(f"Processed {task_count} rows from CSV file")
-                else:
-                    # If not CSV, read lines
-                    with open(start_task.input_file, "r", encoding="utf-8") as f:
-                        lines = f.read().splitlines()
-                        previous_task = None
-                        for i, line in enumerate(lines):
-                            row_task = Task(
-                                description=f"{start_task.description}\n{line.strip()}" if start_task.description else line.strip(),
-                                agent=start_task.agent,
-                                name=f"{start_task.name}_{i+1}" if start_task.name else line.strip(),
-                                expected_output=getattr(start_task, 'expected_output', None),
-                                on_task_complete=start_task.callback,  # Inherit callback from parent loop task
-                                is_start=(i == 0),
-                                task_type="task",
-                                condition={
-                                    "complete": ["next"],
-                                    "retry": ["current"]
-                                }
-                            )
-                            self.tasks[row_task.id] = row_task
-                            new_tasks.append(row_task)
-
-                            if previous_task:
-                                previous_task.next_tasks = [row_task.name]
-                                previous_task.condition["complete"] = [row_task.name]
-                            previous_task = row_task
-
-                if new_tasks:
-                    start_task = new_tasks[0]
-                    logging.info(f"Created {len(new_tasks)} tasks from: {start_task.input_file}")
+                parent_loop_task = start_task
+                parent_input_file = parent_loop_task.input_file
+                self._create_loop_subtasks(parent_loop_task, decision_mode=True)
+                # Get the first created subtask as the new start task
+                subtasks = [
+                    t for t in self.tasks.values()
+                    if t.name.startswith(parent_loop_task.name + "_")
+                ]
+                if subtasks:
+                    # Mark parent loop task as completed and find start subtask
+                    parent_loop_task.status = "completed"
+                    parent_loop_task._subtasks_created = True
+                    start_task = next((t for t in subtasks if t.is_start), subtasks[0])
+                    logging.info(f"Created {len(subtasks)} tasks from: {parent_input_file}")
             except Exception as e:
                 logging.error(f"Failed to read file tasks: {e}")
 
@@ -1256,7 +1238,7 @@ Tasks by type:
                 break  # Exit immediately to prevent task reset
 
 
-            # Handle loop task file reading at runtime
+            # Handle loop task file reading at runtime using consolidated helper
             if (current_task.task_type == "loop" and
                 current_task is not start_task and
                 getattr(current_task, "_subtasks_created", False) is not True):
@@ -1266,66 +1248,18 @@ Tasks by type:
 
                 if getattr(current_task, "input_file", None):
                     try:
-                        file_ext = os.path.splitext(current_task.input_file)[1].lower()
-                        new_tasks = []
-
-                        if file_ext == ".csv":
-                            with open(current_task.input_file, "r", encoding="utf-8") as f:
-                                reader = csv.reader(f)
-                                previous_task = None
-                                for i, row in enumerate(reader):
-                                    if row:  # Skip empty rows
-                                        task_desc = row[0]  # Take first column
-                                        row_task = Task(
-                                            description=f"{current_task.description}\n{task_desc}" if current_task.description else task_desc,
-                                            agent=current_task.agent,
-                                            name=f"{current_task.name}_{i+1}" if current_task.name else task_desc,
-                                            expected_output=getattr(current_task, 'expected_output', None),
-                                            on_task_complete=current_task.callback,  # Inherit callback from parent loop task
-                                            is_start=(i == 0),
-                                            task_type="task",
-                                            condition={
-                                                "complete": ["next"],
-                                                "retry": ["current"]
-                                            }
-                                        )
-                                        self.tasks[row_task.id] = row_task
-                                        new_tasks.append(row_task)
-
-                                        if previous_task:
-                                            previous_task.next_tasks = [row_task.name]
-                                            previous_task.condition["complete"] = [row_task.name]
-                                        previous_task = row_task
-                        else:
-                            with open(current_task.input_file, "r", encoding="utf-8") as f:
-                                lines = f.read().splitlines()
-                                previous_task = None
-                                for i, line in enumerate(lines):
-                                    row_task = Task(
-                                        description=f"{current_task.description}\n{line.strip()}" if current_task.description else line.strip(),
-                                        agent=current_task.agent,
-                                        name=f"{current_task.name}_{i+1}" if current_task.name else line.strip(),
-                                        expected_output=getattr(current_task, 'expected_output', None),
-                                        on_task_complete=current_task.callback,  # Inherit callback from parent loop task
-                                        is_start=(i == 0),
-                                        task_type="task",
-                                        condition={
-                                            "complete": ["next"],
-                                            "retry": ["current"]
-                                        }
-                                    )
-                                    self.tasks[row_task.id] = row_task
-                                    new_tasks.append(row_task)
-
-                                    if previous_task:
-                                        previous_task.next_tasks = [row_task.name]
-                                        previous_task.condition["complete"] = [row_task.name]
-                                    previous_task = row_task
-
-                        if new_tasks:
-                            current_task.next_tasks = [new_tasks[0].name]
+                        self._create_loop_subtasks(current_task, decision_mode=False)
+                        # Update current task to point to first subtask
+                        subtasks = [
+                            t for t in self.tasks.values()
+                            if t.name.startswith(current_task.name + "_")
+                        ]
+                        if subtasks:
+                            # Find first subtask by is_start flag or first in list
+                            first_subtask = next((t for t in subtasks if t.is_start), subtasks[0])
+                            current_task.next_tasks = [first_subtask.name]
                             current_task._subtasks_created = True
-                            logging.info(f"Created {len(new_tasks)} tasks from: {current_task.input_file} for loop task {current_task.name}")
+                            logging.info(f"Created {len(subtasks)} tasks from: {current_task.input_file} for loop task {current_task.name}")
                     except Exception as e:
                         logging.error(f"Failed to read file tasks for loop task {current_task.name}: {e}")
 

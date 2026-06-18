@@ -76,11 +76,57 @@ def format_help(
     return "\n".join(lines)
 
 
-async def handle_stop_command(
+def handle_stop_command(session_manager, user_id: str) -> str:
+    """Handle a /stop command to cancel an active run.
+    
+    This function works with both the legacy BotSessionManager approach
+    and the newer SessionRunControl approach for maximum compatibility.
+    
+    Args:
+        session_manager: BotSessionManager instance or SessionRunControl
+        user_id: User ID to cancel run for
+        
+    Returns:
+        Response message indicating success or failure
+    """
+    # Handle SessionRunControl (newer approach)
+    if hasattr(session_manager, 'stop'):
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # We're in an async context, need to use create_task
+                task = asyncio.create_task(session_manager.stop(user_id))
+                # This is a synchronous function, so we can't await
+                # Return a message indicating async operation is happening
+                return "⏳ Cancellation requested..."
+            else:
+                # No event loop, run synchronously
+                stopped = asyncio.run(session_manager.stop(user_id))
+                if stopped:
+                    return "✅ Current task cancelled. Send a new message to start fresh."
+                else:
+                    return "ℹ️ No active task to cancel."
+        except Exception as e:
+            return f"❌ Error stopping task: {e}"
+    
+    # Handle BotSessionManager (legacy approach)
+    elif hasattr(session_manager, 'cancel_run'):
+        was_cancelled = session_manager.cancel_run(user_id, "user_stop_command")
+        if was_cancelled:
+            return "✅ Current task cancelled. Send a new message to start fresh."
+        else:
+            return "ℹ️ No active task to cancel."
+    
+    else:
+        return "❌ Stop command not available (run control not enabled)"
+
+
+async def handle_stop_command_async(
     user_id: str,
     run_control: Optional["SessionRunControl"] = None,
 ) -> str:
-    """Handle /stop command to cancel current agent task.
+    """Async version of handle_stop_command for SessionRunControl.
     
     Args:
         user_id: User identifier

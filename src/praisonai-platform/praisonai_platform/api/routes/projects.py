@@ -115,4 +115,4 @@ async def project_stats(
     project = await svc.get(project_id, workspace_id=workspace_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
-    return await svc.get_stats(project_id)
+    return await svc.get_stats(project_id, workspace_id=workspace_id)

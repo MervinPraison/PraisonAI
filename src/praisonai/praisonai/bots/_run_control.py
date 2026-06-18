@@ -38,6 +38,7 @@ import logging
 import time
 from enum import Enum
 from typing import Dict, Optional, Any, TYPE_CHECKING
+from .._lockmap import LockMap
 
 if TYPE_CHECKING:
     from praisonaiagents.agent.interrupt import InterruptController
@@ -99,13 +100,11 @@ class SessionRunControl:
             
         self._busy_ack_template = busy_ack_template
         self._sessions: Dict[str, SessionRunState] = {}
-        self._locks: Dict[str, asyncio.Lock] = {}
+        self._locks = LockMap()
 
     def _get_lock(self, user_id: str) -> asyncio.Lock:
         """Get or create lock for user."""
-        if user_id not in self._locks:
-            self._locks[user_id] = asyncio.Lock()
-        return self._locks[user_id]
+        return self._locks.get(user_id)
 
     def _get_session(self, user_id: str) -> SessionRunState:
         """Get or create session state for user."""
@@ -338,7 +337,7 @@ class SessionRunControl:
                 
         for user_id in stale_users:
             del self._sessions[user_id]
-            self._locks.pop(user_id, None)
+            self._locks.drop(user_id)
             
         if stale_users:
             logger.debug(f"SessionRunControl: cleaned up {len(stale_users)} stale sessions")

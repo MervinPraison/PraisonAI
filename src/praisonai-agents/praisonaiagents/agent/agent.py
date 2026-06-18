@@ -588,7 +588,8 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         tool_config: Optional[Union[bool, 'ToolConfig']] = None,  # Tool execution configuration (timeout, retry, parallel)
         learn: Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
         backend: Optional[Any] = None,  # External managed agent backend (e.g., ManagedAgentIntegration)
-        cli_backend: Optional[Union[str, Any]] = None,  # CLI backend for delegating turns (e.g., "claude-code")
+        cli_backend: Optional[Union[str, Any]] = None,  # CLI backend for delegating turns (e.g., "claude-code") - DEPRECATED
+        runtime: Optional[Union[str, Dict[str, Any], 'AgentRuntimeConfig']] = None,  # Model-scoped runtime configuration
         interrupt_controller: Optional['InterruptController'] = None,  # G2: Cooperative cancellation
         tool_search: Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']] = False,  # Progressive tool disclosure
         message_steering: Optional[Union[bool, 'MessageSteeringProtocol']] = False,  # Real-time message steering during execution
@@ -689,13 +690,15 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
                 - None: Use local execution (default)
                 When provided, agent can delegate execution to managed infrastructure
                 for long-running tasks or when local resources are constrained.
-            cli_backend: CLI backend for delegating full turns to external CLI tools. Accepts:
-                - str: Backend ID ("claude-code", "codex-cli", "gemini-cli")
-                - CliBackendProtocol: Custom CLI backend instance
-                - None: Use standard LLM execution (default)
-                When provided, agent delegates entire conversation turns to the CLI tool
-                instead of using the built-in LLM. Enables session continuity and 
-                tool integration through external AI coding assistants.
+            cli_backend: **DEPRECATED** CLI backend for delegating full turns. Use 'runtime' parameter instead.
+                This parameter is deprecated in favor of model-scoped runtime configuration.
+                Will emit deprecation warning when used.
+            runtime: Model-scoped runtime configuration for turn delegation. Accepts:
+                - str: Runtime ID ("claude-code", "praisonai") 
+                - Dict[str, Any]: Runtime config {"runtime": "claude-code", "config_overrides": {...}}
+                - AgentRuntimeConfig: Pre-configured runtime instance
+                - None: Use model-based resolution (default)
+                Enables turn delegation with per-model runtime selection and fail-closed behavior.
             tool_search: Progressive tool disclosure configuration. Accepts:
                 - bool: False=disabled (default), True=auto mode
                 - str: Mode ("auto", "on", "off")  
@@ -2032,10 +2035,26 @@ Your Goal: {self.goal}
         # Backend - external managed agent backend for hybrid execution
         self.backend = backend
         
-        # CLI Backend - external CLI backend for delegating full turns
+        # CLI Backend - external CLI backend for delegating full turns (DEPRECATED)
         self._cli_backend = None
         if cli_backend is not None:
+            from ..utils.deprecation import warn_deprecated_param
+            warn_deprecated_param(
+                "cli_backend",
+                since="1.0.0",
+                removal="2.0.0",
+                alternative="use 'runtime=' instead for model-scoped runtime configuration",
+                stacklevel=3
+            )
             self._cli_backend = self._resolve_cli_backend(cli_backend)
+        
+        # Runtime Configuration - model-scoped runtime selection
+        self._runtime_config = None
+        if runtime is not None:
+            self._runtime_config = self._resolve_runtime_config(runtime)
+        
+        # Runtime resolver for per-turn resolution
+        self._runtime_resolver = None  # Will be initialized on first use
 
         # Telemetry - lazy initialized via property for performance
         self.__telemetry = None
@@ -5079,17 +5098,163 @@ Answer:"""
         
         raise TypeError(f"Invalid cli_backend type: {type(cli_backend)}. Expected CliBackendProtocol instance or factory callable.")
     
-    async def _chat_via_cli_backend(self, prompt: str, **kwargs) -> Optional[str]:
+    def _resolve_runtime_config(self, runtime):
+        """Resolve runtime parameter to AgentRuntimeConfig instance.
+        
+        Args:
+            runtime: Runtime configuration parameter
+            
+        Returns:
+            AgentRuntimeConfig instance
+            
+        Raises:
+            TypeError: If runtime type is invalid
+            ValueError: If runtime configuration is invalid
+        """
+        try:
+            from ..runtime import AgentRuntimeConfig
+        except ImportError:
+            raise ImportError(
+                "Runtime configuration features requested but not available. "
+                "This should not happen in a properly installed praisonaiagents package."
+            )
+        
+        # If already an AgentRuntimeConfig instance, return as-is
+        if isinstance(runtime, AgentRuntimeConfig):
+            return runtime
+        
+        # If string, create config with runtime ID
+        if isinstance(runtime, str):
+            return AgentRuntimeConfig.from_runtime_id(runtime)
+        
+        # If dictionary, create config from dict
+        if isinstance(runtime, dict):
+            return AgentRuntimeConfig.from_dict(runtime)
+        
+        raise TypeError(f"Invalid runtime type: {type(runtime)}. Expected str, dict, or AgentRuntimeConfig instance.")
+    
+    def _get_runtime_resolver(self):
+        """Get or create runtime resolver instance (lazy initialization)."""
+        if self._runtime_resolver is None:
+            try:
+                from ..runtime.resolver import RuntimeResolver
+                self._runtime_resolver = RuntimeResolver()
+            except ImportError:
+                raise ImportError(
+                    "Runtime resolution features requested but not available. "
+                    "This should not happen in a properly installed praisonaiagents package."
+                )
+        return self._runtime_resolver
+    
+    async def _resolve_turn_runtime(self):
+        """Resolve runtime for current turn based on model and configuration.
+        
+        Returns:
+            Runtime instance if resolution succeeds, None otherwise
+        """
+        try:
+            from ..runtime.resolver import RuntimeResolutionContext
+        except ImportError:
+            return None
+        
+        # Create resolution context with current model and provider info
+        context = RuntimeResolutionContext(
+            model_name=getattr(self, 'llm', None),
+            provider_name=self._extract_provider_from_model(getattr(self, 'llm', None)),
+            agent_config={'agent_id': getattr(self, 'agent_id', None)}
+        )
+        
+        try:
+            resolver = self._get_runtime_resolver()
+            result = resolver.resolve_runtime_instance(
+                context=context,
+                model_runtime_configs=getattr(self, '_model_runtime_configs', None),
+                provider_runtime_configs=getattr(self, '_provider_runtime_configs', None),
+                legacy_cli_backend=getattr(self, '_cli_backend', None)
+            )
+            
+            if result and result.runtime:
+                return result.runtime
+            
+        except (ValueError, RuntimeError) as e:
+            # Only fall back for registry not initialized, propagate configuration errors
+            if "not initialized" in str(e).lower():
+                # Registry not initialized - this is expected in SDK-only mode
+                pass
+            else:
+                # Configuration error (unknown runtime ID etc.) - fail closed
+                raise RuntimeError(
+                    f"Runtime resolution failed for agent={getattr(self, 'display_name', 'unknown')!r}, "
+                    f"model={getattr(self, 'llm', None)!r}: {e}. "
+                    "Fix the runtime ID/configuration or remove the runtime override."
+                ) from e
+        
+        return None
+    
+    def _extract_provider_from_model(self, model_name):
+        """Extract provider name from model name.
+        
+        Args:
+            model_name: Model name string (e.g., "anthropic/claude-3-sonnet")
+            
+        Returns:
+            Provider name if detectable, None otherwise
+        """
+        if not model_name or not isinstance(model_name, str):
+            return None
+        
+        # Common provider patterns
+        if '/' in model_name:
+            return model_name.split('/')[0]
+        
+        # Provider inference based on model name patterns
+        model_lower = model_name.lower()
+        if 'claude' in model_lower or 'anthropic' in model_lower:
+            return 'anthropic'
+        elif 'gpt' in model_lower or 'openai' in model_lower:
+            return 'openai'
+        elif 'gemini' in model_lower or 'google' in model_lower:
+            return 'google'
+        elif 'llama' in model_lower:
+            return 'meta'
+        
+        return None
+    
+    async def _chat_via_runtime(self, runtime_instance, prompt: str, **kwargs) -> Optional[str]:
+        """Chat implementation using resolved runtime instance.
+        
+        This is similar to _chat_via_cli_backend but uses the resolved runtime
+        from the model-scoped runtime resolution system.
+        
+        Args:
+            runtime_instance: Resolved runtime instance (CliBackendProtocol)
+            prompt: User prompt
+            **kwargs: Additional chat parameters
+            
+        Returns:
+            Runtime response content
+        """
+        if not runtime_instance:
+            raise RuntimeError("Runtime instance is None")
+        
+        # Delegate to CLI backend implementation with runtime instance
+        # Pass runtime instance directly to avoid mutating shared state
+        return await self._chat_via_cli_backend(prompt=prompt, cli_backend=runtime_instance, **kwargs)
+    
+    async def _chat_via_cli_backend(self, prompt: str, cli_backend: Any = None, **kwargs) -> Optional[str]:
         """Chat implementation using CLI backend delegation.
         
         Args:
             prompt: User prompt
+            cli_backend: Optional specific backend instance to use (for runtime delegation)
             **kwargs: Additional chat parameters (passed through as metadata)
             
         Returns:
             CLI backend response content
         """
-        if not self._cli_backend:
+        # Use provided backend or fall back to instance backend
+        backend = cli_backend or self._cli_backend
+        if not backend:
             raise RuntimeError("CLI backend not configured")
         
         try:
@@ -5128,7 +5293,7 @@ Answer:"""
                     images = None
             
             # Execute CLI backend
-            result = await self._cli_backend.execute(
+            result = await backend.execute(
                 prompt=prompt,
                 session=session_binding,
                 images=images,

@@ -111,6 +111,12 @@ class BotConfig:
     
     # Owner user ID for pairing approvals (platform-specific format)
     owner_user_id: Optional[str] = None
+    
+    # Progressive streaming for channel bots (default: False)
+    streaming: bool = False
+    
+    # Edit interval for streaming responses in milliseconds (default: 700ms)
+    stream_edit_interval_ms: int = 700
 
     def __post_init__(self) -> None:
         if self.unknown_user_policy not in {"deny", "pair", "allow"}:
@@ -153,6 +159,8 @@ class BotConfig:
             "workspace_scope": self.workspace_scope,
             "unknown_user_policy": self.unknown_user_policy,
             "owner_user_id": "***" if self.owner_user_id else None,
+            "streaming": self.streaming,
+            "stream_edit_interval_ms": self.stream_edit_interval_ms,
             "metadata": self.metadata,
         }
     
