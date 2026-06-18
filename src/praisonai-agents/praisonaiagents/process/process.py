@@ -618,7 +618,6 @@ class Process:
 
         current_task = start_task
         visited_tasks = set()
-        loop_data = {}  # Store loop-specific data
 
         # TODO: start task with loop feature is not available in aworkflow method
 
@@ -789,8 +788,6 @@ Subtask: {st.name}
                 yield task_id
                 visited_tasks.add(task_id)
                 # Reset description to original after execution to prevent context accumulation
-                if hasattr(current_task, '_original_description'):
-                    current_task.description = current_task._original_description
 
                 # Only end workflow if no next_tasks AND no conditions
                 if not current_task.next_tasks and not current_task.condition and not any(
@@ -828,22 +825,6 @@ Subtask: {st.name}
                         logging.debug(f"=== Skipping reset for loop/decision/subtask/parallel or rerun=False: {subtask_name} ===")
                         logging.debug(f"Keeping status as: {self.tasks[task_id].status}")
 
-            # Handle loop progression
-            if current_task.task_type == "loop":
-                loop_key = f"loop_{current_task.name}"
-                if loop_key in loop_data:
-                    loop_info = loop_data[loop_key]
-                    loop_info["index"] += 1
-                    has_more = loop_info["remaining"] > 0
-
-                    # Update result to trigger correct condition
-                    if current_task.result:
-                        result = current_task.result.raw
-                        if has_more:
-                            result += "\nmore"
-                        else:
-                            result += "\ndone"
-                        current_task.result.raw = result
 
             # Determine next task based on result
             next_task = None
@@ -1191,7 +1172,6 @@ Provide a JSON with the structure:
         # end of start task handling
         current_task = start_task
         visited_tasks = set()
-        loop_data = {}  # Store loop-specific data
 
         while current_task:
             current_iter += 1
@@ -1386,8 +1366,6 @@ Subtask: {st.name}
                 yield task_id
                 visited_tasks.add(task_id)
                 # Reset description to original after execution to prevent context accumulation
-                if hasattr(current_task, '_original_description'):
-                    current_task.description = current_task._original_description
 
                 # Only end workflow if no next_tasks AND no conditions
                 if not current_task.next_tasks and not current_task.condition and not any(
@@ -1423,22 +1401,6 @@ Subtask: {st.name}
                     logging.debug(f"Keeping status as: {self.tasks[task_id].status}")
 
 
-            # Handle loop progression
-            if current_task.task_type == "loop":
-                loop_key = f"loop_{current_task.name}"
-                if loop_key in loop_data:
-                    loop_info = loop_data[loop_key]
-                    loop_info["index"] += 1
-                    has_more = loop_info["remaining"] > 0
-
-                    # Update result to trigger correct condition
-                    if current_task.result:
-                        result = current_task.result.raw
-                        if has_more:
-                            result += "\nmore"
-                        else:
-                            result += "\ndone"
-                        current_task.result.raw = result
 
             # Determine next task based on result
             next_task = None
