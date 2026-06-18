@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import os
 import contextvars
-from typing import Any, Dict, List, Optional, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 # Use context variable instead of module-level global for multi-agent safety
 _configured_context: contextvars.ContextVar[bool] = contextvars.ContextVar('host_configured', default=False)
@@ -248,4 +249,132 @@ def create_host_app():
 def build_host_app(**configure_kwargs):
     """One-shot: configure host + return ``create_app()``."""
     configure_host(**configure_kwargs)
+    return create_host_app()
+
+
+@dataclass
+class UIPreset:
+    """UI configuration preset for standardizing UI app creation."""
+    title: str = "PraisonAI"
+    logo: str = "🤖"
+    pages: List[str] = field(default_factory=lambda: ["chat"])
+    theme: Dict[str, Any] = field(default_factory=lambda: {"preset": "blue", "dark_mode": True, "radius": "lg"})
+    agent_kwargs: Dict[str, Any] = field(default_factory=dict)
+    starters: List[Dict[str, str]] = field(default_factory=list)
+    welcome: str = "👋 Hi! I'm your PraisonAI assistant."
+    sidebar: bool = True
+    page_header: bool = True
+    openai_fallback: bool = False
+    settings_handler: Optional[Callable] = None
+    agent_factory: Optional[Callable] = None
+
+
+def build_ui_app(preset: UIPreset):
+    """Build a UI app from a preset configuration."""
+    import praisonaiui as aiui
+    
+    # Configure the host with preset values
+    configure_host(
+        title=preset.title,
+        logo=preset.logo,
+        pages=preset.pages,
+        sidebar=preset.sidebar,
+        page_header=preset.page_header,
+        theme=preset.theme,
+        agent_kwargs=preset.agent_kwargs,
+    )
+    
+    # Set up starters if provided
+    if preset.starters:
+        @aiui.starters
+        async def _starters():
+            return preset.starters
+    
+    # Set up welcome message
+    @aiui.welcome
+    async def _welcome():
+        await aiui.say(preset.welcome)
+    
+    # Set up legacy host handlers if needed
+    if is_legacy_host():
+        _agents_cache = {}
+        
+        # Settings handler if provided
+        if preset.settings_handler:
+            @aiui.settings
+            async def _settings(new_settings):
+                session_id = getattr(aiui.current_session, "id", "default")
+                _agents_cache.pop(session_id, None)
+                if preset.settings_handler:
+                    await preset.settings_handler(new_settings)
+        
+        # Reply handler with caching
+        @aiui.reply
+        async def _reply(message: str, settings: dict | None = None):
+            session_id = getattr(aiui.current_session, "id", "default")
+            settings_key = str(sorted((settings or {}).items()))
+            cache_key = f"{session_id}:{settings_key}"
+            
+            # Get or create agent
+            if cache_key not in _agents_cache:
+                if preset.agent_factory:
+                    _agents_cache[cache_key] = preset.agent_factory(settings)
+                else:
+                    # Default agent creation
+                    from praisonaiagents import Agent
+                    _agents_cache[cache_key] = Agent(**preset.agent_kwargs)
+            
+            agent = _agents_cache[cache_key]
+            
+            # Process with agent
+            if agent is not None:
+                try:
+                    await aiui.think("Thinking...")
+                    result = await agent.achat(str(message))
+                    response_text = str(result) if result else ""
+                    
+                    # Stream response
+                    words = response_text.split(" ")
+                    for i, word in enumerate(words):
+                        await aiui.stream_token(word + (" " if i < len(words) - 1 else ""))
+                    return
+                except Exception as e:
+                    if not preset.openai_fallback:
+                        await aiui.say(f"❌ Error: {e}")
+                        return
+                    await aiui.say(f"⚠️ Agent error: {e}. Falling back to OpenAI...")
+            
+            # OpenAI fallback if enabled
+            if preset.openai_fallback:
+                try:
+                    from openai import AsyncOpenAI
+                    api_key = os.getenv("OPENAI_API_KEY")
+                    if not api_key:
+                        await aiui.say("❌ Please set OPENAI_API_KEY environment variable.")
+                        return
+                    
+                    client = AsyncOpenAI(api_key=api_key)
+                    stream = await client.chat.completions.create(
+                        model=os.getenv("PRAISONAI_MODEL", "gpt-4o-mini"),
+                        messages=[
+                            {"role": "system", "content": preset.agent_kwargs.get("instructions", "You are a helpful assistant.")},
+                            {"role": "user", "content": str(message)},
+                        ],
+                        stream=True,
+                    )
+                    
+                    async for chunk in stream:
+                        delta = chunk.choices[0].delta
+                        if delta.content:
+                            await aiui.stream_token(delta.content)
+                except ImportError:
+                    await aiui.say("❌ Please install openai: `pip install openai`")
+                except Exception as e:
+                    await aiui.say(f"❌ OpenAI error: {e}")
+        
+        # Cancel handler
+        @aiui.cancel
+        async def _cancel():
+            await aiui.say("⏹️ Stopped.")
+    
     return create_host_app()

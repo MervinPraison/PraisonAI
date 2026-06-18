@@ -631,19 +631,16 @@ Unified client CLI for interacting with PraisonAI endpoints.
         if not provider_type:
             provider_type = "recipe"
         
-        # Route to appropriate invocation method
-        if provider_type == "recipe":
-            return self._invoke_recipe(endpoint_name, input_data, config, parsed)
-        elif provider_type == "agents-api":
-            return self._invoke_agents_api(endpoint_name, input_data, config, parsed)
-        elif provider_type in ("mcp", "tools-mcp"):
-            return self._invoke_mcp(endpoint_name, input_data, config, parsed)
-        elif provider_type == "a2a":
-            return self._invoke_a2a(endpoint_name, input_data, config, parsed)
-        elif provider_type == "a2u":
-            return self._invoke_a2u(endpoint_name, input_data, config, parsed)
-        else:
-            # Fallback to recipe
+        # Route to appropriate invocation method using registry
+        from ._endpoint_registry import EndpointProviderRegistry
+        
+        registry = EndpointProviderRegistry.default()
+        try:
+            invoke_method = registry.resolve(provider_type)
+            # Bind the method to self and call it
+            return invoke_method(self, endpoint_name, input_data, config, parsed)
+        except ValueError:
+            # Fallback to recipe for unknown types
             return self._invoke_recipe(endpoint_name, input_data, config, parsed)
     
     def _invoke_recipe(self, name: str, input_data: Dict, config: Dict, parsed: Dict) -> int:

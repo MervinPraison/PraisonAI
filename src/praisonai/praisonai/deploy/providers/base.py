@@ -86,16 +86,9 @@ def get_provider(config: CloudConfig) -> BaseProvider:
     Raises:
         ValueError: If provider is not supported
     """
-    from ..models import CloudProvider
+    from ._registry import CloudProviderRegistry
     
-    if config.provider == CloudProvider.AWS:
-        from .aws import AWSProvider
-        return AWSProvider(config)
-    elif config.provider == CloudProvider.AZURE:
-        from .azure import AzureProvider
-        return AzureProvider(config)
-    elif config.provider == CloudProvider.GCP:
-        from .gcp import GCPProvider
-        return GCPProvider(config)
-    else:
-        raise ValueError(f"Unsupported provider: {config.provider}")
+    registry = CloudProviderRegistry.default()
+    provider_name = config.provider.value if hasattr(config.provider, 'value') else str(config.provider)
+    cls = registry.resolve(provider_name.lower())
+    return cls(config)

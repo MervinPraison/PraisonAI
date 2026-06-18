@@ -10,6 +10,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from .base import StateStore
+from ...storage import RedisStorageAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,8 @@ logger = logging.getLogger(__name__)
 class RedisStateStore(StateStore):
     """
     Redis-based state store for fast key-value operations.
+    
+    This is now a thin wrapper around RedisStorageAdapter to avoid duplication.
     
     Example:
         store = RedisStateStore(
@@ -46,43 +49,33 @@ class RedisStateStore(StateStore):
             db: Redis database number
             password: Redis password
             prefix: Key prefix for namespacing
-            decode_responses: Decode bytes to strings
+            decode_responses: Decode bytes to strings (for compatibility, not used)
             socket_timeout: Socket timeout in seconds
-            max_connections: Max connections in pool
+            max_connections: Max connections in pool (for compatibility, not used)
         """
-        try:
-            import redis as redis_lib
-        except ImportError:
-            raise ImportError(
-                "redis is required for Redis support. "
-                "Install with: pip install redis"
-            )
+        # Build URL from components if not provided
+        if not url:
+            if password:
+                url = f"redis://:{password}@{host}:{port}/{db}"
+            else:
+                url = f"redis://{host}:{port}/{db}"
         
-        self._redis_lib = redis_lib
+        # Use the canonical storage adapter
+        self._adapter = RedisStorageAdapter(
+            url=url,
+            prefix=prefix,
+            db=db,
+            password=password,
+            socket_timeout=float(socket_timeout),
+        )
+        
+        # Store for compatibility
         self.prefix = prefix
         
-        if url:
-            self._client = redis_lib.from_url(
-                url,
-                decode_responses=decode_responses,
-                socket_timeout=socket_timeout,
-                max_connections=max_connections,
-            )
-        else:
-            pool = redis_lib.ConnectionPool(
-                host=host,
-                port=port,
-                db=db,
-                password=password,
-                decode_responses=decode_responses,
-                socket_timeout=socket_timeout,
-                max_connections=max_connections,
-            )
-            self._client = redis_lib.Redis(connection_pool=pool)
+        # Keep reference to redis client for advanced operations
+        self._client = self._adapter._get_client()
         
-        # Test connection
-        self._client.ping()
-        logger.info(f"Connected to Redis at {url or f'{host}:{port}'}")
+        logger.info(f"Connected to Redis at {url}")
     
     def _key(self, key: str) -> str:
         """Add prefix to key."""
@@ -90,14 +83,13 @@ class RedisStateStore(StateStore):
     
     def get(self, key: str) -> Optional[Any]:
         """Get a value by key."""
-        value = self._client.get(self._key(key))
-        if value is None:
+        data = self._adapter.load(key)
+        if data is None:
             return None
-        # Try to deserialize JSON
-        try:
-            return json.loads(value)
-        except (json.JSONDecodeError, TypeError):
-            return value
+        # Unwrap value if it was wrapped for dict storage
+        if isinstance(data, dict) and "value" in data and len(data) == 1:
+            return data["value"]
+        return data
     
     def set(
         self,
@@ -106,18 +98,28 @@ class RedisStateStore(StateStore):
         ttl: Optional[int] = None
     ) -> None:
         """Set a value with optional TTL."""
-        # Serialize non-string values
-        if not isinstance(value, str):
-            value = json.dumps(value)
+        # Wrap non-dict values for adapter (expects dict)
+        if not isinstance(value, dict):
+            value = {"value": value}
         
+        # Store TTL in adapter if needed
         if ttl:
-            self._client.setex(self._key(key), ttl, value)
+            # Create new adapter instance with TTL
+            adapter_with_ttl = RedisStorageAdapter(
+                url=self._adapter.url,
+                prefix=self._adapter.prefix,
+                ttl=ttl,
+                db=self._adapter.db,
+                password=self._adapter.password,
+                socket_timeout=self._adapter.socket_timeout,
+            )
+            adapter_with_ttl.save(key, value)
         else:
-            self._client.set(self._key(key), value)
+            self._adapter.save(key, value)
     
     def delete(self, key: str) -> bool:
         """Delete a key."""
-        return self._client.delete(self._key(key)) > 0
+        return self._adapter.delete(key)
     
     def exists(self, key: str) -> bool:
         """Check if a key exists."""

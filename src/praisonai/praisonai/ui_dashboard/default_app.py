@@ -4,11 +4,9 @@ Loaded by ``praisonai unified`` (aiui mode) via ``build_host_app()``.
 """
 
 import os
+from praisonai.integration.host_app import UIPreset, build_ui_app
 
-import praisonaiui as aiui
-from praisonai.integration.host_app import configure_host, create_host_app, is_legacy_host
-
-configure_host(
+app = build_ui_app(UIPreset(
     title="PraisonAI Unified Dashboard",
     logo="🌟",
     pages=[
@@ -22,26 +20,17 @@ configure_host(
         "config",
         "logs",
     ],
+    theme={"preset": "blue", "dark_mode": True, "radius": "lg"},
     agent_kwargs={
         "name": "PraisonAI",
         "instructions": "You are a helpful assistant for the PraisonAI unified dashboard.",
         "llm": os.getenv("PRAISONAI_MODEL", "gpt-4o-mini"),
     },
-)
-
-
-@aiui.welcome
-async def on_welcome():
-    await aiui.say("🌟 Welcome to PraisonAI Unified Dashboard!")
-    await aiui.say("Use the sidebar to access chat, agents, memory, and more.")
-
-
-if is_legacy_host():
-
-    @aiui.reply
-    async def on_reply(message: str, settings: dict | None = None):
-        await aiui.think("Processing...")
-        await aiui.say(f"Unified Dashboard received: {message}")
-
-
-app = create_host_app()
+    starters=[
+        {"label": "Dashboard", "message": "Show me the dashboard overview", "icon": "📊"},
+        {"label": "Agents", "message": "List all available agents", "icon": "🤖"},
+        {"label": "Help", "message": "How do I use this dashboard?", "icon": "❓"},
+        {"label": "Status", "message": "Check system status", "icon": "🔍"},
+    ],
+    welcome="🌟 Welcome to PraisonAI Unified Dashboard! Access all features from the sidebar.",
+))
