@@ -27,6 +27,8 @@ class SandboxMixin:
         if sandbox is True:
             from ..sandbox import SandboxConfig
             sandbox = SandboxConfig.subprocess()
+        elif sandbox is False:
+            sandbox = None
         
         self.sandbox_config: Optional['SandboxConfig'] = sandbox
         
