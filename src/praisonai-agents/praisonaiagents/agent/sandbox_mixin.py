@@ -5,15 +5,10 @@ Provides safe code execution capabilities to agents via the sandbox framework.
 """
 
 import logging
-from typing import Optional, Dict, Any, Union
+from typing import Optional, Dict, Any, Union, TYPE_CHECKING
 
-from ..sandbox import (
-    SandboxConfig, 
-    SandboxManager, 
-    SandboxResult,
-    check_code_safety,
-    format_warnings,
-)
+if TYPE_CHECKING:
+    from ..sandbox import SandboxConfig, SandboxManager, SandboxResult
 
 logger = logging.getLogger(__name__)
 
@@ -26,27 +21,33 @@ class SandboxMixin:
     
     def __init__(self, *args, **kwargs):
         # Extract sandbox config from kwargs
-        self.sandbox_config: Optional[SandboxConfig] = kwargs.pop('sandbox', None)
+        sandbox = kwargs.pop('sandbox', None)
         
         # Convert boolean True to default config
-        if self.sandbox_config is True:
-            self.sandbox_config = SandboxConfig.subprocess()
+        if sandbox is True:
+            from ..sandbox import SandboxConfig
+            sandbox = SandboxConfig.subprocess()
+        elif sandbox is False:
+            sandbox = None
+        
+        self.sandbox_config: Optional['SandboxConfig'] = sandbox
         
         super().__init__(*args, **kwargs)
         
-        self._sandbox_manager: Optional[SandboxManager] = None
+        self._sandbox_manager: Optional['SandboxManager'] = None
     
     @property
     def has_sandbox(self) -> bool:
         """Check if sandbox is configured for this agent."""
         return self.sandbox_config is not None
     
-    def get_sandbox_manager(self) -> Optional[SandboxManager]:
+    def get_sandbox_manager(self) -> Optional['SandboxManager']:
         """Get or create sandbox manager."""
         if not self.has_sandbox:
             return None
         
         if self._sandbox_manager is None:
+            from ..sandbox import SandboxManager
             self._sandbox_manager = SandboxManager(self.sandbox_config)
         
         return self._sandbox_manager
@@ -57,7 +58,7 @@ class SandboxMixin:
         language: str = "python",
         check_security: bool = True,
         **kwargs
-    ) -> SandboxResult:
+    ) -> 'SandboxResult':
         """Execute code safely in configured sandbox.
         
         Args:
@@ -79,6 +80,7 @@ class SandboxMixin:
         
         # Security pre-check if enabled
         if check_security:
+            from ..sandbox import check_code_safety, format_warnings
             warnings = check_code_safety(code, language)
             if warnings:
                 warning_text = format_warnings(warnings)
@@ -97,7 +99,7 @@ class SandboxMixin:
         language: str = "python", 
         check_security: bool = True,
         **kwargs
-    ) -> SandboxResult:
+    ) -> 'SandboxResult':
         """Synchronous wrapper for execute_code.
         
         Args:
@@ -117,7 +119,7 @@ class SandboxMixin:
         command: Union[str, list],
         check_security: bool = True,
         **kwargs
-    ) -> SandboxResult:
+    ) -> 'SandboxResult':
         """Run a shell command in the sandbox.
         
         Args:
@@ -139,6 +141,7 @@ class SandboxMixin:
         
         # Security pre-check
         if check_security:
+            from ..sandbox import check_code_safety, format_warnings
             warnings = check_code_safety(command_str, "bash")
             if warnings:
                 warning_text = format_warnings(warnings)
