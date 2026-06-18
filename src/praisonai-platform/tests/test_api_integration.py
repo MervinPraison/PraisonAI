@@ -142,16 +142,24 @@ class TestFullFlow:
         assert issue["priority"] == "high"
         assert issue["creator_id"] == user_id
 
-        # 10. Update issue (assign to agent)
+        # 10. Create agent and assign issue
+        resp = await client.post(
+            f"/api/v1/workspaces/{ws_id}/agents/",
+            json={"name": "FlowBot"},
+            headers=headers,
+        )
+        assert resp.status_code == 201
+        agent_id = resp.json()["id"]
+
         resp = await client.patch(
             f"/api/v1/workspaces/{ws_id}/issues/{issue_id}",
-            json={"assignee_type": "agent", "assignee_id": "agent-42", "status": "in_progress"},
+            json={"assignee_type": "agent", "assignee_id": agent_id, "status": "in_progress"},
             headers=headers,
         )
         assert resp.status_code == 200
         updated = resp.json()
         assert updated["assignee_type"] == "agent"
-        assert updated["assignee_id"] == "agent-42"
+        assert updated["assignee_id"] == agent_id
         assert updated["status"] == "in_progress"
 
         # 11. Add comment
