@@ -246,7 +246,6 @@ class ToolExecutionMixin:
                     blocked_result = {"error": f"[loop-guard] {decision.message}", "loop_blocked": True}
                 elif decision.action == GuardAction.HALT:
                     # Halt execution with exception
-                    from ..errors import ToolExecutionError
                     raise ToolExecutionError(
                         f"[loop-guard] {decision.message}",
                         tool_name=function_name,
