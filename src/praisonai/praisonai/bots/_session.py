@@ -26,6 +26,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class BotRunTimeout(Exception):
+    """Exception raised when a bot run times out."""
+    pass
+
+
 class BotSessionManager:
     """Lightweight per-user session store for bot agents.
 
@@ -66,6 +71,7 @@ class BotSessionManager:
         identity_resolver: Optional[Any] = None,
         ingress_journal: Optional[Any] = None,
         run_control: Optional[Any] = None,
+        run_timeout: float = 300.0,  # 5 minutes default timeout
     ) -> None:
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
         self._locks: Dict[str, asyncio.Lock] = {}
@@ -89,6 +95,9 @@ class BotSessionManager:
         self._last_journal_key = None  # Store key for delayed completion
         # Run control for in-flight message handling
         self._run_control = run_control
+        # Run timeout and active run tracking for cancellation support
+        self._run_timeout = run_timeout
+        self._active_runs: Dict[str, Any] = {}  # user_id -> InterruptController
 
     def _storage_key(self, user_id: str) -> str:
         """Resolve a raw platform user id to the in-memory/store key.
@@ -275,29 +284,67 @@ class BotSessionManager:
                     async with agent_lock:
                         saved_history = agent.chat_history
                         agent.chat_history = user_history
+                        
+                        # Create interrupt controller for this run and register it
+                        try:
+                            from praisonaiagents.agent.interrupt import InterruptController
+                        except ImportError:
+                            # Fallback if InterruptController is not available
+                            InterruptController = None
+                        
+                        controller = InterruptController() if InterruptController else None
+                        storage_key = self._storage_key(user_id)
+                        if controller:
+                            self._active_runs[storage_key] = controller
+                        
                         try:
                             # Choose streaming vs non-streaming path based on callback
                             if stream_callback:
-                                # Streaming path: use agent.astart() with stream callback
-                                response = await agent.astart(prompt, stream_callback=stream_callback)
-                                # Handle AutonomyResult when autonomy is enabled in caller mode
-                                if hasattr(response, 'output'):
-                                    response = response.output
+                                # Streaming path: use agent.astart() with stream callback and timeout
+                                try:
+                                    # astart is async so we can use asyncio.wait_for directly 
+                                    response = await asyncio.wait_for(
+                                        agent.astart(prompt, stream_callback=stream_callback),
+                                        timeout=self._run_timeout if self._run_timeout > 0 else None,
+                                    )
+                                    # Handle AutonomyResult when autonomy is enabled in caller mode
+                                    if hasattr(response, 'output'):
+                                        response = response.output
+                                except asyncio.TimeoutError:
+                                    if controller:
+                                        controller.request("run timeout")
+                                    raise BotRunTimeout(f"Agent run timed out after {self._run_timeout}s")
                             else:
-                                # Legacy non-streaming path: use agent.chat() in executor
-                                # Copy current task's contextvars (incl. SessionContext)
-                                # into the worker thread so tools the agent invokes can
-                                # read platform/user metadata.
+                                # Legacy non-streaming path: use agent.chat() in executor with cancel_token and timeout
                                 import contextvars
+                                import inspect
+                                from functools import partial
                                 _ctx = contextvars.copy_context()
-                                response = await loop.run_in_executor(
-                                    None, _ctx.run, agent.chat, prompt
-                                )
+                                
+                                # Create agent.chat call with cancel_token if supported
+                                # Use inspect.signature for safer parameter checking
+                                _chat_params = inspect.signature(agent.chat).parameters if (controller and hasattr(agent, 'chat')) else {}
+                                if controller and 'cancel_token' in _chat_params:
+                                    chat_call = partial(agent.chat, prompt, cancel_token=controller)
+                                else:
+                                    chat_call = partial(agent.chat, prompt)
+                                
+                                # Run with timeout and interruption support
+                                try:
+                                    response = await asyncio.wait_for(
+                                        loop.run_in_executor(None, _ctx.run, chat_call),
+                                        timeout=self._run_timeout if self._run_timeout > 0 else None,
+                                    )
+                                except asyncio.TimeoutError:
+                                    if controller:
+                                        controller.request("run timeout")
+                                    raise BotRunTimeout(f"Agent run timed out after {self._run_timeout}s")
                             # Capture updated history before restoring caller's.
                             updated_history = agent.chat_history
                         except Exception as exc:
                             # N4: persist the failed inbound message before bubbling.
-                            if self._dlq is not None:
+                            # Skip DLQ for timeout exceptions to prevent infinite retry loops
+                            if self._dlq is not None and not isinstance(exc, BotRunTimeout):
                                 try:
                                     await loop.run_in_executor(
                                         None,
@@ -319,6 +366,9 @@ class BotSessionManager:
                             raise
                         finally:
                             agent.chat_history = saved_history
+                            # Clean up active run tracking
+                            if controller:
+                                self._active_runs.pop(storage_key, None)
 
                     # Persist outside the agent_lock — it's per-user and the agent
                     # is no longer touched.
@@ -531,6 +581,27 @@ class BotSessionManager:
                 logger.warning("Failed to clear session in store: %s", e)
 
         return existed
+
+    def cancel_run(self, user_id: str, reason: str = "user_cancel") -> bool:
+        """Cancel an active run for a user.
+        
+        Args:
+            user_id: Raw platform user id
+            reason: Reason for cancellation
+            
+        Returns:
+            bool: True if there was an active run to cancel, False otherwise
+        """
+        storage_key = self._storage_key(user_id)
+        controller = self._active_runs.get(storage_key)
+        if controller:
+            controller.request(reason)
+            return True
+        return False
+
+    def get_active_runs(self) -> List[str]:
+        """Get list of user IDs with active runs."""
+        return list(self._active_runs.keys())
 
     def _add_mirror_entry_sync(self, user_id: str, entry: dict) -> bool:
         """Thread-safe method to add a mirror entry to user's history.
