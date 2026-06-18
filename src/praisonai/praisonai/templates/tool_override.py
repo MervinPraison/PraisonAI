@@ -439,14 +439,18 @@ def resolve_tools(
     """
     Resolve tool names to callable tools from registry.
     
+    Delegates to ToolResolver for consistent resolution across all surfaces,
+    while preserving template-dir autoload and registry overrides.
+    
     Handles:
-    - String tool names (looked up in registry)
+    - String tool names (looked up via ToolResolver)
     - Already-callable tools (passed through)
-    - Built-in tool names (shell_tool, file_tool, etc.)
+    - Name variations (lower, _/-, _tool suffix)
+    - Template-local tools.py autoload (security-gated)
     
     Args:
         tool_names: List of tool names (strings) or callables
-        registry: Tool registry to look up names in
+        registry: Tool registry to look up names in (for backward compat)
         template_dir: Optional template directory for local tools.py autoload
         
     Returns:
@@ -455,11 +459,17 @@ def resolve_tools(
     if not tool_names:
         return []
     
+    from ..tool_resolver import ToolResolver
+    from ..tool_registry import ToolRegistry
+    
     resolved = []
     
-    # Build registry if not provided
+    # Build registry if not provided (for backward compat with existing callers)
     if registry is None:
         registry = create_tool_registry_with_overrides(include_defaults=True)
+    
+    # Create a ToolRegistry instance for high-priority overrides
+    tool_registry = ToolRegistry()
     
     # Load template-local tools.py if exists. Gated behind the same opt-in
     # flag as create_tool_registry_with_overrides() to prevent implicit code
@@ -469,75 +479,59 @@ def resolve_tools(
         tools_py = Path(template_dir) / "tools.py"
         if tools_py.exists():
             try:
-                local_tools = loader.load_from_file(str(tools_py))
-                registry.update(local_tools)
+                template_tools = loader.load_from_file(str(tools_py))
+                # Register template tools in the ToolRegistry
+                for name, tool in template_tools.items():
+                    if callable(tool):
+                        tool_registry.register_function(name, tool)
             except Exception:
                 logger.debug(
                     "failed to autoload template tools.py at %s", tools_py,
                     exc_info=True,
                 )
     
+    # Add registry overrides to ToolRegistry (registry takes precedence over template tools)
+    if registry:
+        # Filter out lazy-loaded tuples from registry and register callables
+        for name, tool in registry.items():
+            if not isinstance(tool, tuple) and callable(tool):  # Skip lazy-loaded entries
+                tool_registry.register_function(name, tool)
+    
+    # Create ToolResolver with the registry having highest priority
+    # Note: template_dir tools.py will be loaded by ToolResolver if path provided,
+    # but our registry overrides will have higher priority
+    resolver = ToolResolver(
+        tools_py_path=str(Path(template_dir) / "tools.py") if template_dir else None,
+        registry=tool_registry
+    )
+    
     for tool in tool_names:
         if callable(tool):
             # Already a callable, use directly
             resolved.append(tool)
         elif isinstance(tool, str):
-            # Look up by name in registry
             tool_name = tool.strip()
             
-            # Try exact match first
-            if tool_name in registry:
-                tool_obj = registry[tool_name]
-                # Handle lazy-loaded tools (tuples of module, class) - skip these
-                # They should be resolved via praisonaiagents.tools.__getattr__
-                if isinstance(tool_obj, tuple):
-                    # Try to import from praisonaiagents.tools instead
-                    try:
-                        from praisonaiagents import tools as agent_tools
-                        if hasattr(agent_tools, tool_name):
-                            resolved.append(getattr(agent_tools, tool_name))
-                            continue
-                    except (ImportError, AttributeError):
-                        pass
-                elif callable(tool_obj):
-                    resolved.append(tool_obj)
-                    continue
-                else:
-                    # Try to instantiate if it's a class
-                    try:
-                        resolved.append(tool_obj())
-                        continue
-                    except Exception:
-                        resolved.append(tool_obj)
-                        continue
+            # Use ToolResolver for resolution (gets full fallback chain)
+            fn = resolver.resolve(tool_name, instantiate=True)
             
-            # Not in registry or was a tuple, try variations
-            variations = [
-                tool_name,
-                tool_name.lower(),
-                tool_name.replace("-", "_"),
-                tool_name.replace("_", "-"),
-                f"{tool_name}_tool",
-                f"{tool_name}Tool",
-            ]
-            found = False
-            for var in variations:
-                if var in registry:
-                    tool_obj = registry[var]
-                    if callable(tool_obj):
-                        resolved.append(tool_obj)
-                        found = True
-                        break
+            # If not found, try name variations (backward compat)
+            if fn is None:
+                variations = [
+                    tool_name.lower(),
+                    tool_name.replace("-", "_"),
+                    tool_name.replace("_", "-"),
+                    f"{tool_name}_tool",
+                    f"{tool_name}Tool",
+                ]
+                for var in variations:
+                    if var != tool_name:  # Skip if same as original
+                        fn = resolver.resolve(var, instantiate=True)
+                        if fn is not None:
+                            logger.debug(f"Resolved '{tool_name}' as variation '{var}'")
+                            break
             
-            if not found:
-                # Try to import from praisonaiagents.tools
-                try:
-                    from praisonaiagents import tools as agent_tools
-                    if hasattr(agent_tools, tool_name):
-                        resolved.append(getattr(agent_tools, tool_name))
-                    elif hasattr(agent_tools, f"{tool_name}_tool"):
-                        resolved.append(getattr(agent_tools, f"{tool_name}_tool"))
-                except (ImportError, AttributeError):
-                    pass
+            if fn is not None:
+                resolved.append(fn)
     
     return resolved
