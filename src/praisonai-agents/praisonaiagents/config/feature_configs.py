@@ -774,29 +774,39 @@ class ExecutionConfig:
                 self.context_compaction
             )
         
-        # Emit deprecation warning for default behavior change
-        # Only warn if context_compaction was not explicitly set (i.e., using the default False)
-        import warnings
-        import inspect
-        frame = inspect.currentframe()
-        try:
-            # Check if this is being called from user code (not internal)
-            caller_frame = frame.f_back
-            if (caller_frame and 
-                not any(path_part in caller_frame.f_code.co_filename 
-                       for path_part in ['praisonaiagents', 'test_', '__pycache__'])):
-                # This is being called from user code
-                if self.context_compaction is False:
-                    warnings.warn(
-                        "ExecutionConfig.context_compaction will default to True in the next "
-                        "release for proactive context overflow protection. To disable, explicitly "
-                        "set context_compaction=False. To use the new default early, set "
-                        "context_compaction=True.",
-                        DeprecationWarning,
-                        stacklevel=3
-                    )
-        finally:
-            del frame
+        # Emit deprecation warning once per process for default behavior change.
+        # Walk the stack once — dataclass __init__ uses caller filename "<string>".
+        if self.context_compaction is False:
+            if getattr(ExecutionConfig, '_context_compaction_internal', False):
+                return
+            if getattr(ExecutionConfig, '_context_compaction_warned', False):
+                return
+            import warnings
+            import inspect
+            _INTERNAL = ('praisonaiagents', 'test_', '__pycache__')
+            frame = inspect.currentframe()
+            try:
+                caller = frame.f_back if frame else None
+                is_internal = False
+                while caller is not None:
+                    if any(p in caller.f_code.co_filename for p in _INTERNAL):
+                        is_internal = True
+                        break
+                    caller = caller.f_back
+                if is_internal:
+                    ExecutionConfig._context_compaction_internal = True
+                    return
+                warnings.warn(
+                    "ExecutionConfig.context_compaction will default to True in the next "
+                    "release for proactive context overflow protection. To disable, explicitly "
+                    "set context_compaction=False. To use the new default early, set "
+                    "context_compaction=True.",
+                    DeprecationWarning,
+                    stacklevel=3,
+                )
+                ExecutionConfig._context_compaction_warned = True
+            finally:
+                del frame
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""

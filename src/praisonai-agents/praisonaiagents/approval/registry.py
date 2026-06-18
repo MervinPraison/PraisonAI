@@ -194,9 +194,13 @@ class ApprovalRegistry:
 
     def is_yaml_approved(self, tool_name: str) -> bool:
         try:
-            return tool_name in self._yaml_approved_tools.get()
+            if tool_name not in self._yaml_approved_tools.get():
+                return False
         except LookupError:
             return False
+        if self.get_risk_level(tool_name) == "critical":
+            return False
+        return True
 
     # ── Env-var check ────────────────────────────────────────────────────
 

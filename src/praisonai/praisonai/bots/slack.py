@@ -309,6 +309,21 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
         async def handle_mention(event, say):
             if event.get("bot_id"):
                 return
+
+            bot_message = self._convert_event_to_message(event)
+            bot_message._channel_type = "slack"
+
+            if not self.config.is_channel_allowed(
+                bot_message.channel.channel_id if bot_message.channel else ""
+            ):
+                return
+
+            user_id = bot_message.sender.user_id if bot_message.sender else ""
+            is_explicitly_allowed = bool(self.config.allowed_users) and self.config.is_user_allowed(user_id)
+            if not is_explicitly_allowed:
+                user_allowed = await UnknownUserHandler.handle(bot_message, self._bot_context)
+                if not user_allowed:
+                    return
             
             text = event.get("text", "")
             if self._bot_user:

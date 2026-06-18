@@ -246,3 +246,74 @@ class SecurityConfig:
     def get_bind_address(self) -> str:
         """Get recommended bind address based on config."""
         return "127.0.0.1" if self.bind_localhost_only else "0.0.0.0"
+
+
+def load_sse_security_from_env():
+    """Load optional SSE security settings from environment."""
+    import os
+
+    token = os.environ.get("MCP_SSE_AUTH_TOKEN") or os.environ.get("MCP_AUTH_TOKEN")
+    origins_raw = os.environ.get("MCP_SSE_ALLOWED_ORIGINS")
+    if not token and not origins_raw:
+        return None, None
+
+    origins = (
+        [origin.strip() for origin in origins_raw.split(",") if origin.strip()]
+        if origins_raw
+        else None
+    )
+    config = SecurityConfig(
+        require_auth=bool(token),
+        validate_origin=origins is not None,
+        allowed_origins=origins or SecurityConfig().allowed_origins,
+    )
+    return config, token
+
+
+def build_sse_security_app(app, security: Optional["SecurityConfig"] = None):
+    """Wrap a Starlette app with SSE security middleware when configured."""
+    config = security
+    token = None
+    if config is None:
+        config, token = load_sse_security_from_env()
+    elif config.require_auth:
+        import os
+
+        token = os.environ.get("MCP_SSE_AUTH_TOKEN") or os.environ.get("MCP_AUTH_TOKEN")
+    if config is None or (not config.require_auth and not config.validate_origin):
+        return app
+
+    class _SSESecurityMiddleware:
+        def __init__(self, inner, sec: SecurityConfig, expected_token: Optional[str]):
+            self._inner = inner
+            self._sec = sec
+            self._token = expected_token
+
+        async def __call__(self, scope, receive, send):
+            if scope.get("type") != "http":
+                await self._inner(scope, receive, send)
+                return
+
+            headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
+
+            if self._sec.require_auth and self._token:
+                auth = headers.get("authorization", "")
+                if not auth.startswith("Bearer ") or auth[7:] != self._token:
+                    from starlette.responses import JSONResponse
+
+                    response = JSONResponse({"error": "Unauthorized"}, status_code=401)
+                    await response(scope, receive, send)
+                    return
+
+            if self._sec.validate_origin:
+                origin = headers.get("origin") or None
+                if not self._sec.is_origin_allowed(origin):
+                    from starlette.responses import JSONResponse
+
+                    response = JSONResponse({"error": "Origin not allowed"}, status_code=403)
+                    await response(scope, receive, send)
+                    return
+
+            await self._inner(scope, receive, send)
+
+    return _SSESecurityMiddleware(app, config, token)

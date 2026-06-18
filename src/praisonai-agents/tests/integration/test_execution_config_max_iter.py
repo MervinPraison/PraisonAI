@@ -18,6 +18,7 @@ class TestExecutionConfigMaxIter:
     def setup_method(self):
         """Set up test fixtures."""
         self.test_llm_config = {
+            "model": "gpt-4o-mini",
             "api_base": "http://test",
             "api_key": "test-key",
             "provider": "custom"
@@ -33,21 +34,13 @@ class TestExecutionConfigMaxIter:
         config = ExecutionConfig(max_iter=15)
         assert config.max_iter == 15
     
-    @patch('praisonaiagents.llm.llm.LLM._chat_completion')
-    def test_agent_with_execution_config_max_iter(self, mock_chat):
+    def test_agent_with_execution_config_max_iter(self):
         """Test that Agent passes ExecutionConfig.max_iter to LLM."""
-        # Mock the LLM response to avoid actual API calls
-        mock_response = Mock()
-        mock_response.choices = [Mock()]
-        mock_response.choices[0].message.content = "Hello, I'm a test response!"
-        mock_response.choices[0].message.tool_calls = None
-        mock_chat.return_value = mock_response
-        
-        # Create agent with custom max_iter
         execution_config = ExecutionConfig(max_iter=15)
         
-        with patch('praisonaiagents.agent.agent.LLM') as MockLLM:
+        with patch('praisonaiagents.llm.llm.LLM') as MockLLM:
             mock_llm_instance = Mock()
+            mock_llm_instance.get_response.return_value = "Hello, I'm a test response!"
             MockLLM.return_value = mock_llm_instance
             
             agent = Agent(
@@ -56,6 +49,9 @@ class TestExecutionConfigMaxIter:
                 llm=self.test_llm_config,
                 execution=execution_config
             )
+            
+            # LLM is deferred until first access
+            _ = agent.llm_instance
             
             # Verify LLM was instantiated with max_iter from ExecutionConfig
             MockLLM.assert_called()
@@ -72,7 +68,7 @@ class TestExecutionConfigMaxIter:
     def test_llm_constructor_accepts_max_iter(self):
         """Test that LLM constructor accepts max_iter parameter."""
         llm = LLM(
-            api_base="http://test",
+            model="gpt-4o-mini",
             api_key="test-key",
             max_iter=25
         )
@@ -82,7 +78,7 @@ class TestExecutionConfigMaxIter:
     def test_llm_constructor_default_max_iter(self):
         """Test LLM constructor default max_iter value."""
         llm = LLM(
-            api_base="http://test", 
+            model="gpt-4o-mini",
             api_key="test-key"
         )
         
@@ -90,7 +86,7 @@ class TestExecutionConfigMaxIter:
         assert hasattr(llm, 'max_iter')
         assert llm.max_iter == 20  # Default aligned with ExecutionConfig
     
-    @patch('praisonaiagents.agent.agent.LLM')
+    @patch('praisonaiagents.llm.llm.LLM')
     def test_agent_without_execution_config_uses_llm_default(self, MockLLM):
         """Test that Agent without ExecutionConfig doesn't override LLM max_iter."""
         mock_llm_instance = Mock()
@@ -101,6 +97,8 @@ class TestExecutionConfigMaxIter:
             instructions="Be helpful",
             llm=self.test_llm_config
         )
+        
+        _ = agent.llm_instance
         
         # Verify LLM was called without max_iter override
         MockLLM.assert_called()
@@ -121,7 +119,7 @@ class TestExecutionConfigMaxIter:
             # Skip if presets not implemented yet
             pytest.skip("ExecutionConfig presets not implemented yet")
     
-    @patch('praisonaiagents.agent.agent.LLM')
+    @patch('praisonaiagents.llm.llm.LLM')
     def test_different_llm_init_paths_respect_max_iter(self, MockLLM):
         """Test that all LLM initialization paths in Agent respect max_iter."""
         mock_llm_instance = Mock()
@@ -129,15 +127,15 @@ class TestExecutionConfigMaxIter:
         execution_config = ExecutionConfig(max_iter=30)
         
         test_cases = [
-            # Dict config
-            {"provider": "openai", "model": "gpt-4o", "api_key": "test"},
-            # String config
-            "gpt-4o",
-            # With base_url
-            {"base_url": "http://test", "model": "test-model", "api_key": "test"}
+            # Dict config — deferred LLM
+            ({"provider": "openai", "model": "gpt-4o", "api_key": "test"}, True),
+            # Plain model string — OpenAI path, no LLM() at init
+            ("gpt-4o", False),
+            # Dict with base_url — deferred LLM
+            ({"base_url": "http://test", "model": "test-model", "api_key": "test"}, True),
         ]
         
-        for llm_config in test_cases:
+        for llm_config, expects_custom_llm in test_cases:
             MockLLM.reset_mock()
             
             agent = Agent(
@@ -147,11 +145,17 @@ class TestExecutionConfigMaxIter:
                 execution=execution_config
             )
             
-            # Verify LLM was called with max_iter
-            MockLLM.assert_called()
-            call_args = MockLLM.call_args
-            assert 'max_iter' in call_args.kwargs
-            assert call_args.kwargs['max_iter'] == 30
+            if expects_custom_llm:
+                assert agent._llm_init_params is not None
+                assert agent._llm_init_params.get('max_iter') == 30
+                _ = agent.llm_instance
+                MockLLM.assert_called()
+                call_args = MockLLM.call_args
+                assert call_args.kwargs.get('max_iter') == 30
+            else:
+                assert agent._llm_init_params is None
+                assert not agent._using_custom_llm
+                assert agent.max_iter == 30
     
     def test_max_iter_bounds_validation(self):
         """Test validation of max_iter bounds."""
@@ -184,7 +188,7 @@ class TestExecutionConfigMaxIter:
         autonomy_config = AutonomyConfig()
         
         # This should not conflict
-        with patch('praisonaiagents.agent.agent.LLM') as MockLLM:
+        with patch('praisonaiagents.llm.llm.LLM') as MockLLM:
             mock_llm_instance = Mock()
             MockLLM.return_value = mock_llm_instance
             
@@ -195,6 +199,8 @@ class TestExecutionConfigMaxIter:
                 execution=execution_config,
                 autonomy=autonomy_config
             )
+            
+            _ = agent.llm_instance
             
             # Verify both configs can coexist and max_iter is propagated
             MockLLM.assert_called()

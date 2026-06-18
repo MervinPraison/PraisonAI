@@ -111,6 +111,12 @@ class TemplateCache:
     def _ensure_cache_dir(self) -> None:
         """Ensure the cache directory exists."""
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _safe_segment(value: str) -> str:
+        if not value or ".." in value or "/" in value or "\\" in value:
+            raise ValueError(f"Invalid cache path segment: {value!r}")
+        return value
     
     def _get_cache_path(self, resolved: ResolvedTemplate) -> Path:
         """Get the cache path for a resolved template."""
@@ -124,11 +130,11 @@ class TemplateCache:
         
         elif resolved.source == TemplateSource.GITHUB:
             # github/owner/repo/template/ref
-            ref = resolved.ref or "main"
+            ref = self._safe_segment(resolved.ref or "main")
             return (
                 self.cache_dir / "github" / 
-                resolved.owner / resolved.repo / 
-                resolved.path / ref
+                self._safe_segment(resolved.owner) / self._safe_segment(resolved.repo) / 
+                self._safe_segment(resolved.path) / ref
             )
         
         elif resolved.source == TemplateSource.HTTP:

@@ -254,6 +254,26 @@ def doctor_skills(
     raise typer.Exit(_run_doctor(args))
 
 
+@app.command("runtime")
+def doctor_runtime(
+    team: str = typer.Option(None, "--team", help="Team YAML file to validate"),
+    workflow: str = typer.Option(None, "--workflow", help="Workflow YAML file to validate (future)"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+    deep: bool = typer.Option(False, "--deep", help="Enable deeper probes"),
+):
+    """Check runtime compatibility for multi-agent setups."""
+    args = ["runtime"]
+    if team:
+        args.extend(["--team", team])
+    if workflow:
+        args.extend(["--workflow", workflow])
+    if json_output:
+        args.append("--json")
+    if deep:
+        args.append("--deep")
+    raise typer.Exit(_run_doctor(args))
+
+
 @app.command("troubleshoot")
 def doctor_troubleshoot():
     """

@@ -64,6 +64,7 @@ class SandlockSandbox:
         self.config = config or SandboxConfig.native()
         self._is_running = False
         self._temp_dir: Optional[str] = None
+        self._used_subprocess_fallback = False
         
         # Lazy import sandlock to avoid import-time dependency
         try:
@@ -283,6 +284,17 @@ class SandlockSandbox:
                 completed_at=completed_at,
             )
 
+    def _tag_subprocess_fallback(self, result: SandboxResult) -> SandboxResult:
+        meta = dict(result.metadata or {})
+        meta.update({
+            "isolation_level": "subprocess",
+            "filesystem_isolation": False,
+            "network_isolation": False,
+            "sandlock_downgrade": True,
+        })
+        result.metadata = meta
+        return result
+
     async def execute(
         self,
         code: str,
@@ -296,11 +308,18 @@ class SandlockSandbox:
             await self.start()
         
         if not self.is_available:
-            # Fallback to subprocess sandbox if sandlock not available
-            logger.warning("Sandlock not available, falling back to subprocess")
             from .subprocess import SubprocessSandbox
             fallback = SubprocessSandbox(self.config)
-            return await fallback.execute(code, language, limits, env, working_dir)
+            if self.config.metadata.get("require_landlock"):
+                return SandboxResult(
+                    status=SandboxStatus.FAILED,
+                    error="Landlock is required but unavailable on this system",
+                    metadata={"isolation_level": "none", "sandlock_downgrade": True},
+                )
+            logger.warning("Sandlock not available, falling back to subprocess (no kernel isolation)")
+            self._used_subprocess_fallback = True
+            result = await fallback.execute(code, language, limits, env, working_dir)
+            return self._tag_subprocess_fallback(result)
         
         limits = limits or self.config.resource_limits
         execution_id = str(uuid.uuid4())
@@ -354,10 +373,18 @@ class SandlockSandbox:
             await self.start()
         
         if not self.is_available:
-            logger.warning("Sandlock not available, falling back to subprocess")
             from .subprocess import SubprocessSandbox
             fallback = SubprocessSandbox(self.config)
-            return await fallback.run_command(command, limits, env, working_dir)
+            if self.config.metadata.get("require_landlock"):
+                return SandboxResult(
+                    status=SandboxStatus.FAILED,
+                    error="Landlock is required but unavailable on this system",
+                    metadata={"isolation_level": "none", "sandlock_downgrade": True},
+                )
+            logger.warning("Sandlock not available, falling back to subprocess (no kernel isolation)")
+            self._used_subprocess_fallback = True
+            result = await fallback.run_command(command, limits, env, working_dir)
+            return self._tag_subprocess_fallback(result)
         
         limits = limits or self.config.resource_limits
         execution_id = str(uuid.uuid4())
@@ -438,16 +465,18 @@ class SandlockSandbox:
     
     def get_status(self) -> Dict[str, Any]:
         """Get sandbox status information."""
+        kernel_isolated = self.is_available and not self._used_subprocess_fallback
         return {
             "available": self.is_available,
             "type": self.sandbox_type,
             "running": self._is_running,
             "temp_dir": self._temp_dir,
             "landlock_supported": self.is_available,
+            "subprocess_fallback": self._used_subprocess_fallback,
             "features": {
-                "filesystem_isolation": True,
-                "network_isolation": True,
-                "syscall_filtering": True,
+                "filesystem_isolation": kernel_isolated,
+                "network_isolation": kernel_isolated,
+                "syscall_filtering": kernel_isolated,
                 "resource_limits": True,
             }
         }

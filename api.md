@@ -59,6 +59,8 @@ Methods:
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">handoff_to</a>(target_agent: 'Agent', prompt: str, context: Optional[Dict[str, Any]] = None, config: Optional['HandoffConfig'] = None) -> 'HandoffResult'</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">handoff_to_async</a>(target_agent: 'Agent', prompt: str, context: Optional[Dict[str, Any]] = None, config: Optional['HandoffConfig'] = None) -> 'HandoffResult'</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">is_closed</a>() -> bool</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">llm_instance</a>()</code>
+* <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">llm_instance</a>(value)</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">llm_model</a>() -> Optional[str]</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">output_style</a>() -> Optional[str]</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">output_style</a>(value: Optional[str]) -> None</code>
@@ -885,6 +887,7 @@ Methods:
 * <code title="cli">praisonai doctor network <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor packaging <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor performance <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
+* <code title="cli">praisonai doctor runtime <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor selftest <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor skills <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor tools <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
@@ -1306,7 +1309,7 @@ export { // Python parity additions
 export { // Subagent Tool (agent-as-tool pattern)
   SubagentTool, BaseTool, FunctionTool, ToolRegistry, ToolResult, ToolValidationError, createDelegator, createSubagentTool, createSubagentTools, createTool, getRegistry, getTool, registerTool, tool, validateTool } from "./tools";
 export { airweaveSearch, bedrockBrowserClick, bedrockBrowserFill, bedrockBrowserNavigate, bedrockCodeInterpreter, codeExecution, codeMode, createCustomTool, exaSearch, firecrawlCrawl, firecrawlScrape, parallelSearch, perplexitySearch, registerCustomTool, registerLocalTool, registerNpmTool, superagentGuard, superagentRedact, superagentVerify, tavilyCrawl, tavilyExtract, tavilySearch, valyuBioSearch, valyuCompanyResearch, valyuEconomicsSearch, valyuFinanceSearch, valyuPaperSearch, valyuPatentSearch, valyuSecSearch, valyuWebSearch } from "./tools/builtins";
-export { BudgetExceededError, MissingDependencyError, MissingEnvVarError, ToolsRegistry, composeMiddleware, createLoggingMiddleware, createRateLimitMiddleware, createRedactionMiddleware, createRetryMiddleware, createTimeoutMiddleware, createToolsRegistry, createTracingMiddleware, createValidationMiddleware, getRegistry, getTool, getToolsRegistry, get_registry, get_tool, registerTool, register_tool, resetToolsRegistry, validateTool, validate_tool } from "./tools/registry";
+export { BudgetExceededError, MissingDependencyError, MissingEnvVarError, ToolsRegistry, composeMiddleware, createLoggingMiddleware, createRateLimitMiddleware, createRedactionMiddleware, createRetryMiddleware, createTimeoutMiddleware, createToolsRegistry, createTracingMiddleware, createValidationMiddleware, getToolsRegistry, get_registry, get_tool, register_tool, resetToolsRegistry, validate_tool } from "./tools/registry";
 export type { InstallHints, PraisonTool, RedactionHooks, RegisteredTool, ToolCapabilities, ToolExecutionContext, ToolExecutionResult, ToolFactory, ToolHooks, ToolInstallStatus, ToolLimits, ToolLogger, ToolMetadata, ToolMiddleware, ToolParameterProperty, ToolParameterSchema } from "./tools/registry";
 export { registerBuiltinTools, tools } from "./tools/tools";
 export { // Classes

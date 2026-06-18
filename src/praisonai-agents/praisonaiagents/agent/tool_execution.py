@@ -231,9 +231,10 @@ class ToolExecutionMixin:
                     arguments.update(res.output.modified_data)
 
             # Loop guard check - prevent tool execution loops with graduated response
-            if hasattr(self, '_loop_guard') and self._loop_guard:
+            if hasattr(self, '_ensure_loop_guard'):
+                loop_guard = self._ensure_loop_guard()
                 from ..escalation.loop_guard import GuardAction
-                decision = self._loop_guard.check(function_name, arguments, is_pre_execution=True)
+                decision = loop_guard.check(function_name, arguments, is_pre_execution=True)
                 
                 if decision.action == GuardAction.WARN:
                     # Inject warning into tool result so LLM sees guidance
@@ -394,11 +395,12 @@ class ToolExecutionMixin:
                     self._doom_loop_tracker.mark_progress(f"tool:{function_name}")
             
             # Record tool execution in loop guard
-            if hasattr(self, '_loop_guard') and self._loop_guard:
+            if hasattr(self, '_ensure_loop_guard'):
+                loop_guard = self._ensure_loop_guard()
                 is_success = result is not None and not (isinstance(result, dict) and result.get('error'))
-                self._loop_guard.record(function_name, arguments, is_success)
+                loop_guard.record(function_name, arguments, is_success)
                 # Handle warning injection for WARN decisions
-                decision = self._loop_guard.check(function_name, arguments, is_pre_execution=False) 
+                decision = loop_guard.check(function_name, arguments, is_pre_execution=False) 
                 if decision.action.value == "warn":
                     if isinstance(result, str):
                         result = f"{result}\n\n[loop-guard] {decision.message}"

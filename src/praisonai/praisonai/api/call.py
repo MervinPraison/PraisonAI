@@ -134,24 +134,28 @@ from fastapi import HTTPException, status
 @app.api_route("/", methods=["GET", "POST"])
 async def handle_incoming_call(request: Request):
     """Handle incoming call and return TwiML response to connect to Media Stream."""
-    if CALL_SERVER_TOKEN:
-        token = request.query_params.get("token")
-        if not token:
-            auth = request.headers.get("Authorization", "")
-            if auth.startswith("Bearer "):
-                token = auth.split(" ")[1]
-            elif auth.startswith("Basic "):
-                try:
-                    import base64
-                    decoded = base64.b64decode(auth[6:]).decode("utf-8")
-                    if ":" in decoded:
-                        token = decoded.split(":", 1)[1]  # Use Password as token
-                    else:
-                        token = decoded
-                except Exception:
-                    pass
-        if token != CALL_SERVER_TOKEN:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+    if not CALL_SERVER_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="CALL_SERVER_TOKEN is not configured",
+        )
+    token = request.query_params.get("token")
+    if not token:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            token = auth.split(" ")[1]
+        elif auth.startswith("Basic "):
+            try:
+                import base64
+                decoded = base64.b64decode(auth[6:]).decode("utf-8")
+                if ":" in decoded:
+                    token = decoded.split(":", 1)[1]
+                else:
+                    token = decoded
+            except Exception:
+                pass
+    if token != CALL_SERVER_TOKEN:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
 
     response = VoiceResponse()
     response.say("")
@@ -174,11 +178,13 @@ async def handle_media_stream(websocket: WebSocket):
     global active_connections
     
     # 1. Authentication
-    if CALL_SERVER_TOKEN:
-        token = websocket.query_params.get("token")
-        if token != CALL_SERVER_TOKEN:
-            await websocket.close(code=4003, reason="Unauthorized")
-            return
+    if not CALL_SERVER_TOKEN:
+        await websocket.close(code=4003, reason="CALL_SERVER_TOKEN not configured")
+        return
+    token = websocket.query_params.get("token")
+    if token != CALL_SERVER_TOKEN:
+        await websocket.close(code=4003, reason="Unauthorized")
+        return
             
     # 2. Rate Limiting Request Rate
     client_ip = websocket.client.host if websocket.client else "unknown"

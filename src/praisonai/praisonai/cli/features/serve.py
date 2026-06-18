@@ -801,11 +801,19 @@ Launch PraisonAI servers with unified discovery support.
     
     def cmd_a2u(self, args: List[str]) -> int:
         """Launch A2U event stream server."""
+        import os
         spec = {
             "host": {"default": self.DEFAULT_HOST},
             "port": {"default": 8083, "type": "int"},
         }
         parsed = self._parse_args(args, spec)
+        host = parsed["host"]
+        if host not in ("127.0.0.1", "localhost", "::1") and not os.environ.get("A2U_AUTH_TOKEN"):
+            self._print_error(
+                "A2U_AUTH_TOKEN required for non-localhost binding. "
+                "Set A2U_AUTH_TOKEN or bind to 127.0.0.1"
+            )
+            return 4  # POLICY_DENIED
         
         try:
             self._print_success(f"Starting A2U server on {parsed['host']}:{parsed['port']}")

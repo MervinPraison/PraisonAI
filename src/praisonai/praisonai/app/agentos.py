@@ -7,6 +7,8 @@ It creates a FastAPI-based web service for deploying agents.
 
 from typing import Any, Dict, List, Optional, Union
 
+import os
+
 from praisonaiagents import AgentOSConfig, AgentOSProtocol
 
 
@@ -112,6 +114,25 @@ class AgentOS:
         
         # Register routes
         self._register_routes(app)
+
+        launch_token = self.config.api_key or os.environ.get("PRAISONAI_AGENTOS_API_KEY")
+        if launch_token:
+            from starlette.middleware.base import BaseHTTPMiddleware
+            from starlette.responses import JSONResponse
+
+            expected = launch_token
+
+            class _AgentOSAuthMiddleware(BaseHTTPMiddleware):
+                async def dispatch(self, request, call_next):
+                    if request.url.path in ("/health", "/"):
+                        return await call_next(request)
+                    auth = request.headers.get("Authorization", "")
+                    token = auth[7:] if auth.startswith("Bearer ") else request.headers.get("X-API-Key", "")
+                    if token != expected:
+                        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+                    return await call_next(request)
+
+            app.add_middleware(_AgentOSAuthMiddleware)
         
         return app
     

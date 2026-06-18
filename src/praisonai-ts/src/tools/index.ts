@@ -1,15 +1,56 @@
 // Export base tool interfaces and classes
 export { BaseTool, ToolResult, ToolValidationError, validateTool, createTool, type ToolParameters } from './base';
 
-// Export decorator and registry (legacy)
-export * from './decorator';
+// Legacy @tool decorator registry (camelCase names reserved for this API)
+export {
+  tool, FunctionTool, ToolRegistry, getRegistry, registerTool, getTool,
+  type ToolConfig, type ToolContext,
+} from './decorator';
 
 // Export all tool modules
 export * from './arxivTools';
 export * from './mcpSse';
 
-// Export new registry system
-export * from './registry';
+// New AI SDK tools registry — snake_case parity names (avoid camelCase clash with decorator)
+export {
+  ToolsRegistry,
+  getToolsRegistry,
+  createToolsRegistry,
+  resetToolsRegistry,
+  get_registry,
+  get_tool,
+  register_tool,
+  validate_tool,
+} from './registry';
+export type {
+  ToolExecutionContext,
+  ToolLimits,
+  RedactionHooks,
+  ToolLogger,
+  ToolCapabilities,
+  InstallHints,
+  ToolMetadata,
+  ToolExecutionResult,
+  PraisonTool,
+  ToolParameterSchema,
+  ToolParameterProperty,
+  ToolMiddleware,
+  ToolHooks,
+  ToolFactory,
+  RegisteredTool,
+  ToolInstallStatus,
+} from './registry';
+export { MissingDependencyError, MissingEnvVarError, BudgetExceededError } from './registry';
+export {
+  createLoggingMiddleware,
+  createTimeoutMiddleware,
+  createRedactionMiddleware,
+  createRateLimitMiddleware,
+  createRetryMiddleware,
+  createTracingMiddleware,
+  createValidationMiddleware,
+  composeMiddleware,
+} from './registry';
 
 // Export built-in tools
 export * from './builtins';

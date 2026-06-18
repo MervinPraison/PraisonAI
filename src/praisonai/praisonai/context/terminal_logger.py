@@ -72,6 +72,10 @@ class TerminalLogger:
     
     def _get_log_path(self, run_id: str, agent_id: str) -> Path:
         """Get the path to the terminal log file."""
+        from ._storage_path import safe_storage_id
+
+        safe_storage_id(run_id, "run_id")
+        safe_storage_id(agent_id, "agent_id")
         terminal_dir = self.base_dir / run_id / "terminal"
         terminal_dir.mkdir(parents=True, exist_ok=True)
         return terminal_dir / f"{agent_id}.log"

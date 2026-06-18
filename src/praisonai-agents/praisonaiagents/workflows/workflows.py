@@ -1020,10 +1020,11 @@ class AgentFlow:
         # Update workflow status
         self.status = "running"
         
-        # Set YAML-approved tools in approval context (for auto-approval of dangerous tools)
+        # Set YAML-approved tools only when caller allows dangerous tools
         _approval_token = None
         approve_tools = getattr(self, 'approve_tools', [])
-        if approve_tools:
+        allow_dangerous = getattr(self, 'allow_dangerous_tools', False)
+        if approve_tools and allow_dangerous:
             from ..approval import set_yaml_approved_tools
             _approval_token = set_yaml_approved_tools(approve_tools)
         

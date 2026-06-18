@@ -17,80 +17,80 @@ This report compares **Rust SDK feature categories** against **Rust documentatio
 
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
-| ✅ AGUI | 6 | 1 | 108 |
-| ✅ Agent | 39 | 5 | 901 |
-| ✅ Agent-to-Agent (A2A) | 6 | 1 | 131 |
-| ✅ Approval | 2 | 1 | 102 |
-| ✅ Audio | 3 | 1 | 100 |
-| ✅ Auto Generation | 5 | 1 | 102 |
-| ✅ Autonomy | 4 | 1 | 108 |
-| ✅ Bots | 10 | 1 | 271 |
-| ✅ Budget | 2 | 1 | 90 |
-| ✅ Callbacks | 1 | 1 | 96 |
-| ✅ Chunking | 3 | 1 | 114 |
-| ✅ Citations | 2 | 1 | 123 |
-| ✅ Code Execution | 5 | 1 | 147 |
-| ✅ Conditions | 1 | 1 | 243 |
-| ✅ Configuration | 2 | 1 | 301 |
-| ✅ Context Management | 21 | 1 | 284 |
-| ✅ Criteria | 4 | 1 | 108 |
-| ✅ Database | 2 | 1 | 80 |
-| ✅ Display | 12 | 1 | 282 |
-| ✅ Documents | 1 | 1 | 113 |
-| ✅ Embeddings | 8 | 2 | 323 |
-| ✅ Evaluation | 5 | 1 | 311 |
-| ✅ Events | 3 | 1 | 117 |
-| ✅ Execution | 3 | 1 | 93 |
-| ✅ Failover | 3 | 1 | 279 |
-| ✅ Files | 3 | 1 | 101 |
-| ✅ Flow | 2 | 1 | 99 |
-| ✅ Gateway | 8 | 1 | 293 |
-| ✅ Guardrails | 10 | 1 | 322 |
-| ✅ Handoffs | 13 | 1 | 311 |
-| ✅ Hooks | 12 | 1 | 297 |
-| ✅ Image | 4 | 1 | 139 |
-| ✅ Knowledge | 12 | 1 | 297 |
-| ✅ LLM | 10 | 1 | 237 |
-| ✅ Loops | 7 | 1 | 111 |
-| ✅ MCP | 11 | 1 | 359 |
-| ✅ Memory | 11 | 1 | 267 |
-| ✅ OCR | 5 | 1 | 130 |
-| ✅ Optimizer | 1 | 1 | 62 |
-| ✅ Output | 3 | 1 | 99 |
-| ✅ Parallel Execution | 4 | 1 | 98 |
-| ✅ Planning | 10 | 1 | 305 |
-| ✅ Plugins | 11 | 1 | 337 |
-| ✅ Process | 2 | 1 | 83 |
-| ✅ Prompts | 4 | 1 | 117 |
-| ✅ Providers | 3 | 1 | 140 |
-| ✅ Query | 5 | 1 | 109 |
-| ✅ RAG | 6 | 1 | 328 |
-| ✅ Realtime | 3 | 1 | 130 |
-| ✅ Reflection | 4 | 1 | 89 |
-| ✅ Retrieval | 4 | 1 | 136 |
-| ✅ Routing | 1 | 1 | 129 |
-| ✅ Sandbox | 7 | 2 | 56 |
-| ✅ Security | 2 | 1 | 127 |
-| ✅ Sessions | 7 | 1 | 279 |
-| ✅ Skills | 5 | 1 | 224 |
-| ✅ Streaming | 6 | 1 | 332 |
-| ✅ Tasks | 8 | 1 | 269 |
-| ✅ Telemetry | 4 | 1 | 285 |
-| ✅ Templates | 1 | 1 | 95 |
-| ✅ Token Management | 2 | 1 | 119 |
-| ✅ Tools | 16 | 1 | 281 |
-| ✅ Tracing | 8 | 1 | 280 |
-| ✅ Vector Store | 2 | 1 | 128 |
-| ✅ Video | 5 | 1 | 133 |
-| ✅ Vision | 3 | 1 | 89 |
-| ✅ Web | 5 | 1 | 106 |
-| ✅ Workflows | 5 | 1 | 295 |
+| ✅ AGUI | 6 | 1 | 53 |
+| ✅ Agent | 39 | 5 | 635 |
+| ✅ Agent-to-Agent (A2A) | 6 | 1 | 85 |
+| ✅ Approval | 2 | 1 | 163 |
+| ✅ Audio | 3 | 1 | 101 |
+| ✅ Auto Generation | 5 | 1 | 62 |
+| ✅ Autonomy | 4 | 1 | 161 |
+| ✅ Bots | 10 | 1 | 66 |
+| ✅ Budget | 2 | 1 | 76 |
+| ✅ Callbacks | 1 | 1 | 178 |
+| ✅ Chunking | 3 | 1 | 103 |
+| ✅ Citations | 2 | 1 | 71 |
+| ✅ Code Execution | 5 | 1 | 104 |
+| ✅ Conditions | 1 | 1 | 132 |
+| ✅ Configuration | 2 | 1 | 130 |
+| ✅ Context Management | 21 | 1 | 83 |
+| ✅ Criteria | 4 | 1 | 70 |
+| ✅ Database | 2 | 1 | 198 |
+| ✅ Display | 12 | 1 | 64 |
+| ✅ Documents | 1 | 1 | 71 |
+| ✅ Embeddings | 8 | 2 | 143 |
+| ✅ Evaluation | 5 | 1 | 96 |
+| ✅ Events | 3 | 1 | 114 |
+| ✅ Execution | 3 | 1 | 105 |
+| ✅ Failover | 3 | 1 | 115 |
+| ✅ Files | 3 | 1 | 187 |
+| ✅ Flow | 2 | 1 | 118 |
+| ✅ Gateway | 8 | 1 | 76 |
+| ✅ Guardrails | 10 | 1 | 291 |
+| ✅ Handoffs | 13 | 1 | 276 |
+| ✅ Hooks | 12 | 1 | 339 |
+| ✅ Image | 4 | 1 | 85 |
+| ✅ Knowledge | 12 | 1 | 146 |
+| ✅ LLM | 10 | 1 | 151 |
+| ✅ Loops | 7 | 1 | 134 |
+| ✅ MCP | 11 | 1 | 196 |
+| ✅ Memory | 11 | 1 | 273 |
+| ✅ OCR | 5 | 1 | 70 |
+| ✅ Optimizer | 1 | 1 | 317 |
+| ✅ Output | 3 | 1 | 120 |
+| ✅ Parallel Execution | 4 | 1 | 115 |
+| ✅ Planning | 10 | 1 | 193 |
+| ✅ Plugins | 11 | 1 | 62 |
+| ✅ Process | 2 | 1 | 257 |
+| ✅ Prompts | 4 | 1 | 80 |
+| ✅ Providers | 3 | 1 | 74 |
+| ✅ Query | 5 | 1 | 57 |
+| ✅ RAG | 6 | 1 | 73 |
+| ✅ Realtime | 3 | 1 | 66 |
+| ✅ Reflection | 4 | 1 | 129 |
+| ✅ Retrieval | 4 | 1 | 68 |
+| ✅ Routing | 1 | 1 | 78 |
+| ✅ Sandbox | 7 | 2 | 130 |
+| ✅ Security | 2 | 1 | 74 |
+| ✅ Sessions | 7 | 1 | 169 |
+| ✅ Skills | 5 | 1 | 66 |
+| ✅ Streaming | 6 | 1 | 128 |
+| ✅ Tasks | 8 | 1 | 68 |
+| ✅ Telemetry | 4 | 1 | 104 |
+| ✅ Templates | 1 | 1 | 66 |
+| ✅ Token Management | 2 | 1 | 67 |
+| ✅ Tools | 16 | 1 | 334 |
+| ✅ Tracing | 8 | 1 | 310 |
+| ✅ Vector Store | 2 | 1 | 68 |
+| ✅ Video | 5 | 1 | 60 |
+| ✅ Vision | 3 | 1 | 65 |
+| ✅ Web | 5 | 2 | 185 |
+| ✅ Workflows | 5 | 1 | 69 |
 
 ## Documentation Without Features
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ CLI (1 docs, 168 lines)
+- ℹ️ CLI (1 docs, 123 lines)
 
 ---
 

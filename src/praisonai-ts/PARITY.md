@@ -1,6 +1,6 @@
 # Feature Parity Tracker
 
-> **Version:** 1.5.87 | **Last Updated:** 2026-06-13
+> **Version:** 1.5.87 | **Last Updated:** 2026-06-18
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 ## Summary
@@ -9,7 +9,7 @@
 |--------|-------|
 | Python Core Features | 360 |
 | Python Wrapper Features | 99 |
-| TypeScript Features | 1192 |
+| TypeScript Features | 1188 |
 | **Gap Count** | **68** |
 | P0 (Critical) | 2 |
 | P1 (High) | 0 |
@@ -893,7 +893,7 @@ import { AgentStats, AgentTelemetry, MetricEntry, MinimalTelemetry, PerformanceM
 </details>
 
 <details>
-<summary><strong>tools</strong> (91 exports)</summary>
+<summary><strong>tools</strong> (87 exports)</summary>
 
 ```typescript
 import { BaseTool, BudgetExceededError, DelegatorConfig, FunctionTool, InstallHints, MissingDependencyError, MissingEnvVarError, PraisonTool, RedactionHooks, RegisteredTool... } from 'praisonai';

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from praisonaiagents.auth import AuthIdentity
 
-from ..deps import get_db, require_workspace_member
+from ..deps import get_db, require_delete_permission, require_workspace_member
 from ..schemas import ProjectCreate, ProjectResponse, ProjectUpdate
 from ...services.project_service import ProjectService
 
@@ -93,6 +93,12 @@ async def delete_project(
     session: AsyncSession = Depends(get_db),
 ):
     svc = ProjectService(session)
+    project = await svc.get(project_id, workspace_id=workspace_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    await require_delete_permission(
+        workspace_id, user, session, resource_owner_id=project.lead_id
+    )
     deleted = await svc.delete(project_id, workspace_id=workspace_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -109,4 +115,4 @@ async def project_stats(
     project = await svc.get(project_id, workspace_id=workspace_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
-    return await svc.get_stats(project_id)
+    return await svc.get_stats(project_id, workspace_id=workspace_id)

@@ -532,6 +532,14 @@ def _smtp_reply_email(message_id: str, body: str) -> str:
         logger.error(f"Failed to reply to {message_id}: {e}")
         return f"Failed to reply: {e}"
 
+def _imap_sanitize(value: str) -> str:
+    """Strip characters that break IMAP quoted-string search criteria."""
+    cleaned = value.replace('"', "").replace("\\", "")
+    if any(c in cleaned for c in "\r\n\x00"):
+        raise ValueError("Invalid IMAP search value")
+    return cleaned
+
+
 def _smtp_search_emails(
     query: Optional[str] = None,
     from_addr: Optional[str] = None,
@@ -544,11 +552,11 @@ def _smtp_search_emails(
         # Build IMAP search criteria
         criteria = []
         if from_addr:
-            criteria.append(f'FROM "{from_addr}"')
+            criteria.append(f'FROM "{_imap_sanitize(from_addr)}"')
         if subject:
-            criteria.append(f'SUBJECT "{subject}"')
+            criteria.append(f'SUBJECT "{_imap_sanitize(subject)}"')
         if query:
-            criteria.append(f'TEXT "{query}"')
+            criteria.append(f'TEXT "{_imap_sanitize(query)}"')
         if not criteria:
             criteria.append("ALL")
         search_str = " ".join(criteria)

@@ -12,6 +12,9 @@ import inspect
 
 __all__ = ['deprecated', 'DeprecationConfig', 'check_expired_deprecations']
 
+# Warn once per process for param deprecations (avoids hot-path overhead in Agent.__init__)
+_warned_params: set[str] = set()
+
 class DeprecationConfig:
     """Configuration for deprecation behavior and version management."""
     
@@ -182,6 +185,10 @@ def warn_deprecated_param(
     
     message = "".join(msg_parts)
     
+    warn_key = f"{param_name}:{since}"
+    if warn_key in _warned_params:
+        return
+    _warned_params.add(warn_key)
     warnings.warn(message, category=DeprecationWarning, stacklevel=stacklevel)
 
 

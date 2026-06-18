@@ -185,7 +185,7 @@ def instantiate_praisonai_agent():
     return PraisonAgent(
         name="Test Agent",
         instructions="Be concise, reply with one sentence.",
-        llm="gpt-4o-mini",
+        model="gpt-4o-mini",
         tools=tools,
         output="silent"
     )
@@ -196,7 +196,7 @@ def instantiate_praisonai_litellm_agent():
     return PraisonAgent(
         name="Test Agent",
         instructions="Be concise, reply with one sentence.",
-        llm="openai/gpt-4o-mini",
+        model="openai/gpt-4o-mini",
         tools=tools,
         output="silent"
     )
