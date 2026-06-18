@@ -20,6 +20,7 @@ class ToolRegistry:
     def __init__(self):
         self._functions: Dict[str, Callable] = {}
         self._lock = threading.Lock()
+        self._resolver = None  # Will be set by AgentsGenerator to enable cache invalidation
         # Note: AutoGen-specific adapters moved to framework_adapters.autogen
         
     def register_function(self, name: str, func: Callable) -> None:
@@ -29,6 +30,9 @@ class ToolRegistry:
         with self._lock:
             self._functions[name] = func
         logger.debug(f"Registered function tool: {name}")
+        # Invalidate resolver cache for this tool
+        if self._resolver is not None:
+            self._resolver.invalidate(name)
     
     def register_autogen_adapter(self, tool_type_name: str, adapter: Callable, _suppress_deprecation_warning: bool = False) -> None:
         """Deprecated: AutoGen adapters moved to framework_adapters.autogen module."""
@@ -101,6 +105,17 @@ class ToolRegistry:
             if hasattr(self, '_autogen_adapters'):
                 self._autogen_adapters.clear()
         logger.debug("Cleared tool registry")
+        # Invalidate entire resolver cache
+        if self._resolver is not None:
+            self._resolver.invalidate()
+    
+    def set_resolver(self, resolver) -> None:
+        """Set the resolver for cache invalidation.
+        
+        Args:
+            resolver: ToolResolver instance to notify on changes
+        """
+        self._resolver = resolver
     
     def register_from_module(self, module: Any) -> List[str]:
         """

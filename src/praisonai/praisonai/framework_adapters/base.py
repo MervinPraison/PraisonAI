@@ -95,6 +95,26 @@ class FrameworkAdapter(Protocol):
     def cleanup(self) -> None:
         """Clean up any resources after execution."""
         ...
+    
+    def resolve_variant(
+        self,
+        config: Dict[str, Any],
+        registry: "FrameworkAdapterRegistry",
+    ) -> "FrameworkAdapter":
+        """Resolve to the appropriate adapter variant based on config.
+        
+        Default implementation returns self. Adapters with multiple versions
+        (e.g., AutoGen v0.2 vs v0.4) should override this to select the
+        appropriate concrete implementation.
+        
+        Args:
+            config: Framework configuration that may contain version hints
+            registry: The adapter registry for creating other adapters if needed
+            
+        Returns:
+            The resolved FrameworkAdapter instance (may be self or another adapter)
+        """
+        return self
 
 
 class BaseFrameworkAdapter:
@@ -103,19 +123,11 @@ class BaseFrameworkAdapter:
     DEFAULT_MODEL = "openai/gpt-4o-mini"
     
     def __init__(self):
-        self._tool_registry: Dict[str, Any] = {}
-        
-    def register_tool(self, name: str, tool: Any) -> None:
-        """Register a tool in the adapter's local registry."""
-        self._tool_registry[name] = tool
+        pass
     
-    def get_tool(self, name: str) -> Optional[Any]:
-        """Get a tool from the adapter's local registry."""
-        return self._tool_registry.get(name)
-    
-    def list_tools(self) -> List[str]:
-        """List all registered tool names."""
-        return list(self._tool_registry.keys())
+    def resolve_variant(self, config: Dict[str, Any], registry: Any) -> "BaseFrameworkAdapter":
+        """Default implementation returns self."""
+        return self
     
     def _resolve_llm(self, spec, llm_config):
         """Build a PraisonAIModel from a per-agent llm/function_calling_llm spec.
