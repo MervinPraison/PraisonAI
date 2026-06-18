@@ -1,27 +1,40 @@
-"""Runtime configuration system for PraisonAI Agents.
+"""
+Runtime execution components for PraisonAI agents.
 
-Provides model-scoped runtime selection following the protocol-driven design:
-- Core protocols and dataclasses in this module
-- Heavy implementations in wrapper layer (praisonai package)
-- Fail-closed behavior for unknown runtime IDs
+This module provides runtime execution abstractions and protocols for 
+standardizing agent execution across different harness types.
 """
 
-def __getattr__(name: str):
-    """Lazy loading for runtime components."""
-    if name == "AgentRuntimeConfig":
-        from .config import AgentRuntimeConfig
-        return AgentRuntimeConfig
-    elif name == "RuntimeRegistry":
-        from .registry import RuntimeRegistry
-        return RuntimeRegistry
-    elif name == "RuntimeResolver":
-        from .resolver import RuntimeResolver
-        return RuntimeResolver
-    else:
-        raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+from .turn_context import (
+    PreparedTurnContext, 
+    ModelReference,
+    ToolSchema,
+    TranscriptWindow,
+    DeliveryChannels,
+    SessionCorrelation,
+    RuntimeMode,
+    create_default_model_ref,
+    create_empty_transcript,
+    create_default_delivery,
+    create_session_correlation,
+)
+from .protocols import TurnRuntimeProtocol, TurnContextBuilderProtocol
+from .context_builder import DefaultTurnContextBuilder, default_context_builder
 
 __all__ = [
-    "AgentRuntimeConfig",
-    "RuntimeRegistry",
-    "RuntimeResolver"
+    'PreparedTurnContext',
+    'TurnRuntimeProtocol',
+    'TurnContextBuilderProtocol',
+    'ModelReference',
+    'ToolSchema', 
+    'TranscriptWindow',
+    'DeliveryChannels',
+    'SessionCorrelation',
+    'RuntimeMode',
+    'create_default_model_ref',
+    'create_empty_transcript',
+    'create_default_delivery',
+    'create_session_correlation',
+    'DefaultTurnContextBuilder',
+    'default_context_builder',
 ]
