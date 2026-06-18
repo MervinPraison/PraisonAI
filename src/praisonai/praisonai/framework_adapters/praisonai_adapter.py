@@ -38,6 +38,69 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         # Fall back to global default
         return default_model
     
+    def _resolve_agent_runtime(self, details: Dict[str, Any], config: Dict[str, Any]) -> Any:
+        """Resolve runtime configuration for a specific agent.
+        
+        Resolution order:
+        1. Agent-level runtime parameter
+        2. Model-scoped runtime from models section
+        3. Provider-scoped runtime from providers section
+        4. Legacy cli_backend (with deprecation warning)
+        5. None (use default LLM execution)
+        
+        Args:
+            details: Agent configuration details
+            config: Full YAML configuration
+            
+        Returns:
+            Runtime configuration or None
+        """
+        # 1. Check agent-level runtime parameter
+        if 'runtime' in details:
+            return details['runtime']
+        
+        # 2. Check model-scoped runtime
+        agent_model = self._resolve_agent_model(details, "")
+        if agent_model and 'models' in config:
+            models_config = config['models']
+            if isinstance(models_config, dict) and agent_model in models_config:
+                model_config = models_config[agent_model]
+                if isinstance(model_config, dict) and 'runtime' in model_config:
+                    return model_config['runtime']
+        
+        # 3. Check provider-scoped runtime
+        if agent_model and 'providers' in config:
+            # Extract provider from model name
+            provider = None
+            if '/' in agent_model:
+                provider = agent_model.split('/')[0]
+            elif 'claude' in agent_model.lower():
+                provider = 'anthropic'
+            elif 'gpt' in agent_model.lower():
+                provider = 'openai'
+            elif 'gemini' in agent_model.lower():
+                provider = 'google'
+            
+            if provider:
+                providers_config = config['providers']
+                if isinstance(providers_config, dict) and provider in providers_config:
+                    provider_config = providers_config[provider]
+                    if isinstance(provider_config, dict) and 'runtime_default' in provider_config:
+                        return provider_config['runtime_default']
+        
+        # 4. Check legacy cli_backend (with deprecation warning handled by Agent.__init__)
+        if 'cli_backend' in details:
+            import warnings
+            warnings.warn(
+                "Agent-level 'cli_backend' in YAML is deprecated. "
+                "Use 'runtime' parameter or model-scoped runtime configuration instead.",
+                DeprecationWarning,
+                stacklevel=3
+            )
+            return details['cli_backend']
+        
+        return None
+    
     def run(
         self,
         config: Dict[str, Any],
@@ -142,6 +205,9 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 # Resolve per-agent LLM model
                 agent_model = self._resolve_agent_model(details, model_name)
                 
+                # Resolve per-agent runtime configuration
+                agent_runtime = self._resolve_agent_runtime(details, config)
+                
                 # Create basic agent (pass both tools and toolsets)
                 agent = PraisonAgent(
                     name=role_filled,
@@ -153,6 +219,7 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                     allow_delegation=details.get('allow_delegation', False),
                     tools=agent_tool_list,
                     toolsets=agent_toolsets,
+                    runtime=agent_runtime,
                 )
                 
                 if agent_callback:
@@ -321,6 +388,9 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 # Resolve per-agent LLM model
                 agent_model = self._resolve_agent_model(details, model_name)
                 
+                # Resolve per-agent runtime configuration
+                agent_runtime = self._resolve_agent_runtime(details, config)
+                
                 # Create basic agent (pass both tools and toolsets)
                 agent = PraisonAgent(
                     name=role_filled,
@@ -332,6 +402,7 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                     allow_delegation=details.get('allow_delegation', False),
                     tools=agent_tool_list,
                     toolsets=agent_toolsets,
+                    runtime=agent_runtime,
                 )
                 
                 if agent_callback:

@@ -73,6 +73,8 @@ export interface MCPServerConfig {
     port?: number | null;
     /** Enable logging */
     logging?: boolean;
+    /** Optional bearer token for HTTP transport (or set PRAISONAI_MCP_AUTH_TOKEN) */
+    authToken?: string;
 }
 
 /**
@@ -108,6 +110,7 @@ export class MCPServer {
     private logging: boolean;
     private running: boolean = false;
     private httpServer: any = null;
+    private authToken?: string;
 
     constructor(config: MCPServerConfig = {}) {
         this.id = randomUUID();
@@ -117,6 +120,7 @@ export class MCPServer {
         this.resources = new Map();
         this.prompts = new Map();
         this.logging = config.logging ?? false;
+        this.authToken = config.authToken ?? process.env.PRAISONAI_MCP_AUTH_TOKEN ?? undefined;
 
         // Register initial tools
         if (config.tools) {
@@ -398,6 +402,29 @@ export class MCPServer {
     }
 
     /**
+     * Verify HTTP bearer token when authToken is configured
+     */
+    private verifyHttpAuth(req: import('http').IncomingMessage): boolean {
+        if (!this.authToken) {
+            return true;
+        }
+
+        const authHeader = req.headers.authorization ?? req.headers['Authorization'];
+        if (typeof authHeader === 'string') {
+            if (authHeader.startsWith('Bearer ') && authHeader.slice(7) === this.authToken) {
+                return true;
+            }
+        }
+
+        const xAuth = req.headers['x-auth-token'] ?? req.headers['X-Auth-Token'];
+        if (typeof xAuth === 'string' && xAuth === this.authToken) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * Start HTTP transport
      */
     async startHttp(port: number): Promise<void> {
@@ -408,6 +435,12 @@ export class MCPServer {
 
         this.httpServer = http.createServer(async (req, res) => {
             if (req.method === 'POST') {
+                if (!this.verifyHttpAuth(req)) {
+                    res.writeHead(401, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: 'Unauthorized' }));
+                    return;
+                }
+
                 let body = '';
                 req.on('data', chunk => body += chunk);
                 req.on('end', async () => {

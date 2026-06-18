@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from praisonaiagents.auth import AuthIdentity
 
-from ..deps import get_db, require_workspace_member
+from ..deps import get_db, require_delete_permission, require_workspace_member
 from ..schemas import AgentCreate, AgentResponse, AgentUpdate
 from ...services.agent_service import AgentService
 
@@ -96,6 +96,12 @@ async def delete_agent(
     session: AsyncSession = Depends(get_db),
 ):
     svc = AgentService(session)
+    agent = await svc.get(agent_id, workspace_id=workspace_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    await require_delete_permission(
+        workspace_id, user, session, resource_owner_id=agent.owner_id
+    )
     deleted = await svc.delete(agent_id, workspace_id=workspace_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Agent not found")

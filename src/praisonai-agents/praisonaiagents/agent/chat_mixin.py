@@ -87,12 +87,41 @@ Your Goal: {self.goal}"""
         
         # Add memory context if memory is enabled
         if self._memory_instance:
-            memory_context = self.get_memory_context()
-            if memory_context:
-                system_prompt += f"\n\n## Memory (Information you remember about the user)\n{memory_context}"
-                # Display memory info to user if verbose
-                if self.verbose:
-                    self._display_memory_info()
+            # Use cache-optimized context if model supports prompt caching and cache boundary is requested
+            use_cache_boundaries = hasattr(self, '_model_supports_prompt_caching') and self._model_supports_prompt_caching()
+            if use_cache_boundaries and hasattr(self._memory_instance, 'build_cache_optimized_context'):
+                try:
+                    # Get the goal/task description for context building
+                    task_desc = getattr(self, 'goal', '') or 'general assistance'
+                    cache_result = self._memory_instance.build_cache_optimized_context(
+                        task_descr=task_desc,
+                        include_cache_boundary=True
+                    )
+                    memory_context = cache_result.get('stable_prefix', '')
+                    cache_boundary = cache_result.get('cache_boundary', '')
+                    if memory_context:
+                        system_prompt += f"\n\n## Memory (Information you remember about the user)\n{memory_context}"
+                        if cache_boundary:
+                            system_prompt += cache_boundary
+                        # Display memory info to user if verbose
+                        if self.verbose:
+                            self._display_memory_info()
+                except (AttributeError, KeyError, TypeError) as e:
+                    # Fall back to standard memory context if cache optimization fails
+                    memory_context = self.get_memory_context()
+                    if memory_context:
+                        system_prompt += f"\n\n## Memory (Information you remember about the user)\n{memory_context}"
+                        # Display memory info to user if verbose
+                        if self.verbose:
+                            self._display_memory_info()
+            else:
+                # Standard memory context without cache boundaries
+                memory_context = self.get_memory_context()
+                if memory_context:
+                    system_prompt += f"\n\n## Memory (Information you remember about the user)\n{memory_context}"
+                    # Display memory info to user if verbose
+                    if self.verbose:
+                        self._display_memory_info()
             
             # Add learn context if learn is enabled (auto-inject when memory="learn")
             learn_context = self.get_learn_context()
@@ -451,6 +480,17 @@ Your Goal: {self.goal}"""
                 cleaned_tools.append(tool_copy)
             else:
                 cleaned_tools.append(tool)
+        
+        # Sort tools deterministically for cache stability
+        def sort_formatted_tools(tools_list):
+            """Sort already-formatted tool schemas by function name."""
+            def sort_key(tool):
+                if isinstance(tool, dict) and tool.get('type') == 'function':
+                    return str(tool.get('function', {}).get('name') or '')
+                return ''
+            return sorted(tools_list, key=sort_key)
+        
+        cleaned_tools = sort_formatted_tools(cleaned_tools)
         
         # Cache the formatted tools with LRU eviction, including tool search metadata
         self._cache_put(
@@ -1327,7 +1367,7 @@ Your Goal: {self.goal}"""
         """
         Execute unified chat completion using composition instead of runtime class mutation.
         
-        This method provides the same functionality as UnifiedChatMixin but uses
+        This method provides a unified dispatch for all LLM providers using
         composition for safety and maintainability.
         """
         from ..llm import create_llm_dispatcher
@@ -1451,7 +1491,7 @@ Your Goal: {self.goal}"""
         """
         Execute unified async chat completion using composition instead of runtime class mutation.
         
-        This method provides the same functionality as UnifiedChatMixin but uses
+        This method provides a unified async dispatch for all LLM providers using
         composition for safety and maintainability.
         """
         from ..llm import create_llm_dispatcher

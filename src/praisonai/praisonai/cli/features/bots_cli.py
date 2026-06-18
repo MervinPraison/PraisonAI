@@ -74,6 +74,10 @@ class BotCapabilities:
     stt: bool = False  # Enable STT tool
     stt_model: Optional[str] = None  # STT model (default: openai/whisper-1)
     
+    # Streaming
+    stream: bool = False  # Enable progressive streaming responses
+    stream_edit_interval: int = 700  # Minimum interval between message edits (ms)
+    
     # Session
     session_id: Optional[str] = None
     user_id: Optional[str] = None
@@ -104,6 +108,8 @@ class BotCapabilities:
             "auto_tts": self.auto_tts,
             "stt": self.stt,
             "stt_model": self.stt_model,
+            "stream": self.stream,
+            "stream_edit_interval": self.stream_edit_interval,
             "session_id": self.session_id,
             "user_id": self.user_id,
         }
@@ -228,6 +234,8 @@ class BotHandler:
             tools=agent_config.get("tools", []) or [],
             model=agent_config.get("llm"),
             auto_approve=agent_config.get("auto_approve", False),
+            stream=config.get("streaming", False),
+            stream_edit_interval=config.get("stream_edit_interval_ms", 700),
         )
         
         # Write a temporary agent YAML for _load_agent (reuse existing logic)
@@ -343,7 +351,16 @@ class BotHandler:
             return
         
         agent = self._load_agent(agent_file, capabilities, agent_config_dict=agent_config_dict)
-        bot = TelegramBot(token=token, agent=agent)
+        
+        # Create bot config with streaming settings
+        from praisonaiagents.bots import BotConfig
+        bot_config = BotConfig(
+            token=token,
+            streaming=capabilities.stream if capabilities else False,
+            stream_edit_interval_ms=capabilities.stream_edit_interval if capabilities else 700,
+        )
+        
+        bot = TelegramBot(token=token, agent=agent, config=bot_config)
         
         self._print_startup_info("Telegram", capabilities)
         

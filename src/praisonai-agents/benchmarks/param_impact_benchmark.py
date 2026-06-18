@@ -120,8 +120,8 @@ def run_benchmark(iterations: int = 100) -> List[ParamResult]:
         ('backstory', 'I am an AI assistant.', 'backstory="..."'),
         
         # LLM configuration
-        ('llm', 'gpt-4o-mini', 'llm="gpt-4o-mini"'),
-        ('llm', 'openai/gpt-4o-mini', 'llm="openai/gpt-4o-mini" (LiteLLM)'),
+        ('model', 'gpt-4o-mini', 'model="gpt-4o-mini"'),
+        ('model', 'openai/gpt-4o-mini', 'model="openai/gpt-4o-mini" (LiteLLM)'),
         
         # Tools
         ('tools', [sample_tool], 'tools=[sample_tool]'),
@@ -298,7 +298,7 @@ def save_results(results: List[ParamResult], filename: str = 'PARAM_IMPACT_RESUL
         f.write('### Best Practices\n\n')
         f.write('1. Use `output="silent"` for production workloads\n')
         f.write('2. Only enable `context=True` when needed for long conversations\n')
-        f.write('3. Use `llm="gpt-4o-mini"` (OpenAI SDK) for fastest instantiation\n')
+        f.write('3. Use `model="gpt-4o-mini"` for fastest instantiation\n')
         f.write('4. Avoid `memory=True` unless persistent memory is required\n')
         
         f.write('\n## How to Reproduce\n\n')

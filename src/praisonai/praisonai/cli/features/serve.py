@@ -19,6 +19,36 @@ import logging
 from typing import Any, Dict, List, Optional
 
 
+def _install_api_key_middleware(
+    app: Any,
+    api_key: Optional[str],
+    public_paths: Optional[set] = None,
+) -> None:
+    """Enforce --api-key on serve endpoints when a key is configured."""
+    if not api_key:
+        return
+
+    import hmac
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.responses import JSONResponse
+
+    public = public_paths or {"/health", "/", "/.well-known/agent.json"}
+
+    class APIKeyMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            path = request.url.path
+            if path in public or path.startswith("/__praisonai__/"):
+                return await call_next(request)
+            auth = request.headers.get("Authorization", "")
+            header_key = request.headers.get("X-API-Key", "")
+            token = auth[7:] if auth.startswith("Bearer ") else header_key
+            if not token or not hmac.compare_digest(token, api_key):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            return await call_next(request)
+
+    app.add_middleware(APIKeyMiddleware)
+
+
 class ServeHandler:
     """
     CLI handler for serve operations.
@@ -407,6 +437,8 @@ Launch PraisonAI servers with unified discovery support.
                 "endpoints": [path, "/agents/{agent_name}", "/api/v1/agents/{agent_id}/invoke"],
                 "discovery": "/__praisonai__/discovery",
             }
+
+        _install_api_key_middleware(app, config.get("api_key"))
         
         return app
     
@@ -769,11 +801,19 @@ Launch PraisonAI servers with unified discovery support.
     
     def cmd_a2u(self, args: List[str]) -> int:
         """Launch A2U event stream server."""
+        import os
         spec = {
             "host": {"default": self.DEFAULT_HOST},
             "port": {"default": 8083, "type": "int"},
         }
         parsed = self._parse_args(args, spec)
+        host = parsed["host"]
+        if host not in ("127.0.0.1", "localhost", "::1") and not os.environ.get("A2U_AUTH_TOKEN"):
+            self._print_error(
+                "A2U_AUTH_TOKEN required for non-localhost binding. "
+                "Set A2U_AUTH_TOKEN or bind to 127.0.0.1"
+            )
+            return 4  # POLICY_DENIED
         
         try:
             self._print_success(f"Starting A2U server on {parsed['host']}:{parsed['port']}")
@@ -943,6 +983,8 @@ Launch PraisonAI servers with unified discovery support.
                 "description": "PraisonAI Unified Server",
                 "version": "1.0.0",
             }
+
+        _install_api_key_middleware(app, config.get("api_key"))
         
         return app
     

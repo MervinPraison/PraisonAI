@@ -78,6 +78,7 @@ class AsyncTUIConfig:
     multiline_mode: bool = False
     autonomy_mode: bool = True  # Enable autonomous task delegation (aligned with InteractiveConfig)
     debug: bool = False  # Enable debug logging to file (~/.praisonai/async_tui_debug.log)
+    no_rules: bool = False  # Disable auto-injection of project instruction files
 
 
 # ============================================================================
@@ -197,12 +198,42 @@ class AsyncTUI:
                 tools = self._load_tools()
                 logger.debug(f"Tools for agent: {len(tools) if tools else 0}")
                 
+                # Auto-inject project instruction files unless disabled
+                instructions = "You are Praison AI, a helpful assistant. Be concise and helpful. You have access to tools for file operations, code execution, and web search."
+                max_chars = 32000  # Default cap
+                
+                # Check config for rules settings with proper precedence
+                try:
+                    from praisonai.cli.configuration.loader import load_config
+                    config = load_config()
+                    if self.config.no_rules:
+                        should_load_rules = False
+                    else:
+                        should_load_rules = config.rules.auto
+                        max_chars = config.rules.max_chars
+                except Exception:
+                    # Config not available, use defaults
+                    should_load_rules = not self.config.no_rules
+                
+                if should_load_rules:
+                    try:
+                        from praisonaiagents.memory import RulesManager
+                        rules_manager = RulesManager(workspace_path=self.config.workspace or os.getcwd(), verbose=0)
+                        rules_context = rules_manager.build_rules_context(max_chars=max_chars)
+                        if rules_context:
+                            instructions = f"{rules_context}\n\n{instructions}"
+                            logger.debug("Project instruction files loaded")
+                    except ImportError:
+                        pass  # RulesManager not available
+                    except Exception as e:
+                        logger.debug(f"Error loading rules: {e}")
+
                 # Build agent config
                 agent_config = {
                     "name": "Praison",
-                    "role": "AI Assistant",
+                    "role": "AI Assistant", 
                     "goal": "Help the user with their requests",
-                    "instructions": "You are Praison AI, a helpful assistant. Be concise and helpful. You have access to tools for file operations, code execution, and web search.",
+                    "instructions": instructions,
                     "llm": self.config.model,
                     "tools": tools if tools else None,
                 }

@@ -14,6 +14,7 @@ Implements the MCP Streamable HTTP transport (MCP 2025-11-25 spec):
 import asyncio
 import json
 import logging
+import os
 import time
 import uuid
 from typing import TYPE_CHECKING, Any, Dict, Optional
@@ -90,6 +91,7 @@ class HTTPStreamTransport:
             self.cors_origins = [origin for origin in cors_origins if origin != "*"]
         self.api_key = api_key
         self.session_ttl = session_ttl
+        self.max_sessions = int(os.getenv("PRAISONAI_MCP_MAX_SESSIONS", "1000"))
         self.allow_client_termination = allow_client_termination
         self.response_mode = response_mode
         self.resumability_enabled = resumability_enabled
@@ -142,13 +144,17 @@ class HTTPStreamTransport:
         if self.allowed_origins is None:
             # No allowed origins configured - reject all Origin headers
             return False
-        
-        # Check if origin matches any allowed origin
-        for allowed in self.allowed_origins:
-            if request_origin == allowed or request_origin.startswith(allowed):
-                return True
-        
-        return False
+
+        from urllib.parse import urlparse
+        from praisonaiagents.mcp.mcp_security import is_valid_origin
+
+        allowed_hosts = []
+        for origin in self.allowed_origins:
+            host = urlparse(origin).hostname
+            if host:
+                allowed_hosts.append(host.lower())
+
+        return is_valid_origin(request_origin, allowed_hosts, allow_missing=False)
     
     def _validate_protocol_version(self, version: Optional[str]) -> bool:
         """Validate MCP-Protocol-Version header."""
@@ -171,6 +177,7 @@ class HTTPStreamTransport:
         
         async def mcp_post(request: Request) -> Response:
             """Handle POST requests (client→server messages)."""
+            self._cleanup_sessions()
             # Validate Origin header (MCP 2025-11-25 security requirement)
             origin = request.headers.get("Origin")
             if not self._validate_origin(origin):
@@ -220,6 +227,11 @@ class HTTPStreamTransport:
             
             # Check if this is an initialize request
             if body.get("method") == "initialize":
+                if len(self._sessions) >= self.max_sessions:
+                    return JSONResponse(
+                        {"jsonrpc": "2.0", "id": body.get("id"), "error": {"code": -32000, "message": "Too many active sessions"}},
+                        status_code=503,
+                    )
                 # Create new session
                 new_session_id = str(uuid.uuid4())
                 self._sessions[new_session_id] = {

@@ -28,8 +28,19 @@ logger = logging.getLogger(__name__)
 
 # Authentication
 import os
+import warnings
+
 CALL_SERVER_TOKEN = os.getenv('CALL_SERVER_TOKEN')
-_CALL_AUTH_DISABLED = os.getenv('PRAISONAI_CALL_AUTH', '').lower() == 'disabled'
+_LOCALHOST_HOSTS = frozenset({'127.0.0.1', 'localhost', '::1'})
+
+
+def _call_auth_disabled() -> bool:
+    return os.getenv('PRAISONAI_CALL_AUTH', '').lower() == 'disabled'
+
+
+def _bind_host_from_request(request: Request) -> str:
+    host = getattr(getattr(request, 'url', None), 'hostname', None)
+    return host or os.getenv('PRAISONAI_CALL_BIND_HOST', '127.0.0.1')
 
 
 async def verify_token(
@@ -39,15 +50,24 @@ async def verify_token(
     """Verify API token for authentication."""
     if not FASTAPI_AVAILABLE:
         return
-    if _CALL_AUTH_DISABLED:
+    if _call_auth_disabled():
+        bind_host = _bind_host_from_request(request)
+        if bind_host not in _LOCALHOST_HOSTS:
+            raise HTTPException(
+                status_code=503,
+                detail="PRAISONAI_CALL_AUTH=disabled is only permitted for localhost binding",
+            )
+        warnings.warn(
+            "PRAISONAI_CALL_AUTH=disabled bypasses authentication; "
+            "set CALL_SERVER_TOKEN for production use",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return
     if not CALL_SERVER_TOKEN:
         raise HTTPException(
             status_code=503,
-            detail=(
-                "CALL_SERVER_TOKEN is not configured. Set CALL_SERVER_TOKEN or "
-                "PRAISONAI_CALL_AUTH=disabled to run without authentication."
-            ),
+            detail="CALL_SERVER_TOKEN is not configured. Set CALL_SERVER_TOKEN to enable authentication.",
         )
         
     token = None

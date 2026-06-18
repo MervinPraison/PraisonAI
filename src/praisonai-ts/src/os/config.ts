@@ -58,6 +58,9 @@ export interface AgentOSConfig {
 
     /** Additional metadata for the app */
     metadata?: Record<string, any>;
+
+    /** Optional API key for route protection (or set PRAISONAI_AGENTOS_API_KEY) */
+    apiKey?: string;
 }
 
 /**
@@ -76,6 +79,7 @@ export const DEFAULT_AGENTOS_CONFIG: Required<Omit<AgentOSConfig, 'metadata'>> &
     logLevel: 'info',
     workers: 1,
     timeout: 60,
+    apiKey: '',
     metadata: {},
 };
 
@@ -83,9 +87,12 @@ export const DEFAULT_AGENTOS_CONFIG: Required<Omit<AgentOSConfig, 'metadata'>> &
  * Merge user config with defaults.
  */
 export function mergeConfig(userConfig?: AgentOSConfig): Required<Omit<AgentOSConfig, 'metadata'>> & { metadata: Record<string, any> } {
+    const apiKey = userConfig?.apiKey ?? process.env.PRAISONAI_AGENTOS_API_KEY ?? '';
+
     return {
         ...DEFAULT_AGENTOS_CONFIG,
         ...userConfig,
+        apiKey,
         metadata: {
             ...DEFAULT_AGENTOS_CONFIG.metadata,
             ...userConfig?.metadata,

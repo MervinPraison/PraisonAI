@@ -28,7 +28,7 @@ import importlib.util
 import inspect
 import threading
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol
 from types import MappingProxyType
 from ._safe_loader import load_user_module
 
@@ -36,6 +36,18 @@ logger = logging.getLogger(__name__)
 
 # Sentinel for cache - needed because None is a valid cached result (tool not found)
 _SENTINEL = object()
+
+
+class ToolSource(Protocol):
+    """Protocol for anything that can provide tools."""
+    @property
+    def name(self) -> str:
+        """Name identifying this source for debugging."""
+        ...
+    
+    def lookup(self, name: str) -> Optional[Callable]:
+        """Look up a tool by name, returning None if not found."""
+        ...
 
 
 class ToolResolver:
@@ -57,12 +69,14 @@ class ToolResolver:
         self,
         tools_py_path: Optional[str] = None,
         registry: Optional["ToolRegistry"] = None,
+        sources: Optional[List[ToolSource]] = None,
     ):
         """Initialize the resolver.
         
         Args:
             tools_py_path: Optional path to tools.py. If None, uses ./tools.py
             registry: Optional ToolRegistry to include in resolution chain
+            sources: Optional list of ToolSource objects. If None, uses defaults.
         """
         from pathlib import Path
         # Resolve path eagerly in constructor to make binding explicit and inspectable
@@ -72,6 +86,14 @@ class ToolResolver:
         self._praisonai_tools_available: Optional[bool] = None
         self._local_tools_lock = threading.Lock()
         self._registry = registry
+        
+        # Initialize sources (future extension point)
+        if sources is not None:
+            self._sources = sources
+        else:
+            # Keep backward compatible sources inline for now
+            # TODO: Will be refactored to separate classes and integrated in resolve() in future
+            self._sources = None
         
         # Cache for resolved tools to avoid repeated resolution
         self._resolve_cache: Dict[str, Optional[Callable]] = {}
@@ -244,6 +266,21 @@ class ToolResolver:
             logger.debug(f"Error resolving '{name}' from registry: {e}")
         
         return None
+    
+    def invalidate(self, name: Optional[str] = None) -> None:
+        """Invalidate cached tool lookups.
+        
+        Args:
+            name: If specified, invalidate only this tool. Otherwise clear all.
+        """
+        with self._resolve_cache_lock:
+            if name is None:
+                self._resolve_cache.clear()
+                logger.debug("Cleared entire tool resolution cache")
+            else:
+                if name in self._resolve_cache:
+                    del self._resolve_cache[name]
+                    logger.debug(f"Invalidated cached resolution for '{name}'")
     
     def resolve(self, name: str, instantiate: bool = False) -> Optional[Callable]:
         """Resolve a tool name to a callable.

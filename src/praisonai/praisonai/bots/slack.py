@@ -26,7 +26,7 @@ from praisonaiagents.bots import (
 )
 
 from .media import split_media_from_output, is_audio_file
-from ._commands import format_status, format_help
+from ._commands import format_status, format_help, handle_stop_command
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
 from ._ack import AckReactor
@@ -213,6 +213,11 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
             elif text == "/help":
                 await say(text=self._format_help(), thread_ts=event.get("ts"))
                 return
+            elif text == "/stop":
+                user_id = event.get("user", "unknown")
+                response = handle_stop_command(self._session, user_id)
+                await say(text=response, thread_ts=event.get("ts"))
+                return
             
             for handler in self._message_handlers:
                 try:
@@ -273,6 +278,8 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                         self._agent, user_id, text,
                         chat_id=str(channel_id) if channel_id else "",
                         thread_id=event.get("thread_ts", "") or "",
+                        message_id=event.get("ts", ""),
+                        account=self._config.get("account", "default"),
                     )
                     logger.info(f"Response sent: {response[:100]}...")
                     
@@ -307,6 +314,21 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
         async def handle_mention(event, say):
             if event.get("bot_id"):
                 return
+
+            bot_message = self._convert_event_to_message(event)
+            bot_message._channel_type = "slack"
+
+            if not self.config.is_channel_allowed(
+                bot_message.channel.channel_id if bot_message.channel else ""
+            ):
+                return
+
+            user_id = bot_message.sender.user_id if bot_message.sender else ""
+            is_explicitly_allowed = bool(self.config.allowed_users) and self.config.is_user_allowed(user_id)
+            if not is_explicitly_allowed:
+                user_allowed = await UnknownUserHandler.handle(bot_message, self._bot_context)
+                if not user_allowed:
+                    return
             
             text = event.get("text", "")
             if self._bot_user:
@@ -320,6 +342,8 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                         self._agent, user_id, text,
                         chat_id=str(event.get("channel", "")),
                         thread_id=event.get("thread_ts", "") or "",
+                        message_id=event.get("ts", ""),
+                        account=self._config.get("account", "default"),
                     )
                     logger.info(f"Response sent: {response[:100]}...")
                     

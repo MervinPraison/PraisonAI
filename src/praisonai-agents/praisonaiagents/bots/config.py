@@ -91,6 +91,16 @@ class BotConfig:
     # When set, stale sessions older than this are auto-reaped.
     session_ttl: int = 0
     
+    # In-flight run control settings for mid-run message handling
+    # busy_mode: Policy for handling messages during active runs
+    #   - "queue": Queue message for next turn (default)
+    #   - "interrupt": Cancel current run and start new one  
+    #   - "steer": Inject message into current run via steering
+    busy_mode: str = "queue"
+    
+    # Template for busy acknowledgment messages (use {action} placeholder)
+    busy_ack: str = "⏳ {action} — will be considered next"
+    
     # Workspace settings for file operation containment and security
     workspace_dir: Optional[str] = None  # default: ~/.praisonai/workspaces/<scope>/<session_key>
     workspace_access: str = "rw"  # "rw" (read-write) | "ro" (read-only) | "none" (copy-on-write sandbox)
@@ -101,6 +111,12 @@ class BotConfig:
     
     # Owner user ID for pairing approvals (platform-specific format)
     owner_user_id: Optional[str] = None
+    
+    # Progressive streaming for channel bots (default: False)
+    streaming: bool = False
+    
+    # Edit interval for streaming responses in milliseconds (default: 700ms)
+    stream_edit_interval_ms: int = 700
 
     def __post_init__(self) -> None:
         if self.unknown_user_policy not in {"deny", "pair", "allow"}:
@@ -136,11 +152,15 @@ class BotConfig:
             "ack_emoji": self.ack_emoji,
             "done_emoji": self.done_emoji,
             "session_ttl": self.session_ttl,
+            "busy_mode": self.busy_mode,
+            "busy_ack": self.busy_ack,
             "workspace_dir": self.workspace_dir,
             "workspace_access": self.workspace_access,
             "workspace_scope": self.workspace_scope,
             "unknown_user_policy": self.unknown_user_policy,
             "owner_user_id": "***" if self.owner_user_id else None,
+            "streaming": self.streaming,
+            "stream_edit_interval_ms": self.stream_edit_interval_ms,
             "metadata": self.metadata,
         }
     

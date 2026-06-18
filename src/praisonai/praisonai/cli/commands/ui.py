@@ -111,7 +111,7 @@ def _launch_aiui_app(
 def ui(
     ctx: typer.Context,
     port: int = typer.Option(8081, "--port", "-p", help="Port to run chat UI on"),
-    host: str = typer.Option("0.0.0.0", "--host", help="Host to bind to"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
     app_file: Optional[str] = typer.Option(
         None, "--app", "-a", help="Custom app.py file (default: ~/.praisonai/ui/app.py)"
     ),
@@ -183,7 +183,7 @@ def ui(
 @app.command()
 def agents(
     port: int = typer.Option(8083, "--port", "-p", help="Port to run agents UI on"),
-    host: str = typer.Option("0.0.0.0", "--host", help="Host to bind to"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
     app_file: Optional[str] = typer.Option(
         None, "--app", "-a", help="Custom app.py file"
     ),
@@ -201,7 +201,7 @@ def agents(
 @app.command()
 def bot(
     port: int = typer.Option(8084, "--port", "-p", help="Port to run bot UI on"),
-    host: str = typer.Option("0.0.0.0", "--host", help="Host to bind to"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
     app_file: Optional[str] = typer.Option(
         None, "--app", "-a", help="Custom app.py file"
     ),
@@ -219,7 +219,7 @@ def bot(
 @app.command()
 def realtime(
     port: int = typer.Option(8085, "--port", "-p", help="Port to run realtime UI on"),
-    host: str = typer.Option("0.0.0.0", "--host", help="Host to bind to"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
     app_file: Optional[str] = typer.Option(
         None, "--app", "-a", help="Custom app.py file"
     ),

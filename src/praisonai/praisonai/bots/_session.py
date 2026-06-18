@@ -18,12 +18,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import weakref
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from .._lockmap import LockMap
 
 if TYPE_CHECKING:
     from praisonaiagents import Agent
 
 logger = logging.getLogger(__name__)
+
+
+class BotRunTimeout(Exception):
+    """Exception raised when a bot run times out."""
+    pass
 
 
 class BotSessionManager:
@@ -64,10 +71,13 @@ class BotSessionManager:
         platform: str = "",
         dlq: Optional[Any] = None,
         identity_resolver: Optional[Any] = None,
+        ingress_journal: Optional[Any] = None,
+        run_control: Optional[Any] = None,
+        run_timeout: float = 300.0,  # 5 minutes default timeout
     ) -> None:
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
-        self._locks: Dict[str, asyncio.Lock] = {}
-        self._agent_locks: Dict[int, asyncio.Lock] = {}
+        self._locks = LockMap()
+        self._agent_locks: "weakref.WeakKeyDictionary[Any, asyncio.Lock]" = weakref.WeakKeyDictionary()
         self._max_history = max_history
         self._store = store
         self._platform = platform
@@ -80,6 +90,16 @@ class BotSessionManager:
         # session key is the resolver-returned unified user id, so the
         # same human pinging from multiple platforms shares one history.
         self._identity_resolver = identity_resolver
+        # Ingress journal: optional durable message processing with dedup.
+        # When set, messages are journaled before agent processing for
+        # crash recovery and webhook redelivery protection.
+        self._ingress_journal = ingress_journal
+        self._last_journal_key = None  # Store key for delayed completion
+        # Run control for in-flight message handling
+        self._run_control = run_control
+        # Run timeout and active run tracking for cancellation support
+        self._run_timeout = run_timeout
+        self._active_runs: Dict[str, Any] = {}  # user_id -> InterruptController
 
     def _storage_key(self, user_id: str) -> str:
         """Resolve a raw platform user id to the in-memory/store key.
@@ -113,16 +133,15 @@ class BotSessionManager:
     def _get_lock(self, user_id: str) -> asyncio.Lock:
         """Get or create an asyncio.Lock for *user_id* (storage-keyed)."""
         key = self._storage_key(user_id)
-        if key not in self._locks:
-            self._locks[key] = asyncio.Lock()
-        return self._locks[key]
+        return self._locks.get(key)
 
     def _get_agent_lock(self, agent: "Agent") -> asyncio.Lock:
-        """Get or create a lock for the *agent* instance (by id)."""
-        agent_id = id(agent)
-        if agent_id not in self._agent_locks:
-            self._agent_locks[agent_id] = asyncio.Lock()
-        return self._agent_locks[agent_id]
+        """Get or create a lock for the *agent* instance (using WeakKeyDictionary)."""
+        lock = self._agent_locks.get(agent)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._agent_locks[agent] = lock
+        return lock
 
     def _load_history(self, user_id: str) -> List[Dict[str, Any]]:
         """Load user history from store (if available) or in-memory cache."""
@@ -171,6 +190,8 @@ class BotSessionManager:
         chat_id: str = "",
         thread_id: str = "",
         user_name: str = "",
+        message_id: str = "",
+        account: str = "",
         stream_callback: Optional[Any] = None,
     ) -> str:
         """Run ``agent.chat(prompt)`` with *user_id*-scoped history.
@@ -191,7 +212,32 @@ class BotSessionManager:
         This makes the error visible to the caller (so the bot adapter
         can log / show the user a friendly message) while preserving
         the message for later replay.
+        
+        Ingress Journal: if an ``ingress_journal`` was passed to ``__init__``
+        and ``message_id`` is provided, the message is journaled with deduplication
+        and claim/complete semantics for crash-safe, exactly-once processing.
         """
+        # Handle ingress journaling for durable message processing
+        journal_key = None
+        if self._ingress_journal is not None and message_id:
+            payload = {
+                "user_id": user_id,
+                "prompt": prompt,
+                "chat_id": chat_id,
+                "thread_id": thread_id,
+                "user_name": user_name,
+            }
+            journal_key = self._ingress_journal.receive(
+                platform=self._platform or "unknown",
+                account=account or "default",
+                channel_id=chat_id or user_id,
+                message_id=message_id,
+                payload=payload
+            )
+            if journal_key is None:
+                # Duplicate message - return empty response
+                return ""
+                
         self._last_active[self._storage_key(user_id)] = time.monotonic()
         user_lock = self._get_lock(user_id)
         agent_lock = self._get_agent_lock(agent)
@@ -218,68 +264,133 @@ class BotSessionManager:
             _clear_ctx = None  # type: ignore[assignment]
 
         try:
-            async with user_lock:
-                # Load history (may hit disk via run_in_executor for async safety)
-                loop = asyncio.get_running_loop()
-                user_history = await loop.run_in_executor(
-                    None, self._load_history, user_id
-                )
+            # Claim journal entry if we have one
+            if journal_key is not None:
+                claim_ctx = self._ingress_journal.aclaim(journal_key)
+                await claim_ctx.__aenter__()
+            else:
+                claim_ctx = None
+                
+            try:
+                async with user_lock:
+                    # Load history (may hit disk via run_in_executor for async safety)
+                    loop = asyncio.get_running_loop()
+                    user_history = await loop.run_in_executor(
+                        None, self._load_history, user_id
+                    )
 
-                # W1 robustness: hold ``agent_lock`` across the FULL LLM call
-                # (not only the history swap) so concurrent users on a shared
-                # Agent instance never observe each other's chat_history.
-                async with agent_lock:
-                    saved_history = agent.chat_history
-                    agent.chat_history = user_history
-                    try:
-                        # Choose streaming vs non-streaming path based on callback
-                        if stream_callback:
-                            # Streaming path: use agent.astart() with stream callback
-                            response = await agent.astart(prompt, stream_callback=stream_callback)
-                            # Handle AutonomyResult when autonomy is enabled in caller mode
-                            if hasattr(response, 'output'):
-                                response = response.output
-                        else:
-                            # Legacy non-streaming path: use agent.chat() in executor
-                            import contextvars
-                            _ctx = contextvars.copy_context()
-                            response = await loop.run_in_executor(
-                                None, _ctx.run, agent.chat, prompt
-                            )
-                        # Capture updated history before restoring caller's.
-                        updated_history = agent.chat_history
-                    except Exception as exc:
-                        # N4: persist the failed inbound message before bubbling.
-                        if self._dlq is not None:
-                            try:
-                                await loop.run_in_executor(
-                                    None,
-                                    lambda: self._dlq.enqueue(
-                                        platform=self._platform,
-                                        user_id=user_id,
-                                        prompt=prompt,
-                                        error=f"{type(exc).__name__}: {exc}",
-                                        chat_id=chat_id,
-                                        thread_id=thread_id,
-                                        user_name=user_name,
+                    # W1 robustness: hold ``agent_lock`` across the FULL LLM call
+                    # (not only the history swap) so concurrent users on a shared
+                    # Agent instance never observe each other's chat_history.
+                    async with agent_lock:
+                        saved_history = agent.chat_history
+                        agent.chat_history = user_history
+                        
+                        # Create interrupt controller for this run and register it
+                        try:
+                            from praisonaiagents.agent.interrupt import InterruptController
+                        except ImportError:
+                            # Fallback if InterruptController is not available
+                            InterruptController = None
+                        
+                        controller = InterruptController() if InterruptController else None
+                        storage_key = self._storage_key(user_id)
+                        if controller:
+                            self._active_runs[storage_key] = controller
+                        
+                        try:
+                            # Choose streaming vs non-streaming path based on callback
+                            if stream_callback:
+                                # Streaming path: use agent.astart() with stream callback and timeout
+                                try:
+                                    # astart is async so we can use asyncio.wait_for directly 
+                                    response = await asyncio.wait_for(
+                                        agent.astart(prompt, stream_callback=stream_callback),
+                                        timeout=self._run_timeout if self._run_timeout > 0 else None,
                                     )
-                                )
-                            except Exception as dlq_exc:  # pragma: no cover — defensive
-                                logger.error(
-                                    "Failed to enqueue inbound DLQ entry: %s", dlq_exc
-                                )
-                        agent.chat_history = saved_history
-                        raise
-                    finally:
-                        agent.chat_history = saved_history
+                                    # Handle AutonomyResult when autonomy is enabled in caller mode
+                                    if hasattr(response, 'output'):
+                                        response = response.output
+                                except asyncio.TimeoutError:
+                                    if controller:
+                                        controller.request("run timeout")
+                                    raise BotRunTimeout(f"Agent run timed out after {self._run_timeout}s")
+                            else:
+                                # Legacy non-streaming path: use agent.chat() in executor with cancel_token and timeout
+                                import contextvars
+                                import inspect
+                                from functools import partial
+                                _ctx = contextvars.copy_context()
+                                
+                                # Create agent.chat call with cancel_token if supported
+                                # Use inspect.signature for safer parameter checking
+                                _chat_params = inspect.signature(agent.chat).parameters if (controller and hasattr(agent, 'chat')) else {}
+                                if controller and 'cancel_token' in _chat_params:
+                                    chat_call = partial(agent.chat, prompt, cancel_token=controller)
+                                else:
+                                    chat_call = partial(agent.chat, prompt)
+                                
+                                # Run with timeout and interruption support
+                                try:
+                                    response = await asyncio.wait_for(
+                                        loop.run_in_executor(None, _ctx.run, chat_call),
+                                        timeout=self._run_timeout if self._run_timeout > 0 else None,
+                                    )
+                                except asyncio.TimeoutError:
+                                    if controller:
+                                        controller.request("run timeout")
+                                    raise BotRunTimeout(f"Agent run timed out after {self._run_timeout}s")
+                            # Capture updated history before restoring caller's.
+                            updated_history = agent.chat_history
+                        except Exception as exc:
+                            # N4: persist the failed inbound message before bubbling.
+                            # Skip DLQ for timeout exceptions to prevent infinite retry loops
+                            if self._dlq is not None and not isinstance(exc, BotRunTimeout):
+                                try:
+                                    await loop.run_in_executor(
+                                        None,
+                                        lambda: self._dlq.enqueue(
+                                            platform=self._platform,
+                                            user_id=user_id,
+                                            prompt=prompt,
+                                            error=f"{type(exc).__name__}: {exc}",
+                                            chat_id=chat_id,
+                                            thread_id=thread_id,
+                                            user_name=user_name,
+                                        )
+                                    )
+                                except Exception as dlq_exc:  # pragma: no cover — defensive
+                                    logger.error(
+                                        "Failed to enqueue inbound DLQ entry: %s", dlq_exc
+                                    )
+                            agent.chat_history = saved_history
+                            raise
+                        finally:
+                            agent.chat_history = saved_history
+                            # Clean up active run tracking
+                            if controller:
+                                self._active_runs.pop(storage_key, None)
 
-                # Persist outside the agent_lock — it's per-user and the agent
-                # is no longer touched.
-                await loop.run_in_executor(
-                    None, self._save_history, user_id, updated_history
-                )
+                    # Persist outside the agent_lock — it's per-user and the agent
+                    # is no longer touched.
+                    await loop.run_in_executor(
+                        None, self._save_history, user_id, updated_history
+                    )
 
-                return response
+                    # Store journal key in instance for later completion after message delivery
+                    self._last_journal_key = journal_key
+                    
+                    return response
+                    
+            except Exception as e:
+                # Handle any remaining exceptions and ensure claim is released 
+                if claim_ctx is not None:
+                    await claim_ctx.__aexit__(type(e), e, e.__traceback__)
+                raise
+            else:
+                # Clean exit - no exception
+                if claim_ctx is not None:
+                    await claim_ctx.__aexit__(None, None, None)
         finally:
             # Always clear task-local session context, even if an exception occurred.
             if ctx_token is not None and _clear_ctx is not None:
@@ -287,6 +398,129 @@ class BotSessionManager:
                     _clear_ctx(ctx_token)
                 except Exception as e:
                     logger.debug("Failed to clear task-local session context for ctx_token=%r: %s", ctx_token, e)
+
+    async def chat_with_run_control(
+        self,
+        agent: "Agent",
+        user_id: str,
+        prompt: str,
+        chat_id: str = "",
+        thread_id: str = "",
+        user_name: str = "",
+    ) -> Dict[str, Any]:
+        """Run agent.chat() with run control for better UX during long operations.
+        
+        This method integrates with SessionRunControl to provide:
+        - Busy acknowledgment for mid-run messages
+        - Pending message slot for follow-ups
+        - Interrupt support via /stop command
+        - Optional steering for real-time guidance
+        
+        Returns:
+            Dict with 'response' (str) and 'metadata' (dict) keys.
+            Metadata includes run control information.
+        """
+        if self._run_control is None:
+            # Fall back to regular chat if no run control
+            response = await self.chat(agent, user_id, prompt, chat_id, thread_id, user_name)
+            return {"response": response, "metadata": {"run_control": False}}
+        
+        try:
+            # Import here to avoid circular dependency
+            from ._run_control import RunDecision
+        except ImportError:
+            # Fall back if run control not available
+            response = await self.chat(agent, user_id, prompt, chat_id, thread_id, user_name)
+            return {"response": response, "metadata": {"run_control": False, "error": "run_control_unavailable"}}
+        
+        # Submit message to run control
+        decision = await self._run_control.submit(user_id, prompt)
+        
+        if decision in (RunDecision.QUEUED, RunDecision.MERGED):
+            # Message was queued or merged, return acknowledgment
+            ack_msg = await self._run_control.get_busy_ack_message(user_id, decision)
+            return {
+                "response": ack_msg,
+                "metadata": {
+                    "run_control": True,
+                    "decision": decision.value,
+                    "queued": True
+                }
+            }
+        
+        # We're running now (RUN_NOW or INTERRUPTED)
+        run_generation = None
+        interrupt_controller = None
+        
+        if decision == RunDecision.RUN_NOW:
+            # Get the interrupt controller for this run
+            interrupt_controller = self._run_control.get_interrupt_controller(user_id)
+        elif decision == RunDecision.INTERRUPTED:
+            # Previous run was cancelled, get new controller
+            interrupt_controller = self._run_control.get_interrupt_controller(user_id)
+        
+        # Get current run generation for race protection
+        status = self._run_control.get_run_status(user_id)
+        run_generation = status.get("run_generation")
+        
+        try:
+            # Attach interrupt controller to agent if available
+            original_interrupt = None
+            if interrupt_controller and hasattr(agent, '_interrupt_controller'):
+                original_interrupt = getattr(agent, '_interrupt_controller', None)
+                agent._interrupt_controller = interrupt_controller
+            
+            # Run the chat with the existing method
+            response = await self.chat(agent, user_id, prompt, chat_id, thread_id, user_name)
+            
+            # Check for pending messages to process next
+            pending = self._run_control.next_pending(user_id)
+            pending_info = {}
+            if pending:
+                pending_info = {
+                    "next_pending": pending[:100] + "..." if len(pending) > 100 else pending
+                }
+            
+            return {
+                "response": response,
+                "metadata": {
+                    "run_control": True,
+                    "decision": decision.value,
+                    "completed": True,
+                    "run_generation": run_generation,
+                    **pending_info
+                }
+            }
+            
+        except Exception as e:
+            # Handle interruption specifically
+            if interrupt_controller and interrupt_controller.is_set():
+                reason = interrupt_controller.reason or "unknown"
+                return {
+                    "response": f"⚠️ Task cancelled: {reason}",
+                    "metadata": {
+                        "run_control": True,
+                        "decision": decision.value,
+                        "interrupted": True,
+                        "reason": reason,
+                        "run_generation": run_generation
+                    }
+                }
+            else:
+                # Re-raise other exceptions
+                raise
+                
+        finally:
+            # Restore original interrupt controller
+            if interrupt_controller and hasattr(agent, '_interrupt_controller'):
+                if original_interrupt is not None:
+                    agent._interrupt_controller = original_interrupt
+                else:
+                    agent._interrupt_controller = None
+            
+            # Mark run as finished
+            if run_generation is not None:
+                await self._run_control.finish_run(user_id, run_generation)
 
     def reap_stale(self, max_age_seconds: int) -> int:
         """Remove sessions older than *max_age_seconds*.  Returns count reaped.
@@ -304,7 +538,7 @@ class BotSessionManager:
         for storage_key in stale:
             self._histories.pop(storage_key, None)
             self._last_active.pop(storage_key, None)
-            self._locks.pop(storage_key, None)
+            self._locks.drop(storage_key)
             if self._store is not None:
                 key = self._persist_key(storage_key)
                 try:
@@ -315,13 +549,30 @@ class BotSessionManager:
             logger.debug("BotSessionManager: reaped %d stale sessions", len(stale))
         return len(stale)
 
+    def complete_last_journal_entry(self) -> bool:
+        """Complete the last journal entry if one exists.
+        
+        Call this after successfully delivering a message to the platform
+        to ensure the journal entry is marked as completed.
+        
+        Returns True if an entry was completed, False if no entry was pending.
+        """
+        if self._last_journal_key is not None and self._ingress_journal is not None:
+            try:
+                self._ingress_journal.complete(self._last_journal_key)
+                self._last_journal_key = None
+                return True
+            except Exception as e:
+                logger.warning("Failed to complete journal entry: %s", e)
+        return False
+
     def reset(self, user_id: str) -> bool:
         """Clear a user's session history.  Returns True if it existed."""
         storage_key = self._storage_key(user_id)
         existed = storage_key in self._histories
         self._histories.pop(storage_key, None)
         self._last_active.pop(storage_key, None)
-        self._locks.pop(storage_key, None)
+        self._locks.drop(storage_key)
 
         if self._store is not None:
             persist_key = self._session_key(user_id)
@@ -331,6 +582,27 @@ class BotSessionManager:
                 logger.warning("Failed to clear session in store: %s", e)
 
         return existed
+
+    def cancel_run(self, user_id: str, reason: str = "user_cancel") -> bool:
+        """Cancel an active run for a user.
+        
+        Args:
+            user_id: Raw platform user id
+            reason: Reason for cancellation
+            
+        Returns:
+            bool: True if there was an active run to cancel, False otherwise
+        """
+        storage_key = self._storage_key(user_id)
+        controller = self._active_runs.get(storage_key)
+        if controller:
+            controller.request(reason)
+            return True
+        return False
+
+    def get_active_runs(self) -> List[str]:
+        """Get list of user IDs with active runs."""
+        return list(self._active_runs.keys())
 
     def _add_mirror_entry_sync(self, user_id: str, entry: dict) -> bool:
         """Thread-safe method to add a mirror entry to user's history.

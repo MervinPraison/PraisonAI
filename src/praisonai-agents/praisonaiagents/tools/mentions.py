@@ -165,12 +165,17 @@ class MentionsParser:
     def _process_file_mention(self, file_path: str) -> Optional[str]:
         """Process @file:path mention."""
         try:
-            # Resolve path relative to workspace
-            full_path = self.workspace_path / file_path
-            if not full_path.exists():
-                # Try as absolute path
-                full_path = Path(file_path)
-            
+            if ".." in file_path:
+                self._log(f"Rejected path traversal in mention: {file_path}", logging.WARNING)
+                return f"# File: {file_path}\n[Path not allowed]"
+
+            # Resolve only within workspace (no arbitrary absolute paths)
+            full_path = (self.workspace_path / file_path).resolve()
+            workspace_root = self.workspace_path.resolve()
+            if not str(full_path).startswith(str(workspace_root) + os.sep) and full_path != workspace_root:
+                self._log(f"File outside workspace: {file_path}", logging.WARNING)
+                return f"# File: {file_path}\n[Path outside workspace]"
+
             if not full_path.exists():
                 self._log(f"File not found: {file_path}", logging.WARNING)
                 return f"# File: {file_path}\n[File not found]"

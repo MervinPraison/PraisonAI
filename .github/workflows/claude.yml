@@ -200,6 +200,7 @@ jobs:
           allowed_bots: 'praisonai-triage-agent[bot]'
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ steps.app-token.outputs.token }}
+          model: opus
           trigger_phrase: "@claude"
           label_trigger: "claude"
 

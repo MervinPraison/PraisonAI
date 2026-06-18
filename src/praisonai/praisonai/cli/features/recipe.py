@@ -724,9 +724,10 @@ class RecipeHandler:
         options = {
             "dry_run": parsed["dry_run"] or parsed["explain"],
             "verbose": parsed["verbose"],
-            "output": output_mode,  # New: output mode (status, trace, verbose, etc.)
+            "output": output_mode,
             "timeout_sec": int(parsed["timeout"]),
             "mode": parsed["mode"],
+            "policy": parsed.get("policy"),
             "offline": parsed["offline"],
             "force": parsed["force"],
             "allow_dangerous_tools": parsed["allow_dangerous_tools"],

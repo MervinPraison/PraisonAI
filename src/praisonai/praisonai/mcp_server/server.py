@@ -81,6 +81,7 @@ class MCPServer:
         # Cancellation support
         self._active_requests: Dict[str, asyncio.Task] = {}
         self._cancelled_requests: Set[str] = set()
+        self._max_cancelled_requests = 10000
         
         # Progress notification callback
         self._progress_callback: Optional[Callable] = None
@@ -170,6 +171,10 @@ class MCPServer:
             request_id = params.get("requestId")
             if request_id:
                 self._cancelled_requests.add(str(request_id))
+                if len(self._cancelled_requests) > self._max_cancelled_requests:
+                    overflow = len(self._cancelled_requests) - self._max_cancelled_requests
+                    for _ in range(overflow):
+                        self._cancelled_requests.pop()
                 # Cancel active task if exists
                 if str(request_id) in self._active_requests:
                     task = self._active_requests[str(request_id)]

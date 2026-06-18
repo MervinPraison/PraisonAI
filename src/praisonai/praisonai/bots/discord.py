@@ -24,7 +24,7 @@ from praisonaiagents.bots import (
     MessageType,
 )
 
-from ._commands import format_status, format_help
+from ._commands import format_status, format_help, handle_stop_command
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
 from ._ack import AckReactor
@@ -200,6 +200,11 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                 elif command == "help":
                     await message.reply(self._format_help())
                     return
+                elif command == "stop":
+                    user_id = str(message.author.id)
+                    response = handle_stop_command(self._session, user_id)
+                    await message.reply(response)
+                    return
                 elif command and command in self._command_handlers:
                     handler = self._command_handlers[command]
                     try:
@@ -251,6 +256,8 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                             self._agent, user_id, text_to_send,
                             chat_id=str(message.channel.id),
                             user_name=str(getattr(message.author, "name", "")),
+                            message_id=str(message.id),
+                            account=self._config.get("account", "default"),
                         )
                         send_result = self.fire_message_sending(
                             str(message.channel.id), str(response),

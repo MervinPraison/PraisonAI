@@ -40,6 +40,21 @@ class TaskStatus(Enum):
 # Set up logger
 logger = get_logger(__name__)
 
+
+def _launch_auth_token() -> Optional[str]:
+    return os.environ.get("PRAISONAI_LAUNCH_AUTH_TOKEN")
+
+
+def _authorise_launch_request(request) -> bool:
+    token = _launch_auth_token()
+    if not token:
+        return True
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer ") and auth[7:] == token:
+        return True
+    return request.headers.get("X-Auth-Token") == token
+
+
 # Agent server registry for thread-safe server management
 
 
@@ -245,7 +260,20 @@ Expected Output: {task.expected_output}."""
     # Add memory context if available
     if task.memory:
         try:
-            memory_context = task.memory.build_context_for_task(task.description)
+            # Use cache-optimized context if available for better prompt caching
+            if hasattr(task.memory, 'build_cache_optimized_context'):
+                try:
+                    cache_result = task.memory.build_cache_optimized_context(
+                        task_descr=task.description,
+                        include_cache_boundary=False  # Don't include boundary for agent task context
+                    )
+                    memory_context = cache_result.get('stable_prefix', '')
+                except Exception as e:
+                    # Fall back to standard context building
+                    logger.debug(f"Cache-optimized context failed for task '{task.description or task.id}', falling back to standard: {e}")
+                    memory_context = task.memory.build_context_for_task(task.description)
+            else:
+                memory_context = task.memory.build_context_for_task(task.description)
             if memory_context:
                 # Log detailed memory context for debugging
                 logger.debug(f"Memory context for task '{task.description}': {memory_context}")
@@ -1993,6 +2021,8 @@ class AgentTeam(SpawnAnnounceProtocol):
             # Define the endpoint handler
             @app.post(path)
             async def handle_query(request: Request, query_data: Optional[AgentQuery] = None):
+                if not _authorise_launch_request(request):
+                    raise HTTPException(status_code=401, detail="Unauthorized")
                 # Handle both direct JSON with query field and form data
                 if query_data is None:
                     try:
@@ -2071,7 +2101,9 @@ class AgentTeam(SpawnAnnounceProtocol):
             
             # Add GET endpoint to list available agents
             @app.get(f"{path}/list")
-            async def list_agents():
+            async def list_agents(request: Request):
+                if not _authorise_launch_request(request):
+                    raise HTTPException(status_code=401, detail="Unauthorized")
                 return {
                     "agents": [
                         {"name": agent.display_name, "id": agent.display_name.lower().replace(' ', '_')}
@@ -2086,6 +2118,8 @@ class AgentTeam(SpawnAnnounceProtocol):
                 # Create a closure to capture the agent instance
                 def create_agent_handler(agent):
                     async def handle_single_agent(request: Request):
+                        if not _authorise_launch_request(request):
+                            raise HTTPException(status_code=401, detail="Unauthorized")
                         try:
                             request_data = await request.json()
                             query = request_data.get("query", "")

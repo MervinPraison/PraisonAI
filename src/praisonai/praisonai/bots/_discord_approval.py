@@ -253,6 +253,11 @@ class DiscordApproval:
                     if author.get("bot"):
                         continue
 
+                    # Only accept replies to the approval message
+                    ref = msg.get("message_reference") or {}
+                    if ref.get("message_id") != message_id:
+                        continue
+
                     text = msg.get("content", "").strip()
                     user_id = author.get("id", "unknown")
                     username = author.get("username", user_id)

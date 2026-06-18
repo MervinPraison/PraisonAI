@@ -19,40 +19,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from praisonaiagents.auth import AuthIdentity
 
 from ..db.models import Member, User
+from .jwt_secret import resolve_jwt_secret
 
 _pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-_DEFAULT_SECRET = "dev-secret-change-me"
-JWT_SECRET = os.environ.get("PLATFORM_JWT_SECRET")
+JWT_SECRET = resolve_jwt_secret()
 JWT_ALGORITHM = "HS256"
 JWT_TTL_SECONDS = int(os.environ.get("PLATFORM_JWT_TTL", str(30 * 24 * 3600)))
 
-if JWT_SECRET is None or JWT_SECRET == _DEFAULT_SECRET:
-    # Determine if we are in an explicit dev environment.
-    # Only trust PLATFORM_ENV when it is explicitly set — an unset value
-    # must NOT silently fall back to "dev" because production deployments
-    # that forget the variable would run with a well-known signing key.
-    _explicit_env = os.environ.get("PLATFORM_ENV")
-    if _explicit_env == "dev":
-        # Developer explicitly opted in to insecure defaults — allow it.
-        JWT_SECRET = _DEFAULT_SECRET
-    else:
-        # Either production or environment not specified.
-        # Auto-generate an ephemeral secret so the service can start, but
-        # warn loudly because tokens will not survive a restart.
-        import secrets as _secrets
-        import warnings as _warnings
-
-        JWT_SECRET = _secrets.token_urlsafe(32)
-        _warnings.warn(
-            "PLATFORM_JWT_SECRET is not set. Auto-generated an ephemeral "
-            "signing key — JWT tokens will be invalidated on restart. "
-            "Set PLATFORM_JWT_SECRET to a stable random value for production "
-            "use, or set PLATFORM_ENV=dev to use the development default.",
-            stacklevel=2,
-        )
-
-# Type-narrow: at this point JWT_SECRET is always a non-None str.
 assert JWT_SECRET is not None  # noqa: S105
 
 
