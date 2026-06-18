@@ -1427,7 +1427,7 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
             # String could be LLM prompt - passthrough for later processing
             _guardrails_config = guardrails
         else:
-            from .._resolver_helpers import resolve_guardrails as _resolve_guardrails
+            from ..config.param_resolver import resolve_guardrails as _resolve_guardrails
             _guardrails_config = _resolve_guardrails(
                 value=guardrails,
                 config_class=GuardrailConfig,
