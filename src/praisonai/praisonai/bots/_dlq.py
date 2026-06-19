@@ -387,7 +387,7 @@ class OutboundDLQ:
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_outbound_ts ON outbound_entries(ts)")
 
-    def enqueue_outbound(
+    async def enqueue_outbound(
         self,
         *,
         platform: str,
@@ -398,6 +398,29 @@ class OutboundDLQ:
         reply_to: str = "",
     ) -> int:
         """Persist a failed outbound message. Returns its row id."""
+        # Run synchronous SQLite operations in thread pool to avoid blocking
+        import asyncio
+        return await asyncio.to_thread(
+            self._enqueue_outbound_sync,
+            platform=platform,
+            channel_id=channel_id,
+            reply_text=reply_text,
+            error=error,
+            thread_id=thread_id,
+            reply_to=reply_to,
+        )
+
+    def _enqueue_outbound_sync(
+        self,
+        *,
+        platform: str,
+        channel_id: str,
+        reply_text: str,
+        error: str,
+        thread_id: str = "",
+        reply_to: str = "",
+    ) -> int:
+        """Synchronous version of enqueue_outbound for thread pool execution."""
         with self._lock, self._connect() as conn:
             try:
                 conn.execute("BEGIN IMMEDIATE")

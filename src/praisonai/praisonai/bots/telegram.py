@@ -868,24 +868,30 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 try:
                     with open(media_path, "rb") as f:
                         if audio_as_voice:
-                            # Use retry wrapper for voice messages
-                            await deliver_with_retry(
-                                lambda: self._application.bot.send_voice(
+                            # Use retry wrapper for voice messages with proper seek
+                            async def send_voice():
+                                f.seek(0)  # Reset file position before each attempt
+                                return await self._application.bot.send_voice(
                                     chat_id=chat_id, voice=f
-                                ),
+                                )
+                            await deliver_with_retry(
+                                send_voice,
                                 policy=self._outbound_backoff,
                                 platform="telegram",
-                                parked_store=None,  # Don't DLQ media for now (file handle issues)
+                                parked_store=None,  # Don't DLQ media for now (complex replay)
                             )
                         else:
-                            # Use retry wrapper for audio messages
-                            await deliver_with_retry(
-                                lambda: self._application.bot.send_audio(
+                            # Use retry wrapper for audio messages with proper seek
+                            async def send_audio():
+                                f.seek(0)  # Reset file position before each attempt
+                                return await self._application.bot.send_audio(
                                     chat_id=chat_id, audio=f
-                                ),
+                                )
+                            await deliver_with_retry(
+                                send_audio,
                                 policy=self._outbound_backoff,
                                 platform="telegram",
-                                parked_store=None,  # Don't DLQ media for now (file handle issues)
+                                parked_store=None,  # Don't DLQ media for now (complex replay)
                             )
                 except Exception as e:
                     logger.error(f"Failed to send audio: {e}")

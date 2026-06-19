@@ -12,7 +12,7 @@ import logging
 import random
 import time
 from dataclasses import dataclass, field
-from typing import Optional, Set
+from typing import Any, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -287,14 +287,33 @@ async def deliver_with_retry(
         is_recoverable = lambda e: is_recoverable_error(e, platform)
     
     last_error = None
-    for attempt in range(1, policy.max_attempts + 1):
+    attempt = 0
+    
+    # Handle unlimited retries when max_attempts is 0
+    while True:
+        attempt += 1
         try:
             return await send_func()
         except Exception as e:
             last_error = e
             
-            # Check if error is recoverable and we have attempts left
-            if not is_recoverable(e) or attempt >= policy.max_attempts:
+            # Check if error is recoverable
+            if not is_recoverable(e):
+                # Non-recoverable, park and raise
+                if parked_store is not None and reply_data is not None:
+                    try:
+                        await parked_store.enqueue_outbound(
+                            platform=platform,
+                            error=f"{type(e).__name__}: {e}",
+                            **reply_data
+                        )
+                        logger.info(f"[{platform}] Parked failed outbound message for later replay")
+                    except Exception as dlq_exc:
+                        logger.error(f"Failed to park outbound message: {dlq_exc}")
+                raise
+            
+            # Check if we've exceeded max attempts (if limited)
+            if policy.max_attempts > 0 and attempt >= policy.max_attempts:
                 # Park the message for later replay if DLQ is configured
                 if parked_store is not None and reply_data is not None:
                     try:
@@ -310,12 +329,10 @@ async def deliver_with_retry(
             
             # Compute backoff delay
             delay = compute_backoff(policy, attempt)
+            attempts_display = f"{attempt}/{policy.max_attempts}" if policy.max_attempts > 0 else f"{attempt}/∞"
             logger.warning(
-                f"[{platform}] Outbound send failed (attempt {attempt}/{policy.max_attempts}): "
+                f"[{platform}] Outbound send failed (attempt {attempts_display}): "
                 f"{e}; retrying in {delay:.1f}s"
             )
             
             await asyncio.sleep(delay)
-    
-    # Should not reach here, but for safety
-    raise last_error
