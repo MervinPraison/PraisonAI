@@ -4,12 +4,10 @@ Test script to validate the gateway configuration unification.
 """
 
 import os
-import sys
 import yaml
 from pathlib import Path
 
-# Add src path
-sys.path.insert(0, str(Path(__file__).parent / "src" / "praisonai"))
+import praisonai
 
 # Mock pydantic if not available
 try:
@@ -101,7 +99,7 @@ def test_doctor_checks():
     print("\n=== Testing Doctor Checks ===")
     
     # Verify doctor checks file exists
-    doctor_checks_path = Path(__file__).parent / "src" / "praisonai" / "praisonai" / "cli" / "features" / "doctor" / "checks" / "gateway_checks.py"
+    doctor_checks_path = Path(praisonai.__file__).parent / "cli" / "features" / "doctor" / "checks" / "gateway_checks.py"
     
     if doctor_checks_path.exists():
         print("✓ gateway_checks.py exists")
