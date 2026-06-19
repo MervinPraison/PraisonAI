@@ -111,7 +111,12 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
         
         # Session manager for conversation state
         self.config = config or BotConfig()
-        self._session = BotSessionManager(self.config)
+        try:
+            from praisonaiagents.session import get_default_session_store
+            _store = get_default_session_store()
+        except Exception:
+            _store = None
+        self._session = BotSessionManager(store=_store, platform="agentmail")
         
         # Resolve mode: explicit param > config > default
         if mode:
