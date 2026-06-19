@@ -67,6 +67,8 @@ class ChannelConfigSchema(BaseModel):
     webhook_url: Optional[str] = None
     webhook_port: int = 8080
     streaming: Optional[StreamingConfigSchema] = None
+    home_channel: Optional[str] = None  # Default channel for this platform
+    aliases: Dict[str, str] = Field(default_factory=dict)  # Friendly name -> channel_id mapping
     
     @field_validator("mode")
     @classmethod

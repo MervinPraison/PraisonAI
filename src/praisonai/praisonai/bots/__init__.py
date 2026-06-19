@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from .agentmail import AgentMailBot
     from .bot import Bot
     from .botos import BotOS
+    from .delivery import DeliveryRouter, ChannelDirectory, SessionSource
     from ._session import BotSessionManager
     from ._dlq import InboundDLQ, DLQEntry
     from ._ingress import InboundJournal, JournalEntry
@@ -102,6 +103,16 @@ def __getattr__(name: str):
     if name == "DraftStreamer":
         from ._streaming import DraftStreamer
         return DraftStreamer
+    # Delivery routing components
+    if name == "DeliveryRouter":
+        from .delivery import DeliveryRouter
+        return DeliveryRouter
+    if name == "ChannelDirectory":
+        from .delivery import ChannelDirectory
+        return ChannelDirectory
+    if name == "SessionSource":
+        from .delivery import SessionSource
+        return SessionSource
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
@@ -114,6 +125,8 @@ __all__ = [
     "WebhookApproval", "HTTPApproval",
     # Streaming
     "StreamingConfig", "StreamingMode", "DraftStreamer",
+    # Delivery routing
+    "DeliveryRouter", "ChannelDirectory", "SessionSource",
     # W1
     "mirror_to_session", "BotSessionManager",
 ]
