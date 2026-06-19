@@ -22,6 +22,7 @@ from .protocols import (
     PushChannelProtocol,
     PresenceProtocol,
     DeliveryGuaranteeProtocol,
+    OutboundDeliveryProtocol,
     ChannelInfo,
     PresenceInfo,
 )
@@ -89,6 +90,7 @@ __all__ = [
     "PushChannelProtocol",
     "PresenceProtocol",
     "DeliveryGuaranteeProtocol",
+    "OutboundDeliveryProtocol",
     "ChannelInfo",
     "PresenceInfo",
     # Config (always available)
