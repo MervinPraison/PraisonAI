@@ -471,37 +471,34 @@ def resolve_tools(
     # Create a ToolRegistry instance for high-priority overrides
     tool_registry = ToolRegistry()
     
-    # Load template-local tools.py if exists. Gated behind the same opt-in
-    # flag as create_tool_registry_with_overrides() to prevent implicit code
-    # execution from untrusted (e.g. remotely fetched) recipe directories.
-    if template_dir and _autoload_tools_enabled():
-        loader = ToolOverrideLoader()
-        tools_py = Path(template_dir) / "tools.py"
-        if tools_py.exists():
-            try:
-                template_tools = loader.load_from_file(str(tools_py))
-                # Register template tools in the ToolRegistry
-                for name, tool in template_tools.items():
-                    if callable(tool):
-                        tool_registry.register_function(name, tool)
-            except Exception:
-                logger.debug(
-                    "failed to autoload template tools.py at %s", tools_py,
-                    exc_info=True,
-                )
+    # FIX for Issue 1 & 3: Don't manually load template tools here.
+    # Instead, let ToolResolver handle it to avoid double-execution.
+    # We'll populate tool_registry ONLY with registry overrides.
     
-    # Add registry overrides to ToolRegistry (registry takes precedence over template tools)
+    # Add registry overrides to ToolRegistry
+    # These will have HIGHER priority than template tools in ToolResolver
     if registry:
         # Filter out lazy-loaded tuples from registry and register callables
         for name, tool in registry.items():
-            if not isinstance(tool, tuple) and callable(tool):  # Skip lazy-loaded entries
-                tool_registry.register_function(name, tool)
+            if not isinstance(tool, tuple):
+                if callable(tool):
+                    tool_registry.register_function(name, tool)
+                elif hasattr(tool, "run") and callable(getattr(tool, "run", None)):
+                    # FIX from Gemini: Support non-callable tools with run method
+                    def make_callable(t):
+                        return lambda *args, **kwargs: t.run(*args, **kwargs)
+                    tool_registry.register_function(name, make_callable(tool))
+    
+    # FIX for Issue 2: Only pass template tools path if autoload is enabled
+    # This ensures the security gate is respected
+    template_tools_path = None
+    if template_dir and _autoload_tools_enabled():
+        template_tools_path = str(Path(template_dir) / "tools.py")
     
     # Create ToolResolver with the registry having highest priority
-    # Note: template_dir tools.py will be loaded by ToolResolver if path provided,
-    # but our registry overrides will have higher priority
+    # Template tools will only be loaded if autoload is enabled
     resolver = ToolResolver(
-        tools_py_path=str(Path(template_dir) / "tools.py") if template_dir else None,
+        tools_py_path=template_tools_path,
         registry=tool_registry
     )
     
@@ -512,8 +509,9 @@ def resolve_tools(
         elif isinstance(tool, str):
             tool_name = tool.strip()
             
-            # Use ToolResolver for resolution (gets full fallback chain)
-            fn = resolver.resolve(tool_name, instantiate=True)
+            # FIX from Gemini: Use instantiate=False and handle instantiation manually
+            # This prevents crashes if a class requires constructor arguments
+            fn = resolver.resolve(tool_name, instantiate=False)
             
             # If not found, try name variations (backward compat)
             if fn is None:
@@ -526,12 +524,20 @@ def resolve_tools(
                 ]
                 for var in variations:
                     if var != tool_name:  # Skip if same as original
-                        fn = resolver.resolve(var, instantiate=True)
+                        fn = resolver.resolve(var, instantiate=False)
                         if fn is not None:
                             logger.debug(f"Resolved '{tool_name}' as variation '{var}'")
                             break
             
             if fn is not None:
+                # Try to instantiate if it's a class
+                if isinstance(fn, type):
+                    try:
+                        fn = fn()
+                    except Exception:
+                        # If instantiation fails, use the class itself
+                        # (backward compat with tools that require args)
+                        pass
                 resolved.append(fn)
     
     return resolved
