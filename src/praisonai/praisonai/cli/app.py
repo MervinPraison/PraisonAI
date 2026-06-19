@@ -163,6 +163,7 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "publish": (".commands.publish", "app", "Package publishing"),
     "hooks": (".commands.hooks", "app", "Hook management"),
     "rules": (".commands.rules", "app", "Rules management"),
+    "permissions": (".commands.permissions", "permissions", "Tool approval and permission management"),
     "registry": (".commands.registry", "app", "Registry management"),
     "package": (".commands.package", "app", "Package management"),
     "endpoints": (".commands.endpoints", "app", "API endpoint management"),

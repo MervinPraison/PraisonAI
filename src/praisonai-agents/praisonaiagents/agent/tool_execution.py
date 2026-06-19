@@ -585,12 +585,22 @@ class ToolExecutionMixin:
         from ..approval import get_approval_registry
         from ..approval.protocols import ApprovalRequest, ApprovalDecision
         from ..approval.registry import DEFAULT_DANGEROUS_TOOLS
+        from ..tools import get_registry as get_tool_registry
         
         backend = getattr(self, '_approval_backend', None)
         approve_all = getattr(self, '_approve_all_tools', False)
         
+        # Check tool trust level if available
+        tool_registry = get_tool_registry()
+        trust_level = tool_registry.get_trust_level(tool_name)
+        
         if backend is not None:
-            needs_approval = approve_all or tool_name in DEFAULT_DANGEROUS_TOOLS
+            # Check if tool needs approval based on multiple criteria
+            needs_approval = (
+                approve_all 
+                or tool_name in DEFAULT_DANGEROUS_TOOLS
+                or (trust_level == "external")  # External tools need approval
+            )
             if needs_approval:
                 request = ApprovalRequest(
                     tool_name=tool_name,
