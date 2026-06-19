@@ -45,6 +45,7 @@ if TYPE_CHECKING:
     from praisonaiagents import Agent
 
 from .bot import Bot
+from .delivery import DeliveryRouter, SessionSource
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,9 @@ class BotOS:
         # gives cross-platform unified-user sessions out of the box.
         self._identity_resolver = identity_resolver
         self._tasks: List[asyncio.Task] = []
+        
+        # Initialize delivery router for proactive outbound messaging
+        self._delivery_router = DeliveryRouter(self)
 
         # Register explicit bots
         if bots:
@@ -127,6 +131,11 @@ class BotOS:
     def get_bot(self, platform: str) -> Optional[Bot]:
         """Get a registered bot by platform name."""
         return self._bots.get(platform.lower())
+    
+    @property
+    def delivery_router(self) -> DeliveryRouter:
+        """Get the delivery router for proactive messaging."""
+        return self._delivery_router
 
     # ── Lifecycle ───────────────────────────────────────────────────
 
@@ -146,6 +155,9 @@ class BotOS:
 
         self._is_running = True
         logger.info(f"BotOS starting {len(self._bots)} bot(s): {', '.join(self._bots.keys())}")
+        
+        # Configure delivery router from bot configurations
+        self._configure_delivery_from_bots()
 
         self._tasks = []
         for platform, bot in self._bots.items():
@@ -271,20 +283,111 @@ class BotOS:
         result = await asyncio.to_thread(agent.chat, job.message)
         result_str = str(result) if result else None
 
-        # Deliver to originating platform if delivery target is set
+        # Deliver using the new delivery router
         delivered = False
         delivery = job.delivery
-        if delivery and delivery.channel and delivery.channel_id:
-            bot = self.get_bot(delivery.channel)
-            if bot:
-                try:
-                    await bot.send_message(delivery.channel_id, str(result))
-                    delivered = True
-                except Exception as e:
-                    logger.warning(f"BotOS: delivery to {delivery.channel} failed: {e}")
+        if delivery:
+            # Build origin context if available
+            origin = None
+            if delivery.channel and delivery.channel_id:
+                origin = SessionSource(
+                    platform=delivery.channel,
+                    channel_id=delivery.channel_id
+                )
+            
+            # Determine target - use explicit target if set, otherwise "origin"
+            target = getattr(delivery, 'target', None)
+            if not target and origin:
+                target = "origin"
+            
+            if target and result_str:
+                delivered = await self._delivery_router.deliver(
+                    target=target,
+                    text=result_str,
+                    origin=origin
+                )
 
         logger.info(f"BotOS: executed schedule job '{job.name}'")
         return (result_str, delivered)
+    
+    def _configure_delivery_from_bots(self) -> None:
+        """Configure delivery router from bot configurations."""
+        for platform, bot in self._bots.items():
+            # Check if bot has channel configuration
+            # Try _config first (for manually created bots), then _kwargs (from from_config())
+            config = getattr(bot, '_config', None)
+            kwargs = getattr(bot, '_kwargs', {})
+            
+            # Extract home_channel and aliases from config or kwargs
+            home_channel = None
+            aliases = {}
+            
+            if config:
+                home_channel = getattr(config, 'home_channel', None)
+                aliases = getattr(config, 'aliases', {})
+            elif kwargs:
+                home_channel = kwargs.get('home_channel')
+                aliases = kwargs.get('aliases', {})
+            
+            # Set home channel if configured
+            if home_channel:
+                self._delivery_router.directory.set_home_channel(platform, home_channel)
+            
+            # Add aliases if configured
+            for alias_name, channel_id in aliases.items():
+                self._delivery_router.directory.add_alias(alias_name, platform, channel_id)
+    
+    def configure_channels(self, config: Dict[str, Any]) -> None:
+        """
+        Configure channel directory from a dictionary.
+        
+        Args:
+            config: Dictionary with platform configurations
+            
+        Example::
+            
+            botos.configure_channels({
+                "telegram": {
+                    "home_channel": "123456",
+                    "aliases": {
+                        "ops-alerts": "123456",
+                        "dev-chat": "789012"
+                    }
+                },
+                "discord": {
+                    "home_channel": "456789"
+                }
+            })
+        """
+        self._delivery_router.configure_from_dict(config)
+    
+    async def deliver(self, target: str, text: str, origin: Optional[SessionSource] = None) -> bool:
+        """
+        Deliver a message to a target channel.
+        
+        Args:
+            target: Target specification (origin|platform|platform:channel|alias)
+            text: Message content to deliver
+            origin: Optional source of the original request
+            
+        Returns:
+            True if delivered successfully, False otherwise
+            
+        Example::
+            
+            # Reply to origin
+            await botos.deliver("origin", "Hello!", origin=source)
+            
+            # Send to specific platform's home channel
+            await botos.deliver("telegram", "Alert!")
+            
+            # Send to specific channel
+            await botos.deliver("telegram:123456", "Build complete")
+            
+            # Send to aliased channel
+            await botos.deliver("ops-alerts", "Disk full")
+        """
+        return await self._delivery_router.deliver(target, text, origin)
 
     async def stop(self) -> None:
         """Gracefully stop all running bots."""
