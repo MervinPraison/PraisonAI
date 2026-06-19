@@ -4,7 +4,7 @@ Run command group for PraisonAI CLI.
 Provides agent execution commands.
 """
 
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import typer
 
@@ -84,6 +84,9 @@ def run_main(
     session: Optional[str] = typer.Option(None, "--session", "-s", help="Resume a specific session ID"),
     fork: bool = typer.Option(False, "--fork", help="Fork from the specified session (requires --session)"),
     no_save: bool = typer.Option(False, "--no-save", help="Don't auto-save session after execution"),
+    # Custom definitions
+    agent: Optional[str] = typer.Option(None, "--agent", "-a", help="Use a named custom agent"),
+    command: Optional[str] = typer.Option(None, "--command", help="Execute a named custom command"),
 ):
     """
     Run agents from a file or prompt.
@@ -121,6 +124,64 @@ def run_main(
         output.print_error("Cannot use both --continue and --session together")
         raise typer.Exit(1)
     
+    # Handle custom agent or command
+    if agent:
+        from ..features.custom_definitions import load_agent_from_name
+        agent_config = load_agent_from_name(agent)
+        if not agent_config:
+            output.print_error(f"Agent '{agent}' not found")
+            raise typer.Exit(1)
+        
+        # Run with custom agent
+        _run_custom_agent(
+            agent_config,
+            target or "",  # Use target as the prompt if provided
+            model=model,
+            verbose=verbose,
+            stream=stream,
+            trace=trace,
+            memory=memory,
+            tools=tools,
+            toolset=toolset,
+            max_tokens=max_tokens,
+            output_mode=output_mode,
+            continue_session=continue_session,
+            session=session,
+            fork=fork,
+            no_save=no_save,
+        )
+        return
+    
+    if command:
+        from ..features.custom_definitions import interpolate_command_template
+        prompt = interpolate_command_template(command, target or "")
+        if not prompt:
+            output.print_error(f"Command '{command}' not found")
+            raise typer.Exit(1)
+        
+        # Run the interpolated command as a prompt
+        _run_prompt(
+            prompt,
+            model=model,
+            verbose=verbose,
+            stream=stream,
+            trace=trace,
+            memory=memory,
+            tools=tools,
+            toolset=toolset,
+            max_tokens=max_tokens,
+            output_mode=output_mode,
+            approval=approval,
+            approve_all_tools=approve_all_tools,
+            approval_timeout=approval_timeout,
+            no_rules=no_rules,
+            continue_session=continue_session,
+            session=session,
+            fork=fork,
+            no_save=no_save,
+        )
+        return
+    
     if not target:
         output.print_panel(
             "Run agents from a file or prompt.\n\n"
@@ -129,7 +190,9 @@ def run_main(
             "  praisonai run \"What is the weather?\"\n"
             "  praisonai run \"What is the weather?\" --continue\n"
             "  praisonai run \"Add tests\" --session abc123\n"
-            "  praisonai run agents.yaml --interactive\n\n"
+            "  praisonai run agents.yaml --interactive\n"
+            "  praisonai run --agent researcher \"Find info on X\"\n"
+            "  praisonai run --command summarize \"Long text here\"\n\n"
             "Options:\n"
             "  --model, -m       LLM model to use\n"
             "  --framework, -f   Framework (praisonai, crewai, autogen)\n"
@@ -140,7 +203,9 @@ def run_main(
             "  --continue, -c    Continue the most recent session\n"
             "  --session, -s     Resume a specific session ID\n"
             "  --fork            Fork from specified session\n"
-            "  --no-save         Don't auto-save session",
+            "  --no-save         Don't auto-save session\n"
+            "  --agent, -a       Use a named custom agent\n"
+            "  --command         Execute a named custom command",
             title="Run Command"
         )
         return
@@ -587,6 +652,97 @@ def _run_from_file_profiled(
     
     # Print profiling report
     profiler.print_report()
+
+
+def _run_custom_agent(
+    agent_config: Dict[str, Any],
+    prompt: str,
+    model: Optional[str] = None,
+    verbose: bool = False,
+    stream: bool = True,
+    trace: bool = False,
+    memory: bool = False,
+    tools: Optional[str] = None,
+    toolset: Optional[str] = None,
+    max_tokens: int = 16000,
+    output_mode: Optional[str] = None,
+    continue_session: bool = False,
+    session: Optional[str] = None,
+    fork: bool = False,
+    no_save: bool = False,
+):
+    """Run a custom agent definition."""
+    output = get_output_controller()
+    
+    try:
+        from praisonaiagents import Agent
+        
+        # Override model if specified
+        if model:
+            agent_config["llm"] = model
+        
+        # Add verbose flag
+        if verbose:
+            agent_config["verbose"] = verbose
+        
+        # Handle session continuity
+        session_id = None
+        auto_save_name = None
+        
+        if continue_session or session or fork:
+            from ..state.project_sessions import get_project_session_store, find_last_session
+            
+            if continue_session:
+                session_id = find_last_session()
+                if session_id:
+                    output.print_info(f"Continuing session: {session_id}")
+                else:
+                    output.print_warning("No previous sessions found. Starting new session.")
+                    
+            elif session:
+                project_store = get_project_session_store()
+                if project_store.session_exists(session):
+                    session_id = session
+                    output.print_info(f"Resuming session: {session_id}")
+                else:
+                    output.print_error(f"Session not found: {session}")
+                    raise typer.Exit(1)
+                
+                if fork:
+                    from praisonaiagents.session.hierarchy import HierarchicalSessionStore
+                    from ..utils.project import get_project_sessions_dir
+                    
+                    hierarchical_store = HierarchicalSessionStore(str(get_project_sessions_dir()))
+                    forked_session_id = hierarchical_store.fork_session(session_id)
+                    session_id = forked_session_id
+                    output.print_info(f"Forked session {session} -> {forked_session_id}")
+        
+        if not no_save:
+            import uuid
+            auto_save_name = session_id or "session-" + str(uuid.uuid4())[:8]
+        
+        # Add session support to agent config
+        if session_id:
+            agent_config["resume_session"] = session_id
+        if auto_save_name:
+            agent_config["auto_save"] = auto_save_name
+        
+        # Create and run agent
+        agent = Agent(**agent_config)
+        result = agent.start(prompt)
+        
+        output.emit_result(
+            message="Agent completed",
+            data={"result": str(result) if result else None}
+        )
+        
+        if result and not output.is_json_mode:
+            print(result)
+    
+    except Exception as e:
+        output.emit_error(message=str(e))
+        output.print_error(str(e))
+        raise typer.Exit(1)
 
 
 def _run_prompt_profiled(

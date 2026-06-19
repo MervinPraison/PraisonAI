@@ -154,6 +154,8 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "rag": (".commands.rag", "app", "RAG commands (legacy - use index/query instead)"),
     "deploy": (".commands.deploy", "app", "Deployment management"),
     "agents": (".commands.agents", "app", "Agent management"),
+    "agent": (".commands.agent", "app", "Custom agent definitions management"),
+    "command": (".commands.command", "app", "Custom command definitions management"),
     "skills": (".commands.skills", "app", "Skill management"),
     "eval": (".commands.eval", "app", "Evaluation and testing"),
     "templates": (".commands.templates", "app", "Template management"),
