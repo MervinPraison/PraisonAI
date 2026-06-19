@@ -8,11 +8,14 @@ Provides configuration management commands:
 - config reset: Reset to defaults
 """
 
+import json
+import os
+from pathlib import Path
 from typing import Optional
-
+import yaml
 import typer
 
-from ..configuration.loader import get_config_loader
+from ..configuration.resolver import resolve_config, get_resolver
 from ..output.console import get_output_controller
 
 app = typer.Typer(help="Configuration management")
@@ -29,25 +32,36 @@ def config_list(
 ):
     """List all configuration values."""
     output = get_output_controller()
-    loader = get_config_loader()
     
-    config = loader.list_all()
-    
-    if output.is_json_mode:
-        output.print_json(config)
-        return
-    
-    output.print_panel("Configuration", title="PraisonAI Config")
-    
-    def print_dict(d, prefix=""):
-        for key, value in d.items():
-            full_key = f"{prefix}.{key}" if prefix else key
-            if isinstance(value, dict):
-                print_dict(value, full_key)
-            else:
-                output.print(f"  {full_key} = {value}")
-    
-    print_dict(config)
+    try:
+        # Resolve configuration using new resolver
+        config = resolve_config()
+        config_dict = config.to_dict()
+        
+        if output.is_json_mode:
+            output.print_json(config_dict)
+            return
+        
+        output.print_panel("Configuration", title="PraisonAI Config")
+        
+        def print_dict(d, prefix=""):
+            for key, value in d.items():
+                full_key = f"{prefix}.{key}" if prefix else key
+                if isinstance(value, dict):
+                    print_dict(value, full_key)
+                else:
+                    output.print(f"  {full_key} = {value}")
+        
+        print_dict(config_dict)
+        
+        # Show sources if verbose
+        if output.verbose:
+            output.print("\n[dim]Sources:[/dim]")
+            for source in config.sources:
+                output.print(f"  • {source}")
+    except Exception as e:
+        output.print_error(f"Failed to load configuration: {e}")
+        raise typer.Exit(1)
 
 
 @app.command("get")
@@ -56,18 +70,28 @@ def config_get(
 ):
     """Get a configuration value."""
     output = get_output_controller()
-    loader = get_config_loader()
     
-    value = loader.get(key)
-    
-    if value is None:
-        output.print_error(f"Key not found: {key}")
+    try:
+        config = resolve_config()
+        config_dict = config.to_dict()
+        
+        # Navigate to the key
+        keys = key.split('.')
+        value = config_dict
+        for k in keys:
+            if isinstance(value, dict) and k in value:
+                value = value[k]
+            else:
+                output.print_error(f"Key not found: {key}")
+                raise typer.Exit(1)
+        
+        if output.is_json_mode:
+            output.print_json({"key": key, "value": value})
+        else:
+            output.print(f"{key} = {value}")
+    except Exception as e:
+        output.print_error(f"Failed to get configuration: {e}")
         raise typer.Exit(1)
-    
-    if output.is_json_mode:
-        output.print_json({"key": key, "value": value})
-    else:
-        output.print(f"{key} = {value}")
 
 
 @app.command("set")
@@ -83,7 +107,6 @@ def config_set(
 ):
     """Set a configuration value."""
     output = get_output_controller()
-    loader = get_config_loader()
     
     # Parse value
     if value.lower() == "true":
@@ -99,12 +122,43 @@ def config_set(
             except ValueError:
                 parsed_value = value
     
-    loader.set(key, parsed_value, scope=scope)
+    # Determine which config file to update
+    if scope == "user":
+        config_path = Path.home() / ".praisonai" / "config.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    else:  # project
+        config_path = Path.cwd() / ".praisonai" / "config.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
     
-    if output.is_json_mode:
-        output.print_json({"key": key, "value": parsed_value, "scope": scope})
-    else:
-        output.print_success(f"Set {key} = {parsed_value} ({scope})")
+    # Load existing config
+    config = {}
+    if config_path.exists():
+        try:
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f) or {}
+        except Exception:
+            pass
+    
+    # Set the value
+    keys = key.split('.')
+    current = config
+    for k in keys[:-1]:
+        current = current.setdefault(k, {})
+    current[keys[-1]] = parsed_value
+    
+    # Write back
+    try:
+        with open(config_path, 'w') as f:
+            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+        config_path.chmod(0o600 if scope == "user" else 0o644)
+        
+        if output.is_json_mode:
+            output.print_json({"key": key, "value": parsed_value, "scope": scope})
+        else:
+            output.print_success(f"Set {key} = {parsed_value} ({scope})")
+    except Exception as e:
+        output.print_error(f"Failed to save configuration: {e}")
+        raise typer.Exit(1)
 
 
 @app.command("reset")
@@ -131,13 +185,23 @@ def config_reset(
             output.print_info("Cancelled")
             raise typer.Exit(0)
     
-    loader = get_config_loader()
-    loader.reset(scope=scope)
+    # Determine which config file to reset
+    if scope == "user":
+        config_path = Path.home() / ".praisonai" / "config.yaml"
+    else:  # project
+        config_path = Path.cwd() / ".praisonai" / "config.yaml"
     
-    if output.is_json_mode:
-        output.print_json({"reset": True, "scope": scope})
+    if config_path.exists():
+        config_path.unlink()
+        if output.is_json_mode:
+            output.print_json({"reset": True, "scope": scope, "path": str(config_path)})
+        else:
+            output.print_success(f"Reset {scope} configuration to defaults")
     else:
-        output.print_success(f"Reset {scope} configuration to defaults")
+        if output.is_json_mode:
+            output.print_json({"reset": False, "scope": scope, "message": "No configuration to reset"})
+        else:
+            output.print_info("No configuration to reset")
 
 
 @app.command("path")
@@ -152,12 +216,10 @@ def config_path(
     """Show configuration file path."""
     output = get_output_controller()
     
-    from ..configuration.paths import get_user_config_path, get_project_config_path
-    
     if scope == "project":
-        path = get_project_config_path()
+        path = Path.cwd() / ".praisonai" / "config.yaml"
     else:
-        path = get_user_config_path()
+        path = Path.home() / ".praisonai" / "config.yaml"
     
     if output.is_json_mode:
         output.print_json({"path": str(path), "exists": path.exists()})
@@ -384,3 +446,155 @@ def config_doctor():
                 "size": cache_size,
             }
         })
+
+
+@app.command("show")
+def config_show(
+    format: str = typer.Option(
+        "yaml",
+        "--format",
+        "-f",
+        help="Output format: yaml, json, table",
+    ),
+    sources: bool = typer.Option(
+        False,
+        "--sources",
+        "-s",
+        help="Show configuration sources",
+    ),
+):
+    """Show the complete resolved configuration."""
+    output = get_output_controller()
+    
+    try:
+        config = resolve_config()
+        config_dict = config.to_dict()
+        
+        if format == "yaml":
+            yaml_output = yaml.dump(config_dict, default_flow_style=False, sort_keys=False)
+            output.print(yaml_output)
+            
+        elif format == "json":
+            import json
+            json_output = json.dumps(config_dict, indent=2)
+            output.print(json_output)
+            
+        elif format == "table":
+            def print_dict(d, prefix=""):
+                for key, value in d.items():
+                    full_key = f"{prefix}.{key}" if prefix else key
+                    if isinstance(value, dict):
+                        print_dict(value, full_key)
+                    else:
+                        output.print(f"  {full_key} = {value}")
+            
+            output.print("[bold]Configuration:[/bold]")
+            print_dict(config_dict)
+        
+        if sources:
+            output.print("\n[bold]Sources:[/bold]")
+            for source in config.sources:
+                output.print(f"  • {source}")
+                
+    except Exception as e:
+        output.print_error(f"Failed to show configuration: {e}")
+        raise typer.Exit(1)
+
+
+@app.command("validate")
+def config_validate(
+    file: Optional[str] = typer.Argument(
+        None,
+        help="Configuration file to validate (defaults to current config)",
+    ),
+):
+    """Validate configuration file syntax and schema."""
+    output = get_output_controller()
+    
+    try:
+        if file:
+            # Validate specific file
+            config_path = Path(file)
+            if not config_path.exists():
+                output.print_error(f"File not found: {file}")
+                raise typer.Exit(1)
+                
+            with open(config_path, 'r') as f:
+                data = yaml.safe_load(f)
+                
+        else:
+            # Validate current resolved config
+            config = resolve_config()
+            data = config.to_dict()
+            config_path = "resolved configuration"
+        
+        # Check schema validity
+        from ..configuration.resolver import ResolvedConfig
+        
+        try:
+            if isinstance(data, dict):
+                validated = ResolvedConfig.from_dict(data)
+                output.print_success(f"✓ Configuration is valid: {config_path}")
+            else:
+                output.print_error(f"Configuration must be a dictionary/object: {config_path}")
+                raise typer.Exit(1)
+                
+        except Exception as e:
+            output.print_error(f"Schema validation failed: {e}")
+            raise typer.Exit(1)
+            
+    except yaml.YAMLError as e:
+        output.print_error(f"Invalid YAML syntax: {e}")
+        raise typer.Exit(1)
+    except Exception as e:
+        output.print_error(f"Validation failed: {e}")
+        raise typer.Exit(1)
+
+
+@app.command("sources")
+def config_sources():
+    """List all configuration sources in precedence order."""
+    output = get_output_controller()
+    
+    try:
+        resolver = get_resolver()
+        output.print("[bold]Configuration hierarchy:[/bold]")
+        output.print("(highest precedence first)\n")
+        
+        # 1. CLI flags
+        output.print("1. [cyan]CLI flags[/cyan] (runtime only)")
+        
+        # 2. Environment variables
+        output.print("2. [cyan]Environment variables:[/cyan]")
+        import os
+        env_vars = [
+            "MODEL_NAME", "OPENAI_MODEL_NAME", "PRAISONAI_MODEL",
+            "PRAISONAI_PROVIDER", "OPENAI_BASE_URL", "PRAISONAI_BASE_URL",
+        ]
+        for var in env_vars:
+            value = os.environ.get(var)
+            if value:
+                output.print(f"   • {var}={value}")
+        
+        # 3. Project config
+        output.print("3. [cyan]Project config:[/cyan]")
+        project_config = resolver._load_project_config()
+        if project_config and "_source" in project_config:
+            output.print(f"   • {project_config['_source']} ✓")
+        else:
+            output.print("   • (none found)")
+        
+        # 4. Global config
+        output.print("4. [cyan]Global config:[/cyan]")
+        global_config = resolver._load_global_config()
+        if global_config and "_source" in global_config:
+            output.print(f"   • {global_config['_source']} ✓")
+        else:
+            output.print(f"   • {Path.home() / '.praisonai' / 'config.yaml'} (not found)")
+        
+        # 5. Built-in defaults
+        output.print("5. [cyan]Built-in defaults[/cyan]")
+        
+    except Exception as e:
+        output.print_error(f"Failed to list sources: {e}")
+        raise typer.Exit(1)

@@ -7,7 +7,10 @@ from environment variables, ensuring consistent precedence across all components
 
 import os
 from dataclasses import dataclass
-from typing import Optional, Callable
+from typing import Optional, Callable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..cli.configuration.resolver import ResolvedConfig
 
 
 @dataclass(frozen=True)
@@ -57,31 +60,49 @@ def _provider_from_model(model: str) -> tuple[str, str | None]:
 def resolve_llm_endpoint(
     *, 
     default_base: str = _DEFAULT_BASE, 
-    fallback_lookup: Optional[Callable[[str], Optional[dict]]] = None
+    fallback_lookup: Optional[Callable[[str], Optional[dict]]] = None,
+    resolved_config: Optional['ResolvedConfig'] = None
 ) -> LLMEndpoint:
     """
-    Resolve LLM endpoint configuration from environment variables.
+    Resolve LLM endpoint configuration from environment variables and config.
     
     Precedence order:
+    - Environment variables (highest)
+    - Resolved config (if provided)
     - Model: MODEL_NAME > OPENAI_MODEL_NAME > fallback > default
     - Base URL: OPENAI_BASE_URL > OPENAI_API_BASE > OLLAMA_API_BASE > provider default > fallback > default
     - API Key: provider-specific key (e.g., ANTHROPIC_API_KEY) > OPENAI_API_KEY fallback > stored credentials > None
+    - Built-in defaults (lowest)
     
     Args:
         default_base: Default base URL if none found in environment variables
         fallback_lookup: Optional callable to get stored credentials (provider_name) -> dict
+        resolved_config: Optional resolved configuration from the resolver
         
     Returns:
         LLMEndpoint with resolved configuration
     """
-    model = _first_set(*_MODEL_VARS) or _DEFAULT_MODEL
+    # Try environment variables first
+    env_model = _first_set(*_MODEL_VARS)
+    
+    # Fall back to config, then default
+    if env_model:
+        model = env_model
+    elif resolved_config and resolved_config.agent.model:
+        model = resolved_config.agent.model
+    else:
+        model = _DEFAULT_MODEL
+    
     key_var, provider_base = _provider_from_model(model)
 
-    base_url = (
-        _first_set(*_BASE_URL_VARS)
-        or provider_base
-        or default_base
-    )
+    # Check for base URL in env, then config, then provider default
+    env_base = _first_set(*_BASE_URL_VARS)
+    if env_base:
+        base_url = env_base
+    elif resolved_config and resolved_config.agent.base_url:
+        base_url = resolved_config.agent.base_url
+    else:
+        base_url = provider_base or default_base
     
     # Try provider-specific key first; fall back to OPENAI_API_KEY only for
     # OpenAI-compatible proxies that may use a single shared key.

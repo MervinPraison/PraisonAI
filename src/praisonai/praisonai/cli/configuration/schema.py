@@ -9,6 +9,21 @@ from typing import Any, Dict, List, Optional, Union, Literal
 
 
 @dataclass
+class AgentConfig:
+    """Agent configuration defaults."""
+    model: Optional[str] = None
+    provider: Optional[str] = None
+    base_url: Optional[str] = None
+    tools: List[str] = field(default_factory=list)
+    toolset: Optional[str] = None
+    default_agent: Optional[str] = None
+    memory: Optional[Union[bool, Dict[str, Any]]] = None
+    stream: bool = True
+    temperature: float = 0.7
+    max_tokens: int = 16000
+
+
+@dataclass
 class OutputConfig:
     """Output configuration."""
     format: str = "text"  # text, json, stream-json
@@ -105,6 +120,7 @@ class ConfigSchema:
     
     Represents all configurable options for PraisonAI CLI.
     """
+    agent: AgentConfig = field(default_factory=AgentConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     traces: TracesConfig = field(default_factory=TracesConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
@@ -119,6 +135,18 @@ class ConfigSchema:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
+            "agent": {
+                "model": self.agent.model,
+                "provider": self.agent.provider,
+                "base_url": self.agent.base_url,
+                "tools": self.agent.tools,
+                "toolset": self.agent.toolset,
+                "default_agent": self.agent.default_agent,
+                "memory": self.agent.memory,
+                "stream": self.agent.stream,
+                "temperature": self.agent.temperature,
+                "max_tokens": self.agent.max_tokens,
+            },
             "output": {
                 "format": self.output.format,
                 "color": self.output.color,
@@ -191,6 +219,7 @@ class ConfigSchema:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ConfigSchema":
         """Create from dictionary."""
+        agent_data = data.get("agent", {})
         output_data = data.get("output", {})
         traces_data = data.get("traces", {})
         mcp_data = data.get("mcp", {})
@@ -200,7 +229,7 @@ class ConfigSchema:
         rules_data = data.get("rules", {})
         
         # Extract known keys
-        known_keys = {"output", "traces", "mcp", "model", "llm", "session", "rules"}
+        known_keys = {"agent", "output", "traces", "mcp", "model", "llm", "session", "rules"}
         extra = {k: v for k, v in data.items() if k not in known_keys}
         
         # Parse MCP servers
@@ -235,6 +264,18 @@ class ConfigSchema:
                 )
         
         return cls(
+            agent=AgentConfig(
+                model=agent_data.get("model"),
+                provider=agent_data.get("provider"),
+                base_url=agent_data.get("base_url"),
+                tools=agent_data.get("tools", []),
+                toolset=agent_data.get("toolset"),
+                default_agent=agent_data.get("default_agent"),
+                memory=agent_data.get("memory"),
+                stream=agent_data.get("stream", True),
+                temperature=agent_data.get("temperature", 0.7),
+                max_tokens=agent_data.get("max_tokens", 16000),
+            ),
             output=OutputConfig(
                 format=output_data.get("format", "text"),
                 color=output_data.get("color", True),
