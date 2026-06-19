@@ -552,6 +552,7 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         # LLM configuration
         llm: Optional[Union[str, Any]] = None,
         model: Optional[Union[str, Any]] = None,  # Alias for llm=
+        fallback_models: Optional[List[str]] = None,  # Ordered list of fallback models for resilience
         base_url: Optional[str] = None,  # Kept separate (connection/auth)
         api_key: Optional[str] = None,  # Kept separate (connection/auth)
         auth: Optional[str] = None,  # Subscription auth provider: "claude-code", "codex", etc.
@@ -606,6 +607,8 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
             llm: Model name string ("gpt-4o", "anthropic/claude-3-sonnet") or LLM object.
                 Defaults to OPENAI_MODEL_NAME env var or "gpt-4o-mini".
             model: Alias for llm parameter.
+            fallback_models: Ordered list of fallback models for resilience when primary model is unavailable.
+                Used when transient/overloaded errors occur. Example: ["claude-sonnet-4-6", "gpt-4o-mini"].
             base_url: Custom LLM endpoint URL (e.g., for Ollama). Kept separate for auth.
             api_key: API key for LLM provider. Kept separate for auth.
             tools: List of tools, functions, callables, or MCP instances.
@@ -1664,6 +1667,10 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         # Otherwise, fall back to OpenAI environment/name (cached for performance)
         else:
             self.llm = llm or Agent._get_default_model()
+        
+        # Store fallback models for resilience
+        self.fallback_models = fallback_models or []
+        
         # Handle tools parameter - ensure it's always a list
         if callable(tools):
             # If a single function/callable is passed, wrap it in a list
