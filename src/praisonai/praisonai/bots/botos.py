@@ -603,8 +603,9 @@ class BotOS:
         if health_cfg and isinstance(health_cfg, dict):
             health_monitor = HealthMonitorConfig.from_dict(health_cfg)
 
-        # Check if supervision is disabled
-        enable_supervision = raw.get("supervision", {}).get("enabled", True)
+        # Check if supervision is disabled (handle null supervision key)
+        supervision_cfg = raw.get("supervision") or {}
+        enable_supervision = supervision_cfg.get("enabled", True)
 
         return cls(bots=bots, health_monitor=health_monitor, enable_supervision=enable_supervision)
 

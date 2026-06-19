@@ -222,8 +222,32 @@ class ChannelSupervisor:
                 logger.info(f"Starting channel '{name}'..." + 
                            (f" (attempt {monitor.attempt + 1})" if monitor.attempt > 0 else ""))
                 
-                # Start the bot
-                await start_fn(name, bot)
+                # Start the bot in a task so it can be cancelled
+                bot_task = asyncio.create_task(start_fn(name, bot))
+                abort_task = asyncio.create_task(abort_signal.wait())
+                
+                # Wait for either the bot to exit or abort signal
+                done, pending = await asyncio.wait(
+                    [bot_task, abort_task],
+                    return_when=asyncio.FIRST_COMPLETED
+                )
+                
+                # Cancel whichever task didn't complete
+                for task in pending:
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+                
+                # Check which one completed
+                if abort_task in done:
+                    # Abort signal was set - restart the loop
+                    abort_signal.clear()
+                    continue
+                    
+                # Bot exited normally
+                await bot_task  # Re-raise any exception from the bot
                 
                 # If we get here, the bot exited cleanly
                 monitor.record_success()
@@ -331,13 +355,13 @@ class ChannelSupervisor:
         """
         logger.info(f"Health monitor requesting restart of '{name}' (reason={reason.value})")
         
-        # Update status with health reason
+        # Trigger restart via reconnect first
+        self.reconnect(name)
+        
+        # Then update status with health reason (after reconnect clears it)
         if name in self._channels:
             self._channels[name].last_error = f"Health check failed: {reason.value}"
             self._channels[name].last_error_time = time.time()
-        
-        # Trigger restart via reconnect
-        self.reconnect(name)
     
     async def start_health_monitoring(self) -> None:
         """Start the health monitor."""

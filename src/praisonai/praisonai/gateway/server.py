@@ -1747,7 +1747,7 @@ class WebSocketGateway:
         if self._channel_bots:
             # Start health monitoring if configured
             if self._health_config and self._health_config.enabled:
-                asyncio.create_task(self._channel_supervisor.start_health_monitoring())
+                await self._channel_supervisor.start_health_monitoring()
                 logger.info("Channel health monitoring enabled")
             
             for name, bot in self._channel_bots.items():

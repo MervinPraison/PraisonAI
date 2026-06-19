@@ -11,7 +11,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional, Set
+from typing import Any, Awaitable, Callable, Dict, Optional, Set
 
 from praisonaiagents.bots.protocols import (
     HealthReason,
@@ -101,7 +101,7 @@ class ChannelHealthMonitor:
         self,
         config: Optional[HealthMonitorConfig] = None,
         health_check_fn: Optional[Callable[[str, Any], HealthResult]] = None,
-        restart_fn: Optional[Callable[[str, HealthReason], None]] = None,
+        restart_fn: Optional[Callable[[str, HealthReason], "Awaitable[None]"]] = None,
     ):
         """Initialize health monitor.
         
