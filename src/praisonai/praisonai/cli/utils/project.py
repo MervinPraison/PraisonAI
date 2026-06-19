@@ -126,11 +126,6 @@ def apply_cli_session_continuity(agent, session_id: Optional[str]) -> None:
     agent._session_store_initialized = True
     agent._history_enabled = True
     agent._history_session_id = session_id
-
-    if not agent.chat_history:
-        history = store.get_chat_history(session_id)
-        if history:
-            agent.chat_history = [
-                {"role": msg["role"], "content": msg["content"]}
-                for msg in history
-            ]
+    
+    # Don't pre-populate chat_history - the mixin will load it from _session_store
+    # when _history_enabled=True, avoiding duplicate history injection

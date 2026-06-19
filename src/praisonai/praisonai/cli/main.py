@@ -4559,9 +4559,10 @@ Do NOT add any explanations or formatting."""
                     print(f"[bold cyan]History enabled - loading context from last {self.args.history} session(s)[/bold cyan]")
 
                 # CLI session continuity from `praison run --continue/--session`
+                # Only apply for resume sessions, not plain --auto-save
                 _resume_id = getattr(self.args, 'resume_session', None)
-                _auto_save_id = getattr(self.args, 'auto_save', None)
-                if _resume_id or _auto_save_id:
+                if _resume_id:
+                    _auto_save_id = getattr(self.args, 'auto_save', None)
                     from praisonai.cli.utils.project import build_cli_memory_config
                     _session_cfg = build_cli_memory_config(
                         session_id=_resume_id,

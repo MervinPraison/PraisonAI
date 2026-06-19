@@ -343,10 +343,11 @@ class ContextCompactor:
         
         # If still over limit, truncate more
         while self.count_total_tokens(result) > self.target_tokens and len(result) > 1:
-            # Remove oldest non-system message
+            # Remove oldest message (respecting preserve_system setting)
             removed = False
             for i, msg in enumerate(result):
-                if msg.get("role") != "system":
+                # Skip system messages only if preserve_system is True
+                if not (self.preserve_system and msg.get("role") == "system"):
                     result.pop(i)
                     removed = True
                     break
