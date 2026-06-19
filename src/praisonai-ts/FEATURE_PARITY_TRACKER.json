@@ -5,7 +5,7 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
     "pythonCoreFeatures": 360,
-    "pythonWrapperFeatures": 99,
+    "pythonWrapperFeatures": 100,
     "typescriptFeatures": 1188,
     "gapCount": 68,
     "priorityP0": 2,
@@ -828,6 +828,7 @@
       "context_manager",
       "cost_tracker",
       "csv_test_runner",
+      "custom_definitions",
       "debug",
       "deploy",
       "diag",
