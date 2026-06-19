@@ -545,58 +545,6 @@ Launch PraisonAI servers with unified discovery support.
             self._print_error(str(e))
             return self.EXIT_GENERAL_ERROR
     
-    def _create_mcp_app(self, config: Dict[str, Any]) -> Any:
-        """Create FastAPI app for MCP server."""
-        from fastapi import FastAPI
-        
-        from praisonai.endpoints.discovery import (
-            create_discovery_document,
-            ProviderInfo,
-        )
-        from praisonai.endpoints.server import add_discovery_routes
-        
-        # Create discovery document
-        discovery = create_discovery_document(server_name="praisonai-mcp")
-        discovery.add_provider(ProviderInfo(
-            type="mcp",
-            name="MCP Server",
-            description=f"MCP server ({config['transport']} transport)",
-            capabilities=["list-tools", "call-tool"],
-        ))
-        
-        app = FastAPI(
-            title="PraisonAI MCP Server",
-            description="MCP protocol server",
-        )
-        
-        add_discovery_routes(app, discovery)
-        
-        # MCP tools endpoint
-        @app.get("/mcp/tools")
-        async def list_tools():
-            """List available MCP tools."""
-            # TODO: Load tools from config or registry
-            return {"tools": []}
-        
-        @app.post("/mcp/tools/call")
-        async def call_tool(request_data: dict):
-            """Call an MCP tool."""
-            tool_name = request_data.get("tool")
-            _ = request_data.get("arguments", {})  # Arguments for tool
-            
-            # TODO: Execute tool
-            return {"result": None, "tool": tool_name}
-        
-        @app.get("/")
-        async def root():
-            return {
-                "message": "PraisonAI MCP Server",
-                "transport": config["transport"],
-                "discovery": "/__praisonai__/discovery",
-            }
-        
-        return app
-    
     def cmd_tools(self, args: List[str]) -> int:
         """Launch tools as MCP server (DEPRECATED - use 'praisonai mcp serve' instead)."""
         import sys
@@ -630,50 +578,6 @@ Launch PraisonAI servers with unified discovery support.
         except Exception as e:
             self._print_error(str(e))
             return self.EXIT_GENERAL_ERROR
-    
-    def _create_tools_app(self, config: Dict[str, Any]) -> Any:
-        """Create FastAPI app for tools MCP server."""
-        from fastapi import FastAPI
-        
-        from praisonai.endpoints.discovery import (
-            create_discovery_document,
-            ProviderInfo,
-        )
-        from praisonai.endpoints.server import add_discovery_routes
-        
-        discovery = create_discovery_document(server_name="praisonai-tools-mcp")
-        discovery.add_provider(ProviderInfo(
-            type="tools-mcp",
-            name="Tools MCP Server",
-            description="Python tools exposed as MCP server",
-            capabilities=["list-tools", "call-tool"],
-        ))
-        
-        app = FastAPI(
-            title="PraisonAI Tools MCP Server",
-            description="Tools exposed as MCP server",
-        )
-        
-        add_discovery_routes(app, discovery)
-        
-        @app.get("/tools")
-        async def list_tools():
-            """List available tools."""
-            return {"tools": []}
-        
-        @app.post("/tools/call")
-        async def call_tool(request_data: dict):
-            """Call a tool."""
-            return {"result": None}
-        
-        @app.get("/")
-        async def root():
-            return {
-                "message": "PraisonAI Tools MCP Server",
-                "discovery": "/__praisonai__/discovery",
-            }
-        
-        return app
     
     def cmd_a2a(self, args: List[str]) -> int:
         """Launch A2A protocol server."""
