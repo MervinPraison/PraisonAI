@@ -40,7 +40,7 @@ class ValkeyStorageAdapter:
 
     Example:
         ```python
-        from praisonai.storage import ValkeyStorageAdapter
+        from praisonai.storage.valkey_adapter import ValkeyStorageAdapter
 
         adapter = ValkeyStorageAdapter(host="localhost", port=6379)
         adapter.save("session_123", {"messages": []})
@@ -219,7 +219,7 @@ class ValkeySearchBackend:
 
     Example:
         ```python
-        from praisonai.storage import ValkeySearchBackend
+        from praisonai.storage.valkey_adapter import ValkeySearchBackend
 
         backend = ValkeySearchBackend(host="localhost", port=6379, vector_dim=1536)
         backend.create_index()
