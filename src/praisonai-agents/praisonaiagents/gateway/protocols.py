@@ -30,6 +30,7 @@ from typing import (
 if TYPE_CHECKING:
     from praisonai.gateway.pairing import PairedChannel
     from ..agent import Agent
+    from ..bots.presentation import MessagePresentation
 
 
 class EventType(str, Enum):
@@ -149,6 +150,7 @@ class GatewayMessage:
         timestamp: Message creation time
         metadata: Additional message metadata
         reply_to: ID of message being replied to (optional)
+        presentation: Optional interactive presentation (buttons, menus, etc.)
     """
     
     content: Union[str, Dict[str, Any]]
@@ -158,10 +160,11 @@ class GatewayMessage:
     timestamp: float = field(default_factory=time.time)
     metadata: Dict[str, Any] = field(default_factory=dict)
     reply_to: Optional[str] = None
+    presentation: Optional["MessagePresentation"] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
-        return {
+        data = {
             "content": self.content,
             "sender_id": self.sender_id,
             "session_id": self.session_id,
@@ -170,10 +173,20 @@ class GatewayMessage:
             "metadata": self.metadata,
             "reply_to": self.reply_to,
         }
+        if self.presentation is not None:
+            data["presentation"] = self.presentation.to_dict()
+        return data
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "GatewayMessage":
         """Create from dictionary."""
+        from ..bots.presentation import MessagePresentation
+        
+        presentation = None
+        raw_presentation = data.get("presentation")
+        if isinstance(raw_presentation, dict):
+            presentation = MessagePresentation.from_dict(raw_presentation)
+        
         return cls(
             content=data.get("content", ""),
             sender_id=data.get("sender_id", "unknown"),
@@ -182,6 +195,7 @@ class GatewayMessage:
             timestamp=data.get("timestamp", time.time()),
             metadata=data.get("metadata", {}),
             reply_to=data.get("reply_to"),
+            presentation=presentation,
         )
 
 
