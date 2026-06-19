@@ -484,6 +484,11 @@ class DurableDelivery:
             metadata=metadata,
         )
         
+        # Check if already sent (duplicate idempotency key)
+        if ":status=sent" in key:
+            logger.info(f"Message already sent for idempotency_key={idempotency_key}")
+            return True
+        
         # Attempt delivery
         success, error = await deliver_with_retry(
             self.adapter,

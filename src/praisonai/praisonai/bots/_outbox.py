@@ -230,15 +230,16 @@ class OutboundQueue:
                 return f"{target}:{idempotency_key}:{entry_id}"
                 
             except sqlite3.IntegrityError:
-                # Duplicate idempotency key - return existing entry
+                # Duplicate idempotency key - return existing entry with status
                 conn.rollback()
                 cur = conn.execute("""
-                    SELECT id FROM outbound_queue 
+                    SELECT id, status FROM outbound_queue 
                     WHERE idempotency_key = ?
                 """, (idempotency_key,))
                 row = cur.fetchone()
                 if row:
-                    return f"{target}:{idempotency_key}:{row[0]}"
+                    # Include status in the key to help detect already-sent messages
+                    return f"{target}:{idempotency_key}:{row[0]}:status={row[1]}"
                 raise
             except Exception:
                 conn.rollback()

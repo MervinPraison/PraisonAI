@@ -720,7 +720,7 @@ class OutboundDeliveryProtocol(Protocol):
         # Enqueue before sending
         key = await outbox.enqueue(
             idempotency_key="msg-123",
-            target_channel="telegram:12345",
+            target="telegram:12345",
             payload={"text": "Hello", "metadata": {...}}
         )
         
