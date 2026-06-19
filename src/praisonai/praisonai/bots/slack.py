@@ -108,14 +108,14 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
         if hasattr(self.config, 'session') and self.config.session:
             if hasattr(self.config.session, 'reset') and self.config.session.reset:
                 from ._reset_policy import SessionResetPolicy
-                reset_policy = SessionResetPolicy.from_dict(self.config.session.reset.__dict__)
+                reset_policy = SessionResetPolicy.from_dict(self.config.session.reset.model_dump())
         
         # Support backward compatibility with max_history at channel level
         max_history = 100
-        if hasattr(self.config, 'max_history') and self.config.max_history:
+        if hasattr(self.config, 'max_history') and self.config.max_history is not None:
             max_history = self.config.max_history
         elif hasattr(self.config, 'session') and self.config.session:
-            if hasattr(self.config.session, 'max_history') and self.config.session.max_history:
+            if hasattr(self.config.session, 'max_history') and self.config.session.max_history is not None:
                 max_history = self.config.session.max_history
         
         self._session: BotSessionManager = BotSessionManager(

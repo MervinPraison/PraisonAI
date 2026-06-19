@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, time as datetime_time
+from datetime import datetime, timedelta
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -95,22 +95,27 @@ class SessionResetPolicy:
                 microsecond=0
             )
             
-            # Calculate time since last potential reset
-            # If we're past today's reset time and haven't reset since then
-            if current_datetime >= reset_time_today:
-                # Time since today's scheduled reset (in seconds)
-                seconds_since_scheduled = (current_datetime - reset_time_today).total_seconds()
-                # Time since last actual reset
-                seconds_since_last_reset = now - last_reset
-                
-                # If last reset was before the scheduled time
-                if seconds_since_last_reset > seconds_since_scheduled:
-                    logger.debug(
-                        "Daily reset triggered (hour=%d, last_reset=%.1f mins ago)",
-                        reset_hour,
-                        seconds_since_last_reset / 60
-                    )
-                    return True
+            # Check the most recent scheduled boundary
+            # If current time is past today's reset time, use today's reset time
+            # Otherwise, use yesterday's reset time
+            last_scheduled = (
+                reset_time_today
+                if current_datetime >= reset_time_today
+                else reset_time_today - timedelta(days=1)
+            )
+            
+            # Calculate seconds since the most recent scheduled reset
+            seconds_since_scheduled = (current_datetime - last_scheduled).total_seconds()
+            seconds_since_last_reset = now - last_reset
+            
+            # If we haven't reset since the most recent scheduled time
+            if seconds_since_last_reset >= seconds_since_scheduled:
+                logger.debug(
+                    "Daily reset triggered (hour=%d, last_reset=%.1f mins ago)",
+                    reset_hour,
+                    seconds_since_last_reset / 60
+                )
+                return True
         
         return False
     

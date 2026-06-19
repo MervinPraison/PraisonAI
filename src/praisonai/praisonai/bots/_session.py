@@ -257,7 +257,6 @@ class BotSessionManager:
                 # Duplicate message - return empty response
                 return ""
                 
-        self._last_active[self._storage_key(user_id)] = time.monotonic()
         user_lock = self._get_lock(user_id)
         agent_lock = self._get_agent_lock(agent)
 
@@ -297,6 +296,9 @@ class BotSessionManager:
                     user_history = await loop.run_in_executor(
                         None, self._load_history, user_id
                     )
+                    
+                    # Update last active timestamp AFTER history load and reset check
+                    self._last_active[self._storage_key(user_id)] = time.monotonic()
 
                     # W1 robustness: hold ``agent_lock`` across the FULL LLM call
                     # (not only the history swap) so concurrent users on a shared
@@ -628,10 +630,11 @@ class BotSessionManager:
         last_reset = self._last_reset.get(storage_key, 0)
         
         # If this is a new session, initialize timestamps but don't reset
-        if storage_key not in self._last_active:
-            self._last_active[storage_key] = now
+        if storage_key not in self._last_reset:
             self._last_reset[storage_key] = now
-            return False
+            if storage_key not in self._last_active:
+                self._last_active[storage_key] = now
+                return False
         
         return self._reset_policy.should_reset(
             last_activity=last_activity,
@@ -649,7 +652,7 @@ class BotSessionManager:
         """
         self._histories.pop(storage_key, None)
         # Don't clear last_active as we still need it for idle tracking
-        self._locks.drop(storage_key)
+        # Don't drop lock here as it may still be held by caller
         
         if self._store is not None:
             persist_key = self._session_key(user_id)
