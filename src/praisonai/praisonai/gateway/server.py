@@ -50,6 +50,7 @@ class GatewaySession:
     _max_messages: int = 1000
     _event_cursor: int = 0  # Monotonic cursor for event replay
     _events: List[GatewayEvent] = field(default_factory=list)  # Event history for replay
+    _was_resumed: bool = False  # Track if session was resumed from persistence
     
     # Stepper & Concurrency logic
     _inbox: asyncio.Queue = field(default_factory=asyncio.Queue)
@@ -150,6 +151,9 @@ class GatewaySession:
             _state=data.get("state", {}),
             _max_messages=max_messages,
         )
+        
+        # Mark this session as resumed from persistence
+        session._was_resumed = True
         
         # Restore messages
         for msg_data in data.get("messages", []):
@@ -968,7 +972,7 @@ class WebSocketGateway:
                     "type": "joined",
                     "session_id": session.session_id,
                     "agent_id": agent_id,
-                    "resumed": session_id is not None and session._created_at < time.time() - 1,
+                    "resumed": session._was_resumed,
                     "cursor": session._event_cursor,
                 })
                 
@@ -1160,9 +1164,7 @@ class WebSocketGateway:
         ws = self._clients.get(client_id)
         if ws:
             try:
-                await ws.send_json(data)
-                
-                # Track event in session for replay if it's a response or important event
+                # Track event in session BEFORE sending if it's a response or important event
                 if data.get("type") in ["response", "message", "stream_end", "error"]:
                     session_id = self._client_sessions.get(client_id)
                     if session_id:
@@ -1175,10 +1177,11 @@ class WebSocketGateway:
                                 target=client_id,
                             )
                             cursor = session.add_event(event)
-                            # Add cursor to the data being sent
+                            # Add cursor to the data BEFORE sending
                             data["cursor"] = cursor
-                            # Re-send with cursor
-                            await ws.send_json(data)
+                
+                # Send ONCE with cursor already attached if applicable
+                await ws.send_json(data)
             except Exception as e:
                 logger.error(f"Error sending to client {client_id}: {e}")
     
@@ -1328,19 +1331,17 @@ class WebSocketGateway:
         # Try to rehydrate from persistent store
         if session_id and self._session_store and self._session_store.session_exists(session_id):
             try:
-                # Rehydrate session from store
-                chat_history = self._session_store.get_chat_history(session_id)
+                # Rehydrate session from store - get full session data with metadata
+                session_data_obj = self._session_store.get_session(session_id)
                 
                 # Load session metadata if stored
-                session_data = {}
-                if hasattr(self._session_store, 'get_session_metadata'):
-                    session_data = self._session_store.get_session_metadata(session_id) or {}
-                elif chat_history:
-                    # Try to extract session data from the first system message if available
-                    for msg in chat_history:
-                        if msg.get('role') == 'system' and 'session_data' in msg.get('metadata', {}):
-                            session_data = msg['metadata']['session_data']
-                            break
+                session_data = None
+                
+                # Try to extract session data from system messages with metadata
+                for msg in session_data_obj.messages:
+                    if msg.role == 'system' and msg.metadata and 'session_data' in msg.metadata:
+                        session_data = msg.metadata['session_data']
+                        break
                 
                 # Restore session from persisted data
                 if session_data:
@@ -1353,15 +1354,17 @@ class WebSocketGateway:
                         _client_id=client_id,
                         _max_messages=self.config.session_config.max_messages,
                     )
+                    # Mark as resumed since we're restoring from persistence
+                    session._was_resumed = True
                     # Restore messages from history
-                    for msg in chat_history:
-                        if msg.get('role') in ['user', 'assistant']:
+                    for msg in session_data_obj.messages:
+                        if msg.role in ['user', 'assistant']:
                             gateway_msg = GatewayMessage(
-                                content=msg['content'],
-                                sender_id=msg['role'],
+                                content=msg.content,
+                                sender_id=msg.role,
                                 session_id=sid,
-                                timestamp=msg.get('timestamp', time.time()),
-                                metadata=msg.get('metadata', {}),
+                                timestamp=msg.timestamp,
+                                metadata=msg.metadata or {},
                             )
                             session.add_message(gateway_msg)
                 
