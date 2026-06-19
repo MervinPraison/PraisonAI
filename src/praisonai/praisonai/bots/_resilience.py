@@ -250,3 +250,72 @@ class ConnectionMonitor:
             "total_recoveries": self.total_recoveries,
             "max_attempts": self.policy.max_attempts,
         }
+
+
+async def deliver_with_retry(
+    send_func,
+    *,
+    policy: Optional[BackoffPolicy] = None,
+    is_recoverable: Optional[callable] = None,
+    platform: str = "",
+    parked_store: Optional[Any] = None,
+    reply_data: Optional[dict] = None,
+) -> Any:
+    """Deliver a message with bounded exponential backoff retry.
+    
+    This wrapper ensures reliable delivery of bot responses even when
+    transient platform errors occur (HTTP 5xx, network issues, rate limits).
+    
+    Args:
+        send_func: Async callable to execute (the send operation)
+        policy: Backoff configuration (defaults to BackoffPolicy())
+        is_recoverable: Function to check if error is transient (defaults to is_recoverable_error)
+        platform: Platform name for error classification
+        parked_store: Optional outbound DLQ for failed sends
+        reply_data: Optional metadata about the reply for DLQ storage
+        
+    Returns:
+        Result from successful send_func execution
+        
+    Raises:
+        The original exception if non-recoverable or max attempts exceeded
+    """
+    if policy is None:
+        policy = BackoffPolicy(max_attempts=3)  # Default to 3 attempts for outbound
+    
+    if is_recoverable is None:
+        is_recoverable = lambda e: is_recoverable_error(e, platform)
+    
+    last_error = None
+    for attempt in range(1, policy.max_attempts + 1):
+        try:
+            return await send_func()
+        except Exception as e:
+            last_error = e
+            
+            # Check if error is recoverable and we have attempts left
+            if not is_recoverable(e) or attempt >= policy.max_attempts:
+                # Park the message for later replay if DLQ is configured
+                if parked_store is not None and reply_data is not None:
+                    try:
+                        await parked_store.enqueue_outbound(
+                            platform=platform,
+                            error=f"{type(e).__name__}: {e}",
+                            **reply_data
+                        )
+                        logger.info(f"[{platform}] Parked failed outbound message for later replay")
+                    except Exception as dlq_exc:
+                        logger.error(f"Failed to park outbound message: {dlq_exc}")
+                raise
+            
+            # Compute backoff delay
+            delay = compute_backoff(policy, attempt)
+            logger.warning(
+                f"[{platform}] Outbound send failed (attempt {attempt}/{policy.max_attempts}): "
+                f"{e}; retrying in {delay:.1f}s"
+            )
+            
+            await asyncio.sleep(delay)
+    
+    # Should not reach here, but for safety
+    raise last_error

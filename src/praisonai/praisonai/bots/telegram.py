@@ -41,6 +41,8 @@ from ._unknown_user import UnknownUserHandler, BotContext
 from ._pairing_ui import PairingUIBuilder, PairingCallbackHandler
 from ._streaming import StreamingConfig, StreamingMode, DraftStreamer
 from ._rate_limit import RateLimiter
+from ._resilience import deliver_with_retry, BackoffPolicy, TELEGRAM_BACKOFF
+from ._dlq import OutboundDLQ
 from ..gateway.unicode_utils import safe_error_message, safe_log_message, extract_root_cause_from_error
 from ..gateway.pairing import PairingStore
 
@@ -153,6 +155,31 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         # Resilience
         self._monitor = None  # Lazy: ConnectionMonitor
         self._stop_event: Optional[asyncio.Event] = None
+        
+        # Outbound resilience configuration
+        outbound_resilience = getattr(self.config, 'outbound_resilience', None)
+        if outbound_resilience and getattr(outbound_resilience, 'enabled', True):
+            # Use configured values
+            self._outbound_backoff: BackoffPolicy = BackoffPolicy(
+                initial_ms=getattr(outbound_resilience, 'initial_ms', 1000),
+                max_ms=getattr(outbound_resilience, 'max_ms', 10000),
+                factor=getattr(outbound_resilience, 'factor', 1.5),
+                max_attempts=getattr(outbound_resilience, 'max_attempts', 3),
+                jitter=getattr(outbound_resilience, 'jitter', 0.25)
+            )
+            # Initialize outbound DLQ if path is configured
+            outbound_dlq_path = getattr(outbound_resilience, 'dlq_path', None)
+            self._outbound_dlq: Optional[OutboundDLQ] = None
+            if outbound_dlq_path:
+                try:
+                    self._outbound_dlq = OutboundDLQ(path=outbound_dlq_path)
+                    logger.info(f"Outbound DLQ initialized at {outbound_dlq_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to initialize outbound DLQ: {e}")
+        else:
+            # Default resilience settings
+            self._outbound_backoff = BackoffPolicy(initial_ms=1000, max_ms=10000, factor=1.5, max_attempts=3)
+            self._outbound_dlq = None
     
     
     def configure_streaming(self, config: StreamingConfig) -> None:
@@ -703,7 +730,20 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         if thread_id:
             kwargs["message_thread_id"] = int(thread_id)
         
-        sent = await self._application.bot.send_message(**kwargs)
+        # Use retry wrapper for reliable delivery
+        send_kwargs = dict(kwargs)  # Copy to avoid closure issues
+        sent = await deliver_with_retry(
+            lambda: self._application.bot.send_message(**send_kwargs),
+            policy=self._outbound_backoff,
+            platform="telegram",
+            parked_store=self._outbound_dlq,
+            reply_data={
+                "channel_id": channel_id,
+                "reply_text": text,
+                "thread_id": thread_id or "",
+                "reply_to": reply_to or "",
+            }
+        )
         
         return BotMessage(
             message_id=str(sent.message_id),
@@ -727,14 +767,41 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             kwargs = {"chat_id": chat_id, "text": text}
             if reply_to:
                 kwargs["reply_to_message_id"] = reply_to
-            await self._application.bot.send_message(**kwargs)
+            
+            # Use retry wrapper for reliable delivery
+            # Create a lambda that captures kwargs properly
+            send_kwargs = dict(kwargs)  # Copy to avoid closure issues
+            await deliver_with_retry(
+                lambda: self._application.bot.send_message(**send_kwargs),
+                policy=self._outbound_backoff,
+                platform="telegram",
+                parked_store=self._outbound_dlq,
+                reply_data={
+                    "channel_id": str(chat_id),
+                    "reply_text": text,
+                    "reply_to": str(reply_to) if reply_to else "",
+                }
+            )
         else:
             chunks = chunk_message(text, max_length=max_len, preserve_fences=True)
             for i, chunk in enumerate(chunks):
                 kwargs = {"chat_id": chat_id, "text": chunk}
                 if i == 0 and reply_to:
                     kwargs["reply_to_message_id"] = reply_to
-                await self._application.bot.send_message(**kwargs)
+                
+                # Use retry wrapper for each chunk
+                send_kwargs = dict(kwargs)  # Copy to avoid closure issues
+                await deliver_with_retry(
+                    lambda: self._application.bot.send_message(**send_kwargs),
+                    policy=self._outbound_backoff,
+                    platform="telegram",
+                    parked_store=self._outbound_dlq,
+                    reply_data={
+                        "channel_id": str(chat_id),
+                        "reply_text": chunk,
+                        "reply_to": str(reply_to) if reply_to and i == 0 else "",
+                    }
+                )
     
     async def _transcribe_audio(self, update) -> Optional[str]:
         """Download and transcribe voice/audio message."""
@@ -801,12 +868,24 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 try:
                     with open(media_path, "rb") as f:
                         if audio_as_voice:
-                            await self._application.bot.send_voice(
-                                chat_id=chat_id, voice=f
+                            # Use retry wrapper for voice messages
+                            await deliver_with_retry(
+                                lambda: self._application.bot.send_voice(
+                                    chat_id=chat_id, voice=f
+                                ),
+                                policy=self._outbound_backoff,
+                                platform="telegram",
+                                parked_store=None,  # Don't DLQ media for now (file handle issues)
                             )
                         else:
-                            await self._application.bot.send_audio(
-                                chat_id=chat_id, audio=f
+                            # Use retry wrapper for audio messages
+                            await deliver_with_retry(
+                                lambda: self._application.bot.send_audio(
+                                    chat_id=chat_id, audio=f
+                                ),
+                                policy=self._outbound_backoff,
+                                platform="telegram",
+                                parked_store=None,  # Don't DLQ media for now (file handle issues)
                             )
                 except Exception as e:
                     logger.error(f"Failed to send audio: {e}")
