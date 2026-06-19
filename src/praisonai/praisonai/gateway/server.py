@@ -282,6 +282,7 @@ class WebSocketGateway:
         
         # Channel supervisor for resilient bot management
         self._channel_supervisor = ChannelSupervisor()
+        self._health_config = None  # Will be set from config if provided
     
     @property
     def is_running(self) -> bool:
@@ -1744,6 +1745,11 @@ class WebSocketGateway:
 
         # Start all bots concurrently
         if self._channel_bots:
+            # Start health monitoring if configured
+            if self._health_config and self._health_config.enabled:
+                await self._channel_supervisor.start_health_monitoring()
+                logger.info("Channel health monitoring enabled")
+            
             for name, bot in self._channel_bots.items():
                 task = asyncio.create_task(self._run_bot_safe(name, bot))
                 self._channel_tasks.append(task)
@@ -2062,6 +2068,9 @@ class WebSocketGateway:
 
     async def stop_channels(self) -> None:
         """Gracefully stop all running channel bots."""
+        # Stop health monitoring first
+        await self._channel_supervisor.stop_health_monitoring()
+        
         for task in self._channel_tasks:
             task.cancel()
 
@@ -2192,6 +2201,14 @@ class WebSocketGateway:
                 "manual_pause": status.manual_pause,
             }
         return status_dict
+    
+    def get_health_monitor_status(self) -> Dict[str, Any]:
+        """Get health monitor status.
+        
+        Returns:
+            Dictionary with health monitor status and channel health information
+        """
+        return self._channel_supervisor.get_health_status()
 
     async def start_with_config(self, config_path: str) -> None:
         """Start the gateway with a gateway.yaml configuration.
@@ -2210,6 +2227,14 @@ class WebSocketGateway:
             self._host = gw_cfg["host"]
         if gw_cfg.get("port"):
             self._port = int(gw_cfg["port"])
+        
+        # Parse health monitoring configuration
+        health_cfg = gw_cfg.get("health")
+        if health_cfg and isinstance(health_cfg, dict):
+            from .health_monitor import HealthMonitorConfig
+            self._health_config = HealthMonitorConfig.from_dict(health_cfg)
+            # Recreate supervisor with health config
+            self._channel_supervisor = ChannelSupervisor(health_config=self._health_config)
 
         # Create agents
         agents_cfg = cfg.get("agents", {})
