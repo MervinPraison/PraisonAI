@@ -26,6 +26,8 @@ from praisonaiagents.gateway import (
     GatewayMessage,
     EventType,
 )
+from praisonaiagents.session.protocols import SessionStoreProtocol
+from praisonaiagents.session.store import DefaultSessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,8 @@ class GatewaySession:
     _state: Dict[str, Any] = field(default_factory=dict)
     _messages: List[GatewayMessage] = field(default_factory=list)
     _max_messages: int = 1000
+    _event_cursor: int = 0  # Monotonic cursor for event replay
+    _events: List[GatewayEvent] = field(default_factory=list)  # Event history for replay
     
     # Stepper & Concurrency logic
     _inbox: asyncio.Queue = field(default_factory=asyncio.Queue)
@@ -95,6 +99,77 @@ class GatewaySession:
     
     def close(self) -> None:
         self._is_active = False
+    
+    def add_event(self, event: GatewayEvent) -> int:
+        """Add an event and return its cursor position."""
+        self._event_cursor += 1
+        event.data['cursor'] = self._event_cursor
+        self._events.append(event)
+        self._last_activity = time.time()
+        # Keep events bounded to prevent unbounded growth
+        if len(self._events) > self._max_messages * 2:
+            self._events = self._events[-self._max_messages:]
+        return self._event_cursor
+    
+    def get_events_since(self, cursor: int) -> List[GatewayEvent]:
+        """Get events since the given cursor."""
+        return [e for e in self._events if e.data.get('cursor', 0) > cursor]
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize session to dictionary for persistence."""
+        return {
+            "session_id": self._session_id,
+            "agent_id": self._agent_id,
+            "client_id": self._client_id,
+            "is_active": self._is_active,
+            "created_at": self._created_at,
+            "last_activity": self._last_activity,
+            "state": self._state,
+            "messages": [{
+                "content": msg.content,
+                "sender_id": msg.sender_id,
+                "session_id": msg.session_id,
+                "message_id": msg.message_id,
+                "timestamp": msg.timestamp,
+                "metadata": msg.metadata,
+            } for msg in self._messages],
+            "event_cursor": self._event_cursor,
+            "events": [e.to_dict() for e in self._events[-100:]],  # Keep last 100 events
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any], max_messages: int = 1000) -> 'GatewaySession':
+        """Deserialize session from dictionary."""
+        session = cls(
+            _session_id=data["session_id"],
+            _agent_id=data["agent_id"],
+            _client_id=data.get("client_id"),
+            _is_active=data.get("is_active", True),
+            _created_at=data.get("created_at", time.time()),
+            _last_activity=data.get("last_activity", time.time()),
+            _state=data.get("state", {}),
+            _max_messages=max_messages,
+        )
+        
+        # Restore messages
+        for msg_data in data.get("messages", []):
+            msg = GatewayMessage(
+                content=msg_data["content"],
+                sender_id=msg_data["sender_id"],
+                session_id=msg_data["session_id"],
+                message_id=msg_data.get("message_id"),
+                timestamp=msg_data.get("timestamp", time.time()),
+                metadata=msg_data.get("metadata", {}),
+            )
+            session._messages.append(msg)
+        
+        # Restore event cursor and events
+        session._event_cursor = data.get("event_cursor", 0)
+        for event_data in data.get("events", []):
+            event = GatewayEvent.from_dict(event_data)
+            session._events.append(event)
+        
+        return session
 
     async def queue_message(self, message: str) -> None:
         """Queue a user message for execution after the current operation."""
@@ -176,7 +251,21 @@ class WebSocketGateway:
                 return cls._substitute_env_vars(value)
             return value
         
-        # Build GatewayConfig
+        # Build GatewayConfig with session configuration
+        from praisonaiagents.gateway.config import SessionConfig
+        
+        # Parse session configuration if present
+        session_config = SessionConfig()
+        if "session" in gateway_config:
+            session_data = gateway_config["session"]
+            session_config = SessionConfig(
+                timeout=int(session_data.get("timeout", 3600)),
+                max_messages=int(session_data.get("max_messages", 1000)),
+                persist=bool(session_data.get("persist", False)),
+                persist_path=_substitute(session_data.get("persist_path")),
+                resume_window=int(session_data.get("resume_window", 86400)),
+            )
+        
         config = GatewayConfig(
             host=_substitute(gateway_config.get("host", "127.0.0.1")),
             port=int(gateway_config.get("port", 8765)),
@@ -187,6 +276,7 @@ class WebSocketGateway:
             reconnect_timeout=int(gateway_config.get("reconnect_timeout", 60)),
             ssl_cert=_substitute(gateway_config.get("ssl_cert")),
             ssl_key=_substitute(gateway_config.get("ssl_key")),
+            session_config=session_config,
         )
         
         logger.info(f"Gateway config loaded from {config_path}")
@@ -197,6 +287,7 @@ class WebSocketGateway:
         host: str = "127.0.0.1",
         port: int = 8765,
         config: Optional[GatewayConfig] = None,
+        session_store: Optional[SessionStoreProtocol] = None,
     ):
         """Initialize the gateway.
         
@@ -204,6 +295,7 @@ class WebSocketGateway:
             host: Host to bind to
             port: Port to listen on
             config: Optional gateway configuration
+            session_store: Optional session store for persistence
         """
         self.config = config or GatewayConfig(host=host, port=port)
         
@@ -262,6 +354,21 @@ class WebSocketGateway:
         self._clients: Dict[str, Any] = {}  # WebSocket connections
         self._client_sessions: Dict[str, str] = {}  # client_id -> session_id
         
+        # Initialize session store based on configuration
+        if session_store:
+            self._session_store: Optional[SessionStoreProtocol] = session_store
+        elif self.config.session_config.persist:
+            # Use DefaultSessionStore when persistence is enabled
+            persist_path = self.config.session_config.persist_path
+            self._session_store = DefaultSessionStore(session_dir=persist_path)
+            logger.info(f"Session persistence enabled, using directory: {persist_path or '~/.praisonai/sessions/'}")
+        else:
+            self._session_store = None
+            logger.info("Session persistence disabled, using in-memory sessions only")
+        
+        # Track session TTLs for cleanup
+        self._session_ttls: Dict[str, float] = {}  # session_id -> expiry timestamp
+        
         self._event_handlers: Dict[str, List[Callable]] = {}
         self._message_queue: asyncio.Queue = asyncio.Queue()
         
@@ -276,6 +383,9 @@ class WebSocketGateway:
         
         # Scheduler tick background task
         self._scheduler_task: Optional[asyncio.Task] = None
+        
+        # Session cleanup background task
+        self._cleanup_task: Optional[asyncio.Task] = None
         
         # PID lock for single-instance enforcement
         self._pid_lock: Optional[Any] = None
@@ -788,6 +898,10 @@ class WebSocketGateway:
         self._is_running = True
         self._started_at = time.time()
         
+        # Start session cleanup task if persistence is enabled
+        if self._session_store:
+            await self._start_session_cleanup()
+        
         logger.info(f"Gateway started on ws://{self._host}:{self._port}")
         
         try:
@@ -835,13 +949,35 @@ class WebSocketGateway:
         if msg_type == "join":
             agent_id = data.get("agent_id")
             if agent_id and agent_id in self._agents:
-                session = self.create_session(agent_id, client_id)
+                # Support reconnection with existing session
+                session_id = data.get("session_id")  # Optional: existing session to resume
+                since_cursor = data.get("since")  # Optional: cursor for event replay
+                
+                # Resume or create session
+                session, replay_events = self.resume_or_create_session(
+                    session_id=session_id,
+                    agent_id=agent_id,
+                    client_id=client_id,
+                    since_cursor=since_cursor,
+                )
+                
                 self._client_sessions[client_id] = session.session_id
+                
+                # Send join confirmation
                 await self._send_to_client(client_id, {
                     "type": "joined",
                     "session_id": session.session_id,
                     "agent_id": agent_id,
+                    "resumed": session_id is not None and session._created_at < time.time() - 1,
+                    "cursor": session._event_cursor,
                 })
+                
+                # Replay missed events if any
+                for event in replay_events:
+                    await self._send_to_client(client_id, {
+                        "type": "replay",
+                        "event": event.to_dict(),
+                    })
             else:
                 await self._send_to_client(client_id, {
                     "type": "error",
@@ -877,7 +1013,8 @@ class WebSocketGateway:
         elif msg_type == "leave":
             session_id = self._client_sessions.pop(client_id, None)
             if session_id:
-                self.close_session(session_id)
+                # Close session but keep it persisted for resumption
+                self.close_session(session_id, persist=True)
                 await self._send_to_client(client_id, {
                     "type": "left",
                     "session_id": session_id,
@@ -1024,6 +1161,24 @@ class WebSocketGateway:
         if ws:
             try:
                 await ws.send_json(data)
+                
+                # Track event in session for replay if it's a response or important event
+                if data.get("type") in ["response", "message", "stream_end", "error"]:
+                    session_id = self._client_sessions.get(client_id)
+                    if session_id:
+                        session = self._sessions.get(session_id)
+                        if session:
+                            event = GatewayEvent(
+                                type=data.get("type", "message"),
+                                data=data,
+                                source="gateway",
+                                target=client_id,
+                            )
+                            cursor = session.add_event(event)
+                            # Add cursor to the data being sent
+                            data["cursor"] = cursor
+                            # Re-send with cursor
+                            await ws.send_json(data)
             except Exception as e:
                 logger.error(f"Error sending to client {client_id}: {e}")
     
@@ -1160,8 +1315,64 @@ class WebSocketGateway:
         client_id: Optional[str] = None,
         session_id: Optional[str] = None,
     ) -> GatewaySession:
-        """Create a new session."""
+        """Create a new session or resume an existing one."""
         sid = session_id or str(uuid.uuid4())
+        
+        # Check if session exists in memory first
+        if sid in self._sessions:
+            session = self._sessions[sid]
+            if session.is_active:
+                logger.info(f"Session already active in memory: {sid}")
+                return session
+        
+        # Try to rehydrate from persistent store
+        if session_id and self._session_store and self._session_store.session_exists(session_id):
+            try:
+                # Rehydrate session from store
+                chat_history = self._session_store.get_chat_history(session_id)
+                
+                # Load session metadata if stored
+                session_data = {}
+                if hasattr(self._session_store, 'get_session_metadata'):
+                    session_data = self._session_store.get_session_metadata(session_id) or {}
+                elif chat_history:
+                    # Try to extract session data from the first system message if available
+                    for msg in chat_history:
+                        if msg.get('role') == 'system' and 'session_data' in msg.get('metadata', {}):
+                            session_data = msg['metadata']['session_data']
+                            break
+                
+                # Restore session from persisted data
+                if session_data:
+                    session = GatewaySession.from_dict(session_data, self.config.session_config.max_messages)
+                else:
+                    # Fallback: create new session but restore messages
+                    session = GatewaySession(
+                        _session_id=sid,
+                        _agent_id=agent_id,
+                        _client_id=client_id,
+                        _max_messages=self.config.session_config.max_messages,
+                    )
+                    # Restore messages from history
+                    for msg in chat_history:
+                        if msg.get('role') in ['user', 'assistant']:
+                            gateway_msg = GatewayMessage(
+                                content=msg['content'],
+                                sender_id=msg['role'],
+                                session_id=sid,
+                                timestamp=msg.get('timestamp', time.time()),
+                                metadata=msg.get('metadata', {}),
+                            )
+                            session.add_message(gateway_msg)
+                
+                session._is_active = True  # Reactivate the session
+                self._sessions[sid] = session
+                logger.info(f"Session resumed from persistent store: {sid} for agent {agent_id}")
+                return session
+            except Exception as e:
+                logger.warning(f"Failed to rehydrate session {sid}: {e}. Creating new session.")
+        
+        # Create new session
         session = GatewaySession(
             _session_id=sid,
             _agent_id=agent_id,
@@ -1169,6 +1380,20 @@ class WebSocketGateway:
             _max_messages=self.config.session_config.max_messages,
         )
         self._sessions[sid] = session
+        
+        # Persist initial session state if store is configured
+        if self._session_store:
+            try:
+                # Store session metadata as first system message
+                self._session_store.add_message(
+                    session_id=sid,
+                    role="system",
+                    content="Session initialized",
+                    metadata={"session_data": session.to_dict()},
+                )
+            except Exception as e:
+                logger.warning(f"Failed to persist initial session state: {e}")
+        
         logger.info(f"Session created: {sid} for agent {agent_id}")
         return session
     
@@ -1176,14 +1401,44 @@ class WebSocketGateway:
         """Get a session by ID."""
         return self._sessions.get(session_id)
     
-    def close_session(self, session_id: str) -> bool:
-        """Close a session."""
-        session = self._sessions.pop(session_id, None)
-        if session:
-            session.close()
-            logger.info(f"Session closed: {session_id}")
-            return True
-        return False
+    def close_session(self, session_id: str, persist: bool = True) -> bool:
+        """Close a session, optionally persisting it for later resumption.
+        
+        Args:
+            session_id: The session ID to close
+            persist: Whether to persist the session for later resumption (default: True)
+        
+        Returns:
+            True if session was closed, False if not found
+        """
+        session = self._sessions.get(session_id)
+        if not session:
+            return False
+        
+        session.close()
+        
+        # Persist session state before removing from memory if configured
+        if persist and self._session_store:
+            try:
+                # Save final session state
+                self._session_store.add_message(
+                    session_id=session_id,
+                    role="system",
+                    content="Session closed",
+                    metadata={"session_data": session.to_dict()},
+                )
+                # Set TTL for session cleanup
+                resume_window = self.config.session_config.resume_window
+                self._session_ttls[session_id] = time.time() + resume_window
+                logger.info(f"Session {session_id} persisted, resumable for {resume_window}s")
+            except Exception as e:
+                logger.warning(f"Failed to persist session state on close: {e}")
+        
+        # Remove from active sessions
+        self._sessions.pop(session_id, None)
+        
+        logger.info(f"Session closed: {session_id}")
+        return True
     
     def list_sessions(self, agent_id: Optional[str] = None) -> List[str]:
         """List session IDs, optionally filtered by agent."""
@@ -1193,6 +1448,45 @@ class WebSocketGateway:
                 if session.agent_id == agent_id
             ]
         return list(self._sessions.keys())
+    
+    def resume_or_create_session(
+        self,
+        session_id: Optional[str],
+        agent_id: str,
+        client_id: Optional[str] = None,
+        since_cursor: Optional[int] = None,
+    ) -> tuple[GatewaySession, List[GatewayEvent]]:
+        """Resume an existing session or create a new one, with event replay.
+        
+        Args:
+            session_id: Existing session ID to resume (None to create new)
+            agent_id: Agent ID for the session
+            client_id: Client ID
+            since_cursor: Cursor position to replay events from
+        
+        Returns:
+            Tuple of (session, replay_events) where replay_events are events
+            that occurred after since_cursor
+        """
+        replay_events = []
+        
+        # Try to resume existing session
+        if session_id:
+            session = self.get_session(session_id)
+            if not session and self._session_store and self._session_store.session_exists(session_id):
+                # Rehydrate from store
+                session = self.create_session(agent_id, client_id, session_id)
+            
+            if session:
+                # Get events to replay if cursor provided
+                if since_cursor is not None:
+                    replay_events = session.get_events_since(since_cursor)
+                    logger.info(f"Replaying {len(replay_events)} events since cursor {since_cursor}")
+                return session, replay_events
+        
+        # Create new session if not found
+        session = self.create_session(agent_id, client_id, session_id)
+        return session, []
     
     def on_event(self, event_type: str) -> Callable:
         """Decorator to register an event handler."""
@@ -1372,6 +1666,43 @@ class WebSocketGateway:
 
         self._scheduler_task = asyncio.create_task(_run())
         logger.info("Scheduler tick started (interval=15s)")
+    
+    async def _start_session_cleanup(self) -> None:
+        """Start periodic cleanup of expired sessions."""
+        if not self._session_store:
+            return  # No cleanup needed without persistence
+        
+        async def _cleanup():
+            while self._is_running:
+                try:
+                    await asyncio.sleep(3600)  # Check hourly
+                    
+                    # Clean up expired session TTLs
+                    current_time = time.time()
+                    expired_sessions = [
+                        sid for sid, expiry in self._session_ttls.items()
+                        if expiry < current_time
+                    ]
+                    
+                    for sid in expired_sessions:
+                        try:
+                            # Remove from TTL tracking
+                            self._session_ttls.pop(sid, None)
+                            
+                            # Delete from persistent store
+                            if self._session_store:
+                                self._session_store.delete_session(sid)
+                                logger.info(f"Expired session removed from store: {sid}")
+                        except Exception as e:
+                            logger.warning(f"Failed to cleanup expired session {sid}: {e}")
+                            
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    logger.error(f"Session cleanup error: {e}")
+        
+        self._cleanup_task = asyncio.create_task(_cleanup())
+        logger.info("Session cleanup task started (interval=1h)")
 
     # ── Multi-bot lifecycle ───────────────────────────────────────────
 
@@ -2267,4 +2598,6 @@ class WebSocketGateway:
                 self._config_watch_task.cancel()
             if self._scheduler_task:
                 self._scheduler_task.cancel()
+            if self._cleanup_task:
+                self._cleanup_task.cancel()
             await self.stop_channels()
