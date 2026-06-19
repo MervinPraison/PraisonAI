@@ -17,6 +17,7 @@ class SessionConfig:
         max_messages: Maximum messages to keep in history (0 = unlimited)
         persist: Whether to persist session state
         persist_path: Path for session persistence
+        resume_window: How long (seconds) a session stays resumable after disconnect
         metadata: Additional session metadata
     """
     
@@ -24,6 +25,7 @@ class SessionConfig:
     max_messages: int = 1000
     persist: bool = False
     persist_path: Optional[str] = None
+    resume_window: int = 86400  # 24 hours default
     metadata: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -33,6 +35,7 @@ class SessionConfig:
             "max_messages": self.max_messages,
             "persist": self.persist,
             "persist_path": self.persist_path,
+            "resume_window": self.resume_window,
             "metadata": self.metadata,
         }
 
