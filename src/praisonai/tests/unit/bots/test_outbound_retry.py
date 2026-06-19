@@ -7,10 +7,10 @@ import asyncio
 import logging
 from unittest.mock import Mock, AsyncMock, patch
 
-from src.praisonai.praisonai.bots._resilience import (
+from praisonai.bots._resilience import (
     deliver_with_retry,
     BackoffPolicy,
-    is_recoverable_error
+    is_recoverable_error,
 )
 
 logging.basicConfig(level=logging.INFO)

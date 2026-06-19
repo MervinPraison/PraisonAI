@@ -8,9 +8,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-# Add the praisonai package to the path
-sys.path.insert(0, str(Path(__file__).parent / "src" / "praisonai"))
-
 def test_credential_store():
     """Test basic credential store functionality."""
     print("🧪 Testing credential store...")
