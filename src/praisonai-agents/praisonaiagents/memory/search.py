@@ -14,6 +14,9 @@ from datetime import datetime
 class SearchMixin:
     """Mixin class containing search and retrieval methods for the Memory class."""
     
+    # Allowed table names for SQLite queries to prevent SQL injection
+    _ALLOWED_SQLITE_TABLES = {"short_term", "long_term"}
+    
     def search_short_term(self, query: str, limit: int = 5, metadata_filter: Optional[Dict] = None, 
                          min_quality: Optional[float] = None, user_id: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]:
         """
@@ -216,6 +219,10 @@ class SearchMixin:
         if not conn:
             return []
         
+        # Validate table name to prevent SQL injection
+        if table not in self._ALLOWED_SQLITE_TABLES:
+            raise ValueError(f"Invalid table name: {table}. Must be one of {self._ALLOWED_SQLITE_TABLES}")
+        
         # Build WHERE clause
         where_clauses = ["content LIKE ?"]
         params = [f"%{query}%"]
@@ -254,13 +261,13 @@ class SearchMixin:
     def _search_sqlite_stm(self, query: str, limit: int, metadata_filter: Optional[Dict],
                           min_quality: Optional[float], user_id: Optional[str]) -> List[Dict[str, Any]]:
         """Search short-term memory in SQLite."""
-        conn = self._get_stm_conn() if hasattr(self, '_get_stm_conn') else None
+        conn = self._get_stm_conn()  # Let AttributeError propagate naturally
         return self._search_sqlite(conn, "short_term", query, limit, metadata_filter, min_quality, user_id)
     
     def _search_sqlite_ltm(self, query: str, limit: int, metadata_filter: Optional[Dict],
                           min_quality: Optional[float], user_id: Optional[str]) -> List[Dict[str, Any]]:
         """Search long-term memory in SQLite."""
-        conn = self._get_ltm_conn() if hasattr(self, '_get_ltm_conn') else None
+        conn = self._get_ltm_conn()  # Let AttributeError propagate naturally
         return self._search_sqlite(conn, "long_term", query, limit, metadata_filter, min_quality, user_id)
     
     def _format_vector_results(self, results: Dict) -> List[Dict[str, Any]]:
