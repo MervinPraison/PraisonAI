@@ -7,20 +7,9 @@ Reuses existing telemetry/token_collector for token tracking.
 
 import logging
 from praisonaiagents._logging import get_logger
-from typing import Optional, List, Dict, Any, Callable
-from dataclasses import dataclass, field
+from typing import Optional, List, Dict, Any
 
 logger = get_logger(__name__)
-
-@dataclass
-class SummarizationConfig:
-    """Configuration for auto-summarization."""
-    enabled: bool = False
-    threshold: float = 0.8  # 80% of context window
-    context_window: int = 128000  # Default for GPT-4
-    summary_model: Optional[str] = None  # Use smaller model for summaries
-    preserve_system: bool = True  # Keep system message
-    preserve_recent: int = 2  # Keep last N message pairs
 
 class SummarizationManager:
     """
@@ -179,45 +168,3 @@ SUMMARY:"""
         """Number of times summarization has been performed."""
         return self._summarization_count
 
-async def summarize_conversation(
-    messages: List[Dict[str, str]],
-    llm_call: Callable,
-    manager: SummarizationManager,
-) -> List[Dict[str, str]]:
-    """
-    Summarize conversation using LLM.
-    
-    Args:
-        messages: Current message history
-        llm_call: Async function to call LLM
-        manager: SummarizationManager instance
-        
-    Returns:
-        New message history with summary
-    """
-    prompt = manager.generate_summary_prompt(messages)
-    
-    # Call LLM to generate summary
-    summary = await llm_call(prompt)
-    
-    # Prepare new history
-    new_history = manager.prepare_summarized_history(messages, summary)
-    
-    # Reset token count (will be recalculated on next message)
-    manager.reset_tokens()
-    
-    return new_history
-
-def summarize_conversation_sync(
-    messages: List[Dict[str, str]],
-    llm_call: Callable,
-    manager: SummarizationManager,
-) -> List[Dict[str, str]]:
-    """
-    Synchronous version of summarize_conversation.
-    """
-    prompt = manager.generate_summary_prompt(messages)
-    summary = llm_call(prompt)
-    new_history = manager.prepare_summarized_history(messages, summary)
-    manager.reset_tokens()
-    return new_history
