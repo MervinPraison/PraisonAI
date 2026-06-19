@@ -1099,28 +1099,6 @@ class AgentTeam(SpawnAnnounceProtocol):
             logger.warning(f"Task {task_id}: Guardrail processing error (retry {task.retry_count}/{task.max_retries}): {e}")
             return task_output, True  # Signal retry needed
 
-    def _run_task_callback(self, task, task_id, task_output):
-        """Execute task callback (handles both sync and async callbacks).
-        
-        Args:
-            task: The task object
-            task_id: Task identifier for logging
-            task_output: Task output to pass to callback
-        """
-        if not task.callback:
-            return
-            
-        try:
-            if asyncio.iscoroutinefunction(task.callback):
-                if run_coroutine_safely:
-                    run_coroutine_safely(task.callback(task_output))
-                else:
-                    logger.warning("run_coroutine_safely not available, skipping async callback")
-            else:
-                task.callback(task_output)
-        except Exception as e:
-            logger.error(f"Error executing task callback for task {task_id}: {e}")
-            logger.exception(e)
 
     async def arun_task(self, task_id):
         """Async version of run_task method"""
@@ -1158,9 +1136,6 @@ class AgentTeam(SpawnAnnounceProtocol):
                             raise
                         if hasattr(task, 'fail_on_memory_error') and task.fail_on_memory_error:
                             raise
-                    
-                    # Run task callback using shared helper
-                    self._run_task_callback(task, task_id, task_output)
                             
                     self.save_output_to_file(task, task_output)
                     if self.verbose >= 1:
@@ -1389,9 +1364,6 @@ class AgentTeam(SpawnAnnounceProtocol):
                     except Exception as e:
                         logger.error(f"Error executing memory callback for task {task_id}: {e}")
                         logger.exception(e)
-                    
-                    # Run task callback using shared helper
-                    self._run_task_callback(task, task_id, task_output)
                             
                     self.save_output_to_file(task, task_output)
                     
