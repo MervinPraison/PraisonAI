@@ -161,6 +161,15 @@ class TestAgentMailBotStructure:
         
         assert bot.config == config
 
+    def test_agentmail_session_manager_max_history_is_int(self):
+        """BotSessionManager must not receive BotConfig as max_history."""
+        from praisonai.bots import AgentMailBot
+
+        bot = AgentMailBot(token="test_token")
+        assert isinstance(bot._session._max_history, int)
+        # Regression: BotConfig as max_history raised TypeError on save
+        bot._session._save_history("user1", [{"role": "user", "content": "hi"}])
+
 
 class TestEmailUtilsShared:
     """Test shared email utilities work correctly."""

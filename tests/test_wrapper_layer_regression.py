@@ -185,6 +185,28 @@ class TestCliBackendValidation:
         with pytest.raises(ValueError, match="cli_backend requires framework='praisonai'"):
             generator._validate_cli_backend_compatibility(config, 'autogen')
 
+    def test_cli_backend_validation_accepts_praisonai_adapter_name(self):
+        """Runtime features must validate against adapter.name, not the adapter object."""
+        from praisonai.praisonai.agents_generator import AgentsGenerator
+
+        generator = AgentsGenerator(
+            agent_file=None,
+            framework='praisonai',
+            config_list=[{"model": "gpt-4o-mini"}]
+        )
+        config = {
+            'roles': {
+                'test_agent': {
+                    'role': 'Test Agent',
+                    'goal': 'Test',
+                    'backstory': 'Testing',
+                    'cli_backend': 'claude-code',
+                }
+            }
+        }
+        # Must not raise when framework name is the string 'praisonai'
+        generator._validate_cli_backend_compatibility(config, 'praisonai')
+
     def test_agent_wrapper_cli_backend_resolution(self):
         """Test that Agent wrapper resolves CLI backend configs correctly"""
         from praisonai.praisonai.agent import Agent
