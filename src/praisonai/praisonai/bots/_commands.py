@@ -123,7 +123,7 @@ class CommandRegistry:
             command: Command name to unregister
             
         Returns:
-            True if command was unregistered, False if not found
+            True if command was unregistered, False if not found or builtin
         """
         if command in self._commands and not self._commands[command].get("builtin"):
             del self._commands[command]

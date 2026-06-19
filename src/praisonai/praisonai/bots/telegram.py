@@ -177,12 +177,12 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         # Parse admin users from config
         admin_users = set()
         if hasattr(self.config, 'admin_users') and self.config.admin_users:
-            admin_users = set(user.strip() for user in self.config.admin_users.split(','))
+            admin_users = set(user.strip() for user in self.config.admin_users.split(',') if user.strip())
         
         # Parse user allowed commands from config  
         user_allowed_commands = None
         if hasattr(self.config, 'user_allowed_commands') and self.config.user_allowed_commands:
-            user_allowed_commands = set(cmd.strip() for cmd in self.config.user_allowed_commands.split(','))
+            user_allowed_commands = set(cmd.strip() for cmd in self.config.user_allowed_commands.split(',') if cmd.strip())
         
         # Create command access policy
         self._command_policy = CommandAccessPolicy(
@@ -452,13 +452,6 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     await update.message.reply_text(f"⛔ You are not permitted to run /{command}")
                     return
                 
-                # Handle built-in commands with unified registry
-                if command == "whoami":
-                    username = message.sender.username if message.sender else None
-                    response = self._command_registry.format_whoami(user_id, username, self._command_policy)
-                    await update.message.reply_text(response)
-                    return
-                
                 # Handle custom registered commands
                 if command in self._command_handlers:
                     handler = self._command_handlers[command]
@@ -505,12 +498,8 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 return
             user_id = message.sender.user_id if message.sender else "unknown"
             # Help is always allowed (in ALWAYS_ALLOWED set)
-            help_text = self._command_registry.format_help(
-                user_id=user_id,
-                policy=self._command_policy,
-                agent=self._agent,
-                platform="telegram"
-            )
+            # Use instance method to include custom commands
+            help_text = self._format_help_with_permissions(user_id)
             await update.message.reply_text(help_text)
         
         async def handle_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -972,6 +961,36 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         """Format /help response."""
         extra = {cmd: "Custom command" for cmd in self._command_handlers}
         return format_help(self._agent, self.platform, extra)
+    
+    def _format_help_with_permissions(self, user_id: str) -> str:
+        """Format /help response with permission filtering and custom commands."""
+        # Get allowed commands for this user
+        all_commands = self._command_registry.get_command_names() | set(self._command_handlers.keys())
+        
+        if self._command_policy:
+            allowed = self._command_policy.get_allowed_commands(user_id, all_commands)
+        else:
+            allowed = all_commands
+        
+        agent_name = self._agent.name if self._agent else "No agent"
+        model = getattr(self._agent, "llm", "default") if self._agent else "default"
+        
+        lines = ["Available Commands"]
+        
+        # Built-in commands from registry
+        for cmd in sorted(allowed):
+            if cmd in self._command_registry.get_all_commands():
+                cmd_info = self._command_registry.get_command(cmd)
+                desc = cmd_info.get("description", "No description")
+                lines.append(f"/{cmd} - {desc}")
+            elif cmd in self._command_handlers:
+                # Custom commands
+                lines.append(f"/{cmd} - Custom command")
+        
+        lines.append(f"\nAgent: {agent_name}")
+        lines.append(f"Model: {model}")
+        
+        return "\n".join(lines)
     
     def _convert_update_to_message(self, update, override_text: Optional[str] = None) -> BotMessage:
         """Convert Telegram Update to BotMessage."""
