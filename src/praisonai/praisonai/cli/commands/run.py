@@ -486,8 +486,6 @@ def _run_prompt(
         if not no_save:
             import uuid
             auto_save_name = session_id or "session-" + str(uuid.uuid4())[:8]
-
-        # If output_mode is "actions", use direct Agent with actions preset
         if output_mode == "actions":
             from praisonaiagents import Agent
             from ..state.project_sessions import build_cli_memory_config, apply_cli_session_continuity
@@ -514,7 +512,7 @@ def _run_prompt(
             
             agent = Agent(**agent_config)
             if session_id or auto_save_name:
-                apply_cli_session_continuity(agent, session_id or auto_save_name)
+                apply_cli_session_continuity(agent, session_id or auto_save_name, auto_save=auto_save_name)
             result = agent.start(prompt)
             
             output.emit_result(
@@ -637,6 +635,22 @@ def _run_from_file_profiled(
     )
     if model:
         praison.config_list[0]['model'] = model
+    
+    # Apply session continuity if requested
+    session_id, auto_save_name = resolve_session_params(
+        continue_session, session, fork, no_save
+    )
+    if session_id or auto_save_name:
+        class Args:
+            pass
+        
+        args = Args()
+        args.auto_save = auto_save_name
+        args.resume_session = session_id
+        args.cli_project_sessions = bool(session_id or auto_save_name)
+        
+        praison.args = args
+    
     profiler.mark_init_end()
     
     # Execution phase
@@ -789,7 +803,21 @@ def _run_prompt_profiled(
     if model:
         agent_config["llm"] = model
     
+    # Apply session continuity if requested
+    session_id, auto_save_name = resolve_session_params(
+        continue_session, session, fork, no_save
+    )
+    if session_id or auto_save_name:
+        from ..state.project_sessions import build_cli_memory_config, apply_cli_session_continuity
+        
+        memory_cfg = build_cli_memory_config(session_id, auto_save_name)
+        if memory_cfg is not None:
+            agent_config["memory"] = memory_cfg
+    
     agent = Agent(**agent_config)
+    if session_id or auto_save_name:
+        apply_cli_session_continuity(agent, session_id or auto_save_name, auto_save=auto_save_name)
+    
     profiler.mark_init_end()
     
     # Execution phase

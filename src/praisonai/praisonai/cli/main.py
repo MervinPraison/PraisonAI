@@ -4538,15 +4538,12 @@ Do NOT add any explanations or formatting."""
                     getattr(self.args, 'resume_session', None) or getattr(self.args, 'auto_save', None)
                 ):
                     from .state.project_sessions import build_cli_memory_config
-                    project_session_id = (
-                        getattr(self.args, 'resume_session', None)
-                        or getattr(self.args, 'auto_save', None)
-                    )
                     agent_config["memory"] = build_cli_memory_config(
                         getattr(self.args, 'resume_session', None),
                         getattr(self.args, 'auto_save', None),
                     )
-                    print(f"[bold cyan]Project session enabled - session '{project_session_id}'[/bold cyan]")
+                    session_label = agent_config['memory'].auto_save or agent_config['memory'].session_id
+                    print(f"[bold cyan]Project session enabled - session '{session_label}'[/bold cyan]")
                 elif getattr(self.args, 'auto_save', None):
                     from praisonaiagents import MemoryConfig
                     agent_config["memory"] = MemoryConfig(auto_save=self.args.auto_save)
@@ -4831,11 +4828,12 @@ Do NOT add any explanations or formatting."""
             
             agent = PraisonAgent(**agent_config)
 
-            if getattr(self.args, 'cli_project_sessions', False):
+            if hasattr(self, 'args') and getattr(self.args, 'cli_project_sessions', False):
                 session_id = getattr(self.args, 'resume_session', None) or getattr(self.args, 'auto_save', None)
+                auto_save = getattr(self.args, 'auto_save', None)
                 if session_id:
                     from .state.project_sessions import apply_cli_session_continuity
-                    apply_cli_session_continuity(agent, session_id)
+                    apply_cli_session_continuity(agent, session_id, auto_save=auto_save)
             
             # AutoRag - Automatic RAG retrieval decision
             if hasattr(self, 'args') and getattr(self.args, 'auto_rag', False):
