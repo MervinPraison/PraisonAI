@@ -787,7 +787,6 @@ Subtask: {st.name}
                 logging.debug(f"Task next_tasks: {current_task.next_tasks}")
                 yield task_id
                 visited_tasks.add(task_id)
-                # Reset description to original after execution to prevent context accumulation
 
                 # Only end workflow if no next_tasks AND no conditions
                 if not current_task.next_tasks and not current_task.condition and not any(
@@ -1365,7 +1364,6 @@ Subtask: {st.name}
                 logging.debug(f"Task next_tasks: {current_task.next_tasks}")
                 yield task_id
                 visited_tasks.add(task_id)
-                # Reset description to original after execution to prevent context accumulation
 
                 # Only end workflow if no next_tasks AND no conditions
                 if not current_task.next_tasks and not current_task.condition and not any(
