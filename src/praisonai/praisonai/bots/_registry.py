@@ -11,6 +11,7 @@ import threading
 from typing import Any, Dict, List, Type, Optional
 
 from .._registry import PluginRegistry
+from praisonaiagents.bots.protocols import PlatformCapabilities
 
 
 def _telegram_loader():
@@ -61,13 +62,66 @@ _BUILTIN_PLATFORMS = {
 
 
 class BotPlatformRegistry(PluginRegistry):
-    """Registry for bot platform adapters."""
+    """Registry for bot platform adapters with capability descriptors."""
     
     def __init__(self):
         super().__init__(
             entry_point_group="praisonai.bots",
             builtins=_BUILTIN_PLATFORMS
         )
+        # Store capabilities for each platform
+        self._capabilities: Dict[str, PlatformCapabilities] = {}
+        self._capabilities_lock = threading.Lock()
+    
+    def register_with_capabilities(
+        self, 
+        name: str, 
+        adapter_class: Type,
+        capabilities: Optional[PlatformCapabilities] = None
+    ) -> None:
+        """Register a platform adapter with its capabilities.
+        
+        Args:
+            name: Platform identifier (lowercase)
+            adapter_class: The bot adapter class
+            capabilities: Optional platform capabilities descriptor
+        """
+        self.register(name.lower(), adapter_class)
+        if capabilities:
+            with self._capabilities_lock:
+                self._capabilities[name.lower()] = capabilities
+    
+    def get_capabilities(self, name: str) -> PlatformCapabilities:
+        """Get capabilities for a platform.
+        
+        Args:
+            name: Platform identifier
+            
+        Returns:
+            Platform capabilities (defaults if not specified)
+        """
+        name = name.lower()
+        
+        # Check stored capabilities first
+        with self._capabilities_lock:
+            if name in self._capabilities:
+                return self._capabilities[name]
+        
+        # Try to get from adapter class
+        try:
+            adapter_class = self.resolve(name)
+            # Check if adapter has a default capabilities class method
+            if hasattr(adapter_class, 'default_capabilities'):
+                caps = adapter_class.default_capabilities()
+                # Cache for future use
+                with self._capabilities_lock:
+                    self._capabilities[name] = caps
+                return caps
+        except (ValueError, AttributeError):
+            pass
+        
+        # Return defaults
+        return PlatformCapabilities()
 
 
 # Default registry (lazy, module-private)
@@ -114,14 +168,24 @@ def get_platform_registry() -> Dict[str, Any]:
     return result
 
 
-def register_platform(name: str, adapter_class: Type) -> None:
-    """Register a custom platform adapter.
+def register_platform(
+    name: str, 
+    adapter_class: Type,
+    capabilities: Optional[PlatformCapabilities] = None
+) -> None:
+    """Register a custom platform adapter with optional capabilities.
 
     Args:
         name: Platform identifier (lowercase).
         adapter_class: The bot adapter class.
+        capabilities: Optional platform capabilities descriptor.
     """
-    _get_lazy_registry().register(name.lower(), adapter_class)
+    registry = _get_lazy_registry()
+    if isinstance(registry, BotPlatformRegistry):
+        registry.register_with_capabilities(name.lower(), adapter_class, capabilities)
+    else:
+        # Fallback for compatibility
+        registry.register(name.lower(), adapter_class)
 
 
 def list_platforms() -> List[str]:
@@ -142,3 +206,19 @@ def resolve_adapter(name: str) -> Type:
         ValueError: If the platform is not registered.
     """
     return _get_lazy_registry().resolve(name.lower())
+
+
+def get_platform_capabilities(name: str) -> PlatformCapabilities:
+    """Get capabilities for a platform.
+    
+    Args:
+        name: Platform identifier.
+        
+    Returns:
+        Platform capabilities descriptor.
+    """
+    registry = _get_lazy_registry()
+    if isinstance(registry, BotPlatformRegistry):
+        return registry.get_capabilities(name.lower())
+    # Fallback to defaults
+    return PlatformCapabilities()

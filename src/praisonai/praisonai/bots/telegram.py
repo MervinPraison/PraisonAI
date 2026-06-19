@@ -24,6 +24,7 @@ from praisonaiagents.bots import (
     BotUser,
     BotChannel,
     MessageType,
+    PlatformCapabilities,
 )
 
 from .media import split_media_from_output, is_audio_file
@@ -243,6 +244,27 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             "edit_rate_limit": 1.0,
             "reaction_rate_limit": 0.5,
         }
+    
+    @property
+    def platform_capabilities(self) -> PlatformCapabilities:
+        """Return Telegram platform capabilities."""
+        return self.default_capabilities()
+    
+    @classmethod
+    def default_capabilities(cls) -> PlatformCapabilities:
+        """Default Telegram platform capabilities."""
+        return PlatformCapabilities(
+            max_message_length=4096,
+            length_unit="utf16",  # Telegram uses UTF-16 for length calculation
+            supports_edit=True,  # Telegram supports message editing
+            supports_typing=True,
+            markdown_dialect="telegram_markdown_v2",
+            needs_rate_limit=True,
+            edit_interval_ms=1000,  # Telegram rate limits edits
+            max_files_per_message=1,
+            max_file_size_mb=50,  # Telegram supports up to 50MB for bots
+            supported_file_types=["image/*", "audio/*", "video/*", "application/*"],
+        )
     
     async def start(self) -> None:
         """Start the Telegram bot."""

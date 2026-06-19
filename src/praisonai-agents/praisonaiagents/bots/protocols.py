@@ -66,6 +66,70 @@ class RunStatus(Enum):
     ERROR = "error"
 
 
+@dataclass(frozen=True)
+class PlatformCapabilities:
+    """Platform-specific capabilities descriptor for bot adapters.
+    
+    Declares what a messaging platform can do, enabling the shared delivery
+    machinery to apply features like streaming, rate limiting, and chunking
+    uniformly across all platforms.
+    
+    Attributes:
+        max_message_length: Maximum message length in the platform's unit
+        length_unit: Unit for message length ("codepoints" or "utf16")
+        supports_edit: Whether the platform supports in-place message edits (for streaming)
+        supports_typing: Whether the platform supports typing indicators
+        markdown_dialect: Markdown flavor the platform uses (e.g., "markdown", "telegram_markdown_v2")
+        needs_rate_limit: Whether the platform needs rate limiting
+        edit_interval_ms: Minimum milliseconds between message edits (for streaming)
+        max_files_per_message: Maximum number of file attachments per message
+        max_file_size_mb: Maximum file size in megabytes
+        supported_file_types: List of supported file extensions/mime types
+    """
+    
+    max_message_length: int = 4096
+    length_unit: str = "codepoints"  # "codepoints" or "utf16"
+    supports_edit: bool = False
+    supports_typing: bool = True
+    markdown_dialect: str = "markdown"
+    needs_rate_limit: bool = True
+    edit_interval_ms: int = 1000  # Minimum ms between edits
+    max_files_per_message: int = 1
+    max_file_size_mb: int = 10
+    supported_file_types: List[str] = field(default_factory=lambda: ["*"])
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "max_message_length": self.max_message_length,
+            "length_unit": self.length_unit,
+            "supports_edit": self.supports_edit,
+            "supports_typing": self.supports_typing,
+            "markdown_dialect": self.markdown_dialect,
+            "needs_rate_limit": self.needs_rate_limit,
+            "edit_interval_ms": self.edit_interval_ms,
+            "max_files_per_message": self.max_files_per_message,
+            "max_file_size_mb": self.max_file_size_mb,
+            "supported_file_types": self.supported_file_types,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "PlatformCapabilities":
+        """Create from dictionary."""
+        return cls(
+            max_message_length=data.get("max_message_length", 4096),
+            length_unit=data.get("length_unit", "codepoints"),
+            supports_edit=data.get("supports_edit", False),
+            supports_typing=data.get("supports_typing", True),
+            markdown_dialect=data.get("markdown_dialect", "markdown"),
+            needs_rate_limit=data.get("needs_rate_limit", True),
+            edit_interval_ms=data.get("edit_interval_ms", 1000),
+            max_files_per_message=data.get("max_files_per_message", 1),
+            max_file_size_mb=data.get("max_file_size_mb", 10),
+            supported_file_types=data.get("supported_file_types", ["*"]),
+        )
+
+
 class MessageType(str, Enum):
     """Types of bot messages."""
     
@@ -510,6 +574,15 @@ class BotProtocol(Protocol):
         
         Returns capabilities that shared engines use to adapt behavior.
         Channels that don't support a feature should return False for it.
+        """
+        ...
+    
+    @property
+    def platform_capabilities(self) -> PlatformCapabilities:
+        """Platform capabilities descriptor.
+        
+        Returns the platform's capabilities for use by shared delivery code.
+        Adapters should override this to declare their specific capabilities.
         """
         ...
     

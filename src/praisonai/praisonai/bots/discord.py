@@ -22,6 +22,7 @@ from praisonaiagents.bots import (
     BotUser,
     BotChannel,
     MessageType,
+    PlatformCapabilities,
 )
 
 from ._commands import format_status, format_help, handle_stop_command
@@ -130,6 +131,27 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
             "edit_rate_limit": 1.0,
             "reaction_rate_limit": 0.25,  # Discord has generous rate limits
         }
+    
+    @property
+    def platform_capabilities(self) -> PlatformCapabilities:
+        """Return Discord platform capabilities."""
+        return self.default_capabilities()
+    
+    @classmethod
+    def default_capabilities(cls) -> PlatformCapabilities:
+        """Default Discord platform capabilities."""
+        return PlatformCapabilities(
+            max_message_length=2000,  # Discord's limit for regular messages
+            length_unit="codepoints",
+            supports_edit=True,  # Discord supports message editing
+            supports_typing=True,
+            markdown_dialect="discord_markdown",
+            needs_rate_limit=False,  # Discord.py handles rate limiting
+            edit_interval_ms=500,  # Discord is less restrictive on edits
+            max_files_per_message=10,
+            max_file_size_mb=8,  # Default Discord limit (varies by boost level)
+            supported_file_types=["*"],  # Discord supports most file types
+        )
     
     async def start(self) -> None:
         """Start the Discord bot."""
