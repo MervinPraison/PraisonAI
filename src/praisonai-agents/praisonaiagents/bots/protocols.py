@@ -354,6 +354,80 @@ class ProbeResult:
         }
 
 
+class HealthReason(Enum):
+    """Reasons for channel health status."""
+    HEALTHY = "healthy"
+    NOT_RUNNING = "not-running"
+    DISCONNECTED = "disconnected"
+    STALE_SOCKET = "stale-socket"
+    STUCK = "stuck"
+    BUSY = "busy"
+    STARTUP_GRACE = "startup-grace"
+    ERROR = "error"
+    
+    @property
+    def is_recoverable(self) -> bool:
+        """Whether this reason indicates a recoverable state."""
+        return self in {
+            HealthReason.DISCONNECTED,
+            HealthReason.STALE_SOCKET,
+            HealthReason.STUCK,
+            HealthReason.ERROR,
+        }
+
+
+def evaluate_channel_health(
+    health: HealthResult,
+    startup_grace_seconds: float = 60.0,
+    stale_after_seconds: float = 120.0,
+    current_time: Optional[float] = None,
+) -> HealthReason:
+    """Evaluate channel health and return a reason.
+    
+    Pure function that evaluates a HealthResult and determines
+    the health reason based on various criteria.
+    
+    Args:
+        health: The health result to evaluate
+        startup_grace_seconds: Grace period for startup
+        stale_after_seconds: Time after which no activity is considered stale
+        current_time: Current timestamp (for testing)
+        
+    Returns:
+        HealthReason indicating the channel's health status
+    """
+    if current_time is None:
+        current_time = time.time()
+    
+    # Not running
+    if not health.is_running:
+        return HealthReason.NOT_RUNNING
+    
+    # Startup grace period
+    if health.uptime_seconds is not None and health.uptime_seconds < startup_grace_seconds:
+        return HealthReason.STARTUP_GRACE
+    
+    # Check for errors
+    if health.error:
+        return HealthReason.ERROR
+    
+    # Check probe result
+    if health.probe and not health.probe.ok:
+        return HealthReason.DISCONNECTED
+    
+    # Check for stale socket (no transport activity)
+    if health.last_activity is not None:
+        time_since_activity = current_time - health.last_activity
+        if time_since_activity > stale_after_seconds:
+            return HealthReason.STALE_SOCKET
+    
+    # Overall health status
+    if not health.ok:
+        return HealthReason.ERROR
+    
+    return HealthReason.HEALTHY
+
+
 @dataclass
 class HealthResult:
     """Detailed health status of a bot.
@@ -367,6 +441,8 @@ class HealthResult:
         sessions: Number of active sessions
         error: Error message (if unhealthy)
         details: Additional platform-specific health details
+        reason: Health status reason (optional)
+        last_activity: Last transport activity timestamp (optional)
     """
     
     ok: bool
@@ -377,6 +453,8 @@ class HealthResult:
     sessions: int = 0
     error: Optional[str] = None
     details: Dict[str, Any] = field(default_factory=dict)
+    reason: Optional[HealthReason] = None
+    last_activity: Optional[float] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -389,6 +467,8 @@ class HealthResult:
             "sessions": self.sessions,
             "error": self.error,
             "details": self.details,
+            "reason": self.reason.value if self.reason else None,
+            "last_activity": self.last_activity,
         }
 
 

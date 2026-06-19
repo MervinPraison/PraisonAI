@@ -39,11 +39,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from praisonaiagents import Agent
 
+from praisonaiagents.bots.protocols import HealthReason, HealthResult, evaluate_channel_health
+from ..gateway.supervisor import ChannelSupervisor
+from ..gateway.health_monitor import ChannelHealthMonitor, HealthMonitorConfig
 from .bot import Bot
 from .delivery import DeliveryRouter, SessionSource
 
@@ -71,6 +75,8 @@ class BotOS:
         platforms: Optional[List[str]] = None,
         config: Optional[Any] = None,
         identity_resolver: Optional[Any] = None,
+        health_monitor: Optional[HealthMonitorConfig] = None,
+        enable_supervision: bool = True,
     ):
         self._bots: Dict[str, Bot] = {}
         self._is_running = False
@@ -82,6 +88,18 @@ class BotOS:
         
         # Initialize delivery router for proactive outbound messaging
         self._delivery_router = DeliveryRouter(self)
+        
+        self._enable_supervision = enable_supervision
+        
+        # Initialize supervisor and health monitor if enabled
+        if self._enable_supervision:
+            self._supervisor = ChannelSupervisor(health_config=health_monitor)
+            self._health_monitor_config = health_monitor or HealthMonitorConfig()
+        else:
+            self._supervisor = None
+            self._health_monitor_config = None
+        
+        self._start_times: Dict[str, float] = {}  # Track bot start times
 
         # Register explicit bots
         if bots:
@@ -159,6 +177,11 @@ class BotOS:
         # Configure delivery router from bot configurations
         self._configure_delivery_from_bots()
 
+        # Start health monitoring if enabled
+        if self._enable_supervision and self._supervisor:
+            await self._supervisor.start_health_monitoring()
+            logger.info("BotOS: health monitoring enabled")
+
         self._tasks = []
         for platform, bot in self._bots.items():
             task = asyncio.create_task(
@@ -179,15 +202,28 @@ class BotOS:
         except asyncio.CancelledError:
             pass
         finally:
+            # Stop health monitoring
+            if self._enable_supervision and self._supervisor:
+                await self._supervisor.stop_health_monitoring()
             self._is_running = False
 
     async def _run_bot(self, platform: str, bot: Bot) -> None:
-        """Run a single bot with error isolation."""
-        try:
-            logger.info(f"BotOS: starting {platform}")
-            await bot.start()
-        except Exception as e:
-            logger.error(f"BotOS: {platform} failed: {e}")
+        """Run a single bot with error isolation and optional supervision."""
+        if self._enable_supervision and self._supervisor:
+            # Run with supervision and auto-recovery
+            async def start_bot(name: str, bot_instance: Bot) -> None:
+                self._start_times[name] = time.time()
+                await bot_instance.start()
+            
+            await self._supervisor.run(platform, bot, start_bot)
+        else:
+            # Original behavior without supervision
+            try:
+                logger.info(f"BotOS: starting {platform}")
+                self._start_times[platform] = time.time()
+                await bot.start()
+            except Exception as e:
+                logger.error(f"BotOS: {platform} failed: {e}")
 
     async def _run_schedule_loop(self) -> None:
         """Poll for due scheduled jobs and execute them.
@@ -396,10 +432,17 @@ class BotOS:
 
         logger.info("BotOS stopping all bots...")
 
+        # Stop health monitoring first
+        if self._enable_supervision and self._supervisor:
+            await self._supervisor.stop_health_monitoring()
+
         # Stop each bot
         for platform, bot in self._bots.items():
             try:
                 await bot.stop()
+                # Cleanup supervisor state
+                if self._enable_supervision and self._supervisor:
+                    self._supervisor.cleanup(platform)
             except Exception as e:
                 logger.warning(f"BotOS: error stopping {platform}: {e}")
 
@@ -457,6 +500,10 @@ class BotOS:
                 token: ${TELEGRAM_BOT_TOKEN}
               discord:
                 token: ${DISCORD_BOT_TOKEN}
+            health:
+              interval: 300
+              startup_grace: 60
+              max_restarts_per_hour: 10
 
         Args:
             path: Path to YAML config file.
@@ -550,8 +597,106 @@ class BotOS:
             token = resolved.pop("token", None)
             bots.append(Bot(plat_name, agent=agent, token=token, **resolved))
 
-        return cls(bots=bots)
+        # Parse health configuration
+        health_cfg = raw.get("health")
+        health_monitor = None
+        if health_cfg and isinstance(health_cfg, dict):
+            health_monitor = HealthMonitorConfig.from_dict(health_cfg)
 
+        # Check if supervision is disabled
+        enable_supervision = raw.get("supervision", {}).get("enabled", True)
+
+        return cls(bots=bots, health_monitor=health_monitor, enable_supervision=enable_supervision)
+
+    async def health(self) -> Dict[str, HealthResult]:
+        """Get health status of all bots.
+        
+        Returns:
+            Dictionary mapping platform name to HealthResult
+        """
+        results = {}
+        current_time = time.time()
+        
+        for platform, bot in self._bots.items():
+            try:
+                if hasattr(bot, "health"):
+                    results[platform] = await bot.health()
+                else:
+                    # Construct basic health result
+                    uptime = None
+                    if platform in self._start_times:
+                        uptime = current_time - self._start_times[platform]
+                    
+                    results[platform] = HealthResult(
+                        ok=bot.is_running if hasattr(bot, "is_running") else False,
+                        platform=platform,
+                        is_running=bot.is_running if hasattr(bot, "is_running") else False,
+                        uptime_seconds=uptime,
+                    )
+            except Exception as e:
+                results[platform] = HealthResult(
+                    ok=False,
+                    platform=platform,
+                    is_running=False,
+                    error=str(e),
+                )
+        
+        return results
+    
+    def get_supervisor_status(self) -> Optional[Dict[str, Any]]:
+        """Get supervisor status if enabled.
+        
+        Returns:
+            Supervisor status dictionary or None if supervision disabled
+        """
+        if self._supervisor:
+            return {
+                "enabled": True,
+                "channels": self._supervisor.get_all_status(),
+                "health_monitor": self._supervisor.get_health_status(),
+            }
+        return {"enabled": False}
+    
+    def pause_bot(self, platform: str) -> bool:
+        """Pause a bot (only works with supervision enabled).
+        
+        Args:
+            platform: Platform name to pause
+            
+        Returns:
+            True if paused, False otherwise
+        """
+        if self._supervisor:
+            return self._supervisor.pause(platform)
+        return False
+    
+    def resume_bot(self, platform: str) -> bool:
+        """Resume a paused bot (only works with supervision enabled).
+        
+        Args:
+            platform: Platform name to resume
+            
+        Returns:
+            True if resumed, False otherwise
+        """
+        if self._supervisor:
+            return self._supervisor.resume(platform)
+        return False
+    
+    def reconnect_bot(self, platform: str) -> bool:
+        """Force reconnect a bot (only works with supervision enabled).
+        
+        Args:
+            platform: Platform name to reconnect
+            
+        Returns:
+            True if reconnect triggered, False otherwise
+        """
+        if self._supervisor:
+            return self._supervisor.reconnect(platform)
+        return False
+    
     def __repr__(self) -> str:
         platforms = list(self._bots.keys())
-        return f"BotOS(platforms={platforms!r}, running={self._is_running})"
+        supervised = "supervised" if self._enable_supervision else "unsupervised"
+        return f"BotOS(platforms={platforms!r}, running={self._is_running}, mode={supervised})"

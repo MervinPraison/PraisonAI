@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, Optional
 
+from praisonaiagents.bots.protocols import HealthReason
+
 from ..bots._resilience import (
     BackoffPolicy,
     ConnectionMonitor,
@@ -21,6 +23,7 @@ from ..bots._resilience import (
     is_conflict_error,
     sleep_with_abort,
 )
+from .health_monitor import ChannelHealthMonitor, HealthMonitorConfig
 
 logger = logging.getLogger(__name__)
 
@@ -57,13 +60,15 @@ class ChannelSupervisor:
     def __init__(
         self,
         policy: Optional[BackoffPolicy] = None,
-        classify_fn: Optional[Callable[[BaseException, str], bool]] = None
+        classify_fn: Optional[Callable[[BaseException, str], bool]] = None,
+        health_config: Optional[HealthMonitorConfig] = None,
     ):
         """Initialize channel supervisor.
         
         Args:
             policy: Backoff policy for retries (uses default if None)
             classify_fn: Error classification function (uses is_recoverable_error if None)
+            health_config: Health monitor configuration (uses defaults if None)
         """
         self._policy = policy or BackoffPolicy(max_attempts=0)  # Unlimited retries
         self._classify_fn = classify_fn or is_recoverable_error
@@ -71,6 +76,14 @@ class ChannelSupervisor:
         self._monitors: Dict[str, ConnectionMonitor] = {}
         self._abort_signals: Dict[str, asyncio.Event] = {}
         self._tasks: Dict[str, asyncio.Task] = {}
+        self._bots: Dict[str, Any] = {}  # Store bot references for health checks
+        
+        # Initialize health monitor
+        self._health_monitor = ChannelHealthMonitor(
+            config=health_config,
+            health_check_fn=self._get_channel_health,
+            restart_fn=self._restart_channel_for_health,
+        )
         
     def get_status(self, name: str) -> ChannelStatus:
         """Get current status of a channel."""
@@ -181,6 +194,10 @@ class ChannelSupervisor:
             self._monitors[name] = ConnectionMonitor(platform=platform, policy=self._policy)
         if name not in self._abort_signals:
             self._abort_signals[name] = asyncio.Event()
+        
+        # Store bot reference and register with health monitor
+        self._bots[name] = bot
+        self._health_monitor.register_channel(name, bot)
             
         status = self._channels[name]
         monitor = self._monitors[name]
@@ -268,6 +285,7 @@ class ChannelSupervisor:
         """Clean up supervision state for a channel."""
         self._channels.pop(name, None)
         self._monitors.pop(name, None)
+        self._bots.pop(name, None)
         if name in self._abort_signals:
             self._abort_signals[name].set()
             self._abort_signals.pop(name, None)
@@ -275,3 +293,60 @@ class ChannelSupervisor:
             task = self._tasks.pop(name)
             if not task.done():
                 task.cancel()
+        # Unregister from health monitor
+        self._health_monitor.unregister_channel(name)
+    
+    async def _get_channel_health(self, name: str, bot: Any) -> Any:
+        """Get health status for a channel.
+        
+        Used by the health monitor to check channel health.
+        
+        Args:
+            name: Channel name
+            bot: Bot instance
+            
+        Returns:
+            HealthResult if available
+        """
+        if hasattr(bot, "health"):
+            return await bot.health()
+        # Fallback: construct basic health result
+        from praisonaiagents.bots.protocols import HealthResult
+        status = self.get_status(name)
+        return HealthResult(
+            ok=status.state == ChannelState.RUNNING,
+            platform=getattr(bot, "platform", name),
+            is_running=status.state == ChannelState.RUNNING,
+            error=status.last_error,
+        )
+    
+    async def _restart_channel_for_health(self, name: str, reason: HealthReason) -> None:
+        """Restart a channel based on health check.
+        
+        Used by the health monitor to trigger restarts.
+        
+        Args:
+            name: Channel name
+            reason: Health reason for restart
+        """
+        logger.info(f"Health monitor requesting restart of '{name}' (reason={reason.value})")
+        
+        # Update status with health reason
+        if name in self._channels:
+            self._channels[name].last_error = f"Health check failed: {reason.value}"
+            self._channels[name].last_error_time = time.time()
+        
+        # Trigger restart via reconnect
+        self.reconnect(name)
+    
+    async def start_health_monitoring(self) -> None:
+        """Start the health monitor."""
+        await self._health_monitor.start()
+    
+    async def stop_health_monitoring(self) -> None:
+        """Stop the health monitor."""
+        await self._health_monitor.stop()
+    
+    def get_health_status(self) -> Dict[str, Any]:
+        """Get health monitor status."""
+        return self._health_monitor.get_status()
