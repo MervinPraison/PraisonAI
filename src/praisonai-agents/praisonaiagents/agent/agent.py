@@ -1668,8 +1668,8 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         else:
             self.llm = llm or Agent._get_default_model()
         
-        # Store fallback models for resilience
-        self.fallback_models = fallback_models or []
+        # Store fallback models for resilience (defensive copy to avoid external mutations)
+        self.fallback_models = list(fallback_models) if fallback_models else []
         
         # Handle tools parameter - ensure it's always a list
         if callable(tools):
@@ -2129,6 +2129,7 @@ Your Goal: {self.goal}
             
             # LLM configuration 
             'llm': self.llm,
+            'fallback_models': list(self.fallback_models) if hasattr(self, 'fallback_models') and self.fallback_models else None,
             'base_url': getattr(self, 'base_url', None),
             'api_key': getattr(self, 'api_key', None),
             'auth': getattr(self, 'auth', None),
