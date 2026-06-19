@@ -31,24 +31,18 @@ async def test_praisonai_runtime_run_turn():
     """Test PraisonAI runtime run_turn method."""
     runtime = PraisonAIRuntime()
     
-    # Test basic execution (may fail if no API key, but should not crash)
-    try:
-        result = await runtime.run_turn("Hello test")
-        
-        # If we get a result, verify its structure
-        assert isinstance(result, RuntimeResult)
-        assert isinstance(result.content, str)
-        assert isinstance(result.metadata, dict)
-        assert result.metadata.get('runtime') == 'praisonai'
-        
-        # Error should be None if successful
-        if result.content:
-            assert result.error is None
-            
-    except Exception as e:
-        # If it fails due to missing API keys, that's expected in tests
-        # The runtime should handle this gracefully
-        pass
+    # Test basic execution - runtime should handle errors gracefully
+    result = await runtime.run_turn("Hello test")
+    
+    # Always verify result structure, even if there's an error
+    assert isinstance(result, RuntimeResult)
+    assert isinstance(result.content, str)
+    assert isinstance(result.metadata, dict)
+    assert result.metadata.get('runtime') == 'praisonai'
+    
+    # Either we have content or an error, but not neither
+    if not result.content:
+        assert result.error is not None
 
 
 @pytest.mark.asyncio
@@ -56,22 +50,23 @@ async def test_praisonai_runtime_run_turn_with_params():
     """Test PraisonAI runtime with various parameters."""
     runtime = PraisonAIRuntime()
     
-    try:
-        # Test with system prompt
-        result = await runtime.run_turn(
-            "Hello test",
-            system_prompt="You are a helpful assistant",
-            model_ref="gpt-3.5-turbo"
-        )
-        
-        assert isinstance(result, RuntimeResult)
-        assert isinstance(result.content, str)
-        assert isinstance(result.metadata, dict)
-        assert result.metadata.get('runtime') == 'praisonai'
-        
-    except Exception:
-        # Expected if no API keys
-        pass
+    # Test with system prompt and model
+    result = await runtime.run_turn(
+        "Hello test",
+        system_prompt="You are a helpful assistant",
+        model_ref="gpt-3.5-turbo",
+        temperature=0.7,
+        max_tokens=100
+    )
+    
+    assert isinstance(result, RuntimeResult)
+    assert isinstance(result.content, str)
+    assert isinstance(result.metadata, dict)
+    assert result.metadata.get('runtime') == 'praisonai'
+    
+    # Runtime should handle missing API keys gracefully
+    if not result.content:
+        assert result.error is not None
 
 
 @pytest.mark.asyncio
@@ -79,27 +74,30 @@ async def test_praisonai_runtime_stream_turn():
     """Test PraisonAI runtime stream_turn method."""
     runtime = PraisonAIRuntime()
     
-    try:
-        deltas = []
-        async for delta in runtime.stream_turn("Hello test"):
-            assert isinstance(delta, RuntimeDelta)
-            assert hasattr(delta, 'type')
-            assert hasattr(delta, 'content')
-            assert hasattr(delta, 'metadata')
-            assert delta.metadata.get('runtime') == 'praisonai'
-            deltas.append(delta)
-            
-            # Limit collection for tests
-            if len(deltas) >= 5:
-                break
+    deltas = []
+    async for delta in runtime.stream_turn(
+        "Hello test",
+        system_prompt="You are a helpful assistant"
+    ):
+        assert isinstance(delta, RuntimeDelta)
+        assert hasattr(delta, 'type')
+        assert hasattr(delta, 'content')
+        assert hasattr(delta, 'metadata')
+        assert delta.metadata.get('runtime') == 'praisonai'
+        deltas.append(delta)
         
-        # Should have received some deltas if successful
-        if deltas:
-            assert all(isinstance(delta, RuntimeDelta) for delta in deltas)
-            
-    except Exception:
-        # Expected if no API keys or agent creation fails
-        pass
+        # Limit collection for tests
+        if len(deltas) >= 5:
+            break
+    
+    # Should have received at least one delta (even if error)
+    assert len(deltas) > 0
+    
+    # Check if we got an error delta
+    error_deltas = [d for d in deltas if d.type == 'error']
+    if error_deltas:
+        # If error, it should have content explaining the error
+        assert any(d.content for d in error_deltas)
 
 
 @pytest.mark.asyncio 

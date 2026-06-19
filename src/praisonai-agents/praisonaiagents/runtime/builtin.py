@@ -66,33 +66,37 @@ class PraisonAIRuntime:
             if model_ref:
                 agent_kwargs['model'] = model_ref
             if system_prompt:
-                agent_kwargs['system_prompt'] = system_prompt
+                # Agent uses 'instructions' not 'system_prompt'
+                agent_kwargs['instructions'] = system_prompt
                 
-            # Extract any agent configuration from kwargs
-            if 'max_tokens' in kwargs:
-                agent_kwargs['max_tokens'] = kwargs['max_tokens']
-            if 'temperature' in kwargs:
-                agent_kwargs['temperature'] = kwargs['temperature']
+            # Tools can be passed to Agent constructor
             if 'tools' in kwargs:
                 agent_kwargs['tools'] = kwargs['tools']
                 
-            # Create agent instance
-            agent = Agent(**agent_kwargs)
-            
-            # Execute the prompt using agent's chat capabilities
-            result = await agent.achat(prompt)
-            
-            # Extract metadata from agent
-            metadata = {
-                'model': getattr(agent, 'model', None),
-                'agent_id': getattr(agent, 'agent_id', None),
-                'runtime': self.runtime_id
-            }
-            
-            return RuntimeResult(
-                content=str(result) if result else "",
-                metadata=metadata
-            )
+            # Create agent instance using async context manager for proper cleanup
+            async with Agent(**agent_kwargs) as agent:
+                # Prepare achat kwargs - these go to achat, not Agent constructor
+                chat_kwargs = {}
+                if 'max_tokens' in kwargs:
+                    # max_tokens might need to be in model config, handle gracefully
+                    chat_kwargs['config'] = {'max_tokens': kwargs['max_tokens']}
+                if 'temperature' in kwargs:
+                    chat_kwargs['temperature'] = kwargs['temperature']
+                    
+                # Execute the prompt using agent's chat capabilities
+                result = await agent.achat(prompt, **chat_kwargs)
+                
+                # Extract metadata from agent
+                metadata = {
+                    'model': getattr(agent, 'model', None),
+                    'agent_id': getattr(agent, 'agent_id', None),
+                    'runtime': self.runtime_id
+                }
+                
+                return RuntimeResult(
+                    content=str(result) if result else "",
+                    metadata=metadata
+                )
             
         except Exception as e:
             return RuntimeResult(
@@ -128,48 +132,60 @@ class PraisonAIRuntime:
             if model_ref:
                 agent_kwargs['model'] = model_ref
             if system_prompt:
-                agent_kwargs['system_prompt'] = system_prompt
+                # Agent uses 'instructions' not 'system_prompt'
+                agent_kwargs['instructions'] = system_prompt
                 
-            # Extract any agent configuration from kwargs
-            if 'max_tokens' in kwargs:
-                agent_kwargs['max_tokens'] = kwargs['max_tokens']
-            if 'temperature' in kwargs:
-                agent_kwargs['temperature'] = kwargs['temperature']
+            # Tools can be passed to Agent constructor
             if 'tools' in kwargs:
                 agent_kwargs['tools'] = kwargs['tools']
                 
-            # Enable streaming
-            agent_kwargs['stream'] = True
-            
-            # Create agent instance
-            agent = Agent(**agent_kwargs)
-            
-            # Stream the response
-            async for chunk in agent.astream(prompt):
-                # Convert agent stream format to RuntimeDelta
-                if isinstance(chunk, str):
-                    yield RuntimeDelta(
-                        type="text",
-                        content=chunk,
-                        metadata={'runtime': self.runtime_id}
-                    )
-                elif isinstance(chunk, dict):
-                    # Handle structured chunks
-                    content_type = chunk.get('type', 'text')
-                    content = chunk.get('content', '')
-                    metadata = chunk.get('metadata', {})
-                    metadata['runtime'] = self.runtime_id
+            # Create agent instance using async context manager
+            async with Agent(**agent_kwargs) as agent:
+                # Prepare achat kwargs for streaming
+                chat_kwargs = {'stream': True}  # Enable streaming via achat parameter
+                if 'max_tokens' in kwargs:
+                    chat_kwargs['config'] = {'max_tokens': kwargs['max_tokens']}
+                if 'temperature' in kwargs:
+                    chat_kwargs['temperature'] = kwargs['temperature']
                     
-                    yield RuntimeDelta(
-                        type=content_type,
-                        content=content,
-                        metadata=metadata
-                    )
+                # Stream the response using achat with stream=True
+                # Agent doesn't have astream method, but achat can stream
+                result = await agent.achat(prompt, **chat_kwargs)
+                
+                # If streaming is supported, result should be an async iterator
+                if hasattr(result, '__aiter__'):
+                    async for chunk in result:
+                        # Convert agent stream format to RuntimeDelta
+                        if isinstance(chunk, str):
+                            yield RuntimeDelta(
+                                type="text",
+                                content=chunk,
+                                metadata={'runtime': self.runtime_id}
+                            )
+                        elif isinstance(chunk, dict):
+                            # Handle structured chunks
+                            content_type = chunk.get('type', 'text')
+                            content = chunk.get('content', '')
+                            metadata = chunk.get('metadata', {})
+                            metadata['runtime'] = self.runtime_id
+                            
+                            yield RuntimeDelta(
+                                type=content_type,
+                                content=content,
+                                metadata=metadata
+                            )
+                        else:
+                            # Fallback for unknown chunk types
+                            yield RuntimeDelta(
+                                type="text",
+                                content=str(chunk),
+                                metadata={'runtime': self.runtime_id}
+                            )
                 else:
-                    # Fallback for unknown chunk types
+                    # If not streaming, return single result as delta
                     yield RuntimeDelta(
                         type="text",
-                        content=str(chunk),
+                        content=str(result) if result else "",
                         metadata={'runtime': self.runtime_id}
                     )
                     
