@@ -5,6 +5,7 @@ JSON-based session persistence with file locking and atomic writes.
 Zero dependencies beyond stdlib.
 """
 
+import copy
 import json
 import logging
 from praisonaiagents._logging import get_logger
@@ -79,7 +80,7 @@ class SessionData:
     gateway_session_id: Optional[str] = None
     agent_id: Optional[str] = None  # Gateway agent ID (different from agent_name)
     # Runtime state for native transcript mirroring - Issue #1943
-    runtime_state: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # {runtime_id: {turn_id: state}}
+    runtime_state: Dict[str, Dict[str, Dict[str, Any]]] = field(default_factory=dict)  # {runtime_id: {turn_id: state}}
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -117,7 +118,7 @@ class SessionData:
             metadata=data.get("metadata", {}),
             gateway_session_id=data.get("gateway_session_id"),
             agent_id=data.get("agent_id"),
-            runtime_state=data.get("runtime_state", {}),
+            runtime_state=data.get("runtime_state") or {},
         )
     
     def get_chat_history(self, max_messages: Optional[int] = None) -> List[Dict[str, str]]:
@@ -823,7 +824,8 @@ class DefaultSessionStore:
         session_id: str, 
         runtime_id: str, 
         turn_id: str, 
-        state: Dict[str, Any]
+        state: Dict[str, Any],
+        mirror_enabled: bool = True  # Default True for backward compatibility
     ) -> bool:
         """Set runtime state for a specific runtime and turn.
         
@@ -833,18 +835,24 @@ class DefaultSessionStore:
             turn_id: Turn identifier within the runtime
             state: Runtime state data (tool call ids, transcript slices, etc.)
                   Should be lightweight - avoid storing large outputs or sensitive data
+            mirror_enabled: Whether runtime state mirroring is enabled (from SessionConfig.mirror_runtime_state)
+                          Default True for backward compatibility. Set to False to skip storage.
             
         Returns:
-            True if saved successfully
+            True if saved successfully (or skipped when mirror_enabled=False)
             
         Note:
             Keep state lightweight (<1KB per turn recommended). Redact sensitive
             data before storage. This is for handoff replay, not full state dumps.
         """
+        # Honor the opt-in flag to avoid storage bloat
+        if not mirror_enabled:
+            return True  # Successfully "saved" (by not saving)
+        
         def _apply(session: SessionData) -> None:
             if runtime_id not in session.runtime_state:
                 session.runtime_state[runtime_id] = {}
-            session.runtime_state[runtime_id][turn_id] = state
+            session.runtime_state[runtime_id][turn_id] = copy.deepcopy(state)
 
         return self._modify_session_locked(
             session_id, _apply, error_label="set runtime state"
@@ -870,9 +878,9 @@ class DefaultSessionStore:
         runtime_state = session.runtime_state.get(runtime_id, {})
         
         if turn_id is not None:
-            return runtime_state.get(turn_id, {})
+            return copy.deepcopy(runtime_state.get(turn_id, {}))
         
-        return runtime_state
+        return copy.deepcopy(runtime_state)
     
     def clear_runtime_state(
         self, 

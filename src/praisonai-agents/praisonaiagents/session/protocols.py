@@ -145,7 +145,8 @@ class RuntimeStateMirroringProtocol(Protocol):
         session_id: str, 
         runtime_id: str, 
         turn_id: str, 
-        state: Dict[str, Any]
+        state: Dict[str, Any],
+        mirror_enabled: bool = True
     ) -> bool:
         """Set runtime state for a specific runtime and turn.
         
@@ -154,6 +155,7 @@ class RuntimeStateMirroringProtocol(Protocol):
             runtime_id: Runtime identifier (e.g., "native", "plugin_harness") 
             turn_id: Turn identifier within the runtime
             state: Runtime state data (tool call ids, transcript slices, etc.)
+            mirror_enabled: Whether runtime state mirroring is enabled (from SessionConfig.mirror_runtime_state)
             
         Returns:
             True if saved successfully

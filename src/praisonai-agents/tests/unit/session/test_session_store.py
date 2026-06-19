@@ -803,3 +803,69 @@ class TestRuntimeStateMirroring:
         assert len(plugin_states) == 2
         assert native_states["turn-1"]["status"] == "completed"
         assert plugin_states["turn-1"]["version"] == "1.0"
+    
+    def test_runtime_state_mirror_enabled_flag(self, temp_store):
+        """Test that mirror_enabled flag controls whether runtime state is stored."""
+        session_id = "test-session"
+        runtime_id = "native"
+        turn_id = "turn-1"
+        state = {"tool_calls": ["call-1", "call-2"]}
+        
+        # Test with mirror_enabled=False (should not store)
+        result = temp_store.set_runtime_state(
+            session_id, runtime_id, turn_id, state, mirror_enabled=False
+        )
+        assert result is True  # Should return True (successfully skipped)
+        
+        # Verify state was NOT saved
+        retrieved_state = temp_store.get_runtime_state(session_id, runtime_id, turn_id)
+        assert retrieved_state == {}  # Should be empty
+        
+        # Test with mirror_enabled=True (should store)
+        result = temp_store.set_runtime_state(
+            session_id, runtime_id, turn_id, state, mirror_enabled=True
+        )
+        assert result is True
+        
+        # Verify state WAS saved
+        retrieved_state = temp_store.get_runtime_state(session_id, runtime_id, turn_id)
+        assert retrieved_state == state
+    
+    def test_runtime_state_deep_copy_protection(self, temp_store):
+        """Test that modifications to original state don't affect stored state."""
+        session_id = "test-session"
+        runtime_id = "native"
+        turn_id = "turn-1"
+        original_state = {"tool_calls": ["call-1"], "metadata": {"key": "value"}}
+        
+        # Set runtime state
+        temp_store.set_runtime_state(session_id, runtime_id, turn_id, original_state)
+        
+        # Modify original state
+        original_state["tool_calls"].append("call-2")
+        original_state["metadata"]["key"] = "modified"
+        
+        # Verify stored state is unaffected
+        retrieved_state = temp_store.get_runtime_state(session_id, runtime_id, turn_id)
+        assert retrieved_state == {"tool_calls": ["call-1"], "metadata": {"key": "value"}}
+        assert retrieved_state != original_state
+    
+    def test_runtime_state_null_handling(self, temp_store):
+        """Test that null runtime_state in JSON is handled correctly."""
+        session_id = "test-session"
+        
+        # Manually create a session file with null runtime_state
+        filepath = os.path.join(temp_store.session_dir, f"{session_id}.json")
+        session_data = {
+            "session_id": session_id,
+            "messages": [],
+            "metadata": {},
+            "runtime_state": None  # Explicitly null
+        }
+        
+        with open(filepath, "w") as f:
+            json.dump(session_data, f)
+        
+        # Verify that loading handles null correctly
+        session = temp_store.get_session(session_id)
+        assert session.runtime_state == {}  # Should default to empty dict, not None
