@@ -10,6 +10,7 @@ import typer
 
 from ..output.console import get_output_controller
 from ..state.identifiers import get_current_context
+from ..configuration.resolver import resolve_config
 
 app = typer.Typer(help="Run agents")
 
@@ -97,6 +98,19 @@ def run_main(
     """
     output = get_output_controller()
     _ = get_current_context()  # Initialize context
+    
+    # Resolve configuration if model not explicitly provided
+    if model is None:
+        try:
+            config = resolve_config()
+            if config.agent.model:
+                model = config.agent.model
+                if verbose:
+                    output.print_info(f"Using model from config: {model}")
+        except (ValueError, OSError) as e:
+            # Continue if config resolution fails, but log in verbose mode
+            if verbose:
+                output.print_info(f"Skipping config-based model fallback: {e}")
     
     # Validate session options
     if fork and not session:
