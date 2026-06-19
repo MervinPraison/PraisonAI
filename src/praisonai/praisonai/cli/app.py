@@ -750,26 +750,9 @@ def get_command_names():
     """Get all available command names without importing the modules."""
     names = set(_COMMAND_GROUPS.keys())
     # Add dynamically registered commands that don't have modules
+    # NOTE: retrieval_module.register_commands(app) adds these commands dynamically
     names.update({"index", "query"})  # retrieval commands
     return names
-
-def load_command_module(name):
-    """Load a specific command module by name."""
-    if name not in _COMMAND_GROUPS:
-        return None
-    
-    module_path = _COMMAND_GROUPS[name]
-    
-    # Handle special cases
-    if module_path in ("standardise_app_special", "app_special", "tui_special", "queue_special"):
-        return None  # These are registered inline in register_commands()
-    
-    try:
-        import importlib
-        module = importlib.import_module(module_path, package=__package__)
-        return getattr(module, "app", None)
-    except (ImportError, AttributeError):
-        return None
 
 def register_commands():
     """Register all command groups (idempotent).
