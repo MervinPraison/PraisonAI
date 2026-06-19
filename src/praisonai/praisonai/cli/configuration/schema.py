@@ -82,6 +82,16 @@ class SessionConfig:
 
 
 @dataclass
+class LLMConfig:
+    """LLM configuration for default model and provider settings."""
+    model: str = "gpt-4o-mini"
+    provider: Optional[str] = None
+    base_url: Optional[str] = None
+    temperature: float = 0.7
+    max_tokens: int = 16000
+
+
+@dataclass
 class RulesConfig:
     """Rules/instructions configuration."""
     auto: bool = True  # Auto-inject project instruction files
@@ -98,7 +108,8 @@ class ConfigSchema:
     output: OutputConfig = field(default_factory=OutputConfig)
     traces: TracesConfig = field(default_factory=TracesConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
-    model: ModelConfig = field(default_factory=ModelConfig)
+    model: ModelConfig = field(default_factory=ModelConfig)  # Deprecated
+    llm: LLMConfig = field(default_factory=LLMConfig)
     session: SessionConfig = field(default_factory=SessionConfig)
     rules: RulesConfig = field(default_factory=RulesConfig)
     
@@ -130,6 +141,13 @@ class ConfigSchema:
                 "default": self.model.default,
                 "temperature": self.model.temperature,
                 "max_tokens": self.model.max_tokens,
+            },
+            "llm": {
+                "model": self.llm.model,
+                "provider": self.llm.provider,
+                "base_url": self.llm.base_url,
+                "temperature": self.llm.temperature,
+                "max_tokens": self.llm.max_tokens,
             },
             "session": {
                 "auto_save": self.session.auto_save,
@@ -177,11 +195,12 @@ class ConfigSchema:
         traces_data = data.get("traces", {})
         mcp_data = data.get("mcp", {})
         model_data = data.get("model", {})
+        llm_data = data.get("llm", {})
         session_data = data.get("session", {})
         rules_data = data.get("rules", {})
         
         # Extract known keys
-        known_keys = {"output", "traces", "mcp", "model", "session", "rules"}
+        known_keys = {"output", "traces", "mcp", "model", "llm", "session", "rules"}
         extra = {k: v for k, v in data.items() if k not in known_keys}
         
         # Parse MCP servers
@@ -233,6 +252,13 @@ class ConfigSchema:
                 default=model_data.get("default", "gpt-4o-mini"),
                 temperature=model_data.get("temperature", 0.7),
                 max_tokens=model_data.get("max_tokens", 16000),
+            ),
+            llm=LLMConfig(
+                model=llm_data.get("model", "gpt-4o-mini"),
+                provider=llm_data.get("provider"),
+                base_url=llm_data.get("base_url"),
+                temperature=llm_data.get("temperature", 0.7),
+                max_tokens=llm_data.get("max_tokens", 16000),
             ),
             session=SessionConfig(
                 auto_save=session_data.get("auto_save", False),

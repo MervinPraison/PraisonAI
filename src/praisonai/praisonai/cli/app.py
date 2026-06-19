@@ -116,6 +116,7 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "config": (".commands.config", "app", "Configuration management"),
     "traces": (".commands.traces", "app", "Trace collection management"),
     "env": (".commands.environment", "app", "Environment and diagnostics"),
+    "auth": (".commands.auth", "app", "Credential management"),
     "session": (".commands.session", "app", "Session management"),
     "completion": (".commands.completion", "app", "Shell completion scripts"),
     "version": (".commands.version", "app", "Version information"),
