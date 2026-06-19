@@ -126,6 +126,7 @@ def resolve_approval_config(
     backend_name: Optional[str] = None,
     all_tools: bool = False,
     timeout: Optional[str] = None,
+    non_interactive: bool = False,
 ) -> Optional[Any]:
     """Build an approval value for ``Agent(approval=...)``.
 
@@ -138,8 +139,9 @@ def resolve_approval_config(
         all_tools:    ``--approve-all-tools`` flag.
         timeout:      ``--approval-timeout`` value.  ``"none"`` means
                       indefinite; a numeric string is parsed as seconds.
+        non_interactive: Whether to run in non-interactive mode.
     """
-    backend = resolve_approval_backend(backend_name)
+    backend = resolve_approval_backend(backend_name, non_interactive=non_interactive)
     if backend is None:
         return None
 

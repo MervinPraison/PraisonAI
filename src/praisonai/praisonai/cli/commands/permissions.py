@@ -36,8 +36,8 @@ def get_project_permissions_dir() -> str:
     return os.path.join(project_dir, ".praisonai", "permissions")
 
 
-@permissions.command()
-def list():
+@permissions.command(name="list")
+def list_rules():
     """List all permission rules."""
     permissions_dir = get_project_permissions_dir()
     manager = PermissionManager(storage_dir=permissions_dir)
@@ -104,7 +104,6 @@ def allow(pattern: str, agent: Optional[str], description: Optional[str], priori
     )
     
     manager.add_rule(rule)
-    manager.save_rules()
     
     console.print(f"[green]✓ Added ALLOW rule for pattern: {pattern}[/green]")
 
@@ -134,7 +133,6 @@ def deny(pattern: str, agent: Optional[str], description: Optional[str], priorit
     )
     
     manager.add_rule(rule)
-    manager.save_rules()
     
     console.print(f"[red]✓ Added DENY rule for pattern: {pattern}[/red]")
 
@@ -163,7 +161,6 @@ def ask(pattern: str, agent: Optional[str], description: Optional[str], priority
     )
     
     manager.add_rule(rule)
-    manager.save_rules()
     
     console.print(f"[yellow]✓ Added ASK rule for pattern: {pattern}[/yellow]")
 
@@ -176,19 +173,25 @@ def remove(rule_id: str):
     manager = PermissionManager(storage_dir=permissions_dir)
     
     rules = manager.get_rules()
-    rule_to_remove = None
     
-    for rule in rules:
-        if rule.id.startswith(rule_id):
-            rule_to_remove = rule
-            break
+    # Find all rules matching the prefix
+    matches = [rule for rule in rules if rule.id.startswith(rule_id)]
     
-    if not rule_to_remove:
+    if not matches:
         console.print(f"[red]✗ No rule found with ID starting with: {rule_id}[/red]")
         return
     
+    if len(matches) > 1:
+        console.print(
+            f"[yellow]✗ Multiple rules match '{rule_id}'. Please provide a longer ID prefix.[/yellow]"
+        )
+        console.print("Matching rules:")
+        for rule in matches:
+            console.print(f"  - {rule.id}: {rule.pattern} ({rule.action.value})")
+        return
+    
+    rule_to_remove = matches[0]
     manager.remove_rule(rule_to_remove.id)
-    manager.save_rules()
     
     console.print(f"[green]✓ Removed rule: {rule_to_remove.pattern} ({rule_to_remove.action.value})[/green]")
 

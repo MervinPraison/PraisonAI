@@ -5,10 +5,7 @@ Provides interactive prompts for tool approval with persistent rules.
 """
 
 import asyncio
-import json
 import os
-import sys
-from pathlib import Path
 from typing import Optional, Dict, Any
 
 from praisonaiagents.approval import ApprovalRequest, ApprovalDecision
@@ -17,7 +14,6 @@ from praisonaiagents.permissions import (
     PermissionRule,
     PermissionAction,
     PermissionMode,
-    PersistentApproval
 )
 
 
@@ -81,20 +77,7 @@ class InteractiveCLIApprovalBackend:
             Tuple of (approved, persist_as_always)
         """
         if self.non_interactive:
-            # In non-interactive mode, follow permission mode
-            if self.permission_mode == PermissionMode.BYPASS:
-                return (True, False)
-            elif self.permission_mode == PermissionMode.PLAN:
-                # Plan mode blocks writes
-                if request.tool_name in ["write", "edit", "delete", "bash", "shell"]:
-                    return (False, False)
-                return (True, False)
-            elif self.permission_mode == PermissionMode.ACCEPT_EDITS:
-                if "edit" in request.tool_name.lower() or "write" in request.tool_name.lower():
-                    return (True, False)
-            elif self.permission_mode == PermissionMode.DONT_ASK:
-                return (False, False)
-            # Default to deny in non-interactive
+            # In non-interactive mode, default to deny
             return (False, False)
         
         # Interactive prompt
@@ -159,21 +142,71 @@ class InteractiveCLIApprovalBackend:
         # Default to exact tool name
         return f"{tool_name}:*"
     
+    def _decision_from_mode(self, request: ApprovalRequest) -> Optional[ApprovalDecision]:
+        """
+        Check if permission mode provides an immediate decision.
+        
+        Returns None if mode doesn't apply, otherwise returns the decision.
+        """
+        # BYPASS mode: unconditional allow
+        if self.permission_mode == PermissionMode.BYPASS:
+            return ApprovalDecision(
+                approved=True,
+                reason="Bypassed by permission mode",
+                approver="permission_mode"
+            )
+        
+        # PLAN mode: unconditional deny for write/edit/shell operations
+        if self.permission_mode == PermissionMode.PLAN:
+            if request.tool_name in ["write", "edit", "delete", "bash", "shell"]:
+                return ApprovalDecision(
+                    approved=False,
+                    reason="Blocked by plan mode",
+                    approver="permission_mode"
+                )
+        
+        # ACCEPT_EDITS mode: unconditional allow for edit/write operations
+        if self.permission_mode == PermissionMode.ACCEPT_EDITS:
+            if "edit" in request.tool_name.lower() or "write" in request.tool_name.lower():
+                return ApprovalDecision(
+                    approved=True,
+                    reason="Auto-approved edit by permission mode",
+                    approver="permission_mode"
+                )
+        
+        # DONT_ASK mode in non-interactive: deny all asks
+        if self.permission_mode == PermissionMode.DONT_ASK and self.non_interactive:
+            return ApprovalDecision(
+                approved=False,
+                reason="Denied by don't-ask mode",
+                approver="permission_mode"
+            )
+        
+        return None
+    
     async def request_approval(self, request: ApprovalRequest) -> ApprovalDecision:
         """
         Request approval for a tool execution.
         
-        First checks existing rules, then prompts if needed.
+        First checks permission modes, then existing rules, then prompts if needed.
         """
-        # Build target string for permission check
-        target = f"{request.tool_name}"
+        # Check permission mode first (takes precedence)
+        mode_decision = self._decision_from_mode(request)
+        if mode_decision is not None:
+            return mode_decision
+        
+        # Build target string for permission check (always include colon for consistency)
         if "command" in request.arguments:
             target = f"{request.tool_name}:{request.arguments['command']}"
         elif request.arguments:
             # Include first arg value for more specific matching
-            first_arg = list(request.arguments.values())[0] if request.arguments else ""
+            first_arg = next(iter(request.arguments.values()), "") if request.arguments else ""
             if isinstance(first_arg, str) and len(first_arg) < 100:
                 target = f"{request.tool_name}:{first_arg}"
+            else:
+                target = f"{request.tool_name}:"
+        else:
+            target = f"{request.tool_name}:"
         
         # Check existing permissions
         result = self.permission_manager.check(target, agent_name=request.agent_name)
@@ -194,7 +227,7 @@ class InteractiveCLIApprovalBackend:
             )
         
         # Need to ask - run prompt in thread to avoid blocking
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         approved, persist = await loop.run_in_executor(
             None, self._prompt_user, request
         )
@@ -213,9 +246,6 @@ class InteractiveCLIApprovalBackend:
                 priority=100,  # User rules have high priority
             )
             self.permission_manager.add_rule(rule)
-            
-            # Save immediately
-            self.permission_manager.save_rules()
         
         return ApprovalDecision(
             approved=approved,

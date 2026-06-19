@@ -113,7 +113,8 @@ class PermissionManager:
     
     def save_rules(self):
         """Public method to save rules to disk."""
-        self._save_rules()
+        with self._lock:
+            self._save_rules()
     
     def _load_approvals(self):
         """Load approvals from disk."""
