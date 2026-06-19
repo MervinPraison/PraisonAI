@@ -139,6 +139,18 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
     def bot_user(self) -> Optional[BotUser]:
         return self._bot_user
     
+    @property
+    def capabilities(self) -> Dict[str, Any]:
+        """Slack capabilities - supports edit and reactions, no typing."""
+        return {
+            "live_edit": True,
+            "reactions": True,
+            "typing": False,  # Slack doesn't support typing indicators via API
+            "text_limit": 40000,  # Slack has a 40KB limit
+            "edit_rate_limit": 1.0,
+            "reaction_rate_limit": 0.5,
+        }
+    
     async def start(self) -> None:
         """Start the Slack bot."""
         if self._is_running:
@@ -595,6 +607,70 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
     async def send_typing(self, channel_id: str) -> None:
         """Send typing indicator (not supported in Slack API)."""
         pass
+    
+    async def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> bool:
+        """Add a reaction to a message."""
+        if not self._client:
+            return False
+        
+        try:
+            # Map common Unicode emojis to Slack names
+            emoji_mapping = {
+                "🤔": "thinking_face",
+                "⏳": "hourglass",
+                "🔧": "wrench",
+                "✅": "white_check_mark",
+                "❌": "x",
+            }
+            
+            # If it's a Unicode emoji, try to map it
+            if emoji in emoji_mapping:
+                emoji_name = emoji_mapping[emoji]
+            else:
+                # Otherwise strip colons if present (for :emoji_name: format)
+                emoji_name = emoji.strip(':')
+            
+            await self._client.reactions_add(
+                channel=channel_id,
+                timestamp=message_id,
+                name=emoji_name,
+            )
+            return True
+        except Exception as e:
+            logger.debug(f"Failed to add reaction: {e}")
+            return False
+    
+    async def remove_reaction(self, channel_id: str, message_id: str, emoji: str) -> bool:
+        """Remove a reaction from a message."""
+        if not self._client:
+            return False
+        
+        try:
+            # Map common Unicode emojis to Slack names
+            emoji_mapping = {
+                "🤔": "thinking_face",
+                "⏳": "hourglass",
+                "🔧": "wrench",
+                "✅": "white_check_mark",
+                "❌": "x",
+            }
+            
+            # If it's a Unicode emoji, try to map it
+            if emoji in emoji_mapping:
+                emoji_name = emoji_mapping[emoji]
+            else:
+                # Otherwise strip colons if present (for :emoji_name: format)
+                emoji_name = emoji.strip(':')
+            
+            await self._client.reactions_remove(
+                channel=channel_id,
+                timestamp=message_id,
+                name=emoji_name,
+            )
+            return True
+        except Exception as e:
+            logger.debug(f"Failed to remove reaction: {e}")
+            return False
     
     async def get_user(self, user_id: str) -> Optional[BotUser]:
         """Get user information."""
