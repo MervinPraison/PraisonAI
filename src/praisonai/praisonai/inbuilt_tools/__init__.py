@@ -1,5 +1,5 @@
 """Lazy access to autogen_tools, with `find_spec` startup probes for crewai/autogen."""
-from praisonai.auto import _load_optional
+from .._lazy_cache import lazy_get
 
 from .._framework_availability import is_available
 CREWAI_AVAILABLE = is_available("crewai")
@@ -15,7 +15,7 @@ def _load_autogen_tools():
 
 def _get_autogen_tools():
     """Thread-safe, single-shot lazy import. Negative result is cached too."""
-    return _load_optional("inbuilt_autogen_tools", _load_autogen_tools)
+    return lazy_get("inbuilt_autogen_tools", _load_autogen_tools)
 
 
 def _praisonai_tools_available() -> bool:

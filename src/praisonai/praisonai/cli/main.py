@@ -158,27 +158,25 @@ def _get_agents_generator():
     from praisonai.agents_generator import AgentsGenerator
     return AgentsGenerator
 
-# Optional module imports with availability checks
-GRADIO_AVAILABLE = False
-CALL_MODULE_AVAILABLE = False
-CREWAI_AVAILABLE = False
-AUTOGEN_AVAILABLE = False
-PRAISONAI_AVAILABLE = False
-TRAIN_AVAILABLE = False
-
 # Use centralized availability detection
 from .._framework_availability import is_available
 
-GRADIO_AVAILABLE = is_available("gradio")
-try:
-    import importlib.util
-    CALL_MODULE_AVAILABLE = importlib.util.find_spec("praisonai.api.call") is not None
-except (ModuleNotFoundError, AttributeError):
-    CALL_MODULE_AVAILABLE = False
-CREWAI_AVAILABLE = is_available("crewai")
-AUTOGEN_AVAILABLE = is_available("autogen")
-PRAISONAI_AVAILABLE = is_available("praisonaiagents")
-TRAIN_AVAILABLE = is_available("unsloth")
+# Module-level __getattr__ for backward compatibility with constants
+def __getattr__(name):
+    if name in {"GRADIO_AVAILABLE", "CREWAI_AVAILABLE", "AUTOGEN_AVAILABLE",
+                "PRAISONAI_AVAILABLE", "TRAIN_AVAILABLE"}:
+        mapping = {
+            "GRADIO_AVAILABLE":   "gradio",
+            "CREWAI_AVAILABLE":   "crewai",
+            "AUTOGEN_AVAILABLE":  "autogen",
+            "PRAISONAI_AVAILABLE": "praisonaiagents",
+            "TRAIN_AVAILABLE":    "unsloth",
+        }
+        return is_available(mapping[name])
+    if name == "CALL_MODULE_AVAILABLE":
+        import importlib.util
+        return importlib.util.find_spec("praisonai.api.call") is not None
+    raise AttributeError(name)
 
 # Lazy import helpers for optional dependencies (defined after availability flags)
 def _get_call_module():
@@ -187,7 +185,8 @@ def _get_call_module():
     Raises:
         ImportError: If praisonai.api.call is not installed
     """
-    if not CALL_MODULE_AVAILABLE:
+    import importlib.util
+    if not importlib.util.find_spec("praisonai.api.call"):
         raise ImportError(
             "Call feature is not installed. Install with: pip install \"praisonai[call]\""
         )
@@ -619,7 +618,9 @@ class PraisonAI:
             return
 
         if getattr(args, 'call', False):
-            if not CALL_MODULE_AVAILABLE:
+            import importlib.util
+            call_available = importlib.util.find_spec("praisonai.api.call") is not None
+            if not call_available:
                 print("[red]ERROR: Call feature is not installed. Install with:[/red]")
                 print("\npip install \"praisonai[call]\"\n")
                 return
@@ -1266,7 +1267,8 @@ class PraisonAI:
 
         # Handle both command and flag versions for call
         if args.command == 'call' or args.call:
-            if not CALL_MODULE_AVAILABLE:
+            import importlib.util
+            if not importlib.util.find_spec("praisonai.api.call"):
                 print("[red]ERROR: Call feature is not installed. Install with:[/red]")
                 print("\npip install \"praisonai[call]\"\n")
                 sys.exit(1)
@@ -1293,7 +1295,8 @@ class PraisonAI:
                 sys.exit(0)
 
             elif args.command == 'call':
-                if not CALL_MODULE_AVAILABLE:
+                import importlib.util
+                if not importlib.util.find_spec("praisonai.api.call"):
                     print("[red]ERROR: Call feature is not installed. Install with:[/red]")
                     print("\npip install \"praisonai[call]\"\n")
                     sys.exit(1)

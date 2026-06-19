@@ -411,65 +411,13 @@ class AgentsGenerator:
     
     def _build_tools_dict(self, config):
         """Shared tool resolution logic for sync and async paths."""
-        tools_dict = {}
-        
-        # Demand-driven tool resolution - only resolve tools actually used in YAML
-        if is_available("crewai") or is_available("autogen") or is_available("praisonaiagents") or is_available("ag2"):
-            try:
-                # Collect all tool names mentioned in the YAML config
-                needed_tools: set[str] = set()
-                for role_cfg in config.get('roles', {}).values():
-                    for t in role_cfg.get('tools') or []:
-                        if isinstance(t, str) and t.strip():
-                            needed_tools.add(t.strip())
-                    for task_cfg in (role_cfg.get('tasks') or {}).values():
-                        if not isinstance(task_cfg, dict):
-                            continue
-                        for t in task_cfg.get('tools') or []:
-                            if isinstance(t, str) and t.strip():
-                                needed_tools.add(t.strip())
-
-                # Resolve only the tools actually referenced in YAML
-                for tool_name in needed_tools:
-                    try:
-                        resolved_tool = self.tool_resolver.resolve(tool_name)
-                        if resolved_tool is None:
-                            self.logger.warning(f"Tool '{tool_name}' not found")
-                            continue
-                        tools_dict[tool_name] = (
-                            resolved_tool() if inspect.isclass(resolved_tool) else resolved_tool
-                        )
-                    except Exception as e:
-                        self.logger.warning(f"Failed to initialize tool '{tool_name}': {e}")
-                        continue
-                            
-            except Exception as e:
-                self.logger.warning(f"Error collecting YAML tool references: {e}")
-            
-            # Add tools from class names - use tool_resolver to check tool validity
-            for tool_class in self.tools:
-                if isinstance(tool_class, type):
-                    try:
-                        tool_instance = tool_class()
-                        tool_name = tool_class.__name__
-                        tools_dict[tool_name] = tool_instance
-                        self.logger.debug(f"Added tool: {tool_name}")
-                    except Exception as e:
-                        self.logger.warning(f"Failed to instantiate tool class {tool_class.__name__}: {e}")
-
-        root_directory = os.getcwd()
-        tools_py_path = os.path.join(root_directory, 'tools.py')
-        tools_dir_path = Path(root_directory) / 'tools'
-        
-        # Use consolidated ToolResolver for tools.py loading
-        tools_dict.update(self.tool_resolver.get_local_tool_classes())
-        if os.path.isfile(tools_py_path):
-            self.logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
-        elif tools_dir_path.is_dir():
-            tools_dict.update(self.tool_resolver.get_local_tool_classes_from_dir(tools_dir_path))
-            if tools_dict:
-                self.logger.debug("tools folder exists in the root directory")
-        
+        tools_dict = self.tool_resolver.resolve_all_from_yaml(config)
+        for tool_class in self.tools:
+            if isinstance(tool_class, type):
+                try:
+                    tools_dict[tool_class.__name__] = tool_class()
+                except Exception as e:
+                    self.logger.warning(f"Failed to instantiate tool class {tool_class.__name__}: {e}")
         return tools_dict
     
     def _select_framework(self, framework: str, config: Dict[str, Any]) -> Any:
@@ -601,68 +549,6 @@ class AgentsGenerator:
                         f"Unknown field '{field_name}' in {entity_name} '{name}'.{suggestion}"
                     )
 
-    def is_function_or_decorated(self, obj):
-        """
-        Checks if the given object is a function or has a __call__ method.
-
-        Parameters:
-            obj (object): The object to be checked.
-
-        Returns:
-            bool: True if the object is a function or has a __call__ method, False otherwise.
-        """
-        return inspect.isfunction(obj) or hasattr(obj, '__call__')
-
-    def load_tools_from_module(self, module_path):
-        """
-        Load function tools from a user-supplied module (gated by PRAISONAI_ALLOW_LOCAL_TOOLS).
-
-        Parameters:
-            module_path (str): The path to the module containing the tools.
-
-        Returns:
-            dict: A dictionary containing the names of the tools as keys and the corresponding functions or objects as values.
-                  Returns an empty dict if the module cannot be loaded (path missing, loading blocked by PRAISONAI_ALLOW_LOCAL_TOOLS, or any other load error).
-        """
-        from ._safe_loader import load_user_module
-        module = load_user_module(module_path, name="tools_module")
-        if module is None:
-            return {}
-        return {name: obj for name, obj in inspect.getmembers(module, self.is_function_or_decorated)}
-    
-    def load_tools_from_module_class(self, module_path):
-        """
-        Load BaseTool / langchain tool classes from a user-supplied module (gated by PRAISONAI_ALLOW_LOCAL_TOOLS).
-        """
-        from ._safe_loader import load_user_module
-        module = load_user_module(module_path, name="tools_module")
-        if module is None:
-            return {}
-        return self.tool_resolver._extract_tool_classes(module)
-
-    def load_tools_from_package(self, package_path):
-        """
-        Loads tools from a specified package path containing modules with functions or classes.
-
-        Parameters:
-            package_path (str): The path to the package containing the tools.
-
-        Returns:
-            dict: A dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.
-
-        Raises:
-            FileNotFoundError: If the specified package path does not exist.
-
-        This function iterates through all the .py files in the specified package path, excluding those that start with "__". For each file, it imports the corresponding module and checks if it contains any functions or classes that can be loaded as tools. The function then returns a dictionary containing the names of the tools as keys and the corresponding initialized instances of the classes as values.
-        """
-        tools_dict = {}
-        for module_file in os.listdir(package_path):
-            if module_file.endswith('.py') and not module_file.startswith('__'):
-                module_name = f"{package_path.name}.{module_file[:-3]}"  # Remove .py for import
-                module = importlib.import_module(module_name)
-                for name, obj in inspect.getmembers(module, self.is_function_or_decorated):
-                    tools_dict[name] = obj
-        return tools_dict
 
 
     def _load_config(self):

@@ -16,7 +16,10 @@ T = TypeVar("T")
 
 _DEFAULT_TIMEOUT = float(os.environ.get("PRAISONAI_RUN_SYNC_TIMEOUT", "300"))
 
-class _BackgroundLoop:
+class AsyncBridge:
+    """Per-instance async runner. The module-level `run_sync()` keeps the
+    historical shared default; embedders/services should construct their own."""
+
     def __init__(self) -> None:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
@@ -53,6 +56,34 @@ class _BackgroundLoop:
             loop = self._spawn_locked()
             return asyncio.run_coroutine_threadsafe(coro, loop)
 
+    def run_sync(self, coro: Awaitable[T], *, timeout: float | None = _DEFAULT_TIMEOUT) -> T:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            raise RuntimeError(
+                "run_sync() cannot be called from a running event loop"
+            )
+        fut = self.submit(coro)
+        try:
+            return fut.result(timeout=timeout)
+        except (TimeoutError, concurrent.futures.TimeoutError):
+            fut.cancel()
+            try:
+                fut.exception(timeout=1.0)
+            except (
+                TimeoutError,
+                concurrent.futures.TimeoutError,
+                asyncio.CancelledError,
+                FutureCancelledError,
+            ):
+                pass
+            raise
+        except BaseException:
+            fut.cancel()
+            raise
+
     def shutdown(self, timeout: float = 5.0) -> None:
         with self._lock:
             loop, thread = self._loop, self._thread
@@ -75,16 +106,17 @@ class _BackgroundLoop:
                 self._loop = None
                 self._thread = None
 
-_BG: "_BackgroundLoop | None" = None
-_BG_LOCK = threading.Lock()
+# Backwards-compatible module-level shared default:
+_DEFAULT_BRIDGE: AsyncBridge | None = None
+_DEFAULT_LOCK = threading.Lock()
 
-def _get_bg() -> "_BackgroundLoop":
-    global _BG
-    if _BG is None:
-        with _BG_LOCK:
-            if _BG is None:
-                _BG = _BackgroundLoop()
-    return _BG
+def _default_bridge() -> AsyncBridge:
+    global _DEFAULT_BRIDGE
+    if _DEFAULT_BRIDGE is None:
+        with _DEFAULT_LOCK:
+            if _DEFAULT_BRIDGE is None:
+                _DEFAULT_BRIDGE = AsyncBridge()
+    return _DEFAULT_BRIDGE
 
 
 def run_sync(coro: Awaitable[T], *, timeout: float | None = _DEFAULT_TIMEOUT) -> T:
@@ -106,44 +138,12 @@ def run_sync(coro: Awaitable[T], *, timeout: float | None = _DEFAULT_TIMEOUT) ->
         TimeoutError: If timeout is exceeded
         Any exception raised by the coroutine
     """
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        pass
-    else:
-        raise RuntimeError(
-            "run_sync() cannot be called from a running event loop; "
-            "await the coroutine directly instead."
-        )
-
-    # Submit the coroutine atomically
-    fut = _get_bg().submit(coro)
-    
-    try:
-        return fut.result(timeout=timeout)
-    except (TimeoutError, concurrent.futures.TimeoutError):
-        # Propagate cancellation into the background loop so the underlying
-        # awaitable (DB query, HTTP call, subprocess wait) actually unwinds.
-        fut.cancel()
-        try:
-            # Give cancellation a short grace period to release resources.
-            fut.exception(timeout=1.0)
-        except (
-            TimeoutError,
-            concurrent.futures.TimeoutError,
-            asyncio.CancelledError,
-            FutureCancelledError,
-        ):
-            pass
-        raise
-    except BaseException:
-        # Ctrl-C / GeneratorExit / SystemExit must also cancel the bg task.
-        fut.cancel()
-        raise
+    return _default_bridge().run_sync(coro, timeout=timeout)
 
 
 def shutdown() -> None:
-    """Public hook for long-running server processes to stop the bridge cleanly."""
-    bg = _BG
-    if bg is not None:
-        bg.shutdown()
+    """Shut down ONLY the shared default bridge (not user-owned instances)."""
+    global _DEFAULT_BRIDGE
+    if _DEFAULT_BRIDGE is not None:
+        _DEFAULT_BRIDGE.shutdown()
+        _DEFAULT_BRIDGE = None
