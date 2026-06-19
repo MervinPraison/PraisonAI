@@ -94,65 +94,6 @@ class SessionDeduplicationCache:
             self._cache.clear()
             self._stats = {"duplicates_prevented": 0, "tokens_saved": 0}
 
-def deduplicate_topics(topics: list, key: str = "title", similarity_threshold: float = 0.8) -> list:
-    """
-    Programmatic deduplication of topics/items before agent processing.
-    
-    This helps prevent duplicate content from being passed to downstream agents,
-    reducing token waste and improving quality.
-    
-    Args:
-        topics: List of topic dicts or strings
-        key: Key to use for comparison if topics are dicts (default: "title")
-        similarity_threshold: Similarity threshold for fuzzy matching (0.0-1.0)
-        
-    Returns:
-        Deduplicated list of topics
-    """
-    if not topics:
-        return topics
-    
-    seen_hashes = set()
-    seen_normalized = set()
-    unique_topics = []
-    
-    for topic in topics:
-        # Get the content to compare
-        if isinstance(topic, dict):
-            content = str(topic.get(key, topic.get("content", str(topic))))
-        else:
-            content = str(topic)
-        
-        # Normalize for comparison
-        normalized = content.lower().strip()
-        # Remove common words for better matching
-        normalized = " ".join(w for w in normalized.split() if len(w) > 3)
-        
-        # Check exact hash match
-        content_hash = hashlib.sha256(normalized.encode()).hexdigest()
-        if content_hash in seen_hashes:
-            continue
-        
-        # Check fuzzy match using simple word overlap
-        is_duplicate = False
-        for seen in seen_normalized:
-            # Calculate Jaccard similarity
-            words1 = set(normalized.split())
-            words2 = set(seen.split())
-            if words1 and words2:
-                intersection = len(words1 & words2)
-                union = len(words1 | words2)
-                similarity = intersection / union if union > 0 else 0
-                if similarity >= similarity_threshold:
-                    is_duplicate = True
-                    break
-        
-        if not is_duplicate:
-            seen_hashes.add(content_hash)
-            seen_normalized.add(normalized)
-            unique_topics.append(topic)
-    
-    return unique_topics
 
 class EstimationMode(str, Enum):
     """Token estimation modes."""
