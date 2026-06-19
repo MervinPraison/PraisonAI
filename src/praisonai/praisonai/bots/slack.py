@@ -614,8 +614,22 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
             return False
         
         try:
-            # Remove colons from emoji if present (Slack uses name only)
-            emoji_name = emoji.strip(':')
+            # Map common Unicode emojis to Slack names
+            emoji_mapping = {
+                "🤔": "thinking_face",
+                "⏳": "hourglass",
+                "🔧": "wrench",
+                "✅": "white_check_mark",
+                "❌": "x",
+            }
+            
+            # If it's a Unicode emoji, try to map it
+            if emoji in emoji_mapping:
+                emoji_name = emoji_mapping[emoji]
+            else:
+                # Otherwise strip colons if present (for :emoji_name: format)
+                emoji_name = emoji.strip(':')
+            
             await self._client.reactions_add(
                 channel=channel_id,
                 timestamp=message_id,
@@ -632,7 +646,22 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
             return False
         
         try:
-            emoji_name = emoji.strip(':')
+            # Map common Unicode emojis to Slack names
+            emoji_mapping = {
+                "🤔": "thinking_face",
+                "⏳": "hourglass",
+                "🔧": "wrench",
+                "✅": "white_check_mark",
+                "❌": "x",
+            }
+            
+            # If it's a Unicode emoji, try to map it
+            if emoji in emoji_mapping:
+                emoji_name = emoji_mapping[emoji]
+            else:
+                # Otherwise strip colons if present (for :emoji_name: format)
+                emoji_name = emoji.strip(':')
+            
             await self._client.reactions_remove(
                 channel=channel_id,
                 timestamp=message_id,

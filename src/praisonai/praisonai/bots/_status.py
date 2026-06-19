@@ -171,8 +171,10 @@ class StatusReactions:
         # Schedule debounced update
         async def _delayed_update():
             await asyncio.sleep(self._config.debounce_delay)
-            if self._pending_status:
-                await self._apply_status(self._pending_status)
+            # Save the pending status to apply (may have changed during sleep)
+            status_to_apply = self._pending_status
+            if status_to_apply:
+                await self._apply_status(status_to_apply)
         
         self._update_task = asyncio.create_task(_delayed_update())
     
@@ -188,6 +190,8 @@ class StatusReactions:
                     self._message_id,
                     self._current_emoji
                 )
+                # Clear current emoji after successful removal
+                self._current_emoji = None
             
             # Add new emoji
             if emoji:
@@ -200,15 +204,30 @@ class StatusReactions:
                 if success:
                     self._current_status = status
                     self._current_emoji = emoji
-                    self._pending_status = None
                     
                     logger.debug(
                         "StatusReactions applied %s (%s) to message %s",
                         status, emoji, self._message_id
                     )
+                else:
+                    # Failed to add reaction, but we already removed the old one
+                    # Keep state consistent
+                    self._current_status = None
+                    logger.debug(
+                        "StatusReactions failed to add reaction %s to message %s",
+                        emoji, self._message_id
+                    )
+            
+            # Only clear pending status if we applied it successfully
+            # (or if there's no emoji to apply)
+            if status == self._pending_status:
+                self._pending_status = None
             
         except Exception as e:
             logger.warning("StatusReactions failed to apply status: %s", e)
+            # On exception, clear emoji state to avoid desync
+            self._current_emoji = None
+            self._current_status = None
     
     async def clear(self) -> None:
         """Clear all status reactions."""

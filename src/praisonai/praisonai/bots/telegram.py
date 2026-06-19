@@ -824,12 +824,19 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             return False
     
     async def remove_reaction(self, channel_id: str, message_id: str, emoji: str) -> bool:
-        """Remove a reaction from a message."""
+        """Remove a reaction from a message.
+        
+        Note: Telegram's setMessageReaction API is set-based - it replaces all bot reactions.
+        To remove a specific emoji, we would need to fetch current reactions and filter out
+        the target. Since there's no getMessageReactions API, we'll clear all bot reactions
+        as a simpler approach (the bot typically has only one reaction anyway).
+        """
         if not self._application:
             return False
         
         try:
-            # Telegram API: send empty reaction list to remove all reactions
+            # Telegram API: send empty reaction list to remove all bot reactions
+            # This is a known limitation - we can't selectively remove individual reactions
             await self._application.bot.set_message_reaction(
                 chat_id=int(channel_id),
                 message_id=int(message_id),

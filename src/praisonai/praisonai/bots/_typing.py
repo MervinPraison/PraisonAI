@@ -169,6 +169,7 @@ class TypingManager:
             pass
         
         self._task = None
+        self._start_time = None  # Reset start time to avoid stale duration
         logger.debug("TypingManager stopped for %s", self._channel_id)
     
     @property

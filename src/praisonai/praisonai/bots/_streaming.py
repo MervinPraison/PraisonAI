@@ -127,7 +127,11 @@ class DraftStreamer:
         caps = getattr(adapter, 'capabilities', {})
         self._can_edit = caps.get('live_edit', True)  # Assume true for backward compat
         self._text_limit = caps.get('text_limit', 0) or 0  # 0 = unlimited
-        self._edit_rate_limit = caps.get('edit_rate_limit', 0) or self._config.min_interval
+        self._edit_rate_limit = caps.get('edit_rate_limit', 0) or 0
+        
+        # Use the more restrictive rate limit between channel capability and config
+        if self._edit_rate_limit > 0:
+            self._config.min_interval = max(self._config.min_interval, self._edit_rate_limit)
         
         # Override config if channel doesn't support editing
         if not self._can_edit and self._config.mode != StreamingMode.OFF:
@@ -138,8 +142,8 @@ class DraftStreamer:
             self._config = StreamingConfig(mode=StreamingMode.OFF)
         
         logger.debug(
-            "DraftStreamer initialized for channel %s, mode=%s, can_edit=%s",
-            channel_id, config.mode, self._can_edit
+            "DraftStreamer initialized for channel %s, mode=%s, can_edit=%s, min_interval=%s",
+            channel_id, self._config.mode, self._can_edit, self._config.min_interval
         )
     
     async def start(self) -> str:
