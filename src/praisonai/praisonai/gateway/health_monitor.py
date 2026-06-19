@@ -100,7 +100,7 @@ class ChannelHealthMonitor:
     def __init__(
         self,
         config: Optional[HealthMonitorConfig] = None,
-        health_check_fn: Optional[Callable[[str, Any], HealthResult]] = None,
+        health_check_fn: Optional[Callable[[str, Any], "Awaitable[HealthResult]"]] = None,
         restart_fn: Optional[Callable[[str, HealthReason], "Awaitable[None]"]] = None,
     ):
         """Initialize health monitor.
