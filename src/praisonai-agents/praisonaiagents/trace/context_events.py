@@ -463,6 +463,8 @@ class ContextTraceEmitter:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Emit agent start event."""
+        if not self._enabled:
+            return
         self._emit(ContextEvent(
             event_type=ContextEventType.AGENT_START,
             timestamp=time.time(),
@@ -477,6 +479,8 @@ class ContextTraceEmitter:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Emit agent end event."""
+        if not self._enabled:
+            return
         self._emit(ContextEvent(
             event_type=ContextEventType.AGENT_END,
             timestamp=time.time(),
@@ -495,6 +499,8 @@ class ContextTraceEmitter:
         tokens_budget: int = 0,
     ) -> None:
         """Emit message added event."""
+        if not self._enabled:
+            return
         # Truncate long content for storage
         truncated_content = content[:1000] + "..." if len(content) > 1000 else content
         
@@ -519,6 +525,8 @@ class ContextTraceEmitter:
         tool_args: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Emit tool call start event."""
+        if not self._enabled:
+            return
         self._emit(ContextEvent(
             event_type=ContextEventType.TOOL_CALL_START,
             timestamp=time.time(),
@@ -549,6 +557,8 @@ class ContextTraceEmitter:
             error: Error message if any
             cost_usd: Cost in USD (e.g., 0.001 for internet search = 1 credit)
         """
+        if not self._enabled:
+            return
         # Smart truncate long results unless full_content is enabled
         truncated_result = None
         if result:
@@ -670,6 +680,8 @@ class ContextTraceEmitter:
             model: Model being used
             messages: Optional full messages array for context replay
         """
+        if not self._enabled:
+            return
         data = {"model": model}
         if messages is not None:
             data["messages"] = messages
@@ -708,6 +720,8 @@ class ContextTraceEmitter:
             completion_tokens: Number of tokens in the completion/response
             cost_usd: Estimated cost in USD for this LLM call
         """
+        if not self._enabled:
+            return
         # Use completion_tokens if provided, fallback to response_tokens for backward compat
         actual_completion_tokens = completion_tokens if completion_tokens > 0 else response_tokens
         
