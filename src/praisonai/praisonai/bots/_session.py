@@ -204,7 +204,7 @@ class BotSessionManager:
 
         Args:
             stream_callback: Optional async callback for streaming events.
-                            If provided, will be passed to agent.astart() for streaming.
+                            When provided, events are bridged via agent.stream_emitter.
 
         N4 — Inbound DLQ: if a ``dlq`` was passed to ``__init__`` and
         ``agent.chat()`` raises, the failing message is persisted to
@@ -298,23 +298,44 @@ class BotSessionManager:
                         if controller:
                             self._active_runs[storage_key] = controller
                         
+                        bridged_stream_callback = None
                         try:
                             # Choose streaming vs non-streaming path based on callback
                             if stream_callback:
-                                # Streaming path: use agent.astart() with stream callback and timeout
+                                # Streaming path: bridge events via stream_emitter because
+                                # achat()/astart() do not accept stream_callback directly.
+                                emitter = getattr(agent, "stream_emitter", None)
+                                if emitter is not None:
+                                    def bridged_stream_callback(event):
+                                        try:
+                                            result = stream_callback(event)
+                                            if asyncio.iscoroutine(result):
+                                                asyncio.get_running_loop().create_task(result)
+                                        except Exception as cb_exc:
+                                            logger.warning("Stream callback failed: %s", cb_exc)
+
+                                    emitter.add_callback(bridged_stream_callback)
+
+                                astart_kwargs = {"stream": True}
+                                if controller:
+                                    astart_kwargs["cancel_token"] = controller
+
                                 try:
-                                    # astart is async so we can use asyncio.wait_for directly 
                                     response = await asyncio.wait_for(
-                                        agent.astart(prompt, stream_callback=stream_callback),
+                                        agent.astart(prompt, **astart_kwargs),
                                         timeout=self._run_timeout if self._run_timeout > 0 else None,
                                     )
-                                    # Handle AutonomyResult when autonomy is enabled in caller mode
-                                    if hasattr(response, 'output'):
+                                    if hasattr(response, "output"):
                                         response = response.output
                                 except asyncio.TimeoutError:
                                     if controller:
                                         controller.request("run timeout")
-                                    raise BotRunTimeout(f"Agent run timed out after {self._run_timeout}s")
+                                    raise BotRunTimeout(
+                                        f"Agent run timed out after {self._run_timeout}s"
+                                    )
+                                finally:
+                                    if emitter is not None and bridged_stream_callback is not None:
+                                        emitter.remove_callback(bridged_stream_callback)
                             else:
                                 # Legacy non-streaming path: use agent.chat() in executor with cancel_token and timeout
                                 import contextvars

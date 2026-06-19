@@ -386,7 +386,7 @@ class AgentsGenerator:
         assert_framework_available(adapter.name)
         
         # Validate cli_backend compatibility
-        self._validate_cli_backend_compatibility(config, adapter)
+        self._validate_cli_backend_compatibility(config, adapter.name)
         
         # Initialize observability hooks
         from .observability.hooks import init_observability
