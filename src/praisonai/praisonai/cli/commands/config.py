@@ -89,9 +89,11 @@ def config_get(
             output.print_json({"key": key, "value": value})
         else:
             output.print(f"{key} = {value}")
+    except typer.Exit:
+        raise
     except Exception as e:
         output.print_error(f"Failed to get configuration: {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 @app.command("set")
@@ -135,15 +137,30 @@ def config_set(
     if config_path.exists():
         try:
             with open(config_path, 'r') as f:
-                config = yaml.safe_load(f) or {}
-        except Exception:
-            pass
+                loaded = yaml.safe_load(f)
+                if loaded is None:
+                    config = {}
+                elif not isinstance(loaded, dict):
+                    output.print_error(f"Configuration file must be a YAML dictionary: {config_path}")
+                    raise typer.Exit(1)
+                else:
+                    config = loaded
+        except yaml.YAMLError as e:
+            output.print_error(f"Invalid YAML in {config_path}: {e}")
+            raise typer.Exit(1)
+        except OSError as e:
+            output.print_error(f"Failed to read {config_path}: {e}")
+            raise typer.Exit(1)
     
     # Set the value
     keys = key.split('.')
     current = config
     for k in keys[:-1]:
-        current = current.setdefault(k, {})
+        next_value = current.setdefault(k, {})
+        if not isinstance(next_value, dict):
+            output.print_error(f"Cannot set nested key '{key}' - intermediate key '{k}' is not a dictionary")
+            raise typer.Exit(1)
+        current = next_value
     current[keys[-1]] = parsed_value
     
     # Write back
@@ -450,7 +467,7 @@ def config_doctor():
 
 @app.command("show")
 def config_show(
-    format: str = typer.Option(
+    output_format: str = typer.Option(
         "yaml",
         "--format",
         "-f",
@@ -470,16 +487,20 @@ def config_show(
         config = resolve_config()
         config_dict = config.to_dict()
         
-        if format == "yaml":
+        # Include sources in serialized output if requested (for JSON/YAML)
+        if sources and output_format in ["yaml", "json"]:
+            config_dict["_sources"] = config.sources
+        
+        if output_format == "yaml":
             yaml_output = yaml.dump(config_dict, default_flow_style=False, sort_keys=False)
             output.print(yaml_output)
             
-        elif format == "json":
+        elif output_format == "json":
             import json
             json_output = json.dumps(config_dict, indent=2)
             output.print(json_output)
             
-        elif format == "table":
+        elif output_format == "table":
             def print_dict(d, prefix=""):
                 for key, value in d.items():
                     full_key = f"{prefix}.{key}" if prefix else key
@@ -490,11 +511,15 @@ def config_show(
             
             output.print("[bold]Configuration:[/bold]")
             print_dict(config_dict)
-        
-        if sources:
-            output.print("\n[bold]Sources:[/bold]")
-            for source in config.sources:
-                output.print(f"  • {source}")
+            
+            # For table format, show sources separately
+            if sources:
+                output.print("\n[bold]Sources:[/bold]")
+                for source in config.sources:
+                    output.print(f"  • {source}")
+        else:
+            output.print_error(f"Unsupported format: {output_format}")
+            raise typer.Exit(1)
                 
     except Exception as e:
         output.print_error(f"Failed to show configuration: {e}")
@@ -543,12 +568,14 @@ def config_validate(
             output.print_error(f"Schema validation failed: {e}")
             raise typer.Exit(1)
             
+    except typer.Exit:
+        raise
     except yaml.YAMLError as e:
         output.print_error(f"Invalid YAML syntax: {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
     except Exception as e:
         output.print_error(f"Validation failed: {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 @app.command("sources")

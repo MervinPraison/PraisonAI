@@ -107,9 +107,10 @@ def run_main(
                 model = config.agent.model
                 if verbose:
                     output.print_info(f"Using model from config: {model}")
-        except Exception:
-            # Silently continue if config resolution fails
-            pass
+        except (ValueError, OSError) as e:
+            # Continue if config resolution fails, but log in verbose mode
+            if verbose:
+                output.print_info(f"Skipping config-based model fallback: {e}")
     
     # Validate session options
     if fork and not session:

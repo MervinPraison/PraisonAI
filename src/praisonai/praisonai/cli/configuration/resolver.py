@@ -15,10 +15,9 @@ import os
 import json
 import toml
 import yaml
-from dataclasses import dataclass, field, asdict, replace
+from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
-from functools import lru_cache
 
 from ..utils.project import get_git_root
 
@@ -261,6 +260,7 @@ class ConfigResolver:
         if env_path.exists():
             env_data = self._read_env_file(env_path)
             if env_data and not configs:
+                env_data["_source"] = str(env_path)
                 configs.append(env_data)
             elif env_data and configs:
                 # Merge env data into existing config
@@ -270,20 +270,19 @@ class ConfigResolver:
     
     def _load_project_config(self) -> Optional[Dict[str, Any]]:
         """Load project configuration with walk-up discovery."""
-        # Try git root first
+        # Build search paths from current directory up to git root (or filesystem root)
         git_root = get_git_root(str(self.cwd))
         search_paths = []
         
-        if git_root:
-            search_paths.append(git_root)
-        
         # Walk up from cwd to root (or git root if found)
         current = self.cwd.resolve()
-        stop_at = git_root if git_root else Path("/")
+        stop_at = Path("/")
         
-        while current != current.parent and current != stop_at:
-            if current not in search_paths:
-                search_paths.append(current)
+        # Collect paths from current directory upward
+        while current != current.parent:
+            search_paths.append(current)
+            if git_root and current == git_root:
+                break  # Stop at git root if found
             current = current.parent
         
         # Search for config files
@@ -392,12 +391,12 @@ class ConfigResolver:
                 # Try to detect format
                 try:
                     return yaml.safe_load(content) or {}
-                except:
+                except yaml.YAMLError:
                     try:
                         return toml.loads(content)
-                    except:
+                    except toml.TomlDecodeError:
                         return None
-        except Exception:
+        except (OSError, json.JSONDecodeError, toml.TomlDecodeError, yaml.YAMLError):
             return None
     
     def _read_env_file(self, path: Path) -> Dict[str, Any]:
@@ -431,7 +430,8 @@ class ConfigResolver:
             migrated["rag"] = {}
             rag_keys = [
                 "collection", "top_k", "hybrid", "rerank", "min_score",
-                "include_citations", "max_context_tokens", "vector_store_path"
+                "include_citations", "max_context_tokens", "vector_store_path",
+                "vector_store_provider"
             ]
             for key in rag_keys:
                 if key in data:

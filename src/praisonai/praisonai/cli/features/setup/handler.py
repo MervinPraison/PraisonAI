@@ -298,8 +298,9 @@ class SetupHandler(CommandHandler):
                 import yaml
                 with open(config_file, 'r') as f:
                     existing_config = yaml.safe_load(f) or {}
-            except Exception:
-                pass
+            except Exception as e:
+                output.print_warning(f"Could not read existing config: {e}")
+                # Continue with empty config rather than failing setup
         
         # Build new config structure following the unified schema
         new_config = existing_config.copy()
