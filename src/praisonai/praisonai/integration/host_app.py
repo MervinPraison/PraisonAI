@@ -138,34 +138,36 @@ def configure_host(
     if not is_legacy_host():
         from praisonaiui.providers import PraisonAIProvider
         from praisonaiui.server import set_provider
+        import praisonaiui.server as srv
         
-        # Always proceed with provider setup unless explicitly skipped by legacy mode
-        # Tests that need to override providers should do so after configure_host() completes
-        kwargs = dict(agent_kwargs or {})
-        if agents:
-            set_provider(PraisonAIProvider(agents=list(agents), **kwargs))
-        else:
-            # Load context files if specified
-            instructions = kwargs.pop("instructions", "You are a helpful assistant.")
-            if context_paths:
-                try:
-                    from praisonai.integration.context_files import load_context_files
-                    context = load_context_files(list(context_paths))
-                    if context:
-                        instructions = f"{instructions}\n\nContext:\n{context}"
-                except ImportError:
-                    pass  # Context files helper is optional
-            
-            set_provider(
-                PraisonAIProvider(
-                    name=kwargs.pop("name", "PraisonAI"),
-                    instructions=instructions,
-                    llm=kwargs.pop(
-                        "llm", os.getenv("PRAISONAI_MODEL", "gpt-4o-mini")
-                    ),
-                    **kwargs,
+        # Check if a provider is already set (e.g., by tests)
+        # Only set a new provider if none exists
+        if not hasattr(srv, '_provider') or srv._provider is None:
+            kwargs = dict(agent_kwargs or {})
+            if agents:
+                set_provider(PraisonAIProvider(agents=list(agents), **kwargs))
+            else:
+                # Load context files if specified
+                instructions = kwargs.pop("instructions", "You are a helpful assistant.")
+                if context_paths:
+                    try:
+                        from praisonai.integration.context_files import load_context_files
+                        context = load_context_files(list(context_paths))
+                        if context:
+                            instructions = f"{instructions}\n\nContext:\n{context}"
+                    except ImportError:
+                        pass  # Context files helper is optional
+                
+                set_provider(
+                    PraisonAIProvider(
+                        name=kwargs.pop("name", "PraisonAI"),
+                        instructions=instructions,
+                        llm=kwargs.pop(
+                            "llm", os.getenv("PRAISONAI_MODEL", "gpt-4o-mini")
+                        ),
+                        **kwargs,
+                    )
                 )
-            )
         setup_bridges()
 
     # Register L3 dashboard pages
@@ -267,6 +269,8 @@ class UIPreset:
     openai_fallback: bool = False
     settings_handler: Optional[Callable] = None
     agent_factory: Optional[Callable] = None
+    realtime_manager: Optional[Any] = None  # For OpenAIRealtimeManager
+    agent_loader: Optional[Callable] = None  # For loading agents from YAML
 
 
 def build_ui_app(preset: UIPreset):
@@ -294,6 +298,14 @@ def build_ui_app(preset: UIPreset):
     @aiui.welcome
     async def _welcome():
         await aiui.say(preset.welcome)
+    
+    # Set up realtime manager if provided
+    if preset.realtime_manager:
+        aiui.set_realtime_manager(preset.realtime_manager)
+    
+    # Load agents from YAML if loader provided
+    if preset.agent_loader:
+        preset.agent_loader()
     
     # Set up legacy host handlers if needed
     if is_legacy_host():

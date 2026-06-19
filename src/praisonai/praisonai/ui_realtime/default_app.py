@@ -11,6 +11,13 @@ Requires: pip install "praisonai[ui]"
 import os
 from praisonai.integration.host_app import UIPreset, build_ui_app
 
+# Initialize the realtime manager for voice functionality
+try:
+    from praisonaiui.realtime import OpenAIRealtimeManager
+    realtime_manager = OpenAIRealtimeManager()
+except ImportError:
+    realtime_manager = None
+
 app = build_ui_app(UIPreset(
     title="PraisonAI Realtime Voice",
     logo="🎤",
@@ -28,4 +35,5 @@ app = build_ui_app(UIPreset(
         {"label": "Help", "message": "How do I use voice commands?", "icon": "❓"},
     ],
     welcome="🎤 Welcome to PraisonAI Realtime Voice! Click the microphone button to start talking.",
+    realtime_manager=realtime_manager,
 ))

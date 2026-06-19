@@ -57,6 +57,7 @@ class SandboxHandler:
             except ValueError:
                 # Fallback to subprocess for unknown types
                 sandbox_class = registry.resolve("subprocess")
+                sandbox_type = "subprocess"  # Update to match resolved type
             
             # Pass image parameter only for Docker sandbox
             if sandbox_type == "docker":
@@ -115,6 +116,7 @@ class SandboxHandler:
             except ValueError:
                 # Fallback to subprocess for unknown types
                 sandbox_class = registry.resolve("subprocess")
+                sandbox_type = "subprocess"  # Update to match resolved type
             
             # Pass image parameter only for Docker sandbox
             if sandbox_type == "docker":

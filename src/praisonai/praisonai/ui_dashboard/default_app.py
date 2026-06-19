@@ -24,7 +24,7 @@ app = build_ui_app(UIPreset(
     agent_kwargs={
         "name": "PraisonAI",
         "instructions": "You are a helpful assistant for the PraisonAI unified dashboard.",
-        "llm": os.getenv("PRAISONAI_MODEL", "gpt-4o-mini"),
+        "llm": os.getenv("MODEL_NAME", os.getenv("PRAISONAI_MODEL", "gpt-4o-mini")),
     },
     starters=[
         {"label": "Dashboard", "message": "Show me the dashboard overview", "icon": "📊"},

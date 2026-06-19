@@ -26,7 +26,7 @@ def create_chat_agent(settings):
         return Agent(
             name="PraisonAI",
             instructions="You are a helpful assistant. Delegate coding/analysis tasks to external subagents when available.",
-            llm=os.getenv("MODEL_NAME", "gpt-4o-mini"),
+            llm=os.getenv("MODEL_NAME", os.getenv("PRAISONAI_MODEL", "gpt-4o-mini")),
             tools=tools if tools else None,
         )
     except ImportError:

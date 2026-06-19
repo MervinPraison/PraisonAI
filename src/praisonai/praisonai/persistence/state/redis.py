@@ -75,7 +75,11 @@ class RedisStateStore(StateStore):
         # Keep reference to redis client for advanced operations
         self._client = self._adapter._get_client()
         
-        logger.info(f"Connected to Redis at {url}")
+        # Mask password in log output
+        log_url = url
+        if password and "@" in url:
+            log_url = url.replace(f":{password}@", ":****@")
+        logger.info(f"Connected to Redis at {log_url}")
     
     def _key(self, key: str) -> str:
         """Add prefix to key."""
@@ -86,8 +90,8 @@ class RedisStateStore(StateStore):
         data = self._adapter.load(key)
         if data is None:
             return None
-        # Unwrap value if it was wrapped for dict storage
-        if isinstance(data, dict) and "value" in data and len(data) == 1:
+        # Unwrap value if it was wrapped for dict storage (check for marker)
+        if isinstance(data, dict) and "__wrapped__" in data and "value" in data:
             return data["value"]
         return data
     
@@ -100,20 +104,14 @@ class RedisStateStore(StateStore):
         """Set a value with optional TTL."""
         # Wrap non-dict values for adapter (expects dict)
         if not isinstance(value, dict):
-            value = {"value": value}
+            value = {"value": value, "__wrapped__": True}
         
-        # Store TTL in adapter if needed
+        # Store with TTL if needed
         if ttl:
-            # Create new adapter instance with TTL
-            adapter_with_ttl = RedisStorageAdapter(
-                url=self._adapter.url,
-                prefix=self._adapter.prefix,
-                ttl=ttl,
-                db=self._adapter.db,
-                password=self._adapter.password,
-                socket_timeout=self._adapter.socket_timeout,
-            )
-            adapter_with_ttl.save(key, value)
+            # Use the existing client with setex for TTL
+            full_key = self._key(key)
+            json_data = json.dumps(value, default=str, ensure_ascii=False)
+            self._client.setex(full_key, ttl, json_data)
         else:
             self._adapter.save(key, value)
     
@@ -131,7 +129,21 @@ class RedisStateStore(StateStore):
         keys = self._client.keys(full_pattern)
         # Remove prefix from returned keys
         prefix_len = len(self.prefix)
-        return [k[prefix_len:] if k.startswith(self.prefix) else k for k in keys]
+        prefix_bytes = self.prefix.encode('utf-8')
+        result = []
+        for k in keys:
+            # Handle both bytes and string keys
+            if isinstance(k, bytes):
+                if k.startswith(prefix_bytes):
+                    result.append(k[prefix_len:].decode('utf-8'))
+                else:
+                    result.append(k.decode('utf-8'))
+            else:
+                if k.startswith(self.prefix):
+                    result.append(k[prefix_len:])
+                else:
+                    result.append(k)
+        return result
     
     def ttl(self, key: str) -> Optional[int]:
         """Get remaining TTL in seconds."""
@@ -165,10 +177,21 @@ class RedisStateStore(StateStore):
         data = self._client.hgetall(self._key(key))
         result = {}
         for k, v in data.items():
-            try:
-                result[k] = json.loads(v)
-            except (json.JSONDecodeError, TypeError):
-                result[k] = v
+            # Handle bytes keys
+            field_key = k.decode('utf-8') if isinstance(k, bytes) else k
+            # Handle bytes values
+            field_val = v
+            if isinstance(field_val, bytes):
+                try:
+                    field_val = json.loads(field_val.decode('utf-8'))
+                except (json.JSONDecodeError, ValueError):
+                    field_val = field_val.decode('utf-8')
+            else:
+                try:
+                    field_val = json.loads(field_val)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            result[field_key] = field_val
         return result
     
     def hdel(self, key: str, *fields: str) -> int:
