@@ -77,7 +77,7 @@ def github_create_pull_request(title: str, body: str, head_branch: str, base_bra
         ...     head_branch="feature/auth",
         ...     base_branch="main"
         ... )
-        'Successfully created Pull Request:\nhttps://github.com/user/repo/pull/456'
+        'Successfully created Pull Request:\\nhttps://github.com/user/repo/pull/456'
     """
     try:
         # Verify gh CLI is installed and authenticated
