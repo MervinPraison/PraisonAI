@@ -795,6 +795,8 @@ Methods:
 
 * <code title="cli">praisonai <a href="./src/praisonai/praisonai/cli/main.py">--help</a></code>
 * <code title="cli">praisonai acp acp-main <a href="./src/praisonai/praisonai/cli/commands/acp.py">--help</a></code>
+* <code title="cli">praisonai agent list <a href="./src/praisonai/praisonai/cli/commands/agent.py">--help</a></code>
+* <code title="cli">praisonai agent show <a href="./src/praisonai/praisonai/cli/commands/agent.py">--help</a></code>
 * <code title="cli">praisonai agents create <a href="./src/praisonai/praisonai/cli/commands/agents.py">--help</a></code>
 * <code title="cli">praisonai agents info <a href="./src/praisonai/praisonai/cli/commands/agents.py">--help</a></code>
 * <code title="cli">praisonai agents list <a href="./src/praisonai/praisonai/cli/commands/agents.py">--help</a></code>
@@ -844,6 +846,8 @@ Methods:
 * <code title="cli">praisonai claw claw <a href="./src/praisonai/praisonai/cli/commands/claw.py">--help</a></code>
 * <code title="cli">praisonai code <a href="./src/praisonai/praisonai/cli/main.py">--help</a></code>
 * <code title="cli">praisonai code code-main <a href="./src/praisonai/praisonai/cli/commands/code.py">--help</a></code>
+* <code title="cli">praisonai command list <a href="./src/praisonai/praisonai/cli/commands/command.py">--help</a></code>
+* <code title="cli">praisonai command show <a href="./src/praisonai/praisonai/cli/commands/command.py">--help</a></code>
 * <code title="cli">praisonai commit commit-main <a href="./src/praisonai/praisonai/cli/commands/commit.py">--help</a></code>
 * <code title="cli">praisonai completion bash <a href="./src/praisonai/praisonai/cli/commands/completion.py">--help</a></code>
 * <code title="cli">praisonai completion completion-callback <a href="./src/praisonai/praisonai/cli/commands/completion.py">--help</a></code>
