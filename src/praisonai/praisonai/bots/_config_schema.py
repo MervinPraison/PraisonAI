@@ -38,6 +38,50 @@ class AgentConfigSchema(BaseModel):
         return self
 
 
+class SessionResetConfigSchema(BaseModel):
+    """Schema for session reset policy configuration."""
+    mode: str = "none"  # none | idle | daily | both
+    idle_minutes: int = 60  # Reset after N minutes of inactivity
+    at_hour: Optional[int] = None  # Daily reset hour (0-23)
+    
+    @field_validator("mode")
+    @classmethod
+    def validate_mode(cls, v: str) -> str:
+        allowed = {"none", "idle", "daily", "both"}
+        if v not in allowed:
+            raise ValueError(
+                f"Invalid reset mode '{v}'. Must be one of: {', '.join(sorted(allowed))}"
+            )
+        return v
+    
+    @field_validator("idle_minutes")
+    @classmethod
+    def validate_idle_minutes(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("idle_minutes must be at least 1")
+        return v
+    
+    @field_validator("at_hour")
+    @classmethod
+    def validate_at_hour(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and not (0 <= v <= 23):
+            raise ValueError("at_hour must be between 0 and 23")
+        return v
+    
+    @model_validator(mode="after")
+    def validate_config_consistency(self):
+        """Ensure at_hour is set when mode requires it."""
+        if self.mode in ("daily", "both") and self.at_hour is None:
+            raise ValueError(f"at_hour is required when mode is '{self.mode}'")
+        return self
+
+
+class SessionConfigSchema(BaseModel):
+    """Schema for session configuration."""
+    max_history: int = 100
+    reset: Optional[SessionResetConfigSchema] = None
+
+
 class StreamingConfigSchema(BaseModel):
     """Schema for streaming reply configuration."""
     mode: str = "off"  # off | draft | progress
@@ -116,6 +160,8 @@ class ChannelConfigSchema(BaseModel):
     home_channel: Optional[str] = None  # Default channel for this platform
     aliases: Dict[str, str] = Field(default_factory=dict)  # Friendly name -> channel_id mapping
     outbound_resilience: Optional[OutboundResilienceSchema] = None
+    session: Optional[SessionConfigSchema] = None
+    max_history: Optional[int] = None  # Backward compatibility
     
     # Platform-specific fields
     phone_number_id: Optional[str] = None  # WhatsApp

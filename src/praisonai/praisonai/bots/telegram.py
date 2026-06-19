@@ -131,10 +131,27 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             except ImportError:
                 logger.warning("Run control not available, falling back to basic session management")
         
+        # Extract reset policy from config
+        reset_policy = None
+        if hasattr(self.config, 'session') and self.config.session:
+            if hasattr(self.config.session, 'reset') and self.config.session.reset:
+                from ._reset_policy import SessionResetPolicy
+                reset_policy = SessionResetPolicy.from_dict(self.config.session.reset.model_dump())
+        
+        # Support backward compatibility with max_history at channel level
+        max_history = 100
+        if hasattr(self.config, 'max_history') and self.config.max_history is not None:
+            max_history = self.config.max_history
+        elif hasattr(self.config, 'session') and self.config.session:
+            if hasattr(self.config.session, 'max_history') and self.config.session.max_history is not None:
+                max_history = self.config.session.max_history
+        
         self._session: BotSessionManager = BotSessionManager(
+            max_history=max_history,
             store=_store,
             platform="telegram",
             run_control=run_control,
+            reset_policy=reset_policy,
         )
         self._debouncer: InboundDebouncer = InboundDebouncer(
             debounce_ms=self.config.debounce_ms,
