@@ -190,8 +190,8 @@ def test_middleware_integration():
         assert not isinstance(result, StubHarnessResult)
         
     finally:
-        # Cleanup
-        get_default_registry().clear()
+        # Cleanup - only unregister our test middleware, not all middleware
+        get_default_registry().unregister("stub_harness")
 
 
 def test_native_runtime_bypass():
