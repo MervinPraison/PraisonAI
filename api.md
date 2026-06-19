@@ -856,6 +856,9 @@ Methods:
 * <code title="cli">praisonai config path <a href="./src/praisonai/praisonai/cli/commands/config.py">--help</a></code>
 * <code title="cli">praisonai config reset <a href="./src/praisonai/praisonai/cli/commands/config.py">--help</a></code>
 * <code title="cli">praisonai config set <a href="./src/praisonai/praisonai/cli/commands/config.py">--help</a></code>
+* <code title="cli">praisonai config show <a href="./src/praisonai/praisonai/cli/commands/config.py">--help</a></code>
+* <code title="cli">praisonai config sources <a href="./src/praisonai/praisonai/cli/commands/config.py">--help</a></code>
+* <code title="cli">praisonai config validate <a href="./src/praisonai/praisonai/cli/commands/config.py">--help</a></code>
 * <code title="cli">praisonai context add <a href="./src/praisonai/praisonai/cli/commands/context.py">--help</a></code>
 * <code title="cli">praisonai context clear <a href="./src/praisonai/praisonai/cli/commands/context.py">--help</a></code>
 * <code title="cli">praisonai context compact <a href="./src/praisonai/praisonai/cli/commands/context.py">--help</a></code>
