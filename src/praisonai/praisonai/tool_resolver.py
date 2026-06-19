@@ -632,7 +632,16 @@ class ToolResolver:
             for t in role_cfg.get('tools') or []:
                 if isinstance(t, str) and t.strip():
                     needed.add(t.strip())
-            for task_cfg in (role_cfg.get('tasks') or {}).values():
+            tasks = role_cfg.get('tasks') or {}
+            # Handle both dict and list formats for tasks
+            if isinstance(tasks, dict):
+                task_list = tasks.values()
+            elif isinstance(tasks, list):
+                task_list = tasks
+            else:
+                task_list = []
+            
+            for task_cfg in task_list:
                 if not isinstance(task_cfg, dict):
                     continue
                 for t in task_cfg.get('tools') or []:
@@ -646,10 +655,21 @@ class ToolResolver:
                 continue
             tools_dict[name] = resolved() if inspect.isclass(resolved) else resolved
 
-        tools_dict.update(self.get_local_tool_classes())
-        tools_dir = Path(os.getcwd()) / 'tools'
-        if tools_dir.is_dir():
+        # Restore original mutual exclusion: tools.py OR tools/ directory, not both
+        root_directory = os.getcwd()
+        tools_py_path = os.path.join(root_directory, 'tools.py')
+        tools_dir = Path(root_directory) / 'tools'
+        
+        # Load from tools.py if it exists
+        local_tools = self.get_local_tool_classes()
+        if local_tools:
+            tools_dict.update(local_tools)
+            if os.path.isfile(tools_py_path):
+                logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
+        # Otherwise load from tools/ directory if it exists
+        elif tools_dir.is_dir():
             tools_dict.update(self.get_local_tool_classes_from_dir(tools_dir))
+            logger.debug("tools folder exists in the root directory")
         return tools_dict
 
 
@@ -659,7 +679,7 @@ class ToolResolver:
         module = load_user_module(module_path, name="tools_module")
         return {} if module is None else {
             name: obj for name, obj in inspect.getmembers(module)
-            if not name.startswith('_') and (inspect.isfunction(obj) or callable(obj))
+            if inspect.isfunction(obj) or callable(obj)
         }
 
 

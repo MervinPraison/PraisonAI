@@ -161,21 +161,27 @@ def _get_agents_generator():
 # Use centralized availability detection
 from .._framework_availability import is_available
 
-# Module-level __getattr__ for backward compatibility with constants
+# Define real module-level constants for internal use (prevents NameError)
+# These are evaluated on-demand for dynamic behavior
+GRADIO_AVAILABLE = is_available("gradio")
+CREWAI_AVAILABLE = is_available("crewai")
+AUTOGEN_AVAILABLE = is_available("autogen")
+PRAISONAI_AVAILABLE = is_available("praisonaiagents")
+TRAIN_AVAILABLE = is_available("unsloth")
+
+# Handle CALL_MODULE_AVAILABLE with exception guard
+try:
+    import importlib.util
+    CALL_MODULE_AVAILABLE = importlib.util.find_spec("praisonai.api.call") is not None
+except (ModuleNotFoundError, AttributeError):
+    CALL_MODULE_AVAILABLE = False
+
+# Module-level __getattr__ for backward compatibility with external access
 def __getattr__(name):
+    # For external backward compatibility, return the actual module-level values
     if name in {"GRADIO_AVAILABLE", "CREWAI_AVAILABLE", "AUTOGEN_AVAILABLE",
-                "PRAISONAI_AVAILABLE", "TRAIN_AVAILABLE"}:
-        mapping = {
-            "GRADIO_AVAILABLE":   "gradio",
-            "CREWAI_AVAILABLE":   "crewai",
-            "AUTOGEN_AVAILABLE":  "autogen",
-            "PRAISONAI_AVAILABLE": "praisonaiagents",
-            "TRAIN_AVAILABLE":    "unsloth",
-        }
-        return is_available(mapping[name])
-    if name == "CALL_MODULE_AVAILABLE":
-        import importlib.util
-        return importlib.util.find_spec("praisonai.api.call") is not None
+                "PRAISONAI_AVAILABLE", "TRAIN_AVAILABLE", "CALL_MODULE_AVAILABLE"}:
+        return globals()[name]
     raise AttributeError(name)
 
 # Lazy import helpers for optional dependencies (defined after availability flags)

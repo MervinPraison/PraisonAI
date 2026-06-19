@@ -416,7 +416,7 @@ class AgentsGenerator:
             if isinstance(tool_class, type):
                 try:
                     tools_dict[tool_class.__name__] = tool_class()
-                except Exception as e:
+                except (TypeError, ValueError, RuntimeError) as e:
                     self.logger.warning(f"Failed to instantiate tool class {tool_class.__name__}: {e}")
         return tools_dict
     

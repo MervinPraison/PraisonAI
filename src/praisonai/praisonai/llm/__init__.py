@@ -23,7 +23,10 @@ def __getattr__(name):
     """Lazy load LLM registry classes."""
     if name not in _LAZY_ATTRS:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    return lazy_get(f"llm:{name}", _LAZY_ATTRS[name])
+    value = lazy_get(f"llm:{name}", _LAZY_ATTRS[name])
+    if value is None:
+        raise AttributeError(f"module {__name__!r} cannot load attribute {name!r} due to import failure")
+    return value
 
 
 __all__ = [

@@ -144,6 +144,7 @@ def run_sync(coro: Awaitable[T], *, timeout: float | None = _DEFAULT_TIMEOUT) ->
 def shutdown() -> None:
     """Shut down ONLY the shared default bridge (not user-owned instances)."""
     global _DEFAULT_BRIDGE
-    if _DEFAULT_BRIDGE is not None:
-        _DEFAULT_BRIDGE.shutdown()
-        _DEFAULT_BRIDGE = None
+    with _DEFAULT_LOCK:
+        if _DEFAULT_BRIDGE is not None:
+            _DEFAULT_BRIDGE.shutdown()
+            _DEFAULT_BRIDGE = None
