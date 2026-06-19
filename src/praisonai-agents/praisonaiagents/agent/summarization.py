@@ -167,4 +167,7 @@ SUMMARY:"""
     def summarization_count(self) -> int:
         """Number of times summarization has been performed."""
         return self._summarization_count
+<<<<<<< HEAD
 
+=======
+>>>>>>> 75143c5e (fix: remove unreferenced helpers in core SDK (fixes #2056))
