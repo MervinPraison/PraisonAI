@@ -211,12 +211,16 @@ class InboundJournal:
                 conn.commit()
                 
                 # Return a key for claim/complete operations
-                return f"{platform}:{account}:{channel_id}:{message_id}:{entry_id}"
+                return self._make_key(
+                    platform, account, channel_id, message_id, entry_id
+                )
                 
             except sqlite3.IntegrityError:
-                # Duplicate message - this is expected for webhook redeliveries
+                # Duplicate message_id — return key only if still unprocessed
                 conn.rollback()
-                return None
+                return self._key_for_existing_locked(
+                    conn, platform, account, channel_id, message_id
+                )
             except Exception:
                 conn.rollback() 
                 raise
@@ -281,6 +285,67 @@ class InboundJournal:
             return int(key.split(":")[-1])
         except (ValueError, IndexError):
             raise ValueError(f"Invalid journal key format: {key}")
+
+    def _make_key(
+        self,
+        platform: str,
+        account: str,
+        channel_id: str,
+        message_id: str,
+        entry_id: int,
+    ) -> str:
+        return f"{platform}:{account}:{channel_id}:{message_id}:{entry_id}"
+
+    def _key_for_existing_locked(
+        self,
+        conn: sqlite3.Connection,
+        platform: str,
+        account: str,
+        channel_id: str,
+        message_id: str,
+    ) -> Optional[str]:
+        """Return journal key for an uncompleted duplicate (caller holds lock)."""
+        row = conn.execute(
+            """
+            SELECT id, status, claimed_at FROM ingress_journal
+            WHERE platform = ? AND account = ? AND channel_id = ? AND message_id = ?
+            """,
+            (platform, account, channel_id, message_id),
+        ).fetchone()
+        if not row:
+            return None
+
+        entry_id, status, claimed_at = row
+        if status == "completed":
+            return None
+
+        if status == "claimed" and claimed_at is not None:
+            if time.time() - claimed_at <= self.claim_timeout:
+                return None
+            conn.execute(
+                """
+                UPDATE ingress_journal
+                SET status = 'pending', claimed_at = NULL
+                WHERE id = ?
+                """,
+                (entry_id,),
+            )
+            conn.commit()
+
+        return self._make_key(platform, account, channel_id, message_id, entry_id)
+
+    def _key_for_existing(
+        self,
+        platform: str,
+        account: str,
+        channel_id: str,
+        message_id: str,
+    ) -> Optional[str]:
+        """Return journal key for an uncompleted duplicate, else None if done/in-flight."""
+        with self._lock, self._connect() as conn:
+            return self._key_for_existing_locked(
+                conn, platform, account, channel_id, message_id
+            )
     
     # ── Maintenance ─────────────────────────────────────────────────
     def _evict_expired_locked(self, conn: sqlite3.Connection) -> int:

@@ -398,9 +398,13 @@ class BotSessionManager:
                         None, self._save_history, user_id, updated_history
                     )
 
-                    # Store journal key in instance for later completion after message delivery
-                    self._last_journal_key = journal_key
-                    
+                    # Mark ingress entry completed before claim context releases it
+                    if journal_key is not None:
+                        self._ingress_journal.complete(journal_key)
+                        self._last_journal_key = None
+                    else:
+                        self._last_journal_key = None
+
                     return response
                     
             except Exception as e:
