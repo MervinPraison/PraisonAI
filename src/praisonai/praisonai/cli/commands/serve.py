@@ -585,6 +585,7 @@ def serve_unified(
 def serve_openai(
     host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host to bind to"),
     port: int = typer.Option(8765, "--port", "-p", help="Port to bind to"),
+    agents_url: str = typer.Option("http://127.0.0.1:8000", "--agents-url", help="URL of the running Agents API server"),
     api_key: Optional[str] = typer.Option(None, "--api-key", help="API key for authentication"),
     reload: bool = typer.Option(False, "--reload", help="Enable auto-reload"),
 ):
@@ -603,12 +604,12 @@ def serve_openai(
         import uvicorn
         from fastapi import FastAPI
         from praisonai.endpoints.providers import OpenAICompatProvider, AgentsAPIProvider
-        from praisonai.endpoints.server import create_server, register_provider
+        from praisonai.endpoints.server import create_unified_app, register_provider_to_discovery, register_endpoint_to_discovery
         
         output.print_info(f"Starting OpenAI-compatible server on {host}:{port}")
         
         # Create providers
-        agents_provider = AgentsAPIProvider(base_url=f"http://{host}:{port}")
+        agents_provider = AgentsAPIProvider(base_url=agents_url)
         openai_provider = OpenAICompatProvider(
             base_url=f"http://{host}:{port}",
             api_key=api_key,
@@ -616,8 +617,10 @@ def serve_openai(
         )
         
         # Create server and register OpenAI provider
-        app = create_server(title="PraisonAI OpenAI API", version="1.0.0")
-        register_provider(app, openai_provider, prefix="/v1")
+        app = create_unified_app(server_name="PraisonAI OpenAI API")
+        register_provider_to_discovery(app, openai_provider.get_provider_info())
+        for endpoint in openai_provider.list_endpoints():
+            register_endpoint_to_discovery(app, endpoint)
         
         # Add OpenAI-style route mappings
         from fastapi import Request, Response
@@ -627,14 +630,6 @@ def serve_openai(
         @app.post("/v1/chat/completions")
         async def chat_completions(request: Request):
             body = await request.json()
-            result = openai_provider.invoke("chat_completions", body, stream=body.get("stream", False))
-            
-            if not result.ok:
-                return Response(
-                    content=json.dumps({"error": {"message": result.error, "type": "api_error"}}),
-                    status_code=400,
-                    media_type="application/json"
-                )
             
             if body.get("stream", False):
                 def generate():
@@ -643,8 +638,15 @@ def serve_openai(
                             yield f"data: {json.dumps(chunk['data'])}\n\n"
                         elif chunk["event"] == "done":
                             yield "data: [DONE]\n\n"
-                
-                return StreamingResponse(generate(), media_type="text/plain")
+                return StreamingResponse(generate(), media_type="text/event-stream")
+            
+            result = openai_provider.invoke("chat_completions", body, stream=False)
+            if not result.ok:
+                return Response(
+                    content=json.dumps({"error": {"message": result.error, "type": "api_error"}}),
+                    status_code=400,
+                    media_type="application/json"
+                )
             
             return result.data
         

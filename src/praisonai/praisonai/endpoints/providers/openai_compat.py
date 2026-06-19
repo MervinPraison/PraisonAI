@@ -198,11 +198,12 @@ class OpenAICompatProvider(BaseProvider):
             else:
                 yield {"event": "error", "data": {"error": result.error}}
     
-    def _handle_chat_completions(self, input_data: Dict[str, Any], stream: bool = False) -> InvokeResult:
+    def _handle_chat_completions(self, input_data: Optional[Dict[str, Any]], stream: bool = False) -> InvokeResult:
         """Handle /v1/chat/completions endpoint."""
         from praisonai.capabilities.completions import chat_completion
         
         try:
+            input_data = input_data or {}
             # Extract OpenAI-format request
             messages = input_data.get("messages", [])
             model = input_data.get("model", "gpt-4o-mini")
@@ -239,11 +240,12 @@ class OpenAICompatProvider(BaseProvider):
                 error=f"Chat completion error: {str(e)}",
             )
     
-    def _handle_completions(self, input_data: Dict[str, Any]) -> InvokeResult:
+    def _handle_completions(self, input_data: Optional[Dict[str, Any]]) -> InvokeResult:
         """Handle /v1/completions endpoint."""
         from praisonai.capabilities.completions import text_completion
         
         try:
+            input_data = input_data or {}
             prompt = input_data.get("prompt", "")
             model = input_data.get("model", "gpt-3.5-turbo-instruct")
             temperature = input_data.get("temperature", 1.0)
@@ -313,7 +315,7 @@ class OpenAICompatProvider(BaseProvider):
             data=response,
         )
     
-    def _handle_tools_invoke(self, input_data: Dict[str, Any]) -> InvokeResult:
+    def _handle_tools_invoke(self, input_data: Optional[Dict[str, Any]]) -> InvokeResult:
         """Handle /v1/tools/invoke endpoint (PraisonAI extension)."""
         if not self.agent_provider:
             return InvokeResult(
@@ -323,6 +325,7 @@ class OpenAICompatProvider(BaseProvider):
             )
         
         try:
+            input_data = input_data or {}
             agent_name = input_data.get("agent", "default")
             tool_name = input_data.get("tool_name")
             parameters = input_data.get("parameters", {})
@@ -354,7 +357,7 @@ class OpenAICompatProvider(BaseProvider):
                 error=f"Tool invocation error: {str(e)}",
             )
     
-    def _stream_chat_completions(self, input_data: Dict[str, Any]) -> Iterator[Dict[str, Any]]:
+    def _stream_chat_completions(self, input_data: Optional[Dict[str, Any]]) -> Iterator[Dict[str, Any]]:
         """Stream chat completions in OpenAI SSE format."""
         try:
             # For now, use non-streaming and convert to SSE format
@@ -367,8 +370,9 @@ class OpenAICompatProvider(BaseProvider):
                 }
                 return
             
-            response = result.data
-            choice = response["choices"][0] if response["choices"] else {}
+            response = result.data or {}
+            choices = response.get("choices", [])
+            choice = choices[0] if choices else {}
             content = choice.get("message", {}).get("content", "")
             
             # Simulate streaming by chunking the response
@@ -463,14 +467,8 @@ class OpenAICompatProvider(BaseProvider):
     def health(self) -> HealthResult:
         """Check OpenAI compatibility layer health."""
         try:
-            # Test basic completion capability
+            # Verify that the required capabilities can be imported
             from praisonai.capabilities.completions import chat_completion
-            
-            test_result = chat_completion(
-                messages=[{"role": "user", "content": "test"}],
-                model="gpt-4o-mini",
-                max_tokens=1,
-            )
             
             return HealthResult(
                 healthy=True,
@@ -480,7 +478,6 @@ class OpenAICompatProvider(BaseProvider):
                 provider_type=self.provider_type,
                 metadata={
                     "endpoints": ["chat/completions", "completions", "models", "tools/invoke"],
-                    "test_completion_id": test_result.id,
                 },
             )
             
