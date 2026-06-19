@@ -54,6 +54,31 @@ class StreamingConfigSchema(BaseModel):
         return v
 
 
+class OutboundResilienceSchema(BaseModel):
+    """Schema for outbound message retry configuration."""
+    enabled: bool = True
+    initial_ms: float = 1000.0  # Initial retry delay in ms
+    max_ms: float = 10000.0  # Maximum retry delay in ms
+    factor: float = 1.5  # Exponential backoff factor
+    max_attempts: int = 3  # Maximum retry attempts
+    jitter: float = 0.25  # Random jitter fraction
+    dlq_path: Optional[str] = None  # Path to outbound DLQ database
+    
+    @field_validator("initial_ms")
+    @classmethod
+    def validate_initial_ms(cls, v: float) -> float:
+        if v < 100:
+            raise ValueError("initial_ms must be at least 100ms")
+        return v
+    
+    @field_validator("max_attempts")
+    @classmethod
+    def validate_max_attempts(cls, v: int) -> int:
+        if v < 1 or v > 10:
+            raise ValueError("max_attempts must be between 1 and 10")
+        return v
+
+
 class ChannelConfigSchema(BaseModel):
     """Schema for a single channel configuration."""
     platform: Optional[str] = None
@@ -71,6 +96,7 @@ class ChannelConfigSchema(BaseModel):
     streaming: Optional[StreamingConfigSchema] = None
     home_channel: Optional[str] = None  # Default channel for this platform
     aliases: Dict[str, str] = Field(default_factory=dict)  # Friendly name -> channel_id mapping
+    outbound_resilience: Optional[OutboundResilienceSchema] = None
     
     @field_validator("mode")
     @classmethod

@@ -296,4 +296,264 @@ class InboundDLQ:
         )
 
 
-__all__ = ["InboundDLQ", "DLQEntry", "ReplayHandler"]
+@dataclass(frozen=True)
+class OutboundDLQEntry:
+    """A single failed outbound message awaiting replay."""
+
+    id: int
+    ts: float
+    platform: str
+    channel_id: str
+    reply_text: str
+    thread_id: str
+    reply_to: str
+    error: str
+    attempts: int
+
+
+class OutboundDLQ:
+    """SQLite-backed dead-letter queue for failed outbound bot messages.
+
+    When a bot fails to send a response after exhausting retries (due to
+    platform errors, rate limits, etc.), this queue preserves the message
+    for later replay. This ensures expensive LLM work is never wasted.
+
+    Args:
+        path: SQLite file path. Created if missing; parent dirs created.
+        max_size: Maximum entries kept; oldest evicted when exceeded.
+        ttl_seconds: Entries older than this are evicted on the next
+            ``enqueue_outbound()`` or ``evict_expired()`` call.
+
+    Example::
+
+        from praisonai.bots import OutboundDLQ
+
+        dlq = OutboundDLQ(path="~/.praisonai/outbound_dlq.sqlite")
+
+        # In bot adapter, after retries exhausted:
+        await dlq.enqueue_outbound(
+            platform="telegram",
+            channel_id=chat_id,
+            reply_text=response,
+            error="HTTP 503: Service Unavailable"
+        )
+
+        # Later, an admin replays:
+        async def replay_handler(entry):
+            try:
+                await bot.send_message(entry.channel_id, entry.reply_text)
+                return True
+            except Exception:
+                return False
+        await dlq.replay(replay_handler)
+    """
+
+    def __init__(
+        self,
+        path: Union[str, Path],
+        *,
+        max_size: int = _DEFAULT_MAX_SIZE,
+        ttl_seconds: int = _DEFAULT_TTL_SECONDS,
+    ) -> None:
+        self.path = Path(path).expanduser()
+        self.max_size = int(max_size)
+        self.ttl_seconds = int(ttl_seconds)
+        self._lock = threading.Lock()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_schema()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(self.path))
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        return conn
+
+    def _init_schema(self) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS outbound_entries (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts REAL NOT NULL,
+                    platform TEXT NOT NULL,
+                    channel_id TEXT NOT NULL,
+                    reply_text TEXT NOT NULL,
+                    thread_id TEXT DEFAULT '',
+                    reply_to TEXT DEFAULT '',
+                    error TEXT DEFAULT '',
+                    attempts INTEGER DEFAULT 0
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_outbound_ts ON outbound_entries(ts)")
+
+    async def enqueue_outbound(
+        self,
+        *,
+        platform: str,
+        channel_id: str,
+        reply_text: str,
+        error: str,
+        thread_id: str = "",
+        reply_to: str = "",
+    ) -> int:
+        """Persist a failed outbound message. Returns its row id."""
+        # Run synchronous SQLite operations in thread pool to avoid blocking
+        import asyncio
+        return await asyncio.to_thread(
+            self._enqueue_outbound_sync,
+            platform=platform,
+            channel_id=channel_id,
+            reply_text=reply_text,
+            error=error,
+            thread_id=thread_id,
+            reply_to=reply_to,
+        )
+
+    def _enqueue_outbound_sync(
+        self,
+        *,
+        platform: str,
+        channel_id: str,
+        reply_text: str,
+        error: str,
+        thread_id: str = "",
+        reply_to: str = "",
+    ) -> int:
+        """Synchronous version of enqueue_outbound for thread pool execution."""
+        with self._lock, self._connect() as conn:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                self._evict_expired_locked(conn)
+                cur = conn.execute(
+                    """
+                    INSERT INTO outbound_entries(ts, platform, channel_id, reply_text,
+                                                 thread_id, reply_to, error)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        time.time(), platform, channel_id, reply_text,
+                        thread_id, reply_to, error,
+                    ),
+                )
+                self._evict_overflow_locked(conn)
+                conn.commit()
+                return int(cur.lastrowid)
+            except Exception:
+                conn.rollback()
+                raise
+
+    def purge(self) -> int:
+        """Delete all entries. Returns count removed."""
+        with self._lock, self._connect() as conn:
+            n = conn.execute("SELECT COUNT(*) FROM outbound_entries").fetchone()[0]
+            conn.execute("DELETE FROM outbound_entries")
+            return int(n)
+
+    def evict_expired(self) -> int:
+        """Drop entries older than ``ttl_seconds``. Returns count removed."""
+        with self._lock, self._connect() as conn:
+            return self._evict_expired_locked(conn)
+
+    def _evict_expired_locked(self, conn: sqlite3.Connection) -> int:
+        cutoff = time.time() - self.ttl_seconds
+        cur = conn.execute("DELETE FROM outbound_entries WHERE ts <= ?", (cutoff,))
+        return int(cur.rowcount or 0)
+
+    def _evict_overflow_locked(self, conn: sqlite3.Connection) -> int:
+        n = conn.execute("SELECT COUNT(*) FROM outbound_entries").fetchone()[0]
+        if n <= self.max_size:
+            return 0
+        excess = n - self.max_size
+        cur = conn.execute(
+            "DELETE FROM outbound_entries WHERE id IN "
+            "(SELECT id FROM outbound_entries ORDER BY ts ASC LIMIT ?)",
+            (excess,),
+        )
+        return int(cur.rowcount or 0)
+
+    def size(self) -> int:
+        with self._lock, self._connect() as conn:
+            return int(conn.execute("SELECT COUNT(*) FROM outbound_entries").fetchone()[0])
+
+    def list(self, limit: int = 100) -> List[OutboundDLQEntry]:
+        """Return up to ``limit`` entries, newest first."""
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, ts, platform, channel_id, reply_text,
+                       thread_id, reply_to, error, attempts
+                FROM outbound_entries
+                ORDER BY ts DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+        return [OutboundDLQEntry(*r) for r in rows]
+
+    async def replay(
+        self,
+        handler: Callable[[OutboundDLQEntry], Awaitable[bool]],
+        *,
+        limit: int = 100,
+    ) -> int:
+        """Replay up to ``limit`` entries through ``handler``.
+
+        Calls ``handler(entry)`` for each; if it returns ``True``,
+        the entry is deleted. Otherwise increments ``attempts`` for retry.
+
+        Returns the number of successfully replayed (deleted) entries.
+        """
+        import asyncio
+        entries = self._list_oldest_first(limit)
+        success_count = 0
+
+        for entry in entries:
+            try:
+                success = await handler(entry)
+                if success:
+                    self._delete_entry(entry.id)
+                    success_count += 1
+                else:
+                    self._increment_attempts(entry.id)
+            except Exception as e:
+                logger.warning(f"Replay handler error for entry {entry.id}: {e}")
+                self._increment_attempts(entry.id)
+
+        return success_count
+
+    def _list_oldest_first(self, limit: int = 100) -> List[OutboundDLQEntry]:
+        """Return up to ``limit`` entries, oldest first for replay."""
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, ts, platform, channel_id, reply_text,
+                       thread_id, reply_to, error, attempts
+                FROM outbound_entries
+                ORDER BY ts ASC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+        return [OutboundDLQEntry(*r) for r in rows]
+
+    def _delete_entry(self, entry_id: int) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute("DELETE FROM outbound_entries WHERE id = ?", (entry_id,))
+
+    def _increment_attempts(self, entry_id: int) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "UPDATE outbound_entries SET attempts = attempts + 1 WHERE id = ?",
+                (entry_id,),
+            )
+
+    def __repr__(self) -> str:
+        return (
+            f"OutboundDLQ(path={str(self.path)!r}, "
+            f"size={self.size()}, "
+            f"max_size={self.max_size}, ttl={self.ttl_seconds}s)"
+        )
+
+
+__all__ = ["InboundDLQ", "DLQEntry", "ReplayHandler", "OutboundDLQ", "OutboundDLQEntry"]
