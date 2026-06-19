@@ -4164,10 +4164,20 @@ Summary:"""
                     # Assume it's already a RuntimeCapability enum
                     required_set.add(cap)
             
-            # For now, validate against native runtime capabilities
-            # TODO: In future, this should check against the actual selected runtime
-            runtime_matrix = get_native_runtime_capabilities()
+            # Get the actual runtime capabilities based on the selected runtime
             runtime_name = self._runtime_config.preferred_runtime or "native"
+            
+            # Determine which capability matrix to use based on runtime type
+            if runtime_name == "native":
+                runtime_matrix = get_native_runtime_capabilities()
+            elif runtime_name in ["plugin", "harness", "reduced"]:
+                # Use reduced capabilities for plugin/harness runtimes
+                from praisonaiagents.runtime.capabilities import get_reduced_harness_capabilities
+                runtime_matrix = get_reduced_harness_capabilities()
+            else:
+                # For unknown runtimes, use reduced capabilities as safe default
+                from praisonaiagents.runtime.capabilities import get_reduced_harness_capabilities
+                runtime_matrix = get_reduced_harness_capabilities()
             
             # Perform validation
             validate_capabilities(runtime_matrix, required_set, runtime_name)

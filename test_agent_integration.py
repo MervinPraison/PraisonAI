@@ -3,7 +3,10 @@
 """Test Agent integration with runtime capability system."""
 
 import sys
-sys.path.insert(0, '/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents')
+import os
+# Add the package to path if running as a script
+if __name__ == "__main__":
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src', 'praisonai-agents'))
 
 from praisonaiagents.agent.agent import Agent
 from praisonaiagents.config.feature_configs import RuntimeConfig

@@ -3,7 +3,10 @@
 """Test capability validation failure scenarios."""
 
 import sys
-sys.path.insert(0, '/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents')
+import os
+# Add the package to path if running as a script
+if __name__ == "__main__":
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src', 'praisonai-agents'))
 
 from praisonaiagents.runtime.capabilities import (
     RuntimeCapabilityMatrix,
@@ -28,7 +31,7 @@ def test_validation_failure():
     
     try:
         validate_capabilities(limited_runtime, required, "plugin-harness")
-        assert False, "Expected CapabilityValidationError but validation passed"
+        raise AssertionError("Expected CapabilityValidationError but validation passed")
     except CapabilityValidationError as e:
         assert e.runtime_name == "plugin-harness"
         assert RuntimeCapability.NATIVE_HOOKS in e.missing_capabilities
@@ -48,7 +51,7 @@ def test_validation_failure():
     
     try:
         validate_capabilities(partial_runtime, required_partial, "partial-runtime")
-        assert False, "Expected CapabilityValidationError but validation passed"
+        raise AssertionError("Expected CapabilityValidationError but validation passed")
     except CapabilityValidationError as e:
         assert RuntimeCapability.STREAMING_DELTAS in e.missing_capabilities
         assert RuntimeCapability.NATIVE_HOOKS not in e.missing_capabilities  # This one is available

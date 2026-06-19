@@ -99,7 +99,7 @@ class CliBackendProtocol(Protocol):
     """
     config: CliBackendConfig
     
-    def capabilities(self) -> Any:  # RuntimeCapabilityMatrix, avoiding import
+    def capabilities(self) -> "RuntimeCapabilityMatrix":  # type: ignore
         """Report capabilities supported by this CLI backend.
         
         Required for integration with the runtime capability validation system.

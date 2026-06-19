@@ -311,3 +311,7 @@ class AgentRuntimeProtocol(Protocol):
             Health status dict with status, latency, errors, etc.
         """
         ...
+
+
+# CliBackendProtocol removed - use the canonical definition from cli_backend.protocols instead
+# to avoid duplicate incompatible protocol definitions

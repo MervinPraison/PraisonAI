@@ -1594,10 +1594,27 @@ class RuntimeConfig:
     # Additional runtime metadata/hints
     metadata: Optional[Dict[str, Any]] = field(default_factory=dict)
     
+    def __post_init__(self) -> None:
+        """Normalize required_capabilities to a list."""
+        if self.required_capabilities is not None:
+            if isinstance(self.required_capabilities, str):
+                self.required_capabilities = [self.required_capabilities]
+            else:
+                try:
+                    self.required_capabilities = list(self.required_capabilities)
+                except TypeError:
+                    self.required_capabilities = [self.required_capabilities]
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
+        req_caps = None
+        if self.required_capabilities:
+            req_caps = [
+                cap.name.lower() if hasattr(cap, "name") else str(cap)
+                for cap in self.required_capabilities
+            ]
         return {
-            "required_capabilities": list(self.required_capabilities) if self.required_capabilities else None,
+            "required_capabilities": req_caps,
             "preferred_runtime": self.preferred_runtime,
             "fallback_allowed": self.fallback_allowed,
             "validate_on_creation": self.validate_on_creation,
@@ -1617,11 +1634,16 @@ def resolve_runtime(value: RuntimeParam) -> Optional[RuntimeConfig]:
         return RuntimeConfig()
     if isinstance(value, str):
         return RuntimeConfig(preferred_runtime=value)
+    if isinstance(value, (list, set, tuple, frozenset)):
+        return RuntimeConfig(required_capabilities=list(value))
     if isinstance(value, dict):
         return RuntimeConfig(**value)
     if isinstance(value, RuntimeConfig):
         return value
-    return value
+    raise TypeError(
+        f"Invalid runtime parameter type: {type(value).__name__}. "
+        "Expected None/False, True, str, list, set, dict, or RuntimeConfig."
+    )
 
 
 __all__ = [

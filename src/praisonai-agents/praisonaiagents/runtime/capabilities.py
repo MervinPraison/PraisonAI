@@ -167,10 +167,13 @@ class CapabilityValidationError(Exception):
         self.missing_capabilities = missing_capabilities
         self.available_capabilities = available_capabilities or set()
         
-        missing_names = [cap.name for cap in missing_capabilities]
+        missing_names = sorted(cap.name for cap in missing_capabilities)
+        available_names = sorted(cap.name for cap in self.available_capabilities)
         message = (
             f"Runtime '{runtime_name}' lacks required capabilities: {missing_names}. "
-            f"Available capabilities: {[cap.name for cap in self.available_capabilities]}"
+            f"Available capabilities: {available_names}. "
+            "Remediation: select a runtime that supports the missing capabilities "
+            "or remove unsupported entries from runtime.required_capabilities."
         )
         super().__init__(message)
 
@@ -194,6 +197,10 @@ def validate_capabilities(
     Raises:
         CapabilityValidationError: If validation fails
     """
+    # Handle empty or None required capabilities
+    if not required_capabilities:
+        return True
+        
     if isinstance(required_capabilities, RuntimeCapabilityMatrix):
         required_set = required_capabilities.to_capability_set()
     else:
