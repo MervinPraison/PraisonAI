@@ -382,19 +382,13 @@ class TestEventBusOptimization:
         """Test that publishing with no subscribers skips expensive work."""
         bus = EventBus()
         
-        # Mock the Event class to track if it gets instantiated
-        from unittest.mock import patch
+        # Create a real event and publish directly
+        real_event = Event(type="test.event", data={})
+        result = bus.publish_event(real_event)
         
-        with patch('praisonaiagents.bus.bus.Event') as mock_event_class:
-            # Create a real event for the test
-            real_event = Event(type="test.event", data={})
-            
-            # Test publish_event directly (skips Event construction in publish())
-            result = bus.publish_event(real_event)
-            
-            # Should return the event without storing in history
-            assert result is real_event
-            assert len(bus.get_history()) == 0  # No history when no subscribers
+        # Should return the event without storing in history
+        assert result is real_event
+        assert len(bus.get_history()) == 0  # No history when no subscribers
     
     def test_publish_normal_path_with_subscribers(self):
         """Test that publishing with subscribers works normally."""

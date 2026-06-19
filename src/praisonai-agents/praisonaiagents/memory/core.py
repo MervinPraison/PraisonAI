@@ -378,6 +378,17 @@ class MemoryCoreMixin:
     def _emit_memory_event(self, event_type: str, memory_type: str, content: str, metadata: Dict):
         """Emit a memory-related event for monitoring/hooks."""
         try:
+            # Helper to build event data lazily
+            def _build_event_data():
+                return {
+                    'type': event_type,
+                    'memory_type': memory_type,
+                    'content_preview': content[:100] + ('...' if len(content) > 100 else ''),
+                    'metadata': metadata,
+                    'timestamp': datetime.now().isoformat(),
+                    'provider': getattr(self, 'provider', 'unknown')
+                }
+            
             # Try to emit to the EventBus if available
             try:
                 from ..bus import get_default_bus
@@ -388,38 +399,13 @@ class MemoryCoreMixin:
                     return
                     
                 # Integrate with the existing event system
-                event_data = {
-                    'type': event_type,
-                    'memory_type': memory_type,
-                    'content_preview': content[:100] + ('...' if len(content) > 100 else ''),
-                    'metadata': metadata,
-                    'timestamp': datetime.now().isoformat(),
-                    'provider': getattr(self, 'provider', 'unknown')
-                }
-                
-                bus.publish(f"memory.{event_type}.{memory_type}", event_data)
+                bus.publish(f"memory.{event_type}.{memory_type}", _build_event_data())
             except ImportError:
                 # EventBus not available, fall back to logging
-                event_data = {
-                    'type': event_type,
-                    'memory_type': memory_type,
-                    'content_preview': content[:100] + ('...' if len(content) > 100 else ''),
-                    'metadata': metadata,
-                    'timestamp': datetime.now().isoformat(),
-                    'provider': getattr(self, 'provider', 'unknown')
-                }
-                logging.debug(f"Memory event: {event_type}.{memory_type} - {event_data}")
+                logging.debug(f"Memory event: {event_type}.{memory_type} - {_build_event_data()}")
             except Exception as bus_error:
                 # EventBus failed, log the event instead
-                event_data = {
-                    'type': event_type,
-                    'memory_type': memory_type,
-                    'content_preview': content[:100] + ('...' if len(content) > 100 else ''),
-                    'metadata': metadata,
-                    'timestamp': datetime.now().isoformat(),
-                    'provider': getattr(self, 'provider', 'unknown')
-                }
-                logging.debug(f"Memory event (bus failed): {event_type}.{memory_type} - {event_data}")
+                logging.debug(f"Memory event (bus failed): {event_type}.{memory_type} - {_build_event_data()}")
                 logging.debug(f"EventBus error: {bus_error}")
         except Exception as e:
             logging.debug(f"Failed to emit memory event: {e}")

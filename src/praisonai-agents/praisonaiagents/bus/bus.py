@@ -170,6 +170,17 @@ class EventBus:
         Returns:
             The published Event object
         """
+        # Fast path: if no subscribers, return a minimal event without expensive operations
+        if not self._subscribers:
+            # Convert EventType enum to string
+            type_str = event_type.value if isinstance(event_type, EventType) else event_type
+            return Event(
+                type=type_str,
+                data=data or {},
+                source=source,
+                metadata=metadata or {},
+            )
+        
         # Convert EventType enum to string
         type_str = event_type.value if isinstance(event_type, EventType) else event_type
         
@@ -249,6 +260,15 @@ class EventBus:
         """
         type_str = event_type.value if isinstance(event_type, EventType) else event_type
         
+        # Fast path: if no subscribers, return a minimal event without expensive operations
+        if not self._subscribers:
+            return Event(
+                type=type_str,
+                data=data or {},
+                source=source,
+                metadata=metadata or {},
+            )
+        
         event = Event(
             type=type_str,
             data=data or {},
@@ -257,10 +277,6 @@ class EventBus:
         )
         
         logger.debug(f"Publishing async event: {event.type}")
-        
-        # Fast path: if no subscribers, skip expensive work
-        if not self._subscribers:
-            return event
         
         # Store in history
         with self._lock:
