@@ -27,7 +27,13 @@ from praisonaiagents.bots import (
 )
 
 from .media import split_media_from_output, is_audio_file
-from ._commands import format_status, format_help, handle_stop_command
+from ._commands import (
+    format_status, 
+    format_help, 
+    handle_stop_command,
+    CommandAccessPolicy,
+    get_command_registry
+)
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
 from ._ack import AckReactor
@@ -83,6 +89,9 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._token = token
         self._agent = agent
         self.config = config or BotConfig(token=token)
+        
+        # Initialize command access policy
+        self._init_command_access_policy()
         
         # Initialize streaming config based on BotConfig
         if self.config.streaming:
@@ -162,6 +171,27 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
     def enable_auto_tts(self, enabled: bool = True) -> None:
         """Enable auto-TTS for responses."""
         self._auto_tts = enabled
+    
+    def _init_command_access_policy(self):
+        """Initialize command access policy from config."""
+        # Parse admin users from config
+        admin_users = set()
+        if hasattr(self.config, 'admin_users') and self.config.admin_users:
+            admin_users = set(user.strip() for user in self.config.admin_users.split(',') if user.strip())
+        
+        # Parse user allowed commands from config  
+        user_allowed_commands = None
+        if hasattr(self.config, 'user_allowed_commands') and self.config.user_allowed_commands:
+            user_allowed_commands = set(cmd.strip() for cmd in self.config.user_allowed_commands.split(',') if cmd.strip())
+        
+        # Create command access policy
+        self._command_policy = CommandAccessPolicy(
+            admin_users=admin_users,
+            user_allowed_commands=user_allowed_commands
+        )
+        
+        # Get the global command registry
+        self._command_registry = get_command_registry()
     
     @property
     def is_running(self) -> bool:
@@ -414,21 +444,35 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 return
 
             command = message.command
+            user_id = message.sender.user_id if message.sender else "unknown"
             
-            if command and command in self._command_handlers:
-                handler = self._command_handlers[command]
-                try:
-                    if asyncio.iscoroutinefunction(handler):
-                        await handler(message)
-                    else:
-                        handler(message)
-                except Exception as e:
-                    logger.error(f"Command handler error: {e}")
+            if command:
+                # Check command permissions
+                if not self._command_policy.can_run(user_id, command):
+                    await update.message.reply_text(f"⛔ You are not permitted to run /{command}")
+                    return
+                
+                # Handle custom registered commands
+                if command in self._command_handlers:
+                    handler = self._command_handlers[command]
+                    try:
+                        if asyncio.iscoroutinefunction(handler):
+                            await handler(message)
+                        else:
+                            handler(message)
+                    except Exception as e:
+                        logger.error(f"Command handler error: {e}")
         
         async def handle_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message:
                 return
-            if not await process_inbound_telegram_message(update, self):
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return
+            user_id = message.sender.user_id if message.sender else "unknown"
+            # Check command permissions
+            if not self._command_policy.can_run(user_id, "status"):
+                await update.message.reply_text("⛔ You are not permitted to run /status")
                 return
             await update.message.reply_text(self._format_status())
         
@@ -439,15 +483,24 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             if not message:
                 return
             user_id = message.sender.user_id if message.sender else "unknown"
+            # Check command permissions
+            if not self._command_policy.can_run(user_id, "new"):
+                await update.message.reply_text("⛔ You are not permitted to run /new")
+                return
             self._session.reset(user_id)
             await update.message.reply_text("Session reset. Starting fresh conversation.")
         
         async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message:
                 return
-            if not await process_inbound_telegram_message(update, self):
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
                 return
-            await update.message.reply_text(self._format_help())
+            user_id = message.sender.user_id if message.sender else "unknown"
+            # Help is always allowed (in ALWAYS_ALLOWED set)
+            # Use instance method to include custom commands
+            help_text = self._format_help_with_permissions(user_id)
+            await update.message.reply_text(help_text)
         
         async def handle_stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message:
@@ -456,13 +509,30 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             if not message:
                 return
             user_id = message.sender.user_id if message.sender else "unknown"
+            # Check command permissions
+            if not self._command_policy.can_run(user_id, "stop"):
+                await update.message.reply_text("⛔ You are not permitted to run /stop")
+                return
             response = handle_stop_command(self._session, user_id)
+            await update.message.reply_text(response)
+        
+        async def handle_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message:
+                return
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return
+            user_id = message.sender.user_id if message.sender else "unknown"
+            username = message.sender.username if message.sender else None
+            # Whoami is always allowed (in ALWAYS_ALLOWED set)
+            response = self._command_registry.format_whoami(user_id, username, self._command_policy)
             await update.message.reply_text(response)
         
         self._application.add_handler(CommandHandler("status", handle_status))
         self._application.add_handler(CommandHandler("new", handle_new))
         self._application.add_handler(CommandHandler("help", handle_help))
         self._application.add_handler(CommandHandler("stop", handle_stop))
+        self._application.add_handler(CommandHandler("whoami", handle_whoami))
         
         for command in self._command_handlers:
             self._application.add_handler(CommandHandler(command, handle_command))
@@ -891,6 +961,36 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         """Format /help response."""
         extra = {cmd: "Custom command" for cmd in self._command_handlers}
         return format_help(self._agent, self.platform, extra)
+    
+    def _format_help_with_permissions(self, user_id: str) -> str:
+        """Format /help response with permission filtering and custom commands."""
+        # Get allowed commands for this user
+        all_commands = self._command_registry.get_command_names() | set(self._command_handlers.keys())
+        
+        if self._command_policy:
+            allowed = self._command_policy.get_allowed_commands(user_id, all_commands)
+        else:
+            allowed = all_commands
+        
+        agent_name = self._agent.name if self._agent else "No agent"
+        model = getattr(self._agent, "llm", "default") if self._agent else "default"
+        
+        lines = ["Available Commands"]
+        
+        # Built-in commands from registry
+        for cmd in sorted(allowed):
+            if cmd in self._command_registry.get_all_commands():
+                cmd_info = self._command_registry.get_command(cmd)
+                desc = cmd_info.get("description", "No description")
+                lines.append(f"/{cmd} - {desc}")
+            elif cmd in self._command_handlers:
+                # Custom commands
+                lines.append(f"/{cmd} - Custom command")
+        
+        lines.append(f"\nAgent: {agent_name}")
+        lines.append(f"Model: {model}")
+        
+        return "\n".join(lines)
     
     def _convert_update_to_message(self, update, override_text: Optional[str] = None) -> BotMessage:
         """Convert Telegram Update to BotMessage."""

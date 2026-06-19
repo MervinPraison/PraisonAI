@@ -63,6 +63,8 @@ class ChannelConfigSchema(BaseModel):
     allowlist: List[str] = Field(default_factory=list)
     blocklist: List[str] = Field(default_factory=list)
     allowed_users: Optional[str] = None
+    admin_users: Optional[str] = None  # Comma-separated list of admin user IDs
+    user_allowed_commands: Optional[str] = None  # Comma-separated list of allowed commands
     routes: Dict[str, str] = Field(default_factory=dict)
     webhook_url: Optional[str] = None
     webhook_port: int = 8080
