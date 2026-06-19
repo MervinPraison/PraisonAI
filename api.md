@@ -1022,6 +1022,14 @@ Methods:
 * <code title="cli">praisonai pairing list <a href="./src/praisonai/praisonai/cli/commands/pairing.py">--help</a></code>
 * <code title="cli">praisonai pairing revoke <a href="./src/praisonai/praisonai/cli/commands/pairing.py">--help</a></code>
 * <code title="cli">praisonai paths show <a href="./src/praisonai/praisonai/cli/commands/paths.py">--help</a></code>
+* <code title="cli">praisonai permissions allow <a href="./src/praisonai/praisonai/cli/commands/permissions.py">--help</a></code>
+* <code title="cli">praisonai permissions ask <a href="./src/praisonai/praisonai/cli/commands/permissions.py">--help</a></code>
+* <code title="cli">praisonai permissions deny <a href="./src/praisonai/praisonai/cli/commands/permissions.py">--help</a></code>
+* <code title="cli">praisonai permissions export <a href="./src/praisonai/praisonai/cli/commands/permissions.py">--help</a></code>
+* <code title="cli">praisonai permissions import-rules <a href="./src/praisonai/praisonai/cli/commands/permissions.py">--help</a></code>
+* <code title="cli">praisonai permissions list <a href="./src/praisonai/praisonai/cli/commands/permissions.py">--help</a></code>
+* <code title="cli">praisonai permissions remove <a href="./src/praisonai/praisonai/cli/commands/permissions.py">--help</a></code>
+* <code title="cli">praisonai permissions reset <a href="./src/praisonai/praisonai/cli/commands/permissions.py">--help</a></code>
 * <code title="cli">praisonai plugins create <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
 * <code title="cli">praisonai plugins disable <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
 * <code title="cli">praisonai plugins discover <a href="./src/praisonai/praisonai/cli/commands/plugins.py">--help</a></code>
