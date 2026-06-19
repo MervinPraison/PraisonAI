@@ -34,6 +34,7 @@ __all__ = [
     "PermissionAction",
     "PermissionMode",
     "PermissionResult",
+    "PersistentApproval",
     "DoomLoopDetector",
 ]
 
@@ -59,6 +60,10 @@ def __getattr__(name: str):
     if name == "PermissionResult":
         from .rules import PermissionResult
         return PermissionResult
+    
+    if name == "PersistentApproval":
+        from .rules import PersistentApproval
+        return PersistentApproval
     
     if name == "DoomLoopDetector":
         from .doom_loop import DoomLoopDetector

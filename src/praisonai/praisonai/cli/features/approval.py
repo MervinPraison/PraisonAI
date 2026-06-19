@@ -13,10 +13,10 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 # Valid backend names for CLI help text
-VALID_BACKENDS = ["console", "slack", "telegram", "discord", "webhook", "http", "agent", "auto", "none"]
+VALID_BACKENDS = ["console", "slack", "telegram", "discord", "webhook", "http", "agent", "auto", "none", "plan", "accept-edits", "bypass"]
 
 
-def resolve_approval_backend(value: Optional[str]) -> Optional[Any]:
+def resolve_approval_backend(value: Optional[str], non_interactive: bool = False) -> Optional[Any]:
     """Resolve a CLI --approval flag value to an approval backend instance.
 
     Args:
@@ -42,8 +42,9 @@ def resolve_approval_backend(value: Optional[str]) -> Optional[Any]:
     name = str(value).lower().strip()
 
     if name in ("true", "console", "yes", "1"):
-        from praisonaiagents.approval.backends import ConsoleBackend
-        return ConsoleBackend()
+        # Use our new interactive CLI backend with persistence
+        from praisonai.cli.approval_backend import InteractiveCLIApprovalBackend
+        return InteractiveCLIApprovalBackend(non_interactive=non_interactive)
 
     if name in ("false", "no", "0"):
         return None
@@ -51,6 +52,24 @@ def resolve_approval_backend(value: Optional[str]) -> Optional[Any]:
     if name == "auto":
         from praisonaiagents.approval.backends import AutoApproveBackend
         return AutoApproveBackend()
+    
+    if name == "plan":
+        # Plan mode - read-only, blocks write operations
+        from praisonai.cli.approval_backend import InteractiveCLIApprovalBackend
+        from praisonaiagents.permissions import PermissionMode
+        return InteractiveCLIApprovalBackend(permission_mode=PermissionMode.PLAN, non_interactive=non_interactive)
+    
+    if name == "accept-edits":
+        # Accept edits mode - auto-approve file edits
+        from praisonai.cli.approval_backend import InteractiveCLIApprovalBackend
+        from praisonaiagents.permissions import PermissionMode
+        return InteractiveCLIApprovalBackend(permission_mode=PermissionMode.ACCEPT_EDITS, non_interactive=non_interactive)
+    
+    if name == "bypass":
+        # Bypass mode - skip all permission checks (dangerous)
+        from praisonai.cli.approval_backend import InteractiveCLIApprovalBackend
+        from praisonaiagents.permissions import PermissionMode
+        return InteractiveCLIApprovalBackend(permission_mode=PermissionMode.BYPASS, non_interactive=non_interactive)
 
     if name == "slack":
         from praisonai.bots import SlackApproval
@@ -107,6 +126,7 @@ def resolve_approval_config(
     backend_name: Optional[str] = None,
     all_tools: bool = False,
     timeout: Optional[str] = None,
+    non_interactive: bool = False,
 ) -> Optional[Any]:
     """Build an approval value for ``Agent(approval=...)``.
 
@@ -119,8 +139,9 @@ def resolve_approval_config(
         all_tools:    ``--approve-all-tools`` flag.
         timeout:      ``--approval-timeout`` value.  ``"none"`` means
                       indefinite; a numeric string is parsed as seconds.
+        non_interactive: Whether to run in non-interactive mode.
     """
-    backend = resolve_approval_backend(backend_name)
+    backend = resolve_approval_backend(backend_name, non_interactive=non_interactive)
     if backend is None:
         return None
 
