@@ -25,6 +25,7 @@ if TYPE_CHECKING:
         EmailProtocol,
         EmailInbox,
         SupportsPresentation,
+        PlatformCapabilities,
     )
     from .presentation import (
         MessagePresentation,
@@ -54,6 +55,7 @@ from .protocols import (
     EmailProtocol,
     EmailInbox,
     SupportsPresentation,
+    PlatformCapabilities,
 )
 from .presentation import (
     MessagePresentation,
@@ -96,4 +98,5 @@ __all__ = [
     "ActionType",
     "ButtonStyle",
     "BlockType",
+    "PlatformCapabilities",
 ]
