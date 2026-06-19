@@ -467,23 +467,6 @@ class AgentsGenerator:
         """
         return inspect.isfunction(obj) or hasattr(obj, '__call__')
 
-    def _extract_tool_classes(self, module):
-        """
-        Extract tool classes from a loaded module that inherit from BaseTool 
-        or are part of langchain_community.tools package.
-        """
-        result = {}
-        for name, obj in inspect.getmembers(module, 
-            lambda x: inspect.isclass(x) and (
-                x.__module__.startswith('langchain_community.tools') or 
-                (PRAISONAI_TOOLS_AVAILABLE and BaseTool and issubclass(x, BaseTool))
-            ) and x is not BaseTool):
-            try:
-                result[name] = obj()
-            except Exception as e:
-                self.logger.warning(f"Error instantiating tool class {name}: {e}")
-                continue
-        return result
 
     def generate_crew_and_kickoff(self):
         """
