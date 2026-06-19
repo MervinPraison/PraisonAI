@@ -60,6 +60,11 @@ class StreamingConfig:
 class BotAdapter(Protocol):
     """Protocol for bot adapters that support message editing."""
     
+    @property
+    def capabilities(self) -> Any:
+        """Get channel capabilities."""
+        ...
+    
     async def send_message(self, channel_id: str, content: str) -> Any:
         """Send a new message and return message info."""
         ...
@@ -118,7 +123,24 @@ class DraftStreamer:
         self._update_task: Optional[asyncio.Task] = None
         self._pending_update = False
         
-        logger.debug("DraftStreamer initialized for channel %s, mode=%s", channel_id, config.mode)
+        # Check capabilities and degrade gracefully
+        caps = getattr(adapter, 'capabilities', {})
+        self._can_edit = caps.get('live_edit', True)  # Assume true for backward compat
+        self._text_limit = caps.get('text_limit', 0) or 0  # 0 = unlimited
+        self._edit_rate_limit = caps.get('edit_rate_limit', 0) or self._config.min_interval
+        
+        # Override config if channel doesn't support editing
+        if not self._can_edit and self._config.mode != StreamingMode.OFF:
+            logger.info(
+                "Channel %s doesn't support live editing, disabling streaming",
+                channel_id
+            )
+            self._config = StreamingConfig(mode=StreamingMode.OFF)
+        
+        logger.debug(
+            "DraftStreamer initialized for channel %s, mode=%s, can_edit=%s",
+            channel_id, config.mode, self._can_edit
+        )
     
     async def start(self) -> str:
         """Start streaming by sending initial placeholder message.
@@ -242,6 +264,10 @@ class DraftStreamer:
                     content = self._config.placeholder_text
             else:
                 return  # Should not happen
+            
+            # Apply text limit if configured
+            if self._text_limit > 0 and len(content) > self._text_limit:
+                content = content[:self._text_limit - 3] + "..."
             
             # Perform edit
             await self._adapter.edit_message(self._channel_id, self._message_id, content)

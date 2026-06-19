@@ -119,6 +119,18 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
     def bot_user(self) -> Optional[BotUser]:
         return self._bot_user
     
+    @property
+    def capabilities(self) -> Dict[str, Any]:
+        """Discord supports edit, reactions, and typing."""
+        return {
+            "live_edit": True,
+            "reactions": True,
+            "typing": True,
+            "text_limit": 2000,  # Discord message limit
+            "edit_rate_limit": 1.0,
+            "reaction_rate_limit": 0.25,  # Discord has generous rate limits
+        }
+    
     async def start(self) -> None:
         """Start the Discord bot."""
         if self._is_running:
@@ -420,6 +432,36 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
             channel = self._client.get_channel(int(channel_id))
             if channel:
                 await channel.trigger_typing()
+    
+    async def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> bool:
+        """Add a reaction to a message."""
+        if not self._client:
+            return False
+        
+        try:
+            channel = self._client.get_channel(int(channel_id))
+            if channel:
+                message = await channel.fetch_message(int(message_id))
+                await message.add_reaction(emoji)
+                return True
+        except Exception as e:
+            logger.debug(f"Failed to add reaction: {e}")
+        return False
+    
+    async def remove_reaction(self, channel_id: str, message_id: str, emoji: str) -> bool:
+        """Remove a reaction from a message."""
+        if not self._client:
+            return False
+        
+        try:
+            channel = self._client.get_channel(int(channel_id))
+            if channel:
+                message = await channel.fetch_message(int(message_id))
+                await message.remove_reaction(emoji, self._client.user)
+                return True
+        except Exception as e:
+            logger.debug(f"Failed to remove reaction: {e}")
+        return False
     
     async def get_user(self, user_id: str) -> Optional[BotUser]:
         """Get user information."""

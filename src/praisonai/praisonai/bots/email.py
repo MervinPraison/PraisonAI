@@ -141,6 +141,18 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
     def bot_user(self) -> Optional[BotUser]:
         return self._bot_user
     
+    @property
+    def capabilities(self) -> Dict[str, Any]:
+        """Email has no real-time capabilities."""
+        return {
+            "live_edit": False,  # Email is immutable
+            "reactions": False,  # No reactions in email
+            "typing": False,  # No typing indicators
+            "text_limit": 0,  # No practical limit
+            "edit_rate_limit": 0,
+            "reaction_rate_limit": 0,
+        }
+    
     def set_agent(self, agent: "Agent") -> None:
         """Set the agent that handles messages."""
         self._agent = agent
@@ -560,6 +572,14 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
     async def send_typing(self, channel_id: str) -> None:
         """Send typing indicator (no-op for email)."""
         pass
+    
+    async def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> bool:
+        """Add a reaction (no-op for email)."""
+        return False
+    
+    async def remove_reaction(self, channel_id: str, message_id: str, emoji: str) -> bool:
+        """Remove a reaction (no-op for email)."""
+        return False
     
     async def get_user(self, user_id: str) -> Optional[BotUser]:
         """Get user information."""

@@ -175,6 +175,18 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
     def bot_user(self) -> Optional[BotUser]:
         return self._bot_user
     
+    @property
+    def capabilities(self) -> Dict[str, Any]:
+        """Telegram supports all features."""
+        return {
+            "live_edit": True,
+            "reactions": True,
+            "typing": True,
+            "text_limit": 4096,
+            "edit_rate_limit": 1.0,
+            "reaction_rate_limit": 0.5,
+        }
+    
     async def start(self) -> None:
         """Start the Telegram bot."""
         if self._is_running:
@@ -793,6 +805,40 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 chat_id=int(channel_id),
                 action="typing",
             )
+    
+    async def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> bool:
+        """Add a reaction to a message."""
+        if not self._application:
+            return False
+        
+        try:
+            from telegram import ReactionTypeEmoji
+            await self._application.bot.set_message_reaction(
+                chat_id=int(channel_id),
+                message_id=int(message_id),
+                reaction=[ReactionTypeEmoji(emoji=emoji)],
+            )
+            return True
+        except Exception as e:
+            logger.debug(f"Failed to add reaction: {e}")
+            return False
+    
+    async def remove_reaction(self, channel_id: str, message_id: str, emoji: str) -> bool:
+        """Remove a reaction from a message."""
+        if not self._application:
+            return False
+        
+        try:
+            # Telegram API: send empty reaction list to remove all reactions
+            await self._application.bot.set_message_reaction(
+                chat_id=int(channel_id),
+                message_id=int(message_id),
+                reaction=[],
+            )
+            return True
+        except Exception as e:
+            logger.debug(f"Failed to remove reaction: {e}")
+            return False
     
     async def get_user(self, user_id: str) -> Optional[BotUser]:
         """Get user information."""

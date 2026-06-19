@@ -22,12 +22,48 @@ from typing import (
     List,
     Optional,
     Protocol,
+    TypedDict,
     Union,
     runtime_checkable,
 )
 
 if TYPE_CHECKING:
     from ..agent import Agent
+
+
+class ChannelCapabilities(TypedDict, total=False):
+    """Declares what features a bot channel supports.
+    
+    This allows shared engines to adapt behavior based on platform capabilities,
+    enabling graceful degradation when features aren't available.
+    
+    Attributes:
+        live_edit: Whether the channel supports editing messages in place
+        reactions: Whether the channel supports adding reactions to messages
+        typing: Whether the channel supports typing indicators
+        text_limit: Maximum message length (0 = unlimited)
+        edit_rate_limit: Minimum seconds between edits (for throttling)
+        reaction_rate_limit: Minimum seconds between reactions
+    """
+    live_edit: bool
+    reactions: bool
+    typing: bool
+    text_limit: int
+    edit_rate_limit: float
+    reaction_rate_limit: float
+
+
+class RunStatus(Enum):
+    """Run status states for progress feedback.
+    
+    Used by status engines to show agent execution state through
+    reactions or status lines.
+    """
+    QUEUED = "queued"
+    THINKING = "thinking"
+    TOOL = "tool"
+    DONE = "done"
+    ERROR = "error"
 
 
 class MessageType(str, Enum):
@@ -388,6 +424,15 @@ class BotProtocol(Protocol):
         """The bot's user information."""
         ...
     
+    @property
+    def capabilities(self) -> ChannelCapabilities:
+        """Channel capabilities for feature discovery.
+        
+        Returns capabilities that shared engines use to adapt behavior.
+        Channels that don't support a feature should return False for it.
+        """
+        ...
+    
     # Lifecycle methods
     async def start(self) -> None:
         """Start the bot (begin receiving messages)."""
@@ -496,6 +541,33 @@ class BotProtocol(Protocol):
         
         Args:
             channel_id: Target channel ID
+        """
+        ...
+    
+    # Reactions
+    async def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> bool:
+        """Add a reaction emoji to a message.
+        
+        Args:
+            channel_id: Channel containing the message
+            message_id: Message to react to
+            emoji: Emoji to add (Unicode or custom emoji ID)
+            
+        Returns:
+            True if reaction was added successfully
+        """
+        ...
+    
+    async def remove_reaction(self, channel_id: str, message_id: str, emoji: str) -> bool:
+        """Remove a reaction emoji from a message.
+        
+        Args:
+            channel_id: Channel containing the message
+            message_id: Message to remove reaction from
+            emoji: Emoji to remove
+            
+        Returns:
+            True if reaction was removed successfully
         """
         ...
     
