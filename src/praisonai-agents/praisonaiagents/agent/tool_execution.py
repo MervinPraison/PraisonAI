@@ -315,6 +315,8 @@ class ToolExecutionMixin:
                 result = None
                 last_exception = None
                 
+                # max_retry_limit is the number of retries (not total attempts)
+                # So total attempts = 1 (initial) + max_retry_limit (retries)
                 for attempt in range(1, max_retry_limit + 2):
                     try:
                         # P8/G11: Apply tool timeout if configured
@@ -372,8 +374,9 @@ class ToolExecutionMixin:
                             
                     except ToolExecutionError as e:
                         last_exception = e
-                        # Only retry if the error is marked as retryable
-                        if not e.is_retryable or attempt >= max_retry_limit + 1:
+                        # Only retry if the error is marked as retryable and we have retries left
+                        # attempt starts at 1, so (attempt - 1) gives us the retry count
+                        if not e.is_retryable or (attempt - 1) >= max_retry_limit:
                             raise e
                         
                         # Calculate delay for exponential backoff
@@ -396,7 +399,8 @@ class ToolExecutionMixin:
                         )
                         last_exception = tool_error
                         
-                        if not is_retryable or attempt >= max_retry_limit + 1:
+                        # attempt starts at 1, so (attempt - 1) gives us the retry count
+                        if not is_retryable or (attempt - 1) >= max_retry_limit:
                             raise tool_error from e
                         
                         # Calculate delay for exponential backoff
@@ -529,18 +533,16 @@ class ToolExecutionMixin:
             _duration_ms = (_time.time() - _tool_start_time) * 1000
             _trace_emitter.tool_call_end(self.name, function_name, None, _duration_ms, str(e))
             
-            # Preserve existing ToolExecutionError unchanged to maintain loop guard HALT behavior
-            if isinstance(e, ToolExecutionError):
-                raise
-            
-            # Gap 3a fix: Wrap exceptions in ToolExecutionError for better observability
-            is_retryable = not isinstance(e, (ValueError, TypeError, AttributeError))
-            raise ToolExecutionError(
-                f"Tool '{function_name}' failed: {e}",
-                tool_name=function_name,
-                agent_id=self.name,
-                is_retryable=is_retryable,
-            ) from e
+            # Wrap the exception if it's not already a ToolExecutionError
+            if not isinstance(e, ToolExecutionError):
+                is_retryable = not isinstance(e, (ValueError, TypeError, AttributeError))
+                raise ToolExecutionError(
+                    f"Tool '{function_name}' failed: {e}",
+                    tool_name=function_name,
+                    agent_id=self.name,
+                    is_retryable=is_retryable,
+                ) from e
+            raise  # Re-raise if already wrapped
 
     def _trigger_after_agent_hook(self, prompt, response, start_time, tools_used=None):
         """Trigger AFTER_AGENT hook and return response."""
