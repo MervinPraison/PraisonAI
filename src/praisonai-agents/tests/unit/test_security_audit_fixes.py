@@ -47,6 +47,24 @@ def test_file_memory_rejects_traversal_user_id():
         FileMemory(user_id="../escape")
 
 
+def test_file_memory_uses_sanitised_user_id_for_path(tmp_path):
+    from praisonaiagents.memory.file_memory import FileMemory
+
+    mem = FileMemory(user_id="", base_path=str(tmp_path / "memory"))
+    assert mem.user_id == "default"
+    assert mem.user_path == tmp_path / "memory" / "default"
+
+
+def test_file_memory_rejects_path_object_user_id(tmp_path):
+    from pathlib import Path
+    from praisonaiagents.memory.file_memory import FileMemory
+
+    mem = FileMemory(user_id=Path("../../outside"), base_path=str(tmp_path / "memory"))
+    assert mem.user_id == "default"
+    assert "outside" not in str(mem.user_path)
+    assert mem.user_path == tmp_path / "memory" / "default"
+
+
 def test_ast_grep_rewrite_requires_approval():
     from praisonaiagents.tools import ast_grep_tool  # noqa: F401
     from praisonaiagents.approval import is_approval_required

@@ -317,8 +317,9 @@ class MemoryMixin:
             return
         
         try:
-            from ..session import get_default_session_store
-            self._session_store = get_default_session_store()
+            if self._session_store is None:
+                from ..session import get_default_session_store
+                self._session_store = get_default_session_store()
             
             # Restore chat history from previous session
             history = self._session_store.get_chat_history(self._session_id)

@@ -487,9 +487,9 @@ class BotSessionManager:
         try:
             # Attach interrupt controller to agent if available
             original_interrupt = None
-            if interrupt_controller and hasattr(agent, '_interrupt_controller'):
-                original_interrupt = getattr(agent, '_interrupt_controller', None)
-                agent._interrupt_controller = interrupt_controller
+            if interrupt_controller and hasattr(agent, 'interrupt_controller'):
+                original_interrupt = getattr(agent, 'interrupt_controller', None)
+                agent.interrupt_controller = interrupt_controller
             
             # Run the chat with the existing method
             response = await self.chat(agent, user_id, prompt, chat_id, thread_id, user_name)
@@ -533,11 +533,11 @@ class BotSessionManager:
                 
         finally:
             # Restore original interrupt controller
-            if interrupt_controller and hasattr(agent, '_interrupt_controller'):
+            if interrupt_controller and hasattr(agent, 'interrupt_controller'):
                 if original_interrupt is not None:
-                    agent._interrupt_controller = original_interrupt
+                    agent.interrupt_controller = original_interrupt
                 else:
-                    agent._interrupt_controller = None
+                    agent.interrupt_controller = None
             
             # Mark run as finished
             if run_generation is not None:

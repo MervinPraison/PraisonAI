@@ -362,12 +362,19 @@ class PraisonAI:
         original_agent_file = self.agent_file
         
         # Parse args - this returns both args and unknown_args
+        preserved_args = getattr(self, 'args', None)
         parse_result = self.parse_args()
         if isinstance(parse_result, tuple):
             args, unknown_args = parse_result
         else:
             args = parse_result
             unknown_args = []
+        
+        # Preserve project session flags set by ``praison run`` before parse_args()
+        if preserved_args and getattr(preserved_args, 'cli_project_sessions', False):
+            for attr in ('auto_save', 'resume_session', 'cli_project_sessions'):
+                if hasattr(preserved_args, attr):
+                    setattr(args, attr, getattr(preserved_args, attr))
         
         # Store args for use in handle_direct_prompt
         self.args = args
@@ -4243,6 +4250,15 @@ Do NOT add any explanations or formatting."""
         handoff_detect_cycles = getattr(self.args, 'handoff_detect_cycles', None)
         if handoff_detect_cycles is not None:
             cli_config['handoff_detect_cycles'] = handoff_detect_cycles
+
+        if getattr(self.args, 'cli_project_sessions', False):
+            from .state.project_sessions import build_cli_memory_config
+            memory_cfg = build_cli_memory_config(
+                getattr(self.args, 'resume_session', None),
+                getattr(self.args, 'auto_save', None),
+            )
+            if memory_cfg is not None:
+                cli_config['memory'] = memory_cfg
             
         return cli_config
 
@@ -4509,6 +4525,19 @@ Do NOT add any explanations or formatting."""
                     else:
                         agent_config["memory"] = True
                     print("[bold cyan]Memory enabled - agent will remember context across sessions[/bold cyan]")
+                elif getattr(self.args, 'cli_project_sessions', False) and (
+                    getattr(self.args, 'resume_session', None) or getattr(self.args, 'auto_save', None)
+                ):
+                    from .state.project_sessions import build_cli_memory_config
+                    project_session_id = (
+                        getattr(self.args, 'resume_session', None)
+                        or getattr(self.args, 'auto_save', None)
+                    )
+                    agent_config["memory"] = build_cli_memory_config(
+                        getattr(self.args, 'resume_session', None),
+                        getattr(self.args, 'auto_save', None),
+                    )
+                    print(f"[bold cyan]Project session enabled - session '{project_session_id}'[/bold cyan]")
                 elif getattr(self.args, 'auto_save', None):
                     from praisonaiagents import MemoryConfig
                     agent_config["memory"] = MemoryConfig(auto_save=self.args.auto_save)
@@ -4792,6 +4821,12 @@ Do NOT add any explanations or formatting."""
                 flow.display_workflow_start("Direct Prompt", ["DirectAgent"])
             
             agent = PraisonAgent(**agent_config)
+
+            if getattr(self.args, 'cli_project_sessions', False):
+                session_id = getattr(self.args, 'resume_session', None) or getattr(self.args, 'auto_save', None)
+                if session_id:
+                    from .state.project_sessions import apply_cli_session_continuity
+                    apply_cli_session_continuity(agent, session_id)
             
             # AutoRag - Automatic RAG retrieval decision
             if hasattr(self, 'args') and getattr(self.args, 'auto_rag', False):
