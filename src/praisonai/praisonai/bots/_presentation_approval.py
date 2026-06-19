@@ -61,7 +61,7 @@ class PresentationApprovalHandler:
         }
         
         # Create approval future
-        future = asyncio.get_event_loop().create_future()
+        future = asyncio.get_running_loop().create_future()
         self._approval_futures[approval_id] = future
         
         # Create approval presentation
@@ -73,8 +73,10 @@ class PresentationApprovalHandler:
         if channel_send_func and target:
             try:
                 await channel_send_func(target, presentation)
-            except Exception as e:
-                logger.error(f"Failed to send approval presentation: {e}")
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Failed to send approval presentation")
         
         # Wait for approval decision with timeout
         try:

@@ -614,6 +614,55 @@ class ChatCommandProtocol(Protocol):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SupportsPresentation — interactive UI presentation protocol
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+@runtime_checkable
+class SupportsPresentation(Protocol):
+    """Protocol for channel adapters that support presentations.
+    
+    Channel adapters implement this protocol to render
+    portable presentations as native widgets.
+    """
+    
+    @property
+    def presentation_limits(self) -> "PresentationLimits":
+        """Get channel-specific presentation limits."""
+        ...
+    
+    async def render_presentation(
+        self,
+        target: str,
+        presentation: "MessagePresentation",
+    ) -> Optional[str]:
+        """Render a presentation to a target (chat/channel).
+        
+        Args:
+            target: Target identifier (chat_id, channel_id, etc.)
+            presentation: The presentation to render
+            
+        Returns:
+            Message ID if sent successfully, None otherwise
+        """
+        ...
+    
+    def truncate_presentation(
+        self,
+        presentation: "MessagePresentation",
+    ) -> "MessagePresentation":
+        """Truncate a presentation to fit channel limits.
+        
+        Args:
+            presentation: The presentation to truncate
+            
+        Returns:
+            Truncated presentation that fits channel limits
+        """
+        ...
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # EmailProtocol — email-specific bot capabilities
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

@@ -183,8 +183,9 @@ class GatewayMessage:
         from ..bots.presentation import MessagePresentation
         
         presentation = None
-        if "presentation" in data:
-            presentation = MessagePresentation.from_dict(data["presentation"])
+        raw_presentation = data.get("presentation")
+        if isinstance(raw_presentation, dict):
+            presentation = MessagePresentation.from_dict(raw_presentation)
         
         return cls(
             content=data.get("content", ""),

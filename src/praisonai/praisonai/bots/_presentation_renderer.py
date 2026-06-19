@@ -85,7 +85,7 @@ class TelegramPresentationRenderer:
                                 button_data["web_app"] = {"url": button.action.web_app_url}
                             elif button.action.type == "command" and button.action.command:
                                 # For commands, we use callback data
-                                button_data["callback_data"] = f"cmd:{button.action.command}"
+                                button_data["callback_data"] = f"cmd:{button.action.command}"[:64]
                             elif button.action.type == "callback" and button.action.value:
                                 button_data["callback_data"] = button.action.value[:64]
                         
@@ -112,7 +112,7 @@ class TelegramPresentationRenderer:
                             "callback_data": f"select:{block.action_id}:{option.value[:32]}"
                         }])
         
-        result = {"text": "\n\n".join(text_parts) if text_parts else "​"}  # Zero-width space if no text
+        result = {"text": "\n\n".join(text_parts) if text_parts else "\u200B"}  # Zero-width space if no text
         
         if inline_keyboard:
             result["reply_markup"] = {"inline_keyboard": inline_keyboard}
@@ -368,7 +368,7 @@ class DiscordPresentationRenderer:
                         "components": [select_menu]
                     })
         
-        result = {"content": "\n\n".join(text_parts)[:2000] if text_parts else "​"}
+        result = {"content": "\n\n".join(text_parts)[:2000] if text_parts else "\u200B"}
         
         if components:
             result["components"] = components[:5]  # Max 5 action rows

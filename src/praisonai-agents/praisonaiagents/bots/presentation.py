@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional, Protocol, Union, runtime_checkable
+from typing import Any, Dict, List, Literal, Optional, Union
 
 
 class ActionType(str, Enum):
@@ -187,7 +187,7 @@ class PresentationBlock:
     action_id: Optional[str] = None
     
     @staticmethod
-    def text(content: str, markdown: bool = True) -> "PresentationBlock":
+    def make_text(content: str, markdown: bool = True) -> "PresentationBlock":
         """Create a text block."""
         return PresentationBlock(type=BlockType.TEXT, text=content)
     
@@ -197,7 +197,7 @@ class PresentationBlock:
         return PresentationBlock(type=BlockType.BUTTONS, buttons=items)
     
     @staticmethod
-    def select(
+    def make_select(
         options: List[SelectOption],
         placeholder: Optional[str] = None,
         action_id: Optional[str] = None,
@@ -211,28 +211,27 @@ class PresentationBlock:
         )
     
     @staticmethod
-    def divider() -> "PresentationBlock":
+    def make_divider() -> "PresentationBlock":
         """Create a divider block."""
         return PresentationBlock(type=BlockType.DIVIDER)
     
     @staticmethod
-    def context(content: str) -> "PresentationBlock":
+    def make_context(content: str) -> "PresentationBlock":
         """Create a context block (smaller text)."""
         return PresentationBlock(type=BlockType.CONTEXT, text=content)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
         data = {"type": self.type.value if isinstance(self.type, BlockType) else self.type}
-        # Only include actual data attributes, not the static methods
-        if self.text is not None and not callable(self.text):
+        if self.text is not None:
             data["text"] = self.text
-        if self.buttons is not None and not callable(self.buttons):
+        if self.buttons is not None:
             data["buttons"] = [b.to_dict() for b in self.buttons]
-        if self.options is not None and not callable(self.options):
+        if self.options is not None:
             data["options"] = [o.to_dict() for o in self.options]
-        if self.placeholder is not None and not callable(self.placeholder):
+        if self.placeholder is not None:
             data["placeholder"] = self.placeholder
-        if self.action_id is not None and not callable(self.action_id):
+        if self.action_id is not None:
             data["action_id"] = self.action_id
         return data
     
@@ -242,8 +241,14 @@ class PresentationBlock:
         return cls(
             type=data.get("type", "text"),
             text=data.get("text"),
-            buttons=[PresentationButton.from_dict(b) for b in data.get("buttons", [])],
-            options=[SelectOption.from_dict(o) for o in data.get("options", [])],
+            buttons=(
+                [PresentationButton.from_dict(b) for b in data["buttons"]]
+                if "buttons" in data else None
+            ),
+            options=(
+                [SelectOption.from_dict(o) for o in data["options"]]
+                if "options" in data else None
+            ),
             placeholder=data.get("placeholder"),
             action_id=data.get("action_id"),
         )
@@ -305,11 +310,11 @@ class MessagePresentation:
         blocks = []
         
         # Add prompt
-        blocks.append(PresentationBlock.text(prompt))
+        blocks.append(PresentationBlock.make_text(prompt))
         
         # Add context if provided
         if context:
-            blocks.append(PresentationBlock.context(context))
+            blocks.append(PresentationBlock.make_context(context))
         
         # Create buttons
         buttons = [
@@ -449,45 +454,3 @@ class PresentationLimits:
         )
 
 
-@runtime_checkable
-class SupportsPresentation(Protocol):
-    """Protocol for channel adapters that support presentations.
-    
-    Channel adapters implement this protocol to render
-    portable presentations as native widgets.
-    """
-    
-    @property
-    def presentation_limits(self) -> PresentationLimits:
-        """Get channel-specific presentation limits."""
-        ...
-    
-    async def render_presentation(
-        self,
-        target: str,
-        presentation: MessagePresentation,
-    ) -> Optional[str]:
-        """Render a presentation to a target (chat/channel).
-        
-        Args:
-            target: Target identifier (chat_id, channel_id, etc.)
-            presentation: The presentation to render
-            
-        Returns:
-            Message ID if sent successfully, None otherwise
-        """
-        ...
-    
-    def truncate_presentation(
-        self,
-        presentation: MessagePresentation,
-    ) -> MessagePresentation:
-        """Truncate a presentation to fit channel limits.
-        
-        Args:
-            presentation: The presentation to truncate
-            
-        Returns:
-            Truncated presentation that fits channel limits
-        """
-        ...

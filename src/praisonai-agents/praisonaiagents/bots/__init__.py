@@ -24,6 +24,7 @@ if TYPE_CHECKING:
         HealthResult,
         EmailProtocol,
         EmailInbox,
+        SupportsPresentation,
     )
     from .presentation import (
         MessagePresentation,
@@ -32,7 +33,6 @@ if TYPE_CHECKING:
         PresentationAction,
         SelectOption,
         PresentationLimits,
-        SupportsPresentation,
         ActionType,
         ButtonStyle,
         BlockType,
@@ -53,6 +53,7 @@ from .protocols import (
     HealthResult,
     EmailProtocol,
     EmailInbox,
+    SupportsPresentation,
 )
 from .presentation import (
     MessagePresentation,
@@ -61,7 +62,6 @@ from .presentation import (
     PresentationAction,
     SelectOption,
     PresentationLimits,
-    SupportsPresentation,
     ActionType,
     ButtonStyle,
     BlockType,
