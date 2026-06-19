@@ -15,10 +15,12 @@ try:
     from importlib.metadata import entry_points
     def iter_entry_points(group):
         try:
+            # Python 3.10+ supports group parameter
             return entry_points(group=group)
         except TypeError:
-            # Fallback for Python 3.8 and 3.9
-            return entry_points().get(group, [])
+            # Python 3.8/3.9 fallback - entry_points() returns a dict
+            eps = entry_points()
+            return eps.get(group, [])
 except ImportError:
     try:
         from pkg_resources import iter_entry_points
@@ -224,7 +226,7 @@ class SimpleRuntimeRegistry:
         """Discover runtime factories from entry points."""
         try:
             for entry_point in iter_entry_points(self._entry_point_group):
-                # Wrap in lazy factory to defer module loading
+                # Wrap in lazy factory to defer module loading until runtime is resolved
                 def make_lazy_factory(ep):
                     def lazy_factory():
                         loaded = ep.load()  # Load module on demand
