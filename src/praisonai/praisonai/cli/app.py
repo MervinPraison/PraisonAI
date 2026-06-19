@@ -622,7 +622,7 @@ def main_callback(
         mode = OutputMode.TEXT
     
     # Install warning filters for CLI usage only
-    from .main import install_warning_filters
+    from ._warnings import install_warning_filters
     install_warning_filters()
     
     # Create run context
