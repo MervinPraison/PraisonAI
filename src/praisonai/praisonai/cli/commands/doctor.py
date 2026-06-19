@@ -363,6 +363,23 @@ def doctor_troubleshoot():
     raise typer.Exit(0)
 
 
+@app.command("fix")
+def doctor_fix(
+    dry_run: bool = typer.Option(True, "--dry-run/--execute", help="Show what would be fixed without applying changes"),
+    backup: bool = typer.Option(True, "--backup/--no-backup", help="Create backup files before modifying"),
+    config_path: Optional[str] = typer.Option(None, "--config", help="Specific config file to fix"),
+):
+    """Fix common configuration issues, including deprecated cli_backend usage."""
+    args = ["fix"]
+    if not dry_run:
+        args.append("--execute")
+    if not backup:
+        args.append("--no-backup") 
+    if config_path:
+        args.extend(["--file", config_path])
+    raise typer.Exit(_run_doctor(args))
+
+
 @app.callback(invoke_without_command=True)
 def doctor_callback(
     ctx: typer.Context,
