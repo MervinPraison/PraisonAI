@@ -281,13 +281,15 @@ class BotSessionManager:
         except Exception:  # pragma: no cover — defensive
             _clear_ctx = None  # type: ignore[assignment]
 
+        # Initialize result variable
+        result: Optional[str] = None
+        claim_ctx = None
+        
         try:
             # Claim journal entry if we have one
             if journal_key is not None:
                 claim_ctx = self._ingress_journal.aclaim(journal_key)
                 await claim_ctx.__aenter__()
-            else:
-                claim_ctx = None
                 
             try:
                 async with user_lock:
@@ -419,14 +421,8 @@ class BotSessionManager:
                         None, self._save_history, user_id, updated_history
                     )
 
-                    # Mark ingress entry completed before claim context releases it
-                    if journal_key is not None:
-                        self._ingress_journal.complete(journal_key)
-                        self._last_journal_key = None
-                    else:
-                        self._last_journal_key = None
-
-                    return response
+                    # Store response to return after cleanup
+                    result = response
                     
             except Exception as e:
                 # Handle any remaining exceptions and ensure claim is released 
@@ -434,9 +430,16 @@ class BotSessionManager:
                     await claim_ctx.__aexit__(type(e), e, e.__traceback__)
                 raise
             else:
-                # Clean exit - no exception
+                # Clean exit - mark journal complete before releasing claim
+                if journal_key is not None and self._ingress_journal is not None:
+                    try:
+                        self._ingress_journal.complete(journal_key)
+                        self._last_journal_key = None
+                    except Exception as e:
+                        logger.warning("Failed to complete journal entry: %s", e)
                 if claim_ctx is not None:
                     await claim_ctx.__aexit__(None, None, None)
+                return result or ""
         finally:
             # Always clear task-local session context, even if an exception occurred.
             if ctx_token is not None and _clear_ctx is not None:
@@ -495,78 +498,76 @@ class BotSessionManager:
             }
         
         # We're running now (RUN_NOW or INTERRUPTED)
-        run_generation = None
-        interrupt_controller = None
-        
-        if decision == RunDecision.RUN_NOW:
-            # Get the interrupt controller for this run
-            interrupt_controller = self._run_control.get_interrupt_controller(user_id)
-        elif decision == RunDecision.INTERRUPTED:
-            # Previous run was cancelled, get new controller
-            interrupt_controller = self._run_control.get_interrupt_controller(user_id)
-        
-        # Get current run generation for race protection
-        status = self._run_control.get_run_status(user_id)
-        run_generation = status.get("run_generation")
-        
-        try:
-            # Attach interrupt controller to agent if available
-            original_interrupt = None
-            if interrupt_controller and hasattr(agent, 'interrupt_controller'):
-                original_interrupt = getattr(agent, 'interrupt_controller', None)
-                agent.interrupt_controller = interrupt_controller
-            
-            # Run the chat with the existing method
-            response = await self.chat(agent, user_id, prompt, chat_id, thread_id, user_name)
-            
-            # Check for pending messages to process next
-            pending = self._run_control.next_pending(user_id)
-            pending_info = {}
-            if pending:
-                pending_info = {
-                    "next_pending": pending[:100] + "..." if len(pending) > 100 else pending
-                }
-            
-            return {
-                "response": response,
-                "metadata": {
-                    "run_control": True,
-                    "decision": decision.value,
-                    "completed": True,
-                    "run_generation": run_generation,
-                    **pending_info
-                }
-            }
-            
-        except Exception as e:
-            # Handle interruption specifically
-            if interrupt_controller and interrupt_controller.is_set():
-                reason = interrupt_controller.reason or "unknown"
-                return {
-                    "response": f"⚠️ Task cancelled: {reason}",
-                    "metadata": {
-                        "run_control": True,
-                        "decision": decision.value,
-                        "interrupted": True,
-                        "reason": reason,
-                        "run_generation": run_generation
+        current_prompt = prompt
+        last_response = ""
+        last_decision = decision
+        pending_processed: List[str] = []
+
+        while True:
+            run_generation = None
+            interrupt_controller = None
+
+            if last_decision in (RunDecision.RUN_NOW, RunDecision.INTERRUPTED):
+                interrupt_controller = self._run_control.get_interrupt_controller(user_id)
+
+            status = self._run_control.get_run_status(user_id)
+            run_generation = status.get("run_generation")
+
+            try:
+                original_interrupt = None
+                if interrupt_controller and hasattr(agent, 'interrupt_controller'):
+                    original_interrupt = getattr(agent, 'interrupt_controller', None)
+                    agent.interrupt_controller = interrupt_controller
+
+                last_response = await self.chat(
+                    agent, user_id, current_prompt, chat_id, thread_id, user_name
+                )
+
+            except Exception as e:
+                if interrupt_controller and interrupt_controller.is_set():
+                    reason = interrupt_controller.reason or "unknown"
+                    return {
+                        "response": f"⚠️ Task cancelled: {reason}",
+                        "metadata": {
+                            "run_control": True,
+                            "decision": last_decision.value,
+                            "interrupted": True,
+                            "reason": reason,
+                            "run_generation": run_generation,
+                        },
                     }
-                }
-            else:
-                # Re-raise other exceptions
                 raise
-                
-        finally:
-            # Restore original interrupt controller
-            if interrupt_controller and hasattr(agent, 'interrupt_controller'):
-                if original_interrupt is not None:
-                    agent.interrupt_controller = original_interrupt
-                else:
-                    agent.interrupt_controller = None
-            
-            # Mark run as finished
-            if run_generation is not None:
-                await self._run_control.finish_run(user_id, run_generation)
+
+            finally:
+                if interrupt_controller and hasattr(agent, 'interrupt_controller'):
+                    if original_interrupt is not None:
+                        agent.interrupt_controller = original_interrupt
+                    else:
+                        agent.interrupt_controller = None
+
+                if run_generation is not None:
+                    await self._run_control.finish_run(user_id, run_generation)
+
+            pending = self._run_control.next_pending(user_id)
+            if not pending:
+                break
+
+            pending_processed.append(
+                pending[:100] + "..." if len(pending) > 100 else pending
+            )
+            current_prompt = pending
+            last_decision = await self._run_control.submit(user_id, pending)
+
+        metadata: Dict[str, Any] = {
+            "run_control": True,
+            "decision": decision.value,
+            "completed": True,
+            "run_generation": run_generation,
+        }
+        if pending_processed:
+            metadata["pending_processed"] = pending_processed
+
+        return {"response": last_response, "metadata": metadata}
 
     def reap_stale(self, max_age_seconds: int) -> int:
         """Remove sessions older than *max_age_seconds*.  Returns count reaped.

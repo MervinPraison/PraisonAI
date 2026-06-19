@@ -94,3 +94,38 @@ def get_project_sessions_dir(path: Optional[str] = None) -> Path:
     
     project_id = get_project_id(path)
     return get_sessions_dir() / f"projects/{project_id}"
+
+
+def build_cli_memory_config(
+    session_id: Optional[str] = None,
+    auto_save: Optional[str] = None,
+):
+    """Build MemoryConfig for CLI session continuity."""
+    if not session_id and not auto_save:
+        return None
+    from praisonaiagents import MemoryConfig
+
+    name = session_id or auto_save
+    return MemoryConfig(
+        auto_save=auto_save or name,
+        history=True,
+        session_id=name,
+    )
+
+
+def apply_cli_session_continuity(agent, session_id: Optional[str]) -> None:
+    """Wire an agent to the project session store for CLI continuity."""
+    if not session_id:
+        return
+
+    from ..state.project_sessions import get_project_session_store
+
+    store = get_project_session_store()
+    agent._session_id = session_id
+    agent._session_store = store
+    agent._session_store_initialized = True
+    agent._history_enabled = True
+    agent._history_session_id = session_id
+    
+    # Don't pre-populate chat_history - the mixin will load it from _session_store
+    # when _history_enabled=True, avoiding duplicate history injection
