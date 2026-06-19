@@ -135,9 +135,26 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
             _store = get_default_session_store()
         except Exception:
             _store = None
+        # Extract reset policy from config
+        reset_policy = None
+        if hasattr(self.config, 'session') and self.config.session:
+            if hasattr(self.config.session, 'reset') and self.config.session.reset:
+                from ._reset_policy import SessionResetPolicy
+                reset_policy = SessionResetPolicy.from_dict(self.config.session.reset.__dict__)
+        
+        # Support backward compatibility with max_history at channel level
+        max_history = 100
+        if hasattr(self.config, 'max_history') and self.config.max_history:
+            max_history = self.config.max_history
+        elif hasattr(self.config, 'session') and self.config.session:
+            if hasattr(self.config.session, 'max_history') and self.config.session.max_history:
+                max_history = self.config.session.max_history
+        
         self._session_mgr = BotSessionManager(
+            max_history=max_history,
             store=_store,
             platform="whatsapp",
+            reset_policy=reset_policy,
         )
         self._message_handlers: List[Callable] = []
         self._runner: Any = None

@@ -19,8 +19,10 @@ import asyncio
 import logging
 import time
 import weakref
+from datetime import datetime
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from .._lockmap import LockMap
+from ._reset_policy import SessionResetPolicy
 
 if TYPE_CHECKING:
     from praisonaiagents import Agent
@@ -74,6 +76,7 @@ class BotSessionManager:
         ingress_journal: Optional[Any] = None,
         run_control: Optional[Any] = None,
         run_timeout: float = 300.0,  # 5 minutes default timeout
+        reset_policy: Optional[SessionResetPolicy] = None,
     ) -> None:
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
         self._locks = LockMap()
@@ -82,6 +85,7 @@ class BotSessionManager:
         self._store = store
         self._platform = platform
         self._last_active: Dict[str, float] = {}
+        self._last_reset: Dict[str, float] = {}  # Track last reset time per user
         # N4: optional inbound DLQ — when set, failed agent.chat() calls
         # are persisted for later replay. Default ``None`` preserves
         # legacy behaviour (exception bubbles up untouched).
@@ -100,6 +104,8 @@ class BotSessionManager:
         # Run timeout and active run tracking for cancellation support
         self._run_timeout = run_timeout
         self._active_runs: Dict[str, Any] = {}  # user_id -> InterruptController
+        # Session reset policy for automatic lifecycle management
+        self._reset_policy = reset_policy or SessionResetPolicy(mode="none")
 
     def _storage_key(self, user_id: str) -> str:
         """Resolve a raw platform user id to the in-memory/store key.
@@ -144,7 +150,20 @@ class BotSessionManager:
         return lock
 
     def _load_history(self, user_id: str) -> List[Dict[str, Any]]:
-        """Load user history from store (if available) or in-memory cache."""
+        """Load user history from store (if available) or in-memory cache.
+        
+        Checks reset policy and clears history if a reset is needed.
+        """
+        storage_key = self._storage_key(user_id)
+        
+        # Check if session should be reset based on policy
+        if self._should_reset_session(storage_key):
+            logger.info("Auto-resetting session for user %s based on policy", user_id)
+            self._clear_session_data(storage_key, user_id)
+            # Mark the reset time
+            self._last_reset[storage_key] = time.monotonic()
+            return []
+        
         if self._store is not None:
             key = self._session_key(user_id)
             try:
@@ -153,7 +172,7 @@ class BotSessionManager:
                     return list(history)
             except Exception as e:
                 logger.warning("Failed to load session from store: %s", e)
-        return list(self._histories.get(self._storage_key(user_id), []))
+        return list(self._histories.get(storage_key, []))
 
     def _save_history(
         self, user_id: str, history: List[Dict[str, Any]]
@@ -591,21 +610,63 @@ class BotSessionManager:
                 logger.warning("Failed to complete journal entry: %s", e)
         return False
 
-    def reset(self, user_id: str) -> bool:
-        """Clear a user's session history.  Returns True if it existed."""
-        storage_key = self._storage_key(user_id)
-        existed = storage_key in self._histories
+    def _should_reset_session(self, storage_key: str) -> bool:
+        """Check if a session should be reset based on the policy.
+        
+        Args:
+            storage_key: The storage key for the user
+            
+        Returns:
+            True if session should be reset
+        """
+        if self._reset_policy.mode == "none":
+            return False
+        
+        # Get timestamps
+        now = time.monotonic()
+        last_activity = self._last_active.get(storage_key, now)
+        last_reset = self._last_reset.get(storage_key, 0)
+        
+        # If this is a new session, initialize timestamps but don't reset
+        if storage_key not in self._last_active:
+            self._last_active[storage_key] = now
+            self._last_reset[storage_key] = now
+            return False
+        
+        return self._reset_policy.should_reset(
+            last_activity=last_activity,
+            last_reset=last_reset,
+            now=now,
+            current_datetime=datetime.now()
+        )
+    
+    def _clear_session_data(self, storage_key: str, user_id: str) -> None:
+        """Clear session data for a user.
+        
+        Args:
+            storage_key: The storage key for the user
+            user_id: The raw user ID
+        """
         self._histories.pop(storage_key, None)
-        self._last_active.pop(storage_key, None)
+        # Don't clear last_active as we still need it for idle tracking
         self._locks.drop(storage_key)
-
+        
         if self._store is not None:
             persist_key = self._session_key(user_id)
             try:
                 self._store.clear_session(persist_key)
             except Exception as e:
                 logger.warning("Failed to clear session in store: %s", e)
-
+    
+    def reset(self, user_id: str) -> bool:
+        """Clear a user's session history.  Returns True if it existed."""
+        storage_key = self._storage_key(user_id)
+        existed = storage_key in self._histories
+        
+        self._clear_session_data(storage_key, user_id)
+        self._last_active.pop(storage_key, None)
+        self._last_reset[storage_key] = time.monotonic()
+        
         return existed
 
     def cancel_run(self, user_id: str, reason: str = "user_cancel") -> bool:
