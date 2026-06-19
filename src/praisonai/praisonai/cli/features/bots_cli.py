@@ -168,7 +168,6 @@ class BotHandler:
         Args:
             config_file: Path to the bot YAML configuration file
         """
-        import re
         self._load_dotenv()
         
         if not os.path.exists(config_file):
@@ -176,83 +175,67 @@ class BotHandler:
             return
         
         try:
-            import yaml
-            with open(config_file, "r") as f:
-                config = yaml.safe_load(f)
+            # Use the canonical loader
+            from praisonai.bots._config_schema import load_and_validate_gateway_yaml
+            
+            validated_config = load_and_validate_gateway_yaml(config_file)
+            
+        except ValueError as e:
+            print(f"Error: Invalid config: {e}")
+            return
         except Exception as e:
-            print(f"Error: Invalid YAML config: {e}")
+            print(f"Error loading config: {e}")
             return
-        
-        if not config or not isinstance(config, dict):
-            print("Error: Config file must be a YAML dictionary")
+            
+        # Get first channel from validated config
+        if not validated_config.channels:
+            print("Error: No channels configured in bot config")
             return
+            
+        # Pick first channel to start
+        channel_name = next(iter(validated_config.channels))
+        channel = validated_config.channels[channel_name]
         
-        # Resolve env vars in string values (e.g., ${TELEGRAM_BOT_TOKEN})
-        def resolve_env_vars(value):
-            if isinstance(value, str):
-                return re.sub(
-                    r'\$\{([^}]+)\}',
-                    lambda m: os.environ.get(m.group(1), m.group(0)),
-                    value,
-                )
-            return value
-        
-        platform = config.get("platform")
-        if not platform:
-            # Also try channels-style config (multi-channel format)
-            channels = config.get("channels")
-            if channels and isinstance(channels, dict):
-                # Pick first channel as platform
-                platform = next(iter(channels))
-                # Merge channel config into top level for token resolution
-                channel_conf = channels[platform] or {}
-                if "token" not in config and channel_conf.get("token"):
-                    config["token"] = channel_conf["token"]
-                if "bot_token" not in config and channel_conf.get("bot_token"):
-                    config["token"] = channel_conf["bot_token"]
-            else:
-                print("Error: 'platform' or 'channels' is required in bot config")
-                return
-        
+        platform = channel.platform or channel_name
         platform = platform.lower().strip()
-        valid_platforms = ("telegram", "discord", "slack", "whatsapp", "email", "agentmail")
-        if platform not in valid_platforms:
-            print(f"Error: Unknown platform '{platform}'. Use: {', '.join(valid_platforms)}")
-            return
         
-        token = resolve_env_vars(config.get("token", ""))
-        app_token = resolve_env_vars(config.get("app_token", ""))
+        token = channel.token
+        app_token = channel.app_token or ""
         
-        # Build capabilities from YAML agent config
-        agent_config = config.get("agent", {})
+        # Build capabilities from validated agent config
+        agent_config = validated_config.agent
+        if agent_config:
+            agent_config_dict = agent_config.model_dump()
+        else:
+            agent_config_dict = {}
+            
         capabilities = BotCapabilities(
-            memory=agent_config.get("memory", False),
-            knowledge=bool(agent_config.get("knowledge", False)),
-            knowledge_sources=agent_config.get("knowledge", []) if isinstance(agent_config.get("knowledge"), list) else [],
-            web_search=agent_config.get("web_search", False),
-            web_search_provider=agent_config.get("web_search_provider", "duckduckgo"),
-            tools=agent_config.get("tools", []) or [],
-            model=agent_config.get("llm"),
-            auto_approve=agent_config.get("auto_approve", False),
-            stream=config.get("streaming", False),
-            stream_edit_interval=config.get("stream_edit_interval_ms", 700),
+            memory=agent_config_dict.get("memory", False),
+            knowledge=bool(agent_config_dict.get("knowledge", False)),
+            knowledge_sources=agent_config_dict.get("knowledge", []) if isinstance(agent_config_dict.get("knowledge"), list) else [],
+            web_search=agent_config_dict.get("web_search", False),
+            web_search_provider=agent_config_dict.get("web_search_provider", "duckduckgo"),
+            tools=agent_config_dict.get("tools", []) or [],
+            model=agent_config_dict.get("model") or agent_config_dict.get("llm"),
+            auto_approve=agent_config_dict.get("auto_approve", False),
+            stream=channel.streaming.mode != "off" if channel.streaming else False,
+            stream_edit_interval=int(channel.streaming.min_interval * 1000) if channel.streaming else 700,
         )
         
-        # Write a temporary agent YAML for _load_agent (reuse existing logic)
-        # Or pass the agent_config directly
+        # Start bot based on platform
         if platform == "telegram":
             self.start_telegram(
                 token=token or None,
                 agent_file=None,
                 capabilities=capabilities,
-                agent_config_dict=agent_config,
+                agent_config_dict=agent_config_dict,
             )
         elif platform == "discord":
             self.start_discord(
                 token=token or None,
                 agent_file=None,
                 capabilities=capabilities,
-                agent_config_dict=agent_config,
+                agent_config_dict=agent_config_dict,
             )
         elif platform == "slack":
             self.start_slack(
@@ -260,60 +243,41 @@ class BotHandler:
                 app_token=app_token or None,
                 agent_file=None,
                 capabilities=capabilities,
-                agent_config_dict=agent_config,
+                agent_config_dict=agent_config_dict,
             )
         elif platform == "whatsapp":
-            phone_number_id = resolve_env_vars(config.get("phone_number_id", ""))
-            verify_token_val = resolve_env_vars(config.get("verify_token", ""))
-            webhook_port = config.get("webhook_port", 8080)
-            wa_mode = config.get("mode", "cloud")
-            wa_creds_dir = config.get("creds_dir")
-            # Message filtering from YAML config
-            wa_respond_to = config.get("respond_to")
-            wa_respond_to_groups = config.get("respond_to_groups")
-            wa_respond_to_all = config.get("respond_to_all", False)
-            wa_allowed_numbers = None
-            wa_allowed_groups = None
-            if isinstance(wa_respond_to, list):
-                wa_allowed_numbers = wa_respond_to
-            elif isinstance(wa_respond_to, str) and wa_respond_to:
-                wa_allowed_numbers = [n.strip() for n in wa_respond_to.split(",") if n.strip()]
-            if isinstance(wa_respond_to_groups, list):
-                wa_allowed_groups = wa_respond_to_groups
-            elif isinstance(wa_respond_to_groups, str) and wa_respond_to_groups:
-                wa_allowed_groups = [g.strip() for g in wa_respond_to_groups.split(",") if g.strip()]
             self.start_whatsapp(
                 token=token or None,
-                phone_number_id=phone_number_id or None,
-                verify_token=verify_token_val or None,
-                webhook_port=int(webhook_port),
+                phone_number_id=channel.phone_number_id or None,
+                verify_token=channel.verify_token or None,
+                webhook_port=channel.webhook_port,
                 agent_file=None,
                 capabilities=capabilities,
-                agent_config_dict=agent_config,
-                mode=wa_mode,
-                creds_dir=wa_creds_dir,
-                allowed_numbers=wa_allowed_numbers,
-                allowed_groups=wa_allowed_groups,
-                respond_to_all=bool(wa_respond_to_all),
+                agent_config_dict=agent_config_dict,
+                mode=channel.whatsapp_mode if hasattr(channel, 'whatsapp_mode') and channel.whatsapp_mode else "cloud",
+                creds_dir=channel.creds_dir if hasattr(channel, 'creds_dir') else None,
+                allowed_numbers=channel.allowed_users if channel.allowed_users else None,
+                allowed_groups=None,  # Could be extracted from allowlist
+                respond_to_all=not bool(channel.allowed_users or channel.allowlist or channel.blocklist),
             )
         elif platform == "email":
             self.start_email(
                 token=token or None,
                 agent_file=None,
                 capabilities=capabilities,
-                agent_config_dict=agent_config,
-                email_address=resolve_env_vars(config.get("email_address", "")),
-                imap_server=resolve_env_vars(config.get("imap_server", "")),
-                smtp_server=resolve_env_vars(config.get("smtp_server", "")),
+                agent_config_dict=agent_config_dict,
+                email_address=channel.email_address or "",
+                imap_server=channel.imap_server or "",
+                smtp_server=channel.smtp_server or "",
             )
         elif platform == "agentmail":
             self.start_agentmail(
                 token=token or None,
                 agent_file=None,
                 capabilities=capabilities,
-                agent_config_dict=agent_config,
-                inbox_id=resolve_env_vars(config.get("inbox_id", "")),
-                domain=resolve_env_vars(config.get("domain", "")),
+                agent_config_dict=agent_config_dict,
+                inbox_id=channel.inbox_id or "",
+                domain=channel.domain or "",
             )
     
     def start_telegram(
