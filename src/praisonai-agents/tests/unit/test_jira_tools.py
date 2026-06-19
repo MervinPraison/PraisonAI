@@ -286,9 +286,9 @@ def test_jira_tools_import():
         jira_watch_issue,
         jira_watch_project, 
         jira_get_issue_info,
-        jira_search_issues,
-        jira_tools
+        jira_search_issues
     )
+    from praisonaiagents.tools.jira_tools import jira_tools
     
     # Verify functions exist
     assert callable(jira_watch_issue)
@@ -301,3 +301,59 @@ def test_jira_tools_import():
     tools = jira_tools()
     assert isinstance(tools, list)
     assert len(tools) == 4
+
+
+class TestTimestampParsing:
+    """Test timestamp parsing utilities."""
+    
+    def test_parse_timestamp_valid_formats(self):
+        """Test parsing various valid ISO 8601 formats."""
+        from praisonaiagents.tools.jira_tools import _parse_timestamp
+        
+        # Test ISO format with Z
+        dt = _parse_timestamp("2024-01-01T10:00:00Z")
+        assert dt is not None
+        assert dt.year == 2024
+        assert dt.month == 1
+        assert dt.day == 1
+        assert dt.hour == 10
+        
+        # Test ISO format with +00:00
+        dt2 = _parse_timestamp("2024-01-01T10:00:00+00:00")
+        assert dt2 is not None
+        
+        # Test ISO format with +0000 (JIRA format)
+        dt3 = _parse_timestamp("2024-01-01T10:00:00.000+0000")
+        assert dt3 is not None
+        
+        # Test ISO format with timezone offset
+        dt4 = _parse_timestamp("2024-01-01T10:00:00-05:00")
+        assert dt4 is not None
+    
+    def test_parse_timestamp_invalid(self):
+        """Test parsing invalid timestamps."""
+        from praisonaiagents.tools.jira_tools import _parse_timestamp
+        
+        with pytest.raises(ValueError):
+            _parse_timestamp("invalid-date")
+        
+        with pytest.raises(ValueError):
+            _parse_timestamp("")
+        
+        with pytest.raises(ValueError):
+            _parse_timestamp("2024-13-40")  # Invalid date values
+    
+    def test_validate_timestamp(self):
+        """Test timestamp validation for JQL injection prevention."""
+        from praisonaiagents.tools.jira_tools import _validate_timestamp
+        
+        # Valid timestamps should not raise
+        _validate_timestamp("2024-01-01T10:00:00Z")
+        _validate_timestamp("2024-01-01T10:00:00+00:00")
+        
+        # Invalid timestamps should raise ValueError
+        with pytest.raises(ValueError):
+            _validate_timestamp("2024-01-01\" OR project != \"\"")
+        
+        with pytest.raises(ValueError):
+            _validate_timestamp("'; DROP TABLE issues; --")

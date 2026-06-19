@@ -3,6 +3,7 @@ import os
 import time
 import logging
 import re
+from datetime import datetime
 from typing import Dict, List, Optional, Any
 from .decorator import tool
 
@@ -53,6 +54,58 @@ def _get_jira_connection(
     
     return JIRA(server=url, basic_auth=auth)
 
+def _parse_timestamp(ts_str: str) -> datetime:
+    """Parse ISO 8601 timestamp string into a datetime object.
+    
+    Args:
+        ts_str: ISO 8601 timestamp string
+        
+    Returns:
+        datetime object
+        
+    Raises:
+        ValueError: If timestamp format is invalid
+    """
+    if not ts_str or not ts_str.strip():
+        raise ValueError("Timestamp cannot be empty")
+    
+    ts_str = ts_str.strip()
+    
+    # Handle different ISO 8601 formats
+    # Convert Z to +00:00 for Python's fromisoformat
+    if ts_str.endswith('Z'):
+        ts_str = ts_str[:-1] + '+00:00'
+    # Handle +0000 format (convert to +00:00)
+    elif len(ts_str) >= 5 and ts_str[-5] in ('+', '-') and ts_str[-4:].isdigit():
+        ts_str = ts_str[:-2] + ':' + ts_str[-2:]
+    
+    try:
+        return datetime.fromisoformat(ts_str)
+    except ValueError:
+        # Fallback to dateutil if available
+        try:
+            import dateutil.parser
+            return dateutil.parser.parse(ts_str)
+        except ImportError:
+            raise ValueError(
+                f"Could not parse timestamp: {ts_str}. " 
+                "Install python-dateutil for better timestamp parsing: pip install python-dateutil"
+            )
+
+def _validate_timestamp(timestamp: str) -> None:
+    """Validate timestamp format to prevent injection.
+    
+    Args:
+        timestamp: Timestamp string to validate
+        
+    Raises:
+        ValueError: If timestamp format is invalid
+    """
+    try:
+        _parse_timestamp(timestamp)
+    except ValueError as e:
+        raise ValueError(f"Invalid timestamp format: {e}")
+
 @tool
 def jira_watch_issue(
     issue_key: str,
@@ -97,7 +150,14 @@ def jira_watch_issue(
             return result
         
         # Check if updated since timestamp
-        if current_updated > since_timestamp:
+        try:
+            since_dt = _parse_timestamp(since_timestamp)
+            current_dt = _parse_timestamp(current_updated)
+        except ValueError as e:
+            logger.warning(f"Error parsing timestamps: {e}")
+            return f"Error parsing timestamps: {e}"
+        
+        if current_dt > since_dt:
             change_info = {
                 'timestamp': current_updated,
                 'status': current_status,
@@ -110,15 +170,19 @@ def jira_watch_issue(
             recent_changes = []
             if issue.changelog and issue.changelog.histories:
                 for history in issue.changelog.histories[-3:]:  # Last 3 changes
-                    if history.created > since_timestamp:
-                        for item in history.items:
-                            recent_changes.append({
-                                'field': item.field,
-                                'from': item.fromString,
-                                'to': item.toString,
-                                'author': history.author.displayName,
-                                'created': history.created
-                            })
+                    try:
+                        history_dt = _parse_timestamp(history.created)
+                        if history_dt > since_dt:
+                            for item in history.items:
+                                recent_changes.append({
+                                    'field': item.field,
+                                    'from': item.fromString,
+                                    'to': item.toString,
+                                    'author': history.author.displayName if history.author else 'Unknown',
+                                    'created': history.created
+                                })
+                    except (ValueError, AttributeError) as e:
+                        logger.debug(f"Skipping history entry due to parsing error: {e}")
             
             change_info['recent_changes'] = recent_changes
             changes_detected.append(change_info)
@@ -130,12 +194,16 @@ def jira_watch_issue(
             comment_changes = []
             if comments:
                 for comment in comments:
-                    if comment.created > since_timestamp:
-                        comment_changes.append({
-                            'author': comment.author.displayName,
-                            'body': comment.body[:500],  # First 500 chars
-                            'created': comment.created
-                        })
+                    try:
+                        comment_dt = _parse_timestamp(comment.created)
+                        if comment_dt > since_dt:
+                            comment_changes.append({
+                                'author': comment.author.displayName if comment.author else 'Unknown',
+                                'body': comment.body[:500],  # First 500 chars
+                                'created': comment.created
+                            })
+                    except (ValueError, AttributeError) as e:
+                        logger.debug(f"Skipping comment due to parsing error: {e}")
             
             # Add comment changes as separate entries if they exist
             if comment_changes:
@@ -205,6 +273,10 @@ def jira_watch_project(
         # Validate project key to prevent JQL injection
         _validate_project_key(project_key)
         
+        # Validate timestamp if provided to prevent JQL injection
+        if since_timestamp:
+            _validate_timestamp(since_timestamp)
+        
         jira = _get_jira_connection(url, username, token, email)
         
         logger.info(f"Checking JIRA project {project_key} for changes")
@@ -236,7 +308,7 @@ def jira_watch_project(
                 'summary': issue.fields.summary,
                 'status': issue.fields.status.name,
                 'assignee': issue.fields.assignee.displayName if issue.fields.assignee else 'Unassigned',
-                'creator': issue.fields.creator.displayName,
+                'creator': issue.fields.creator.displayName if issue.fields.creator else 'Unknown',
                 'created': issue.fields.created
             })
         
@@ -296,14 +368,14 @@ def jira_get_issue_info(
     """
     try:
         jira = _get_jira_connection(url, username, token, email)
-        issue = jira.issue(issue_key, expand='changelog,comments')
+        issue = jira.issue(issue_key)
         
         result = f"JIRA Issue: {issue.key}\n"
         result += f"Summary: {issue.fields.summary}\n"
         result += f"Status: {issue.fields.status.name}\n"
         result += f"Priority: {issue.fields.priority.name if issue.fields.priority else 'None'}\n"
         result += f"Assignee: {issue.fields.assignee.displayName if issue.fields.assignee else 'Unassigned'}\n"
-        result += f"Reporter: {issue.fields.reporter.displayName}\n"
+        result += f"Reporter: {issue.fields.reporter.displayName if issue.fields.reporter else 'Unknown'}\n"
         result += f"Created: {issue.fields.created}\n"
         result += f"Updated: {issue.fields.updated}\n"
         
@@ -315,7 +387,7 @@ def jira_get_issue_info(
         if comments:
             result += f"\nRecent Comments ({len(comments[-3:])}):\n"
             for comment in comments[-3:]:
-                result += f"  - {comment.author.displayName} ({comment.created}): {comment.body[:200]}...\n"
+                result += f"  - {comment.author.displayName if comment.author else 'Unknown'} ({comment.created}): {comment.body[:200]}...\n"
         
         return result
         
