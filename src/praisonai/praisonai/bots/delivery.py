@@ -49,23 +49,31 @@ class ChannelDirectory:
     
     def set_home_channel(self, platform: str, channel_id: str) -> None:
         """Set the default/home channel for a platform."""
-        self._home_channels[platform] = channel_id
-        logger.debug(f"ChannelDirectory: set home channel for {platform}: {channel_id}")
+        platform_key = platform.lower()
+        self._home_channels[platform_key] = channel_id
+        logger.debug(f"ChannelDirectory: set home channel for {platform_key}: {channel_id}")
     
     def add_alias(self, name: str, platform: str, channel_id: str) -> None:
         """Add a friendly alias for a channel."""
-        self._aliases[name] = (platform, channel_id)
-        logger.debug(f"ChannelDirectory: added alias '{name}' -> {platform}:{channel_id}")
+        platform_key = platform.lower()
+        existing = self._aliases.get(name)
+        if existing and existing != (platform_key, channel_id):
+            raise ValueError(
+                f"Alias '{name}' already points to {existing[0]}:{existing[1]}"
+            )
+        self._aliases[name] = (platform_key, channel_id)
+        logger.debug(f"ChannelDirectory: added alias '{name}' -> {platform_key}:{channel_id}")
     
     def observe_channel(self, platform: str, channel_id: str) -> None:
         """Record an observed channel from an active session."""
-        if platform not in self._observed:
-            self._observed[platform] = set()
-        self._observed[platform].add(channel_id)
+        platform_key = platform.lower()
+        if platform_key not in self._observed:
+            self._observed[platform_key] = set()
+        self._observed[platform_key].add(channel_id)
     
     def get_home_channel(self, platform: str) -> Optional[str]:
         """Get the home channel for a platform."""
-        return self._home_channels.get(platform)
+        return self._home_channels.get(platform.lower())
     
     def resolve_alias(self, alias: str) -> Optional[Tuple[str, str]]:
         """Resolve an alias to (platform, channel_id)."""
@@ -73,17 +81,19 @@ class ChannelDirectory:
     
     def has_channel(self, platform: str, channel_id: str) -> bool:
         """Check if a channel is known (home, alias, or observed)."""
+        platform_key = platform.lower()
+        
         # Check if it's the home channel
-        if self._home_channels.get(platform) == channel_id:
+        if self._home_channels.get(platform_key) == channel_id:
             return True
         
         # Check if it's in aliases
         for p, c in self._aliases.values():
-            if p == platform and c == channel_id:
+            if p.lower() == platform_key and c == channel_id:
                 return True
         
         # Check if it's observed
-        if platform in self._observed and channel_id in self._observed[platform]:
+        if platform_key in self._observed and channel_id in self._observed[platform_key]:
             return True
         
         return False
@@ -126,27 +136,31 @@ class DeliveryRouter:
         
         # Handle "platform:channel_id" format
         if ":" in target:
-            parts = target.split(":", 1)
-            platform = parts[0]
-            channel_id = parts[1]
+            platform, channel_id = [p.strip() for p in target.split(":", 1)]
+            if not platform or not channel_id:
+                raise ValueError(
+                    "Invalid target format. Expected '<platform>:<channel_id>'"
+                )
             
-            # Validate platform exists
-            if not self._botos.get_bot(platform):
+            # Validate platform exists (normalize to lowercase)
+            platform_key = platform.lower()
+            if not self._botos.get_bot(platform_key):
                 raise ValueError(f"Platform '{platform}' not configured")
             
-            return (platform, channel_id)
+            return (platform_key, channel_id)
+        
+        # Check if it's a platform name (use home channel) - check this BEFORE aliases
+        platform_key = target.lower()
+        if self._botos.get_bot(platform_key):
+            home_channel = self.directory.get_home_channel(platform_key)
+            if home_channel:
+                return (platform_key, home_channel)
+            raise ValueError(f"Platform '{target}' has no home channel configured")
         
         # Check if it's an alias
         alias_result = self.directory.resolve_alias(target)
         if alias_result:
             return alias_result
-        
-        # Check if it's a platform name (use home channel)
-        if self._botos.get_bot(target):
-            home_channel = self.directory.get_home_channel(target)
-            if home_channel:
-                return (target, home_channel)
-            raise ValueError(f"Platform '{target}' has no home channel configured")
         
         # If nothing matches, it might be an undefined alias
         raise ValueError(f"Cannot resolve target '{target}': not a platform, alias, or platform:channel format")

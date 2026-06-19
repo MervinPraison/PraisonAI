@@ -300,10 +300,10 @@ class BotOS:
             if not target and origin:
                 target = "origin"
             
-            if target:
+            if target and result_str:
                 delivered = await self._delivery_router.deliver(
                     target=target,
-                    text=str(result),
+                    text=result_str,
                     origin=origin
                 )
 
@@ -314,17 +314,26 @@ class BotOS:
         """Configure delivery router from bot configurations."""
         for platform, bot in self._bots.items():
             # Check if bot has channel configuration
+            # Try _config first (for manually created bots), then _kwargs (from from_config())
             config = getattr(bot, '_config', None)
-            if not config:
-                continue
+            kwargs = getattr(bot, '_kwargs', {})
+            
+            # Extract home_channel and aliases from config or kwargs
+            home_channel = None
+            aliases = {}
+            
+            if config:
+                home_channel = getattr(config, 'home_channel', None)
+                aliases = getattr(config, 'aliases', {})
+            elif kwargs:
+                home_channel = kwargs.get('home_channel')
+                aliases = kwargs.get('aliases', {})
             
             # Set home channel if configured
-            home_channel = getattr(config, 'home_channel', None)
             if home_channel:
                 self._delivery_router.directory.set_home_channel(platform, home_channel)
             
             # Add aliases if configured
-            aliases = getattr(config, 'aliases', {})
             for alias_name, channel_id in aliases.items():
                 self._delivery_router.directory.add_alias(alias_name, platform, channel_id)
     
