@@ -24,11 +24,7 @@ T = TypeVar('T')
 # THREAD-SAFE LAZY LOADING INFRASTRUCTURE - All heavy imports are deferred
 # =============================================================================
 
-import threading
-
-# Thread-safe lazy cache for optional dependencies
-_optional_lock = threading.Lock()
-_optional_cache: dict[str, object] = {}
+from ._lazy_cache import lazy_get
 
 def _rich_print(*args, **kwargs):
     """Lazy-loaded rich.print wrapper."""
@@ -46,29 +42,6 @@ def _yaml_safe_load(stream):
     return yaml.safe_load(stream)
 
 
-def _load_optional(key: str, loader):
-    """Thread-safe lazy loading for optional dependencies.
-    
-    Args:
-        key: Unique key for the dependency
-        loader: Function that imports and returns the dependency
-        
-    Returns:
-        The loaded dependency or None if import fails
-    """
-    if key in _optional_cache:
-        return _optional_cache[key]
-    
-    with _optional_lock:
-        if key in _optional_cache:
-            return _optional_cache[key]
-        
-        try:
-            _optional_cache[key] = loader()
-        except ImportError:
-            _optional_cache[key] = None
-        
-        return _optional_cache[key]
 
 
 
@@ -82,7 +55,7 @@ from ._framework_availability import is_available
 
 def _get_crewai():
     """Lazy load crewai classes (thread-safe)."""
-    return _load_optional("crewai_classes", lambda: (
+    return lazy_get("crewai_classes", lambda: (
         __import__("crewai", fromlist=["Agent", "Task", "Crew"]).Agent,
         __import__("crewai", fromlist=["Agent", "Task", "Crew"]).Task,
         __import__("crewai", fromlist=["Agent", "Task", "Crew"]).Crew,
@@ -91,7 +64,7 @@ def _get_crewai():
 
 def _get_autogen():
     """Lazy load autogen module (thread-safe)."""
-    return _load_optional("autogen_module", lambda: __import__("autogen"))
+    return lazy_get("autogen_module", lambda: __import__("autogen"))
 
 
 def _get_autogen_v4():
@@ -101,7 +74,7 @@ def _get_autogen_v4():
         from autogen_ext.models.openai import OpenAIChatCompletionClient
         return (AssistantAgent, OpenAIChatCompletionClient)
     
-    return _load_optional("autogen_v4_classes", autogen_v4_loader)
+    return lazy_get("autogen_v4_classes", autogen_v4_loader)
 
 
 def _get_praisonai():
@@ -110,7 +83,7 @@ def _get_praisonai():
         from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, AgentTeam as Agents
         return (PraisonAgent, PraisonTask, Agents)
     
-    return _load_optional("praisonai_classes", praisonai_loader)
+    return lazy_get("praisonai_classes", praisonai_loader)
 
 
 # --- PraisonAI Tools lazy loading ---
@@ -144,12 +117,12 @@ def _get_praisonai_tools():
             'YoutubeVideoSearchTool': YoutubeVideoSearchTool,
         }
     
-    return _load_optional("praisonai_tools_dict", tools_loader)
+    return lazy_get("praisonai_tools_dict", tools_loader)
 
 
 def _get_litellm():
     """Lazy load litellm module."""
-    result = _load_optional("litellm", lambda: __import__("litellm"))
+    result = lazy_get("litellm", lambda: __import__("litellm"))
     if result is None:
         raise ImportError("Install with: pip install litellm")
     return result
@@ -619,19 +592,9 @@ class BaseAutoGenerator:
 # Pydantic Models for Structured Output - Lazy Loaded
 # =============================================================================
 
-# Models are created on first use to avoid importing pydantic at module level
-_models_cache = {}
-_models_lock = threading.Lock()
-
 def _get_team_models():
     """Get team structure models, creating them on first use."""
-    if 'team_models' in _models_cache:
-        return _models_cache['team_models']
-    
-    with _models_lock:
-        if 'team_models' in _models_cache:
-            return _models_cache['team_models']
-        
+    def _create_team_models():
         from pydantic import BaseModel
         
         class TaskDetails(BaseModel):
@@ -674,7 +637,7 @@ def _get_team_models():
             pass_action: str  # Action if validation passes (e.g., "continue", "next_step")
             fail_action: str  # Action if validation fails (e.g., "retry", "escalate", "abort")
         
-        _models_cache['team_models'] = {
+        return {
             'TaskDetails': TaskDetails,
             'RoleDetails': RoleDetails,
             'TeamStructure': TeamStructure,
@@ -682,7 +645,8 @@ def _get_team_models():
             'PatternRecommendation': PatternRecommendation,
             'ValidationGate': ValidationGate
         }
-        return _models_cache['team_models']
+    
+    return lazy_get('team_models', _create_team_models)
 
 class AutoGenerator(BaseAutoGenerator):
     """

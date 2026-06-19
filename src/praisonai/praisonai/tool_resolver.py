@@ -618,11 +618,88 @@ class ToolResolver:
         except ImportError as e:
             logger.warning(f"Toolset support unavailable: {e}")
             return []
-        except (ValueError, KeyError) as e:
-            raise ValueError(
-                f"Failed to resolve toolsets {toolset_names}: {e}. "
-                "Check toolset names and includes."
-            ) from e
+    
+    def resolve_all_from_yaml(self, yaml_config: Dict[str, Any]) -> Dict[str, Callable]:
+        """Resolve every tool name referenced in a parsed YAML config.
+
+        Walks roles[*].tools and roles[*].tasks[*].tools, resolves each via
+        self.resolve(), instantiates classes, and merges in local tools.py /
+        tools/ contents. Returns a {name: callable} dict ready for the adapter.
+        """
+        tools_dict: Dict[str, Callable] = {}
+        needed: set[str] = set()
+        for role_cfg in yaml_config.get('roles', {}).values():
+            for t in role_cfg.get('tools') or []:
+                if isinstance(t, str) and t.strip():
+                    needed.add(t.strip())
+            tasks = role_cfg.get('tasks') or {}
+            # Handle both dict and list formats for tasks
+            if isinstance(tasks, dict):
+                task_list = tasks.values()
+            elif isinstance(tasks, list):
+                task_list = tasks
+            else:
+                task_list = []
+            
+            for task_cfg in task_list:
+                if not isinstance(task_cfg, dict):
+                    continue
+                for t in task_cfg.get('tools') or []:
+                    if isinstance(t, str) and t.strip():
+                        needed.add(t.strip())
+
+        for name in needed:
+            resolved = self.resolve(name)
+            if resolved is None:
+                logger.warning("Tool %r not found", name)
+                continue
+            tools_dict[name] = resolved() if inspect.isclass(resolved) else resolved
+
+        # Restore original mutual exclusion: tools.py OR tools/ directory, not both
+        root_directory = os.getcwd()
+        tools_py_path = os.path.join(root_directory, 'tools.py')
+        tools_dir = Path(root_directory) / 'tools'
+        
+        # Load from tools.py if it exists
+        local_tools = self.get_local_tool_classes()
+        if local_tools:
+            tools_dict.update(local_tools)
+            if os.path.isfile(tools_py_path):
+                logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
+        # Otherwise load from tools/ directory if it exists
+        elif tools_dir.is_dir():
+            tools_dict.update(self.get_local_tool_classes_from_dir(tools_dir))
+            logger.debug("tools folder exists in the root directory")
+        return tools_dict
+
+
+    def load_functions_from_module(self, module_path: str) -> Dict[str, Callable]:
+        """Public replacement for AgentsGenerator.load_tools_from_module."""
+        from ._safe_loader import load_user_module
+        module = load_user_module(module_path, name="tools_module")
+        return {} if module is None else {
+            name: obj for name, obj in inspect.getmembers(module)
+            if inspect.isfunction(obj) or callable(obj)
+        }
+
+
+    def load_classes_from_module(self, module_path: str) -> Dict[str, Callable]:
+        """Public replacement for AgentsGenerator.load_tools_from_module_class.
+        Promotes _extract_tool_classes from private to public."""
+        from ._safe_loader import load_user_module
+        module = load_user_module(module_path, name="tools_module")
+        return {} if module is None else self._extract_tool_classes(module)
+
+
+    def load_functions_from_package(self, package_path: Path | str) -> Dict[str, Callable]:
+        """Safe replacement that uses _safe_loader instead of importlib."""
+        pkg = Path(package_path)
+        out: Dict[str, Callable] = {}
+        for py in pkg.glob("*.py"):
+            if py.name.startswith("__"):
+                continue
+            out.update(self.load_functions_from_module(str(py.resolve())))
+        return out
     
     def resolve_tools_and_toolsets(
         self, 
