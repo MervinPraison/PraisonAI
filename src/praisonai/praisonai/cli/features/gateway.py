@@ -299,7 +299,9 @@ class GatewayHandler:
 
 
 def handle_gateway_command(args) -> int:
-    """Handle gateway CLI command. [DEPRECATED]
+    """Handle gateway CLI command.
+    
+    Now uses the unified configuration schema for all bot/gateway operations.
     
     Args:
         args: List of CLI arguments (from main.py unknown_args) or argparse Namespace.
