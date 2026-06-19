@@ -49,12 +49,21 @@ class SandboxHandler:
         try:
             from praisonaiagents.sandbox import ResourceLimits
             
+            from praisonai.sandbox._registry import SandboxRegistry
+            
+            registry = SandboxRegistry.default()
+            try:
+                sandbox_class = registry.resolve(sandbox_type)
+            except ValueError:
+                # Fallback to subprocess for unknown types
+                sandbox_class = registry.resolve("subprocess")
+                sandbox_type = "subprocess"  # Update to match resolved type
+            
+            # Pass image parameter only for Docker sandbox
             if sandbox_type == "docker":
-                from praisonai.sandbox import DockerSandbox
-                sandbox = DockerSandbox(image=image)
+                sandbox = sandbox_class(image=image)
             else:
-                from praisonai.sandbox import SubprocessSandbox
-                sandbox = SubprocessSandbox()
+                sandbox = sandbox_class()
         except ImportError as e:
             print(f"Error: {e}")
             return
@@ -99,12 +108,21 @@ class SandboxHandler:
         try:
             from praisonaiagents.sandbox import ResourceLimits
             
+            from praisonai.sandbox._registry import SandboxRegistry
+            
+            registry = SandboxRegistry.default()
+            try:
+                sandbox_class = registry.resolve(sandbox_type)
+            except ValueError:
+                # Fallback to subprocess for unknown types
+                sandbox_class = registry.resolve("subprocess")
+                sandbox_type = "subprocess"  # Update to match resolved type
+            
+            # Pass image parameter only for Docker sandbox
             if sandbox_type == "docker":
-                from praisonai.sandbox import DockerSandbox
-                sandbox = DockerSandbox(image=image)
+                sandbox = sandbox_class(image=image)
             else:
-                from praisonai.sandbox import SubprocessSandbox
-                sandbox = SubprocessSandbox()
+                sandbox = sandbox_class()
         except ImportError as e:
             print(f"Error: {e}")
             return

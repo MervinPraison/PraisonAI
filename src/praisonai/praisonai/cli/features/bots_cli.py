@@ -951,19 +951,20 @@ class BotHandler:
         # Web search (additional provider-specific tool)
         if capabilities.web_search:
             try:
-                if capabilities.web_search_provider == "duckduckgo":
-                    from praisonai_tools import DuckDuckGoTool
-                    tools.append(DuckDuckGoTool())
-                elif capabilities.web_search_provider == "tavily":
-                    from praisonai_tools import TavilyTool
-                    tools.append(TavilyTool())
-                elif capabilities.web_search_provider == "serper":
-                    from praisonai_tools import SerperTool
-                    tools.append(SerperTool())
-                else:
-                    from praisonai_tools import DuckDuckGoTool
-                    tools.append(DuckDuckGoTool())
-                logger.info(f"Web search provider enabled: {capabilities.web_search_provider}")
+                from ._search_registry import SearchProviderRegistry
+                
+                registry = SearchProviderRegistry.default()
+                provider = capabilities.web_search_provider or "duckduckgo"
+                
+                try:
+                    tool_class = registry.resolve(provider)
+                    tools.append(tool_class())
+                except ValueError:
+                    # Fallback to default
+                    tool_class = registry.resolve("duckduckgo")
+                    tools.append(tool_class())
+                    
+                logger.info(f"Web search provider enabled: {provider}")
             except ImportError:
                 logger.warning("Web search tool not available. Install praisonai-tools.")
         
