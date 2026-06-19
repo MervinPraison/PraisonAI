@@ -113,9 +113,17 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
         self.config = config or BotConfig()
         try:
             from praisonaiagents.session import get_default_session_store
-            _store = get_default_session_store()
-        except Exception:
+        except ImportError:
             _store = None
+        else:
+            try:
+                _store = get_default_session_store()
+            except Exception as exc:
+                logger.warning(
+                    "Falling back to in-memory session store for AgentMailBot: %s",
+                    exc,
+                )
+                _store = None
         self._session = BotSessionManager(store=_store, platform="agentmail")
         
         # Resolve mode: explicit param > config > default

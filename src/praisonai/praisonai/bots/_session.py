@@ -327,15 +327,26 @@ class BotSessionManager:
                                 # achat()/astart() do not accept stream_callback directly.
                                 emitter = getattr(agent, "stream_emitter", None)
                                 if emitter is not None:
+                                    # Check if callback is async (function or callable with async __call__)
+                                    is_async = asyncio.iscoroutinefunction(stream_callback) or asyncio.iscoroutinefunction(
+                                        getattr(stream_callback, "__call__", None)
+                                    )
+                                    
                                     def bridged_stream_callback(event):
                                         try:
                                             result = stream_callback(event)
-                                            if asyncio.iscoroutine(result):
+                                            if is_async and asyncio.iscoroutine(result):
                                                 asyncio.get_running_loop().create_task(result)
                                         except Exception as cb_exc:
                                             logger.warning("Stream callback failed: %s", cb_exc)
 
                                     emitter.add_callback(bridged_stream_callback)
+                                else:
+                                    # Warn when stream_callback is provided but agent lacks stream_emitter
+                                    logger.warning(
+                                        "Stream callback provided but agent lacks stream_emitter - "
+                                        "streaming will not work for agent %s", type(agent).__name__
+                                    )
 
                                 astart_kwargs = {"stream": True}
                                 if controller:
