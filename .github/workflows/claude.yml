@@ -176,6 +176,8 @@ jobs:
             core.setOutput('is_pr', 'true');
             core.setOutput('pr_number', String(prNumber));
             core.setOutput('pr_branch', pr.data.head.ref);
+            core.setOutput('head_repo', pr.data.head.repo.full_name);
+            core.setOutput('merge_state', pr.data.merge_state_status);
 
             if (pr.data.head.repo && pr.data.head.repo.full_name !== context.repo.full_name) {
               core.setOutput('is_fork', 'true');
@@ -201,6 +203,7 @@ jobs:
         run: |
           git fetch origin "pull/${PR_NUMBER}/head:${PR_BRANCH}"
           git checkout "${PR_BRANCH}"
+          git fetch origin main
 
           # If it's a fork, make origin point to local to trick claude-code-action's `git fetch origin <branch>`
           if [ "${IS_FORK}" = "true" ]; then
@@ -220,7 +223,7 @@ jobs:
 
           direct_prompt: |
             ${{ steps.check_fork.outputs.is_fork == 'true' && 'CRITICAL: THIS IS A PULL REQUEST FROM A FORK. YOU DO NOT HAVE PUSH PERMISSIONS TO THIS REPOSITORY. ONLY READ FILES, VALIDATE CODE, AND PROVIDE YOUR COMMENTS/FEEDBACK DIRECTLY IN THIS PR VIA COMMENTS. DO NOT ATTEMPT TO PUSH OR CREATE PULL REQUESTS.\n\n' || (steps.check_fork.outputs.is_pr == 'true' && 'NOTE: The branch is under MervinPraison/PraisonAI (not a fork). You are able to make modifications and push directly to this branch.\n\n' || 'NOTE: This is an issue (not a PR). Create a new fix branch per STEP 3 below.\n\n') }}
-            ${{ steps.check_fork.outputs.is_pr == 'true' && format('CONTEXT: This is PR #{0} on branch {1}. PR author being a bot does NOT mean fork — trust is_fork={2} only.\n\n', steps.check_fork.outputs.pr_number, steps.check_fork.outputs.pr_branch, steps.check_fork.outputs.is_fork) || '' }}
+            ${{ steps.check_fork.outputs.is_pr == 'true' && format('CONTEXT: PR #{0} on branch {1}. head.repo={2}, is_fork={3}, merge_state={4}. NEVER treat cursor/*, claude/* branch names or bot authors as forks — only is_fork=true means fork.\n\n', steps.check_fork.outputs.pr_number, steps.check_fork.outputs.pr_branch, steps.check_fork.outputs.head_repo, steps.check_fork.outputs.is_fork, steps.check_fork.outputs.merge_state) || '' }}
             You are working on the PraisonAI SDK. Follow AGENTS.md strictly.
 
             STEP 0 — SETUP GIT IDENTITY & AUTH (GLOBAL — required for all repos):
@@ -249,7 +252,8 @@ jobs:
             - Is there a name collision with existing exports in __init__.py?
             If ANY of these conceptual checks fail (excluding routing), add a comment to the issue explaining why and close it. Do NOT create a PR.
 
-            ${{ steps.check_fork.outputs.is_pr == 'true' && steps.check_fork.outputs.is_fork != 'true' && format('STEP 3 — IMPLEMENT ON EXISTING PR (branch: {0}, PR #{1}):\n- DO NOT create a new branch or PR\n- git checkout {0}\n- Implement minimal, focused fixes from reviewer feedback\n- Follow protocol-driven design: protocols in core SDK, heavy implementations in wrapper\n- Keep changes small and backward-compatible\n- Commit: git add -A && git commit -m "fix: <description>"\n- Push: git push origin {0}\n- Comment a summary of exact files modified and what you skipped\n', steps.check_fork.outputs.pr_branch, steps.check_fork.outputs.pr_number) || '' }}
+            ${{ steps.check_fork.outputs.is_pr == 'true' && steps.check_fork.outputs.is_fork != 'true' && steps.check_fork.outputs.merge_state == 'DIRTY' && format('STEP 3 — RESOLVE MERGE CONFLICTS ON PR (branch: {0}, PR #{1}):\n- DO NOT create a new branch or PR\n- git fetch origin main && git rebase origin/main\n- Resolve conflicts: keep this PR intent, merge in main newer logic\n- git add -A && git rebase --continue (repeat until done)\n- git push --force-with-lease origin {0}\n- Run targeted pytest on changed paths\n- Comment files resolved and what you skipped\n', steps.check_fork.outputs.pr_branch, steps.check_fork.outputs.pr_number) || '' }}
+            ${{ steps.check_fork.outputs.is_pr == 'true' && steps.check_fork.outputs.is_fork != 'true' && steps.check_fork.outputs.merge_state != 'DIRTY' && format('STEP 3 — IMPLEMENT ON EXISTING PR (branch: {0}, PR #{1}):\n- DO NOT create a new branch or PR\n- git checkout {0}\n- Implement minimal, focused fixes from reviewer feedback\n- Follow protocol-driven design: protocols in core SDK, heavy implementations in wrapper\n- Keep changes small and backward-compatible\n- Commit: git add -A && git commit -m "fix: <description>"\n- Push: git push origin {0}\n- Comment a summary of exact files modified and what you skipped\n', steps.check_fork.outputs.pr_branch, steps.check_fork.outputs.pr_number) || '' }}
             ${{ steps.check_fork.outputs.is_pr != 'true' && 'STEP 3 — IMPLEMENT (for changes in THIS repo — PraisonAI):\n- Create a fix branch: git checkout -b claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)\n- Implement a minimal, focused fix\n- Follow protocol-driven design: protocols in core SDK, heavy implementations in wrapper\n- Keep changes small and backward-compatible\n- Commit: git add -A && git commit -m "fix: <description> (fixes #$ISSUE_NUMBER)"\n- Push: git push origin claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)\nCRITICAL: After pushing, you MUST immediately run: gh pr create --title "fix: <title>" --body "Fixes #$ISSUE_NUMBER" --head claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)\nDo NOT stop after pushing. Do NOT say "manually create a PR". Always create the PR automatically.\n' || '' }}
 
             STEP 3-ALT — IMPLEMENT IN EXTERNAL REPO (for PraisonAI-Tools, PraisonAIDocs, PraisonAI-Plugins):
