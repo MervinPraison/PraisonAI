@@ -45,38 +45,11 @@ class UnifiedExecutionMixin:
         Returns:
             The resolved CLI backend instance, or current backend if no override needed.
         """
-        try:
-            # Try to use runtime resolution to potentially override cli_backend
-            from ..runtime.resolve import resolve_runtime, SessionContext
-            import time
-            
-            # If no model change or runtime context, keep current backend
-            current_model = getattr(self, 'llm', None) or getattr(self, 'model', None)
-            if not current_model:
-                return self._cli_backend
-            
-            # Create session context
-            session_ctx = SessionContext(
-                session_id=getattr(self, '_session_id', 'default'),
-                timestamp=time.time(),
-                parent_agent_id=getattr(self, 'name', None),
-                handoff_depth=0
-            )
-            
-            # Resolve runtime to check if backend should change
-            agent_id = getattr(self, 'agent_id', getattr(self, 'name', 'unknown'))
-            runtime = resolve_runtime(agent_id, current_model, session_ctx)
-            
-            # Check if runtime indicates different backend needs
-            # This is where policy decisions would be made based on runtime.provider
-            # For now, just return current backend (extensibility point)
-            logger.debug(f"Turn-time CLI backend resolution: keeping {type(self._cli_backend).__name__} for {runtime.provider}/{runtime.model_ref}")
-            
-            return self._cli_backend
-            
-        except Exception as e:
-            logger.debug(f"CLI backend turn-time resolution failed, using construction-time backend: {e}")
-            return self._cli_backend
+        # For now, this is a placeholder for future backend override logic
+        # The runtime resolution infrastructure is in place, but the policy
+        # decisions about when to switch backends are not yet implemented
+        # Always return the current backend until override logic is implemented
+        return getattr(self, '_cli_backend', None)
 
     async def _unified_chat_impl(
         self,
@@ -151,53 +124,25 @@ class UnifiedExecutionMixin:
                     tool_choice=tool_choice
                 )
             elif hasattr(self, '_cli_backend') and self._cli_backend is not None:
-                # Apply turn-time resolution for CLI backend selection
-                resolved_backend = self._resolve_cli_backend_at_turn_time()
-                if resolved_backend != self._cli_backend:
-                    logger.debug(f"CLI backend override: {type(self._cli_backend).__name__} -> {type(resolved_backend).__name__}")
-                    # Use resolved backend for this turn
-                    original_backend = self._cli_backend
-                    self._cli_backend = resolved_backend
-                    try:
-                        return await self._chat_via_cli_backend(
-                            prompt=prompt,
-                            temperature=temperature,
-                            tools=tools,
-                            output_json=output_json,
-                            output_pydantic=output_pydantic,
-                            reasoning_steps=reasoning_steps,
-                            stream=stream,
-                            task_name=task_name,
-                            task_description=task_description,
-                            task_id=task_id,
-                            config=config,
-                            force_retrieval=force_retrieval,
-                            skip_retrieval=skip_retrieval,
-                            attachments=attachments,
-                            tool_choice=tool_choice
-                        )
-                    finally:
-                        # Restore original backend
-                        self._cli_backend = original_backend
-                else:
-                    # Legacy CLI backend with deprecation warning (emitted in Agent.__init__)
-                    return await self._chat_via_cli_backend(
-                        prompt=prompt,
-                        temperature=temperature,
-                        tools=tools,
-                        output_json=output_json,
-                        output_pydantic=output_pydantic,
-                        reasoning_steps=reasoning_steps,
-                        stream=stream,
-                        task_name=task_name,
-                        task_description=task_description,
-                        task_id=task_id,
-                        config=config,
-                        force_retrieval=force_retrieval,
-                        skip_retrieval=skip_retrieval,
-                        attachments=attachments,
-                        tool_choice=tool_choice
-                    )
+                # CLI Backend routing - delegate entire turn if configured
+                # Note: Turn-time resolution placeholder is in place for future backend switching
+                return await self._chat_via_cli_backend(
+                    prompt=prompt,
+                    temperature=temperature,
+                    tools=tools,
+                    output_json=output_json,
+                    output_pydantic=output_pydantic,
+                    reasoning_steps=reasoning_steps,
+                    stream=stream,
+                    task_name=task_name,
+                    task_description=task_description,
+                    task_id=task_id,
+                    config=config,
+                    force_retrieval=force_retrieval,
+                    skip_retrieval=skip_retrieval,
+                    attachments=attachments,
+                    tool_choice=tool_choice
+                )
             # Apply rate limiter if configured (before any LLM call)
             if hasattr(self, '_rate_limiter') and self._rate_limiter is not None:
                 await self._rate_limiter.acquire_async()

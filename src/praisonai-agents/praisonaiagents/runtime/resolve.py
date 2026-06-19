@@ -12,7 +12,6 @@ from (agent_id, model_ref) at each handoff/sub-agent invocation.
 import logging
 import threading
 import time
-import weakref
 from typing import Any, Dict, Optional, Protocol, Tuple, Union
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
@@ -73,7 +72,8 @@ class RuntimeResolver(ABC):
         self, 
         agent_id: str, 
         model_ref: str, 
-        session_ctx: SessionContext
+        session_ctx: SessionContext,
+        **kwargs
     ) -> AgentRuntimeProtocol:
         """Resolve runtime for the given agent and model."""
         ...
@@ -108,7 +108,8 @@ class DefaultRuntimeResolver(RuntimeResolver):
         self, 
         agent_id: str, 
         model_ref: str, 
-        session_ctx: SessionContext
+        session_ctx: SessionContext,
+        **kwargs
     ) -> AgentRuntimeProtocol:
         """Resolve runtime based on model reference."""
         try:
@@ -116,8 +117,11 @@ class DefaultRuntimeResolver(RuntimeResolver):
             from ..llm.llm import LLM
             
             # Create a runtime wrapper around the LLM
+            # Pass through any configuration kwargs
+            llm_kwargs = {'model': model_ref}
+            llm_kwargs.update(kwargs)
             return LLMRuntimeWrapper(
-                llm=LLM(model=model_ref),
+                llm=LLM(**llm_kwargs),
                 model_ref=model_ref,
                 agent_id=agent_id
             )
@@ -173,17 +177,23 @@ class LLMRuntimeWrapper(AgentRuntimeProtocol):
         return True  # Most modern LLMs support tools
 
 class FallbackRuntime(AgentRuntimeProtocol):
-    """Fallback runtime implementation."""
+    """Fallback runtime implementation that raises errors instead of returning stubs."""
     
     def __init__(self, model_ref: str, agent_id: str):
         self._model_ref = model_ref
         self._agent_id = agent_id
     
     def execute(self, prompt: str, **kwargs) -> Any:
-        return f"Fallback runtime response for: {prompt}"
+        raise RuntimeError(
+            f"No LLM runtime available for model {self._model_ref}. "
+            "Please ensure the LLM module is properly installed."
+        )
     
     async def aexecute(self, prompt: str, **kwargs) -> Any:
-        return f"Fallback runtime async response for: {prompt}"
+        raise RuntimeError(
+            f"No LLM runtime available for model {self._model_ref}. "
+            "Please ensure the LLM module is properly installed."
+        )
     
     @property
     def model_ref(self) -> str:
@@ -222,7 +232,8 @@ def get_global_resolver() -> RuntimeResolver:
 def resolve_runtime(
     agent_id: str, 
     model_ref: str, 
-    session_ctx: SessionContext
+    session_ctx: SessionContext,
+    **kwargs
 ) -> AgentRuntimeProtocol:
     """
     Resolve runtime for the given agent and model at turn-time.
@@ -278,7 +289,7 @@ def resolve_runtime(
         raise RuntimeError(f"No runtime resolver available for model: {model_ref}")
     
     try:
-        runtime = resolver.resolve(agent_id, model_ref, session_ctx)
+        runtime = resolver.resolve(agent_id, model_ref, session_ctx, **kwargs)
         
         # Cache the resolved runtime
         with _runtime_cache_lock:
@@ -323,6 +334,7 @@ def clear_runtime_cache(session_id: Optional[str] = None) -> None:
 def _cleanup_expired_cache() -> None:
     """Clean up expired cache entries (called periodically)."""
     current_time = time.time()
+    total_expired = 0
     
     with _runtime_cache_lock:
         for session_id, session_cache in list(_runtime_cache.items()):
@@ -333,13 +345,14 @@ def _cleanup_expired_cache() -> None:
             
             for key in expired_keys:
                 del session_cache[key]
+            total_expired += len(expired_keys)
             
             # Remove empty session caches
             if not session_cache:
                 del _runtime_cache[session_id]
     
-    if expired_keys:
-        logger.debug(f"Cleaned up {len(expired_keys)} expired runtime cache entries")
+    if total_expired:
+        logger.debug(f"Cleaned up {total_expired} expired runtime cache entries")
 
 # Background cleanup (optional - only if needed)
 _cleanup_thread = None

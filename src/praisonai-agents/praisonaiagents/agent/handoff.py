@@ -428,7 +428,7 @@ class Handoff:
             
             # Resolve target agent's model reference
             target_model_ref = getattr(self.agent, 'llm', None) or getattr(self.agent, 'model', None) or 'gpt-4o-mini'
-            target_agent_id = getattr(self.agent, 'agent_id', self.agent.name)
+            target_agent_id = getattr(self.agent, 'agent_id', getattr(self.agent, 'name', 'unknown'))
             
             logger.debug(f"Resolving runtime for handoff: agent_id={target_agent_id}, model={target_model_ref}")
             
@@ -441,7 +441,7 @@ class Handoff:
             
             return response
             
-        except (ImportError, Exception) as e:
+        except Exception as e:
             logger.warning(f"Runtime resolution failed, falling back to agent.chat(): {e}")
             # Fallback to traditional agent execution
             return self.agent.chat(prompt, tools=effective_tools)
@@ -469,7 +469,7 @@ class Handoff:
             
             # Resolve target agent's model reference
             target_model_ref = getattr(self.agent, 'llm', None) or getattr(self.agent, 'model', None) or 'gpt-4o-mini'
-            target_agent_id = getattr(self.agent, 'agent_id', self.agent.name)
+            target_agent_id = getattr(self.agent, 'agent_id', getattr(self.agent, 'name', 'unknown'))
             
             logger.debug(f"Resolving async runtime for handoff: agent_id={target_agent_id}, model={target_model_ref}")
             
@@ -482,14 +482,14 @@ class Handoff:
             
             return response
             
-        except (ImportError, Exception) as e:
+        except Exception as e:
             logger.warning(f"Async runtime resolution failed, falling back to agent execution: {e}")
             # Fallback to traditional agent execution
             if hasattr(self.agent, 'achat'):
                 return await self.agent.achat(prompt, tools=effective_tools)
             else:
                 # Run sync chat in executor with tool constraint
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 return await loop.run_in_executor(None, lambda: self.agent.chat(prompt, tools=effective_tools))
     
     def _check_safety(self, source_agent: 'Agent') -> None:

@@ -14,7 +14,7 @@ import asyncio
 from unittest.mock import Mock, patch, MagicMock
 from typing import Any, Dict
 
-from ..resolve import (
+from .resolve import (
     resolve_runtime, 
     SessionContext,
     RuntimeProtocol,
@@ -73,7 +73,7 @@ class TestRuntimeResolvers:
         assert not resolver.supports_model("unknown-model")
         assert not resolver.supports_model("invalid")
     
-    @patch('praisonaiagents.runtime.resolve.LLM')
+    @patch('praisonaiagents.llm.llm.LLM')
     def test_default_resolver_with_llm(self, mock_llm_class):
         """Test DefaultRuntimeResolver when LLM class is available."""
         mock_llm = Mock()
@@ -171,16 +171,18 @@ class TestRuntimeWrappers:
         assert runtime.supports_streaming == False
         assert runtime.supports_tools == False
         
-        result = runtime.execute("Test prompt")
-        assert "Fallback runtime response for: Test prompt" in result
+        # FallbackRuntime should now raise RuntimeError instead of returning stubs
+        with pytest.raises(RuntimeError, match="No LLM runtime available"):
+            runtime.execute("Test prompt")
     
     @pytest.mark.asyncio
     async def test_fallback_runtime_async(self):
         """Test FallbackRuntime async implementation."""
         runtime = FallbackRuntime(model_ref="unknown-model", agent_id="test_agent")
         
-        result = await runtime.aexecute("Test async prompt")
-        assert "Fallback runtime async response for: Test async prompt" in result
+        # FallbackRuntime should now raise RuntimeError instead of returning stubs
+        with pytest.raises(RuntimeError, match="No LLM runtime available"):
+            await runtime.aexecute("Test async prompt")
 
 
 class TestRuntimeResolution:
