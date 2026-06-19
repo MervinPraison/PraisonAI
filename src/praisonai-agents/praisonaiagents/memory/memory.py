@@ -235,6 +235,34 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
         
         # Determine embedding dimensions for legacy compatibility
         self.embedding_dimensions = self._get_embedding_dimensions(self.embedding_model)
+        
+        # Copy adapter attributes to self for backward compatibility
+        # This ensures legacy code that checks hasattr(self, 'attribute') still works
+        if self.use_mem0 and hasattr(adapter, 'mem0_client'):
+            self.mem0_client = adapter.mem0_client
+            
+        if self.use_rag and hasattr(adapter, 'collection'):
+            self.chroma_col = adapter.collection
+            self.chroma_client = adapter.client
+            
+        if self.use_mongodb:
+            if hasattr(adapter, 'client'):
+                self.mongo_client = adapter.client
+            if hasattr(adapter, 'db'):
+                self.mongo_db = adapter.db
+            if hasattr(adapter, 'short_collection'):
+                self.mongo_short_term = adapter.short_collection
+            if hasattr(adapter, 'long_collection'):
+                self.mongo_long_term = adapter.long_collection
+            # CRITICAL FIX: Copy use_vector_search from adapter to self
+            # Without this, lines 579, 758, 857 will crash with AttributeError
+            if hasattr(adapter, 'use_vector_search'):
+                self.use_vector_search = adapter.use_vector_search
+            else:
+                self.use_vector_search = False
+        else:
+            # Initialize use_vector_search to False for non-MongoDB providers
+            self.use_vector_search = False
 
     def _get_adapter_config(self) -> Dict[str, Any]:
         """Get configuration for adapter initialization."""
