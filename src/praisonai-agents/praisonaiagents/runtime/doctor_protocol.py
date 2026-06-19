@@ -6,7 +6,6 @@ for migrating legacy configuration fields like cli_backend to the new
 model-scoped runtime configuration.
 """
 
-import abc
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 from dataclasses import dataclass
 
@@ -32,12 +31,10 @@ class DoctorContractProtocol(Protocol):
     """
     
     @property
-    @abc.abstractmethod
     def rule_id(self) -> str:
         """Unique identifier for this migration rule."""
         ...
     
-    @abc.abstractmethod
     def collect_findings(self, config: Dict[str, Any]) -> List[Finding]:
         """
         Analyze configuration and collect migration findings.
@@ -50,7 +47,6 @@ class DoctorContractProtocol(Protocol):
         """
         ...
     
-    @abc.abstractmethod
     def apply_fix(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """
         Apply migration fixes to configuration.

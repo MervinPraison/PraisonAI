@@ -46,7 +46,7 @@ class CliBackendMigrationRule:
             ))
         
         # Check for cli_backend in roles
-        if "roles" in config:
+        if "roles" in config and isinstance(config["roles"], dict):
             for role_name, role_config in config["roles"].items():
                 if isinstance(role_config, dict) and "cli_backend" in role_config:
                     backend_value = role_config["cli_backend"]
@@ -62,7 +62,8 @@ class CliBackendMigrationRule:
     
     def apply_fix(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Apply cli_backend migration to configuration."""
-        result = config.copy()
+        import copy
+        result = copy.deepcopy(config)
         
         # Migrate top-level cli_backend
         if "cli_backend" in result:
@@ -78,7 +79,7 @@ class CliBackendMigrationRule:
             result["models"]["default"]["runtime"] = runtime_value
         
         # Migrate cli_backend in roles
-        if "roles" in result:
+        if "roles" in result and isinstance(result["roles"], dict):
             for role_name, role_config in result["roles"].items():
                 if isinstance(role_config, dict) and "cli_backend" in role_config:
                     backend_value = role_config.pop("cli_backend")
