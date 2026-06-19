@@ -15,7 +15,7 @@ class SearchMixin:
     """Mixin class containing search and retrieval methods for the Memory class."""
     
     # Allowed table names for SQLite queries to prevent SQL injection
-    _ALLOWED_SQLITE_TABLES = {"short_term", "long_term"}
+    _ALLOWED_SQLITE_TABLES = frozenset({"short_term", "long_term"})
     
     def search_short_term(self, query: str, limit: int = 5, metadata_filter: Optional[Dict] = None, 
                          min_quality: Optional[float] = None, user_id: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]:
@@ -221,7 +221,8 @@ class SearchMixin:
         
         # Validate table name to prevent SQL injection
         if table not in self._ALLOWED_SQLITE_TABLES:
-            raise ValueError(f"Invalid table name: {table}. Must be one of {self._ALLOWED_SQLITE_TABLES}")
+            allowed = ", ".join(sorted(self._ALLOWED_SQLITE_TABLES))
+            raise ValueError(f"Invalid table name: {table}. Allowed tables: {allowed}")
         
         # Build WHERE clause
         where_clauses = ["content LIKE ?"]
