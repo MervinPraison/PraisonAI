@@ -800,6 +800,10 @@ Methods:
 * <code title="cli">praisonai agents list <a href="./src/praisonai/praisonai/cli/commands/agents.py">--help</a></code>
 * <code title="cli">praisonai app app <a href="./src/praisonai/praisonai/cli/commands/app.py">--help</a></code>
 * <code title="cli">praisonai audit agent-centric <a href="./src/praisonai/praisonai/cli/commands/audit.py">--help</a></code>
+* <code title="cli">praisonai auth list <a href="./src/praisonai/praisonai/cli/commands/auth.py">--help</a></code>
+* <code title="cli">praisonai auth login <a href="./src/praisonai/praisonai/cli/commands/auth.py">--help</a></code>
+* <code title="cli">praisonai auth logout <a href="./src/praisonai/praisonai/cli/commands/auth.py">--help</a></code>
+* <code title="cli">praisonai auth status <a href="./src/praisonai/praisonai/cli/commands/auth.py">--help</a></code>
 * <code title="cli">praisonai batch batch-run <a href="./src/praisonai/praisonai/cli/commands/batch.py">--help</a></code>
 * <code title="cli">praisonai batch list <a href="./src/praisonai/praisonai/cli/commands/batch.py">--help</a></code>
 * <code title="cli">praisonai batch report <a href="./src/praisonai/praisonai/cli/commands/batch.py">--help</a></code>
