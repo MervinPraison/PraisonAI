@@ -2590,7 +2590,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if self._using_custom_llm or self._openai_client is None:
                                 # For custom LLMs, we need to handle reflection differently
                                 # Use non-streaming to get complete JSON response
-                                reflection_response = self._chat_completion_with_retry(messages, temperature=temperature, tools=None, stream=False, reasoning_steps=False, task_name=task_name, task_description=task_description, task_id=task_id)
+                                reflection_response = self._chat_completion(messages, temperature=temperature, tools=None, stream=False, reasoning_steps=False, task_name=task_name, task_description=task_description, task_id=task_id)
                                 
                                 if not reflection_response or not reflection_response.choices:
                                     raise Exception("No response from reflection request")
@@ -4061,9 +4061,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def _chat_completion_with_retry(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
         """
-        Wrapper for _chat_completion that adds jittered exponential backoff retry logic.
+        Wrapper for _execute_unified_chat_completion that adds jittered exponential backoff retry logic.
         
-        This method wraps the main _chat_completion call and adds retry capability for 
+        This method wraps the unified chat completion call and adds retry capability for 
         transient failures like rate limits, network errors, and service outages.
         """
         retry_config = getattr(self, '_retry_config', None)

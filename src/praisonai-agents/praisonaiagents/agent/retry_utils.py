@@ -17,7 +17,7 @@ class RetryBackoffConfig:
     """Configuration for jittered exponential backoff retry behavior."""
     base_delay: float = 5.0      # Base delay in seconds
     max_delay: float = 120.0     # Maximum delay in seconds  
-    jitter_ratio: float = 0.5    # Jitter as fraction of delay (0.0-1.0)
+    jitter_ratio: float = 0.5    # Jitter as fraction of delay added on top of base (0.0-1.0)
     max_retries: int = 3         # Maximum retry attempts
     
     def __post_init__(self):
@@ -46,7 +46,7 @@ def jittered_backoff(
         attempt: Current attempt number (0-based)
         base_delay: Base delay in seconds
         max_delay: Maximum delay cap in seconds
-        jitter_ratio: Jitter ratio (0.0-1.0), added/subtracted from base delay
+        jitter_ratio: Jitter ratio (0.0-1.0), fraction of delay added as positive jitter
     
     Returns:
         Delay in seconds with jitter applied
