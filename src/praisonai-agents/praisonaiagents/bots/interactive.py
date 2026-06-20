@@ -12,7 +12,7 @@ callback decoding belongs in the wrapper (praisonai).
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -40,11 +40,7 @@ class InteractiveContext:
     message_id: Optional[str] = None
     chat_id: Optional[str] = None
     bot_adapter: Optional["BotAdapter"] = None
-    platform_data: Dict[str, Any] = None
-    
-    def __post_init__(self):
-        if self.platform_data is None:
-            self.platform_data = {}
+    platform_data: Dict[str, Any] = field(default_factory=dict)
 
 
 InteractiveHandler = Callable[[InteractiveContext], Awaitable[Optional[str]]]
@@ -174,10 +170,12 @@ class InteractiveRegistry:
                 result = await handler(context)
                 if result:
                     logger.debug(f"Handler for namespace '{namespace}' returned: {result}")
-                return True
+                    return True
+                else:
+                    logger.debug(f"Handler for namespace '{namespace}' returned None, trying fallback")
             except Exception as e:
                 logger.error(f"Error in handler for namespace '{namespace}': {e}")
-                return False
+                # Continue to fallback handler
         
         # Try fallback handler
         if self._fallback_handler:
@@ -188,7 +186,10 @@ class InteractiveRegistry:
                 result = await self._fallback_handler(context)
                 if result:
                     logger.debug(f"Fallback handler returned: {result}")
-                return True
+                    return True
+                else:
+                    logger.debug(f"Fallback handler returned None")
+                    return False
             except Exception as e:
                 logger.error(f"Error in fallback handler: {e}")
                 return False
@@ -216,12 +217,28 @@ class InteractiveRegistry:
         return list(self._handlers.keys())
 
 
-# Global registry instance
+# Global registry instance - deprecated, use create_registry() for new code
 _global_registry = InteractiveRegistry()
+
+
+def create_registry() -> InteractiveRegistry:
+    """Create a new interactive registry instance.
+    
+    Each adapter should create its own registry to avoid conflicts
+    when multiple adapters are used in the same process.
+    
+    Returns:
+        A new InteractiveRegistry instance
+    """
+    return InteractiveRegistry()
 
 
 def get_registry() -> InteractiveRegistry:
     """Get the global interactive registry.
+    
+    .. deprecated::
+        Use create_registry() to create adapter-specific registries instead.
+        The global registry can cause conflicts when multiple adapters are used.
     
     Returns:
         The global InteractiveRegistry instance
@@ -232,6 +249,9 @@ def get_registry() -> InteractiveRegistry:
 def register_handler(namespace: str, handler: InteractiveHandler) -> None:
     """Register a handler in the global registry.
     
+    .. deprecated::
+        Use registry.register() on an adapter-specific registry instead.
+    
     Args:
         namespace: The namespace to handle
         handler: Async function to handle callbacks
@@ -241,6 +261,9 @@ def register_handler(namespace: str, handler: InteractiveHandler) -> None:
 
 def unregister_handler(namespace: str) -> None:
     """Unregister a handler from the global registry.
+    
+    .. deprecated::
+        Use registry.unregister() on an adapter-specific registry instead.
     
     Args:
         namespace: The namespace to unregister

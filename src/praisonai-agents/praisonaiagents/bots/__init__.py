@@ -8,46 +8,7 @@ All implementations live in the praisonai wrapper package.
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .protocols import (
-        BotOSProtocol,  # noqa: F401
-        BotProtocol,
-        BotMessageProtocol,
-        BotUserProtocol,
-        BotChannelProtocol,
-        BotMessage,
-        BotUser,
-        BotChannel,
-        MessageType,
-        ChatCommandInfo,
-        ChatCommandProtocol,
-        ProbeResult,
-        HealthResult,
-        EmailProtocol,
-        EmailInbox,
-        SupportsPresentation,
-        PlatformCapabilities,
-    )
-    from .presentation import (
-        MessagePresentation,
-        PresentationBlock,
-        PresentationButton,
-        PresentationAction,
-        SelectOption,
-        PresentationLimits,
-        ActionType,
-        ButtonStyle,
-        BlockType,
-    )
-    from .interactive import (
-        InteractiveContext,
-        InteractiveRegistry,
-        InteractiveHandler,
-        encode_action,
-        decode_callback,
-        get_registry,
-        register_handler,
-        unregister_handler,
-    )
+    from .protocols import BotOSProtocol  # noqa: F401
 from .protocols import (
     BotProtocol,
     BotMessageProtocol,
@@ -84,6 +45,7 @@ from .interactive import (
     InteractiveHandler,
     encode_action,
     decode_callback,
+    create_registry,
     get_registry,
     register_handler,
     unregister_handler,
@@ -124,6 +86,7 @@ __all__ = [
     "InteractiveHandler",
     "encode_action",
     "decode_callback",
+    "create_registry",
     "get_registry",
     "register_handler",
     "unregister_handler",

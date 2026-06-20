@@ -124,7 +124,9 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
         self._pairing_store = PairingStore()
         self._pairing_callback_handler = PairingCallbackHandler(self._pairing_store)
         
-        # Register interactive handlers
+        # Create adapter-specific registry and register handlers
+        from praisonaiagents.bots import create_registry
+        self._interactive_registry = create_registry()
         self._register_interactive_handlers()
         self._bot_context: Optional[BotContext] = None
     
@@ -700,9 +702,7 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
     
     def _register_interactive_handlers(self):
         """Register handlers for interactive callbacks."""
-        from praisonaiagents.bots import get_registry
-        
-        registry = get_registry()
+        registry = self._interactive_registry
         
         # Register handler for command callbacks
         async def handle_command_callback(ctx):
@@ -729,14 +729,18 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                 handler = self._command_handlers[cmd_name]
                 try:
                     # Create a minimal message object for the handler
-                    from praisonaiagents.bots import BotMessage, BotUser
+                    from praisonaiagents.bots import BotMessage, BotUser, BotChannel
                     message = BotMessage(
                         message_id=str(interaction.message.id) if interaction.message else "",
                         content=f"/{command}",
                         sender=BotUser(user_id=ctx.user_id),
-                        chat_id=str(interaction.channel_id) if hasattr(interaction, "channel_id") else "",
-                        command=cmd_name,
-                        command_args=cmd_args
+                        channel=BotChannel(
+                            channel_id=str(interaction.channel_id) if hasattr(interaction, "channel_id") else ""
+                        ),
+                        metadata={
+                            "command": cmd_name,
+                            "command_args": cmd_args
+                        }
                     )
                     
                     if asyncio.iscoroutinefunction(handler):
@@ -797,7 +801,7 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
             await interaction.response.defer()
             
             # Create interactive context
-            from praisonaiagents.bots import InteractiveContext, get_registry
+            from praisonaiagents.bots import InteractiveContext
             ctx = InteractiveContext(
                 callback_data=custom_id,
                 user_id=str(interaction.user.id),
@@ -810,8 +814,7 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
             )
             
             # Try to dispatch through the interactive registry
-            registry = get_registry()
-            handled = await registry.dispatch(ctx)
+            handled = await self._interactive_registry.dispatch(ctx)
             
             if not handled:
                 # Fallback: handle legacy pairing callbacks

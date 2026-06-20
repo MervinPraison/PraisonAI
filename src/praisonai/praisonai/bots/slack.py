@@ -137,7 +137,9 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
         self._pairing_store = PairingStore()
         self._pairing_callback_handler = PairingCallbackHandler(self._pairing_store)
         
-        # Register interactive handlers
+        # Create adapter-specific registry and register handlers
+        from praisonaiagents.bots import create_registry
+        self._interactive_registry = create_registry()
         self._register_interactive_handlers()
         self._bot_context: Optional[BotContext] = None
         
@@ -434,7 +436,7 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                 return
             
             # Create interactive context
-            from praisonaiagents.bots import InteractiveContext, get_registry
+            from praisonaiagents.bots import InteractiveContext
             ctx = InteractiveContext(
                 callback_data=callback_data,
                 user_id=body["user"]["id"],
@@ -448,8 +450,7 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
             )
             
             # Try to dispatch through the interactive registry
-            registry = get_registry()
-            handled = await registry.dispatch(ctx)
+            handled = await self._interactive_registry.dispatch(ctx)
             
             if not handled:
                 # Fallback: handle legacy pairing callbacks
@@ -822,9 +823,7 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
     # Adapter methods for pairing system
     def _register_interactive_handlers(self):
         """Register handlers for interactive callbacks."""
-        from praisonaiagents.bots import get_registry
-        
-        registry = get_registry()
+        registry = self._interactive_registry
         
         # Register handler for command callbacks
         async def handle_command_callback(ctx):
@@ -852,14 +851,16 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                 handler = self._command_handlers[cmd_name]
                 try:
                     # Create a minimal message object for the handler
-                    from praisonaiagents.bots import BotMessage, BotUser
+                    from praisonaiagents.bots import BotMessage, BotUser, BotChannel
                     message = BotMessage(
                         message_id=body.get("message", {}).get("ts", ""),
                         content=f"/{command}",
                         sender=BotUser(user_id=ctx.user_id),
-                        chat_id=ctx.chat_id or "",
-                        command=cmd_name,
-                        command_args=cmd_args
+                        channel=BotChannel(channel_id=ctx.chat_id or ""),
+                        metadata={
+                            "command": cmd_name,
+                            "command_args": cmd_args
+                        }
                     )
                     
                     if asyncio.iscoroutinefunction(handler):
