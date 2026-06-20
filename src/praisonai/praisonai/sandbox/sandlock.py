@@ -222,6 +222,15 @@ class SandlockSandbox:
 
             # Network (deny-all by default)
             "net_allow": net_allow,
+
+            # Environment isolation.  sandlock inherits the parent's FULL
+            # environment when clean_env is False (its default), which would
+            # leak host secrets (SECRET_KEY, DATABASE_URL, ...) into untrusted
+            # sandboxed code.  Force a minimal baseline (PATH/HOME/USER/TERM/
+            # LANG) instead — mirroring SubprocessSandbox, which likewise
+            # refuses to copy the host environment.  Per-call ``env`` is
+            # layered on top of this baseline by _run_sandlocked.
+            "clean_env": True,
         }
 
     @staticmethod
@@ -270,14 +279,18 @@ class SandlockSandbox:
         Centralises all sandlock Sandbox construction and error handling so
         that ``execute`` and ``run_command`` share a single code path.
 
-        ``env`` variables are injected via the ``Sandbox`` ``env`` field
-        (set/overridden in the child).  ``working_dir`` is applied to the
-        sandbox config (added to the writable-path allow-list).
+        ``env`` variables are layered on top of the clean baseline
+        environment established in _build_sandbox_kwargs (clean_env=True),
+        so the child never inherits the host's full environment.  An
+        explicit empty dict is honoured as "no overrides" — distinct from
+        ``None`` only in intent, since the baseline is minimal either way.
+        ``working_dir`` is applied to the sandbox config (added to the
+        writable-path allow-list).
         """
         sandbox_kwargs = self._build_sandbox_kwargs(
             limits, working_dir, extra_readable
         )
-        if env:
+        if env is not None:
             sandbox_kwargs["env"] = dict(env)
 
         started_at = time.time()

@@ -82,6 +82,8 @@ class TestSandlockSandbox:
         assert call_kwargs["max_cpu"] == 50  # From minimal limits
         # Network disabled → deny all outbound (empty allowlist).
         assert call_kwargs["net_allow"] == []
+        # Clean baseline env: never inherit the host's full environment.
+        assert call_kwargs["clean_env"] is True
 
     def test_sandbox_kwargs_network_enabled(self):
         """Network-enabled limits open all TCP plus UDP DNS."""
@@ -95,6 +97,44 @@ class TestSandlockSandbox:
 
         assert "*:*" in call_kwargs["net_allow"]
         assert "udp://*:53" in call_kwargs["net_allow"]
+
+    @pytest.mark.asyncio
+    async def test_env_isolation_no_host_leak(self):
+        """clean_env=True isolates the host env; env={} is honoured, not skipped.
+
+        Regression: ``if env:`` skipped an explicitly-passed empty dict, and
+        with sandlock's default ``clean_env=False`` the child inherited the
+        parent's FULL environment — leaking host secrets regardless of what
+        the caller passed.  The baseline must be clean, and ``env={}`` must
+        still set the field (guard is ``is not None``).
+        """
+        mock_sandlock = Mock()
+        mock_result = Mock(success=True, exit_code=0, stdout=b"", stderr=b"")
+        sandbox_cm = MagicMock()
+        sandbox_cm.__enter__.return_value = Mock(run=Mock(return_value=mock_result))
+        mock_sandlock.Sandbox.return_value = sandbox_cm
+        mock_sandlock.landlock_abi_version.return_value = 6
+
+        sandbox = _make_sandbox(mock_sandlock)
+        await sandbox.start()
+
+        # An explicit empty dict must still set env (honour caller intent).
+        await sandbox.execute("pass", env={})
+        kwargs = mock_sandlock.Sandbox.call_args.kwargs
+        assert kwargs["clean_env"] is True
+        assert kwargs["env"] == {}
+
+        # A populated dict is layered on top of the clean baseline.
+        await sandbox.execute("pass", env={"MY_VAR": "x"})
+        kwargs = mock_sandlock.Sandbox.call_args.kwargs
+        assert kwargs["clean_env"] is True
+        assert kwargs["env"] == {"MY_VAR": "x"}
+
+        # env=None: no overrides, but the baseline is still clean.
+        await sandbox.execute("pass")
+        kwargs = mock_sandlock.Sandbox.call_args.kwargs
+        assert kwargs["clean_env"] is True
+        assert "env" not in kwargs
 
     def test_status_reporting(self):
         """Test sandbox status reporting."""
