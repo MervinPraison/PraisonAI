@@ -105,8 +105,13 @@ class FunctionTool(BaseTool):
         
         Injected parameters are excluded from the schema.
         """
-        sig = inspect.signature(func)
-        hints = get_type_hints(func) if hasattr(func, '__annotations__') else {}
+        try:
+            sig = inspect.signature(func)
+            hints = get_type_hints(func) if hasattr(func, '__annotations__') else {}
+        except (ValueError, NameError, Exception) as e:
+            # Handle built-ins, forward references, and other signature/type issues
+            logging.debug(f"Could not generate schema for {func.__name__}: {e}")
+            return {"type": "object", "properties": {}, "required": []}
         
         # Use the new shared helper with a predicate for injected parameters
         return build_parameters_schema(
@@ -302,14 +307,30 @@ def _schema_from_function(func: Callable) -> Dict[str, Any]:
     name = getattr(func, '__name__', 'unknown')
     description = func.__doc__ or f"Function: {name}"
     
-    sig = inspect.signature(func)
-    hints = get_type_hints(func) if hasattr(func, '__annotations__') else {}
+    try:
+        sig = inspect.signature(func)
+        hints = get_type_hints(func) if hasattr(func, '__annotations__') else {}
+    except (ValueError, NameError, Exception) as e:
+        # Handle built-ins, forward references, and other signature/type issues
+        logging.debug(f"Could not generate schema for {name}: {e}")
+        return {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": description.strip(),
+                "parameters": {"type": "object", "properties": {}, "required": []}
+            }
+        }
     
-    # Use the new shared helper, skipping only 'self'
+    # Detect and skip injected parameters (same as FunctionTool)
+    injected_params = get_injected_params(func)
+    
+    # Use the new shared helper with injected parameter filtering
     parameters = build_parameters_schema(
         sig,
         hints,
         skip={"self"},
+        skip_predicate=lambda name, ptype: name in injected_params or is_injected_type(ptype),
         func_name=name
     )
     

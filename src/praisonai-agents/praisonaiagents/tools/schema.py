@@ -188,28 +188,31 @@ def build_parameters_schema(
     if skip is None:
         skip = {"self", "cls"}
     
-    try:
-        for param_name, param in sig.parameters.items():
-            # Skip explicitly excluded parameters
-            if param_name in skip:
-                continue
-            
-            # Get type hint
-            param_type = hints.get(param_name, Any)
-            
-            # Apply skip predicate if provided
-            if skip_predicate and skip_predicate(param_name, param_type):
-                continue
-            
-            # Use existing annotation_to_json_schema for proper type handling
+    for param_name, _param in sig.parameters.items():
+        # Skip explicitly excluded parameters
+        if param_name in skip:
+            continue
+        
+        # Get type hint
+        param_type = hints.get(param_name, Any)
+        
+        # Apply skip predicate if provided
+        if skip_predicate and skip_predicate(param_name, param_type):
+            continue
+        
+        # Use existing annotation_to_json_schema for proper type handling
+        try:
             prop_schema = annotation_to_json_schema(param_type)
-            
-            schema["properties"][param_name] = prop_schema
-            
-            # Check if required using existing logic
-            if get_parameter_requirements(sig, param_name):
-                schema["required"].append(param_name)
-    except Exception as e:
-        logging.debug(f"Could not generate schema for {func_name}: {e}")
+        except Exception as e:
+            # Log but continue - allow partial schemas
+            logging.debug(f"Could not generate schema for {func_name}.{param_name}: {e}")
+            # Default to string type for parameters that fail schema generation
+            prop_schema = {"type": "string"}
+        
+        schema["properties"][param_name] = prop_schema
+        
+        # Check if required using existing logic
+        if get_parameter_requirements(sig, param_name):
+            schema["required"].append(param_name)
     
     return schema

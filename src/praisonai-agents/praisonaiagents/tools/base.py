@@ -116,8 +116,13 @@ class BaseTool(ABC):
     
     def _generate_parameters_schema(self) -> Dict[str, Any]:
         """Generate JSON Schema from run() method signature."""
-        sig = inspect.signature(self.run)
-        hints = get_type_hints(self.run) if hasattr(self.run, '__annotations__') else {}
+        try:
+            sig = inspect.signature(self.run)
+            hints = get_type_hints(self.run) if hasattr(self.run, '__annotations__') else {}
+        except (ValueError, NameError, Exception) as e:
+            # Handle built-ins, forward references, and other signature/type issues
+            logging.debug(f"Could not generate schema for {self.name}: {e}")
+            return {"type": "object", "properties": {}, "required": []}
         
         # Use the new shared helper, skipping only 'self'
         # Note: the TODO about parsing docstrings for param descriptions
