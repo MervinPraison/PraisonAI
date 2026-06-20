@@ -58,6 +58,7 @@ def schedule_add(
     name: str,
     schedule: str,
     message: str = "",
+    deliver: str = "",
     channel: str = "",
     channel_id: str = "",
     agent_id: str = "",
@@ -74,7 +75,9 @@ def schedule_add(
             - "at:2026-03-01T09:00:00"  (one-shot ISO timestamp)
             - "in 20 minutes"           (relative one-shot)
         message: The prompt or reminder text to deliver when triggered.
-        channel: Delivery platform ("telegram", "discord", "slack",
+        deliver: Delivery token ("origin", "telegram", "all", "platform:chat_id[:thread_id]").
+                Takes precedence over channel/channel_id when set.
+        channel: [Legacy] Delivery platform ("telegram", "discord", "slack",
                  "whatsapp"). If set with channel_id, the result will
                  be sent back to that chat when the job fires.
         channel_id: Target chat/channel/group ID on the platform.
@@ -93,7 +96,14 @@ def schedule_add(
         sched = parse_schedule(schedule)
 
         delivery = None
-        if channel and channel_id:
+        if deliver:
+            # New token-based delivery
+            delivery = DeliveryTarget(
+                deliver=deliver,
+                session_id=session_id or None,
+            )
+        elif channel and channel_id:
+            # Legacy explicit channel/channel_id
             delivery = DeliveryTarget(
                 channel=channel,
                 channel_id=channel_id,
@@ -116,7 +126,12 @@ def schedule_add(
             return f"A schedule named '{name}' already exists (id: {existing.id}). Remove it first or choose a different name."
 
         store.add(job)
-        delivery_note = f" → deliver to {channel}:{channel_id}" if delivery else ""
+        if deliver:
+            delivery_note = f" → deliver to '{deliver}'"
+        elif channel and channel_id:
+            delivery_note = f" → deliver to {channel}:{channel_id}"
+        else:
+            delivery_note = ""
         agent_note = f" agent={agent_id}" if agent_id else ""
         return f"Schedule '{name}' added (id: {job.id}, {schedule}{agent_note}{delivery_note})."
     except ValueError as e:
@@ -155,7 +170,10 @@ def schedule_list() -> str:
             if j.agent_id:
                 parts.append(f" agent={j.agent_id}")
             if j.delivery:
-                parts.append(f" → {j.delivery.channel}:{j.delivery.channel_id}")
+                if j.delivery.deliver:
+                    parts.append(f" → '{j.delivery.deliver}'")
+                elif j.delivery.channel and j.delivery.channel_id:
+                    parts.append(f" → {j.delivery.channel}:{j.delivery.channel_id}")
             if j.message:
                 parts.append(f' — "{j.message}"')
             lines.append("".join(parts))

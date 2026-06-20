@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from praisonai.gateway.pairing import PairedChannel
     from ..agent import Agent
     from ..bots.presentation import MessagePresentation
+    from ..scheduler.models import DeliveryTarget
 
 
 class EventType(str, Enum):
@@ -1038,5 +1039,85 @@ class SessionBindingProtocol(Protocol):
             
         Returns:
             Principal information if found, None otherwise
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Home Channel and Delivery Routing Protocols
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class HomeChannelRegistryProtocol(Protocol):
+    """Protocol for managing default delivery targets per platform.
+    
+    Home channels provide a per-platform default delivery target that can be
+    set once from inside a chat and persisted, so scheduled jobs can deliver
+    results without requiring explicit channel IDs.
+    """
+    
+    def set_home(
+        self, 
+        platform: str, 
+        chat_id: str, 
+        thread_id: Optional[str] = None
+    ) -> None:
+        """Set the home channel for a platform.
+        
+        Args:
+            platform: Platform name (e.g., "telegram", "slack", "discord")
+            chat_id: Platform-specific chat/channel ID
+            thread_id: Optional thread ID for threaded platforms
+        """
+        ...
+    
+    def get_home(self, platform: str) -> Optional[tuple[str, Optional[str]]]:
+        """Get the home channel for a platform.
+        
+        Args:
+            platform: Platform name to look up
+            
+        Returns:
+            Tuple of (chat_id, thread_id) if set, None otherwise
+        """
+        ...
+    
+    def platforms_with_home(self) -> List[str]:
+        """List all platforms that have a home channel configured.
+        
+        Returns:
+            List of platform names with home channels
+        """
+        ...
+
+
+@runtime_checkable
+class DeliveryResolverProtocol(Protocol):
+    """Protocol for resolving delivery routing tokens.
+    
+    Resolves tokens like "origin", "telegram", "all" to concrete delivery
+    targets at fire time, enabling ergonomic routing without hard-coded IDs.
+    """
+    
+    def resolve(
+        self, 
+        token: str, 
+        *, 
+        origin: Optional["DeliveryTarget"] = None
+    ) -> List["DeliveryTarget"]:
+        """Resolve a routing token to concrete delivery targets.
+        
+        Token formats:
+        - "origin": Reply to the chat where the job was created (requires origin)
+        - "<platform>": That platform's home channel
+        - "<platform>:<chat_id>[:<thread_id>]": Explicit target
+        - "all": Fan-out to every connected platform with a home channel
+        
+        Args:
+            token: Routing token to resolve
+            origin: Original delivery target (for "origin" token)
+            
+        Returns:
+            List of concrete delivery targets
         """
         ...
