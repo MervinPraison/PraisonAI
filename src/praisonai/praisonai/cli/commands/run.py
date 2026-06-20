@@ -4,7 +4,7 @@ Run command group for PraisonAI CLI.
 Provides agent execution commands.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 import typer
 
@@ -15,7 +15,7 @@ from ..configuration.resolver import resolve_config
 app = typer.Typer(help="Run agents")
 
 
-def _parse_permissions(allow: Optional[str], deny: Optional[str], permissions_file: Optional[str], default: Optional[str]) -> Optional[dict]:
+def _parse_permissions(allow: Optional[List[str]], deny: Optional[List[str]], permissions_file: Optional[str], default: Optional[str]) -> Optional[dict]:
     """Parse permission flags into a config dict.
     
     Args:
@@ -51,9 +51,11 @@ def _parse_permissions(allow: Optional[str], deny: Optional[str], permissions_fi
     
     # Add CLI patterns (override file config)
     if allow:
-        config[allow] = "allow"
+        for pattern in allow:
+            config[pattern] = "allow"
     if deny:
-        config[deny] = "deny"
+        for pattern in deny:
+            config[pattern] = "deny"
     
     # Add default pattern if specified
     if default and default in ("allow", "deny", "ask"):
@@ -127,8 +129,8 @@ def run_main(
     approval_timeout: Optional[str] = typer.Option(None, "--approval-timeout", help="Seconds to wait for approval. Use 'none' for indefinite wait"),
     no_rules: bool = typer.Option(False, "--no-rules", help="Disable auto-injection of project instruction files"),
     # Permission flags for CI-safe declarative policies
-    allow: Optional[str] = typer.Option(None, "--allow", help="Permission pattern to allow (e.g., 'read:*', 'bash:git *'). Can be repeated."),
-    deny: Optional[str] = typer.Option(None, "--deny", help="Permission pattern to deny (e.g., 'bash:rm *'). Can be repeated."),
+    allow: Optional[List[str]] = typer.Option(None, "--allow", help="Permission pattern to allow (e.g., 'read:*', 'bash:git *'). Can be repeated."),
+    deny: Optional[List[str]] = typer.Option(None, "--deny", help="Permission pattern to deny (e.g., 'bash:rm *'). Can be repeated."),
     permissions: Optional[str] = typer.Option(None, "--permissions", help="Permission file path (YAML or JSON) with allow/deny rules"),
     permission_default: Optional[str] = typer.Option(None, "--permission-default", help="Default action for unmatched patterns: allow, deny, ask (default: ask)"),
     # Session continuity options

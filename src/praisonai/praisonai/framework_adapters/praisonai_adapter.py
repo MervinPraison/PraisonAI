@@ -122,7 +122,6 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 if permissions:
                     # Create backend with permissions
                     backend = InteractiveCLIApprovalBackend(
-                        non_interactive=True,  # CI-safe by default
                         permissions_config=permissions
                     )
                     return ApprovalConfig(
@@ -141,7 +140,6 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             if permissions:
                 # Create backend with global permissions
                 backend = InteractiveCLIApprovalBackend(
-                    non_interactive=True,  # CI-safe when using declarative permissions
                     permissions_config=permissions
                 )
                 return ApprovalConfig(

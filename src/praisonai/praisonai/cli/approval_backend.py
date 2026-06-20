@@ -63,13 +63,11 @@ class InteractiveCLIApprovalBackend:
             return f"{request.tool_name}:{request.arguments['command']}"
         elif request.arguments:
             # Include first arg value for more specific matching
-            first_arg = next(iter(request.arguments.values()), "") if request.arguments else ""
+            first_arg = next(iter(request.arguments.values()), "")
             if isinstance(first_arg, str) and len(first_arg) < 100:
                 return f"{request.tool_name}:{first_arg}"
-            else:
-                return f"{request.tool_name}:"
-        else:
-            return f"{request.tool_name}:"
+        # Use wildcard for consistency with permission patterns
+        return f"{request.tool_name}:*"
     
     def _format_tool_call(self, request: ApprovalRequest) -> str:
         """Format a tool call for display."""
@@ -97,17 +95,9 @@ class InteractiveCLIApprovalBackend:
             Tuple of (approved, persist_as_always)
         """
         if self.non_interactive:
-            # In non-interactive mode, check declared rules before defaulting to deny
-            # This allows CI-safe operation with declarative permissions
-            target = self._build_target_string(request)
-            result = self.permission_manager.check(target, agent_name=request.agent_name)
-            
-            if result.action == PermissionAction.ALLOW:
-                return (True, False)
-            elif result.action == PermissionAction.DENY:
-                return (False, False)
-            else:  # ASK - in non-interactive, default to deny
-                return (False, False)
+            # In non-interactive mode, we're only here if the check returned ASK
+            # (ALLOW/DENY are handled in request_approval), so default to deny
+            return (False, False)
         
         # Interactive prompt
         tool_display = self._format_tool_call(request)
