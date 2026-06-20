@@ -17,6 +17,11 @@ _LAZY_ATTRS = {
     "create_llm_provider":      lambda: __import__("praisonai.llm.registry", fromlist=["create_llm_provider"]).create_llm_provider,
     "parse_model_string":       lambda: __import__("praisonai.llm.registry", fromlist=["parse_model_string"]).parse_model_string,
     "_reset_default_registry":  lambda: __import__("praisonai.llm.registry", fromlist=["_reset_default_registry"])._reset_default_registry,
+    # Gateway providers
+    "OpenRouterProvider":       lambda: __import__("praisonai.llm.gateways", fromlist=["OpenRouterProvider"]).OpenRouterProvider,
+    "LiteLLMProxyProvider":     lambda: __import__("praisonai.llm.gateways", fromlist=["LiteLLMProxyProvider"]).LiteLLMProxyProvider,
+    "CustomGatewayProvider":    lambda: __import__("praisonai.llm.gateways", fromlist=["CustomGatewayProvider"]).CustomGatewayProvider,
+    "register_gateway_providers": lambda: __import__("praisonai.llm.gateways", fromlist=["register_gateway_providers"]).register_gateway_providers,
 }
 
 def __getattr__(name):
@@ -39,6 +44,11 @@ __all__ = [
     "create_llm_provider",
     "parse_model_string",
     "embedding",
+    # Gateway providers
+    "OpenRouterProvider",
+    "LiteLLMProxyProvider",
+    "CustomGatewayProvider",
+    "register_gateway_providers",
 ]
 
 
