@@ -6,11 +6,18 @@ import os
 
 from praisonaiagents import Agent
 
+api_key = os.getenv("EVOLINK_API_KEY")
+if not api_key:
+    raise RuntimeError(
+        "EVOLINK_API_KEY is not set. Set it before running this example: "
+        "export EVOLINK_API_KEY=your_api_key"
+    )
+
 agent = Agent(
     instructions="You are a helpful assistant",
     llm={
         "model": "openai/gpt-5.2",
-        "api_key": os.environ["EVOLINK_API_KEY"],
+        "api_key": api_key,
         "base_url": "https://direct.evolink.ai/v1",
     },
 )

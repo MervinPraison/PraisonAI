@@ -112,10 +112,11 @@ class TestConfigurableModelProvider:
 
         assert agent is not None
         assert agent.llm == "openai/gpt-5.2"
-        mock_llm.assert_called_once()
-        assert mock_llm.call_args.kwargs["model"] == "openai/gpt-5.2"
-        assert mock_llm.call_args.kwargs["api_key"] == "test-evolink-key"
-        assert mock_llm.call_args.kwargs["base_url"] == "https://direct.evolink.ai/v1"
+        assert agent._llm_init_params["model"] == "openai/gpt-5.2"
+        assert agent._llm_init_params["api_key"] == "test-evolink-key"
+        assert agent._llm_init_params["base_url"] == "https://direct.evolink.ai/v1"
+        assert agent._using_custom_llm is True
+        mock_llm.assert_not_called()
 
 
 class TestConfigurableModelThreadSafety:
