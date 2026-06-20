@@ -408,7 +408,7 @@ class WebSocketGateway:
         # Multi-bot lifecycle
         self._channel_bots: Dict[str, Any] = {}  # channel_name -> bot instance
         self._routing_rules: Dict[str, Dict[str, str]] = {}  # channel_name -> {context -> agent_id}
-        self._channel_tasks: List[asyncio.Task] = []
+        self._channel_tasks: Dict[str, asyncio.Task] = {}  # channel_name -> asyncio task
         
         # Pairing store for channel authorization
         from .pairing import PairingStore
@@ -2045,7 +2045,7 @@ class WebSocketGateway:
             self._routing_rules[channel_name] = routes
 
             # Resolve default agent for this channel (used as the bot's primary agent)
-            default_agent_id = routes.get("default", list(self._agents.keys())[0] if self._agents else "default")
+            default_agent_id = routes.get("default", next(iter(self._agents.keys())) if self._agents else "default")
             default_agent = self._agents.get(default_agent_id)
             if not default_agent:
                 logger.warning(f"Default agent '{default_agent_id}' not found for channel '{channel_name}', skipping")
@@ -2118,7 +2118,7 @@ class WebSocketGateway:
             
             for name, bot in self._channel_bots.items():
                 task = asyncio.create_task(self._run_bot_safe(name, bot))
-                self._channel_tasks.append(task)
+                self._channel_tasks[name] = task
             logger.info(f"Started {len(self._channel_bots)} channel bot(s)")
 
     def _create_bot(
@@ -2437,11 +2437,11 @@ class WebSocketGateway:
         # Stop health monitoring first
         await self._channel_supervisor.stop_health_monitoring()
         
-        for task in self._channel_tasks:
+        for task in self._channel_tasks.values():
             task.cancel()
 
         if self._channel_tasks:
-            await asyncio.gather(*self._channel_tasks, return_exceptions=True)
+            await asyncio.gather(*self._channel_tasks.values(), return_exceptions=True)
             self._channel_tasks.clear()
 
         for name, bot in list(self._channel_bots.items()):
@@ -2564,7 +2564,17 @@ class WebSocketGateway:
         """
         logger.info(f"Restarting channel '{channel_name}'...")
         
-        # Find and cancel the existing channel task
+        # Cancel the existing task first
+        if channel_name in self._channel_tasks:
+            task = self._channel_tasks[channel_name]
+            task.cancel()
+            try:
+                await asyncio.wait_for(task, timeout=5.0)
+            except (asyncio.CancelledError, asyncio.TimeoutError):
+                pass
+            del self._channel_tasks[channel_name]
+        
+        # Stop and clean up the existing bot
         if channel_name in self._channel_bots:
             # Stop the bot
             bot = self._channel_bots[channel_name]
@@ -2615,7 +2625,7 @@ class WebSocketGateway:
         self._routing_rules[channel_name] = routes
         
         # Resolve default agent for this channel
-        default_agent_id = routes.get("default", list(self._agents.keys())[0] if self._agents else "default")
+        default_agent_id = routes.get("default", next(iter(self._agents.keys())) if self._agents else "default")
         default_agent = self._agents.get(default_agent_id)
         if not default_agent:
             logger.warning(f"Default agent '{default_agent_id}' not found for channel '{channel_name}', skipping")
@@ -2633,80 +2643,53 @@ class WebSocketGateway:
         group_policy = ch_cfg.get("group_policy", "mention_only")
         mention_required = (group_policy == "mention_only")
         
+        # Extract auto_approve_tools setting (align with start_channels parsing)
         _raw_auto_approve = ch_cfg.get("auto_approve_tools")
         if _raw_auto_approve is None:
             auto_approve_tools = True
+        elif isinstance(_raw_auto_approve, str):
+            auto_approve_tools = _raw_auto_approve.strip().lower() in ("1", "true", "yes", "on")
         else:
-            auto_approve_tools = str(_raw_auto_approve).strip().lower() == "true"
+            auto_approve_tools = bool(_raw_auto_approve)
         
-        bot_config = BotConfig(
-            name=channel_name,
-            platform=channel_type,
+        config_kwargs = dict(
             token=token,
-            agent=default_agent,
-            allowed_users=_raw_allowed,
-            allowed_channels=_raw_channels,
+            allowed_users=list(_raw_allowed),
+            allowed_channels=list(_raw_channels),
             mention_required=mention_required,
-            welcome_message=ch_cfg.get("welcome_message"),
-            auto_approve_tools=auto_approve_tools
+            group_policy=group_policy,
+            auto_approve_tools=auto_approve_tools,
         )
         
-        # Platform-specific configuration
-        for key in ["mode", "polling_interval", "verify_token", "verify_webhook"]:
-            if key in ch_cfg:
-                setattr(bot_config, key, ch_cfg[key])
+        # Only pass default_tools when the channel explicitly overrides it
+        _raw_yaml_tools = ch_cfg.get("default_tools")
+        if isinstance(_raw_yaml_tools, list):
+            config_kwargs["default_tools"] = _raw_yaml_tools
         
-        # Create and start the bot
-        if channel_type == "telegram":
-            task = asyncio.create_task(
-                self._channel_supervisor.run(
-                    channel_name,
-                    self._run_telegram_bot_wrapper,
-                    bot_config,
-                    channel_name
-                )
+        config = BotConfig(**config_kwargs)
+        
+        # Warn if no allowlist is configured
+        if not config.allowed_users:
+            logger.warning(
+                "Channel %r has no allowed_users — bot accepts messages from everyone. "
+                "Re-run `praisonai onboard` to configure.",
+                channel_name,
             )
-        elif channel_type == "discord":
-            task = asyncio.create_task(
-                self._channel_supervisor.run(
-                    channel_name,
-                    self._run_discord_bot_wrapper,
-                    bot_config,
-                    channel_name
-                )
-            )
-        elif channel_type == "slack":
-            task = asyncio.create_task(
-                self._channel_supervisor.run(
-                    channel_name,
-                    self._run_slack_bot,
-                    bot_config,
-                    channel_name
-                )
-            )
-        elif channel_type == "whatsapp":
-            task = asyncio.create_task(
-                self._channel_supervisor.run(
-                    channel_name,
-                    self._run_whatsapp_bot,
-                    bot_config,
-                    channel_name
-                )
-            )
-        elif channel_type in ("email", "agentmail"):
-            task = asyncio.create_task(
-                self._channel_supervisor.run(
-                    channel_name,
-                    self._run_email_bot,
-                    bot_config,
-                    channel_name
-                )
-            )
-        else:
-            logger.error(f"Unsupported platform '{channel_type}' for channel '{channel_name}'")
+        
+        # Create the bot using the same pattern as start_channels
+        try:
+            bot = self._create_bot(channel_type, token, default_agent, config, ch_cfg)
+            if bot is None:
+                return
+            self._channel_bots[channel_name] = bot
+            logger.info(f"Channel '{channel_name}' ({channel_type}) initialized")
+        except Exception as e:
+            logger.error(f"Failed to create bot for '{channel_name}': {e}")
             return
         
-        self._channel_tasks.append(task)
+        # Start the bot using the same pattern as start_channels
+        task = asyncio.create_task(self._run_bot_safe(channel_name, bot))
+        self._channel_tasks[channel_name] = task
         logger.info(f"Started channel '{channel_name}' ({channel_type})")
 
     async def reload_config(self, config_path: str) -> None:
