@@ -123,6 +123,9 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
         # Pairing system
         self._pairing_store = PairingStore()
         self._pairing_callback_handler = PairingCallbackHandler(self._pairing_store)
+        
+        # Register interactive handlers
+        self._register_interactive_handlers()
         self._bot_context: Optional[BotContext] = None
     
     @property
@@ -695,24 +698,137 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
         except Exception as e:
             logger.error(f"Failed to send reply: {e}")
     
+    def _register_interactive_handlers(self):
+        """Register handlers for interactive callbacks."""
+        from praisonaiagents.bots import get_registry
+        
+        registry = get_registry()
+        
+        # Register handler for command callbacks
+        async def handle_command_callback(ctx):
+            """Handle command callbacks from buttons."""
+            payload = ctx.platform_data.get("decoded_payload", {})
+            command = payload.get("command", "")
+            
+            # Get the Discord interaction object
+            interaction = ctx.platform_data.get("interaction")
+            if not interaction:
+                return None
+            
+            # Parse the command (remove leading slash if present)
+            if command.startswith("/"):
+                command = command[1:]
+            
+            # Split command and args
+            parts = command.split(maxsplit=1)
+            cmd_name = parts[0] if parts else ""
+            cmd_args = parts[1] if len(parts) > 1 else ""
+            
+            # Check if command exists in handlers
+            if cmd_name in self._command_handlers:
+                handler = self._command_handlers[cmd_name]
+                try:
+                    # Create a minimal message object for the handler
+                    from praisonaiagents.bots import BotMessage, BotUser
+                    message = BotMessage(
+                        message_id=str(interaction.message.id) if interaction.message else "",
+                        content=f"/{command}",
+                        sender=BotUser(user_id=ctx.user_id),
+                        chat_id=str(interaction.channel_id) if hasattr(interaction, "channel_id") else "",
+                        command=cmd_name,
+                        command_args=cmd_args
+                    )
+                    
+                    if asyncio.iscoroutinefunction(handler):
+                        await handler(message)
+                    else:
+                        handler(message)
+                    
+                    # Update the message to show command was executed
+                    await interaction.edit_original_response(
+                        content=f"{interaction.message.content}\n\n✅ Command executed: /{cmd_name}",
+                        view=None
+                    )
+                    return f"Command {cmd_name} executed"
+                except Exception as e:
+                    logger.error(f"Command handler error: {e}")
+                    await interaction.edit_original_response(
+                        content=f"{interaction.message.content}\n\n❌ Error executing command",
+                        view=None
+                    )
+                    return f"Error: {e}"
+            
+            logger.debug(f"Unknown command from button: {cmd_name}")
+            return None
+        
+        # Register the command handler
+        registry.register("command", handle_command_callback)
+        
+        # Register handler for pairing callbacks using the new system
+        async def handle_pairing_callback(ctx):
+            """Handle pairing callbacks through the new registry."""
+            interaction = ctx.platform_data.get("interaction")
+            if not interaction:
+                return None
+            
+            # The pairing handler already exists, we just wrap it
+            result = await self._pairing_callback_handler.handle_approval_callback(
+                callback_data=ctx.callback_data,
+                owner_user_id=ctx.user_id,
+                bot_adapter=self
+            )
+            
+            # Update the message with result
+            if interaction.message:
+                await interaction.edit_original_response(
+                    content=f"{interaction.message.content}\n\n{result.message}",
+                    view=None  # Remove buttons
+                )
+            
+            return f"Pairing {result.action}"
+        
+        # Register the pairing handler
+        registry.register("pair", handle_pairing_callback)
+    
     async def _handle_pairing_interaction(self, interaction, custom_id: str):
-        """Handle button interaction for pairing approval."""
+        """Handle button interaction through the interactive registry."""
         try:
             # Defer the interaction
             await interaction.response.defer()
             
-            # Handle the pairing callback
-            result = await self._pairing_callback_handler.handle_approval_callback(
+            # Create interactive context
+            from praisonaiagents.bots import InteractiveContext, get_registry
+            ctx = InteractiveContext(
                 callback_data=custom_id,
-                owner_user_id=str(interaction.user.id),
-                bot_adapter=self
+                user_id=str(interaction.user.id),
+                message_id=str(interaction.message.id) if interaction.message else None,
+                chat_id=str(interaction.channel_id) if hasattr(interaction, "channel_id") else None,
+                bot_adapter=self,
+                platform_data={
+                    "interaction": interaction,
+                }
             )
             
-            # Edit the message with result
-            await interaction.edit_original_response(
-                content=f"{interaction.message.content}\n\n{result.message}",
-                view=None  # Remove buttons
-            )
+            # Try to dispatch through the interactive registry
+            registry = get_registry()
+            handled = await registry.dispatch(ctx)
+            
+            if not handled:
+                # Fallback: handle legacy pairing callbacks
+                if custom_id.startswith("pair:"):
+                    result = await self._pairing_callback_handler.handle_approval_callback(
+                        callback_data=custom_id,
+                        owner_user_id=str(interaction.user.id),
+                        bot_adapter=self
+                    )
+                    
+                    # Edit the message with result
+                    await interaction.edit_original_response(
+                        content=f"{interaction.message.content}\n\n{result.message}",
+                        view=None  # Remove buttons
+                    )
+                else:
+                    logger.debug(f"Unhandled callback: {custom_id}")
             
         except Exception as e:
             logger.error(f"Failed to handle pairing interaction: {e}")

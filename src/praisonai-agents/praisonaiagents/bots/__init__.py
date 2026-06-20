@@ -38,6 +38,16 @@ if TYPE_CHECKING:
         ButtonStyle,
         BlockType,
     )
+    from .interactive import (
+        InteractiveContext,
+        InteractiveRegistry,
+        InteractiveHandler,
+        encode_action,
+        decode_callback,
+        get_registry,
+        register_handler,
+        unregister_handler,
+    )
 from .protocols import (
     BotProtocol,
     BotMessageProtocol,
@@ -67,6 +77,16 @@ from .presentation import (
     ActionType,
     ButtonStyle,
     BlockType,
+)
+from .interactive import (
+    InteractiveContext,
+    InteractiveRegistry,
+    InteractiveHandler,
+    encode_action,
+    decode_callback,
+    get_registry,
+    register_handler,
+    unregister_handler,
 )
 from .config import BotConfig, BotOSConfig
 
@@ -99,4 +119,12 @@ __all__ = [
     "ButtonStyle",
     "BlockType",
     "PlatformCapabilities",
+    "InteractiveContext",
+    "InteractiveRegistry",
+    "InteractiveHandler",
+    "encode_action",
+    "decode_callback",
+    "get_registry",
+    "register_handler",
+    "unregister_handler",
 ]

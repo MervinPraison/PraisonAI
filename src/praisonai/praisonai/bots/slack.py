@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
@@ -135,6 +136,9 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
         # Pairing system
         self._pairing_store = PairingStore()
         self._pairing_callback_handler = PairingCallbackHandler(self._pairing_store)
+        
+        # Register interactive handlers
+        self._register_interactive_handlers()
         self._bot_context: Optional[BotContext] = None
         
         # Audio capabilities
@@ -419,46 +423,67 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                     logger.error(f"Command handler error: {e}")
                     await respond(f"Error: {str(e)}")
         
-        # Add block action handler for pairing buttons
-        @self._app.action("pair_approve")
-        @self._app.action("pair_deny")
+        # Add generic block action handler for all interactive buttons
+        @self._app.action(re.compile(".*"))
         async def handle_block_actions(ack, body, action):
             await ack()
             
             # Extract callback data from button value
-            callback_data = action.get("value")
+            callback_data = action.get("value", action.get("action_id", ""))
             if not callback_data:
                 return
             
-            # Handle the pairing callback
-            result = await self._pairing_callback_handler.handle_approval_callback(
+            # Create interactive context
+            from praisonaiagents.bots import InteractiveContext, get_registry
+            ctx = InteractiveContext(
                 callback_data=callback_data,
-                owner_user_id=body["user"]["id"],
-                bot_adapter=self
+                user_id=body["user"]["id"],
+                message_id=body["message"]["ts"] if "message" in body else None,
+                chat_id=body["channel"]["id"] if "channel" in body else None,
+                bot_adapter=self,
+                platform_data={
+                    "body": body,
+                    "action": action,
+                }
             )
             
-            # Update the message
-            blocks = body["message"]["blocks"]
-            # Remove the action block
-            blocks = [block for block in blocks if block["type"] != "actions"]
-            # Add result message
-            blocks.append({
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn", 
-                    "text": result.message
-                }
-            })
+            # Try to dispatch through the interactive registry
+            registry = get_registry()
+            handled = await registry.dispatch(ctx)
             
-            try:
-                await self._client.chat_update(
-                    channel=body["channel"]["id"],
-                    ts=body["message"]["ts"],
-                    blocks=blocks,
-                    text=body["message"]["text"]
-                )
-            except Exception as e:
-                logger.error(f"Failed to update message: {e}")
+            if not handled:
+                # Fallback: handle legacy pairing callbacks
+                if callback_data.startswith("pair:"):
+                    result = await self._pairing_callback_handler.handle_approval_callback(
+                        callback_data=callback_data,
+                        owner_user_id=body["user"]["id"],
+                        bot_adapter=self
+                    )
+                    
+                    # Update the message
+                    blocks = body["message"]["blocks"]
+                    # Remove the action block
+                    blocks = [block for block in blocks if block["type"] != "actions"]
+                    # Add result message
+                    blocks.append({
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn", 
+                            "text": result.message
+                        }
+                    })
+                    
+                    try:
+                        await self._client.chat_update(
+                            channel=body["channel"]["id"],
+                            ts=body["message"]["ts"],
+                            blocks=blocks,
+                            text=body["message"]["text"]
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to update message: {e}")
+                else:
+                    logger.debug(f"Unhandled callback: {callback_data}")
         
         self._is_running = True
         logger.info(f"Slack bot started: {self._bot_user.username}")
@@ -795,6 +820,120 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
         )
     
     # Adapter methods for pairing system
+    def _register_interactive_handlers(self):
+        """Register handlers for interactive callbacks."""
+        from praisonaiagents.bots import get_registry
+        
+        registry = get_registry()
+        
+        # Register handler for command callbacks
+        async def handle_command_callback(ctx):
+            """Handle command callbacks from buttons."""
+            payload = ctx.platform_data.get("decoded_payload", {})
+            command = payload.get("command", "")
+            
+            # Get the Slack body and action objects
+            body = ctx.platform_data.get("body")
+            action = ctx.platform_data.get("action")
+            if not body or not action:
+                return None
+            
+            # Parse the command (remove leading slash if present)
+            if command.startswith("/"):
+                command = command[1:]
+            
+            # Split command and args
+            parts = command.split(maxsplit=1)
+            cmd_name = parts[0] if parts else ""
+            cmd_args = parts[1] if len(parts) > 1 else ""
+            
+            # Check if command exists in handlers
+            if cmd_name in self._command_handlers:
+                handler = self._command_handlers[cmd_name]
+                try:
+                    # Create a minimal message object for the handler
+                    from praisonaiagents.bots import BotMessage, BotUser
+                    message = BotMessage(
+                        message_id=body.get("message", {}).get("ts", ""),
+                        content=f"/{command}",
+                        sender=BotUser(user_id=ctx.user_id),
+                        chat_id=ctx.chat_id or "",
+                        command=cmd_name,
+                        command_args=cmd_args
+                    )
+                    
+                    if asyncio.iscoroutinefunction(handler):
+                        await handler(message)
+                    else:
+                        handler(message)
+                    
+                    # Update the message to show command was executed
+                    if "message" in body:
+                        blocks = body["message"]["blocks"]
+                        blocks = [block for block in blocks if block["type"] != "actions"]
+                        blocks.append({
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": f"✅ Command executed: /{cmd_name}"
+                            }
+                        })
+                        
+                        await self._client.chat_update(
+                            channel=body["channel"]["id"],
+                            ts=body["message"]["ts"],
+                            blocks=blocks,
+                            text=body["message"]["text"]
+                        )
+                    return f"Command {cmd_name} executed"
+                except Exception as e:
+                    logger.error(f"Command handler error: {e}")
+                    return f"Error: {e}"
+            
+            logger.debug(f"Unknown command from button: {cmd_name}")
+            return None
+        
+        # Register the command handler
+        registry.register("command", handle_command_callback)
+        
+        # Register handler for pairing callbacks using the new system
+        async def handle_pairing_callback(ctx):
+            """Handle pairing callbacks through the new registry."""
+            body = ctx.platform_data.get("body")
+            if not body:
+                return None
+            
+            # The pairing handler already exists, we just wrap it
+            result = await self._pairing_callback_handler.handle_approval_callback(
+                callback_data=ctx.callback_data,
+                owner_user_id=ctx.user_id,
+                bot_adapter=self
+            )
+            
+            # Update the message with result
+            if "message" in body:
+                blocks = body["message"]["blocks"]
+                blocks = [block for block in blocks if block["type"] != "actions"]
+                blocks.append({
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": result.message
+                    }
+                })
+                
+                await self._client.chat_update(
+                    channel=body["channel"]["id"],
+                    ts=body["message"]["ts"],
+                    blocks=blocks,
+                    text=body["message"]["text"]
+                )
+            
+            return f"Pairing {result.action}"
+        
+        # Register the pairing handler
+        registry.register("pair", handle_pairing_callback)
+    
     async def send_approval_dm(
         self, 
         owner_user_id: str, 

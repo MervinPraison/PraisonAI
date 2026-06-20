@@ -164,6 +164,9 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         # Pairing system
         self._pairing_store = PairingStore()
         self._pairing_callback_handler = PairingCallbackHandler(self._pairing_store)
+        
+        # Register interactive handlers
+        self._register_interactive_handlers()
         self._bot_context: Optional[BotContext] = None
         
         # Audio capabilities (set by BotCapabilities)
@@ -237,6 +240,111 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         
         # Get the global command registry
         self._command_registry = get_command_registry()
+    
+    def _register_interactive_handlers(self):
+        """Register handlers for interactive callbacks."""
+        from praisonaiagents.bots import get_registry
+        
+        registry = get_registry()
+        
+        # Register handler for command callbacks
+        async def handle_command_callback(ctx):
+            """Handle command callbacks from buttons."""
+            payload = ctx.platform_data.get("decoded_payload", {})
+            command = payload.get("command", "")
+            
+            # Get the Telegram query object
+            query = ctx.platform_data.get("query")
+            if not query:
+                return None
+            
+            # Parse the command (remove leading slash if present)
+            if command.startswith("/"):
+                command = command[1:]
+            
+            # Split command and args
+            parts = command.split(maxsplit=1)
+            cmd_name = parts[0] if parts else ""
+            cmd_args = parts[1] if len(parts) > 1 else ""
+            
+            # Check permissions
+            if not self._command_policy.can_run(ctx.user_id, cmd_name):
+                await query.edit_message_text(
+                    text=f"{query.message.text}\n\n⛔ You are not permitted to run /{cmd_name}",
+                    parse_mode="Markdown"
+                )
+                return "Permission denied"
+            
+            # Handle known commands
+            if cmd_name == "approve":
+                # Handle approval command (from approval buttons)
+                # This is a special case that should be handled by the approval system
+                # For now, log it
+                logger.info(f"Approval command via button: {command}")
+                return "Approval handled"
+            
+            # Check if command exists in handlers
+            if cmd_name in self._command_handlers:
+                handler = self._command_handlers[cmd_name]
+                try:
+                    # Create a minimal message object for the handler
+                    from praisonaiagents.bots import BotMessage, BotUser
+                    message = BotMessage(
+                        message_id=ctx.message_id or "",
+                        content=f"/{command}",
+                        sender=BotUser(user_id=ctx.user_id),
+                        chat_id=ctx.chat_id or "",
+                        command=cmd_name,
+                        command_args=cmd_args
+                    )
+                    
+                    if asyncio.iscoroutinefunction(handler):
+                        await handler(message)
+                    else:
+                        handler(message)
+                    
+                    # Update the message to show command was executed
+                    await query.edit_message_text(
+                        text=f"{query.message.text}\n\n✅ Command executed: /{cmd_name}",
+                        parse_mode="Markdown"
+                    )
+                    return f"Command {cmd_name} executed"
+                except Exception as e:
+                    logger.error(f"Command handler error: {e}")
+                    await query.edit_message_text(
+                        text=f"{query.message.text}\n\n❌ Error executing command",
+                        parse_mode="Markdown"
+                    )
+                    return f"Error: {e}"
+            
+            logger.debug(f"Unknown command from button: {cmd_name}")
+            return None
+        
+        # Register the command handler
+        registry.register("command", handle_command_callback)
+        
+        # Register handler for pairing callbacks using the new system
+        async def handle_pairing_callback(ctx):
+            """Handle pairing callbacks through the new registry."""
+            # The pairing handler already exists, we just wrap it
+            result = await self._pairing_callback_handler.handle_approval_callback(
+                callback_data=ctx.callback_data,
+                owner_user_id=ctx.user_id,
+                bot_adapter=self
+            )
+            
+            # Update the message with result
+            query = ctx.platform_data.get("query")
+            if query and query.message:
+                await query.edit_message_text(
+                    text=f"{query.message.text}\n\n{result.message}",
+                    parse_mode="Markdown"
+                )
+            
+            return f"Pairing {result.action}"
+        
+        # Register the pairing handler
+        registry.register("pair", handle_pairing_callback)
     
     @property
     def is_running(self) -> bool:
@@ -619,31 +727,50 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
         )
         
-        # Add callback query handler for pairing buttons
+        # Add callback query handler for all interactive buttons
         async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
             query = update.callback_query
             if not query or not query.data:
                 return
             
-            # Only handle pairing callbacks
-            if not query.data.startswith("pair:"):
-                return
-            
             # Answer the callback query to stop loading spinner
             await query.answer()
             
-            # Handle the pairing callback
-            result = await self._pairing_callback_handler.handle_approval_callback(
+            # Create interactive context
+            from praisonaiagents.bots import InteractiveContext, get_registry
+            ctx = InteractiveContext(
                 callback_data=query.data,
-                owner_user_id=str(query.from_user.id),
-                bot_adapter=self
+                user_id=str(query.from_user.id),
+                message_id=str(query.message.message_id) if query.message else None,
+                chat_id=str(query.message.chat_id) if query.message else None,
+                bot_adapter=self,
+                platform_data={
+                    "update": update,
+                    "context": context,
+                    "query": query
+                }
             )
             
-            # Update the message with result
-            await query.edit_message_text(
-                text=f"{query.message.text}\n\n{result.message}",
-                parse_mode="Markdown"
-            )
+            # Try to dispatch through the interactive registry
+            registry = get_registry()
+            handled = await registry.dispatch(ctx)
+            
+            if not handled:
+                # Fallback: handle legacy pairing callbacks
+                if query.data.startswith("pair:"):
+                    result = await self._pairing_callback_handler.handle_approval_callback(
+                        callback_data=query.data,
+                        owner_user_id=str(query.from_user.id),
+                        bot_adapter=self
+                    )
+                    
+                    # Update the message with result
+                    await query.edit_message_text(
+                        text=f"{query.message.text}\n\n{result.message}",
+                        parse_mode="Markdown"
+                    )
+                else:
+                    logger.debug(f"Unhandled callback: {query.data}")
         
         self._application.add_handler(CallbackQueryHandler(handle_callback_query))
         
