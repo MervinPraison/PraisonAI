@@ -116,19 +116,16 @@ class EditTools:
             with open(safe_path, 'rb') as f:
                 raw_bytes = f.read()
             
-            # Check for BOM
+            # Check for UTF-8 BOM only (we don't support UTF-16)
             bom = b''
             if raw_bytes.startswith(b'\xef\xbb\xbf'):  # UTF-8 BOM
                 bom = b'\xef\xbb\xbf'
                 raw_bytes = raw_bytes[3:]
-            elif raw_bytes.startswith(b'\xff\xfe'):  # UTF-16 LE BOM
-                bom = b'\xff\xfe'
-                raw_bytes = raw_bytes[2:]
-            elif raw_bytes.startswith(b'\xfe\xff'):  # UTF-16 BE BOM
-                bom = b'\xfe\xff'
-                raw_bytes = raw_bytes[2:]
+            elif raw_bytes.startswith(b'\xff\xfe') or raw_bytes.startswith(b'\xfe\xff'):
+                # UTF-16 BOM detected - not supported
+                return "Error: UTF-16 encoding is not supported. Please convert the file to UTF-8."
             
-            # Decode content
+            # Decode content (UTF-8 only)
             content = raw_bytes.decode('utf-8')
             
             # Detect line endings
@@ -151,14 +148,16 @@ class EditTools:
                 return "Error: old_string must be non-empty"
             
             if old_string not in content:
-                return f"Error: String not found in file: '{old_string[:50]}...'"
+                preview = old_string[:50] + ("..." if len(old_string) > 50 else "")
+                return f"Error: String not found in file: '{preview}'"
             
             # Count occurrences
             occurrences = self._count_occurrences(content, old_string)
             
             # Check for ambiguous match
             if occurrences > 1 and not replace_all:
-                return (f"Error: Ambiguous match - '{old_string[:30]}...' occurs {occurrences} times. "
+                preview = old_string[:30] + ("..." if len(old_string) > 30 else "")
+                return (f"Error: Ambiguous match - '{preview}' occurs {occurrences} times. "
                        f"Please provide more surrounding context to make the match unique, "
                        f"or use replace_all=True to replace all occurrences.")
             
@@ -208,8 +207,16 @@ class EditTools:
             if not os.path.exists(safe_path):
                 return f"Error: File not found: {filepath}", ""
             
-            with open(safe_path, 'r', encoding='utf-8') as f:
-                content = f.read()
+            # Read in binary mode to match edit_file behavior
+            with open(safe_path, 'rb') as f:
+                raw_bytes = f.read()
+            
+            # Strip UTF-8 BOM if present (matching edit_file logic)
+            if raw_bytes.startswith(b'\xef\xbb\xbf'):
+                raw_bytes = raw_bytes[3:]
+            
+            # Decode content (UTF-8 only, matching edit_file)
+            content = raw_bytes.decode('utf-8')
             
             content_hash = self._compute_content_hash(content)
             self._file_cache[safe_path] = content_hash
