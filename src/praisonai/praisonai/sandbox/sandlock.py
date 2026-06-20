@@ -341,17 +341,6 @@ class SandlockSandbox:
             },
         )
 
-    def _tag_subprocess_fallback(self, result: SandboxResult) -> SandboxResult:
-        meta = dict(result.metadata or {})
-        meta.update({
-            "isolation_level": "subprocess",
-            "filesystem_isolation": False,
-            "network_isolation": False,
-            "sandlock_downgrade": True,
-        })
-        result.metadata = meta
-        return result
-
     async def execute(
         self,
         code: str,
@@ -363,20 +352,6 @@ class SandlockSandbox:
         """Execute code in the sandlock-isolated sandbox."""
         if not self._is_running:
             await self.start()
-
-        if not self.is_available:
-            from .subprocess import SubprocessSandbox
-            fallback = SubprocessSandbox(self.config)
-            if self.config.metadata.get("require_landlock"):
-                return SandboxResult(
-                    status=SandboxStatus.FAILED,
-                    error="Landlock is required but unavailable on this system",
-                    metadata={"isolation_level": "none", "sandlock_downgrade": True},
-                )
-            logger.warning("Sandlock not available, falling back to subprocess (no kernel isolation)")
-            self._used_subprocess_fallback = True
-            result = await fallback.execute(code, language, limits, env, working_dir)
-            return self._tag_subprocess_fallback(result)
 
         limits = limits or self.config.resource_limits
         execution_id = str(uuid.uuid4())
@@ -445,20 +420,6 @@ class SandlockSandbox:
         """Run a shell command in the sandbox."""
         if not self._is_running:
             await self.start()
-
-        if not self.is_available:
-            from .subprocess import SubprocessSandbox
-            fallback = SubprocessSandbox(self.config)
-            if self.config.metadata.get("require_landlock"):
-                return SandboxResult(
-                    status=SandboxStatus.FAILED,
-                    error="Landlock is required but unavailable on this system",
-                    metadata={"isolation_level": "none", "sandlock_downgrade": True},
-                )
-            logger.warning("Sandlock not available, falling back to subprocess (no kernel isolation)")
-            self._used_subprocess_fallback = True
-            result = await fallback.run_command(command, limits, env, working_dir)
-            return self._tag_subprocess_fallback(result)
 
         limits = limits or self.config.resource_limits
         execution_id = str(uuid.uuid4())
