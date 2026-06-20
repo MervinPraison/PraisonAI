@@ -15,7 +15,8 @@ import secrets
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from praisonaiagents import Agent
@@ -188,6 +189,34 @@ class GatewaySession:
     def mark_executing(self, status: bool) -> None:
         """Mark the session as currently executing an agent workflow."""
         self._is_executing = status
+
+
+class ReloadAction(Enum):
+    """Actions that can be taken during config reload."""
+    NONE = "none"  # No action needed
+    HOT = "hot"  # Apply in-place without restart
+    RESTART_AGENTS = "restart_agents"  # Recreate agents only
+    RESTART_CHANNEL = "restart_channel"  # Restart specific channel
+    FULL_RESTART = "full_restart"  # Full stop/start all channels
+
+
+@dataclass
+class ReloadPlan:
+    """Plan for selective config reload actions."""
+    restart_channels: Set[str] = field(default_factory=set)
+    reload_agents: bool = False
+    hot_reload_paths: Set[str] = field(default_factory=set)
+    full_restart: bool = False
+    
+    def add_channel_restart(self, channel_name: str) -> None:
+        """Mark a channel for restart."""
+        if not self.full_restart:
+            self.restart_channels.add(channel_name)
+    
+    def requires_full_restart(self) -> None:
+        """Mark that a full restart is required."""
+        self.full_restart = True
+        self.restart_channels.clear()  # No need for selective restarts
 
 
 class WebSocketGateway:
@@ -387,6 +416,9 @@ class WebSocketGateway:
         
         # Scheduler tick background task
         self._scheduler_task: Optional[asyncio.Task] = None
+        
+        # Store last loaded config for diff-driven reload
+        self._loaded_config: Optional[Dict[str, Any]] = None
         
         # Session cleanup background task
         self._cleanup_task: Optional[asyncio.Task] = None
@@ -2427,59 +2459,419 @@ class WebSocketGateway:
         self._channel_bots.clear()
         self._routing_rules.clear()
 
-    async def reload_config(self, config_path: str) -> None:
-        """Hot-reload gateway.yaml — restarts channels with updated config.
+    def _diff_config_paths(self, old: Dict[str, Any], new: Dict[str, Any], prefix: str = "") -> Set[str]:
+        """Find all paths that differ between old and new configs.
+        
+        Args:
+            old: Old configuration dictionary
+            new: New configuration dictionary
+            prefix: Current path prefix for recursion
+            
+        Returns:
+            Set of dotted paths where configs differ
+        """
+        changed = set()
+        
+        # Check for added/removed keys
+        old_keys = set(old.keys()) if old else set()
+        new_keys = set(new.keys()) if new else set()
+        
+        # Keys removed
+        for key in old_keys - new_keys:
+            path = f"{prefix}.{key}" if prefix else key
+            changed.add(path)
+        
+        # Keys added
+        for key in new_keys - old_keys:
+            path = f"{prefix}.{key}" if prefix else key
+            changed.add(path)
+        
+        # Keys present in both - check for changes
+        for key in old_keys & new_keys:
+            path = f"{prefix}.{key}" if prefix else key
+            old_val = old[key]
+            new_val = new[key]
+            
+            if isinstance(old_val, dict) and isinstance(new_val, dict):
+                # Recurse into nested dicts
+                sub_changes = self._diff_config_paths(old_val, new_val, path)
+                changed.update(sub_changes)
+            elif old_val != new_val:
+                changed.add(path)
+        
+        return changed
+    
+    def _build_reload_plan(self, changed_paths: Set[str]) -> ReloadPlan:
+        """Build a selective reload plan based on changed config paths.
+        
+        Args:
+            changed_paths: Set of dotted paths that changed
+            
+        Returns:
+            ReloadPlan with actions to take
+        """
+        plan = ReloadPlan()
+        
+        for path in changed_paths:
+            parts = path.split(".")
+            
+            if not parts:
+                continue
+            
+            # Top-level section changes
+            if parts[0] == "agents":
+                if len(parts) == 1:
+                    # Entire agents section changed
+                    plan.reload_agents = True
+                elif len(parts) >= 2:
+                    # Specific agent or agent property changed
+                    plan.reload_agents = True
+                    
+            elif parts[0] == "channels":
+                if len(parts) == 1:
+                    # Entire channels section changed - need full restart
+                    plan.requires_full_restart()
+                elif len(parts) >= 2:
+                    # Specific channel changed
+                    channel_name = parts[1]
+                    plan.add_channel_restart(channel_name)
+                    
+            elif parts[0] == "provider":
+                # Provider changes affect agents if they use default model
+                plan.reload_agents = True
+                
+            elif parts[0] == "guardrails":
+                # Guardrails changes affect agents
+                plan.reload_agents = True
+                
+            elif parts[0] in ["scheduler", "routes", "routing"]:
+                # These are structural changes requiring full restart
+                plan.requires_full_restart()
+                
+            else:
+                # Unknown section - be safe and do full restart
+                logger.warning(f"Unknown config section changed: {parts[0]} - triggering full restart")
+                plan.requires_full_restart()
+        
+        return plan
+    
+    async def _restart_channel(self, channel_name: str, channels_cfg: Dict[str, Any]) -> None:
+        """Restart a single channel with new configuration.
+        
+        Args:
+            channel_name: Name of the channel to restart
+            channels_cfg: Full channels configuration
+        """
+        logger.info(f"Restarting channel '{channel_name}'...")
+        
+        # Find and cancel the existing channel task
+        if channel_name in self._channel_bots:
+            # Stop the bot
+            bot = self._channel_bots[channel_name]
+            try:
+                if hasattr(bot, "stop"):
+                    await bot.stop()
+            except Exception as e:
+                logger.error(f"Error stopping bot '{channel_name}': {e}")
+            
+            # Remove from tracking
+            del self._channel_bots[channel_name]
+            
+            # Clean up supervisor state
+            self._channel_supervisor.cleanup(channel_name)
+        
+        # Remove old routing rules
+        if channel_name in self._routing_rules:
+            del self._routing_rules[channel_name]
+        
+        # Start the channel again with new config
+        if channel_name in channels_cfg:
+            ch_cfg = channels_cfg[channel_name]
+            await self._start_single_channel(channel_name, ch_cfg)
+    
+    async def _start_single_channel(self, channel_name: str, ch_cfg: Dict[str, Any]) -> None:
+        """Start a single channel with given configuration.
+        
+        Args:
+            channel_name: Name of the channel
+            ch_cfg: Channel configuration
+        """
+        from praisonaiagents.bots import BotConfig
+        
+        channel_type = ch_cfg.get("platform", channel_name).lower()
+        token = ch_cfg.get("token", "")
+        
+        # WhatsApp web mode doesn't require a token
+        wa_web_mode = (channel_type == "whatsapp" and
+                       ch_cfg.get("mode", "cloud").lower().strip() == "web")
+        # Email/AgentMail use env vars for tokens — not required in YAML
+        is_email_platform = channel_type in ("email", "agentmail")
+        
+        if not token and not wa_web_mode and not is_email_platform:
+            logger.warning(f"No token for channel '{channel_name}', skipping")
+            return
+        
+        routes = ch_cfg.get("routing") or ch_cfg.get("routes") or {"default": "default"}
+        self._routing_rules[channel_name] = routes
+        
+        # Resolve default agent for this channel
+        default_agent_id = routes.get("default", list(self._agents.keys())[0] if self._agents else "default")
+        default_agent = self._agents.get(default_agent_id)
+        if not default_agent:
+            logger.warning(f"Default agent '{default_agent_id}' not found for channel '{channel_name}', skipping")
+            return
+        
+        # Extract configuration (same as in start_channels)
+        _raw_allowed = ch_cfg.get("allowed_users") or []
+        if isinstance(_raw_allowed, str):
+            _raw_allowed = [s.strip() for s in _raw_allowed.split(",") if s.strip()]
+        
+        _raw_channels = ch_cfg.get("allowed_channels") or []
+        if isinstance(_raw_channels, str):
+            _raw_channels = [s.strip() for s in _raw_channels.split(",") if s.strip()]
+        
+        group_policy = ch_cfg.get("group_policy", "mention_only")
+        mention_required = (group_policy == "mention_only")
+        
+        _raw_auto_approve = ch_cfg.get("auto_approve_tools")
+        if _raw_auto_approve is None:
+            auto_approve_tools = True
+        else:
+            auto_approve_tools = str(_raw_auto_approve).strip().lower() == "true"
+        
+        bot_config = BotConfig(
+            name=channel_name,
+            platform=channel_type,
+            token=token,
+            agent=default_agent,
+            allowed_users=_raw_allowed,
+            allowed_channels=_raw_channels,
+            mention_required=mention_required,
+            welcome_message=ch_cfg.get("welcome_message"),
+            auto_approve_tools=auto_approve_tools
+        )
+        
+        # Platform-specific configuration
+        for key in ["mode", "polling_interval", "verify_token", "verify_webhook"]:
+            if key in ch_cfg:
+                setattr(bot_config, key, ch_cfg[key])
+        
+        # Create and start the bot
+        if channel_type == "telegram":
+            task = asyncio.create_task(
+                self._channel_supervisor.run(
+                    channel_name,
+                    self._run_telegram_bot_wrapper,
+                    bot_config,
+                    channel_name
+                )
+            )
+        elif channel_type == "discord":
+            task = asyncio.create_task(
+                self._channel_supervisor.run(
+                    channel_name,
+                    self._run_discord_bot_wrapper,
+                    bot_config,
+                    channel_name
+                )
+            )
+        elif channel_type == "slack":
+            task = asyncio.create_task(
+                self._channel_supervisor.run(
+                    channel_name,
+                    self._run_slack_bot,
+                    bot_config,
+                    channel_name
+                )
+            )
+        elif channel_type == "whatsapp":
+            task = asyncio.create_task(
+                self._channel_supervisor.run(
+                    channel_name,
+                    self._run_whatsapp_bot,
+                    bot_config,
+                    channel_name
+                )
+            )
+        elif channel_type in ("email", "agentmail"):
+            task = asyncio.create_task(
+                self._channel_supervisor.run(
+                    channel_name,
+                    self._run_email_bot,
+                    bot_config,
+                    channel_name
+                )
+            )
+        else:
+            logger.error(f"Unsupported platform '{channel_type}' for channel '{channel_name}'")
+            return
+        
+        self._channel_tasks.append(task)
+        logger.info(f"Started channel '{channel_name}' ({channel_type})")
 
-        Agents are recreated and channels are restarted.  The WebSocket
-        server itself is **not** restarted (existing connections kept alive).
+    async def reload_config(self, config_path: str) -> None:
+        """Hot-reload gateway.yaml with diff-driven selective restart.
+
+        Only restarts affected subsystems based on what changed:
+        - Agent changes: recreate agents only
+        - Single channel changes: restart that channel only
+        - Structural changes: full restart (fallback)
+        
+        The WebSocket server itself is never restarted.
         """
         logger.info(f"Hot-reloading gateway config from {config_path}...")
         try:
-            cfg = self.load_gateway_config(config_path)
+            new_cfg = self.load_gateway_config(config_path)
         except (FileNotFoundError, ValueError) as e:
             logger.error(f"Reload failed — config invalid: {e}")
             return
-
-        # Stop existing channels
-        await self.stop_channels()
-
-        # Recreate agents
-        agents_cfg = cfg.get("agents", {})
-        provider_cfg = cfg.get("provider", {})
-        default_model = provider_cfg.get("model") if provider_cfg else None
-        guardrails_cfg = (cfg.get("guardrails") or {}).get("registry")
-        if agents_cfg:
-            self._agents.clear()
-            self._create_agents_from_config(
-                agents_cfg,
-                default_model=default_model,
-                guardrails_cfg=guardrails_cfg,
-            )
-
-        # Restart channels
-        channels_cfg = cfg.get("channels", {})
-        if channels_cfg:
-            await self.start_channels(channels_cfg)
-
+        
+        # First time loading - do full setup
+        if self._loaded_config is None:
+            self._loaded_config = new_cfg
+            await self.stop_channels()
+            
+            # Create agents
+            agents_cfg = new_cfg.get("agents", {})
+            provider_cfg = new_cfg.get("provider", {})
+            default_model = provider_cfg.get("model") if provider_cfg else None
+            guardrails_cfg = (new_cfg.get("guardrails") or {}).get("registry")
+            if agents_cfg:
+                self._agents.clear()
+                self._create_agents_from_config(
+                    agents_cfg,
+                    default_model=default_model,
+                    guardrails_cfg=guardrails_cfg,
+                )
+            
+            # Start channels
+            channels_cfg = new_cfg.get("channels", {})
+            if channels_cfg:
+                await self.start_channels(channels_cfg)
+            
+            logger.info("Initial config load complete")
+            return
+        
+        # Diff the configs to find what changed
+        changed_paths = self._diff_config_paths(self._loaded_config, new_cfg)
+        
+        if not changed_paths:
+            logger.info("No changes detected in config")
+            return
+        
+        logger.info(f"Config changes detected: {changed_paths}")
+        
+        # Build reload plan
+        plan = self._build_reload_plan(changed_paths)
+        
+        # Execute reload plan
+        if plan.full_restart:
+            logger.info("Performing full restart due to structural changes")
+            await self.stop_channels()
+            
+            # Recreate agents
+            agents_cfg = new_cfg.get("agents", {})
+            provider_cfg = new_cfg.get("provider", {})
+            default_model = provider_cfg.get("model") if provider_cfg else None
+            guardrails_cfg = (new_cfg.get("guardrails") or {}).get("registry")
+            if agents_cfg:
+                self._agents.clear()
+                self._create_agents_from_config(
+                    agents_cfg,
+                    default_model=default_model,
+                    guardrails_cfg=guardrails_cfg,
+                )
+            
+            # Restart all channels
+            channels_cfg = new_cfg.get("channels", {})
+            if channels_cfg:
+                await self.start_channels(channels_cfg)
+        else:
+            # Selective reload
+            if plan.reload_agents:
+                logger.info("Reloading agents...")
+                agents_cfg = new_cfg.get("agents", {})
+                provider_cfg = new_cfg.get("provider", {})
+                default_model = provider_cfg.get("model") if provider_cfg else None
+                guardrails_cfg = (new_cfg.get("guardrails") or {}).get("registry")
+                if agents_cfg:
+                    self._agents.clear()
+                    self._create_agents_from_config(
+                        agents_cfg,
+                        default_model=default_model,
+                        guardrails_cfg=guardrails_cfg,
+                    )
+                logger.info("Agents reloaded")
+            
+            # Restart specific channels
+            channels_cfg = new_cfg.get("channels", {})
+            for channel_name in plan.restart_channels:
+                await self._restart_channel(channel_name, channels_cfg)
+            
+            # Apply hot-reload paths (future enhancement)
+            if plan.hot_reload_paths:
+                logger.info(f"Hot-reload paths (no-op for now): {plan.hot_reload_paths}")
+        
+        # Update stored config
+        self._loaded_config = new_cfg
         logger.info("Hot-reload complete")
 
-    async def _watch_config(self, config_path: str, poll_interval: float = 5.0) -> None:
-        """Poll the config file for changes and trigger hot-reload."""
+    async def _watch_config(self, config_path: str, poll_interval: float = 5.0, debounce: float = 1.0) -> None:
+        """Poll the config file for changes and trigger hot-reload.
+        
+        Args:
+            config_path: Path to the config file
+            poll_interval: How often to check for changes (seconds)
+            debounce: Wait time after detecting change before reloading (seconds)
+        """
         last_mtime: float = 0.0
+        last_known_good_config = None
+        pending_reload = False
+        
         try:
             last_mtime = os.path.getmtime(config_path)
-        except OSError:
-            pass
+            # Store initial config as last-known-good
+            last_known_good_config = self.load_gateway_config(config_path)
+        except OSError as e:
+            logger.warning(f"Could not read initial config mtime: {e}")
+        except Exception as e:
+            logger.error(f"Could not load initial config: {e}")
 
         while True:
             await asyncio.sleep(poll_interval)
             try:
                 mtime = os.path.getmtime(config_path)
                 if mtime > last_mtime:
+                    if not pending_reload:
+                        logger.info(f"Config change detected, waiting {debounce}s for changes to settle...")
+                        pending_reload = True
                     last_mtime = mtime
-                    await self.reload_config(config_path)
+                    
+                    # Wait for debounce period to handle rapid consecutive writes
+                    await asyncio.sleep(debounce)
+                    
+                    # Check if file was modified again during debounce
+                    current_mtime = os.path.getmtime(config_path)
+                    if current_mtime > last_mtime:
+                        # File still being written, skip this cycle
+                        continue
+                    
+                    pending_reload = False
+                    
+                    # Validate config before applying
+                    try:
+                        test_cfg = self.load_gateway_config(config_path)
+                        last_known_good_config = test_cfg
+                        await self.reload_config(config_path)
+                    except Exception as e:
+                        logger.error(f"Config reload failed, keeping last-known-good: {e}")
+                        # Could restore last_known_good_config here if needed
+                        
             except asyncio.CancelledError:
                 break
+            except OSError as e:
+                # File might be temporarily unavailable during write
+                logger.debug(f"Config file temporarily unavailable: {e}")
             except Exception as e:
                 logger.warning(f"Config watch error: {e}")
 
@@ -2554,6 +2946,9 @@ class WebSocketGateway:
             config_path: Path to gateway.yaml.
         """
         cfg = self.load_gateway_config(config_path)
+        
+        # Store initial config for diff-driven reload
+        self._loaded_config = cfg
 
         # Apply gateway section overrides
         gw_cfg = cfg.get("gateway", {})
