@@ -107,7 +107,11 @@ def with_injection_context(state: AgentState):
 
 
 def is_injected_type(annotation: Any) -> bool:
-    """Check if a type annotation is Injected[T]."""
+    """Check if a type annotation is Injected[T] or bare Injected."""
+    # Handle bare Injected class
+    if annotation is Injected:
+        return True
+    # Handle Injected[T] with type parameter
     origin = get_origin(annotation)
     if origin is Injected:
         return True
@@ -131,7 +135,7 @@ def resolve_injected_value(annotation: Any, state: Optional[AgentState]) -> Any:
     """Resolve the value to inject based on annotation type.
     
     Args:
-        annotation: The Injected[T] annotation
+        annotation: The Injected[T] annotation or bare Injected
         state: The current agent state
         
     Returns:
@@ -140,6 +144,10 @@ def resolve_injected_value(annotation: Any, state: Optional[AgentState]) -> Any:
     if state is None:
         # Return empty dict if no state available
         return {}
+    
+    # Handle bare Injected (no type parameter) - default to dict
+    if annotation is Injected:
+        return state.to_dict()
     
     inner_type = get_injected_type(annotation)
     

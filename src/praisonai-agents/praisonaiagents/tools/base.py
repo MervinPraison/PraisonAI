@@ -21,7 +21,7 @@ import json
 import logging
 import copy
 
-from .schema import annotation_to_json_schema, get_parameter_requirements
+from .schema import annotation_to_json_schema, get_parameter_requirements, build_parameters_schema
 
 
 class ToolValidationError(Exception):
@@ -116,38 +116,18 @@ class BaseTool(ABC):
     
     def _generate_parameters_schema(self) -> Dict[str, Any]:
         """Generate JSON Schema from run() method signature."""
-        schema = {
-            "type": "object",
-            "properties": {},
-            "required": []
-        }
+        sig = inspect.signature(self.run)
+        hints = get_type_hints(self.run) if hasattr(self.run, '__annotations__') else {}
         
-        try:
-            sig = inspect.signature(self.run)
-            hints = get_type_hints(self.run) if hasattr(self.run, '__annotations__') else {}
-            
-            for param_name, param in sig.parameters.items():
-                if param_name == 'self':
-                    continue
-                
-                # Get type hint
-                param_type = hints.get(param_name, Any)
-                
-                # Use new schema utility for proper type handling
-                prop_schema = annotation_to_json_schema(param_type)
-                
-                # Add description from docstring if available
-                # (Could parse docstring for param descriptions)
-                
-                schema["properties"][param_name] = prop_schema
-                
-                # Check if required using improved logic
-                if get_parameter_requirements(sig, param_name):
-                    schema["required"].append(param_name)
-        except Exception as e:
-            logging.debug(f"Could not generate schema for {self.name}: {e}")
-        
-        return schema
+        # Use the new shared helper, skipping only 'self'
+        # Note: the TODO about parsing docstrings for param descriptions
+        # can be addressed in a future enhancement to build_parameters_schema
+        return build_parameters_schema(
+            sig,
+            hints,
+            skip={"self"},
+            func_name=self.name
+        )
     
     @staticmethod
     def _python_type_to_json(python_type: Type) -> str:

@@ -16,7 +16,8 @@ Usage:
 
 import enum
 import inspect
-from typing import Any, Union, Literal, get_origin, get_args
+import logging
+from typing import Any, Union, Literal, get_origin, get_args, Callable, Dict, Optional, Set
 
 
 def annotation_to_json_schema(annotation: Any) -> dict:
@@ -150,3 +151,65 @@ def get_parameter_requirements(sig: inspect.Signature, param_name: str) -> bool:
     
     # No default and not optional = required
     return True
+
+
+def build_parameters_schema(
+    sig: inspect.Signature,
+    hints: Dict[str, Any],
+    *,
+    skip: Optional[Set[str]] = None,
+    skip_predicate: Optional[Callable[[str, Any], bool]] = None,
+    func_name: str = "unknown"
+) -> Dict[str, Any]:
+    """Build a JSON Schema for function parameters from signature and type hints.
+    
+    This is a shared helper that consolidates the duplicate schema generation logic
+    previously found in BaseTool, decorator._generate_schema_from_func, and
+    decorator._schema_from_function.
+    
+    Args:
+        sig: Function signature from inspect.signature()
+        hints: Type hints from typing.get_type_hints()
+        skip: Set of parameter names to skip (e.g. {"self", "cls"})
+        skip_predicate: Additional predicate to determine if a parameter should be skipped
+                       Takes (param_name, param_type) and returns True to skip
+        func_name: Function name for error logging
+        
+    Returns:
+        dict: JSON Schema with {"type": "object", "properties": {...}, "required": [...]}
+    """
+    schema = {
+        "type": "object",
+        "properties": {},
+        "required": []
+    }
+    
+    # Default skip set
+    if skip is None:
+        skip = {"self", "cls"}
+    
+    try:
+        for param_name, param in sig.parameters.items():
+            # Skip explicitly excluded parameters
+            if param_name in skip:
+                continue
+            
+            # Get type hint
+            param_type = hints.get(param_name, Any)
+            
+            # Apply skip predicate if provided
+            if skip_predicate and skip_predicate(param_name, param_type):
+                continue
+            
+            # Use existing annotation_to_json_schema for proper type handling
+            prop_schema = annotation_to_json_schema(param_type)
+            
+            schema["properties"][param_name] = prop_schema
+            
+            # Check if required using existing logic
+            if get_parameter_requirements(sig, param_name):
+                schema["required"].append(param_name)
+    except Exception as e:
+        logging.debug(f"Could not generate schema for {func_name}: {e}")
+    
+    return schema
