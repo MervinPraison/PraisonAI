@@ -114,6 +114,29 @@ class PermissionRule:
             enabled=data.get("enabled", True),
             created_at=data.get("created_at", time.time()),
         )
+    
+    @classmethod
+    def from_config(cls, pattern: str, action: str, **kwargs) -> "PermissionRule":
+        """
+        Create rule from configuration (YAML/CLI/Python).
+        
+        Args:
+            pattern: The permission pattern (e.g., "read:*", "bash:git *")
+            action: The action string (allow/deny/ask)
+            **kwargs: Optional attributes like description, priority, is_regex
+            
+        Returns:
+            PermissionRule instance
+        """
+        return cls(
+            pattern=pattern,
+            action=PermissionAction(action),
+            description=kwargs.get("description", f"Rule for {pattern}"),
+            is_regex=kwargs.get("is_regex", False),
+            priority=kwargs.get("priority", 0),
+            agent_name=kwargs.get("agent_name"),
+            enabled=kwargs.get("enabled", True),
+        )
 
 
 @dataclass

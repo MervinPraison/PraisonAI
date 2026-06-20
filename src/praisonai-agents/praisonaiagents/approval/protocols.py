@@ -74,11 +74,15 @@ class ApprovalConfig:
                     - *positive float* — wait up to that many seconds.
                     - ``None`` — wait **indefinitely** (no timeout).
                     - *unset / 0* — use the backend's own default timeout.
+        permissions: Declarative permission rules mapping patterns to actions
+                    (e.g., {"read:*": "allow", "bash:rm *": "deny"}).
+                    Used for CI-safe, non-interactive permission policies.
     """
 
     backend: Any = None
     all_tools: bool = False
     timeout: Optional[float] = 0
+    permissions: Optional[Dict[str, Any]] = None
 
 
 @runtime_checkable

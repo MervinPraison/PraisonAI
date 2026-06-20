@@ -15,6 +15,53 @@ from ..configuration.resolver import resolve_config
 app = typer.Typer(help="Run agents")
 
 
+def _parse_permissions(allow: Optional[str], deny: Optional[str], permissions_file: Optional[str], default: Optional[str]) -> Optional[dict]:
+    """Parse permission flags into a config dict.
+    
+    Args:
+        allow: Pattern to allow
+        deny: Pattern to deny
+        permissions_file: Path to permissions file (YAML or JSON)
+        default: Default action (allow/deny/ask)
+        
+    Returns:
+        Dict mapping patterns to actions, or None if no permissions specified
+    """
+    if not any([allow, deny, permissions_file, default]):
+        return None
+    
+    import json
+    import yaml
+    
+    config = {}
+    
+    # Load from file if provided
+    if permissions_file:
+        try:
+            with open(permissions_file, 'r') as f:
+                if permissions_file.endswith('.json'):
+                    file_config = json.load(f)
+                else:
+                    file_config = yaml.safe_load(f)
+                if isinstance(file_config, dict):
+                    config.update(file_config)
+        except (IOError, json.JSONDecodeError, yaml.YAMLError) as e:
+            from ..output.console import get_output_controller
+            get_output_controller().print_warning(f"Failed to load permissions file: {e}")
+    
+    # Add CLI patterns (override file config)
+    if allow:
+        config[allow] = "allow"
+    if deny:
+        config[deny] = "deny"
+    
+    # Add default pattern if specified
+    if default and default in ("allow", "deny", "ask"):
+        config["*"] = default
+    
+    return config if config else None
+
+
 def _check_api_key_available() -> bool:
     """
     Check if an API key is available from environment or stored credentials.
@@ -79,6 +126,11 @@ def run_main(
     approve_all_tools: bool = typer.Option(False, "--approve-all-tools", help="Require approval for ALL tool calls, not just dangerous tools"),
     approval_timeout: Optional[str] = typer.Option(None, "--approval-timeout", help="Seconds to wait for approval. Use 'none' for indefinite wait"),
     no_rules: bool = typer.Option(False, "--no-rules", help="Disable auto-injection of project instruction files"),
+    # Permission flags for CI-safe declarative policies
+    allow: Optional[str] = typer.Option(None, "--allow", help="Permission pattern to allow (e.g., 'read:*', 'bash:git *'). Can be repeated."),
+    deny: Optional[str] = typer.Option(None, "--deny", help="Permission pattern to deny (e.g., 'bash:rm *'). Can be repeated."),
+    permissions: Optional[str] = typer.Option(None, "--permissions", help="Permission file path (YAML or JSON) with allow/deny rules"),
+    permission_default: Optional[str] = typer.Option(None, "--permission-default", help="Default action for unmatched patterns: allow, deny, ask (default: ask)"),
     # Session continuity options
     continue_session: bool = typer.Option(False, "--continue", "-c", help="Continue the most recent session for this project"),
     session: Optional[str] = typer.Option(None, "--session", "-s", help="Resume a specific session ID"),
@@ -160,6 +212,7 @@ def run_main(
             raise typer.Exit(1)
         
         # Run the interpolated command as a prompt
+        permissions_config = _parse_permissions(allow, deny, permissions, permission_default)
         _run_prompt(
             prompt,
             model=model,
@@ -175,6 +228,7 @@ def run_main(
             approve_all_tools=approve_all_tools,
             approval_timeout=approval_timeout,
             no_rules=no_rules,
+            permissions_config=permissions_config,
             continue_session=continue_session,
             session=session,
             fork=fork,
@@ -274,6 +328,7 @@ def run_main(
         )
     else:
         # Run as prompt
+        permissions_config = _parse_permissions(allow, deny, permissions, permission_default)
         _run_prompt(
             target,
             model=model,
@@ -289,6 +344,7 @@ def run_main(
             approve_all_tools=approve_all_tools,
             approval_timeout=approval_timeout,
             no_rules=no_rules,
+            permissions_config=permissions_config,
             continue_session=continue_session,
             session=session,
             fork=fork,
@@ -422,6 +478,7 @@ def _run_prompt(
     approve_all_tools: bool = False,
     approval_timeout: Optional[str] = None,
     no_rules: bool = False,
+    permissions_config: Optional[dict] = None,
     continue_session: bool = False,
     session: Optional[str] = None,
     fork: bool = False,
@@ -504,6 +561,7 @@ def _run_prompt(
                 from praisonai.cli.features.approval import resolve_approval_config
                 agent_config["approval"] = resolve_approval_config(
                     approval, all_tools=approve_all_tools, timeout=approval_timeout,
+                    permissions_config=permissions_config,
                 )
             
             # Add session support to Agent if needed

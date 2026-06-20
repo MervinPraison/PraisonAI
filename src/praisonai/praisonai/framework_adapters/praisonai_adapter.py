@@ -101,6 +101,56 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         
         return None
     
+    def _resolve_agent_approval(self, details: Dict[str, Any], config: Dict[str, Any]):
+        """
+        Resolve approval configuration for an agent.
+        
+        Precedence:
+        1. Agent-level approval config
+        2. Global permissions config from YAML
+        3. None (fallback to environment or defaults)
+        """
+        from praisonaiagents.approval.protocols import ApprovalConfig
+        from praisonai.cli.approval_backend import InteractiveCLIApprovalBackend
+        
+        # Check for agent-level approval
+        if 'approval' in details:
+            approval_config = details['approval']
+            if isinstance(approval_config, dict):
+                # Check if permissions are specified inline
+                permissions = approval_config.get('permissions')
+                if permissions:
+                    # Create backend with permissions
+                    backend = InteractiveCLIApprovalBackend(
+                        non_interactive=True,  # CI-safe by default
+                        permissions_config=permissions
+                    )
+                    return ApprovalConfig(
+                        backend=backend,
+                        all_tools=approval_config.get('all_tools', False),
+                        timeout=approval_config.get('timeout', 0),
+                        permissions=permissions,
+                    )
+                # Otherwise return the approval config as-is
+                return ApprovalConfig(**approval_config)
+            return approval_config
+        
+        # Check for global permissions in config
+        if 'permissions' in config:
+            permissions = config['permissions']
+            if permissions:
+                # Create backend with global permissions
+                backend = InteractiveCLIApprovalBackend(
+                    non_interactive=True,  # CI-safe when using declarative permissions
+                    permissions_config=permissions
+                )
+                return ApprovalConfig(
+                    backend=backend,
+                    permissions=permissions,
+                )
+        
+        return None
+    
     def run(
         self,
         config: Dict[str, Any],
@@ -208,19 +258,28 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 # Resolve per-agent runtime configuration
                 agent_runtime = self._resolve_agent_runtime(details, config)
                 
+                # Resolve approval configuration
+                agent_approval = self._resolve_agent_approval(details, config)
+                
                 # Create basic agent (pass both tools and toolsets)
-                agent = PraisonAgent(
-                    name=role_filled,
-                    role=role_filled,
-                    goal=goal_filled,
-                    backstory=backstory_filled,
-                    instructions=details.get('instructions'),
-                    llm=agent_model,
-                    allow_delegation=details.get('allow_delegation', False),
-                    tools=agent_tool_list,
-                    toolsets=agent_toolsets,
-                    runtime=agent_runtime,
-                )
+                agent_kwargs = {
+                    'name': role_filled,
+                    'role': role_filled,
+                    'goal': goal_filled,
+                    'backstory': backstory_filled,
+                    'instructions': details.get('instructions'),
+                    'llm': agent_model,
+                    'allow_delegation': details.get('allow_delegation', False),
+                    'tools': agent_tool_list,
+                    'toolsets': agent_toolsets,
+                    'runtime': agent_runtime,
+                }
+                
+                # Add approval config if present
+                if agent_approval:
+                    agent_kwargs['approval'] = agent_approval
+                
+                agent = PraisonAgent(**agent_kwargs)
                 
                 if agent_callback:
                     agent.step_callback = agent_callback
@@ -391,19 +450,28 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 # Resolve per-agent runtime configuration
                 agent_runtime = self._resolve_agent_runtime(details, config)
                 
+                # Resolve approval configuration
+                agent_approval = self._resolve_agent_approval(details, config)
+                
                 # Create basic agent (pass both tools and toolsets)
-                agent = PraisonAgent(
-                    name=role_filled,
-                    role=role_filled,
-                    goal=goal_filled,
-                    backstory=backstory_filled,
-                    instructions=details.get('instructions'),
-                    llm=agent_model,
-                    allow_delegation=details.get('allow_delegation', False),
-                    tools=agent_tool_list,
-                    toolsets=agent_toolsets,
-                    runtime=agent_runtime,
-                )
+                agent_kwargs = {
+                    'name': role_filled,
+                    'role': role_filled,
+                    'goal': goal_filled,
+                    'backstory': backstory_filled,
+                    'instructions': details.get('instructions'),
+                    'llm': agent_model,
+                    'allow_delegation': details.get('allow_delegation', False),
+                    'tools': agent_tool_list,
+                    'toolsets': agent_toolsets,
+                    'runtime': agent_runtime,
+                }
+                
+                # Add approval config if present
+                if agent_approval:
+                    agent_kwargs['approval'] = agent_approval
+                
+                agent = PraisonAgent(**agent_kwargs)
                 
                 if agent_callback:
                     agent.step_callback = agent_callback

@@ -364,3 +364,42 @@ class PermissionManager:
             self._approvals = [PersistentApproval.from_dict(a) for a in data.get("approvals", [])]
             if "agent_name" in data:
                 self.agent_name = data["agent_name"]
+    
+    def load_rules_from_config(self, permissions_config: Dict[str, Any], priority_base: int = 50):
+        """
+        Load permission rules from configuration (YAML/CLI/Python).
+        
+        Args:
+            permissions_config: Dictionary mapping patterns to actions or detailed configs
+                               e.g., {"read:*": "allow", "bash:rm *": {"action": "deny", "description": "..."}}
+            priority_base: Base priority for these rules (default: 50, between default and user rules)
+        """
+        if not permissions_config:
+            return
+        
+        with self._lock:
+            for pattern, config in permissions_config.items():
+                if isinstance(config, str):
+                    # Simple format: pattern -> action
+                    rule = PermissionRule.from_config(pattern, config, priority=priority_base)
+                elif isinstance(config, dict):
+                    # Detailed format: pattern -> {action, description, ...}
+                    action = config.get("action", "ask")
+                    rule = PermissionRule.from_config(
+                        pattern,
+                        action,
+                        description=config.get("description"),
+                        is_regex=config.get("is_regex", False),
+                        priority=config.get("priority", priority_base),
+                        agent_name=config.get("agent_name"),
+                        enabled=config.get("enabled", True),
+                    )
+                else:
+                    logger.warning(f"Invalid permission config for {pattern}: {config}")
+                    continue
+                
+                self._rules.append(rule)
+            
+            # Re-sort by priority
+            self._rules.sort(key=lambda r: r.priority, reverse=True)
+            self._save_rules()
