@@ -5,6 +5,7 @@ import sys
 import os
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 # Add praisonaiagents to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -134,10 +135,15 @@ def main():
     print("=" * 50)
     
     try:
-        test_basic_storage()
-        test_format_reference()
-        # test_integration_with_agent()  # Skip for now, needs more setup
-        test_cleanup()
+        # Use temporary directory for all tests to avoid mutating real cache
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_root = Path(tmp)
+            with patch("praisonaiagents.runtime.tool_output_store.get_cache_dir", return_value=cache_root), \
+                 patch("praisonaiagents.paths.get_cache_dir", return_value=cache_root):
+                test_basic_storage()
+                test_format_reference()
+                # test_integration_with_agent()  # Skip - needs agent setup updates
+                test_cleanup()
         
         print("\n✅ All tests passed!")
         return 0

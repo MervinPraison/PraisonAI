@@ -1876,7 +1876,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             logging.warning(f"Context management error (continuing without): {e}")
             return messages, None
 
-    def _truncate_tool_output(self, tool_name: str, output: str, tool_call_id: str = None) -> str:
+    def _truncate_tool_output(self, tool_name: str, output: str, tool_call_id: str | None = None) -> str:
         """
         Truncate tool output according to configured budget.
         
@@ -1894,7 +1894,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             return output
         
         try:
-            return self.context_manager.truncate_tool_output(tool_name, output, tool_call_id)
+            run_id = getattr(self, '_run_id', None)
+            return self.context_manager.truncate_tool_output(tool_name, output, tool_call_id, run_id)
         except Exception as e:
             logging.warning(f"Tool output truncation error: {e}")
             return output

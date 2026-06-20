@@ -726,7 +726,7 @@ class ContextManager:
         if protected and tool_name not in self.config.protected_tools:
             self.config.protected_tools.append(tool_name)
     
-    def truncate_tool_output(self, tool_name: str, output: str, tool_call_id: str = None) -> str:
+    def truncate_tool_output(self, tool_name: str, output: str, tool_call_id: str = None, run_id: str = None) -> str:
         """Truncate tool output according to its budget."""
         max_tokens = self.get_tool_budget(tool_name)
         
@@ -749,7 +749,7 @@ class ContextManager:
         # Store full output for later retrieval
         try:
             from ..runtime.tool_output_store import get_tool_output_store
-            store = get_tool_output_store()
+            store = get_tool_output_store(run_id)
             metadata = store.store(tool_name, output, call_id=tool_call_id)
             if metadata:
                 truncated = store.format_reference(metadata, truncated)

@@ -5,10 +5,10 @@ Provides overflow-safe storage of large tool outputs with bounded inline preview
 and persistent full results. Manages TTL-based cleanup and run-scoped isolation.
 """
 
-import json
 import logging
 import os
 import shutil
+import threading
 import time
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -150,8 +150,11 @@ class ToolOutputStore:
             # Replace the existing marker with enhanced version
             import re
             pattern = r'\.\.\.\[([^\]]+)\]\.\.\.'
-            replacement = f"...[\\1 | Full output stored at: {path}]..."
-            return re.sub(pattern, replacement, truncated_preview, count=1)
+            # Use a callable replacement to avoid backslash-escape issues in
+            # Windows paths (e.g. C:\Users raises re.error for \U in Python 3.12+)
+            def _replace(m):
+                return f"...[{m.group(1)} | Full output stored at: {path}]..."
+            return re.sub(pattern, _replace, truncated_preview, count=1)
         else:
             # Append reference if no marker found
             return f"{truncated_preview}\n[Full output ({size:,} bytes) available at: {path}]"
@@ -159,6 +162,7 @@ class ToolOutputStore:
 
 # Global instance management
 _store_instance: Optional[ToolOutputStore] = None
+_store_lock = threading.Lock()
 
 
 def get_tool_output_store(run_id: Optional[str] = None) -> ToolOutputStore:
@@ -172,12 +176,14 @@ def get_tool_output_store(run_id: Optional[str] = None) -> ToolOutputStore:
         ToolOutputStore instance
     """
     global _store_instance
-    if _store_instance is None or (run_id and run_id != _store_instance.run_id):
-        _store_instance = ToolOutputStore(run_id)
-    return _store_instance
+    with _store_lock:
+        if _store_instance is None or (run_id and run_id != _store_instance.run_id):
+            _store_instance = ToolOutputStore(run_id)
+        return _store_instance
 
 
 def reset_tool_output_store():
     """Reset the global store instance. Mainly for testing."""
     global _store_instance
-    _store_instance = None
+    with _store_lock:
+        _store_instance = None

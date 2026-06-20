@@ -567,8 +567,11 @@ class ToolExecutionMixin:
                 # Store full field value for later retrieval
                 try:
                     from ..runtime.tool_output_store import get_tool_output_store
+                    from uuid import uuid4
                     store = get_tool_output_store(getattr(self, '_run_id', None))
-                    field_call_id = f"{tool_call_id}_{key}" if tool_call_id else f"{tool_name}_{key}"
+                    # Add unique suffix to prevent collisions with repeated keys
+                    unique_suffix = uuid4().hex[:8]
+                    field_call_id = f"{tool_call_id}_{key}_{unique_suffix}" if tool_call_id else f"{tool_name}_{key}_{unique_suffix}"
                     metadata = store.store(f"{tool_name}.{key}", value, call_id=field_call_id)
                     if metadata:
                         truncated = store.format_reference(metadata, truncated)
