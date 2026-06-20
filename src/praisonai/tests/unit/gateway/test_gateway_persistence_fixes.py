@@ -59,13 +59,17 @@ class TestGatewayStopPersistence:
             )
         )
 
+        # Mark gateway as running so stop() will execute session persistence
+        gw._is_running = True
         await gw.stop()
 
         store = gw._session_store
         assert store is not None
         assert store.session_exists(session_id)
 
-        resumed = gw.create_session("agent-1", "client-2", session_id)
+        # Create a new gateway instance to verify persistence
+        gw2 = _make_gateway(tmp_path)
+        resumed = gw2.create_session("agent-1", "client-2", session_id)
         messages = resumed.get_messages()
 
         assert len(messages) == 1

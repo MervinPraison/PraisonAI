@@ -52,6 +52,7 @@ class UnifiedDelivery:
         self._capabilities: Optional["PlatformCapabilities"] = None
         self._rate_limiter: Optional[RateLimiter] = None
         self._streamer: Optional[DraftStreamer] = None
+        self._background_tasks: set[asyncio.Task] = set()
     
     @property
     def capabilities(self) -> "PlatformCapabilities":
@@ -86,7 +87,9 @@ class UnifiedDelivery:
         
         # Show typing indicator if supported
         if typing and caps.supports_typing:
-            asyncio.create_task(self._show_typing(channel_id))
+            task = asyncio.create_task(self._show_typing(channel_id))
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
         
         # Check if we should stream
         if stream and caps.supports_edit and _calculate_length(text, caps.length_unit) > caps.max_message_length // 2:
@@ -106,7 +109,7 @@ class UnifiedDelivery:
         for chunk in chunks:
             # Apply rate limiting per chunk
             if caps.needs_rate_limit:
-                await self._acquire_rate_limit()
+                await self._acquire_rate_limit(channel_id)
             
             msg = await self.bot.send_message(channel_id, chunk, **kwargs)
             messages.append(msg)
@@ -152,6 +155,7 @@ class UnifiedDelivery:
         current_pos = 0
         
         # Stream partial content
+        streaming_completed = False
         while current_pos < len(text):
             # Calculate next position based on platform's length unit
             next_pos = current_pos + chunk_size
@@ -174,7 +178,7 @@ class UnifiedDelivery:
             
             # Apply rate limiting for edits
             if caps.needs_rate_limit:
-                await self._acquire_rate_limit()
+                await self._acquire_rate_limit(channel_id)
             
             # Add ellipsis if not complete
             display_text = partial if next_pos >= len(text) else partial + "..."
@@ -186,6 +190,7 @@ class UnifiedDelivery:
             )
             
             if next_pos >= len(text):
+                streaming_completed = True
                 break  # Complete text has been sent
             
             current_pos = next_pos
@@ -203,7 +208,7 @@ class UnifiedDelivery:
             # Edit first message with first chunk
             await asyncio.sleep(caps.edit_interval_ms / 1000.0)
             if caps.needs_rate_limit:
-                await self._acquire_rate_limit()
+                await self._acquire_rate_limit(channel_id)
             
             await self.bot.edit_message(
                 channel_id,
@@ -214,14 +219,14 @@ class UnifiedDelivery:
             # Send remaining chunks as new messages
             for chunk in chunks[1:]:
                 if caps.needs_rate_limit:
-                    await self._acquire_rate_limit()
+                    await self._acquire_rate_limit(channel_id)
                 msg = await self.bot.send_message(channel_id, chunk)
                 messages.append(msg)
-        else:
-            # Final edit with complete content (fits in limit)
+        elif not streaming_completed:
+            # Final edit with complete content (fits in limit and wasn't already sent)
             await asyncio.sleep(caps.edit_interval_ms / 1000.0)
             if caps.needs_rate_limit:
-                await self._acquire_rate_limit()
+                await self._acquire_rate_limit(channel_id)
             
             await self.bot.edit_message(
                 channel_id,
@@ -244,14 +249,18 @@ class UnifiedDelivery:
         except Exception as e:
             logger.debug("Could not show typing indicator: %s", e)
     
-    async def _acquire_rate_limit(self) -> None:
-        """Acquire rate limit token if platform needs it."""
+    async def _acquire_rate_limit(self, channel_id: Optional[str] = None) -> None:
+        """Acquire rate limit token if platform needs it.
+        
+        Args:
+            channel_id: Optional channel ID for per-channel limiting
+        """
         if self._rate_limiter is None:
             # Use platform-specific rate limiter
             self._rate_limiter = RateLimiter.for_platform(self.bot.platform)
         
         if self._rate_limiter:
-            await self._rate_limiter.acquire()
+            await self._rate_limiter.acquire(channel_id)
 
 
 def create_delivery(bot: "BotProtocol") -> UnifiedDelivery:
