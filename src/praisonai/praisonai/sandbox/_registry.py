@@ -31,7 +31,7 @@ def _ssh_loader():
 
 
 def _modal_loader():
-    from .modal_sandbox import ModalSandbox
+    from .modal import ModalSandbox
     return ModalSandbox
 
 
