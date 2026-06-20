@@ -96,13 +96,34 @@ def schedule_add(
         sched = parse_schedule(schedule)
 
         delivery = None
+        origin = None
+        
         if deliver:
+            # Special handling for "origin" token - validate we have context
+            if deliver == "origin":
+                if channel and channel_id:
+                    # Store the current channel context as origin
+                    origin = DeliveryTarget(
+                        channel=channel,
+                        channel_id=channel_id,
+                        session_id=session_id or None,
+                    )
+                else:
+                    return (
+                        "Error adding schedule: deliver='origin' requires "
+                        "origin channel context (both channel and channel_id must be provided)."
+                    )
+            
             # New token-based delivery
             delivery = DeliveryTarget(
                 deliver=deliver,
                 session_id=session_id or None,
             )
-        elif channel and channel_id:
+        elif channel or channel_id:
+            # Validate both are provided together
+            if not (channel and channel_id):
+                return "Error adding schedule: channel and channel_id must be provided together."
+            
             # Legacy explicit channel/channel_id
             delivery = DeliveryTarget(
                 channel=channel,
@@ -116,6 +137,7 @@ def schedule_add(
             message=message,
             agent_id=agent_id or None,
             delivery=delivery,
+            origin=origin,  # Set origin for "origin" token resolution
         )
 
         store = _get_store()

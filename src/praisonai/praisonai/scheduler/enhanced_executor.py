@@ -13,6 +13,9 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
+# Delivery timeout in seconds
+DELIVERY_TIMEOUT_SECONDS = 30
+
 from praisonaiagents.gateway.protocols import (
     DeliveryResolverProtocol,
     HomeChannelRegistryProtocol,
@@ -75,22 +78,30 @@ class EnhancedScheduledAgentExecutor(ScheduledAgentExecutor):
         Overrides base implementation to add delivery token resolution
         and standalone sender support.
         """
-        # First run the base execution
+        # Check if we need to skip base delivery
+        delivery = getattr(job, "delivery", None)
+        deliver_token = getattr(delivery, "deliver", "") if delivery else ""
+        
+        # If we have a delivery token, temporarily disable base delivery
+        # to prevent it from attempting delivery with empty channel/channel_id
+        original_deliver = self._deliver
+        if deliver_token and delivery:
+            # Check if this is a token-only delivery (no explicit channel/channel_id)
+            if not delivery.channel or not delivery.channel_id:
+                self._deliver = None  # Disable base delivery
+        
+        # Run the base execution
         result = await super()._execute_one(job)
         
-        # If base already delivered or failed, we're done
-        if result.delivered or result.status != "succeeded":
+        # Restore original delivery handler
+        self._deliver = original_deliver
+        
+        # If failed or no delivery needed, we're done
+        if result.status != "succeeded" or not delivery:
             return result
         
-        # Check if we need enhanced delivery
-        delivery = getattr(job, "delivery", None)
-        if not delivery:
-            return result
-        
-        # Check for delivery token
-        deliver_token = getattr(delivery, "deliver", "")
+        # If no delivery token, base already handled it
         if not deliver_token:
-            # No token, base delivery already attempted
             return result
         
         # Resolve the delivery token
@@ -110,7 +121,7 @@ class EnhancedScheduledAgentExecutor(ScheduledAgentExecutor):
                         if self._deliver:
                             coro = self._deliver(target, result.result)
                             if asyncio.iscoroutine(coro):
-                                await coro
+                                await asyncio.wait_for(coro, timeout=DELIVERY_TIMEOUT_SECONDS)
                             delivered_count += 1
                             logger.info(
                                 "Delivered job '%s' via token '%s' to %s:%s",
@@ -123,10 +134,13 @@ class EnhancedScheduledAgentExecutor(ScheduledAgentExecutor):
                         elif self._standalone_sender and target.channel:
                             sender = self._standalone_sender(target.channel)
                             if sender:
-                                await self._send_standalone(
-                                    sender,
-                                    target,
-                                    result.result,
+                                await asyncio.wait_for(
+                                    self._send_standalone(
+                                        sender,
+                                        target,
+                                        result.result,
+                                    ),
+                                    timeout=DELIVERY_TIMEOUT_SECONDS,
                                 )
                                 delivered_count += 1
                                 logger.info(
@@ -135,6 +149,14 @@ class EnhancedScheduledAgentExecutor(ScheduledAgentExecutor):
                                     target.channel,
                                     target.channel_id,
                                 )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "Delivery timeout for job '%s' to %s:%s after %d seconds",
+                            job.id,
+                            target.channel,
+                            target.channel_id,
+                            DELIVERY_TIMEOUT_SECONDS,
+                        )
                     except Exception as e:
                         logger.warning(
                             "Delivery failed for job '%s' to %s:%s: %s",
@@ -153,6 +175,18 @@ class EnhancedScheduledAgentExecutor(ScheduledAgentExecutor):
                         delivered_count,
                         deliver_token,
                     )
+                    
+                    # Update the job history with correct delivery status
+                    # This is necessary because base executor already called mark_run
+                    # with delivered=False
+                    if hasattr(self._runner, 'mark_run'):
+                        self._runner.mark_run(
+                            job,
+                            status="succeeded",
+                            result=result.result,
+                            duration=result.duration,
+                            delivered=True,
+                        )
                     
             except Exception as e:
                 logger.error(
@@ -180,10 +214,13 @@ class EnhancedScheduledAgentExecutor(ScheduledAgentExecutor):
         # The sender should have a send_message method
         # This is platform-specific
         if hasattr(sender, "send_message"):
-            await sender.send_message(
-                chat_id=target.channel_id,
-                text=text,
-                thread_id=target.thread_id,
+            await asyncio.wait_for(
+                sender.send_message(
+                    chat_id=target.channel_id,
+                    text=text,
+                    thread_id=target.thread_id,
+                ),
+                timeout=DELIVERY_TIMEOUT_SECONDS,
             )
         else:
             logger.warning(

@@ -97,7 +97,11 @@ class HomeChannelRegistry(HomeChannelRegistryProtocol):
         self._home_channels[platform] = (chat_id, thread_id)
         self._save()
         logger.info(
-            "Set home channel for %s: chat_id=%s, thread_id=%s",
+            "Set home channel for %s",
+            platform,
+        )
+        logger.debug(
+            "Home channel details for %s: chat_id=%s, thread_id=%s",
             platform, chat_id, thread_id,
         )
     
@@ -185,9 +189,15 @@ class DeliveryResolver(DeliveryResolverProtocol):
         if ":" in token:
             parts = token.split(":", 2)
             if len(parts) >= 2:
-                platform = parts[0]
-                chat_id = parts[1]
-                thread_id = parts[2] if len(parts) > 2 else None
+                platform = parts[0].strip()
+                chat_id = parts[1].strip()
+                thread_id = parts[2].strip() if len(parts) > 2 and parts[2].strip() else None
+                
+                # Validate that platform and chat_id are non-empty
+                if not platform or not chat_id:
+                    logger.warning("Invalid explicit delivery token (empty platform or chat_id): %s", token)
+                    return []
+                
                 return [DeliveryTarget(
                     channel=platform,
                     channel_id=chat_id,
