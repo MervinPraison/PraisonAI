@@ -51,6 +51,20 @@ __all__ = [
     "register_gateway_providers",
 ]
 
+# Eagerly register gateway providers so create_llm_provider("openrouter/...") works
+# without needing to explicitly access a gateway class first
+def _ensure_gateways_registered():
+    """Ensure gateway providers are registered on module import."""
+    try:
+        from .gateways import register_gateway_providers
+        # This will only run once due to module-level call in gateways.py
+        register_gateway_providers()
+    except ImportError:
+        # Gateways module not available, skip registration
+        pass
+
+_ensure_gateways_registered()
+
 
 def embedding(text, model="text-embedding-3-small", **kwargs):
     """

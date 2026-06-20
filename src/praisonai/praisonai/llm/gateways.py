@@ -42,7 +42,8 @@ class GatewayProvider:
             config: Optional configuration including api_key, base_url, headers
         """
         self.model_id = model_id
-        self.config = config or {}
+        # Create a shallow copy to avoid mutating caller's dict
+        self.config = dict(config) if config else {}
         self.provider_id = self.__class__.__name__.lower().replace("provider", "")
         
         # Merge environment variables with config
@@ -129,6 +130,12 @@ class LiteLLMProxyProvider(GatewayProvider):
     - LITELLM_PROXY_BASE_URL (default: http://localhost:4000)
     """
     DEFAULT_BASE_URL = "http://localhost:4000"
+    
+    def __init__(self, model_id: str, config: Optional[Dict[str, Any]] = None):
+        """Initialize LiteLLM Proxy provider."""
+        super().__init__(model_id, config)
+        # Override provider_id to match registration key
+        self.provider_id = "litellm-proxy"
     
     def _setup_config(self):
         """Setup LiteLLM Proxy configuration."""

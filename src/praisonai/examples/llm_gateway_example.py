@@ -135,8 +135,14 @@ def example_gateway_with_fallback():
             
             # Primary and fallback endpoints
             self.endpoints = [
-                {"base_url": "https://primary.api.com/v1", "api_key": "key1"},
-                {"base_url": "https://fallback.api.com/v1", "api_key": "key2"},
+                {
+                    "base_url": os.getenv("PRIMARY_GATEWAY_URL", "https://primary.api.com/v1"),
+                    "api_key": os.getenv("PRIMARY_GATEWAY_API_KEY", "")
+                },
+                {
+                    "base_url": os.getenv("FALLBACK_GATEWAY_URL", "https://fallback.api.com/v1"),
+                    "api_key": os.getenv("FALLBACK_GATEWAY_API_KEY", "")
+                },
             ]
         
         def generate(self, prompt, **kwargs):

@@ -81,22 +81,25 @@ class TestGatewayProviders:
         assert provider.config["base_url"] == "https://api.example.com/v1"
         assert provider.config["api_key"] == "test-key"
     
-    @pytest.mark.skip(reason="litellm required for this test")
-    @patch("litellm.completion")
-    def test_gateway_generate_method(self, mock_completion):
+    def test_gateway_generate_method(self, monkeypatch):
         """Should call litellm.completion correctly."""
-        from praisonai.llm.gateways import OpenRouterProvider
-        
-        # Setup mock
+        # Create a mock litellm module
+        mock_litellm = MagicMock()
         mock_response = MagicMock()
-        mock_completion.return_value = mock_response
+        mock_litellm.completion.return_value = mock_response
+        
+        # Inject the mock into sys.modules
+        import sys
+        monkeypatch.setitem(sys.modules, 'litellm', mock_litellm)
+        
+        from praisonai.llm.gateways import OpenRouterProvider
         
         provider = OpenRouterProvider("gpt-4", {"api_key": "test-key"})
         result = provider.generate("Hello world")
         
         # Verify litellm was called correctly
-        mock_completion.assert_called_once()
-        call_args = mock_completion.call_args
+        mock_litellm.completion.assert_called_once()
+        call_args = mock_litellm.completion.call_args
         
         assert call_args.kwargs["model"] == "openrouter/gpt-4"
         assert call_args.kwargs["messages"] == [{"role": "user", "content": "Hello world"}]
@@ -137,5 +140,5 @@ class TestGatewayProviders:
             "model_id": "claude-3",
             "config": {"api_key": "proxy-key"}
         })
-        assert provider2.provider_id == "litellmproxy"
+        assert provider2.provider_id == "litellm-proxy"
         assert provider2.model_id == "claude-3"
