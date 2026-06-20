@@ -25,6 +25,14 @@ from ..workflows.workflows import (  # noqa: F401
 # Import Task from its module
 from ..task.task import Task  # noqa: F401
 
+# Re-export structured result types that were previously accessible via this module
+from ..workflows.results import (  # noqa: F401
+    StepError,
+    WorkflowResult,
+    StepStatus,
+    ErrorStrategy,
+)
+
 # Backward compatibility aliases
 StepInput = WorkflowContext
 StepOutput = StepResult
@@ -46,4 +54,8 @@ __all__ = [
     "loop",
     "repeat",
     "create_workflow_manager",
+    "StepError",
+    "WorkflowResult",
+    "StepStatus",
+    "ErrorStrategy",
 ]
