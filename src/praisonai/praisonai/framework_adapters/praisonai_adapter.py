@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from ._base import FrameworkAdapter
+from .base import FrameworkAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -57,14 +57,16 @@ class PraisonAIAdapter(FrameworkAdapter):
         Resolve the LLM model for a specific agent.
         
         Priority:
-        1. Agent-specific llm/model field
+        1. Agent-specific llm/model field (string or dict with 'model' key)
         2. Default model from llm_config
         3. Fallback to gpt-4o-mini
         """
         # Check for agent-specific model (could be 'llm' or 'model' key)
-        agent_model = details.get('llm') or details.get('model')
-        if agent_model:
-            return agent_model
+        llm_spec = details.get('llm') or details.get('model')
+        if isinstance(llm_spec, str) and llm_spec.strip():
+            return llm_spec.strip()
+        if isinstance(llm_spec, dict) and llm_spec.get('model'):
+            return llm_spec['model']
         
         # Use default or fallback
         return default_model or "gpt-4o-mini"
@@ -76,29 +78,68 @@ class PraisonAIAdapter(FrameworkAdapter):
         Priority:
         1. Agent-specific runtime field
         2. Agent-specific backend field (legacy)
-        3. Global config.runtime
-        4. Global config.backend (legacy)
-        5. None (uses default)
+        3. Model-scoped runtime from models section
+        4. Provider-scoped runtime from providers section
+        5. Global config.runtime
+        6. Global config.backend (legacy)
+        7. CLI backend override (legacy with warning)
+        8. None (uses default)
         """
-        # Check agent-specific runtime
+        # 1. Check agent-specific runtime
         if 'runtime' in details:
             return details['runtime']
         
-        # Check agent-specific backend (legacy)
+        # 2. Check agent-specific backend (legacy)
         if 'backend' in details:
             return details['backend']
         
-        # Check global config
+        # 3. Check model-scoped runtime
+        agent_model = self._resolve_agent_model(details, "")
+        if agent_model and 'models' in config:
+            models_config = config['models']
+            if isinstance(models_config, dict) and agent_model in models_config:
+                model_config = models_config[agent_model]
+                if isinstance(model_config, dict) and 'runtime' in model_config:
+                    return model_config['runtime']
+        
+        # 4. Check provider-scoped runtime
+        if agent_model and 'providers' in config:
+            # Extract provider from model name
+            provider = None
+            if '/' in agent_model:
+                provider = agent_model.split('/')[0]
+            elif 'claude' in agent_model.lower():
+                provider = 'anthropic'
+            elif 'gpt' in agent_model.lower():
+                provider = 'openai'
+            elif 'gemini' in agent_model.lower():
+                provider = 'google'
+            
+            if provider:
+                providers_config = config['providers']
+                if isinstance(providers_config, dict) and provider in providers_config:
+                    provider_config = providers_config[provider]
+                    if isinstance(provider_config, dict) and 'runtime_default' in provider_config:
+                        return provider_config['runtime_default']
+        
+        # 5. Check global config
         global_config = config.get('config', {})
         if 'runtime' in global_config:
             return global_config['runtime']
         
-        # Check global backend (legacy)
+        # 6. Check global backend (legacy)
         if 'backend' in global_config:
             return global_config['backend']
         
-        # Check CLI backend override
+        # 7. Check CLI backend override (legacy with warning)
         if 'cli_backend' in details:
+            import warnings
+            warnings.warn(
+                "Agent-level 'cli_backend' in YAML is deprecated. "
+                "Use 'runtime' parameter or model-scoped runtime configuration instead.",
+                DeprecationWarning,
+                stacklevel=3
+            )
             return details['cli_backend']
         
         return None
@@ -271,12 +312,12 @@ class PraisonAIAdapter(FrameworkAdapter):
                     task.callback = task_callback
                 tasks.append(task)
             else:
-                for task_name, task_details in agent_tasks.items():
+                for _task_name, task_details in agent_tasks.items():
                     description_filled = self._format_template(
-                        task_details['description'], topic=topic
+                        task_details.get('description', ''), topic=topic
                     )
                     expected_output_filled = self._format_template(
-                        task_details['expected_output'], topic=topic
+                        task_details.get('expected_output', 'Task completed successfully.'), topic=topic
                     )
                     
                     task = PraisonTask(
@@ -371,7 +412,6 @@ class PraisonAIAdapter(FrameworkAdapter):
         """
         # Import PraisonAI components only when needed
         from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, AgentTeam
-        from .._framework_availability import is_available
         import os
         
         logger.info("Starting PraisonAI async execution...")
