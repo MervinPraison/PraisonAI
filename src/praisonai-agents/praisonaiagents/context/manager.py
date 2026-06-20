@@ -726,7 +726,7 @@ class ContextManager:
         if protected and tool_name not in self.config.protected_tools:
             self.config.protected_tools.append(tool_name)
     
-    def truncate_tool_output(self, tool_name: str, output: str) -> str:
+    def truncate_tool_output(self, tool_name: str, output: str, tool_call_id: str = None) -> str:
         """Truncate tool output according to its budget."""
         max_tokens = self.get_tool_budget(tool_name)
         
@@ -745,6 +745,17 @@ class ContextManager:
         head = output[:max_chars - tail_size]
         tail = output[-tail_size:] if tail_size > 0 else ""
         truncated = f"{head}\n...[{len(output):,} chars, showing first/last portions]...\n{tail}"
+        
+        # Store full output for later retrieval
+        try:
+            from ..runtime.tool_output_store import get_tool_output_store
+            store = get_tool_output_store()
+            metadata = store.store(tool_name, output, call_id=tool_call_id)
+            if metadata:
+                truncated = store.format_reference(metadata, truncated)
+                logger.debug(f"Stored full {tool_name} output ({len(output)} bytes) at {metadata.get('path')}")
+        except Exception as e:
+            logger.debug(f"Failed to store tool output: {e}")
         
         self._add_history_event(
             OptimizationEventType.CAP_OUTPUTS,
