@@ -50,7 +50,7 @@ def test_session_serialization_with_pending_messages():
     
     # Verify execution state is included
     assert "is_executing" in session_dict, "is_executing not in serialized data"
-    assert session_dict["is_executing"] == True, "is_executing should be True"
+    assert session_dict["is_executing"], "is_executing should be True"
     
     print("✓ Session serialization test passed")
 
@@ -79,10 +79,10 @@ def test_session_deserialization_with_pending_messages():
     session = GatewaySession.from_dict(session_data)
     
     # Verify session was marked as resumed
-    assert session._was_resumed == True, "Session should be marked as resumed"
+    assert session._was_resumed, "Session should be marked as resumed"
     
     # Verify execution state was restored
-    assert session._is_executing == True, "is_executing should be restored as True"
+    assert session._is_executing, "is_executing should be restored as True"
     
     # Verify pending messages were restored
     assert not session._inbox.empty(), "Inbox should not be empty"
@@ -160,7 +160,7 @@ async def test_stop_with_drain():
     await gateway.stop(drain_timeout=2.0)
     
     # Verify gateway stopped
-    assert gateway._is_running == False, "Gateway should be stopped"
+    assert not gateway._is_running, "Gateway should be stopped"
     
     print("✓ Stop with drain test passed")
 

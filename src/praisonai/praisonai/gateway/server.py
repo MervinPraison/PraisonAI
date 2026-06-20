@@ -961,8 +961,8 @@ class WebSocketGateway:
         logger.info(f"Draining {len(active_sessions)} active sessions (reason: {reason})")
         
         # Give sessions time to complete
-        start_time = asyncio.get_event_loop().time()
-        while active_sessions and (asyncio.get_event_loop().time() - start_time) < timeout:
+        start_time = time.monotonic()
+        while active_sessions and (time.monotonic() - start_time) < timeout:
             # Check which sessions are still active
             still_active = []
             for session in active_sessions:
@@ -1093,6 +1093,10 @@ class WebSocketGateway:
                             "source": session.agent_id,
                             "message": f"Resuming processing ({session._inbox.qsize()} pending messages)...",
                         })
+                        # CRITICAL FIX: Mark executing BEFORE creating the task to prevent race condition
+                        # where a new message arrives before the task starts and spawns a duplicate task
+                        if not session._is_executing:
+                            session.mark_executing(True)
                         # Restart the queue processor
                         asyncio.create_task(self._run_session_queue(session, agent, client_id))
             else:
