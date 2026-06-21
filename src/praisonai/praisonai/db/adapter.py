@@ -141,7 +141,7 @@ class PraisonAIDB:
             # Unable to infer - must fail loudly
             raise ValueError(
                 f"Unable to infer DB backend from URL {url!r}; "
-                "pass backend=... explicitly or use a recognised scheme (sqlite://, postgres://, redis://, etc.)"
+                "use a recognised scheme (sqlite://, postgres://, redis://, etc.)"
             )
         
         # Unknown scheme - fail loudly

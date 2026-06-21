@@ -84,20 +84,11 @@ class DaytonaSandbox:
         if self._is_running:
             return
         
-        if not self.is_available:
-            raise RuntimeError(
-                "Daytona backend not available. Install with: pip install praisonai[daytona]"
-            )
-        
-        try:
-            # Raise error until real implementation
-            raise NotImplementedError(
-                "Daytona backend not yet implemented. "
-                "Use 'subprocess', 'docker', or 'e2b' sandbox instead."
-            )
-            
-        except Exception as e:
-            raise RuntimeError(f"Failed to create Daytona workspace: {e}")
+        # Directly raise NotImplementedError to make the fail-loud contract clear
+        raise NotImplementedError(
+            "Daytona backend not yet implemented. "
+            "Use 'subprocess', 'docker', or 'e2b' sandbox instead."
+        )
     
     async def stop(self) -> None:
         """Stop/cleanup the Daytona workspace."""

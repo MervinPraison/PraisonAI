@@ -114,7 +114,8 @@ class ToolRegistry:
         Args:
             resolver: ToolResolver instance to notify on changes
         """
-        self._resolvers.append(weakref.ref(resolver))
+        with self._lock:
+            self._resolvers.append(weakref.ref(resolver))
     
     def _notify_invalidate(self, name: Optional[str] = None) -> None:
         """Notify all resolvers to invalidate their caches.
@@ -122,14 +123,20 @@ class ToolRegistry:
         Args:
             name: Optional tool name to invalidate. If None, invalidate all.
         """
-        alive = []
-        for ref in self._resolvers:
+        with self._lock:
+            alive = []
+            for ref in self._resolvers:
+                r = ref()
+                if r is not None:
+                    alive.append(ref)
+            # Clean up dead references
+            self._resolvers = alive
+        
+        # Notify outside lock to avoid holding lock during external calls
+        for ref in alive:
             r = ref()
             if r is not None:
                 r.invalidate(name)
-                alive.append(ref)
-        # Clean up dead references
-        self._resolvers = alive
     
     def register_from_module(self, module: Any) -> List[str]:
         """

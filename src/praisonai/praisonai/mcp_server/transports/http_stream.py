@@ -339,13 +339,13 @@ class HTTPStreamTransport:
         
         async def mcp_delete(request: Request) -> Response:
             """Handle DELETE requests (session termination)."""
-            if not self.allow_client_termination:
-                return Response(status_code=405)
-            
-            # Check authentication first
+            # Check authentication first to prevent information disclosure
             auth_result = _check_auth(request)
             if auth_result is not None:
                 return auth_result
+            
+            if not self.allow_client_termination:
+                return Response(status_code=405)
             
             session_id = request.headers.get("MCP-Session-Id") or request.headers.get("Mcp-Session-Id")
             if session_id and session_id in self._sessions:

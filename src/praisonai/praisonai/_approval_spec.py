@@ -101,7 +101,7 @@ class ApprovalSpec:
             # Validate allowed keys to catch typos early
             allowed = {
                 "enabled", "backend", "approve_all_tools", "timeout", 
-                "approve_level", "guardrails",
+                "approve_level", "guardrails", "default_policy", "approve_tools",
                 # Legacy aliases for backward compatibility
                 "backend_name", "all_tools", "approval_timeout"
             }
@@ -127,6 +127,8 @@ class ApprovalSpec:
                 timeout=_parse_timeout(timeout_val) if timeout_val is not None else None,
                 approve_level=node.get("approve_level"),
                 guardrails=node.get("guardrails"),
+                default_policy=node.get("default_policy", "prompt"),  # type: ignore[arg-type]
+                approve_tools=node.get("approve_tools"),
             )
         raise TypeError(f"Unsupported approval node type: {type(node).__name__}")
 
@@ -152,12 +154,16 @@ class ApprovalSpec:
     def install_hook(self) -> None:
         """Install a before_tool hook to enforce approval."""
         try:
-            from praisonaiagents import hooks
+            from praisonaiagents.hooks import add_hook
+            from praisonaiagents.hooks.events import BeforeToolInput
+            from praisonaiagents.hooks.types import HookResult
             
-            def approval_hook(tool_name: str, args: Dict[str, Any]) -> Optional[bool]:
+            def approval_hook(data: BeforeToolInput) -> Optional[HookResult]:
                 """Check if tool execution should be approved."""
                 if not self.enabled:
                     return None  # No opinion, let other hooks decide
+                
+                tool_name = data.tool_name
                 
                 # Check per-tool policy
                 if self.approve_tools and tool_name in self.approve_tools:
@@ -168,7 +174,7 @@ class ApprovalSpec:
                 # Apply default policy
                 if self.default_policy == "deny":
                     logger.warning(f"Tool {tool_name} denied by default policy")
-                    return False
+                    return HookResult.deny(f"Tool {tool_name} denied by default policy")
                 elif self.default_policy == "allow":
                     return None  # Allow
                 else:  # "prompt"
@@ -176,7 +182,7 @@ class ApprovalSpec:
                     logger.info(f"Tool {tool_name} would prompt for approval (backend: {self.backend})")
                     return None
             
-            hooks.add_hook("before_tool", approval_hook)
+            add_hook("before_tool", approval_hook)
             logger.info("Approval hook installed")
         except ImportError:
             logger.warning("Could not import praisonaiagents.hooks - approval enforcement unavailable")

@@ -6,7 +6,7 @@ T = TypeVar("T")
 
 
 class LazyCache:
-    """Thread-safe double-checked lazy cache. Caches None for ImportError."""
+    """Thread-safe double-checked lazy cache. Caches and re-raises ImportError exceptions."""
 
     def __init__(self) -> None:
         self._cache: Dict[str, object] = {}

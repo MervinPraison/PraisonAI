@@ -84,11 +84,16 @@ class LockMap:
             bucket.pop(k, None)
         
         # Cap by LRU (don't evict locks currently held)
+        seen = set()
         while len(bucket) > self._max:
             k, (lock, _) = next(iter(bucket.items()))
+            if k in seen:
+                # All remaining locks are held; give up to avoid infinite loop
+                break
             if lock.locked():
                 # Don't evict locks currently held; bump them to the end
                 bucket.move_to_end(k)
+                seen.add(k)
                 # Continue trying to evict other unlocked entries
                 continue
             bucket.popitem(last=False)
