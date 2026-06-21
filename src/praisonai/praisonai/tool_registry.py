@@ -8,6 +8,7 @@ for both builtin and user tools.
 
 import logging
 import threading
+import weakref
 from typing import Dict, Callable, List, Optional, Any
 import inspect
 
@@ -20,7 +21,7 @@ class ToolRegistry:
     def __init__(self):
         self._functions: Dict[str, Callable] = {}
         self._lock = threading.Lock()
-        self._resolver = None  # Will be set by AgentsGenerator to enable cache invalidation
+        self._resolvers: List[weakref.ref] = []  # Track multiple resolvers with weak refs
         # Note: AutoGen-specific adapters moved to framework_adapters.autogen
         
     def register_function(self, name: str, func: Callable) -> None:
@@ -30,9 +31,8 @@ class ToolRegistry:
         with self._lock:
             self._functions[name] = func
         logger.debug(f"Registered function tool: {name}")
-        # Invalidate resolver cache for this tool
-        if self._resolver is not None:
-            self._resolver.invalidate(name)
+        # Invalidate all resolver caches for this tool
+        self._notify_invalidate(name)
     
     def register_autogen_adapter(self, tool_type_name: str, adapter: Callable, _suppress_deprecation_warning: bool = False) -> None:
         """Deprecated: AutoGen adapters moved to framework_adapters.autogen module."""
@@ -105,9 +105,8 @@ class ToolRegistry:
             if hasattr(self, '_autogen_adapters'):
                 self._autogen_adapters.clear()
         logger.debug("Cleared tool registry")
-        # Invalidate entire resolver cache
-        if self._resolver is not None:
-            self._resolver.invalidate()
+        # Invalidate all resolver caches
+        self._notify_invalidate()
     
     def set_resolver(self, resolver) -> None:
         """Set the resolver for cache invalidation.
@@ -115,7 +114,22 @@ class ToolRegistry:
         Args:
             resolver: ToolResolver instance to notify on changes
         """
-        self._resolver = resolver
+        self._resolvers.append(weakref.ref(resolver))
+    
+    def _notify_invalidate(self, name: Optional[str] = None) -> None:
+        """Notify all resolvers to invalidate their caches.
+        
+        Args:
+            name: Optional tool name to invalidate. If None, invalidate all.
+        """
+        alive = []
+        for ref in self._resolvers:
+            r = ref()
+            if r is not None:
+                r.invalidate(name)
+                alive.append(ref)
+        # Clean up dead references
+        self._resolvers = alive
     
     def register_from_module(self, module: Any) -> List[str]:
         """

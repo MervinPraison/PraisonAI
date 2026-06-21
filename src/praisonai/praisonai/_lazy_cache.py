@@ -14,14 +14,23 @@ class LazyCache:
 
     def get(self, key: str, loader: Callable[[], T]) -> Optional[T]:
         if key in self._cache:
-            return self._cache[key]  # type: ignore[return-value]
+            cached = self._cache[key]
+            # Re-raise cached exception
+            if isinstance(cached, ImportError):
+                raise cached
+            return cached  # type: ignore[return-value]
         with self._lock:
             if key in self._cache:
-                return self._cache[key]  # type: ignore[return-value]
+                cached = self._cache[key]
+                if isinstance(cached, ImportError):
+                    raise cached
+                return cached  # type: ignore[return-value]
             try:
                 value: object = loader()
-            except ImportError:
-                value = None
+            except ImportError as e:
+                # Cache the exception and re-raise
+                self._cache[key] = e
+                raise
             self._cache[key] = value
             return value  # type: ignore[return-value]
 

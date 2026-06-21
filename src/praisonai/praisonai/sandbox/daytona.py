@@ -72,11 +72,8 @@ class DaytonaSandbox:
     @property
     def is_available(self) -> bool:
         """Check if Daytona backend is available."""
-        try:
-            import daytona  # type: ignore # noqa: F401
-            return True
-        except ImportError:
-            return False
+        # Disabled until real implementation is ready
+        return False
     
     @property
     def sandbox_type(self) -> str:
@@ -93,23 +90,11 @@ class DaytonaSandbox:
             )
         
         try:
-            # This is a simplified implementation
-            # In practice, you'd use the actual Daytona Python SDK/API
-            
-            logger.info(f"Creating Daytona workspace: {self.workspace_name}")
-            
-            # Simulate workspace creation
-            self._workspace = {
-                "id": str(uuid.uuid4()),
-                "name": self.workspace_name,
-                "template": self.workspace_template,
-                "provider": self.provider,
-                "status": "running",
-                "endpoint": f"https://{self.workspace_name}.daytona.dev",
-            }
-            
-            self._is_running = True
-            logger.info(f"Daytona workspace created: {self.workspace_name}")
+            # Raise error until real implementation
+            raise NotImplementedError(
+                "Daytona backend not yet implemented. "
+                "Use 'subprocess', 'docker', or 'e2b' sandbox instead."
+            )
             
         except Exception as e:
             raise RuntimeError(f"Failed to create Daytona workspace: {e}")

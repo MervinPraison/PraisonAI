@@ -7,9 +7,13 @@ ensuring consistent behavior across all entry points.
 """
 from dataclasses import dataclass
 from typing import Optional, Literal, Union, Dict, Any
+import logging
 
 Backend = Literal["console", "slack", "telegram", "discord", "webhook", "http", "agent", "auto", "none"]
 ApprovalLevel = Literal["low", "medium", "high", "critical"]
+DefaultPolicy = Literal["deny", "prompt", "allow"]
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_timeout(timeout_val: Optional[Union[str, int, float]]) -> Optional[float]:
@@ -32,12 +36,14 @@ class ApprovalSpec:
     This replaces the fragmented approval configuration scattered across
     multiple fields and provides consistent behavior across all surfaces.
     """
-    enabled: bool = False
+    enabled: bool = True  # Safe by default
     backend: Backend = "console"
     approve_all_tools: bool = False
     timeout: Optional[float] = None
     approve_level: Optional[ApprovalLevel] = None
     guardrails: Optional[str] = None
+    default_policy: DefaultPolicy = "prompt"  # New: default approval policy
+    approve_tools: Optional[Dict[str, ApprovalLevel]] = None  # New: per-tool granularity
 
     @classmethod
     def from_cli(cls, args) -> "ApprovalSpec":
@@ -137,4 +143,40 @@ class ApprovalSpec:
             result["approve_level"] = self.approve_level
         if self.guardrails is not None:
             result["guardrails"] = self.guardrails
+        if self.default_policy != "prompt":
+            result["default_policy"] = self.default_policy
+        if self.approve_tools is not None:
+            result["approve_tools"] = self.approve_tools
         return result
+    
+    def install_hook(self) -> None:
+        """Install a before_tool hook to enforce approval."""
+        try:
+            from praisonaiagents import hooks
+            
+            def approval_hook(tool_name: str, args: Dict[str, Any]) -> Optional[bool]:
+                """Check if tool execution should be approved."""
+                if not self.enabled:
+                    return None  # No opinion, let other hooks decide
+                
+                # Check per-tool policy
+                if self.approve_tools and tool_name in self.approve_tools:
+                    level = self.approve_tools[tool_name]
+                    # TODO: Implement actual approval logic based on level
+                    logger.debug(f"Tool {tool_name} requires approval level: {level}")
+                
+                # Apply default policy
+                if self.default_policy == "deny":
+                    logger.warning(f"Tool {tool_name} denied by default policy")
+                    return False
+                elif self.default_policy == "allow":
+                    return None  # Allow
+                else:  # "prompt"
+                    # TODO: Implement prompting logic based on backend
+                    logger.info(f"Tool {tool_name} would prompt for approval (backend: {self.backend})")
+                    return None
+            
+            hooks.add_hook("before_tool", approval_hook)
+            logger.info("Approval hook installed")
+        except ImportError:
+            logger.warning("Could not import praisonaiagents.hooks - approval enforcement unavailable")

@@ -20,6 +20,10 @@ from praisonai._logging import get_logger
 # Type variable for Pydantic models - will be bound at runtime
 T = TypeVar('T')
 
+# Module-level cache for models (for backward compatibility)
+_models_cache: Dict = {}
+_models_lock = threading.Lock()
+
 # =============================================================================
 # THREAD-SAFE LAZY LOADING INFRASTRUCTURE - All heavy imports are deferred
 # =============================================================================

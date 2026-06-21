@@ -335,8 +335,11 @@ def parse_model_string(model: str) -> Dict[str, str]:
     if model_lower.startswith("gemini-"):
         return {"provider_id": "google", "model_id": model}
     
-    # Default to openai
-    return {"provider_id": "openai", "model_id": model}
+    # Unable to infer provider - fail loudly
+    raise ValueError(
+        f"Cannot infer provider from model {model!r}. "
+        "Use the 'provider/model' form, e.g. 'ollama/llama3', 'bedrock/anthropic.claude-3-sonnet'."
+    )
 
 
 def create_llm_provider(

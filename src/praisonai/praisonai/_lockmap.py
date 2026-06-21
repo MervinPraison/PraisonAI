@@ -6,8 +6,9 @@ re-implementing the dict-of-Lock pattern.
 from __future__ import annotations
 import asyncio
 import time
+import weakref
 from collections import OrderedDict
-from typing import Hashable
+from typing import Hashable, Dict
 
 
 class LockMap:
@@ -28,7 +29,9 @@ class LockMap:
             max_entries: Maximum number of locks to cache (LRU eviction)
             ttl_seconds: Time-to-live for unused locks in seconds
         """
-        self._locks: "OrderedDict[Hashable, tuple[asyncio.Lock, float]]" = OrderedDict()
+        # Bucket locks by event loop to avoid cross-loop issues
+        self._buckets: Dict[int, "OrderedDict[Hashable, tuple[asyncio.Lock, float]]"] = {}
+        self._loop_refs: Dict[int, weakref.ref] = {}
         self._max = max_entries
         self._ttl = ttl_seconds
 
@@ -41,46 +44,77 @@ class LockMap:
         Returns:
             asyncio.Lock for the key
         """
+        # Get the current running loop
+        loop = asyncio.get_running_loop()
+        loop_id = id(loop)
+        
+        # Clean up dead loops
+        self._cleanup_dead_loops()
+        
+        # Get or create bucket for this loop
+        if loop_id not in self._buckets:
+            self._buckets[loop_id] = OrderedDict()
+            self._loop_refs[loop_id] = weakref.ref(loop)
+        
+        bucket = self._buckets[loop_id]
         now = time.monotonic()
-        entry = self._locks.get(key)
+        
+        entry = bucket.get(key)
         if entry is not None:
             lock, _ = entry
             # Move to end (most recently used) and update timestamp
-            self._locks.move_to_end(key)
-            self._locks[key] = (lock, now)
+            bucket.move_to_end(key)
+            bucket[key] = (lock, now)
             return lock
         
         # Create new lock + insert + LRU/TTL evict
         lock = asyncio.Lock()
-        self._locks[key] = (lock, now)
-        self._evict_stale(now)
+        bucket[key] = (lock, now)
+        self._evict_stale_from_bucket(bucket, now)
         return lock
 
-    def _evict_stale(self, now: float) -> None:
-        """Evict expired and excess entries."""
+    def _evict_stale_from_bucket(self, bucket: "OrderedDict", now: float) -> None:
+        """Evict expired and excess entries from a bucket."""
         # Expire by TTL (only if not currently locked)
         expired = [
-            k for k, (lock, ts) in self._locks.items()
+            k for k, (lock, ts) in bucket.items()
             if (now - ts) > self._ttl and not lock.locked()
         ]
         for k in expired:
-            self._locks.pop(k, None)
+            bucket.pop(k, None)
         
         # Cap by LRU (don't evict locks currently held)
-        while len(self._locks) > self._max:
-            k, (lock, _) = next(iter(self._locks.items()))
+        while len(bucket) > self._max:
+            k, (lock, _) = next(iter(bucket.items()))
             if lock.locked():
                 # Don't evict locks currently held; bump them to the end
-                self._locks.move_to_end(k)
+                bucket.move_to_end(k)
                 # Continue trying to evict other unlocked entries
                 continue
-            self._locks.popitem(last=False)
+            bucket.popitem(last=False)
             break
+    
+    def _cleanup_dead_loops(self) -> None:
+        """Remove buckets for event loops that no longer exist."""
+        dead_loops = []
+        for loop_id, ref in self._loop_refs.items():
+            loop = ref()
+            if loop is None or loop.is_closed():
+                dead_loops.append(loop_id)
+        
+        for loop_id in dead_loops:
+            del self._loop_refs[loop_id]
+            if loop_id in self._buckets:
+                del self._buckets[loop_id]
 
     def drop(self, key: Hashable) -> None:
         """Manually remove a lock for the given key."""
-        self._locks.pop(key, None)
+        # Get the current running loop
+        loop = asyncio.get_running_loop()
+        loop_id = id(loop)
+        if loop_id in self._buckets:
+            self._buckets[loop_id].pop(key, None)
 
     def size(self) -> int:
-        """Return current number of cached locks."""
-        return len(self._locks)
+        """Return current number of cached locks across all buckets."""
+        return sum(len(bucket) for bucket in self._buckets.values())
