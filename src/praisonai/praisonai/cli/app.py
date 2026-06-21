@@ -127,6 +127,7 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "setup": (".commands.setup", "app", "Interactive onboarding / configuration wizard"),
     "onboard": (".commands.onboard", "app", "Messaging bot onboarding wizard"),
     "obs": (".commands.obs", "app", "Observability diagnostics and management"),
+    "validate": (".commands.validate", "app", "Validate YAML configuration files"),
     "acp": (".commands.acp", "app", "Agent Client Protocol server"),
     "mcp": (".commands.mcp", "app", "MCP server management"),
     "serve": (".commands.serve", "app", "API server management"),
