@@ -61,7 +61,8 @@ def resolve_llm_endpoint(
     *, 
     default_base: str = _DEFAULT_BASE, 
     fallback_lookup: Optional[Callable[[str], Optional[dict]]] = None,
-    resolved_config: Optional['ResolvedConfig'] = None
+    resolved_config: Optional['ResolvedConfig'] = None,
+    validate_model: bool = True
 ) -> LLMEndpoint:
     """
     Resolve LLM endpoint configuration from environment variables and config.
@@ -78,6 +79,7 @@ def resolve_llm_endpoint(
         default_base: Default base URL if none found in environment variables
         fallback_lookup: Optional callable to get stored credentials (provider_name) -> dict
         resolved_config: Optional resolved configuration from the resolver
+        validate_model: Whether to validate the model ID (default: True)
         
     Returns:
         LLMEndpoint with resolved configuration
@@ -109,6 +111,22 @@ def resolve_llm_endpoint(
     api_key = os.environ.get(key_var) or (
         os.environ.get("OPENAI_API_KEY") if key_var == "OPENAI_API_KEY" else None
     )
+    
+    # Validate model if requested
+    if validate_model:
+        try:
+            from ..llm.catalogue import ModelCatalogue
+            catalogue = ModelCatalogue()
+            # This will raise ValueError with suggestions if invalid
+            validated_model = catalogue.validate_model(model)
+            # Use the normalized model ID
+            model = validated_model
+        except ImportError:
+            # Catalogue not available, skip validation
+            pass
+        except ValueError:
+            # Re-raise validation errors
+            raise
     
     # If no env API key found and fallback lookup provided, try stored credentials
     fallback_model = None

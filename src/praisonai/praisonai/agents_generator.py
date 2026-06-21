@@ -523,6 +523,14 @@ class AgentsGenerator:
             'planning_tools', 'planning', 'autonomy', 'guardrails', 'streaming', 'stream',
             'approval', 'skills', 'cli_backend', 'runtime', 'reflection', 'handoff', 'web', 'web_fetch'
         }
+        
+        # Try to load model catalogue for validation
+        model_catalogue = None
+        try:
+            from .llm.catalogue import ModelCatalogue
+            model_catalogue = ModelCatalogue()
+        except ImportError:
+            pass  # Catalogue not available
 
         for section_name in ('agents', 'roles'):
             section = config.get(section_name, {})
@@ -548,6 +556,38 @@ class AgentsGenerator:
                     self.logger.warning(
                         f"Unknown field '{field_name}' in {entity_name} '{name}'.{suggestion}"
                     )
+                
+                # Validate model/llm values if catalogue available
+                if model_catalogue:
+                    for model_field in ('llm', 'function_calling_llm'):
+                        model_value = section_config.get(model_field)
+                        if model_value and isinstance(model_value, str):
+                            try:
+                                model_catalogue.validate_model(model_value)
+                            except ValueError as e:
+                                self.logger.warning(
+                                    f"Invalid model '{model_value}' in {entity_name} '{name}' field '{model_field}': {e}"
+                                )
+                    
+                    # Check for tools configured with non-tool-calling models
+                    if section_config.get('tools'):
+                        llm_value = section_config.get('llm')
+                        if llm_value:
+                            model_info = model_catalogue.describe_model(llm_value)
+                            if model_info and not model_info.get('supports_tools'):
+                                self.logger.warning(
+                                    f"{entity_name.capitalize()} '{name}' has tools configured but model '{llm_value}' does not support tool calling"
+                                )
+        
+        # Also validate top-level llm/model config
+        if model_catalogue:
+            for model_field in ('llm', 'model'):
+                model_value = config.get(model_field)
+                if model_value and isinstance(model_value, str):
+                    try:
+                        model_catalogue.validate_model(model_value)
+                    except ValueError as e:
+                        self.logger.warning(f"Invalid model '{model_value}' in top-level '{model_field}': {e}")
 
 
 
