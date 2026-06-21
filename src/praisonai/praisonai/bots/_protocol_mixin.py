@@ -167,10 +167,10 @@ class MessageHookMixin:
         """
         # Check for intentional silence first (if enabled)
         if getattr(self, '_allow_silence', False):
+            custom_token = getattr(self.config, 'silence_token', None) if hasattr(self, 'config') else None
             try:
                 from praisonaiagents.bots.silence import is_intentional_silence_response, SILENT_REPLY_TOKEN
                 # Check against custom token if configured, otherwise use default
-                custom_token = getattr(self.config, 'silence_token', None) if hasattr(self, 'config') else None
                 if custom_token:
                     # Exact match for custom token
                     if content and content.strip() == custom_token:
@@ -180,7 +180,9 @@ class MessageHookMixin:
                     if is_intentional_silence_response(content):
                         return {"content": "", "cancel": True, "silent": True}
             except ImportError:
-                # Fallback if core module not available - just check for NO_REPLY
+                # Fallback if core module not available
+                if custom_token and content and content.strip() == custom_token:
+                    return {"content": "", "cancel": True, "silent": True}
                 if content and content.strip() == "NO_REPLY":
                     return {"content": "", "cancel": True, "silent": True}
         

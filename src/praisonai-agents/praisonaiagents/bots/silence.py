@@ -36,4 +36,17 @@ def is_intentional_silence_response(text: str | None) -> bool:
     """
     if not text:
         return False  # blank != deliberate silence
-    return text.strip().strip("[]").upper() in _MARKERS
+    
+    normalized = text.strip().upper()
+    
+    # Check for exact match
+    if normalized in _MARKERS:
+        return True
+    
+    # Check for bracket-wrapped version (only for tokens that aren't already bracketed)
+    if normalized.startswith("[") and normalized.endswith("]"):
+        inner = normalized[1:-1]
+        if inner == "SILENT":  # Only [SILENT] is a valid bracketed marker
+            return True
+    
+    return False

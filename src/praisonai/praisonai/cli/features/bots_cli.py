@@ -115,6 +115,9 @@ class BotCapabilities:
             "stt_model": self.stt_model,
             "stream": self.stream,
             "stream_edit_interval": self.stream_edit_interval,
+            "group_policy": self.group_policy,
+            "allow_silence": self.allow_silence,
+            "silence_token": self.silence_token,
             "session_id": self.session_id,
             "user_id": self.user_id,
         }
@@ -225,6 +228,9 @@ class BotHandler:
             auto_approve=agent_config_dict.get("auto_approve", False),
             stream=channel.streaming.mode != "off" if channel.streaming else False,
             stream_edit_interval=int(channel.streaming.min_interval * 1000) if channel.streaming else 700,
+            group_policy=channel.group_policy,
+            allow_silence=channel.allow_silence,
+            silence_token=channel.silence_token,
         )
         
         # Start bot based on platform

@@ -453,18 +453,30 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         """
         # Fire sending hook
         content_str = content.get("body", "") if isinstance(content, dict) else str(content)
-        self.fire_message_sending(channel_id, content_str)
+        send_result = self.fire_message_sending(channel_id, content_str)
+        if send_result.get("cancel"):
+            return BotMessage(
+                message_id="",
+                content="",
+                message_type=MessageType.TEXT,
+                sender=self._bot_user,
+                channel=BotChannel(channel_id=channel_id, name=channel_id),
+                reply_to=reply_to,
+                thread_id=thread_id,
+                metadata={"silent": True},
+            )
+        content_str = send_result.get("content", content_str)
         
         # Parse content
         if isinstance(content, dict):
             subject = content.get("subject", "Message from PraisonAI")
-            body = content.get("body", "")
+            body = content_str
             html = content.get("html")
             cc = content.get("cc")
             bcc = content.get("bcc")
         else:
             subject = "Message from PraisonAI"
-            body = str(content)
+            body = content_str
             html = None
             cc = None
             bcc = None

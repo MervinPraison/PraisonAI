@@ -379,6 +379,12 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                     )
                     logger.info(f"Response sent: {response[:100]}...")
                     
+                    # Check for silence
+                    send_result = self.fire_message_sending(event.get("channel", ""), str(response))
+                    if send_result.get("cancel"):
+                        return
+                    response = send_result.get("content", response)
+                    
                     # Determine if we should reply in thread
                     thread_ts = None
                     if self.config.reply_in_thread:

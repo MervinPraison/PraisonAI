@@ -716,7 +716,20 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
             body = str(content)
         
         # Fire sending hook
-        self.fire_message_sending(channel_id, body)
+        send_result = self.fire_message_sending(channel_id, body, reply_to=reply_to)
+        if send_result.get("cancel"):
+            # Honor intentional silence / hook cancellation
+            return BotMessage(
+                message_id=str(uuid.uuid4()),
+                content="",
+                message_type=MessageType.TEXT,
+                sender=self._bot_user,
+                channel=BotChannel(channel_id=channel_id, name=channel_id),
+                reply_to=reply_to,
+                thread_id=thread_id,
+                metadata={"subject": subject, "silent": True},
+            )
+        body = send_result.get("content", body)
         
         client = self._get_client()
         
