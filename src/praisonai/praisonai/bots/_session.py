@@ -836,3 +836,48 @@ class BotSessionManager:
     def get_user_ids(self) -> List[str]:
         """List user IDs with active sessions."""
         return list(self._histories.keys())
+
+
+def build_session_manager(config, platform: str, *, run_control=None) -> BotSessionManager:
+    """Build a BotSessionManager with standard configuration from a BotConfig.
+    
+    This helper extracts the common session manager setup logic that's duplicated
+    across all bot adapters, including:
+    - Session store acquisition
+    - Reset policy extraction
+    - Backward-compatible max_history resolution
+    
+    Args:
+        config: BotConfig instance with session configuration
+        platform: Platform identifier (e.g., "telegram", "slack")
+        run_control: Optional run control for Telegram (keyword-only)
+    
+    Returns:
+        Configured BotSessionManager instance
+    """
+    # Try to get the default session store
+    try:
+        from praisonaiagents.session import get_default_session_store
+        store = get_default_session_store()
+    except Exception:
+        store = None
+    
+    # Extract reset policy from config
+    reset_policy = None
+    if getattr(config, "session", None) and getattr(config.session, "reset", None):
+        reset_policy = SessionResetPolicy.from_dict(config.session.reset.model_dump())
+    
+    # Support backward compatibility with max_history at channel level
+    max_history = 100
+    if getattr(config, "max_history", None) is not None:
+        max_history = config.max_history
+    elif getattr(config, "session", None) and getattr(config.session, "max_history", None) is not None:
+        max_history = config.session.max_history
+    
+    return BotSessionManager(
+        max_history=max_history,
+        store=store,
+        platform=platform,
+        reset_policy=reset_policy,
+        run_control=run_control,
+    )

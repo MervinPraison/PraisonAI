@@ -30,7 +30,6 @@ from praisonaiagents.bots import (
     HealthResult,
 )
 
-from ._session import BotSessionManager
 from ._email_utils import is_auto_reply, is_blocked_sender, extract_email_address
 
 logger = logging.getLogger(__name__)
@@ -115,12 +114,9 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
         # Initialize allow_silence from config
         self._allow_silence = getattr(self.config, 'allow_silence', False)
         
-        try:
-            from praisonaiagents.session import get_default_session_store
-            _store = get_default_session_store()
-        except Exception:
-            _store = None
-        self._session = BotSessionManager(store=_store, platform="agentmail")
+        # Use helper to build session manager
+        from ._session import build_session_manager
+        self._session = build_session_manager(self.config, platform="agentmail")
         
         # Resolve mode: explicit param > config > default
         if mode:

@@ -119,14 +119,11 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         self._started_at: Optional[float] = None
         self._processed_uids: set = set()  # Track processed email UIDs
         
-        try:
-            from praisonaiagents.session import get_default_session_store
-            _store = get_default_session_store()
-        except Exception:
-            _store = None
-        self._session: BotSessionManager = BotSessionManager(
-            store=_store,
-            platform="email",
+        # Use helper to build session manager
+        from ._session import build_session_manager
+        self._session: BotSessionManager = build_session_manager(
+            self.config,
+            platform="email"
         )
         
         self._stop_event: Optional[asyncio.Event] = None
