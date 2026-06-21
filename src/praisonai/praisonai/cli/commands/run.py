@@ -63,50 +63,6 @@ def _parse_permissions(allow: Optional[List[str]], deny: Optional[List[str]], pe
     
     return config if config else None
 
-
-def _check_api_key_available() -> bool:
-    """
-    Check if an API key is available from environment or stored credentials.
-    
-    Also injects stored credentials into environment if no env key is present.
-    
-    Returns:
-        True if an API key is available, False otherwise
-    """
-    import os
-    
-    # Check all known provider env vars first
-    known_keys = (
-        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY",
-        "GEMINI_API_KEY", "GROQ_API_KEY", "COHERE_API_KEY",
-    )
-    if any(os.environ.get(k) for k in known_keys):
-        return True
-    
-    # Try to inject stored credentials into env, then re-check any known provider key
-    try:
-        from ...llm.credentials import inject_credentials_into_env
-        inject_credentials_into_env()
-    except ImportError:
-        # Fallback if credential module not available
-        pass
-
-    # Check all known provider env vars after potential injection
-    if any(os.environ.get(k) for k in known_keys):
-        return True
-
-    # Final check using LLM resolution with credential fallback
-    try:
-        from ...llm.credentials import resolve_llm_endpoint_with_credentials
-        endpoint = resolve_llm_endpoint_with_credentials()
-        return bool(endpoint.api_key)
-    except ImportError:
-        # Fallback to basic env check
-        return bool(os.environ.get("OPENAI_API_KEY"))
-    except Exception:
-        return False
-
-
 @app.callback(invoke_without_command=True)
 def run_main(
     ctx: typer.Context,
@@ -741,6 +697,8 @@ def _run_from_file_profiled(
         
         if continue_session:
             session_id = find_last_session()
+            if not session_id:
+                typer.echo("Warning: No previous sessions found. Starting new session.", err=True)
         elif session:
             project_store = get_project_session_store()
             if project_store.session_exists(session):
@@ -753,6 +711,9 @@ def _run_from_file_profiled(
                     hierarchical_store = HierarchicalSessionStore(str(get_project_sessions_dir()))
                     forked_session_id = hierarchical_store.fork_session(session_id)
                     session_id = forked_session_id
+            else:
+                typer.echo(f"Error: Session not found: {session}", err=True)
+                raise typer.Exit(1)
     
     if not no_save:
         import uuid
@@ -929,6 +890,8 @@ def _run_prompt_profiled(
         
         if continue_session:
             session_id = find_last_session()
+            if not session_id:
+                typer.echo("Warning: No previous sessions found. Starting new session.", err=True)
         elif session:
             project_store = get_project_session_store()
             if project_store.session_exists(session):
@@ -941,6 +904,9 @@ def _run_prompt_profiled(
                     hierarchical_store = HierarchicalSessionStore(str(get_project_sessions_dir()))
                     forked_session_id = hierarchical_store.fork_session(session_id)
                     session_id = forked_session_id
+            else:
+                typer.echo(f"Error: Session not found: {session}", err=True)
+                raise typer.Exit(1)
     
     if not no_save:
         import uuid

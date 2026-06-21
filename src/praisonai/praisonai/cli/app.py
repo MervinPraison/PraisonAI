@@ -643,7 +643,7 @@ def main_callback(
         from ..llm.credentials import is_configured
         import sys
         
-        if not is_configured(model="gpt-4o-mini"):  # Check for default model
+        if not is_configured():  # Check for any configured credentials
             # In non-interactive mode, just show error
             if not sys.stdin.isatty() or quiet:
                 typer.echo(
@@ -653,7 +653,7 @@ def main_callback(
                 raise typer.Exit(1)
             
             # In interactive mode, offer to run setup
-            typer.echo("No API key configured for the default model (gpt-4o-mini).")
+            typer.echo("No API key configured.")
             run_setup = typer.confirm("Would you like to run the setup wizard now?")
             
             if run_setup:
@@ -668,6 +668,11 @@ def main_callback(
                 if exit_code != 0:
                     typer.echo("Setup failed. Exiting.", err=True)
                     raise typer.Exit(exit_code)
+                
+                # Re-check credentials after setup
+                if not is_configured():
+                    typer.echo("Setup completed but credentials still not detected.", err=True)
+                    raise typer.Exit(1)
                 
                 # After successful setup, continue to TUI
                 typer.echo("\nSetup complete! Starting interactive mode...\n")
