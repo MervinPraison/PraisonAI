@@ -24,6 +24,7 @@ from typing import (
     Literal,
     Optional,
     Protocol,
+    TypedDict,
     Union,
     runtime_checkable,
 )
@@ -173,6 +174,7 @@ class GatewayEvent:
         timestamp: Event creation time
         source: Source identifier (agent_id, client_id, etc.)
         target: Target identifier (optional, for directed events)
+        sequence: Monotonic sequence number for gap detection (optional)
     """
     
     type: Union[EventType, str]
@@ -181,10 +183,11 @@ class GatewayEvent:
     timestamp: float = field(default_factory=time.time)
     source: Optional[str] = None
     target: Optional[str] = None
+    sequence: Optional[int] = None  # Monotonic sequence for gap detection
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
-        return {
+        result = {
             "type": self.type.value if isinstance(self.type, EventType) else self.type,
             "data": self.data,
             "event_id": self.event_id,
@@ -192,6 +195,9 @@ class GatewayEvent:
             "source": self.source,
             "target": self.target,
         }
+        if self.sequence is not None:
+            result["sequence"] = self.sequence
+        return result
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "GatewayEvent":
@@ -209,6 +215,7 @@ class GatewayEvent:
             timestamp=data.get("timestamp", time.time()),
             source=data.get("source"),
             target=data.get("target"),
+            sequence=data.get("sequence"),
         )
 
 
@@ -1115,7 +1122,6 @@ class SessionBindingProtocol(Protocol):
         ...
 
 
-# ---------------------------------------------------------------------------
 # Home Channel and Delivery Routing Protocols
 # ---------------------------------------------------------------------------
 
@@ -1193,3 +1199,54 @@ class DeliveryResolverProtocol(Protocol):
             List of concrete delivery targets
         """
         ...
+
+
+# ---------------------------------------------------------------------------
+# Protocol Version Negotiation (Issue #2130)
+# ---------------------------------------------------------------------------
+
+# Protocol version constants
+PROTOCOL_VERSION = 1
+MIN_PROTOCOL_VERSION = 1
+MAX_PROTOCOL_VERSION = 1
+
+
+class ProtocolHello(TypedDict, total=False):
+    """Protocol version negotiation handshake request.
+    
+    Sent by client during join to negotiate protocol version.
+    """
+    min_version: int  # Minimum protocol version client supports
+    max_version: int  # Maximum protocol version client supports
+    features: List[str]  # Optional feature flags
+
+
+class ProtocolHelloOk(TypedDict):
+    """Protocol version negotiation response.
+    
+    Server's response to protocol negotiation.
+    """
+    protocol_version: int  # Negotiated protocol version
+    server_min_version: int  # Server's minimum supported version
+    server_max_version: int  # Server's maximum supported version
+    features: List[str]  # Enabled feature flags
+
+
+class GapInfo(TypedDict):
+    """Information about a gap in the event sequence."""
+    expected_seq: int  # Expected sequence number
+    received_seq: int  # Received sequence number  
+    missed_count: int  # Number of events missed
+
+
+class ResumeSnapshot(TypedDict, total=False):
+    """Complete snapshot for session resumption.
+    
+    Provides all necessary state for one-round-trip reconnection.
+    """
+    cursor: int  # Resume cursor position
+    sequence: int  # Current sequence number for gap detection
+    events: List[Dict[str, Any]]  # Replayed events since cursor
+    presence: List[Dict[str, Any]]  # Current presence information
+    health: Dict[str, Any]  # Gateway health status
+    session_state: Dict[str, Any]  # Session-specific state

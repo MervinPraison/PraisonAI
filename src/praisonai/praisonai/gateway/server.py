@@ -26,6 +26,9 @@ from praisonaiagents.gateway import (
     GatewayEvent,
     GatewayMessage,
     EventType,
+    PROTOCOL_VERSION,
+    MIN_PROTOCOL_VERSION,
+    MAX_PROTOCOL_VERSION,
 )
 from praisonaiagents.gateway.protocols import (
     ConnectErrorCode,
@@ -59,6 +62,8 @@ class GatewaySession:
     _event_cursor: int = 0  # Monotonic cursor for event replay
     _events: List[GatewayEvent] = field(default_factory=list)  # Event history for replay
     _was_resumed: bool = False  # Track if session was resumed from persistence
+    _sequence: int = 0  # Monotonic sequence number for gap detection
+    _protocol_version: int = PROTOCOL_VERSION  # Negotiated protocol version
     
     # Stepper & Concurrency logic
     _inbox: asyncio.Queue = field(default_factory=asyncio.Queue)
@@ -112,7 +117,9 @@ class GatewaySession:
     def add_event(self, event: GatewayEvent) -> int:
         """Add an event and return its cursor position."""
         self._event_cursor += 1
+        self._sequence += 1
         event.data['cursor'] = self._event_cursor
+        event.sequence = self._sequence  # Add sequence for gap detection
         self._events.append(event)
         self._last_activity = time.time()
         # Keep events bounded to prevent unbounded growth
@@ -1265,6 +1272,24 @@ class WebSocketGateway:
         elif msg_type == "join":
             agent_id = data.get("agent_id")
             if agent_id and agent_id in self._agents:
+                # Protocol version negotiation
+                client_min_version = data.get("min_version", MIN_PROTOCOL_VERSION)
+                client_max_version = data.get("max_version", PROTOCOL_VERSION)
+                
+                # Check if we can negotiate a common version
+                if client_max_version < MIN_PROTOCOL_VERSION or client_min_version > MAX_PROTOCOL_VERSION:
+                    await self._send_to_client(client_id, {
+                        "type": "error",
+                        "code": "version_unsupported",
+                        "message": f"Protocol version mismatch. Server supports {MIN_PROTOCOL_VERSION}-{MAX_PROTOCOL_VERSION}, client supports {client_min_version}-{client_max_version}",
+                        "server_min_version": MIN_PROTOCOL_VERSION,
+                        "server_max_version": MAX_PROTOCOL_VERSION,
+                    })
+                    return
+                
+                # Negotiate the highest common version
+                negotiated_version = min(client_max_version, MAX_PROTOCOL_VERSION)
+                
                 # Support reconnection with existing session
                 session_id = data.get("session_id")  # Optional: existing session to resume
                 since_cursor = data.get("since")  # Optional: cursor for event replay
@@ -1277,15 +1302,32 @@ class WebSocketGateway:
                     since_cursor=since_cursor,
                 )
                 
+                # Set negotiated protocol version for the session
+                session._protocol_version = negotiated_version
+                
                 self._client_sessions[client_id] = session.session_id
                 
-                # Send join confirmation (old format for backward compatibility)
+                # Build presence snapshot
+                presence_snapshot = []
+                if hasattr(self, '_presence_manager'):
+                    from .push_presence import PresenceManager
+                    if isinstance(self._presence_manager, PresenceManager):
+                        presence_info = self._presence_manager.get_all_presence()
+                        presence_snapshot = [p.to_dict() for p in presence_info]
+                
+                # Send join confirmation with protocol info and snapshot
                 await self._send_to_client(client_id, {
                     "type": "joined",
                     "session_id": session.session_id,
                     "agent_id": agent_id,
                     "resumed": session._was_resumed,
                     "cursor": session._event_cursor,
+                    "sequence": session._sequence,  # Current sequence for gap detection
+                    "protocol_version": negotiated_version,
+                    "server_min_version": MIN_PROTOCOL_VERSION,
+                    "server_max_version": MAX_PROTOCOL_VERSION,
+                    "presence": presence_snapshot,  # Presence snapshot
+                    "health": self.health(),  # Health status
                 })
                 
                 # Replay missed events if any
