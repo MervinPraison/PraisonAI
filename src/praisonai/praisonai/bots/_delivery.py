@@ -21,6 +21,9 @@ from ._resilience import BackoffPolicy, compute_backoff, is_recoverable_error, s
 
 logger = logging.getLogger(__name__)
 
+# Constant for permanent error detection
+PERMANENT_ERROR_PREFIX = "Permanent error:"
+
 
 class MessageSender(Protocol):
     """Protocol for message sending implementations."""
@@ -329,7 +332,7 @@ async def deliver_with_retry(
                 logger.error(
                     f"[{platform}] Permanent delivery failure to {channel_id}: {e}"
                 )
-                return False, f"Permanent error: {last_error}"
+                return False, f"{PERMANENT_ERROR_PREFIX} {last_error}"
             
             # Check if we're out of attempts
             if attempt >= max_attempts:
@@ -509,7 +512,7 @@ class DurableDelivery:
             await self.outbox.mark_sent(key)
         else:
             # Check if permanent error
-            permanent = error and "Permanent error:" in error
+            permanent = error and error.startswith(PERMANENT_ERROR_PREFIX)
             await self.outbox.mark_failed(key, error or "Unknown error", permanent=permanent)
         
         return success
@@ -555,7 +558,7 @@ class DurableDelivery:
             )
             
             # Preserve permanent failure information
-            if not success and error and error.startswith("Permanent error:"):
+            if not success and error and error.startswith(PERMANENT_ERROR_PREFIX):
                 raise RuntimeError(error)
             
             return success
