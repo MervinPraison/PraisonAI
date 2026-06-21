@@ -165,6 +165,8 @@ class GatewaySession:
                 "metadata": msg.metadata,
             } for msg in self._messages],
             "event_cursor": self._event_cursor,
+            "sequence": self._sequence,
+            "protocol_version": self._protocol_version,
             "events": [e.to_dict() for e in self._events[-100:]],  # Keep last 100 events
             "pending_inbox": pending_inbox,
             "is_executing": self._is_executing,
@@ -201,6 +203,8 @@ class GatewaySession:
         
         # Restore event cursor and events
         session._event_cursor = data.get("event_cursor", 0)
+        session._sequence = data.get("sequence", session._event_cursor)
+        session._protocol_version = data.get("protocol_version", PROTOCOL_VERSION)
         for event_data in data.get("events", []):
             event = GatewayEvent.from_dict(event_data)
             session._events.append(event)
@@ -1272,9 +1276,25 @@ class WebSocketGateway:
         elif msg_type == "join":
             agent_id = data.get("agent_id")
             if agent_id and agent_id in self._agents:
-                # Protocol version negotiation
-                client_min_version = data.get("min_version", MIN_PROTOCOL_VERSION)
-                client_max_version = data.get("max_version", PROTOCOL_VERSION)
+                # Protocol version negotiation with validation
+                try:
+                    client_min_version = int(data.get("min_version", MIN_PROTOCOL_VERSION))
+                    client_max_version = int(data.get("max_version", PROTOCOL_VERSION))
+                except (TypeError, ValueError):
+                    await self._send_to_client(client_id, {
+                        "type": "error",
+                        "code": "invalid_protocol_hello",
+                        "message": "Invalid protocol version fields. Expected integer min_version/max_version.",
+                    })
+                    return
+                
+                if client_min_version > client_max_version:
+                    await self._send_to_client(client_id, {
+                        "type": "error",
+                        "code": "invalid_protocol_hello",
+                        "message": f"Invalid version range: min_version ({client_min_version}) > max_version ({client_max_version})",
+                    })
+                    return
                 
                 # Check if we can negotiate a common version
                 if client_max_version < MIN_PROTOCOL_VERSION or client_min_version > MAX_PROTOCOL_VERSION:
@@ -1315,6 +1335,11 @@ class WebSocketGateway:
                         presence_info = self._presence_manager.get_all_presence()
                         presence_snapshot = [p.to_dict() for p in presence_info]
                 
+                # Calculate correct sequence for replay
+                joined_sequence = session._sequence
+                if replay_events and replay_events[0].sequence is not None:
+                    joined_sequence = replay_events[0].sequence - 1
+                
                 # Send join confirmation with protocol info and snapshot
                 await self._send_to_client(client_id, {
                     "type": "joined",
@@ -1322,7 +1347,7 @@ class WebSocketGateway:
                     "agent_id": agent_id,
                     "resumed": session._was_resumed,
                     "cursor": session._event_cursor,
-                    "sequence": session._sequence,  # Current sequence for gap detection
+                    "sequence": joined_sequence,  # Sequence aligned with replay events
                     "protocol_version": negotiated_version,
                     "server_min_version": MIN_PROTOCOL_VERSION,
                     "server_max_version": MAX_PROTOCOL_VERSION,

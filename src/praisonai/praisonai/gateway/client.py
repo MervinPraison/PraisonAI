@@ -9,8 +9,7 @@ import asyncio
 import json
 import logging
 import random
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Union
 
 try:
@@ -21,7 +20,6 @@ except ImportError:
 
 from praisonaiagents.gateway import (
     GatewayEvent,
-    GatewayMessage,
     EventType,
     PROTOCOL_VERSION,
     MIN_PROTOCOL_VERSION,
@@ -143,13 +141,25 @@ class GatewayClient:
         return max(0, delay + jitter)
     
     async def connect(self) -> None:
-        """Connect to the gateway with automatic reconnection."""
+        """Start the connection loop as a background task.
+        
+        This method starts the reconnection loop in the background and returns
+        immediately. Use events() to receive events after calling connect().
+        
+        Example:
+            await client.connect()  # Returns immediately
+            async for event in client.events():
+                print(event)
+        """
         if self._running:
             return
         
         self._running = True
         self._reconnect_attempts = 0
-        
+        self._connect_task = asyncio.create_task(self._connection_loop())
+    
+    async def _connection_loop(self) -> None:
+        """Connection loop with automatic reconnection."""
         while self._running:
             try:
                 await self._connect_once()
@@ -163,6 +173,11 @@ class GatewayClient:
                 # Wait for disconnect or stop
                 await self._receive_task
                 
+            except ValueError as e:
+                # Protocol version mismatch is a permanent error
+                logger.error(f"Connection failed permanently: {e}")
+                self._running = False
+                raise
             except Exception as e:
                 logger.error(f"Connection error: {e}")
             
@@ -175,8 +190,8 @@ class GatewayClient:
                 break
             
             # Calculate backoff delay
-            delay = self._calculate_backoff()
             self._reconnect_attempts += 1
+            delay = self._calculate_backoff()
             
             logger.info(f"Reconnecting in {delay:.1f}s (attempt {self._reconnect_attempts})")
             self._set_state(ConnectionState.RECONNECTING)
@@ -212,8 +227,11 @@ class GatewayClient:
         
         await self._ws.send(json.dumps(join_msg))
         
-        # Wait for join response
-        response = await self._ws.recv()
+        # Wait for join response with timeout
+        try:
+            response = await asyncio.wait_for(self._ws.recv(), timeout=10.0)
+        except asyncio.TimeoutError:
+            raise ConnectionError("Join handshake timed out")
         data = json.loads(response)
         
         if data.get("type") == "error":
@@ -295,7 +313,7 @@ class GatewayClient:
         
         # Update cursor if present
         cursor = event.data.get("cursor")
-        if cursor:
+        if cursor is not None:
             self._cursor = cursor
         
         # Queue the event
@@ -304,6 +322,14 @@ class GatewayClient:
     async def disconnect(self) -> None:
         """Disconnect from the gateway."""
         self._running = False
+        
+        # Cancel connect task if running
+        if hasattr(self, '_connect_task') and self._connect_task:
+            self._connect_task.cancel()
+            try:
+                await self._connect_task
+            except asyncio.CancelledError:
+                pass
         
         if self._receive_task:
             self._receive_task.cancel()
@@ -390,7 +416,7 @@ async def example_usage():
     client.on_state_change = on_state_change
     
     try:
-        # Connect to gateway
+        # Start connection (returns immediately)
         await client.connect()
         
         # Process events
