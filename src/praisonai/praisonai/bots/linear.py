@@ -33,7 +33,6 @@ from praisonaiagents.bots import (
 )
 
 from ._commands import format_status, format_help
-from ._session import BotSessionManager
 from ._rate_limit import RateLimiter
 from ._ack import AckReactor
 

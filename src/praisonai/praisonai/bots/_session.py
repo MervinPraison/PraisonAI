@@ -858,9 +858,18 @@ def build_session_manager(config, platform: str, *, run_control=None) -> BotSess
     # Try to get the default session store
     try:
         from praisonaiagents.session import get_default_session_store
-        store = get_default_session_store()
-    except Exception:
+    except ImportError:
+        # Module not available, fallback to in-memory
         store = None
+    else:
+        try:
+            store = get_default_session_store()
+        except Exception as exc:
+            logger.warning(
+                "Default session store unavailable; falling back to in-memory store: %s",
+                exc,
+            )
+            store = None
     
     # Extract reset policy from config
     reset_policy = None
