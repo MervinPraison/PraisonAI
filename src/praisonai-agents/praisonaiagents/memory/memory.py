@@ -10,7 +10,6 @@ from praisonaiagents._logging import get_logger
 from datetime import datetime, timezone
 
 # Decomposed memory functionality - imported as mixins for backward compatibility
-from .storage import StorageMixin
 from .search import SearchMixin
 from .core import MemoryCoreMixin
 
@@ -36,7 +35,7 @@ CACHE_BOUNDARY = ""
 
 
 
-class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
+class Memory(SearchMixin, MemoryCoreMixin):
     """
     A single-file memory manager covering:
     - Short-term memory (STM) for ephemeral context
