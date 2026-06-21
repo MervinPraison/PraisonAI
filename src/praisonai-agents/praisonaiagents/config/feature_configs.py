@@ -1275,79 +1275,25 @@ def resolve_memory(value: MemoryParam) -> Optional[MemoryConfig]:
     """
     Resolve memory= parameter following precedence ladder.
     
-    Precedence: Instance > Config > Dict > String > Bool > Default
+    Delegates to the canonical resolver in param_resolver.py.
+    Kept for backward compatibility with tests.
     
     Args:
         value: Memory parameter in any supported form
         
     Returns:
         MemoryConfig if enabled, None if disabled
-        
-    Examples:
-        >>> resolve_memory(None)  # Default: disabled
-        None
-        >>> resolve_memory(False)  # Explicit disable
-        None
-        >>> resolve_memory(True)  # Enable with defaults
-        MemoryConfig(backend='file')
-        >>> resolve_memory("redis")  # String shorthand
-        MemoryConfig(backend='redis')
-        >>> resolve_memory({"backend": "sqlite", "user_id": "alice"})  # Dict
-        MemoryConfig(backend='sqlite', user_id='alice')
-        >>> resolve_memory(MemoryConfig(backend="postgres"))  # Config passthrough
-        MemoryConfig(backend='postgres')
     """
-    # Default: disabled
-    if value is None:
-        return None
-    
-    # Bool: False = disabled, True = defaults
-    if value is False:
-        return None
-    if value is True:
-        return MemoryConfig()
-    
-    # String: backend shorthand
-    if isinstance(value, str):
-        try:
-            backend = MemoryBackend(value.lower())
-        except ValueError:
-            backend = value  # Allow custom backend strings
-        return MemoryConfig(backend=backend)
-    
-    # Dict: expand to config
-    if isinstance(value, dict):
-        # Handle backend enum conversion
-        backend = value.get("backend", MemoryBackend.FILE)
-        if isinstance(backend, str):
-            try:
-                backend = MemoryBackend(backend.lower())
-            except ValueError:
-                pass  # Keep as string for custom backends
-        return MemoryConfig(
-            backend=backend,
-            user_id=value.get("user_id"),
-            session_id=value.get("session_id"),
-            auto_memory=value.get("auto_memory", False),
-            claude_memory=value.get("claude_memory", False),
-            db=value.get("db"),
-            config=value.get("config"),
-        )
-    
-    # Config: passthrough
-    if isinstance(value, MemoryConfig):
-        return value
-    
-    # Instance (MemoryManager): return as-is (caller handles)
-    # This is the highest precedence - user provided a pre-configured instance
-    return value
+    from .param_resolver import resolve_memory as _resolve
+    return _resolve(value, MemoryConfig)
 
 
 def resolve_knowledge(value: KnowledgeParam) -> Optional[KnowledgeConfig]:
     """
     Resolve knowledge= parameter following precedence ladder.
     
-    Precedence: Instance > Config > Array > Dict > String > Bool > Default
+    Delegates to the canonical resolver in param_resolver.py.
+    Kept for backward compatibility with tests.
     
     Args:
         value: Knowledge parameter in any supported form
@@ -1355,131 +1301,85 @@ def resolve_knowledge(value: KnowledgeParam) -> Optional[KnowledgeConfig]:
     Returns:
         KnowledgeConfig if enabled, None if disabled
     """
-    # Default: disabled
-    if value is None:
-        return None
-    
-    # Bool: False = disabled, True = defaults
-    if value is False:
-        return None
-    if value is True:
-        return KnowledgeConfig()
-    
-    # String: single source
-    if isinstance(value, str):
-        return KnowledgeConfig(sources=[value])
-    
-    # Array: list of sources
-    if isinstance(value, list):
-        return KnowledgeConfig(sources=value)
-    
-    # Dict: expand to config
-    if isinstance(value, dict):
-        return KnowledgeConfig(
-            sources=value.get("sources", []),
-            embedder=value.get("embedder", "openai"),
-            embedder_config=value.get("embedder_config"),
-            chunking_strategy=value.get("chunking_strategy", ChunkingStrategy.SEMANTIC),
-            chunk_size=value.get("chunk_size", 1000),
-            chunk_overlap=value.get("chunk_overlap", 200),
-            retrieval_k=value.get("retrieval_k", 5),
-            retrieval_threshold=value.get("retrieval_threshold", 0.0),
-            rerank=value.get("rerank", False),
-            rerank_model=value.get("rerank_model"),
-            auto_retrieve=value.get("auto_retrieve", True),
-        )
-    
-    # Config: passthrough
-    if isinstance(value, KnowledgeConfig):
-        return value
-    
-    # Instance: return as-is
-    return value
+    from .param_resolver import resolve_knowledge as _resolve
+    return _resolve(value, KnowledgeConfig)
 
 
 def resolve_planning(value: PlanningParam) -> Optional[PlanningConfig]:
-    """Resolve planning= parameter following precedence ladder."""
-    if value is None or value is False:
-        return None
-    if value is True:
-        return PlanningConfig()
-    if isinstance(value, dict):
-        return PlanningConfig(**value)
-    if isinstance(value, PlanningConfig):
-        return value
-    return value
+    """
+    Resolve planning= parameter following precedence ladder.
+    
+    Delegates to the canonical resolver in param_resolver.py.
+    Kept for backward compatibility with tests.
+    """
+    from .param_resolver import resolve_planning as _resolve
+    return _resolve(value, PlanningConfig)
 
 
 def resolve_reflection(value: ReflectionParam) -> Optional[ReflectionConfig]:
-    """Resolve reflection= parameter following precedence ladder."""
-    if value is None or value is False:
-        return None
-    if value is True:
-        return ReflectionConfig()
-    if isinstance(value, dict):
-        return ReflectionConfig(**value)
-    if isinstance(value, ReflectionConfig):
-        return value
-    return value
+    """
+    Resolve reflection= parameter following precedence ladder.
+    
+    Delegates to the canonical resolver in param_resolver.py.
+    Kept for backward compatibility with tests.
+    """
+    from .param_resolver import resolve_reflection as _resolve
+    return _resolve(value, ReflectionConfig)
 
 
 def resolve_guardrails(value: GuardrailParam) -> Optional[GuardrailConfig]:
-    """Resolve guardrails= parameter following precedence ladder."""
-    if value is None or value is False:
-        return None
-    if value is True:
-        return GuardrailConfig()
-    if callable(value):
-        return GuardrailConfig(validator=value)
-    if isinstance(value, dict):
-        return GuardrailConfig(**value)
-    if isinstance(value, GuardrailConfig):
-        return value
-    return value
+    """
+    Resolve guardrails= parameter following precedence ladder.
+    
+    Delegates to the canonical resolver in param_resolver.py.
+    Kept for backward compatibility with tests.
+    """
+    from .param_resolver import resolve_guardrails as _resolve
+    return _resolve(value, GuardrailConfig)
 
 
 def resolve_web(value: WebParam) -> Optional[WebConfig]:
-    """Resolve web= parameter following precedence ladder."""
-    if value is None or value is False:
-        return None
-    if value is True:
-        return WebConfig()
-    if isinstance(value, dict):
-        return WebConfig(**value)
-    if isinstance(value, WebConfig):
-        return value
-    return value
+    """
+    Resolve web= parameter following precedence ladder.
+    
+    Delegates to the canonical resolver in param_resolver.py.
+    Kept for backward compatibility with tests.
+    """
+    from .param_resolver import resolve_web as _resolve
+    return _resolve(value, WebConfig)
 
 
 
 def resolve_caching(value: CachingParam) -> Optional[CachingConfig]:
-    """Resolve caching= parameter following precedence ladder."""
-    if value is None or value is False:
-        return None
-    if value is True:
-        return CachingConfig()
-    if isinstance(value, dict):
-        return CachingConfig(**value)
-    if isinstance(value, CachingConfig):
-        return value
-    return value
+    """
+    Resolve caching= parameter following precedence ladder.
+    
+    Delegates to the canonical resolver in param_resolver.py.
+    Kept for backward compatibility with tests.
+    """
+    from .param_resolver import resolve_caching as _resolve
+    return _resolve(value, CachingConfig)
 
 
 def resolve_autonomy(value: AutonomyParam) -> Optional[AutonomyConfig]:
-    """Resolve autonomy= parameter following precedence ladder."""
-    if value is None or value is False:
-        return None
-    if value is True:
-        return AutonomyConfig()
-    if isinstance(value, dict):
-        return AutonomyConfig(**value)
-    if isinstance(value, AutonomyConfig):
-        return value
-    return value
+    """
+    Resolve autonomy= parameter following precedence ladder.
+    
+    Delegates to the canonical resolver in param_resolver.py.
+    Kept for backward compatibility with tests.
+    """
+    from .param_resolver import resolve_autonomy as _resolve
+    return _resolve(value, AutonomyConfig)
 
 
 def resolve_tool_search(value: ToolSearchParam) -> Optional[ToolSearchConfig]:
-    """Resolve tool_search= parameter following precedence ladder."""
+    """
+    Resolve tool_search= parameter following precedence ladder.
+    
+    NOTE: This resolver has zero references in the codebase but is kept
+    for backward compatibility. Consider removing in a future version.
+    """
+    # Simple implementation since it's unused
     if value is None or value is False:
         return None
     if value is True:
