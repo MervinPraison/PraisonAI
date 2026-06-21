@@ -205,7 +205,6 @@ class ModelCatalogue:
         """
         try:
             import litellm
-            from litellm import model_cost, model_list
             
             models = []
             
@@ -215,7 +214,9 @@ class ModelCatalogue:
                 cost_data = litellm.model_cost
             
             # Process known models from litellm
-            for model_id in model_list() if hasattr(litellm, 'model_list') else []:
+            # model_list is a list attribute, not a callable
+            model_ids = getattr(litellm, 'model_list', [])
+            for model_id in model_ids:
                 # Determine provider from model ID
                 provider = "unknown"
                 if model_id.startswith(("gpt-", "o1", "text-", "davinci", "curie", "babbage", "ada")):

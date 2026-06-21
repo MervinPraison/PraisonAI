@@ -524,6 +524,12 @@ class AgentsGenerator:
             'approval', 'skills', 'cli_backend', 'runtime', 'reflection', 'handoff', 'web', 'web_fetch'
         }
         
+        # Collect YAML-local model aliases (valid even if not in global catalogue)
+        local_model_aliases = set()
+        models_cfg = config.get("models", {})
+        if isinstance(models_cfg, dict):
+            local_model_aliases = {k for k in models_cfg.keys() if isinstance(k, str)}
+        
         # Try to load model catalogue for validation
         model_catalogue = None
         try:
@@ -562,6 +568,9 @@ class AgentsGenerator:
                     for model_field in ('llm', 'function_calling_llm'):
                         model_value = section_config.get(model_field)
                         if model_value and isinstance(model_value, str):
+                            # Skip validation for local model aliases defined in YAML
+                            if model_value in local_model_aliases:
+                                continue
                             try:
                                 model_catalogue.validate_model(model_value)
                             except ValueError as e:
@@ -584,6 +593,9 @@ class AgentsGenerator:
             for model_field in ('llm', 'model'):
                 model_value = config.get(model_field)
                 if model_value and isinstance(model_value, str):
+                    # Skip validation for local model aliases defined in YAML
+                    if model_value in local_model_aliases:
+                        continue
                     try:
                         model_catalogue.validate_model(model_value)
                     except ValueError as e:

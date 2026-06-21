@@ -96,9 +96,6 @@ def list_models(
             console.print(table)
         
     except ImportError:
-        output.print_warning("Model catalogue not available. Install litellm for full model listing:")
-        output.print("  pip install 'praisonai[litellm]'")
-        
         # Show basic fallback models
         fallback_models = [
             {"provider": "OpenAI", "models": ["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"]},
@@ -107,14 +104,28 @@ def list_models(
             {"provider": "Groq", "models": ["llama-3.3-70b-versatile", "mixtral-8x7b-32768"]},
         ]
         
-        if provider:
-            fallback_models = [p for p in fallback_models if p["provider"].lower() == provider.lower()]
-        
-        for prov in fallback_models:
-            output.print_subheader(f"{prov['provider']} Models")
-            for model in prov['models']:
-                if not search or search.lower() in model.lower():
-                    output.print(f"  • {model}")
+        if json_output:
+            # Provide JSON output for consistency
+            models_list = []
+            for prov in fallback_models:
+                if provider and prov["provider"].lower() != provider.lower():
+                    continue
+                for model_id in prov['models']:
+                    if not search or search.lower() in model_id.lower():
+                        models_list.append({"id": model_id, "provider": prov["provider"]})
+            output.print(json.dumps(models_list, indent=2))
+        else:
+            output.print_warning("Model catalogue not available. Install litellm for full model listing:")
+            output.print("  pip install 'praisonai[litellm]'")
+            
+            if provider:
+                fallback_models = [p for p in fallback_models if p["provider"].lower() == provider.lower()]
+            
+            for prov in fallback_models:
+                output.print_subheader(f"{prov['provider']} Models")
+                for model in prov['models']:
+                    if not search or search.lower() in model.lower():
+                        output.print(f"  • {model}")
     except Exception as e:
         output.print_error(f"Error listing models: {e}")
         raise typer.Exit(1)

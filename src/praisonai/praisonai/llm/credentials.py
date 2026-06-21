@@ -36,7 +36,7 @@ def _credential_lookup(provider: str) -> Optional[Dict[str, Any]]:
 def resolve_llm_endpoint_with_credentials(
     *, 
     default_base: str = "https://api.openai.com/v1",
-    validate_model: bool = True
+    validate_model: bool = False
 ) -> LLMEndpoint:
     """
     Resolve LLM endpoint configuration with credential store fallback.
@@ -46,7 +46,7 @@ def resolve_llm_endpoint_with_credentials(
     
     Args:
         default_base: Default base URL if none found anywhere
-        validate_model: Whether to validate the model ID (default: True)
+        validate_model: Whether to validate the model ID (default: False)
         
     Returns:
         LLMEndpoint with resolved configuration
