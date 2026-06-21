@@ -1275,8 +1275,8 @@ def resolve_memory(value: MemoryParam) -> Optional[MemoryConfig]:
     """
     Resolve memory= parameter following precedence ladder.
     
-    Delegates to the canonical resolver in param_resolver.py.
-    Kept for backward compatibility with tests.
+    Delegates to the canonical resolver in param_resolver.py with
+    special handling for backward compatibility.
     
     Args:
         value: Memory parameter in any supported form
@@ -1285,6 +1285,30 @@ def resolve_memory(value: MemoryParam) -> Optional[MemoryConfig]:
         MemoryConfig if enabled, None if disabled
     """
     from .param_resolver import resolve_memory as _resolve
+    
+    # Special case: handle string backends not in MEMORY_PRESETS
+    if isinstance(value, str):
+        try:
+            # Try to resolve with canonical resolver first
+            return _resolve(value, MemoryConfig)
+        except ValueError:
+            # Fall back to old behavior for custom/unknown backends
+            try:
+                backend = MemoryBackend(value.lower())
+            except ValueError:
+                backend = value  # Allow custom backend strings
+            return MemoryConfig(backend=backend)
+    
+    # Special case: handle arbitrary instances with passthrough
+    if not isinstance(value, (type(None), bool, dict, list, tuple, MemoryConfig)):
+        # Try canonical resolver first
+        result = _resolve(value, MemoryConfig)
+        # If canonical resolver returns None for an instance, pass it through
+        if result is None and hasattr(value, '__class__'):
+            return value
+        return result
+    
+    # Default: use canonical resolver
     return _resolve(value, MemoryConfig)
 
 
@@ -1331,10 +1355,16 @@ def resolve_guardrails(value: GuardrailParam) -> Optional[GuardrailConfig]:
     """
     Resolve guardrails= parameter following precedence ladder.
     
-    Delegates to the canonical resolver in param_resolver.py.
-    Kept for backward compatibility with tests.
+    Delegates to the canonical resolver in param_resolver.py with
+    special handling for callable validators.
     """
     from .param_resolver import resolve_guardrails as _resolve
+    
+    # Special case: wrap callable in GuardrailConfig for backward compatibility
+    if callable(value) and not isinstance(value, type):
+        return GuardrailConfig(validator=value)
+    
+    # Default: use canonical resolver
     return _resolve(value, GuardrailConfig)
 
 
