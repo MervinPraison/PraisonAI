@@ -100,6 +100,9 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         self._agent = agent
         self.config = config or BotConfig(token=token)
         
+        # Initialize allow_silence from config
+        self._allow_silence = getattr(self.config, 'allow_silence', False)
+        
         # Email-specific config
         self._email_address = email_address or os.environ.get("EMAIL_ADDRESS", "")
         self._imap_server = imap_server or os.environ.get("EMAIL_IMAP_SERVER", "imap.gmail.com")

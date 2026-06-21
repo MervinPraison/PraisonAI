@@ -111,6 +111,10 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
         
         # Session manager for conversation state
         self.config = config or BotConfig()
+        
+        # Initialize allow_silence from config
+        self._allow_silence = getattr(self.config, 'allow_silence', False)
+        
         try:
             from praisonaiagents.session import get_default_session_store
             _store = get_default_session_store()

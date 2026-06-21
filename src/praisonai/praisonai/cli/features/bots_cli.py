@@ -78,6 +78,11 @@ class BotCapabilities:
     stream: bool = False  # Enable progressive streaming responses
     stream_edit_interval: int = 700  # Minimum interval between message edits (ms)
     
+    # Group behavior
+    group_policy: str = "mention_only"  # respond_all, mention_only, command_only
+    allow_silence: bool = False  # Allow agent to return NO_REPLY to stay silent
+    silence_token: Optional[str] = None  # Custom silence token
+    
     # Session
     session_id: Optional[str] = None
     user_id: Optional[str] = None
@@ -322,6 +327,9 @@ class BotHandler:
             token=token,
             streaming=capabilities.stream if capabilities else False,
             stream_edit_interval_ms=capabilities.stream_edit_interval if capabilities else 700,
+            group_policy=capabilities.group_policy if capabilities else "mention_only",
+            allow_silence=capabilities.allow_silence if capabilities else False,
+            silence_token=capabilities.silence_token if capabilities else None,
         )
         
         bot = TelegramBot(token=token, agent=agent, config=bot_config)
@@ -368,7 +376,17 @@ class BotHandler:
             return
         
         agent = self._load_agent(agent_file, capabilities, agent_config_dict=agent_config_dict)
-        bot = DiscordBot(token=token, agent=agent)
+        
+        # Create bot config with group and silence settings
+        from praisonaiagents.bots import BotConfig
+        bot_config = BotConfig(
+            token=token,
+            group_policy=capabilities.group_policy if capabilities else "mention_only",
+            allow_silence=capabilities.allow_silence if capabilities else False,
+            silence_token=capabilities.silence_token if capabilities else None,
+        )
+        
+        bot = DiscordBot(token=token, agent=agent, config=bot_config)
         
         self._print_startup_info("Discord", capabilities)
         
@@ -417,7 +435,18 @@ class BotHandler:
             return
         
         agent = self._load_agent(agent_file, capabilities, agent_config_dict=agent_config_dict)
-        bot = SlackBot(token=token, app_token=app_token, agent=agent)
+        
+        # Create bot config with group and silence settings
+        from praisonaiagents.bots import BotConfig
+        bot_config = BotConfig(
+            token=token,
+            app_token=app_token,
+            group_policy=capabilities.group_policy if capabilities else "mention_only",
+            allow_silence=capabilities.allow_silence if capabilities else False,
+            silence_token=capabilities.silence_token if capabilities else None,
+        )
+        
+        bot = SlackBot(token=token, app_token=app_token, agent=agent, config=bot_config)
         
         self._print_startup_info("Slack", capabilities)
         

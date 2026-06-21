@@ -104,6 +104,10 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
         self._phone_number_id = phone_number_id or os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "")
         self._agent = agent
         self.config = config or BotConfig(token=self._token)
+        
+        # Initialize allow_silence from config
+        self._allow_silence = getattr(self.config, 'allow_silence', False)
+        
         self._verify_token = verify_token or os.environ.get("WHATSAPP_VERIFY_TOKEN", "")
         self._app_secret = app_secret or os.environ.get("WHATSAPP_APP_SECRET", "")
         self._webhook_port = webhook_port

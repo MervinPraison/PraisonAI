@@ -165,6 +165,25 @@ class MessageHookMixin:
         Returns:
             dict with keys ``content`` (possibly modified) and ``cancel`` (bool).
         """
+        # Check for intentional silence first (if enabled)
+        if getattr(self, '_allow_silence', False):
+            try:
+                from praisonaiagents.bots.silence import is_intentional_silence_response, SILENT_REPLY_TOKEN
+                # Check against custom token if configured, otherwise use default
+                custom_token = getattr(self.config, 'silence_token', None) if hasattr(self, 'config') else None
+                if custom_token:
+                    # Exact match for custom token
+                    if content and content.strip() == custom_token:
+                        return {"content": "", "cancel": True, "silent": True}
+                else:
+                    # Use default silence detection
+                    if is_intentional_silence_response(content):
+                        return {"content": "", "cancel": True, "silent": True}
+            except ImportError:
+                # Fallback if core module not available - just check for NO_REPLY
+                if content and content.strip() == "NO_REPLY":
+                    return {"content": "", "cancel": True, "silent": True}
+        
         result: Dict[str, Any] = {"content": content, "cancel": False}
         runner = self._get_hook_runner()
         if runner is None:
