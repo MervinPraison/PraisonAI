@@ -113,13 +113,13 @@ class AgentConfig(BaseModel):
     prompt_template: Optional[str] = Field(default=None, description="Prompt template")
     response_template: Optional[str] = Field(default=None, description="Response template")
     
-    @field_validator('stream')
+    @model_validator(mode='before')
     @classmethod
-    def handle_stream_alias(cls, v, info):
-        """Handle stream as alias for streaming."""
-        if v is not None and 'streaming' not in info.data:
-            return v
-        return info.data.get('streaming', False) if v is None else v
+    def normalize_stream_alias(cls, data):
+        """Map legacy 'stream' into canonical 'streaming'."""
+        if isinstance(data, dict) and 'streaming' not in data and 'stream' in data:
+            data['streaming'] = data['stream']
+        return data
     
     @model_validator(mode='after')
     def normalize_config_objects(self):
@@ -192,6 +192,13 @@ class WorkflowStep(BaseModel):
     @model_validator(mode='after')
     def validate_step_type(self):
         """Validate step configuration based on type."""
+        allowed = {'task', 'parallel', 'loop', 'route'}
+        if self.type not in allowed:
+            raise ValueError(
+                f"Step '{self.name}' has invalid type '{self.type}'. "
+                f"Allowed values: {', '.join(sorted(allowed))}"
+            )
+        
         if self.type == 'task':
             if not self.agent or not self.task:
                 raise ValueError(f"Task step '{self.name}' requires both 'agent' and 'task' fields")
@@ -328,19 +335,21 @@ class YAMLConfig(BaseModel):
         
         # Validate handoff references
         all_roles = set()
+        all_agent_configs = []
         for agents_dict in [self.roles, self.agents]:
             if agents_dict:
+                all_agent_configs.extend(agents_dict.values())
                 for agent_config in agents_dict.values():
                     all_roles.add(agent_config.role)
-                    
-                    # Check handoff targets
-                    if agent_config.handoff and isinstance(agent_config.handoff, HandoffConfig):
-                        for target in agent_config.handoff.to:
-                            if target not in all_roles:
-                                errors.append(
-                                    f"Agent '{agent_config.role}' handoff references undefined role '{target}'. "
-                                    f"Available roles: {', '.join(sorted(all_roles))}"
-                                )
+        
+        for agent_config in all_agent_configs:
+            if agent_config.handoff and isinstance(agent_config.handoff, HandoffConfig):
+                for target in agent_config.handoff.to:
+                    if target not in all_roles:
+                        errors.append(
+                            f"Agent '{agent_config.role}' handoff references undefined role '{target}'. "
+                            f"Available roles: {', '.join(sorted(all_roles))}"
+                        )
         
         return errors
 

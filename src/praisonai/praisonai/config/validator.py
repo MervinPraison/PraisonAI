@@ -97,6 +97,17 @@ class ConfigValidator:
         warnings = []
         file_prefix = f"{file_path}: " if file_path else ""
         
+        if config is None:
+            return ValidationResult(
+                valid=False,
+                errors=[f"{file_prefix}Configuration is empty. Expected a YAML mapping at the root."]
+            )
+        if not isinstance(config, dict):
+            return ValidationResult(
+                valid=False,
+                errors=[f"{file_prefix}Invalid root type '{type(config).__name__}'. Expected a YAML mapping/object."]
+            )
+        
         # Validate against schema
         try:
             yaml_config = YAMLConfig(**config)
@@ -241,7 +252,7 @@ class ConfigValidator:
             'KubernetesTool', 'DockerTool', 'TerraformTool',
         }
         
-        return tool_name in known_optional or tool_name.endswith('Tool')
+        return tool_name in known_optional
     
     def _check_unknown_fields(self, config: Dict[str, Any], file_prefix: str = "") -> List[str]:
         """Check for unknown fields in configuration.

@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Optional
 
 import typer
-from rich import print
 from rich.console import Console
 from rich.table import Table
 
@@ -58,11 +57,23 @@ def validate(
         praisonai validate my-config.yaml --json
     """
     from ...config.validator import ConfigValidator
+    import json as json_module
     
-    # Check if file exists
     file_path = Path(file)
+    
+    # Handle JSON output for missing file
     if not file_path.exists():
-        console.print(f"[red]✗ File not found:[/red] {file}", style="bold")
+        if json_output:
+            output = {
+                "file": str(file_path),
+                "valid": False,
+                "errors": [f"File not found: {file}"],
+                "warnings": [],
+                "strict_mode": strict
+            }
+            sys.stdout.write(json_module.dumps(output, indent=2) + "\n")
+        else:
+            console.print(f"[red]✗ File not found:[/red] {file}", style="bold")
         sys.exit(1)
     
     # Initialize validator
@@ -73,7 +84,6 @@ def validate(
     
     # Output JSON if requested
     if json_output:
-        import json
         output = {
             "file": str(file_path),
             "valid": result.valid,
@@ -81,7 +91,7 @@ def validate(
             "warnings": result.warnings,
             "strict_mode": strict
         }
-        print(json.dumps(output, indent=2))
+        sys.stdout.write(json_module.dumps(output, indent=2) + "\n")
         sys.exit(0 if result.valid else 1)
     
     # Display results
