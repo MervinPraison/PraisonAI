@@ -22,7 +22,6 @@ class OpenAICompatProvider(BaseProvider):
     - POST /v1/chat/completions
     - POST /v1/completions  
     - GET /v1/models
-    - POST /v1/embeddings (if available)
     - POST /v1/tools/invoke (custom)
     """
     
@@ -53,7 +52,7 @@ class OpenAICompatProvider(BaseProvider):
             type=self.provider_type,
             name="OpenAI API Compatibility Layer",
             description="OpenAI API-compatible endpoints for PraisonAI",
-            capabilities=["chat", "completions", "models", "embeddings", "tools"],
+            capabilities=["chat", "completions", "models", "tools"],
         )
     
     def list_endpoints(self, tags: Optional[List[str]] = None) -> List[EndpointInfo]:
@@ -380,7 +379,23 @@ class OpenAICompatProvider(BaseProvider):
             # Simulate streaming by chunking the response
             chunk_id = str(uuid.uuid4())
             
-            # If there are tool calls, send them first
+            # Send initial role chunk (required by OpenAI SDK)
+            initial_chunk = {
+                "id": chunk_id,
+                "object": "chat.completion.chunk",
+                "created": int(time.time()),
+                "model": response.get("model", "gpt-4o-mini"),
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"role": "assistant"},
+                        "finish_reason": None
+                    }
+                ]
+            }
+            yield {"event": "data", "data": initial_chunk}
+            
+            # If there are tool calls, send them next
             if tool_calls:
                 for idx, tool_call in enumerate(tool_calls):
                     tool_chunk = {
@@ -450,6 +465,16 @@ class OpenAICompatProvider(BaseProvider):
     
     def _format_chat_completion_response(self, result) -> Dict[str, Any]:
         """Convert PraisonAI CompletionResult to OpenAI chat completion format."""
+        # Build message dict, only including tool_calls if they exist
+        message = {
+            "role": result.role,
+            "content": result.content,
+        }
+        
+        # Only add tool_calls if they exist (OpenAI schema doesn't allow null)
+        if result.tool_calls:
+            message["tool_calls"] = result.tool_calls
+        
         return {
             "id": result.id or f"chatcmpl-{uuid.uuid4().hex[:8]}",
             "object": "chat.completion",
@@ -458,11 +483,7 @@ class OpenAICompatProvider(BaseProvider):
             "choices": [
                 {
                     "index": 0,
-                    "message": {
-                        "role": result.role,
-                        "content": result.content,
-                        "tool_calls": result.tool_calls,
-                    },
+                    "message": message,
                     "finish_reason": result.finish_reason or "stop",
                 }
             ],
