@@ -28,7 +28,6 @@ from praisonaiagents.gateway import (
 )
 from praisonaiagents.gateway.protocols import (
     ConnectErrorCode,
-    HelloParams,
     HelloResult,
     HelloError,
     GATEWAY_PROTOCOL_VERSION,
@@ -979,13 +978,21 @@ class WebSocketGateway:
                 return
             
             # Parse protocol version from client
-            protocol_info = data.get("protocol", {})
-            if isinstance(protocol_info, dict):
-                client_min = protocol_info.get("min", 1)
-                client_max = protocol_info.get("max", 1)
+            # Support both HelloParams format (protocol_min/max as direct fields)
+            # and legacy format (nested under protocol dict)
+            if "protocol_min" in data or "protocol_max" in data:
+                # HelloParams format
+                client_min = data.get("protocol_min", 1)
+                client_max = data.get("protocol_max", 1)
             else:
-                # Backwards compatibility: treat missing protocol as v1
-                client_min = client_max = 1
+                # Legacy format or missing
+                protocol_info = data.get("protocol", {})
+                if isinstance(protocol_info, dict):
+                    client_min = protocol_info.get("min", 1)
+                    client_max = protocol_info.get("max", 1)
+                else:
+                    # Backwards compatibility: treat missing protocol as v1
+                    client_min = client_max = 1
             
             # Negotiate protocol version
             if client_max < MIN_CLIENT_PROTOCOL_VERSION:
@@ -1020,7 +1027,11 @@ class WebSocketGateway:
             negotiated_version = min(client_max, GATEWAY_PROTOCOL_VERSION)
             
             # Get client capabilities
-            client_caps = data.get("caps", [])
+            # Support both HelloParams format (capabilities) and legacy format (caps)
+            client_caps = data.get("capabilities", data.get("caps", []))
+            # Guard against null/None values
+            if client_caps is None or not isinstance(client_caps, list):
+                client_caps = []
             
             # Resume or create session
             session_id = data.get("session_id")
@@ -1032,20 +1043,43 @@ class WebSocketGateway:
                 since_cursor=since_cursor,
             )
             
+            # Validate session belongs to requested agent
+            if hasattr(session, 'agent_id') and session.agent_id != agent_id:
+                error = HelloError(
+                    code=ConnectErrorCode.AUTH_UNAUTHORIZED,
+                    message="Session does not belong to the requested agent",
+                    next_action="start_new_session"
+                )
+                await self._send_to_client(client_id, {
+                    "type": "hello_error",
+                    "code": error.code.value,
+                    "message": error.message,
+                    "next": error.next_action,
+                })
+                return
+            
+            # Rebind client_id to session for correct routing
+            if hasattr(session, '_client_id'):
+                session._client_id = client_id
+            
             self._client_sessions[client_id] = session.session_id
             
-            # Build features list
+            # Build features list - only advertise implemented features
             features = {
-                "methods": ["message", "abort", "leave"],
+                "methods": ["message", "leave"],  # abort not implemented
                 "events": [
-                    EventType.TOKEN_STREAM.value,
-                    EventType.TOOL_CALL_STREAM.value,
-                    EventType.STREAM_END.value,
                     EventType.MESSAGE.value,
-                    EventType.MESSAGE_ACK.value,
                     EventType.ERROR.value,
                 ],
             }
+            
+            # Add streaming events if client supports streaming
+            if "streaming" in client_caps:
+                features["events"].extend([
+                    EventType.TOKEN_STREAM.value,
+                    EventType.TOOL_CALL_STREAM.value,
+                    EventType.STREAM_END.value,
+                ])
             
             # Add optional features based on client capabilities
             if "presence" in client_caps and hasattr(self, '_presence_tracker') and self._presence_tracker:
@@ -1057,15 +1091,17 @@ class WebSocketGateway:
             
             if "ack" in client_caps and hasattr(self, '_delivery_tracker') and self._delivery_tracker:
                 features["events"].extend([
+                    EventType.MESSAGE_ACK.value,
                     EventType.MESSAGE_NACK.value,
                     EventType.DELIVERY_RETRY.value,
                 ])
             
-            # Build policy limits
+            # Build policy limits - use configured values where available
+            heartbeat_interval = getattr(self.config, 'heartbeat_interval', 30)
             policy = {
-                "max_payload": 1048576,  # 1MB
-                "max_buffered_bytes": 8388608,  # 8MB
-                "heartbeat_ms": 15000,  # 15 seconds
+                "max_payload": getattr(self.config, 'max_payload', 1048576),  # 1MB default
+                "max_buffered_bytes": getattr(self.config, 'max_buffered_bytes', 8388608),  # 8MB default
+                "heartbeat_ms": int(heartbeat_interval * 1000),  # Convert seconds to ms
             }
             
             # Send successful handshake response
