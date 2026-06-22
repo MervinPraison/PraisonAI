@@ -593,7 +593,7 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         learn: Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
         backend: Optional[Any] = None,  # External managed agent backend (e.g., ManagedAgentIntegration)
         cli_backend: Optional[Union[str, Any]] = None,  # CLI backend for delegating turns (e.g., "claude-code") - DEPRECATED
-        runtime: Optional[Union[str, Dict[str, Any], 'AgentRuntimeConfig']] = None,  # Model-scoped runtime configuration
+        runtime: Optional[Union[bool, str, Dict[str, Any], 'AgentRuntimeConfig', 'RuntimeConfig']] = None,  # Model-scoped runtime configuration with capability validation
         interrupt_controller: Optional['InterruptController'] = None,  # G2: Cooperative cancellation
         tool_search: Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']] = False,  # Progressive tool disclosure
         message_steering: Optional[Union[bool, 'MessageSteeringProtocol']] = False,  # Real-time message steering during execution
@@ -699,12 +699,15 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
             cli_backend: **DEPRECATED** CLI backend for delegating full turns. Use 'runtime' parameter instead.
                 This parameter is deprecated in favor of model-scoped runtime configuration.
                 Will emit deprecation warning when used.
-            runtime: Model-scoped runtime configuration for turn delegation. Accepts:
-                - str: Runtime ID ("claude-code", "praisonai") 
-                - Dict[str, Any]: Runtime config {"runtime": "claude-code", "config_overrides": {...}}
-                - AgentRuntimeConfig: Pre-configured runtime instance
+            runtime: Model-scoped runtime configuration with capability validation. Accepts:
+                - bool: False=disabled, True=basic capability validation
+                - str: Runtime ID ("claude-code", "praisonai", "native", "plugin-harness") 
+                - Dict[str, Any]: Runtime config with required_capabilities, preferred_runtime, config_overrides, etc.
+                - AgentRuntimeConfig: Pre-configured runtime instance (model-scoped)
+                - RuntimeConfig: Configuration with capability requirements and preferences
                 - None: Use model-based resolution (default)
-                Enables turn delegation with per-model runtime selection and fail-closed behavior.
+                Combines turn delegation with per-model runtime selection and fail-fast capability
+                validation at config time to catch incompatibilities early.
             tool_search: Progressive tool disclosure configuration. Accepts:
                 - bool: False=disabled (default), True=auto mode
                 - str: Mode ("auto", "on", "off")  
@@ -2121,10 +2124,13 @@ Your Goal: {self.goal}
             )
             self._cli_backend = self._resolve_cli_backend(cli_backend)
         
-        # Runtime Configuration - model-scoped runtime selection
+        # Runtime Configuration - model-scoped runtime selection with capability validation
         self._runtime_config = None
         if runtime is not None:
             self._runtime_config = self._resolve_runtime_config(runtime)
+            # Perform capability validation if enabled
+            if self._runtime_config and hasattr(self._runtime_config, 'validate_on_creation') and self._runtime_config.validate_on_creation:
+                self._validate_runtime_capabilities()
         
         # Runtime resolver for per-turn resolution
         self._runtime_resolver = None  # Will be initialized on first use
@@ -4107,6 +4113,81 @@ Summary:"""
                 instructions=f"You are a {profile} assistant.",
             )
     
+    # -------------------------------------------------------------------------
+    #                     Runtime Capability Management
+    # -------------------------------------------------------------------------
+    
+    def _resolve_runtime_config(self, runtime):
+        """Resolve runtime configuration parameter.
+        
+        Args:
+            runtime: Runtime parameter (bool, str, dict, or RuntimeConfig)
+            
+        Returns:
+            RuntimeConfig instance or None
+        """
+        try:
+            from ..config import resolve_runtime
+            return resolve_runtime(runtime)
+        except ImportError:
+            raise ImportError(
+                "Runtime capability features requested but configuration not available. "
+                "This should not happen in a properly installed praisonaiagents package."
+            )
+    
+    def _validate_runtime_capabilities(self):
+        """Validate that current runtime supports required capabilities.
+        
+        Performs fail-fast validation of runtime capabilities against
+        agent requirements at config/creation time.
+        
+        Raises:
+            CapabilityValidationError: If validation fails
+        """
+        if not self._runtime_config or not self._runtime_config.required_capabilities:
+            return  # No requirements to validate
+        
+        try:
+            from ..runtime import RuntimeCapability, validate_capabilities, get_native_runtime_capabilities
+            
+            # Convert string capability names to enum values
+            required_set = set()
+            for cap in self._runtime_config.required_capabilities:
+                if isinstance(cap, str):
+                    # Convert string to enum value
+                    cap_upper = cap.upper()
+                    if hasattr(RuntimeCapability, cap_upper):
+                        required_set.add(getattr(RuntimeCapability, cap_upper))
+                    else:
+                        raise ValueError(f"Unknown capability: {cap}")
+                else:
+                    # Assume it's already a RuntimeCapability enum
+                    required_set.add(cap)
+            
+            # Get the actual runtime capabilities based on the selected runtime
+            runtime_name = self._runtime_config.preferred_runtime or "native"
+            
+            # Determine which capability matrix to use based on runtime type
+            if runtime_name in ["native", "praisonai"]:
+                runtime_matrix = get_native_runtime_capabilities()
+            elif runtime_name in ["plugin", "harness", "reduced", "plugin-harness", "claude-code"]:
+                # Use reduced capabilities for plugin/harness runtimes
+                from praisonaiagents.runtime.capabilities import get_reduced_harness_capabilities
+                runtime_matrix = get_reduced_harness_capabilities()
+            else:
+                # For unknown runtimes, use reduced capabilities as safe default
+                from praisonaiagents.runtime.capabilities import get_reduced_harness_capabilities
+                runtime_matrix = get_reduced_harness_capabilities()
+            
+            # Perform validation
+            validate_capabilities(runtime_matrix, required_set, runtime_name)
+            
+        except ImportError:
+            raise ImportError(
+                "Runtime capability validation requested but runtime module not available. "
+                "This should not happen in a properly installed praisonaiagents package."
+            )
+    
     def _run_verification_hooks(self) -> List[Dict[str, Any]]:
         """Run all registered verification hooks.
         
@@ -5207,39 +5288,122 @@ Answer:"""
         raise TypeError(f"Invalid cli_backend type: {type(cli_backend)}. Expected CliBackendProtocol instance or factory callable.")
     
     def _resolve_runtime_config(self, runtime):
-        """Resolve runtime parameter to AgentRuntimeConfig instance.
+        """Resolve runtime parameter to AgentRuntimeConfig or RuntimeConfig instance.
         
         Args:
             runtime: Runtime configuration parameter
             
         Returns:
-            AgentRuntimeConfig instance
+            AgentRuntimeConfig or RuntimeConfig instance
             
         Raises:
             TypeError: If runtime type is invalid
             ValueError: If runtime configuration is invalid
         """
+        # Try to import AgentRuntimeConfig (from main's turn-based runtime)
+        AgentRuntimeConfig = None
         try:
             from ..runtime import AgentRuntimeConfig
         except ImportError:
+            pass
+        
+        # Try to import RuntimeConfig (from capability validation system)
+        RuntimeConfig = None
+        try:
+            from ..config.feature_configs import RuntimeConfig, resolve_runtime
+        except ImportError:
+            pass
+        
+        if not AgentRuntimeConfig and not RuntimeConfig:
             raise ImportError(
                 "Runtime configuration features requested but not available. "
                 "This should not happen in a properly installed praisonaiagents package."
             )
         
         # If already an AgentRuntimeConfig instance, return as-is
-        if isinstance(runtime, AgentRuntimeConfig):
+        if AgentRuntimeConfig and isinstance(runtime, AgentRuntimeConfig):
             return runtime
         
-        # If string, create config with runtime ID
-        if isinstance(runtime, str):
-            return AgentRuntimeConfig.from_runtime_id(runtime)
+        # If already a RuntimeConfig instance, return as-is
+        if RuntimeConfig and hasattr(RuntimeConfig, '__name__') and isinstance(runtime, RuntimeConfig):
+            return runtime
         
-        # If dictionary, create config from dict
-        if isinstance(runtime, dict):
-            return AgentRuntimeConfig.from_dict(runtime)
+        # Handle capability validation style (bool, RuntimeConfig)
+        if RuntimeConfig and resolve_runtime:
+            try:
+                result = resolve_runtime(runtime)
+                if result is not None:
+                    return result
+            except (TypeError, ValueError):
+                pass  # Try AgentRuntimeConfig path
         
-        raise TypeError(f"Invalid runtime type: {type(runtime)}. Expected str, dict, or AgentRuntimeConfig instance.")
+        # Handle turn-based style (AgentRuntimeConfig)
+        if AgentRuntimeConfig:
+            # If string, create config with runtime ID
+            if isinstance(runtime, str):
+                if hasattr(AgentRuntimeConfig, 'from_runtime_id'):
+                    return AgentRuntimeConfig.from_runtime_id(runtime)
+            
+            # If dictionary, create config from dict
+            if isinstance(runtime, dict):
+                if hasattr(AgentRuntimeConfig, 'from_dict'):
+                    return AgentRuntimeConfig.from_dict(runtime)
+        
+        raise TypeError(f"Invalid runtime type: {type(runtime)}. Expected bool, str, dict, RuntimeConfig, or AgentRuntimeConfig instance.")
+    
+    def _validate_runtime_capabilities(self):
+        """Validate runtime capabilities against requirements.
+        
+        Raises:
+            CapabilityValidationError: If runtime lacks required capabilities
+        """
+        if not self._runtime_config:
+            return
+        
+        # Import capability validation components
+        try:
+            from ..runtime.capabilities import (
+                RuntimeCapability,
+                validate_capabilities,
+                get_native_runtime_capabilities,
+                get_reduced_harness_capabilities
+            )
+        except ImportError:
+            # Capability validation not available, skip
+            return
+        
+        # Get required capabilities from config
+        required_capabilities = getattr(self._runtime_config, 'required_capabilities', None)
+        if not required_capabilities:
+            return
+        
+        # Convert string capabilities to enum
+        required_set = set()
+        for cap in required_capabilities:
+            if isinstance(cap, str):
+                try:
+                    required_set.add(RuntimeCapability[cap.upper()])
+                except KeyError:
+                    raise ValueError(f"Unknown capability: {cap}")
+            elif isinstance(cap, RuntimeCapability):
+                required_set.add(cap)
+            else:
+                raise TypeError(f"Invalid capability type: {type(cap)}")
+        
+        # Determine runtime name
+        runtime_name = getattr(self._runtime_config, 'preferred_runtime', 'native')
+        
+        # Get runtime capabilities based on runtime type
+        if runtime_name == 'native':
+            runtime_matrix = get_native_runtime_capabilities()
+        elif runtime_name in ('plugin-harness', 'harness', 'plugin', 'reduced'):
+            runtime_matrix = get_reduced_harness_capabilities()
+        else:
+            # Unknown runtime, use reduced capabilities as safe default
+            runtime_matrix = get_reduced_harness_capabilities()
+        
+        # Validate capabilities
+        validate_capabilities(runtime_matrix, required_set, runtime_name)
     
     def _get_runtime_resolver(self):
         """Get or create runtime resolver instance (lazy initialization)."""

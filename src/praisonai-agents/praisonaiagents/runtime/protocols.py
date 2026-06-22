@@ -6,7 +6,8 @@ must implement. These protocols standardize the execution contract
 across different runtime types (native, plugin, managed, etc.).
 
 Includes both turn-context protocols and agent runtime protocols to support
-different execution patterns.
+different execution patterns, along with capability reporting protocols 
+for runtime compatibility validation.
 
 Protocol-driven design following AGENTS.md:
 - Lightweight protocols only (no heavy implementations)
@@ -21,6 +22,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Protocol, runtime_c
 
 if TYPE_CHECKING:
     from .turn_context import PreparedTurnContext, RuntimeMode
+    from .capabilities import RuntimeCapabilityMatrix
     from ..agent.protocols import AgentProtocol
 
 
@@ -121,7 +123,7 @@ class TurnContextBuilderProtocol(Protocol):
         ...
 
 
-# Agent runtime protocols and dataclasses from this branch
+# Agent runtime protocols and dataclasses
 
 @dataclass
 class RuntimeConfig:
@@ -155,14 +157,48 @@ class RuntimeDelta:
 
 @runtime_checkable
 class AgentRuntimeProtocol(Protocol):
-    """Protocol for agent runtime implementations.
-    
-    Any object implementing these methods can serve as an Agent runtime.
-    Follows typing.Protocol pattern from AGENTS.md.
-    
-    This is a simpler contract than CliBackendProtocol, focused on 
-    the minimal interface needed for runtime execution.
     """
+    Protocol that all agent runtime implementations must follow.
+    
+    This protocol defines the interface for different runtime environments:
+    - Native runtime (built-in praisonai runtime)
+    - Plugin harness runtimes (external CLI tools, docker containers)
+    - Managed service runtimes (Anthropic, E2B, Modal, etc.)
+    
+    Combines turn-based execution with capability reporting to enable
+    both runtime execution and compatibility validation.
+    """
+    
+    @property
+    def runtime_name(self) -> str:
+        """
+        Human-readable name of this runtime implementation.
+        
+        Examples: "native", "claude-code", "e2b-managed", "docker-harness"
+        """
+        ...
+    
+    @property 
+    def runtime_version(self) -> str:
+        """
+        Version string of this runtime implementation.
+        
+        Used for compatibility tracking and debugging.
+        """
+        ...
+    
+    def capabilities(self) -> "RuntimeCapabilityMatrix":
+        """
+        Report the capability matrix for this runtime.
+        
+        This is the key method for the capability validation system.
+        Each runtime must honestly declare what features it supports
+        to enable fail-fast validation at config/selection time.
+        
+        Returns:
+            RuntimeCapabilityMatrix with supported capabilities
+        """
+        ...
     
     def supports(self, model_ref: Optional[str] = None) -> bool:
         """Check if this runtime supports the given model reference.
@@ -211,3 +247,71 @@ class AgentRuntimeProtocol(Protocol):
             RuntimeDelta objects with incremental response content
         """
         ...
+    
+    async def execute_agent(
+        self, 
+        agent_config: Dict[str, Any], 
+        prompt: str,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Execute agent with the given configuration and prompt.
+        
+        Args:
+            agent_config: Agent configuration dict
+            prompt: User prompt to process
+            **kwargs: Additional execution parameters
+            
+        Returns:
+            Execution result dict with response, metadata, etc.
+        """
+        ...
+    
+    async def stream_agent(
+        self,
+        agent_config: Dict[str, Any],
+        prompt: str,
+        **kwargs
+    ) -> Any:  # AsyncIterator but avoid import
+        """
+        Execute agent with streaming responses.
+        
+        Only required if runtime declares streaming_deltas capability.
+        
+        Args:
+            agent_config: Agent configuration dict 
+            prompt: User prompt to process
+            **kwargs: Additional execution parameters
+            
+        Yields:
+            Streaming response chunks
+        """
+        ...
+    
+    async def validate_config(
+        self, 
+        agent_config: Dict[str, Any]
+    ) -> List[str]:
+        """
+        Validate agent configuration against runtime capabilities.
+        
+        Args:
+            agent_config: Agent configuration to validate
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        ...
+    
+    async def health_check(self) -> Dict[str, Any]:
+        """
+        Perform runtime health check.
+        
+        Returns:
+            Health status dict with status, latency, errors, etc.
+        """
+        ...
+
+
+# CliBackendProtocol removed - use the canonical definition from cli_backend.protocols instead
+# to avoid duplicate incompatible protocol definitions
