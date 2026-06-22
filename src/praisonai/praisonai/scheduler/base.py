@@ -45,7 +45,7 @@ class PraisonAgentExecutor(ExecutorInterface):
         Initialize executor with a PraisonAI agent.
         
         Args:
-            agent: PraisonAI Agent instance (must have start() method)
+            agent: PraisonAI Agent instance (must have start() or astart() method)
         """
         self.agent = agent
         
