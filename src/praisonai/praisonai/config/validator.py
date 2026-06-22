@@ -273,6 +273,7 @@ class ConfigValidator:
             'input', 'topic', 'tools', 'toolsets',
             'config', 'llm', 'models', 'providers',
             'deploy',  # Deployment configuration
+            'dependencies',  # Task dependency declarations
         }
         
         # Known agent/role fields

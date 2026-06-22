@@ -77,8 +77,9 @@ class AgentConfig(BaseModel):
     instructions: Optional[str] = Field(default=None, description="Additional instructions (alias for backstory)")
     tools: Optional[List[str]] = Field(default=None, description="List of tools the agent can use")
     toolsets: Optional[List[str]] = Field(default=None, description="List of toolsets the agent can use")
-    llm: Optional[str] = Field(default=None, description="LLM model to use")
-    function_calling_llm: Optional[str] = Field(default=None, description="LLM for function calling")
+    llm: Optional[Union[str, Dict[str, Any]]] = Field(default=None, description="LLM model to use (string or dict with 'model' key)")
+    function_calling_llm: Optional[Union[str, Dict[str, Any]]] = Field(default=None, description="LLM for function calling (string or dict with 'model' key)")
+    tasks: Optional[Dict[str, Union[Dict[str, Any], 'TaskConfig']]] = Field(default=None, description="Tasks assigned to this agent")
     
     # Behavior configuration
     allow_delegation: Optional[bool] = Field(default=True, description="Allow delegation to other agents")
@@ -124,6 +125,19 @@ class AgentConfig(BaseModel):
     @model_validator(mode='after')
     def normalize_config_objects(self):
         """Convert dict configs to proper model objects."""
+        # Convert tasks dict to TaskConfig objects
+        if isinstance(self.tasks, dict):
+            normalized_tasks = {}
+            for task_name, task_config in self.tasks.items():
+                if isinstance(task_config, dict):
+                    # Add the agent field if not present (use self.role)
+                    if 'agent' not in task_config:
+                        task_config['agent'] = self.role
+                    normalized_tasks[task_name] = TaskConfig(**task_config)
+                else:
+                    normalized_tasks[task_name] = task_config
+            self.tasks = normalized_tasks
+        
         # Convert tool_retry_policy dict to ToolRetryPolicy
         if isinstance(self.tool_retry_policy, dict):
             self.tool_retry_policy = ToolRetryPolicy(**self.tool_retry_policy)
@@ -382,3 +396,7 @@ class ValidationResult(BaseModel):
                 msg += f"  {i}. {warning}\n"
         
         return msg
+
+
+# Resolve forward references for TaskConfig in AgentConfig
+AgentConfig.model_rebuild()
