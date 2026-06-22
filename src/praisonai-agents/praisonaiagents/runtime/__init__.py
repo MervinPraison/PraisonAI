@@ -23,16 +23,6 @@ Features:
 
 from .._lazy import create_lazy_getattr_with_groups
 
-# Import doctor protocol components directly (not lazy)
-from .doctor_protocol import DoctorContractProtocol, Finding
-from .doctor_registry import (
-    get_default_registry,
-    register_rule,
-    get_rules,
-    collect_findings,
-    apply_fixes
-)
-
 __all__ = [
     # Runtime execution contexts
     'PreparedTurnContext',
@@ -138,6 +128,17 @@ _LAZY_GROUPS = {
         'CapabilityValidationError': ('praisonaiagents.runtime.capabilities', 'CapabilityValidationError'),
         'get_native_runtime_capabilities': ('praisonaiagents.runtime.capabilities', 'get_native_runtime_capabilities'),
         'get_reduced_harness_capabilities': ('praisonaiagents.runtime.capabilities', 'get_reduced_harness_capabilities'),
+    },
+    'doctor_protocol': {
+        'DoctorContractProtocol': ('praisonaiagents.runtime.doctor_protocol', 'DoctorContractProtocol'),
+        'Finding': ('praisonaiagents.runtime.doctor_protocol', 'Finding'),
+    },
+    'doctor_registry': {
+        'get_default_registry': ('praisonaiagents.runtime.doctor_registry', 'get_default_registry'),
+        'register_rule': ('praisonaiagents.runtime.doctor_registry', 'register_rule'),
+        'get_rules': ('praisonaiagents.runtime.doctor_registry', 'get_rules'),
+        'collect_findings': ('praisonaiagents.runtime.doctor_registry', 'collect_findings'),
+        'apply_fixes': ('praisonaiagents.runtime.doctor_registry', 'apply_fixes'),
     },
 }
 
