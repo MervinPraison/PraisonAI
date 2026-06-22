@@ -5,10 +5,10 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 360,
+    "pythonCoreFeatures": 361,
     "rustFeatures": 667,
     "gapCount": 81,
-    "parityPercentage": 185.3
+    "parityPercentage": 184.8
   },
   "pythonCoreSDK": {
     "exports": [
@@ -119,6 +119,7 @@
       "GatewayClientProtocol",
       "GatewayConfig",
       "GatewayEvent",
+      "GatewayEventType",
       "GatewayMessage",
       "GatewayProtocol",
       "GatewaySessionProtocol",
@@ -3549,6 +3550,15 @@
       },
       {
         "feature": "GatewayEvent",
+        "python": true,
+        "rust": true,
+        "priority": "P3",
+        "effort": "high",
+        "status": "DONE",
+        "category": "gateway"
+      },
+      {
+        "feature": "GatewayEventType",
         "python": true,
         "rust": true,
         "priority": "P3",

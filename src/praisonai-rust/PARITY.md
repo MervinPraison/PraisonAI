@@ -1,12 +1,12 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 360 | **Rust Features:** 667 | **Parity:** 79.2%
+> **Python Features:** 361 | **Rust Features:** 667 | **Parity:** 79.2%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 360 |
+| Python Core Features | 361 |
 | Rust Features | 667 |
 | **Actual Gap Count** | **75** |
 | Language Limitations (N/A) | 5 |
