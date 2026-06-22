@@ -26,6 +26,14 @@ from praisonaiagents.gateway import (
     GatewayMessage,
     EventType,
 )
+from praisonaiagents.gateway.protocols import (
+    ConnectErrorCode,
+    HelloParams,
+    HelloResult,
+    HelloError,
+    GATEWAY_PROTOCOL_VERSION,
+    MIN_CLIENT_PROTOCOL_VERSION,
+)
 from praisonaiagents.session.protocols import SessionStoreProtocol
 from praisonaiagents.session.store import DefaultSessionStore
 
@@ -951,7 +959,144 @@ class WebSocketGateway:
         """Handle a message from a client."""
         msg_type = data.get("type", "message")
         
-        if msg_type == "join":
+        # Handle versioned handshake
+        if msg_type == "hello":
+            agent_id = data.get("agent_id")
+            
+            # Check if agent exists
+            if not agent_id or agent_id not in self._agents:
+                error = HelloError(
+                    code=ConnectErrorCode.AGENT_NOT_FOUND,
+                    message=f"Agent not found: {agent_id}",
+                    next_action="check_agent_id"
+                )
+                await self._send_to_client(client_id, {
+                    "type": "hello_error",
+                    "code": error.code.value,
+                    "message": error.message,
+                    "next": error.next_action,
+                })
+                return
+            
+            # Parse protocol version from client
+            protocol_info = data.get("protocol", {})
+            if isinstance(protocol_info, dict):
+                client_min = protocol_info.get("min", 1)
+                client_max = protocol_info.get("max", 1)
+            else:
+                # Backwards compatibility: treat missing protocol as v1
+                client_min = client_max = 1
+            
+            # Negotiate protocol version
+            if client_max < MIN_CLIENT_PROTOCOL_VERSION:
+                error = HelloError(
+                    code=ConnectErrorCode.PROTOCOL_UNSUPPORTED,
+                    message=f"Protocol version {client_max} is too old, minimum required is {MIN_CLIENT_PROTOCOL_VERSION}",
+                    next_action="upgrade_client"
+                )
+                await self._send_to_client(client_id, {
+                    "type": "hello_error",
+                    "code": error.code.value,
+                    "message": error.message,
+                    "next": error.next_action,
+                })
+                return
+            
+            if client_min > GATEWAY_PROTOCOL_VERSION:
+                error = HelloError(
+                    code=ConnectErrorCode.PROTOCOL_UNSUPPORTED,
+                    message=f"Protocol version {client_min} is too new, server supports up to {GATEWAY_PROTOCOL_VERSION}",
+                    next_action="use_older_client"
+                )
+                await self._send_to_client(client_id, {
+                    "type": "hello_error",
+                    "code": error.code.value,
+                    "message": error.message,
+                    "next": error.next_action,
+                })
+                return
+            
+            # Select the highest mutually supported version
+            negotiated_version = min(client_max, GATEWAY_PROTOCOL_VERSION)
+            
+            # Get client capabilities
+            client_caps = data.get("caps", [])
+            
+            # Resume or create session
+            session_id = data.get("session_id")
+            since_cursor = data.get("since")
+            session, replay_events = self.resume_or_create_session(
+                session_id=session_id,
+                agent_id=agent_id,
+                client_id=client_id,
+                since_cursor=since_cursor,
+            )
+            
+            self._client_sessions[client_id] = session.session_id
+            
+            # Build features list
+            features = {
+                "methods": ["message", "abort", "leave"],
+                "events": [
+                    EventType.TOKEN_STREAM.value,
+                    EventType.TOOL_CALL_STREAM.value,
+                    EventType.STREAM_END.value,
+                    EventType.MESSAGE.value,
+                    EventType.MESSAGE_ACK.value,
+                    EventType.ERROR.value,
+                ],
+            }
+            
+            # Add optional features based on client capabilities
+            if "presence" in client_caps and hasattr(self, '_presence_tracker') and self._presence_tracker:
+                features["events"].extend([
+                    EventType.PRESENCE_JOIN.value,
+                    EventType.PRESENCE_LEAVE.value,
+                    EventType.PRESENCE_UPDATE.value,
+                ])
+            
+            if "ack" in client_caps and hasattr(self, '_delivery_tracker') and self._delivery_tracker:
+                features["events"].extend([
+                    EventType.MESSAGE_NACK.value,
+                    EventType.DELIVERY_RETRY.value,
+                ])
+            
+            # Build policy limits
+            policy = {
+                "max_payload": 1048576,  # 1MB
+                "max_buffered_bytes": 8388608,  # 8MB
+                "heartbeat_ms": 15000,  # 15 seconds
+            }
+            
+            # Send successful handshake response
+            result = HelloResult(
+                protocol=negotiated_version,
+                features=features,
+                policy=policy,
+                session_id=session.session_id,
+                resumed=session._was_resumed,
+                cursor=session._event_cursor,
+            )
+            
+            await self._send_to_client(client_id, {
+                "type": "hello_ok",
+                "protocol": result.protocol,
+                "features": result.features,
+                "policy": result.policy,
+                "session_id": result.session_id,
+                "resumed": result.resumed,
+                "cursor": result.cursor,
+            })
+            
+            # Replay missed events if any
+            for event in replay_events:
+                await self._send_to_client(client_id, {
+                    "type": "replay",
+                    "event": event.to_dict(),
+                })
+        
+        # Keep backward compatibility with old join message
+        elif msg_type == "join":
             agent_id = data.get("agent_id")
             if agent_id and agent_id in self._agents:
                 # Support reconnection with existing session
@@ -968,7 +1113,7 @@ class WebSocketGateway:
                 
                 self._client_sessions[client_id] = session.session_id
                 
-                # Send join confirmation
+                # Send join confirmation (old format for backward compatibility)
                 await self._send_to_client(client_id, {
                     "type": "joined",
                     "session_id": session.session_id,
