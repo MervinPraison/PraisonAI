@@ -135,6 +135,60 @@ Your Goal: {self.goal}"""
                 system_prompt += f"\n\n## Available Skills\n{skills_prompt}"
                 system_prompt += "\n\nWhen a skill is relevant to the task, read its SKILL.md file to get detailed instructions. If the skill has scripts in its scripts/ directory, you can execute them using the execute_code or run_script tool."
         
+        # Cache the base system prompt BEFORE adding session context
+        # Session context is per-turn and should not be cached
+        if cache_key:
+            self._cache_put(self._system_prompt_cache, cache_key, system_prompt)
+        
+        # Add session context (platform awareness) if available - AFTER caching
+        try:
+            from ..session.context import get_session_context
+            session_ctx = get_session_context()
+            
+            # Format session context into prompt if origin or targets are present
+            if session_ctx.origin or session_ctx.reachable_targets:
+                context_parts = []
+                
+                # Add origin information
+                if session_ctx.origin:
+                    origin = session_ctx.origin
+                    origin_str = f"You are replying on {origin.platform}"
+                    if origin.chat_type and origin.chat_type != "unknown":
+                        origin_str += f" ({origin.chat_type}"
+                        if origin.display_name:
+                            origin_str += f' "{origin.display_name}"'
+                        origin_str += ")"
+                    if origin.thread_id:
+                        origin_str += f" in thread {origin.thread_id}"
+                    context_parts.append(origin_str + ".")
+                
+                # Add reachable targets
+                if session_ctx.reachable_targets:
+                    target_descriptions = []
+                    for target in session_ctx.reachable_targets:
+                        desc = f"{target.name}"
+                        if target.kind == "home":
+                            desc += f" ({target.platform}, home channel)"
+                        elif target.kind == "alias":
+                            desc += f" ({target.platform}:{target.channel_id})"
+                        target_descriptions.append(desc)
+                    
+                    if target_descriptions:
+                        context_parts.append(
+                            f"Reachable delivery targets: {', '.join(target_descriptions)}."
+                        )
+                
+                if context_parts:
+                    system_prompt += "\n\n## Session Context\n" + "\n".join(context_parts)
+        except ImportError:
+            # Session context module not available, continue without it
+            pass
+        except Exception as e:
+            # Log unexpected errors but continue
+            import logging
+            logging.debug(f"Session context injection failed: {e}", exc_info=True)
+            pass
+        
         # Add tool usage instructions if tools are available
         # Use provided tools or fall back to self.tools
         tools_to_use = tools if tools is not None else self.tools
@@ -174,10 +228,7 @@ Your Goal: {self.goal}"""
         except ImportError:
             pass  # Trust module not available, skip security instructions
         
-        # Cache the generated system prompt (only if cache_key is set, i.e., memory not enabled)
-        # Use LRU eviction to prevent unbounded growth
-        if cache_key:
-            self._cache_put(self._system_prompt_cache, cache_key, system_prompt)
+        # Note: Caching is done BEFORE session context injection to avoid cross-user leakage
         return system_prompt
 
     def _build_response_format(self, schema_model):

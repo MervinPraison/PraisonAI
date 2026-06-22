@@ -77,6 +77,8 @@ class BotSessionManager:
         run_control: Optional[Any] = None,
         run_timeout: float = 300.0,  # 5 minutes default timeout
         reset_policy: Optional[SessionResetPolicy] = None,
+        channel_directory: Optional[Any] = None,
+        inject_session_context: bool = True,
     ) -> None:
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
         self._locks = LockMap()
@@ -98,6 +100,9 @@ class BotSessionManager:
         # When set, messages are journaled before agent processing for
         # crash recovery and webhook redelivery protection.
         self._ingress_journal = ingress_journal
+        # Platform awareness: channel directory and injection flag
+        self._channel_directory = channel_directory
+        self._inject_session_context = inject_session_context
         self._last_journal_key = None  # Store key for delayed completion
         # Run control for in-flight message handling
         self._run_control = run_control
@@ -269,7 +274,38 @@ class BotSessionManager:
             from praisonaiagents.session.context import (
                 set_session_context as _set_ctx,
                 clear_session_context as _clear_ctx,
+                Origin,
+                ReachableTarget,
             )
+            
+            # Build enriched context if platform awareness is enabled
+            origin = None
+            reachable_targets = None
+            
+            if self._inject_session_context:
+                # Detect chat type and build origin
+                from .delivery import detect_chat_type
+                chat_type = detect_chat_type(self._platform, chat_id)
+                origin = Origin(
+                    platform=self._platform,
+                    chat_type=chat_type,
+                    display_name=chat_id,  # Use chat_id as display_name since chat_name is not available
+                    thread_id=thread_id,
+                )
+                
+                # Get reachable targets from channel directory
+                if self._channel_directory:
+                    targets_data = self._channel_directory.describe_targets()
+                    reachable_targets = [
+                        ReachableTarget(
+                            name=t['name'],
+                            platform=t['platform'],
+                            channel_id=t['channel_id'],
+                            kind=t['kind'],
+                        )
+                        for t in targets_data
+                    ]
+            
             ctx_token = _set_ctx(
                 platform=self._platform,
                 chat_id=chat_id,
@@ -277,6 +313,8 @@ class BotSessionManager:
                 user_id=user_id,
                 user_name=user_name,
                 unified_user_id=self._storage_key(user_id),
+                origin=origin,
+                reachable_targets=reachable_targets,
             )
         except Exception:  # pragma: no cover — defensive
             _clear_ctx = None  # type: ignore[assignment]
