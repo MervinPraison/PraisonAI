@@ -118,6 +118,11 @@ class FrameworkAdapter(Protocol):
             The resolved FrameworkAdapter instance (may be self or another adapter)
         """
         return self
+    
+    def resolve_alias(self) -> str:
+        """Return the concrete adapter name to dispatch to (e.g. 'autogen_v4').
+        Default: return self.name."""
+        ...
 
 
 class BaseFrameworkAdapter:
@@ -200,6 +205,11 @@ class BaseFrameworkAdapter:
     def cleanup(self) -> None:
         """Clean up resources - default implementation does nothing."""
         pass
+    
+    def resolve_alias(self) -> str:
+        """Return the concrete adapter name to dispatch to.
+        Default: return self.name."""
+        return self.name
 
 
 @contextmanager
