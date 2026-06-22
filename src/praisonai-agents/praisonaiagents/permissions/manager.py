@@ -364,3 +364,71 @@ class PermissionManager:
             self._approvals = [PersistentApproval.from_dict(a) for a in data.get("approvals", [])]
             if "agent_name" in data:
                 self.agent_name = data["agent_name"]
+    
+    def load_rules_from_config(self, permissions_config: Dict[str, Any], priority_base: int = 50, persist: bool = False):
+        """
+        Load permission rules from configuration (YAML/CLI/Python).
+        
+        Args:
+            permissions_config: Dictionary mapping patterns to actions or detailed configs
+                               e.g., {"read:*": "allow", "bash:rm *": {"action": "deny", "description": "..."}}
+            priority_base: Base priority for these rules (default: 50, between default and user rules)
+            persist: Whether to persist these rules to disk (default: False for ephemeral CI/YAML rules)
+        """
+        if not permissions_config:
+            return
+        
+        with self._lock:
+            incoming_rules = []
+            
+            for pattern, config in permissions_config.items():
+                try:
+                    if isinstance(config, str):
+                        # Simple format: pattern -> action
+                        rule = PermissionRule.from_config(pattern, config, priority=priority_base)
+                    elif isinstance(config, dict):
+                        # Detailed format: pattern -> {action, description, ...}
+                        action = config.get("action", "ask")
+                        rule = PermissionRule.from_config(
+                            pattern,
+                            action,
+                            description=config.get("description"),
+                            is_regex=config.get("is_regex", False),
+                            priority=config.get("priority", priority_base),
+                            agent_name=config.get("agent_name"),
+                            enabled=config.get("enabled", True),
+                        )
+                    else:
+                        logger.warning(
+                            "Invalid permission config for pattern '%s': %r. "
+                            "Use 'allow|deny|ask' or {action, description, is_regex, priority, agent_name, enabled}.",
+                            pattern,
+                            config,
+                        )
+                        continue
+                except (TypeError, ValueError) as e:
+                    logger.warning(
+                        "Skipping invalid permission rule for pattern '%s': %s. "
+                        "Valid actions are: allow, deny, ask.",
+                        pattern,
+                        e,
+                    )
+                    continue
+                    
+                incoming_rules.append(rule)
+            
+            # Remove existing rules with same pattern to avoid duplicates
+            # (pattern, agent_name, is_regex) uniquely identifies a rule for matching
+            incoming_keys = {(r.pattern, r.agent_name, r.is_regex) for r in incoming_rules}
+            self._rules = [
+                r for r in self._rules
+                if (r.pattern, r.agent_name, r.is_regex) not in incoming_keys
+            ]
+            self._rules.extend(incoming_rules)
+            
+            # Re-sort by priority
+            self._rules.sort(key=lambda r: r.priority, reverse=True)
+            
+            # Only persist if explicitly requested (not for ephemeral CI/YAML rules)
+            if persist:
+                self._save_rules()

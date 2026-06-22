@@ -1895,20 +1895,24 @@ Your Goal: {self.goal}
                 self._approval_backend = None
                 self._approve_all_tools = False
                 self._approval_timeout = 0
+                self._approval_permissions = None
             else:
                 # Unknown string — treat as no approval
                 self._approval_backend = None
                 self._approve_all_tools = False
                 self._approval_timeout = 0
+                self._approval_permissions = None
         elif approval is True:
             from ..approval.backends import AutoApproveBackend
             self._approval_backend = AutoApproveBackend()
             self._approve_all_tools = False
             self._approval_timeout = 0  # 0 = use backend default
+            self._approval_permissions = None
         elif approval is False or approval is None:
             self._approval_backend = None
             self._approve_all_tools = False
             self._approval_timeout = 0
+            self._approval_permissions = None
             # No explicit approval kwarg — honour PRAISONAI_TOOL_SAFETY.
             # Default preset "default" blocks only destructive ops
             # (delete_*, execute_command, execute_code, kill_process, move/copy)
@@ -1938,17 +1942,21 @@ Your Goal: {self.goal}
             self._approval_backend = approval.backend
             self._approve_all_tools = approval.all_tools
             self._approval_timeout = approval.timeout  # None = indefinite, 0 = backend default
+            # Store permissions if provided (for CI-safe declarative policies)
+            self._approval_permissions = getattr(approval, 'permissions', None)
         elif isinstance(approval, dict):
             # Dict config: convert to ApprovalConfig
             approval_config = ApprovalConfig(**approval)
             self._approval_backend = approval_config.backend
             self._approve_all_tools = approval_config.all_tools
             self._approval_timeout = approval_config.timeout
+            self._approval_permissions = getattr(approval_config, 'permissions', None)
         else:
             # Plain backend object — dangerous tools only, backend default timeout
             self._approval_backend = approval
             self._approve_all_tools = False
             self._approval_timeout = 0
+            self._approval_permissions = None
         
         # Per-agent autonomy→approval bridge (G-BRIDGE-1 fix)
         # If autonomy level is full_auto and no explicit approval was set,
