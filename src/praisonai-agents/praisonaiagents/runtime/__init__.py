@@ -41,6 +41,7 @@ __all__ = [
     "get_middleware",
     # Agent runtime APIs
     'AgentRuntimeProtocol',
+    'StreamingRuntimeProtocol',
     'RuntimeConfig', 
     'RuntimeResult',
     'RuntimeDelta',
@@ -69,6 +70,7 @@ _LAZY_GROUPS = {
         'TurnRuntimeProtocol': ('praisonaiagents.runtime.protocols', 'TurnRuntimeProtocol'),
         'TurnContextBuilderProtocol': ('praisonaiagents.runtime.protocols', 'TurnContextBuilderProtocol'),
         'AgentRuntimeProtocol': ('praisonaiagents.runtime.protocols', 'AgentRuntimeProtocol'),
+        'StreamingRuntimeProtocol': ('praisonaiagents.runtime.protocols', 'StreamingRuntimeProtocol'),
         'RuntimeConfig': ('praisonaiagents.runtime.protocols', 'RuntimeConfig'),
         'RuntimeResult': ('praisonaiagents.runtime.protocols', 'RuntimeResult'),
         'RuntimeDelta': ('praisonaiagents.runtime.protocols', 'RuntimeDelta'),

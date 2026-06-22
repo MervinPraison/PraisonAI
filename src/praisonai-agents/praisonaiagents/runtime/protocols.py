@@ -211,3 +211,52 @@ class AgentRuntimeProtocol(Protocol):
             RuntimeDelta objects with incremental response content
         """
         ...
+
+
+@runtime_checkable
+class StreamingRuntimeProtocol(Protocol):
+    """Extended protocol for runtimes with enhanced streaming capabilities.
+    
+    Optional protocol that runtimes can implement to indicate support for
+    true incremental streaming. This will be the migration path when the
+    underlying Agent implementation adds AsyncIterator support.
+    
+    Example:
+        ```python
+        # Check if runtime supports enhanced streaming
+        if isinstance(runtime, StreamingRuntimeProtocol):
+            if runtime.supports_incremental_streaming():
+                # Use enhanced streaming
+                async for delta in runtime.stream_turn_incremental(prompt):
+                    process_delta(delta)
+        ```
+    """
+    
+    def supports_incremental_streaming(self) -> bool:
+        """Check if this runtime supports true incremental streaming.
+        
+        Returns:
+            True if the runtime can stream incremental deltas,
+            False if it only supports single-delta responses
+        """
+        ...
+    
+    async def stream_turn_incremental(
+        self,
+        prompt: str,
+        **kwargs
+    ) -> AsyncIterator[RuntimeDelta]:
+        """Stream true incremental response deltas.
+        
+        This method will be called when true streaming is available.
+        Unlike the base stream_turn which may return a single delta,
+        this guarantees incremental streaming of response chunks.
+        
+        Args:
+            prompt: User prompt/query
+            **kwargs: Additional options (system_prompt, model_ref, etc.)
+            
+        Yields:
+            RuntimeDelta objects with incremental response chunks
+        """
+        ...

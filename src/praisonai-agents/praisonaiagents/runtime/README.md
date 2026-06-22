@@ -88,6 +88,16 @@ The `praisonai` runtime is the default built-in runtime that wraps the existing 
 - Provides backward compatibility
 - Handles streaming and non-streaming execution
 
+##### Streaming Limitations
+
+**Important Note**: The current `Agent.achat()` implementation does not support true async streaming. When called with `stream=True`, it returns a complete string response rather than an `AsyncIterator`. As a result:
+
+- The `stream_turn()` method returns the full response as a single delta
+- True incremental streaming is not yet available
+- This is a known limitation of the underlying Agent implementation
+
+This limitation will be addressed in future versions when the Agent class is updated to support true async streaming with `AsyncIterator` returns.
+
 #### Protocol Compliance
 
 All runtimes must implement `AgentRuntimeProtocol`:
@@ -136,6 +146,38 @@ runtimes = list_runtimes()
 # Check availability
 if is_runtime_available("my-runtime"):
     runtime = resolve_runtime("my-runtime")
+```
+
+#### Enhanced Streaming Protocol (Future)
+
+For runtimes that support true incremental streaming, an optional extended protocol is available:
+
+```python
+from praisonaiagents.runtime import StreamingRuntimeProtocol
+
+class MyStreamingRuntime:
+    def supports_incremental_streaming(self) -> bool:
+        """Indicate true streaming support."""
+        return True
+    
+    async def stream_turn_incremental(self, prompt: str, **kwargs):
+        """Yield true incremental deltas."""
+        for chunk in await self.get_streaming_chunks(prompt):
+            yield RuntimeDelta(type="text", content=chunk)
+```
+
+Consumers can check for enhanced streaming support:
+
+```python
+if isinstance(runtime, StreamingRuntimeProtocol):
+    if runtime.supports_incremental_streaming():
+        # Use enhanced streaming
+        async for delta in runtime.stream_turn_incremental(prompt):
+            print(delta.content, end="", flush=True)
+    else:
+        # Fall back to single-delta streaming
+        async for delta in runtime.stream_turn(prompt):
+            print(delta.content)
 ```
 
 #### Error Handling
@@ -330,6 +372,28 @@ def normalize(self, result, tool_name, ctx):
 - **Error Isolation**: Middleware failures don't break tool execution - they log warnings and continue
 - **Thread Safety**: The registry is thread-safe for concurrent agent execution
 
+## Example Implementations
+
+The module includes example runtime implementations in `examples.py`:
+
+- **MockRuntime**: Returns predefined responses for testing
+- **EchoRuntime**: Echoes back user input for debugging
+- **DelayedStreamingRuntime**: Demonstrates incremental streaming capabilities
+
+```python
+from praisonaiagents.runtime.examples import MockRuntime, EchoRuntime
+
+# Use mock runtime for testing
+mock = MockRuntime(response="Test response")
+result = await mock.run_turn("Any prompt")
+assert result.content == "Test response"
+
+# Use echo runtime for debugging
+echo = EchoRuntime()
+result = await echo.run_turn("Hello")
+assert result.content == "Echo: Hello"
+```
+
 ## Testing
 
 The runtime system includes comprehensive tests:
@@ -343,7 +407,7 @@ The runtime system includes comprehensive tests:
 Run tests with:
 
 ```bash
-pytest praisonaiagents/runtime/tests/
+pytest tests/unit/runtime/
 ```
 
 Use the provided test utilities to verify your middleware:
