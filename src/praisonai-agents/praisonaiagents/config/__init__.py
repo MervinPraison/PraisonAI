@@ -41,6 +41,7 @@ __all__ = [
     "HooksConfig",
     "SkillsConfig",
     "ToolSearchConfig",
+    "RuntimeConfig",
     # Type aliases
     "MemoryParam",
     "KnowledgeParam",
@@ -48,6 +49,7 @@ __all__ = [
     "ReflectionParam",
     "GuardrailParam",
     "WebParam",
+    "RuntimeParam",
     # Resolver
     "resolve",
     "ArrayMode",
@@ -65,6 +67,7 @@ __all__ = [
     "resolve_hooks",
     "resolve_skills",
     "resolve_routing",
+    "resolve_runtime",
     # Parse utilities
     "detect_url_scheme",
     "is_path_like",
@@ -126,12 +129,14 @@ _MODULE_MAP = {
     "HooksConfig": "feature_configs",
     "SkillsConfig": "feature_configs",
     "ToolSearchConfig": "feature_configs",
+    "RuntimeConfig": "feature_configs",
     "MemoryParam": "feature_configs",
     "KnowledgeParam": "feature_configs",
     "PlanningParam": "feature_configs",
     "ReflectionParam": "feature_configs",
     "GuardrailParam": "feature_configs",
     "WebParam": "feature_configs",
+    "RuntimeParam": "feature_configs",
     # param_resolver
     "resolve": "param_resolver",
     "ArrayMode": "param_resolver",
@@ -148,6 +153,7 @@ _MODULE_MAP = {
     "resolve_hooks": "param_resolver",
     "resolve_skills": "param_resolver",
     "resolve_routing": "param_resolver",
+    "resolve_runtime": "feature_configs",
     # parse_utils
     "detect_url_scheme": "parse_utils",
     "is_path_like": "parse_utils",

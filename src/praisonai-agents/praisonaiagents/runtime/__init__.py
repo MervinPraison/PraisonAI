@@ -1,8 +1,8 @@
 """ 
-Runtime execution components for PraisonAI agents.
+Runtime execution components and capability system for PraisonAI agents.
 
-This module provides runtime execution abstractions and protocols for 
-standardizing agent execution across different harness types.
+This module provides runtime execution abstractions, protocols, and capability
+validation for standardizing agent execution across different harness types.
 
 Key Components:
 - Runtime execution contexts: PreparedTurnContext, TurnRuntimeProtocol  
@@ -10,6 +10,15 @@ Key Components:
 - Tool result middleware: RuntimeToolResultMiddleware, NormalizedToolResult
 - Registry patterns for runtime resolution and middleware management
 - Doctor migration protocol: DoctorContractProtocol for config migration
+- Capability validation: RuntimeCapability, RuntimeCapabilityMatrix, validate_capabilities
+- Runtime protocols: AgentRuntimeProtocol for capability reporting
+
+Features:
+- Turn-based runtime execution with PreparedTurnContext
+- RuntimeCapability flags for feature detection
+- RuntimeCapabilityMatrix for runtime capability sets
+- Capability validation at runtime selection time
+- Support for native, plugin harness, and managed runtimes
 """
 
 from .._lazy import create_lazy_getattr_with_groups
@@ -67,6 +76,15 @@ __all__ = [
     "get_rules",
     "collect_findings",
     "apply_fixes",
+    # Capability types
+    "RuntimeCapability",
+    "RuntimeCapabilityMatrix",
+    # Validation
+    "validate_capabilities",
+    "CapabilityValidationError",
+    # Built-in runtimes
+    "get_native_runtime_capabilities",
+    "get_reduced_harness_capabilities",
 ]
 
 # Grouped lazy imports for efficient loading
@@ -112,6 +130,14 @@ _LAZY_GROUPS = {
         'register_runtime': ('praisonaiagents.runtime.registry', 'register_runtime'),
         'list_runtimes': ('praisonaiagents.runtime.registry', 'list_runtimes'),
         'resolve_runtime': ('praisonaiagents.runtime.registry', 'resolve_runtime'),
+    },
+    'capabilities': {
+        'RuntimeCapability': ('praisonaiagents.runtime.capabilities', 'RuntimeCapability'),
+        'RuntimeCapabilityMatrix': ('praisonaiagents.runtime.capabilities', 'RuntimeCapabilityMatrix'),
+        'validate_capabilities': ('praisonaiagents.runtime.capabilities', 'validate_capabilities'),
+        'CapabilityValidationError': ('praisonaiagents.runtime.capabilities', 'CapabilityValidationError'),
+        'get_native_runtime_capabilities': ('praisonaiagents.runtime.capabilities', 'get_native_runtime_capabilities'),
+        'get_reduced_harness_capabilities': ('praisonaiagents.runtime.capabilities', 'get_reduced_harness_capabilities'),
     },
 }
 
