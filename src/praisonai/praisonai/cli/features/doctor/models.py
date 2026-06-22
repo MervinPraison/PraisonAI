@@ -36,7 +36,6 @@ class CheckCategory(Enum):
     RUNTIME = "runtime"
     SELFTEST = "selftest"
     BOTS = "bots"
-    RUNTIME = "runtime"
 
 
 class CheckSeverity(Enum):
