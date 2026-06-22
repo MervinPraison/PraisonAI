@@ -147,6 +147,8 @@ class ChannelConfigSchema(BaseModel):
     app_token: Optional[str] = None  # For Slack Socket Mode
     mode: str = "poll"  # poll | ws | webhook | hybrid
     group_policy: str = "mention_only"  # Default to secure: respond_all, mention_only, command_only
+    allow_silence: bool = False  # Allow agent to return NO_REPLY to stay silent
+    silence_token: Optional[str] = None  # Custom silence token (defaults to NO_REPLY)
     allowlist: List[str] = Field(default_factory=list)
     blocklist: List[str] = Field(default_factory=list)
     allowed_users: List[str] = Field(default_factory=list)  # Changed to List for consistency

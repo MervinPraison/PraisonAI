@@ -90,6 +90,9 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
         self._agent = agent
         self.config = config or BotConfig(token=token)
         
+        # Initialize allow_silence from config
+        self._allow_silence = getattr(self.config, 'allow_silence', False)
+        
         self._is_running = False
         self._bot_user: Optional[BotUser] = None
         self._app = None
@@ -375,6 +378,12 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                         account=self._config.get("account", "default"),
                     )
                     logger.info(f"Response sent: {response[:100]}...")
+                    
+                    # Check for silence
+                    send_result = self.fire_message_sending(event.get("channel", ""), str(response))
+                    if send_result.get("cancel"):
+                        return
+                    response = send_result.get("content", response)
                     
                     # Determine if we should reply in thread
                     thread_ts = None

@@ -145,6 +145,9 @@ def bot_telegram(
     stt_model: Optional[str] = typer.Option(None, "--stt-model", help="STT model (default: openai/whisper-1)"),
     stream: bool = typer.Option(False, "--stream", help="Enable progressive streaming responses (edit messages live)"),
     stream_edit_interval: int = typer.Option(700, "--stream-edit-interval", help="Minimum interval between message edits in milliseconds"),
+    group_policy: str = typer.Option("mention_only", "--group-policy", help="Group behavior: respond_all, mention_only, command_only"),
+    allow_silence: bool = typer.Option(False, "--allow-silence", help="Allow agent to return NO_REPLY to stay silent"),
+    silence_token: Optional[str] = typer.Option(None, "--silence-token", help="Custom silence token (default: NO_REPLY)"),
 ):
     """Start a Telegram bot with full agent capabilities.
     
@@ -181,6 +184,9 @@ def bot_telegram(
         stt_model=stt_model,
         stream=stream,
         stream_edit_interval=stream_edit_interval,
+        group_policy=group_policy,
+        allow_silence=allow_silence,
+        silence_token=silence_token,
         session_id=session_id,
         user_id=user_id,
     )
@@ -218,6 +224,9 @@ def bot_discord(
     auto_tts: bool = typer.Option(False, "--auto-tts", help="Auto-convert all responses to speech"),
     stt: bool = typer.Option(False, "--stt", help="Enable STT tool for speech-to-text"),
     stt_model: Optional[str] = typer.Option(None, "--stt-model", help="STT model (default: openai/whisper-1)"),
+    group_policy: str = typer.Option("mention_only", "--group-policy", help="Group behavior: respond_all, mention_only, command_only"),
+    allow_silence: bool = typer.Option(False, "--allow-silence", help="Allow agent to return NO_REPLY to stay silent"),
+    silence_token: Optional[str] = typer.Option(None, "--silence-token", help="Custom silence token (default: NO_REPLY)"),
 ):
     """Start a Discord bot with full agent capabilities.
     
@@ -252,6 +261,9 @@ def bot_discord(
         auto_tts=auto_tts,
         stt=stt,
         stt_model=stt_model,
+        group_policy=group_policy,
+        allow_silence=allow_silence,
+        silence_token=silence_token,
         session_id=session_id,
         user_id=user_id,
     )

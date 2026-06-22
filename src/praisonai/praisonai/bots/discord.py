@@ -79,6 +79,9 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
         self._agent = agent
         self.config = config or BotConfig(token=token)
         
+        # Initialize allow_silence from config
+        self._allow_silence = getattr(self.config, 'allow_silence', False)
+        
         self._is_running = False
         self._bot_user: Optional[BotUser] = None
         self._client = None

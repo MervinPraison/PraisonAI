@@ -117,6 +117,10 @@ class BotConfig:
     
     # Edit interval for streaming responses in milliseconds (default: 700ms)
     stream_edit_interval_ms: int = 700
+    
+    # Intentional silence support
+    allow_silence: bool = False
+    silence_token: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.unknown_user_policy not in {"deny", "pair", "allow"}:
@@ -161,6 +165,8 @@ class BotConfig:
             "owner_user_id": "***" if self.owner_user_id else None,
             "streaming": self.streaming,
             "stream_edit_interval_ms": self.stream_edit_interval_ms,
+            "allow_silence": self.allow_silence,
+            "silence_token": self.silence_token,
             "metadata": self.metadata,
         }
     
