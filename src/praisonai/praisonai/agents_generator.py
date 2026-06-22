@@ -238,6 +238,11 @@ class AgentsGenerator:
         # Defer framework adapter creation until YAML is loaded
         # This fixes the issue where empty framework string fails before YAML framework is read
         self.framework_adapter = None
+        
+        # Only autogen-family adapters need the autogen tool shim
+        # Note: autogen_v2 is also part of the autogen family
+        if framework and framework in {"autogen", "autogen_v2", "autogen_v4", "ag2"}:
+            self.tool_registry.register_builtin_autogen_adapters()
 
     def _get_framework_adapter(self, framework: str) -> FrameworkAdapter:
         """

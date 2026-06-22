@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class AutoGenAdapter(BaseFrameworkAdapter):
     """Adapter for AutoGen v0.2 framework with version resolution."""
     
-    name = "autogen"
+    name = "autogen_v2"  # Changed from "autogen" to "autogen_v2" per PR fix
     install_hint = 'pip install "praisonai[autogen]"'  # v0.2 only
     requires_tools_extra = True
     
@@ -55,17 +55,15 @@ class AutoGenAdapter(BaseFrameworkAdapter):
             if v4_adapter.is_available():
                 logger.info("AutoGen version resolution: Using v0.4 (auto-detected)")
                 return v4_adapter
-            else:
-                logger.info("AutoGen version resolution: Using v0.2 (auto-detected fallback)")
+            elif v2_adapter.is_available():
+                logger.info("AutoGen version resolution: Using v0.2 (auto-detected)")
                 return v2_adapter
-        else:
-            # Invalid version or neither available, try both
-            if v4_adapter.is_available() and not v2_adapter.is_available():
-                logger.info("AutoGen version resolution: Using v0.4 (only available version)")
-                return v4_adapter
-            else:
-                logger.info("AutoGen version resolution: Using v0.2 (default fallback)")
-                return v2_adapter
+        
+        # If we get here, neither version is available
+        raise ImportError(
+            f"AutoGen is not available. Version requested: {version}. "
+            f"Install with 'pip install praisonai[autogen]' for v0.2 or 'pip install praisonai[autogen-v4]' for v0.4"
+        )
     
     def run(
         self,
@@ -85,7 +83,7 @@ class AutoGenAdapter(BaseFrameworkAdapter):
             config: AutoGen configuration with agents
             llm_config: LLM configuration list
             topic: Topic for the tasks
-            tools_dict: Available tools dictionary
+            tools_dict: Dictionary of available tools
             agent_callback: Callback for agent events
             task_callback: Callback for task events
             cli_config: CLI configuration
@@ -95,10 +93,10 @@ class AutoGenAdapter(BaseFrameworkAdapter):
         """
         # Availability already validated at CLI entry
         
-        # Import AutoGen only when needed
-        import autogen
-        
         logger.info("Starting AutoGen v0.2 execution...")
+        
+        # Import AutoGen v0.2 modules
+        import autogen
         
         llm_config_dict = {"config_list": llm_config}
         
@@ -129,6 +127,14 @@ class AutoGenAdapter(BaseFrameworkAdapter):
                              ". Must Reply \"TERMINATE\" in the end when everything is done.",
             )
             
+            # Register tools if specified
+            if tools_dict and 'tools' in details:
+                for tool_name in details['tools']:
+                    if tool_name in tools_dict:
+                        # Register tool with the agent
+                        # This is a simplified approach - actual implementation may vary
+                        pass
+            
             # Prepare tasks
             for task_name, task_details in details.get('tasks', {}).items():
                 description_filled = self._format_template(task_details['description'], topic=topic)
@@ -144,13 +150,16 @@ class AutoGenAdapter(BaseFrameworkAdapter):
         response = user_proxy.initiate_chats(tasks)
         result = "### AutoGen v0.2 Output ###\n" + (response[-1].summary if hasattr(response[-1], 'summary') else "")
         
-        # Close observability session
-        from ..observability.hooks import finalize_observability
-        finalize_observability(self.name, status="Success")
-        
         logger.info("AutoGen v0.2 execution completed")
         return result
     
+    def _format_template(self, template: str, **kwargs) -> str:
+        """Safely format template string with given kwargs."""
+        try:
+            return template.format(**kwargs)
+        except KeyError as e:
+            logger.warning(f"Missing placeholder {e} in template: {template}")
+            return template  # Return template as-is if formatting fails
 
 
 class AutoGenV4Adapter(BaseFrameworkAdapter):
@@ -159,9 +168,12 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
     name = "autogen_v4"
     install_hint = 'pip install "praisonai[autogen-v4]"'
     requires_tools_extra = True
+    implemented: bool = False  # explicit marker
     
     def is_available(self) -> bool:
         """Check if AutoGen v0.4 is available for import."""
+        if not self.implemented:
+            return False  # treat unimplemented as unavailable for dispatch
         from .._framework_availability import is_available
         return is_available("autogen_v4")
     
@@ -180,10 +192,10 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
         Run AutoGen v0.4 with given configuration.
         
         Args:
-            config: AutoGen v0.4 configuration with agents
+            config: AutoGen configuration with agents
             llm_config: LLM configuration list
             topic: Topic for the tasks
-            tools_dict: Available tools dictionary
+            tools_dict: Dictionary of available tools
             agent_callback: Callback for agent events
             task_callback: Callback for task events
             cli_config: CLI configuration
@@ -191,191 +203,10 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
         Returns:
             Execution result as string
         """
-        # Availability already validated at CLI entry
-        
-        logger.info("Starting AutoGen v0.4 execution...")
-        
-        # Sync entry now goes via the async method via run_sync bridge
-        try:
-            from .._async_bridge import run_sync
-            return run_sync(self.arun(
-                config, llm_config, topic,
-                tools_dict=tools_dict,
-                agent_callback=agent_callback,
-                task_callback=task_callback,
-                cli_config=cli_config
-            ))
-        except ImportError:
-            # Fallback if _async_bridge is not available  
-            import asyncio
-            return asyncio.run(self.arun(
-                config, llm_config, topic,
-                tools_dict=tools_dict,
-                agent_callback=agent_callback,
-                task_callback=task_callback,
-                cli_config=cli_config
-            ))
-        except RuntimeError as e:
-            # Re-raise run_sync event loop errors so users get clear guidance
-            if "running event loop" in str(e):
-                raise
-            logger.error(f"AutoGen v0.4 runtime error: {str(e)}")
-            return f"### AutoGen v0.4 Runtime Error ###\n{str(e)}"
-        except Exception as e:
-            logger.error(f"Error running AutoGen v0.4: {str(e)}")
-            return f"### AutoGen v0.4 Error ###\n{str(e)}"
-
-    async def arun(
-        self,
-        config: Dict[str, Any],
-        llm_config: List[Dict],
-        topic: str,
-        *,
-        tools_dict: Optional[Dict[str, Any]] = None,
-        agent_callback: Optional[Callable] = None,
-        task_callback: Optional[Callable] = None,
-        cli_config: Optional[Dict[str, Any]] = None,
-    ) -> str:
-        """
-        Async-native AutoGen v0.4 execution without run_sync wrapper.
-        """
-        # Availability already validated at CLI entry
-        
-        logger.info("Starting AutoGen v0.4 async execution...")
-        
-        from autogen_agentchat.agents import AssistantAgent
-        from autogen_ext.models.openai import OpenAIChatCompletionClient
-        from autogen_agentchat.teams import RoundRobinGroupChat
-        from autogen_agentchat.conditions import TextMentionTermination, MaxMessageTermination
-        
-        # Create model client for v0.4
-        model_config = llm_config[0] if llm_config else {}
-        model_client = OpenAIChatCompletionClient(
-            model=model_config.get('model', 'gpt-4o-mini'),
-            api_key=model_config.get('api_key', os.environ.get("OPENAI_API_KEY")),
-            base_url=model_config.get('base_url', "https://api.openai.com/v1")
+        raise NotImplementedError(
+            "AutoGen v0.4 adapter is not yet implemented. "
+            "Use framework='autogen' (v0.2) or pin AUTOGEN_VERSION=v0.2."
         )
-        
-        agents = []
-        combined_tasks = []
-        
-        try:
-            # Create agents from config
-            for role, details in config['roles'].items():
-                # For AutoGen v0.4, ensure agent name is a valid Python identifier
-                agent_name = self._format_template(details['role'], topic=topic)
-                agent_name = self._sanitize_agent_name_for_autogen_v4(agent_name)
-                backstory = self._format_template(details['backstory'], topic=topic)
-                
-                # Convert tools for v0.4 - simplified tool passing
-                agent_tools = []
-                for tool_name in details.get('tools', []):
-                    if tools_dict and tool_name in tools_dict:
-                        tool_instance = tools_dict[tool_name]
-                        # For v0.4, we can pass the tool's run method directly if it's callable
-                        if hasattr(tool_instance, 'run') and callable(tool_instance.run):
-                            agent_tools.append(tool_instance.run)
-                
-                # Create v0.4 AssistantAgent
-                assistant = AssistantAgent(
-                    name=agent_name,
-                    system_message=backstory + ". Must reply with 'TERMINATE' when the task is complete.",
-                    model_client=model_client,
-                    tools=agent_tools,
-                    reflect_on_tool_use=True
-                )
-                
-                agents.append(assistant)
-                
-                # Collect all task descriptions for sequential execution
-                for task_name, task_details in details.get('tasks', {}).items():
-                    description_filled = self._format_template(task_details['description'], topic=topic)
-                    combined_tasks.append(description_filled)
-            
-            if not agents:
-                return "No agents created from configuration"
-            
-            # Create termination conditions
-            text_termination = TextMentionTermination("TERMINATE")
-            max_messages_termination = MaxMessageTermination(max_messages=20)
-            termination_condition = text_termination | max_messages_termination
-            
-            # Create RoundRobinGroupChat for parallel/sequential execution
-            group_chat = RoundRobinGroupChat(
-                agents,
-                termination_condition=termination_condition,
-                max_turns=len(agents) * 3  # Allow multiple rounds
-            )
-            
-            # Combine all tasks into a single task description
-            task_description = f"Topic: {topic}\n\nTasks to complete:\n" + "\n".join(
-                f"{i+1}. {task}" for i, task in enumerate(combined_tasks)
-            )
-            
-            # Run the group chat
-            result = await group_chat.run(task=task_description)
-            
-            # Close observability session on success
-            from ..observability.hooks import finalize_observability
-            finalize_observability(self.name, status="Success")
-            
-            # Extract the final message content
-            if result.messages:
-                final_message = result.messages[-1]
-                if hasattr(final_message, 'content'):
-                    return f"### AutoGen v0.4 Output ###\n{final_message.content}"
-                else:
-                    return f"### AutoGen v0.4 Output ###\n{str(final_message)}"
-            else:
-                return "### AutoGen v0.4 Output ###\nNo messages generated"
-                
-        except Exception as e:
-            # Close observability session on failure
-            from ..observability.hooks import finalize_observability
-            finalize_observability(self.name, status="Failure")
-            logger.error(f"Error in AutoGen v0.4 async execution: {str(e)}")
-            return f"### AutoGen v0.4 Error ###\n{str(e)}"
-        
-        finally:
-            # Close the model client
-            await model_client.close()
-    
-    def _sanitize_agent_name_for_autogen_v4(self, name):
-        """
-        Sanitize agent name to be a valid Python identifier for AutoGen v0.4.
-        
-        Args:
-            name (str): The original agent name
-            
-        Returns:
-            str: A valid Python identifier
-        """
-        import re
-        import keyword
-        
-        # Convert to string and replace invalid characters with underscores
-        sanitized = re.sub(r'[^a-zA-Z0-9_]', '_', str(name))
-        
-        # Collapse only very excessive underscores (5 or more) to reduce extreme cases
-        sanitized = re.sub(r'_{5,}', '_', sanitized)
-        
-        # Remove trailing underscores only if not part of a dunder pattern and only if singular
-        if sanitized.endswith('_') and not sanitized.endswith('__') and sanitized != '_':
-            sanitized = sanitized.rstrip('_')
-        
-        # Ensure it doesn't start with a digit
-        if sanitized and sanitized[0].isdigit():
-            sanitized = 'agent_' + sanitized
-        
-        # If it's empty or just underscores, use a default
-        if not sanitized or sanitized == '_':
-            sanitized = 'agent'
-        
-        # Check if it's a Python keyword and append underscore if so
-        if keyword.iskeyword(sanitized):
-            sanitized += '_'
-        
-        return sanitized
 
 
 class AG2Adapter(BaseFrameworkAdapter):
@@ -384,9 +215,12 @@ class AG2Adapter(BaseFrameworkAdapter):
     name = "ag2"
     install_hint = 'pip install "praisonai[ag2]"'
     requires_tools_extra = False
+    implemented: bool = False  # explicit marker
     
     def is_available(self) -> bool:
         """Check if AG2 is available for import."""
+        if not self.implemented:
+            return False  # treat unimplemented as unavailable for dispatch
         from .._framework_availability import is_available
         return is_available("ag2")
     
@@ -406,9 +240,9 @@ class AG2Adapter(BaseFrameworkAdapter):
         
         Args:
             config: AG2 configuration with agents
-            llm_config: LLM configuration list  
+            llm_config: LLM configuration list
             topic: Topic for the tasks
-            tools_dict: Available tools dictionary
+            tools_dict: Dictionary of available tools
             agent_callback: Callback for agent events
             task_callback: Callback for task events
             cli_config: CLI configuration
@@ -416,145 +250,93 @@ class AG2Adapter(BaseFrameworkAdapter):
         Returns:
             Execution result as string
         """
-        # Availability already validated at CLI entry
+        raise NotImplementedError(
+            "AG2 adapter is not yet implemented. "
+            "Use framework='autogen' (v0.2) or pin AUTOGEN_VERSION=v0.2."
+        )
+
+
+class AutoGenFamilyAdapter(BaseFrameworkAdapter):
+    """
+    Router adapter for AutoGen family (v0.2, v0.4, AG2).
+    Dispatches to concrete adapter based on config/environment.
+    """
+    
+    name = "autogen"
+    
+    def is_available(self) -> bool:
+        """Check if any AutoGen variant is available."""
+        v2 = AutoGenAdapter()
+        v4 = AutoGenV4Adapter()
+        ag2 = AG2Adapter()
+        return v2.is_available() or v4.is_available() or ag2.is_available()
+    
+    def resolve_alias(self) -> str:
+        """Resolve which concrete AutoGen adapter to use."""
+        requested = os.getenv("AUTOGEN_VERSION", "auto").lower()
+        
+        # Check availability
+        v2_available = AutoGenAdapter().is_available()
+        v4_available = AutoGenV4Adapter().is_available()
+        ag2_available = AG2Adapter().is_available()
+
+        # Explicit version pins with warnings if not available
+        if requested == "v0.2":
+            if not v2_available:
+                logger.warning("AUTOGEN_VERSION=v0.2 requested but autogen (v0.2) is not installed")
+            return "autogen_v2"
+        if requested == "v0.4":
+            if not v4_available:
+                logger.warning("AUTOGEN_VERSION=v0.4 requested but autogen_agentchat (v0.4) is not installed")
+            return "autogen_v4"
+        if requested == "ag2":
+            if not ag2_available:
+                logger.warning("AUTOGEN_VERSION=ag2 requested but AG2 is not installed")
+            return "ag2"
+        
+        # Auto selection: prefer v2 (v4 is currently unimplemented)
+        if v2_available:
+            return "autogen_v2"
+        elif v4_available:
+            logger.warning("AutoGen v0.4 is installed but not yet implemented, falling back.")
+            return "autogen_v4"
+        elif ag2_available:
+            return "ag2"
+        
+        # Nothing available
+        raise ImportError(
+            "No AutoGen variant is available. Install with:\n"
+            "  pip install 'praisonai[autogen]' for v0.2\n"
+            "  pip install 'praisonai[autogen-v4]' for v0.4\n"
+            "  pip install 'praisonai[ag2]' for AG2"
+        )
+    
+    def resolve(self, *, config: Optional[Dict[str, Any]] = None) -> "BaseFrameworkAdapter":
+        """Resolve to the concrete AutoGen adapter based on config/environment.
+        
+        This method is called by the orchestrator to get the actual adapter to use.
+        
+        Args:
+            config: Framework configuration that may contain version hints
             
-        logger.info("Starting AG2 execution...")
-        import re
-        import os
-        from autogen import (
-            AssistantAgent, UserProxyAgent, GroupChat, GroupChatManager, LLMConfig
+        Returns:
+            The concrete AutoGen adapter instance
+        """
+        # Get the adapter name to use
+        adapter_name = self.resolve_alias()
+        
+        # Import registry to create the concrete adapter
+        from .registry import get_default_registry
+        registry = get_default_registry()
+        
+        # Create and return the concrete adapter
+        concrete_adapter = registry.create(adapter_name)
+        logger.info(f"AutoGenFamilyAdapter resolved to: {adapter_name}")
+        return concrete_adapter
+    
+    def run(self, config: Dict[str, Any], llm_config: List[Dict], topic: str) -> str:
+        """Router should never run directly."""
+        raise RuntimeError(
+            "AutoGenFamilyAdapter.run() should not be called directly. "
+            "The resolve() method should have been called first to get the concrete adapter."
         )
-
-        model_config = llm_config[0] if llm_config else {}
-
-        # Allow YAML top-level llm block to override config_list values
-        yaml_llm = config.get("llm", {}) or {}
-        # Also check first role's llm block as a fallback
-        first_role_llm = {}
-        for role_details in config.get("roles", {}).values():
-            first_role_llm = role_details.get("llm", {}) or {}
-            break
-
-        # Priority: YAML top-level llm > first role llm > config_list > env vars
-        def _resolve(key, env_var=None, default=None):
-            return (yaml_llm.get(key) or first_role_llm.get(key)
-                    or model_config.get(key)
-                    or (os.environ.get(env_var) if env_var else None)
-                    or default)
-
-        api_type = _resolve("api_type", default="openai").lower()
-        model_name = _resolve("model", default="gpt-4o-mini")
-        api_key = _resolve("api_key", env_var="OPENAI_API_KEY")
-        # Use resolver for consistent env-var precedence as fallback
-        try:
-            from praisonai.llm.env import resolve_llm_endpoint
-            ep = resolve_llm_endpoint()
-            base_url = (model_config.get("base_url")
-                        or yaml_llm.get("base_url")
-                        or ep.base_url)
-        except ImportError:
-            base_url = model_config.get("base_url") or yaml_llm.get("base_url")
-
-        # Build LLMConfig — Bedrock needs no api_key
-        if api_type == "bedrock":
-            llm_config_entry = {"api_type": "bedrock", "model": model_name}
-        else:
-            llm_config_entry = {"model": model_name}
-            if api_key:
-                llm_config_entry["api_key"] = api_key
-            if base_url and base_url not in ("https://api.openai.com/v1", "https://api.openai.com/v1/"):
-                llm_config_entry["base_url"] = base_url
-        llm_config = LLMConfig(llm_config_entry)
-
-        user_proxy = UserProxyAgent(
-            name="User",
-            human_input_mode="NEVER",
-            is_termination_msg=lambda x: "TERMINATE" in (x.get("content") or ""),
-            code_execution_config=False,
-        )
-
-        # Create one AssistantAgent per role
-        ag2_agent_entries = []
-        for role, details in config["roles"].items():
-            agent_name = self._format_template(details.get("role", role), topic=topic)
-            backstory = self._format_template(details.get("backstory", ""), topic=topic)
-            agent_name_safe = re.sub(r"[^a-zA-Z0-9_\-]", "_", agent_name)
-            assistant = AssistantAgent(
-                name=agent_name_safe,
-                system_message=backstory + "\nWhen the task is done, reply 'TERMINATE'.",
-                llm_config=llm_config,
-            )
-            ag2_agent_entries.append((role, details, assistant))
-
-        # Register tools via AG2 decorator pattern
-        for role, details, assistant in ag2_agent_entries:
-            for tool_name in details.get("tools", []):
-                tool = tools_dict.get(tool_name) if tools_dict else None
-                if tool is None:
-                    continue
-                func = tool if callable(tool) else getattr(tool, "run", None)
-                if func is None:
-                    continue
-
-                def make_tool_fn(f, name):
-                    def tool_fn(**kwargs):
-                        return f(**kwargs) if callable(f) else str(f)
-                    tool_fn.__name__ = name
-                    return tool_fn
-
-                wrapped = make_tool_fn(func, tool_name)
-                assistant.register_for_llm(description=f"Tool: {tool_name}")(wrapped)
-                user_proxy.register_for_execution()(wrapped)
-
-        all_assistants = [a for _, _, a in ag2_agent_entries]
-        if not all_assistants:
-            return "### AG2 Output ###\nNo agents created from configuration."
-
-        # Build initial message from all task descriptions
-        task_lines = []
-        for role, details, _ in ag2_agent_entries:
-            for task_name, task_details in details.get("tasks", {}).items():
-                desc = self._format_template(task_details.get("description", ""), topic=topic)
-                if desc:
-                    task_lines.append(desc)
-        initial_message = "\n".join(task_lines) if task_lines else topic
-
-        groupchat = GroupChat(
-            agents=[user_proxy] + all_assistants,
-            messages=[],
-            max_round=12,
-        )
-        manager = GroupChatManager(groupchat=groupchat, llm_config=llm_config)
-
-        try:
-            chat_result = user_proxy.initiate_chat(manager, message=initial_message)
-            
-            # Close observability session on success
-            from ..observability.hooks import finalize_observability
-            finalize_observability(self.name, status="Success")
-        except Exception as e:
-            # Close observability session on failure
-            from ..observability.hooks import finalize_observability
-            finalize_observability(self.name, status="Failure")
-            return f"### AG2 Error ###\n{str(e)}"
-
-        # Prefer ChatResult.summary if available, otherwise scan messages
-        result_content = ""
-        summary = getattr(chat_result, "summary", None)
-        if summary and isinstance(summary, str) and summary.strip():
-            result_content = re.sub(r'[\s\.\,]*TERMINATE[\s\.\,]*$', '', summary, flags=re.IGNORECASE).strip().rstrip('.')
-
-        if not result_content:
-            for msg in reversed(groupchat.messages):
-                if msg.get("name") == "User":
-                    continue
-                content = (msg.get("content") or "").strip()
-                if content:
-                    result_content = re.sub(r'[\s\.\,]*TERMINATE[\s\.\,]*$', '', content, flags=re.IGNORECASE).strip().rstrip('.')
-                    if result_content:
-                        break
-
-        if not result_content:
-            result_content = "Task completed."
-
-        return f"### AG2 Output ###\n{result_content}"

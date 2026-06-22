@@ -22,6 +22,10 @@ def _crewai_loader():
     return CrewAIAdapter
 
 def _autogen_loader():
+    from .autogen_adapter import AutoGenFamilyAdapter
+    return AutoGenFamilyAdapter
+
+def _autogen_v2_loader():
     from .autogen_adapter import AutoGenAdapter
     return AutoGenAdapter
 
@@ -40,7 +44,8 @@ def _praisonai_loader():
 # Built-in framework adapters with lazy loading
 _BUILTIN_ADAPTERS = {
     "crewai": _crewai_loader,
-    "autogen": _autogen_loader,
+    "autogen": _autogen_loader,      # Family adapter for version resolution
+    "autogen_v2": _autogen_v2_loader, # Direct access to v2
     "autogen_v4": _autogen_v4_loader,
     "ag2": _ag2_loader,
     "praisonai": _praisonai_loader,
