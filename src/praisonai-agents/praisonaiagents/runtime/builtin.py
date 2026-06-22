@@ -93,6 +93,17 @@ class PraisonAIRuntime:
                     'runtime': self.runtime_id
                 }
                 
+                # Check if result is empty (might indicate API key issue)
+                if not result:
+                    # Check for common API key issues
+                    import os
+                    if not os.environ.get('OPENAI_API_KEY'):
+                        return RuntimeResult(
+                            content="",
+                            metadata=metadata,
+                            error="OPENAI_API_KEY environment variable is required"
+                        )
+                
                 return RuntimeResult(
                     content=str(result) if result else "",
                     metadata=metadata

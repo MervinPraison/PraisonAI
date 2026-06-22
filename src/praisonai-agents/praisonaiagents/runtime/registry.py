@@ -225,6 +225,11 @@ class RuntimeRegistry:
                 ))
             return entries
     
+    def list_names(self) -> List[str]:
+        """List all registered runtime names/IDs."""
+        entries = self.list_runtimes()
+        return [e.runtime_id for e in entries]
+    
     def get_entry(self, runtime_id: str) -> Optional[RuntimeRegistryEntry]:
         """Get registry entry for a runtime."""
         _initialize_builtin_runtimes()
@@ -277,6 +282,14 @@ class RuntimeRegistry:
                 raise ValueError(f"Cannot create alias '{alias}' for unknown runtime: {canonical_runtime_id}. Available: {available}")
             
             _runtime_aliases[alias] = canonical_runtime_id
+    
+    def is_available(self, runtime_id: str) -> bool:
+        """Check if a runtime is available."""
+        try:
+            self.resolve(runtime_id)
+            return True
+        except ValueError:
+            return False
 
 
 # Global registry instance
