@@ -116,6 +116,7 @@ def artifact_grep(
     Returns:
         List of matches with line numbers and context
     """
+    _artifact_store = _get_artifact_store()
     if _artifact_store is None:
         return [{"error": "Artifact store not available"}]
     
@@ -238,6 +239,7 @@ def artifact_list(
     Returns:
         List of artifact metadata dictionaries
     """
+    _artifact_store = _get_artifact_store()
     if _artifact_store is None:
         return [{"error": "Artifact store not available"}]
     

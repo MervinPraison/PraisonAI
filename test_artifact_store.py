@@ -6,7 +6,7 @@ import os
 sys.path.insert(0, 'src/praisonai-agents')
 
 from praisonaiagents import Agent
-from praisonaiagents.config.feature_configs import ToolOutputConfig
+from praisonaiagents.config.feature_configs import ToolConfig
 from praisonaiagents.context import FileSystemArtifactStore, ArtifactMetadata
 from praisonaiagents.tools import tool
 import tempfile
@@ -26,10 +26,10 @@ def test_artifact_storage():
         name="TestAgent",
         instructions="You are a test agent",
         tools=[generate_large_output],
-        tool_output=ToolOutputConfig(
-            max_bytes=1000,  # Low limit to trigger artifact storage
+        tool_config=ToolConfig(
+            output_limit=1000,  # Low limit to trigger artifact storage
             enable_artifacts=True,
-            retention_days=1
+            artifact_retention_days=1
         )
     )
     

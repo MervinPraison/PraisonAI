@@ -593,7 +593,6 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         runtime: Optional[Union[str, Dict[str, Any], 'AgentRuntimeConfig']] = None,  # Model-scoped runtime configuration
         interrupt_controller: Optional['InterruptController'] = None,  # G2: Cooperative cancellation
         tool_search: Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']] = False,  # Progressive tool disclosure
-        tool_output: Optional[Union[bool, Dict[str, Any], 'ToolOutputConfig']] = None,  # Tool output handling and artifact storage
         message_steering: Optional[Union[bool, 'MessageSteeringProtocol']] = False,  # Real-time message steering during execution
         sandbox: Optional[Union[bool, 'SandboxConfig']] = None,  # Sandbox for safe code execution
     ):
@@ -1509,52 +1508,8 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
                     "a dict of ToolSearchConfig fields, or ToolSearchConfig"
                 )
         
-        # Process tool_output config (artifact storage for large outputs)
+        # Process tool_config and artifact storage (moved from tool_output)
         self._artifact_store = None
-        self._tool_output_config = tool_output  # Store the original config for cloning
-        # Track if tool_output_limit was customized via tool_output config
-        _custom_tool_output_limit = None
-        
-        if tool_output is None or tool_output is False:
-            # Disabled - use default truncation only
-            pass
-        elif tool_output is True:
-            # Enabled with defaults
-            from ..config.feature_configs import ToolOutputConfig
-            from ..context.artifact_store import FileSystemArtifactStore
-            config = ToolOutputConfig()
-            _custom_tool_output_limit = config.max_bytes
-            if config.enable_artifacts:
-                self._artifact_store = config.artifact_store or FileSystemArtifactStore(
-                    retention_days=config.retention_days,
-                    redact_secrets=config.redact_secrets
-                )
-        elif isinstance(tool_output, dict):
-            # Dict -> config overrides
-            from ..config.feature_configs import ToolOutputConfig
-            from ..context.artifact_store import FileSystemArtifactStore
-            config = ToolOutputConfig(**tool_output)
-            _custom_tool_output_limit = config.max_bytes
-            if config.enable_artifacts:
-                self._artifact_store = config.artifact_store or FileSystemArtifactStore(
-                    retention_days=config.retention_days,
-                    redact_secrets=config.redact_secrets
-                )
-        else:
-            from ..config.feature_configs import ToolOutputConfig
-            if isinstance(tool_output, ToolOutputConfig):
-                config = tool_output
-                _custom_tool_output_limit = config.max_bytes
-                if config.enable_artifacts:
-                    from ..context.artifact_store import FileSystemArtifactStore
-                    self._artifact_store = config.artifact_store or FileSystemArtifactStore(
-                        retention_days=config.retention_days,
-                        redact_secrets=config.redact_secrets
-                    )
-            else:
-                raise TypeError(
-                    "tool_output must be False/None, True, a dict of ToolOutputConfig fields, or ToolOutputConfig"
-                )
         
         # ============================================================
         # END CONSOLIDATED PARAMS EXTRACTION
@@ -1603,6 +1558,14 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         _tool_config = Agent._resolve_tool_config(
             tool_config=tool_config
         )
+        
+        # Set up artifact store if enabled in tool_config
+        if _tool_config and _tool_config.enable_artifacts:
+            from ..context.artifact_store import FileSystemArtifactStore
+            self._artifact_store = _tool_config.artifact_store or FileSystemArtifactStore(
+                retention_days=_tool_config.artifact_retention_days,
+                redact_secrets=_tool_config.redact_secrets
+            )
         
         # Gap 2: Store parallel tool calls setting for ToolCallExecutor selection
         self.parallel_tool_calls = _tool_config.parallel if _tool_config else parallel_tool_calls
@@ -1827,8 +1790,8 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         self._init_message_steering(message_steering)
         self.verbose = verbose
         self._has_explicit_output_config = _has_explicit_output  # Track if user set output mode
-        # Use custom tool_output_limit if set via tool_output config, otherwise use parameter value
-        self.tool_output_limit = _custom_tool_output_limit if _custom_tool_output_limit is not None else tool_output_limit
+        # Use tool_config output_limit if configured, otherwise use parameter value
+        self.tool_output_limit = _tool_config.output_limit if _tool_config else tool_output_limit
         self.allow_delegation = allow_delegation
         self.step_callback = step_callback
         # Token budget guard (zero overhead when _max_budget is None)
@@ -2246,8 +2209,6 @@ Your Goal: {self.goal}
             'approval': getattr(self, '_approval_config', None),
             'learn': getattr(self, '_learn_config', None),
             'tool_search': getattr(self, '_tool_search_config', None),
-            'tool_output': getattr(self, '_tool_output_config', None),
-            
             # Tool configuration - use consolidated config when available  
             'tool_config': getattr(self, '_tool_config', None),
             

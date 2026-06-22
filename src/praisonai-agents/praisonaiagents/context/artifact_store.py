@@ -145,8 +145,13 @@ class FileSystemArtifactStore:
         
         return ref
     
-    def _validate_artifact_path(self, path: Path) -> Path:
+    def _validate_artifact_path(self, path_or_ref: Union[Path, ArtifactRef]) -> Path:
         """Validate that path is within the artifact store's base directory."""
+        if isinstance(path_or_ref, ArtifactRef):
+            path = Path(path_or_ref.path)
+        else:
+            path = path_or_ref
+            
         resolved = path.expanduser().resolve()
         base_resolved = self.base_dir.expanduser().resolve()
         
