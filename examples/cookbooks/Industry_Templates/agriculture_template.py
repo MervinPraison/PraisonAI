@@ -12,7 +12,7 @@ Key agents:
 """
 
 from praisonaiagents import Agent, tool
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List, Any, Tuple, Optional
 from pydantic import BaseModel
 from datetime import datetime, timedelta
 from enum import Enum
@@ -217,6 +217,7 @@ def calculate_spray_recommendation(pest_report: Dict, field_data: Dict, weather:
         "treatment_type": treatment,
         "product_name": product,
         "application_rate": rate,
+        "affected_area": affected_area,
         "target_zones": target_zones,
         "optimal_time": (datetime.now() + timedelta(days=1)).isoformat(),
         "weather_window": {

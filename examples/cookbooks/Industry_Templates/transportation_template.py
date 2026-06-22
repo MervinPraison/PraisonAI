@@ -227,7 +227,7 @@ def plan_maintenance(infrastructure_id: str, safety_analysis: Dict, traffic_data
         days_until = 30
         duration = 12
     else:
-        maintenance_type = "routine"
+        maintenance_type = "preventive"
         priority = "low"
         days_until = 90
         duration = 8
@@ -496,9 +496,11 @@ class TrafficManagementPatterns:
             "incident_id": f"INC-{datetime.now().strftime('%Y%m%d%H%M')}",
             "response_time": response_times.get(incident_type, 10),
             "resources_dispatched": [
-                "emergency_response_team",
-                "traffic_control_unit",
-                "maintenance_crew" if "infrastructure" in incident_type else None
+                r for r in [
+                    "emergency_response_team",
+                    "traffic_control_unit",
+                    "maintenance_crew" if "infrastructure" in incident_type else None
+                ] if r is not None
             ],
             "traffic_management": {
                 "lane_closures": 2,

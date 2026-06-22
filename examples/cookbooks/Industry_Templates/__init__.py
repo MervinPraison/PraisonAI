@@ -21,7 +21,14 @@ Example usage:
 __version__ = "1.0.0"
 __author__ = "PraisonAI Team"
 
-# Optional: Export commonly used items for convenience
+# Import the modules so they're accessible via the package
+from . import manufacturing_template
+from . import energy_template
+from . import healthcare_template
+from . import agriculture_template
+from . import transportation_template
+
+# Export commonly used items for convenience
 __all__ = [
     "manufacturing_template",
     "energy_template", 
