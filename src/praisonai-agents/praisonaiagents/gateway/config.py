@@ -19,6 +19,7 @@ class SessionConfig:
         persist_path: Path for session persistence
         resume_window: How long (seconds) a session stays resumable after disconnect
         metadata: Additional session metadata
+        mirror_runtime_state: Enable runtime state mirroring for native transcript replay (Issue #1943)
     """
     
     timeout: int = 3600  # 1 hour default
@@ -27,6 +28,7 @@ class SessionConfig:
     persist_path: Optional[str] = None
     resume_window: int = 86400  # 24 hours default
     metadata: Dict[str, Any] = field(default_factory=dict)
+    mirror_runtime_state: bool = False  # Opt-in to avoid storage bloat
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -37,6 +39,7 @@ class SessionConfig:
             "persist_path": self.persist_path,
             "resume_window": self.resume_window,
             "metadata": self.metadata,
+            "mirror_runtime_state": self.mirror_runtime_state,
         }
 
 
