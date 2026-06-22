@@ -8,7 +8,7 @@ All implementations live in the praisonai wrapper package.
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .protocols import BotOSProtocol  # noqa: F401
+    pass
 from .protocols import (
     BotProtocol,
     BotMessageProtocol,
