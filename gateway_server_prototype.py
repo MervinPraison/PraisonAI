@@ -88,39 +88,51 @@ class GatewayServer:
         
     async def handle_message(self, session: GatewaySession, message: str, client_id: str) -> str:
         """Handle incoming message with inbox overflow protection."""
-        if session._is_executing:
-            # Try to queue the message
-            queued = await session.queue_message(message)
-            if not queued:
-                # Inbox is full, send error response
-                await self._send_to_client(
-                    client_id,
-                    {
-                        "type": "error",
-                        "code": "inbox_full",
-                        "message": "Message queue is full. Please wait for current messages to be processed."
-                    }
-                )
-                return "Inbox full - message rejected."
-            return "Message queued."
-        
-        # Queue and process
-        session._is_executing = True
+        # Try to queue the message
         queued = await session.queue_message(message)
         if not queued:
+            # Inbox is full, send error response
             await self._send_to_client(
                 client_id,
                 {
                     "type": "error",
                     "code": "inbox_full",
-                    "message": "Message queue is full."
+                    "message": "Message queue is full. Please wait for current messages to be processed."
                 }
             )
-            session._is_executing = False
             return "Inbox full - message rejected."
         
-        # Start processing...
-        return "Processing started."
+        # Start processing if not already running
+        if not session._is_executing:
+            session._is_executing = True
+            asyncio.create_task(self._drain_session_queue(session, client_id))
+            return "Processing started."
+        
+        return "Message queued."
+    
+    async def _drain_session_queue(self, session: GatewaySession, client_id: str) -> None:
+        """Process all messages from the session's inbox queue."""
+        try:
+            while not session._inbox.empty():
+                msg = await session._inbox.get()
+                # Process message here (simplified for prototype)
+                logger.info(f"Processing message for session {session._session_id}: {msg}")
+                
+                # Simulate processing delay
+                await asyncio.sleep(0.1)
+                
+                # Send response to client (simplified)
+                await self._send_to_client(
+                    client_id,
+                    {
+                        "type": "response",
+                        "message": f"Processed: {msg}"
+                    }
+                )
+        except Exception as e:
+            logger.error(f"Error processing queue for session {session._session_id}: {e}")
+        finally:
+            session._is_executing = False
     
     async def _send_to_client(self, client_id: str, data: Dict[str, Any]) -> None:
         """Send data to client with slow consumer detection."""
@@ -151,7 +163,7 @@ class GatewayServer:
                 # Send the message
                 await ws.send_json(data)
             except Exception as e:
-                logger.error(f"Error sending to client {client_id}: {e}")
+                logger.error(f"Error sending to client {client_id}: {e}", exc_info=True)
 
 
 # Example usage demonstrating the flow control

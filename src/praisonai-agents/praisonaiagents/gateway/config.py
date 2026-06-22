@@ -30,6 +30,19 @@ class SessionConfig:
     max_inbox: int = 256  # Default bounded queue size
     metadata: Dict[str, Any] = field(default_factory=dict)
     
+    def __post_init__(self) -> None:
+        """Validate configuration values."""
+        if self.max_inbox < 0:
+            raise ValueError(
+                "max_inbox must be >= 0 (use 0 for unlimited queue size)"
+            )
+        if self.timeout < 0:
+            raise ValueError("timeout must be >= 0")
+        if self.max_messages < 0:
+            raise ValueError("max_messages must be >= 0")
+        if self.resume_window < 0:
+            raise ValueError("resume_window must be >= 0")
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
@@ -233,9 +246,19 @@ class GatewayConfig:
     push: PushConfig = field(default_factory=PushConfig)
 
     def __post_init__(self) -> None:
-        """Post-initialization to set bind_host from host if not specified."""
+        """Post-initialization to set bind_host from host if not specified and validate values."""
         if self.bind_host is None:
             self.bind_host = self.host
+        if self.max_buffered_bytes < 0:
+            raise ValueError(
+                "max_buffered_bytes must be >= 0 (use 0 to disable slow-consumer checks)"
+            )
+        if self.max_connections < 0:
+            raise ValueError("max_connections must be >= 0")
+        if self.heartbeat_interval < 0:
+            raise ValueError("heartbeat_interval must be >= 0")
+        if self.reconnect_timeout < 0:
+            raise ValueError("reconnect_timeout must be >= 0")
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary (hides sensitive data)."""
@@ -374,6 +397,22 @@ class MultiChannelGatewayConfig:
         """
         # Parse gateway section
         gw_data = data.get("gateway", {})
+        
+        # Parse session config if provided
+        session_config = SessionConfig()
+        if "session_config" in gw_data:
+            sc_data = gw_data["session_config"]
+            if isinstance(sc_data, dict):
+                session_config = SessionConfig(
+                    timeout=sc_data.get("timeout", 3600),
+                    max_messages=sc_data.get("max_messages", 1000),
+                    persist=sc_data.get("persist", False),
+                    persist_path=sc_data.get("persist_path"),
+                    resume_window=sc_data.get("resume_window", 86400),
+                    max_inbox=sc_data.get("max_inbox", 256),
+                    metadata=sc_data.get("metadata", {}),
+                )
+        
         gateway_config = GatewayConfig(
             host=gw_data.get("host", "127.0.0.1"),
             port=gw_data.get("port", 8765),
@@ -381,6 +420,13 @@ class MultiChannelGatewayConfig:
             allowed_origins=gw_data.get("allowed_origins", []),
             auth_token=gw_data.get("auth_token"),
             max_connections=gw_data.get("max_connections", 1000),
+            max_sessions_per_agent=gw_data.get("max_sessions_per_agent", 0),
+            session_config=session_config,
+            heartbeat_interval=gw_data.get("heartbeat_interval", 30),
+            reconnect_timeout=gw_data.get("reconnect_timeout", 60),
+            ssl_cert=gw_data.get("ssl_cert"),
+            ssl_key=gw_data.get("ssl_key"),
+            max_buffered_bytes=gw_data.get("max_buffered_bytes", 1024 * 1024),
         )
         
         # Parse agents section (pass through as dicts)
