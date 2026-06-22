@@ -55,9 +55,14 @@ REDACT_KEYS: Set[str] = {
     "anthropic_api_key",
 }
 
-# Compiled regex for case-insensitive matching
+# Compiled regex for matching (no IGNORECASE needed since we normalize to lowercase)
 _REDACT_PATTERN = re.compile(
-    r"(" + "|".join(re.escape(k) for k in REDACT_KEYS) + r")",
+    r"(" + "|".join(re.escape(k) for k in REDACT_KEYS) + r")"
+)
+
+# Compiled regex for key=value pattern matching in strings (case-insensitive for raw text)
+_REDACT_KV_PATTERN = re.compile(
+    r'(["\']?)(' + '|'.join(re.escape(k) for k in REDACT_KEYS) + r')(["\']?\s*[:=]\s*["\']?)([^"\'\s,}\]]+)',
     re.IGNORECASE
 )
 
@@ -73,12 +78,8 @@ def _should_redact(key: str) -> bool:
     if normalized in REDACT_KEYS:
         return True
     
-    # Check if any redact key is contained in the normalized key
-    for redact_key in REDACT_KEYS:
-        if redact_key in normalized:
-            return True
-    
-    return False
+    # Use compiled regex for substring matching instead of O(N) loop
+    return bool(_REDACT_PATTERN.search(normalized))
 
 
 def redact_dict(data: Dict[str, Any], enabled: bool = True) -> Dict[str, Any]:
@@ -240,14 +241,5 @@ def redact_string(text: str, enabled: bool = True) -> str:
     if not enabled or not text:
         return text
     
-    # Pattern for key=value or key: value
-    patterns = [
-        (r'(["\']?)(' + '|'.join(re.escape(k) for k in REDACT_KEYS) + r')(["\']?\s*[:=]\s*["\']?)([^"\'\s,}\]]+)', 
-         r'\1\2\3[REDACTED]'),
-    ]
-    
-    result = text
-    for pattern, replacement in patterns:
-        result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
-    
-    return result
+    # Use pre-compiled pattern for better performance
+    return _REDACT_KV_PATTERN.sub(r'\1\2\3[REDACTED]', text)
