@@ -63,50 +63,6 @@ def _parse_permissions(allow: Optional[List[str]], deny: Optional[List[str]], pe
     
     return config if config else None
 
-
-def _check_api_key_available() -> bool:
-    """
-    Check if an API key is available from environment or stored credentials.
-    
-    Also injects stored credentials into environment if no env key is present.
-    
-    Returns:
-        True if an API key is available, False otherwise
-    """
-    import os
-    
-    # Check all known provider env vars first
-    known_keys = (
-        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY",
-        "GEMINI_API_KEY", "GROQ_API_KEY", "COHERE_API_KEY",
-    )
-    if any(os.environ.get(k) for k in known_keys):
-        return True
-    
-    # Try to inject stored credentials into env, then re-check any known provider key
-    try:
-        from ...llm.credentials import inject_credentials_into_env
-        inject_credentials_into_env()
-    except ImportError:
-        # Fallback if credential module not available
-        pass
-
-    # Check all known provider env vars after potential injection
-    if any(os.environ.get(k) for k in known_keys):
-        return True
-
-    # Final check using LLM resolution with credential fallback
-    try:
-        from ...llm.credentials import resolve_llm_endpoint_with_credentials
-        endpoint = resolve_llm_endpoint_with_credentials()
-        return bool(endpoint.api_key)
-    except ImportError:
-        # Fallback to basic env check
-        return bool(os.environ.get("OPENAI_API_KEY"))
-    except Exception:
-        return False
-
-
 @app.callback(invoke_without_command=True)
 def run_main(
     ctx: typer.Context,
@@ -155,6 +111,50 @@ def run_main(
     """
     output = get_output_controller()
     _ = get_current_context()  # Initialize context
+    
+    # Early credential check before any processing
+    if target:  # Only check if we actually have something to run
+        from ...llm.credentials import is_configured
+        import sys
+        
+        # Check if credentials are configured (use model if provided, else check general)
+        if not is_configured(model):
+            # In non-interactive mode, show clear error
+            if not sys.stdin.isatty() or output.is_json_mode:
+                output.print_error(
+                    "No API key configured. Run: praisonai setup\n"
+                    "or set environment variables like OPENAI_API_KEY"
+                )
+                raise typer.Exit(1)
+            
+            # In interactive mode, offer to run setup
+            typer.echo(f"No API key configured{f' for model {model}' if model else ''}.")
+            run_setup = typer.confirm("Would you like to run the setup wizard now?")
+            
+            if run_setup:
+                from ..commands.setup import _run_setup
+                exit_code = _run_setup(
+                    non_interactive=False,
+                    provider=None,
+                    api_key=None,
+                    model=None
+                )
+                if exit_code != 0:
+                    output.print_error("Setup failed. Exiting.")
+                    raise typer.Exit(exit_code)
+                
+                output.print_success("Setup complete! Continuing with your run...")
+                # Re-check after setup
+                if not is_configured(model):
+                    output.print_error("Setup completed but credentials still not detected.")
+                    raise typer.Exit(1)
+            else:
+                output.print_info(
+                    "To configure credentials:\n"
+                    "  - Run: praisonai setup\n"
+                    "  - Or set environment variables like OPENAI_API_KEY"
+                )
+                raise typer.Exit(0)
     
     # Resolve configuration if model not explicitly provided
     if model is None:
@@ -374,12 +374,7 @@ def _run_from_file(
     """Run agents from a YAML file."""
     output = get_output_controller()
     
-    # Preflight check for API key availability
-    if not _check_api_key_available():
-        output.print_error(
-            "No API key configured. Run: praisonai auth login"
-        )
-        raise typer.Exit(1)
+    # Note: Credential check already done in run_main() entry point
     
     try:
         # Use existing PraisonAI class
@@ -489,12 +484,7 @@ def _run_prompt(
     """Run a direct prompt."""
     output = get_output_controller()
     
-    # Preflight check for API key availability
-    if not _check_api_key_available():
-        output.print_error(
-            "No API key configured. Run: praisonai auth login"
-        )
-        raise typer.Exit(1)
+    # Note: Credential check already done in run_main() entry point
     
     try:
         # Handle session continuity first (before any execution mode)
@@ -699,9 +689,35 @@ def _run_from_file_profiled(
         praison.config_list[0]['model'] = model
     
     # Apply session continuity if requested
-    session_id, auto_save_name = resolve_session_params(
-        continue_session, session, fork, no_save
-    )
+    session_id = None
+    auto_save_name = None
+    
+    if continue_session or session or fork:
+        from ..state.project_sessions import get_project_session_store, find_last_session
+        
+        if continue_session:
+            session_id = find_last_session()
+            if not session_id:
+                typer.echo("Warning: No previous sessions found. Starting new session.", err=True)
+        elif session:
+            project_store = get_project_session_store()
+            if project_store.session_exists(session):
+                session_id = session
+                
+                if fork:
+                    from praisonaiagents.session.hierarchy import HierarchicalSessionStore
+                    from ..utils.project import get_project_sessions_dir
+                    
+                    hierarchical_store = HierarchicalSessionStore(str(get_project_sessions_dir()))
+                    forked_session_id = hierarchical_store.fork_session(session_id)
+                    session_id = forked_session_id
+            else:
+                typer.echo(f"Error: Session not found: {session}", err=True)
+                raise typer.Exit(1)
+    
+    if not no_save:
+        import uuid
+        auto_save_name = session_id or "session-" + str(uuid.uuid4())[:8]
     if session_id or auto_save_name:
         class Args:
             pass
@@ -866,9 +882,35 @@ def _run_prompt_profiled(
         agent_config["llm"] = model
     
     # Apply session continuity if requested
-    session_id, auto_save_name = resolve_session_params(
-        continue_session, session, fork, no_save
-    )
+    session_id = None
+    auto_save_name = None
+    
+    if continue_session or session or fork:
+        from ..state.project_sessions import get_project_session_store, find_last_session
+        
+        if continue_session:
+            session_id = find_last_session()
+            if not session_id:
+                typer.echo("Warning: No previous sessions found. Starting new session.", err=True)
+        elif session:
+            project_store = get_project_session_store()
+            if project_store.session_exists(session):
+                session_id = session
+                
+                if fork:
+                    from praisonaiagents.session.hierarchy import HierarchicalSessionStore
+                    from ..utils.project import get_project_sessions_dir
+                    
+                    hierarchical_store = HierarchicalSessionStore(str(get_project_sessions_dir()))
+                    forked_session_id = hierarchical_store.fork_session(session_id)
+                    session_id = forked_session_id
+            else:
+                typer.echo(f"Error: Session not found: {session}", err=True)
+                raise typer.Exit(1)
+    
+    if not no_save:
+        import uuid
+        auto_save_name = session_id or "session-" + str(uuid.uuid4())[:8]
     if session_id or auto_save_name:
         from ..state.project_sessions import build_cli_memory_config, apply_cli_session_continuity
         

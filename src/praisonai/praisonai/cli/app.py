@@ -639,6 +639,48 @@ def main_callback(
     
     # If no command provided, start interactive mode
     if ctx.invoked_subcommand is None:
+        # Check for credentials before starting TUI
+        from ..llm.credentials import is_configured
+        import sys
+        
+        if not is_configured():  # Check for any configured credentials
+            # In non-interactive mode, just show error
+            if not sys.stdin.isatty() or quiet:
+                typer.echo(
+                    "Error: No API key configured. Run: praisonai setup",
+                    err=True
+                )
+                raise typer.Exit(1)
+            
+            # In interactive mode, offer to run setup
+            typer.echo("No API key configured.")
+            run_setup = typer.confirm("Would you like to run the setup wizard now?")
+            
+            if run_setup:
+                # Import and run setup
+                from .commands.setup import _run_setup
+                exit_code = _run_setup(
+                    non_interactive=False,
+                    provider=None,
+                    api_key=None,
+                    model=None
+                )
+                if exit_code != 0:
+                    typer.echo("Setup failed. Exiting.", err=True)
+                    raise typer.Exit(exit_code)
+                
+                # Re-check credentials after setup
+                if not is_configured():
+                    typer.echo("Setup completed but credentials still not detected.", err=True)
+                    raise typer.Exit(1)
+                
+                # After successful setup, continue to TUI
+                typer.echo("\nSetup complete! Starting interactive mode...\n")
+            else:
+                typer.echo("\nTo configure credentials later, run: praisonai setup")
+                typer.echo("or set environment variables like OPENAI_API_KEY")
+                raise typer.Exit(0)
+        
         from praisonai.cli.interactive.async_tui import AsyncTUI, AsyncTUIConfig
         
         tui_config = AsyncTUIConfig(
