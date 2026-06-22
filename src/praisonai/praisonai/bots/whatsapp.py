@@ -43,7 +43,7 @@ from praisonaiagents.bots import (
     MessageType,
 )
 
-from ._commands import format_status, format_help
+from ._commands import format_status, format_help, handle_stop_command
 from ._session import BotSessionManager
 from ._rate_limit import RateLimiter
 from ._ack import AckReactor
@@ -104,6 +104,10 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
         self._phone_number_id = phone_number_id or os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "")
         self._agent = agent
         self.config = config or BotConfig(token=self._token)
+        
+        # Initialize allow_silence from config
+        self._allow_silence = getattr(self.config, 'allow_silence', False)
+        
         self._verify_token = verify_token or os.environ.get("WHATSAPP_VERIFY_TOKEN", "")
         self._app_secret = app_secret or os.environ.get("WHATSAPP_APP_SECRET", "")
         self._webhook_port = webhook_port
@@ -130,14 +134,11 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
         self._is_running = False
         self._started_at: Optional[float] = None
         self._bot_user: Optional[BotUser] = None
-        try:
-            from praisonaiagents.session import get_default_session_store
-            _store = get_default_session_store()
-        except Exception:
-            _store = None
-        self._session_mgr = BotSessionManager(
-            store=_store,
-            platform="whatsapp",
+        # Use helper to build session manager
+        from ._session import build_session_manager
+        self._session_mgr = build_session_manager(
+            self.config,
+            platform="whatsapp"
         )
         self._message_handlers: List[Callable] = []
         self._runner: Any = None
@@ -175,13 +176,18 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
             extra = {
                 name: info.get("description", "")
                 for name, info in self._command_info.items()
-                if name not in ("status", "new", "help")
+                if name not in ("status", "new", "help", "stop")
             }
             return format_help(self._agent, "whatsapp", extra or None)
+
+        async def _stop(msg):
+            user_id = msg.sender.user_id if msg.sender else "unknown"
+            return handle_stop_command(self._session_mgr, user_id)
 
         self.register_command("status", _status, description="Show bot status and info")
         self.register_command("new", _new, description="Reset conversation session")
         self.register_command("help", _help, description="Show this help message")
+        self.register_command("stop", _stop, description="Cancel the current agent run")
 
     # ── Properties ──────────────────────────────────────────────────
 
@@ -201,6 +207,18 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
     @property
     def bot_user(self) -> Optional[BotUser]:
         return self._bot_user
+    
+    @property
+    def capabilities(self) -> Dict[str, Any]:
+        """WhatsApp has limited capabilities."""
+        return {
+            "live_edit": False,  # WhatsApp doesn't support message editing
+            "reactions": False,  # WhatsApp reactions are limited/not available via API
+            "typing": False,  # No typing indicator API
+            "text_limit": 4096,
+            "edit_rate_limit": 0,
+            "reaction_rate_limit": 0,
+        }
 
     # ── Agent management ────────────────────────────────────────────
 
@@ -445,7 +463,11 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
                 if self._agent and content:
                     try:
                         response = await self._session_mgr.chat(
-                            self._agent, sender_jid, content
+                            self._agent, sender_jid, content,
+                            chat_id=chat_jid,
+                            user_name=sender_name or "",
+                            message_id=msg_id,
+                            account=self._config.get("account", "default"),
                         )
                         if response:
                             send_result = self.fire_message_sending(chat_jid, str(response))
@@ -581,12 +603,16 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
         try:
             body = await request.read()
 
-            # Verify signature if app_secret is configured
+            from praisonai.bots.webhook_security import webhooks_require_verification
+
             if self._app_secret:
                 signature = request.headers.get("X-Hub-Signature-256", "")
                 if not self._verify_signature(body, signature):
                     logger.warning("Invalid webhook signature")
                     return web.Response(status=403, text="Invalid signature")
+            elif webhooks_require_verification():
+                logger.warning("Webhook rejected: app secret not configured")
+                return web.Response(status=403, text="Webhook verification not configured")
 
             data = json.loads(body)
         except Exception as e:
@@ -735,7 +761,11 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
             
             try:
                 response = await self._session_mgr.chat(
-                    self._agent, sender_id, content
+                    self._agent, sender_id, content,
+                    chat_id=sender_id,
+                    user_name=sender_name or "",
+                    message_id=msg_id,
+                    account=self._config.get("account", "default"),
                 )
                 if response:
                     send_result = self.fire_message_sending(sender_id, str(response))
@@ -921,6 +951,14 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
     async def send_typing(self, channel_id: str) -> None:
         """WhatsApp doesn't have a typing indicator API."""
         pass
+    
+    async def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> bool:
+        """WhatsApp reactions are not fully supported via API."""
+        return False
+    
+    async def remove_reaction(self, channel_id: str, message_id: str, emoji: str) -> bool:
+        """WhatsApp reactions are not fully supported via API."""
+        return False
 
     async def get_user(self, user_id: str) -> Optional[BotUser]:
         """Get user info (limited in WhatsApp API)."""

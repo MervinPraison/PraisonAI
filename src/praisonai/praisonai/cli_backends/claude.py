@@ -11,7 +11,10 @@ import json
 import asyncio
 import subprocess
 import copy
+import logging
 from typing import Optional, List, Dict, Any, AsyncIterator
+
+logger = logging.getLogger(__name__)
 
 try:
     from praisonaiagents import CliBackendProtocol, CliBackendConfig, CliSessionBinding, CliBackendResult, CliBackendDelta
@@ -29,7 +32,7 @@ DEFAULT_CONFIG = CliBackendConfig(
         "--include-partial-messages",
         "--verbose",
         "--setting-sources", "user",
-        "--permission-mode", "bypassPermissions"
+        "--permission-mode", "default"  # Safe by default - no bypass
     ],
     resume_args=["-p", "--output-format", "stream-json", "--resume", "{session_id}"],
     output="jsonl",
@@ -76,9 +79,30 @@ DEFAULT_CONFIG = CliBackendConfig(
 class ClaudeCodeBackend:
     """Claude Code CLI backend implementation."""
     
-    def __init__(self, config: Optional[CliBackendConfig] = None):
-        """Initialize with custom or default configuration."""
+    def __init__(self, config: Optional[CliBackendConfig] = None, unsafe: bool = False):
+        """Initialize with custom or default configuration.
+        
+        Args:
+            config: Custom configuration or None for defaults
+            unsafe: If True and env PRAISONAI_CLAUDE_BYPASS_PERMISSIONS=1, bypass permissions
+        """
         self.config = copy.deepcopy(config if config is not None else DEFAULT_CONFIG)
+        
+        # Check for explicit bypass permission (requires both flag and env)
+        if unsafe and os.getenv("PRAISONAI_CLAUDE_BYPASS_PERMISSIONS") == "1":
+            logger.warning("SECURITY WARNING: Claude backend running with bypassPermissions - all tool approvals disabled!")
+            # Find and replace the permission mode arg
+            for i, arg in enumerate(self.config.args):
+                if arg == "--permission-mode":
+                    if i + 1 < len(self.config.args):
+                        self.config.args[i + 1] = "bypassPermissions"
+                    break
+        elif "--permission-mode" in self.config.args:
+            # Ensure we're not bypassing by default
+            idx = self.config.args.index("--permission-mode")
+            if idx + 1 < len(self.config.args) and self.config.args[idx + 1] == "bypassPermissions":
+                logger.info("Overriding unsafe bypassPermissions to default mode")
+                self.config.args[idx + 1] = "default"
     
     async def execute(
         self,

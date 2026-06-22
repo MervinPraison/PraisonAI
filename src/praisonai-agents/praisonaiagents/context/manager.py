@@ -94,65 +94,6 @@ class SessionDeduplicationCache:
             self._cache.clear()
             self._stats = {"duplicates_prevented": 0, "tokens_saved": 0}
 
-def deduplicate_topics(topics: list, key: str = "title", similarity_threshold: float = 0.8) -> list:
-    """
-    Programmatic deduplication of topics/items before agent processing.
-    
-    This helps prevent duplicate content from being passed to downstream agents,
-    reducing token waste and improving quality.
-    
-    Args:
-        topics: List of topic dicts or strings
-        key: Key to use for comparison if topics are dicts (default: "title")
-        similarity_threshold: Similarity threshold for fuzzy matching (0.0-1.0)
-        
-    Returns:
-        Deduplicated list of topics
-    """
-    if not topics:
-        return topics
-    
-    seen_hashes = set()
-    seen_normalized = set()
-    unique_topics = []
-    
-    for topic in topics:
-        # Get the content to compare
-        if isinstance(topic, dict):
-            content = str(topic.get(key, topic.get("content", str(topic))))
-        else:
-            content = str(topic)
-        
-        # Normalize for comparison
-        normalized = content.lower().strip()
-        # Remove common words for better matching
-        normalized = " ".join(w for w in normalized.split() if len(w) > 3)
-        
-        # Check exact hash match
-        content_hash = hashlib.sha256(normalized.encode()).hexdigest()
-        if content_hash in seen_hashes:
-            continue
-        
-        # Check fuzzy match using simple word overlap
-        is_duplicate = False
-        for seen in seen_normalized:
-            # Calculate Jaccard similarity
-            words1 = set(normalized.split())
-            words2 = set(seen.split())
-            if words1 and words2:
-                intersection = len(words1 & words2)
-                union = len(words1 | words2)
-                similarity = intersection / union if union > 0 else 0
-                if similarity >= similarity_threshold:
-                    is_duplicate = True
-                    break
-        
-        if not is_duplicate:
-            seen_hashes.add(content_hash)
-            seen_normalized.add(normalized)
-            unique_topics.append(topic)
-    
-    return unique_topics
 
 class EstimationMode(str, Enum):
     """Token estimation modes."""
@@ -498,14 +439,23 @@ class ContextManager:
             return messages, None
         
         # Get optimizer with LLM summarization if configured
-        optimizer = get_optimizer(
-            self.config.strategy,
-            preserve_recent=self.config.keep_recent_turns,
-            protected_tools=self.config.protected_tools,
-            llm_summarize_fn=self._llm_summarize_fn if self.config.llm_summarize else None,
-            smart_tool_summarize=self.config.smart_tool_summarize,
-            tool_summarize_limits=self.config.tool_summarize_limits,
-        )
+        optimizer_kwargs = {
+            "preserve_recent": self.config.keep_recent_turns,
+            "protected_tools": self.config.protected_tools,
+            "llm_summarize_fn": self._llm_summarize_fn if self.config.llm_summarize else None,
+            "smart_tool_summarize": self.config.smart_tool_summarize,
+            "tool_summarize_limits": self.config.tool_summarize_limits,
+        }
+        
+        # Add conversation compaction parameters for CONVERSATION strategy
+        if self.config.strategy.value == "conversation":
+            optimizer_kwargs.update({
+                "llm_analyze_fn": self._llm_summarize_fn if self.config.conversation_compaction else None,
+                "min_compaction_ratio": self.config.conversation_min_compaction_ratio,
+                "analyzer_strategy": self.config.conversation_analyzer_strategy,
+            })
+        
+        optimizer = get_optimizer(self.config.strategy, **optimizer_kwargs)
         
         # Try optimization
         optimized, result = optimizer.optimize(messages, target_tokens, self._ledger.get_ledger())
@@ -776,7 +726,7 @@ class ContextManager:
         if protected and tool_name not in self.config.protected_tools:
             self.config.protected_tools.append(tool_name)
     
-    def truncate_tool_output(self, tool_name: str, output: str) -> str:
+    def truncate_tool_output(self, tool_name: str, output: str, tool_call_id: str = None, run_id: str = None) -> str:
         """Truncate tool output according to its budget."""
         max_tokens = self.get_tool_budget(tool_name)
         
@@ -795,6 +745,17 @@ class ContextManager:
         head = output[:max_chars - tail_size]
         tail = output[-tail_size:] if tail_size > 0 else ""
         truncated = f"{head}\n...[{len(output):,} chars, showing first/last portions]...\n{tail}"
+        
+        # Store full output for later retrieval
+        try:
+            from ..runtime.tool_output_store import get_tool_output_store
+            store = get_tool_output_store(run_id)
+            metadata = store.store(tool_name, output, call_id=tool_call_id)
+            if metadata:
+                truncated = store.format_reference(metadata, truncated)
+                logger.debug(f"Stored full {tool_name} output ({len(output)} bytes) at {metadata.get('path')}")
+        except Exception as e:
+            logger.debug(f"Failed to store tool output: {e}")
         
         self._add_history_event(
             OptimizationEventType.CAP_OUTPUTS,

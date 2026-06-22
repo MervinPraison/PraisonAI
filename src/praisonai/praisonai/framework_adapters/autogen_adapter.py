@@ -24,21 +24,33 @@ class AutoGenAdapter(BaseFrameworkAdapter):
         from .._framework_availability import is_available
         return is_available("autogen")
     
-    def resolve(self) -> "BaseFrameworkAdapter":
-        """Pick the concrete AutoGen adapter variant based on environment and availability."""
-        autogen_version = os.environ.get("AUTOGEN_VERSION", "auto").lower()
+    def resolve(self, *, config: Optional[Dict[str, Any]] = None) -> "BaseFrameworkAdapter":
+        """Pick the concrete AutoGen adapter variant based on config and environment.
+        
+        Args:
+            config: Framework configuration that may contain 'autogen_version'
+            
+        Returns:
+            The resolved AutoGen adapter (v0.2 or v0.4)
+        """
+        # Priority: config['autogen_version'] > environment > 'auto'
+        version = "auto"
+        if config and config.get("autogen_version"):
+            version = str(config["autogen_version"]).lower()
+        else:
+            version = os.environ.get("AUTOGEN_VERSION", "auto").lower()
         
         # Import the specific adapters
         v4_adapter = AutoGenV4Adapter()
         v2_adapter = self  # Current instance is v0.2
         
-        if autogen_version == "v0.4" and v4_adapter.is_available():
+        if version == "v0.4" and v4_adapter.is_available():
             logger.info("AutoGen version resolution: Using v0.4 (explicitly requested)")
             return v4_adapter
-        elif autogen_version == "v0.2" and v2_adapter.is_available():
+        elif version == "v0.2" and v2_adapter.is_available():
             logger.info("AutoGen version resolution: Using v0.2 (explicitly requested)")
             return v2_adapter
-        elif autogen_version == "auto":
+        elif version == "auto":
             # Auto-detect: prefer v0.4 if available, fallback to v0.2
             if v4_adapter.is_available():
                 logger.info("AutoGen version resolution: Using v0.4 (auto-detected)")
@@ -131,6 +143,10 @@ class AutoGenAdapter(BaseFrameworkAdapter):
         # Execute tasks
         response = user_proxy.initiate_chats(tasks)
         result = "### AutoGen v0.2 Output ###\n" + (response[-1].summary if hasattr(response[-1], 'summary') else "")
+        
+        # Close observability session
+        from ..observability.hooks import finalize_observability
+        finalize_observability(self.name, status="Success")
         
         logger.info("AutoGen v0.2 execution completed")
         return result
@@ -299,6 +315,10 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
             # Run the group chat
             result = await group_chat.run(task=task_description)
             
+            # Close observability session on success
+            from ..observability.hooks import finalize_observability
+            finalize_observability(self.name, status="Success")
+            
             # Extract the final message content
             if result.messages:
                 final_message = result.messages[-1]
@@ -310,6 +330,9 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
                 return "### AutoGen v0.4 Output ###\nNo messages generated"
                 
         except Exception as e:
+            # Close observability session on failure
+            from ..observability.hooks import finalize_observability
+            finalize_observability(self.name, status="Failure")
             logger.error(f"Error in AutoGen v0.4 async execution: {str(e)}")
             return f"### AutoGen v0.4 Error ###\n{str(e)}"
         
@@ -505,7 +528,14 @@ class AG2Adapter(BaseFrameworkAdapter):
 
         try:
             chat_result = user_proxy.initiate_chat(manager, message=initial_message)
+            
+            # Close observability session on success
+            from ..observability.hooks import finalize_observability
+            finalize_observability(self.name, status="Success")
         except Exception as e:
+            # Close observability session on failure
+            from ..observability.hooks import finalize_observability
+            finalize_observability(self.name, status="Failure")
             return f"### AG2 Error ###\n{str(e)}"
 
         # Prefer ChatResult.summary if available, otherwise scan messages

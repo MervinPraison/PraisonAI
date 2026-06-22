@@ -23,4 +23,6 @@ def register_all_checks():
     from . import lsp_checks
     from . import acp_checks
     from . import bot_checks
+    from . import gateway_checks
     from . import packaging_checks
+    from . import runtime_checks

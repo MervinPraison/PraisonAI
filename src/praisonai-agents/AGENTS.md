@@ -378,7 +378,7 @@ Agent parameters are consolidated into Config objects following the pattern:
 
 | Config Object | Replaces (Deprecated) |
 |--------------|----------------------|
-| `execution=ExecutionConfig(code_execution=True, code_mode="safe", rate_limiter=obj)` | `allow_code_execution`, `code_execution_mode`, `rate_limiter` |
+| `execution=ExecutionConfig(code_execution=True, code_mode="safe", rate_limiter=obj, context_compaction=False)` | `allow_code_execution`, `code_execution_mode`, `rate_limiter` |
 | `memory=MemoryConfig(auto_save="session_name")` | `auto_save` |
 | `autonomy=AutonomyConfig(verification_hooks=[...])` | `verification_hooks` |
 | `handoffs=[other_agent]` | `allow_delegation` |
@@ -389,6 +389,8 @@ Agent parameters are consolidated into Config objects following the pattern:
 | `web=WebConfig(...)` | `web_search`, `web_fetch` |
 
 **Deprecated standalone params still work** (backward compatible) but emit `DeprecationWarning`.
+
+> **📢 Deprecation Notice:** `ExecutionConfig.context_compaction` currently defaults to `False` during a deprecation period. In the next release, it will default to `True` for automatic proactive context overflow protection. To opt out explicitly, set `context_compaction=False`. To use the new behavior early, set `context_compaction=True`.
 
 ```python
 # ❌ Old way (deprecated)
@@ -413,6 +415,7 @@ agent = Agent(
         code_execution=True,
         code_mode="safe",
         rate_limiter=my_limiter,
+        context_compaction=False,  # prepare for next release when default becomes True; warning still fires during deprecation period
     ),
     memory=MemoryConfig(auto_save="my_session"),
     autonomy=AutonomyConfig(verification_hooks=[my_hook]),

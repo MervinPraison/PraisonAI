@@ -35,6 +35,7 @@ class CheckCategory(Enum):
     PACKAGING = "packaging"
     SELFTEST = "selftest"
     BOTS = "bots"
+    RUNTIME = "runtime"
 
 
 class CheckSeverity(Enum):
@@ -264,3 +265,11 @@ class DoctorConfig:
     category: Optional[str] = None
     path: Optional[str] = None
     save_report: bool = False
+    
+    # Runtime-specific options
+    team_file: Optional[str] = None
+    workflow_file: Optional[str] = None
+    
+    # Fix subcommand options
+    execute: bool = False
+    no_backup: bool = False

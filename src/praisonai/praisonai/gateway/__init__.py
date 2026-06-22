@@ -9,10 +9,12 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .server import WebSocketGateway, GatewaySession
+    from .client import GatewayClient, BackoffConfig
     from .rate_limiter import AuthRateLimiter
     from .pairing import PairingStore
     from .exec_approval import ExecApprovalManager, get_exec_approval_manager
     from .gateway_approval import GatewayApprovalBackend
+    from .home_channels import HomeChannelRegistry, DeliveryResolver
 
 def __getattr__(name: str):
     """Lazy loading of gateway components."""
@@ -22,6 +24,12 @@ def __getattr__(name: str):
     if name == "GatewaySession":
         from .server import GatewaySession
         return GatewaySession
+    if name == "GatewayClient":
+        from .client import GatewayClient
+        return GatewayClient
+    if name == "BackoffConfig":
+        from .client import BackoffConfig
+        return BackoffConfig
     # Security / approval primitives
     if name == "AuthRateLimiter":
         from .rate_limiter import AuthRateLimiter
@@ -38,14 +46,24 @@ def __getattr__(name: str):
     if name == "GatewayApprovalBackend":
         from .gateway_approval import GatewayApprovalBackend
         return GatewayApprovalBackend
+    if name == "HomeChannelRegistry":
+        from .home_channels import HomeChannelRegistry
+        return HomeChannelRegistry
+    if name == "DeliveryResolver":
+        from .home_channels import DeliveryResolver
+        return DeliveryResolver
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "WebSocketGateway",
     "GatewaySession",
+    "GatewayClient",
+    "BackoffConfig",
     "AuthRateLimiter",
     "PairingStore",
     "ExecApprovalManager",
     "get_exec_approval_manager",
     "GatewayApprovalBackend",
+    "HomeChannelRegistry",
+    "DeliveryResolver",
 ]

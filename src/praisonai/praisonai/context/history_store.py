@@ -63,6 +63,10 @@ class HistoryStore:
     
     def _get_history_path(self, run_id: str, agent_id: str) -> Path:
         """Get the path to the history file."""
+        from ._storage_path import safe_storage_id
+
+        safe_storage_id(run_id, "run_id")
+        safe_storage_id(agent_id, "agent_id")
         history_dir = self.base_dir / run_id / "history"
         history_dir.mkdir(parents=True, exist_ok=True)
         return history_dir / f"{agent_id}.jsonl"

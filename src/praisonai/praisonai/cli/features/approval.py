@@ -13,16 +13,18 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 # Valid backend names for CLI help text
-VALID_BACKENDS = ["console", "slack", "telegram", "discord", "webhook", "http", "agent", "auto", "none"]
+VALID_BACKENDS = ["console", "slack", "telegram", "discord", "webhook", "http", "agent", "auto", "none", "plan", "accept-edits", "bypass"]
 
 
-def resolve_approval_backend(value: Optional[str]) -> Optional[Any]:
+def resolve_approval_backend(value: Optional[str], non_interactive: bool = False, permissions_config: Optional[dict] = None) -> Optional[Any]:
     """Resolve a CLI --approval flag value to an approval backend instance.
 
     Args:
         value: One of the backend names (slack, telegram, discord, webhook,
                http, console, auto, none) or None.  For webhook and http,
                additional config is read from environment variables.
+        non_interactive: Whether to run in non-interactive mode.
+        permissions_config: Declarative permission rules from YAML/CLI.
 
     Returns:
         An approval backend instance, or None if disabled.
@@ -42,8 +44,9 @@ def resolve_approval_backend(value: Optional[str]) -> Optional[Any]:
     name = str(value).lower().strip()
 
     if name in ("true", "console", "yes", "1"):
-        from praisonaiagents.approval.backends import ConsoleBackend
-        return ConsoleBackend()
+        # Use our new interactive CLI backend with persistence
+        from praisonai.cli.approval_backend import InteractiveCLIApprovalBackend
+        return InteractiveCLIApprovalBackend(non_interactive=non_interactive, permissions_config=permissions_config)
 
     if name in ("false", "no", "0"):
         return None
@@ -51,6 +54,24 @@ def resolve_approval_backend(value: Optional[str]) -> Optional[Any]:
     if name == "auto":
         from praisonaiagents.approval.backends import AutoApproveBackend
         return AutoApproveBackend()
+    
+    if name == "plan":
+        # Plan mode - read-only, blocks write operations
+        from praisonai.cli.approval_backend import InteractiveCLIApprovalBackend
+        from praisonaiagents.permissions import PermissionMode
+        return InteractiveCLIApprovalBackend(permission_mode=PermissionMode.PLAN, non_interactive=non_interactive, permissions_config=permissions_config)
+    
+    if name == "accept-edits":
+        # Accept edits mode - auto-approve file edits
+        from praisonai.cli.approval_backend import InteractiveCLIApprovalBackend
+        from praisonaiagents.permissions import PermissionMode
+        return InteractiveCLIApprovalBackend(permission_mode=PermissionMode.ACCEPT_EDITS, non_interactive=non_interactive, permissions_config=permissions_config)
+    
+    if name == "bypass":
+        # Bypass mode - skip all permission checks (dangerous)
+        from praisonai.cli.approval_backend import InteractiveCLIApprovalBackend
+        from praisonaiagents.permissions import PermissionMode
+        return InteractiveCLIApprovalBackend(permission_mode=PermissionMode.BYPASS, non_interactive=non_interactive, permissions_config=permissions_config)
 
     if name == "slack":
         from praisonai.bots import SlackApproval
@@ -107,6 +128,8 @@ def resolve_approval_config(
     backend_name: Optional[str] = None,
     all_tools: bool = False,
     timeout: Optional[str] = None,
+    non_interactive: bool = False,
+    permissions_config: Optional[dict] = None,
 ) -> Optional[Any]:
     """Build an approval value for ``Agent(approval=...)``.
 
@@ -119,8 +142,10 @@ def resolve_approval_config(
         all_tools:    ``--approve-all-tools`` flag.
         timeout:      ``--approval-timeout`` value.  ``"none"`` means
                       indefinite; a numeric string is parsed as seconds.
+        non_interactive: Whether to run in non-interactive mode.
+        permissions_config: Declarative permission rules from YAML/CLI.
     """
-    backend = resolve_approval_backend(backend_name)
+    backend = resolve_approval_backend(backend_name, non_interactive=non_interactive, permissions_config=permissions_config)
     if backend is None:
         return None
 
@@ -137,7 +162,7 @@ def resolve_approval_config(
                 parsed_timeout = 0
 
     # If no extra config needed, return plain backend (backward compatible)
-    if not all_tools and parsed_timeout == 0:
+    if not all_tools and parsed_timeout == 0 and not permissions_config:
         return backend
 
     from praisonaiagents.approval.protocols import ApprovalConfig
@@ -145,4 +170,5 @@ def resolve_approval_config(
         backend=backend,
         all_tools=all_tools,
         timeout=parsed_timeout,
+        permissions=permissions_config,
     )

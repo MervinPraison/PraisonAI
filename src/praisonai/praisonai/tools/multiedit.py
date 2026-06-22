@@ -9,11 +9,25 @@ import difflib
 import os
 from typing import Any, Dict, List, Optional
 
+from praisonai.code.utils.file_utils import is_path_within_directory
+
+
+def _resolve_safe_path(filepath: str, workspace_root: Optional[str] = None) -> Optional[str]:
+    """Resolve filepath within workspace; return None if outside boundary."""
+    if ".." in filepath.replace("\\", "/"):
+        return None
+    root = os.path.realpath(workspace_root or os.getcwd())
+    abs_path = os.path.realpath(os.path.join(root, filepath) if not os.path.isabs(filepath) else filepath)
+    if not is_path_within_directory(abs_path, root):
+        return None
+    return abs_path
+
 
 def multiedit(
     filepath: str,
     edits: List[Dict[str, Any]],
     dry_run: bool = False,
+    workspace_root: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Apply multiple edits to a file in a single operation.
@@ -25,6 +39,7 @@ def multiedit(
             - new: The replacement text (required)
             - line: Optional line number hint for faster matching
         dry_run: If True, don't actually modify the file.
+        workspace_root: Directory boundary for filepath (defaults to cwd).
     
     Returns:
         Dict with:
@@ -51,6 +66,13 @@ def multiedit(
         "error": None,
     }
     
+    # Validate path within workspace
+    safe_path = _resolve_safe_path(filepath, workspace_root)
+    if safe_path is None:
+        result["error"] = f"Path outside workspace: {filepath}"
+        return result
+    filepath = safe_path
+
     # Validate inputs
     if not os.path.exists(filepath):
         result["error"] = f"File not found: {filepath}"

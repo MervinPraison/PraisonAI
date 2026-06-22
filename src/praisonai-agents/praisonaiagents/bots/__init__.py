@@ -8,23 +8,7 @@ All implementations live in the praisonai wrapper package.
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .protocols import (
-        BotOSProtocol,  # noqa: F401
-        BotProtocol,
-        BotMessageProtocol,
-        BotUserProtocol,
-        BotChannelProtocol,
-        BotMessage,
-        BotUser,
-        BotChannel,
-        MessageType,
-        ChatCommandInfo,
-        ChatCommandProtocol,
-        ProbeResult,
-        HealthResult,
-        EmailProtocol,
-        EmailInbox,
-    )
+    pass
 from .protocols import (
     BotProtocol,
     BotMessageProtocol,
@@ -41,6 +25,30 @@ from .protocols import (
     HealthResult,
     EmailProtocol,
     EmailInbox,
+    SupportsPresentation,
+    PlatformCapabilities,
+)
+from .presentation import (
+    MessagePresentation,
+    PresentationBlock,
+    PresentationButton,
+    PresentationAction,
+    SelectOption,
+    PresentationLimits,
+    ActionType,
+    ButtonStyle,
+    BlockType,
+)
+from .interactive import (
+    InteractiveContext,
+    InteractiveRegistry,
+    InteractiveHandler,
+    encode_action,
+    decode_callback,
+    create_registry,
+    get_registry,
+    register_handler,
+    unregister_handler,
 )
 from .config import BotConfig, BotOSConfig
 
@@ -62,4 +70,24 @@ __all__ = [
     "HealthResult",
     "EmailProtocol",
     "EmailInbox",
+    "MessagePresentation",
+    "PresentationBlock",
+    "PresentationButton",
+    "PresentationAction",
+    "SelectOption",
+    "PresentationLimits",
+    "SupportsPresentation",
+    "ActionType",
+    "ButtonStyle",
+    "BlockType",
+    "PlatformCapabilities",
+    "InteractiveContext",
+    "InteractiveRegistry",
+    "InteractiveHandler",
+    "encode_action",
+    "decode_callback",
+    "create_registry",
+    "get_registry",
+    "register_handler",
+    "unregister_handler",
 ]

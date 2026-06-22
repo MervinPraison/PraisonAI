@@ -1,0 +1,47 @@
+framework: praisonai
+topic: AI Research with Message Steering
+
+roles:
+  researcher:
+    role: AI Research Analyst
+    goal: Conduct comprehensive AI research with real-time guidance
+    backstory: You are an expert AI researcher who can receive and incorporate real-time guidance during your work
+    message_steering: true  # Enable real-time message steering
+    tools:
+      - internet_search
+      - write_file
+    tasks:
+      research_task:
+        description: |
+          Research the latest developments in AI and write a comprehensive report.
+          You may receive additional guidance during execution via message steering.
+        expected_output: |
+          A well-structured research report covering recent AI developments,
+          incorporating any real-time guidance received during execution.
+
+  writer:
+    role: Technical Writer
+    goal: Write clear, engaging content based on research
+    backstory: You are a skilled technical writer who can adapt content based on real-time feedback
+    message_steering: true  # Enable steering for dynamic content adjustment
+    tools:
+      - read_file
+      - write_file
+    tasks:
+      writing_task:
+        description: |
+          Take the research findings and create an accessible article for a general audience.
+          Adjust style and focus based on any steering messages received.
+        expected_output: |
+          A polished article that transforms technical research into accessible content,
+          refined based on real-time steering guidance.
+
+dependencies:
+  - writing_task: [research_task]
+
+# Usage Instructions:
+# 1. Run: praisonai --agent-file message_steering_example.yaml
+# 2. While running, use steering API to send guidance:
+#    agent.steer("Focus more on practical applications")
+#    agent.steer("Keep it under 500 words", priority=15)
+#    agent.steer("Add more examples", priority=10)

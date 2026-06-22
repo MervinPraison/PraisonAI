@@ -77,9 +77,22 @@ class FileSystemArtifactStore:
     
     def _get_artifact_dir(self, run_id: str, agent_id: str) -> Path:
         """Get the directory for storing artifacts."""
+        from ._storage_path import safe_storage_id
+
+        safe_storage_id(run_id, "run_id")
+        safe_storage_id(agent_id, "agent_id")
         artifact_dir = self.base_dir / run_id / "artifacts" / agent_id
         artifact_dir.mkdir(parents=True, exist_ok=True)
         return artifact_dir
+
+    def _resolve_artifact_path(self, ref_path: str) -> Path:
+        """Ensure artifact reads stay under the configured base directory."""
+        file_path = Path(ref_path).expanduser().resolve()
+        try:
+            file_path.relative_to(self.base_dir)
+        except ValueError as exc:
+            raise FileNotFoundError(f"Artifact outside storage: {ref_path}") from exc
+        return file_path
     
     def _detect_mime_type(self, content: Any) -> str:
         """Detect MIME type from content."""
@@ -221,7 +234,7 @@ class FileSystemArtifactStore:
         Returns:
             The deserialized content
         """
-        file_path = Path(ref.path)
+        file_path = self._resolve_artifact_path(ref.path)
         if not file_path.exists():
             raise FileNotFoundError(f"Artifact not found: {ref.path}")
         
@@ -246,7 +259,7 @@ class FileSystemArtifactStore:
         Returns:
             String containing the last N lines
         """
-        file_path = Path(ref.path)
+        file_path = self._resolve_artifact_path(ref.path)
         if not file_path.exists():
             raise FileNotFoundError(f"Artifact not found: {ref.path}")
         
@@ -290,7 +303,7 @@ class FileSystemArtifactStore:
         Returns:
             String containing the first N lines
         """
-        file_path = Path(ref.path)
+        file_path = self._resolve_artifact_path(ref.path)
         if not file_path.exists():
             raise FileNotFoundError(f"Artifact not found: {ref.path}")
         
@@ -322,7 +335,7 @@ class FileSystemArtifactStore:
         Returns:
             List of GrepMatch objects
         """
-        file_path = Path(ref.path)
+        file_path = self._resolve_artifact_path(ref.path)
         if not file_path.exists():
             raise FileNotFoundError(f"Artifact not found: {ref.path}")
         
@@ -372,7 +385,7 @@ class FileSystemArtifactStore:
         Returns:
             String containing the requested lines
         """
-        file_path = Path(ref.path)
+        file_path = self._resolve_artifact_path(ref.path)
         if not file_path.exists():
             raise FileNotFoundError(f"Artifact not found: {ref.path}")
         
@@ -397,7 +410,7 @@ class FileSystemArtifactStore:
         Returns:
             True if deleted successfully
         """
-        file_path = Path(ref.path)
+        file_path = self._resolve_artifact_path(ref.path)
         meta_path = file_path.with_suffix(file_path.suffix + ".meta")
         
         deleted = False

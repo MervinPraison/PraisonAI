@@ -11,7 +11,11 @@ from __future__ import annotations
 import os
 import uuid
 import json
+import time
+import logging
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from ..memory.memory import Memory
@@ -56,7 +60,8 @@ class Session:
         agent_url: Optional[str] = None,
         memory_config: Optional[Dict[str, Any]] = None,
         knowledge_config: Optional[Dict[str, Any]] = None,
-        timeout: int = 30
+        timeout: int = 30,
+        session_ttl: Optional[int] = None
     ):
         """
         Initialize a new session with optional persistence or remote agent connectivity.
@@ -68,12 +73,22 @@ class Session:
             memory_config: Configuration for memory system (defaults to RAG)
             knowledge_config: Configuration for knowledge base system  
             timeout: HTTP timeout for remote agent calls (default: 30 seconds)
+            session_ttl: Time-to-live in seconds after which session expires
         """
         self.session_id = session_id or str(uuid.uuid4())[:8]
         self.user_id = user_id or "default_user"
         self.agent_url = agent_url
         self.timeout = timeout
         self.is_remote = agent_url is not None
+        
+        # TTL (time-to-live) functionality
+        if session_ttl is not None and session_ttl < 0:
+            raise ValueError(
+                f"Invalid session_ttl={session_ttl} for session_id={self.session_id}. "
+                "Use None (no expiry) or a non-negative number of seconds."
+            )
+        self.session_ttl = session_ttl
+        self._created_at = time.monotonic()
 
         # Validate agent_url format
         if self.is_remote:
@@ -340,14 +355,31 @@ class Session:
                     pass
                 
                 if session_store is not None:
-                    # Use SessionStore for conversation history
+                    # Replace atomically to avoid duplicate appends on repeated save_state()
                     session_id = f"{self.session_id}_{agent_key}"
-                    for msg in chat_history:
-                        if isinstance(msg, dict):
+                    messages = [
+                        {
+                            "role": msg.get("role", "user"),
+                            "content": msg.get("content", ""),
+                        }
+                        for msg in chat_history
+                        if isinstance(msg, dict)
+                    ]
+                    if not messages:
+                        logging.debug(f"No chat history to persist for session {session_id}")
+                    elif hasattr(session_store, "set_chat_history"):
+                        session_store.set_chat_history(session_id, messages)
+                    else:
+                        # Fallback to add_message - may create duplicates on repeated calls
+                        logging.warning(
+                            f"Session store lacks 'set_chat_history' method. Using fallback "
+                            f"'add_message' which may create duplicates on repeated save_state() calls."
+                        )
+                        for msg in messages:
                             session_store.add_message(
                                 session_id,
-                                role=msg.get("role", "user"),
-                                content=msg.get("content", ""),
+                                role=msg["role"],
+                                content=msg["content"],
                             )
                 else:
                     # Fallback to Memory.store_short_term() for backward compatibility
@@ -459,6 +491,20 @@ class Session:
         Returns:
             Formatted context string
         """
+        # Use cache-optimized context if available for better prompt caching
+        if hasattr(self.memory, 'build_cache_optimized_context'):
+            try:
+                cache_result = self.memory.build_cache_optimized_context(
+                    task_descr=query,
+                    user_id=self.user_id,
+                    max_items=max_items,
+                    include_cache_boundary=False  # Don't include boundary for session context
+                )
+                return cache_result.get('stable_prefix', '')
+            except Exception as e:
+                # Fall back to standard context building
+                logger.debug(f"Cache-optimized context failed for session '{self.session_id}', falling back to standard: {e}")
+        
         return self.memory.build_context_for_task(
             task_descr=query,
             user_id=self.user_id,
@@ -554,6 +600,46 @@ class Session:
             The agent's response
         """
         return self.chat(message, **kwargs)
+
+    def is_expired(self) -> bool:
+        """Check if the session has expired based on TTL."""
+        if self.session_ttl is None:
+            return False
+        return time.monotonic() - self._created_at >= self.session_ttl
+
+    def close(self) -> None:
+        """Close and cleanup the session."""
+        if self.is_remote:
+            return  # No cleanup needed for remote sessions
+        
+        # Save agent chat histories before clearing agents
+        self._save_agent_chat_histories()
+        
+        # Properly cleanup memory
+        if hasattr(self, '_memory') and self._memory:
+            try:
+                # Call close_connections to properly cleanup memory adapters
+                if hasattr(self._memory, 'close_connections'):
+                    self._memory.close_connections()
+            except Exception as e:
+                logger.warning(f"Memory cleanup failed: {e}")
+            finally:
+                self._memory = None
+        
+        # Clear knowledge
+        if hasattr(self, '_knowledge') and self._knowledge:
+            self._knowledge = None
+        
+        # Clear agents
+        if hasattr(self, '_agents'):
+            self._agents.clear()
+
+    def time_to_expiry(self) -> Optional[float]:
+        """Get seconds until session expires, or None if no TTL set."""
+        if self.session_ttl is None:
+            return None
+        elapsed = time.monotonic() - self._created_at
+        return max(0, self.session_ttl - elapsed)
 
     def __str__(self) -> str:
         if self.is_remote:

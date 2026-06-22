@@ -16,6 +16,7 @@ Features:
 import asyncio
 import inspect
 import logging
+import sys
 from praisonaiagents._logging import get_logger
 from typing import Callable, Optional, Union, TYPE_CHECKING
 
@@ -93,6 +94,12 @@ class ApprovalCallback:
                 return False
                 
         # Default: require explicit approval (return False)
+        # However, auto-approve when not in an interactive environment (e.g., CI/scripts)
+        if sys.stdin is None or not sys.stdin.isatty():
+            logger.debug(f"Auto-approving plan in non-interactive environment: {plan.name}")
+            plan.approve()
+            return True
+        
         logger.debug(f"Plan requires explicit approval: {plan.name}")
         return False
     
@@ -127,6 +134,12 @@ class ApprovalCallback:
                 return False
                 
         # Default: require explicit approval (return False)
+        # However, auto-approve when not in an interactive environment (e.g., CI/scripts)
+        if sys.stdin is None or not sys.stdin.isatty():
+            logger.debug(f"Auto-approving plan in non-interactive environment: {plan.name}")
+            plan.approve()
+            return True
+        
         logger.debug(f"Plan requires explicit approval: {plan.name}")
         return False
     

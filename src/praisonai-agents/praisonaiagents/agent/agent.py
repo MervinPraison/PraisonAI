@@ -7,6 +7,7 @@ import asyncio
 import contextlib
 import threading
 import concurrent.futures
+import random
 from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Generator
 from collections import OrderedDict
 import inspect
@@ -16,12 +17,13 @@ from .chat_mixin import ChatMixin
 from .execution_mixin import ExecutionMixin
 from .memory_mixin import MemoryMixin
 from .async_memory_mixin import AsyncMemoryMixin
-from .tool_execution import ToolExecutionMixin
+from .tool_execution import ToolExecutionMixin, BackoffPolicy
 from .chat_handler import ChatHandlerMixin
 from .session_manager import SessionManagerMixin
 from .async_safety import AsyncSafeState
 from .unified_execution_mixin import UnifiedExecutionMixin
 from .sandbox_mixin import SandboxMixin
+from .message_steering import SteeringMixin
 
 # Module-level logger for thread safety errors and debugging
 logger = get_logger(__name__)
@@ -242,7 +244,7 @@ def _get_default_server_registry() -> ServerRegistry:
 
 if TYPE_CHECKING:
     from ..approval.protocols import ApprovalConfig, ApprovalProtocol
-    from ..config.feature_configs import LearnConfig, MemoryConfig
+    from ..config.feature_configs import LearnConfig, MemoryConfig, ToolConfig
     from ..context.models import ContextConfig
     from ..context.manager import ContextManager
     from ..knowledge.knowledge import Knowledge
@@ -252,11 +254,15 @@ if TYPE_CHECKING:
     from .handoff import Handoff, HandoffConfig, HandoffResult
     from ..rag.models import RAGResult, ContextPack
     from ..eval.results import EvaluationLoopResult
+    from ..tools.retry import RetryPolicy
 
 # Import structured error from central errors module
 from ..errors import BudgetExceededError
 
-class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin, AsyncMemoryMixin):
+# Import retry configuration
+from .retry_utils import RetryBackoffConfig
+
+class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin, AsyncMemoryMixin):
     # Class-level counter for generating unique display names for nameless agents
     _agent_counter = 0
     _agent_counter_lock = threading.Lock()
@@ -310,6 +316,38 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
                     cls._default_model = os.getenv('OPENAI_MODEL_NAME', 'gpt-4o-mini')
                     cls._default_model_checked = True
         return cls._default_model
+    
+    def _ensure_llm_instance(self):
+        """Lazy-create LLM instance from deferred init params (avoids import at Agent())."""
+        if self._llm_instance is not None:
+            return self._llm_instance
+        if self._llm_init_params:
+            try:
+                from ..llm.llm import LLM
+                self._llm_instance = LLM(**self._llm_init_params)
+            except ImportError as e:
+                raise ImportError(
+                    "LLM features requested but dependencies not installed. "
+                    "Please install with: pip install \"praisonaiagents[llm]\""
+                ) from e
+        return self._llm_instance
+
+    @property
+    def llm_instance(self):
+        return self._ensure_llm_instance()
+
+    @llm_instance.setter
+    def llm_instance(self, value):
+        self._llm_instance = value
+        if value is not None:
+            self._llm_init_params = None
+
+    def _ensure_loop_guard(self):
+        """Lazy-create loop guard on first tool execution."""
+        if self._loop_guard is None:
+            from ..escalation.loop_guard import LoopGuard, LoopGuardConfig
+            self._loop_guard = LoopGuard(LoopGuardConfig(enabled=True))
+        return self._loop_guard
     
     @classmethod
     def _configure_logging(cls):
@@ -516,13 +554,14 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
         backstory: Optional[str] = None,
         instructions: Optional[str] = None,
         # LLM configuration
-        llm: Optional[Union[str, Any]] = None,
+        llm: Optional[Union[str, Any]] = None,  # Can be string, dict, or LLMConfig object
         model: Optional[Union[str, Any]] = None,  # Alias for llm=
         base_url: Optional[str] = None,  # Kept separate (connection/auth)
         api_key: Optional[str] = None,  # Kept separate (connection/auth)
         auth: Optional[str] = None,  # Subscription auth provider: "claude-code", "codex", etc.
         # Tools
         tools: Optional[List[Any]] = None,
+        toolsets: Optional[List[str]] = None,  # Named toolset groups to resolve
         allow_delegation: bool = False,  # Deprecated: use handoffs= instead
         allow_code_execution: Optional[bool] = False,  # Deprecated: use execution=ExecutionConfig(code_execution=True)
         code_execution_mode: Literal["safe", "unsafe"] = "safe",  # Deprecated: use execution=ExecutionConfig(code_mode="safe")
@@ -550,14 +589,16 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
         hooks: Optional[Union[List[Any], Dict[str, Any], 'HooksConfig']] = None,
         skills: Optional[Union[List[str], str, Dict[str, Any], 'SkillsConfig']] = None,
         approval: Optional[Union[bool, str, Dict[str, Any], 'ApprovalConfig', 'ApprovalProtocol']] = None,
-        tool_timeout: Optional[int] = None,  # P8/G11: Timeout in seconds for each tool call
-        parallel_tool_calls: bool = False,  # Gap 2: Enable parallel execution of batched LLM tool calls
+        tool_config: Optional[Union[bool, 'ToolConfig']] = None,  # Tool execution configuration (timeout, retry, parallel)
         learn: Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
         backend: Optional[Any] = None,  # External managed agent backend (e.g., ManagedAgentIntegration)
-        cli_backend: Optional[Union[str, Any]] = None,  # CLI backend for delegating turns (e.g., "claude-code")
+        cli_backend: Optional[Union[str, Any]] = None,  # CLI backend for delegating turns (e.g., "claude-code") - DEPRECATED
+        runtime: Optional[Union[str, Dict[str, Any], 'AgentRuntimeConfig']] = None,  # Model-scoped runtime configuration
         interrupt_controller: Optional['InterruptController'] = None,  # G2: Cooperative cancellation
         tool_search: Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']] = False,  # Progressive tool disclosure
+        message_steering: Optional[Union[bool, 'MessageSteeringProtocol']] = False,  # Real-time message steering during execution
         sandbox: Optional[Union[bool, 'SandboxConfig']] = None,  # Sandbox for safe code execution
+        retry: Optional[Union[bool, Dict[str, Any], 'RetryBackoffConfig']] = None,  # Retry configuration with exponential backoff
     ):
         """Initialize an Agent instance.
 
@@ -567,9 +608,10 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
             goal: Primary objective the agent aims to achieve.
             backstory: Background context shaping personality and decisions.
             instructions: Direct instructions (overrides role/goal/backstory). Recommended for simple agents.
-            llm: Model name string ("gpt-4o", "anthropic/claude-3-sonnet") or LLM object.
+            llm: Model name string ("gpt-4o", "anthropic/claude-3-sonnet"), LLMConfig object, or custom LLM.
+                Can accept LLMConfig(model="gpt-4o", fallback_models=["claude-3-5-sonnet", "gpt-4o-mini"]).
                 Defaults to OPENAI_MODEL_NAME env var or "gpt-4o-mini".
-            model: Alias for llm parameter.
+            model: Alias for llm parameter. Also accepts LLMConfig objects.
             base_url: Custom LLM endpoint URL (e.g., for Ollama). Kept separate for auth.
             api_key: API key for LLM provider. Kept separate for auth.
             tools: List of tools, functions, callables, or MCP instances.
@@ -645,22 +687,24 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
                 - LearnConfig: Custom configuration
                 Learning is a first-class citizen, peer to memory. It captures patterns,
                 preferences, and insights from interactions to improve future responses.
-            parallel_tool_calls: Enable parallel execution of batched LLM tool calls (default False).
-                When True and LLM returns multiple tool calls in a single response, they execute
-                concurrently instead of sequentially. Provides ~3x speedup for I/O-bound tools.
-                Maintains backward compatibility with False default.
+            tool_config: Tool execution configuration. Accepts:
+                - bool: True enables defaults, False disables
+                - ToolConfig: Custom configuration for timeout, retry policy, parallel execution
+                Consolidates tool timeout, retry policy, and parallel execution settings.
             backend: External managed agent backend for hybrid execution. Accepts:
                 - ManagedAgentIntegration: External managed agent service
                 - None: Use local execution (default)
                 When provided, agent can delegate execution to managed infrastructure
                 for long-running tasks or when local resources are constrained.
-            cli_backend: CLI backend for delegating full turns to external CLI tools. Accepts:
-                - str: Backend ID ("claude-code", "codex-cli", "gemini-cli")
-                - CliBackendProtocol: Custom CLI backend instance
-                - None: Use standard LLM execution (default)
-                When provided, agent delegates entire conversation turns to the CLI tool
-                instead of using the built-in LLM. Enables session continuity and 
-                tool integration through external AI coding assistants.
+            cli_backend: **DEPRECATED** CLI backend for delegating full turns. Use 'runtime' parameter instead.
+                This parameter is deprecated in favor of model-scoped runtime configuration.
+                Will emit deprecation warning when used.
+            runtime: Model-scoped runtime configuration for turn delegation. Accepts:
+                - str: Runtime ID ("claude-code", "praisonai") 
+                - Dict[str, Any]: Runtime config {"runtime": "claude-code", "config_overrides": {...}}
+                - AgentRuntimeConfig: Pre-configured runtime instance
+                - None: Use model-based resolution (default)
+                Enables turn delegation with per-model runtime selection and fail-closed behavior.
             tool_search: Progressive tool disclosure configuration. Accepts:
                 - bool: False=disabled (default), True=auto mode
                 - str: Mode ("auto", "on", "off")  
@@ -688,6 +732,7 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
             - auto_save → memory=MemoryConfig(auto_save=)
             - rate_limiter → execution=ExecutionConfig(rate_limiter=)
             - verification_hooks → autonomy=AutonomyConfig(verification_hooks=)
+            - Use tool_config=ToolConfig(...) for tool execution configuration
         """
         # Add check at start if memory is requested
         if memory is not None:
@@ -714,16 +759,16 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
         # Precedence: Explicit params > Config file > Built-in defaults
         # Only applies when param is None (not explicitly set)
         # ============================================================
-        from ..config.loader import apply_config_defaults, get_default
+        from ..config.loader import apply_config_defaults, get_default, _defaults_has_any_values
         
         # Apply config defaults for LLM if not explicitly set
-        if llm is None and model is None:
+        if llm is None and model is None and _defaults_has_any_values():
             config_model = get_default("model")
             if config_model:
                 llm = config_model
         
         # Apply config defaults for base_url if not explicitly set
-        if base_url is None:
+        if base_url is None and _defaults_has_any_values():
             config_base_url = get_default("base_url")
             if config_base_url:
                 base_url = config_base_url
@@ -751,6 +796,8 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
         if autonomy is None:
             # AutonomyConfig is in agent/autonomy.py - use dict for config defaults
             autonomy = apply_config_defaults("autonomy", autonomy, None)
+        if retry is None:
+            retry = apply_config_defaults("retry", retry, RetryBackoffConfig)
 
         # ============================================================
         # DEPRECATION WARNINGS for params consolidated into configs
@@ -798,8 +845,7 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
                 alternative="use 'execution=ExecutionConfig(rate_limiter=obj)' instead",
                 stacklevel=3
             )
-        # Note: parallel_tool_calls is NOT deprecated - it's a new Gap 2 feature
-        # Both direct parameter and ExecutionConfig.parallel_tool_calls are supported
+        # Note: parallel_tool_calls moved to tool_config pattern
         if verification_hooks is not None:
             warn_deprecated_param(
                 "verification_hooks",
@@ -975,8 +1021,8 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
                 allow_code_execution = True
             if _exec_config.code_mode != "safe":
                 code_execution_mode = _exec_config.code_mode
-            # Get parallel_tool_calls from ExecutionConfig, fall back to parameter
-            parallel_tool_calls = getattr(_exec_config, 'parallel_tool_calls', parallel_tool_calls)
+            # Get parallel_tool_calls from ExecutionConfig
+            parallel_tool_calls = getattr(_exec_config, 'parallel_tool_calls', False)
             # Budget guard extraction
             _max_budget = getattr(_exec_config, 'max_budget', None)
             _on_budget_exceeded = getattr(_exec_config, 'on_budget_exceeded', 'stop') or 'stop'
@@ -984,8 +1030,9 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
             max_iter, max_rpm, max_execution_time, max_retry_limit = 20, None, None, 2
             _max_budget = None
             _on_budget_exceeded = 'stop'
-            # Keep parallel_tool_calls parameter value when no ExecutionConfig provided
-            # (already set from parameter, no need to override)
+            # Default to False when no ExecutionConfig provided
+            parallel_tool_calls = False
+            _exec_config = ExecutionConfig()  # Default config for non-execution case
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve TEMPLATES param - FAST PATH
@@ -1388,7 +1435,7 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
             # String could be LLM prompt - passthrough for later processing
             _guardrails_config = guardrails
         else:
-            from .._resolver_helpers import resolve_guardrails as _resolve_guardrails
+            from ..config.param_resolver import resolve_guardrails as _resolve_guardrails
             _guardrails_config = _resolve_guardrails(
                 value=guardrails,
                 config_class=GuardrailConfig,
@@ -1473,6 +1520,9 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
         
         # Initialize autonomy features (agent-centric escalation/doom-loop)
         self._init_autonomy(autonomy, verification_hooks=verification_hooks)
+        
+        # Initialize loop guard lazily on first tool execution (zero init overhead)
+        self._loop_guard = None
 
         # If instructions are provided, use them to set role, goal, and backstory
         if instructions:
@@ -1506,12 +1556,20 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
             self.self_reflect = True if self_reflect is None else self_reflect
         
         self.instructions = instructions
+        
+        # Resolve tool_config for tool execution settings
+        _tool_config = Agent._resolve_tool_config(
+            tool_config=tool_config
+        )
+        
         # Gap 2: Store parallel tool calls setting for ToolCallExecutor selection
-        self.parallel_tool_calls = parallel_tool_calls
+        self.parallel_tool_calls = _tool_config.parallel if _tool_config else parallel_tool_calls
         # G2: Store interrupt controller for cooperative cancellation
         self.interrupt_controller = interrupt_controller
         # Check for model name in environment variable if not provided
         self._using_custom_llm = False
+        self._llm_instance = None
+        self._llm_init_params = None
         # Flag to track if final result has been displayed to prevent duplicates
         self._final_display_shown = False
         
@@ -1526,7 +1584,22 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
         
         # Handle llm= deprecation: model= is the preferred parameter name
         # llm= still works but shows deprecation warning
-        if llm is not None and model is None:
+        fallback_models = None  # Initialize for internal use
+        
+        # Check if llm is an LLMConfig object
+        from ..config import LLMConfig
+        if isinstance(llm, LLMConfig):
+            # Extract values from LLMConfig
+            llm_config_obj = llm
+            llm = llm_config_obj.model
+            fallback_models = llm_config_obj.fallback_models
+            if base_url is None:
+                base_url = llm_config_obj.base_url
+            if api_key is None:
+                api_key = llm_config_obj.api_key
+            if auth is None:
+                auth = llm_config_obj.auth
+        elif llm is not None and model is None:
             warn_deprecated_param(
                 "llm",
                 since="1.0.0",
@@ -1534,9 +1607,23 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
                 alternative="use 'model' instead. Example: Agent(model='gpt-4o-mini')",
                 stacklevel=3
             )
+        
         # model= is the preferred parameter (no warning)
         if model is not None:
-            llm = model  # model= takes precedence
+            # Check if model is an LLMConfig object
+            if isinstance(model, LLMConfig):
+                # Extract values from LLMConfig (same as llm handling)
+                llm = model.model
+                if fallback_models is None:
+                    fallback_models = model.fallback_models
+                if base_url is None:
+                    base_url = model.base_url
+                if api_key is None:
+                    api_key = model.api_key
+                if auth is None:
+                    auth = model.auth
+            else:
+                llm = model  # model= takes precedence
         
         # Store rate limiter (optional, zero overhead when None)
         self._rate_limiter = rate_limiter
@@ -1550,98 +1637,74 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
         self.base_url = base_url
         self.api_key = api_key
 
-        # If base_url is provided, always create a custom LLM instance
+        # If base_url is provided, defer custom LLM instance creation
         if base_url:
-            try:
-                from ..llm.llm import LLM
-                # Handle different llm parameter types with base_url
-                if isinstance(llm, dict):
-                    # Merge base_url and api_key into the dict
-                    llm_config = llm.copy()
-                    llm_config['base_url'] = base_url
-                    if api_key:
-                        llm_config['api_key'] = api_key
-                    if auth:
-                        llm_config['auth'] = auth
-                    llm_config['metrics'] = metrics
-                    self.llm_instance = LLM(**llm_config)
-                    self.llm = llm.get('model', Agent._get_default_model())
-                else:
-                    # Create LLM with model string and base_url (cached for performance)
-                    model_name = llm or Agent._get_default_model()
-                    self.llm_instance = LLM(
-                        model=model_name,
-                        base_url=base_url,
-                        api_key=api_key,
-                        auth=auth,
-                        metrics=metrics,
-                        web_search=web_search,
-                        web_fetch=web_fetch,
-                        prompt_caching=prompt_caching,
-                        claude_memory=claude_memory
-                    )
-                    self.llm = model_name
-                self._using_custom_llm = True
-            except ImportError as e:
-                raise ImportError(
-                    "LLM features requested but dependencies not installed. "
-                    "Please install with: pip install \"praisonaiagents[llm]\""
-                ) from e
+            if isinstance(llm, dict):
+                llm_config = llm.copy()
+                llm_config['base_url'] = base_url
+                if api_key:
+                    llm_config['api_key'] = api_key
+                if auth:
+                    llm_config['auth'] = auth
+                llm_config['metrics'] = metrics
+                llm_config['max_iter'] = max_iter
+                self._llm_init_params = llm_config
+                self.llm = llm.get('model', Agent._get_default_model())
+            else:
+                model_name = llm or Agent._get_default_model()
+                self._llm_init_params = {
+                    'model': model_name,
+                    'base_url': base_url,
+                    'api_key': api_key,
+                    'auth': auth,
+                    'metrics': metrics,
+                    'max_iter': max_iter,
+                    'web_search': web_search,
+                    'web_fetch': web_fetch,
+                    'prompt_caching': prompt_caching,
+                    'claude_memory': claude_memory,
+                }
+                self.llm = model_name
+            self._using_custom_llm = True
         # If the user passes a dictionary (for advanced configuration)
         elif isinstance(llm, dict) and "model" in llm:
-            try:
-                from ..llm.llm import LLM
-                # Add api_key if provided and not in dict
-                if api_key and 'api_key' not in llm:
-                    llm = llm.copy()
-                    llm['api_key'] = api_key
-                # Add auth if provided and not in dict
-                if auth and 'auth' not in llm:
-                    llm = llm.copy()
-                    llm['auth'] = auth
-                # Add metrics parameter
-                llm = llm.copy()
-                llm['metrics'] = metrics
-                self.llm_instance = LLM(**llm)  # Pass all dict items as kwargs
-                self._using_custom_llm = True
-                self.llm = llm.get('model', Agent._get_default_model())
-            except ImportError as e:
-                raise ImportError(
-                    "LLM features requested but dependencies not installed. "
-                    "Please install with: pip install \"praisonaiagents[llm]\""
-                ) from e
-        # If the user passes a string with a slash (provider/model)
+            llm_config = llm.copy()
+            if api_key and 'api_key' not in llm_config:
+                llm_config['api_key'] = api_key
+            if auth and 'auth' not in llm_config:
+                llm_config['auth'] = auth
+            llm_config['metrics'] = metrics
+            llm_config['max_iter'] = max_iter
+            self._llm_init_params = llm_config
+            self._using_custom_llm = True
+            self.llm = llm_config.get('model', Agent._get_default_model())
+        # If the user passes a string with a slash (provider/model) — defer LiteLLM import
         elif isinstance(llm, str) and "/" in llm:
-            try:
-                from ..llm.llm import LLM
-                # Pass the entire string so LiteLLM can parse provider/model
-                llm_params = {'model': llm}
-                if api_key:
-                    llm_params['api_key'] = api_key
-                if auth:
-                    llm_params['auth'] = auth
-                llm_params['metrics'] = metrics
-                llm_params['web_search'] = web_search
-                llm_params['web_fetch'] = web_fetch
-                llm_params['prompt_caching'] = prompt_caching
-                llm_params['claude_memory'] = claude_memory
-                self.llm_instance = LLM(**llm_params)
-                self._using_custom_llm = True
-                self.llm = llm
-                
-                # Ensure tools are properly accessible when using custom LLM
-                if tools:
-                    logging.debug(f"Tools passed to Agent with custom LLM: {tools}")
-                    # Store the tools for later use
-                    self.tools = tools
-            except ImportError as e:
-                raise ImportError(
-                    "LLM features requested but dependencies not installed. "
-                    "Please install with: pip install \"praisonaiagents[llm]\""
-                ) from e
+            llm_params = {'model': llm}
+            if api_key:
+                llm_params['api_key'] = api_key
+            if auth:
+                llm_params['auth'] = auth
+            llm_params['metrics'] = metrics
+            llm_params['web_search'] = web_search
+            llm_params['web_fetch'] = web_fetch
+            llm_params['prompt_caching'] = prompt_caching
+            llm_params['claude_memory'] = claude_memory
+            llm_params['max_iter'] = max_iter
+            self._llm_init_params = llm_params
+            self._using_custom_llm = True
+            self.llm = llm
+            
+            if tools:
+                logging.debug(f"Tools passed to Agent with custom LLM: {tools}")
+                self.tools = tools
         # Otherwise, fall back to OpenAI environment/name (cached for performance)
         else:
             self.llm = llm or Agent._get_default_model()
+        
+        # Store fallback models for resilience (defensive copy to avoid external mutations)
+        self.fallback_models = list(fallback_models) if fallback_models else []
+        
         # Handle tools parameter - ensure it's always a list
         if callable(tools):
             # If a single function/callable is passed, wrap it in a list
@@ -1657,6 +1720,32 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
                 self.tools = list(tools)
         else:
             self.tools = tools or []
+        
+        # Handle toolsets parameter - resolve named toolset groups
+        if toolsets:
+            try:
+                from ..toolsets import resolve_toolsets
+                toolset_tool_names = resolve_toolsets(toolsets)
+                # Remove duplicates with existing tools
+                existing_tool_names = set()
+                for tool in self.tools:
+                    name = getattr(tool, 'name', getattr(tool, '__name__', str(tool)))
+                    existing_tool_names.add(name)
+                
+                unique_tool_names = [name for name in toolset_tool_names if name not in existing_tool_names]
+                toolset_tools = self._resolve_tool_names(unique_tool_names)
+                self.tools.extend(toolset_tools)
+                logging.debug(f"Resolved toolsets {toolsets} to {len(toolset_tools)} tools: {[getattr(t, '__name__', str(t)) for t in toolset_tools]}")
+            except (ValueError, KeyError) as e:
+                raise ValueError(
+                    f"Agent '{getattr(self, 'display_name', 'unknown')}' failed to resolve toolsets {toolsets}: {e}. "
+                    "Verify names with praisonaiagents.toolsets.list_toolsets()."
+                ) from e
+            except ImportError as e:
+                raise ImportError(
+                    f"Agent '{getattr(self, 'display_name', 'unknown')}' failed to import toolsets module: {e}. "
+                    "Ensure praisonaiagents is properly installed."
+                ) from e
         
         # Inject default tools for autonomy mode (after self.tools is initialized)
         # ONLY inject if caller didn't provide tools - avoid duplicates with CLI/wrapper tools
@@ -1693,6 +1782,7 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
         self.max_execution_time = max_execution_time
         self._memory_instance = None
         self._init_memory(memory, user_id)
+        self._init_message_steering(message_steering)
         self.verbose = verbose
         self._has_explicit_output_config = _has_explicit_output  # Track if user set output mode
         self.tool_output_limit = tool_output_limit  # Configurable tool output limit
@@ -1714,9 +1804,14 @@ class Agent(SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandler
         self.allow_code_execution = allow_code_execution
         self.max_retry_limit = max_retry_limit
         self.code_execution_mode = code_execution_mode
+        # Store execution config for guardrail retry backoff
+        self._execution_config = _exec_config
         self.embedder_config = embedder_config
         self.knowledge = knowledge
         self.use_system_prompt = use_system_prompt
+        
+        # Store ExecutionConfig for context compaction policy access
+        self.execution = _exec_config
         # Async-safe chat_history with dual-lock protection
         self.__chat_history_state = AsyncSafeState([])
         
@@ -1806,20 +1901,24 @@ Your Goal: {self.goal}
                 self._approval_backend = None
                 self._approve_all_tools = False
                 self._approval_timeout = 0
+                self._approval_permissions = None
             else:
                 # Unknown string — treat as no approval
                 self._approval_backend = None
                 self._approve_all_tools = False
                 self._approval_timeout = 0
+                self._approval_permissions = None
         elif approval is True:
             from ..approval.backends import AutoApproveBackend
             self._approval_backend = AutoApproveBackend()
             self._approve_all_tools = False
             self._approval_timeout = 0  # 0 = use backend default
+            self._approval_permissions = None
         elif approval is False or approval is None:
             self._approval_backend = None
             self._approve_all_tools = False
             self._approval_timeout = 0
+            self._approval_permissions = None
             # No explicit approval kwarg — honour PRAISONAI_TOOL_SAFETY.
             # Default preset "default" blocks only destructive ops
             # (delete_*, execute_command, execute_code, kill_process, move/copy)
@@ -1849,17 +1948,21 @@ Your Goal: {self.goal}
             self._approval_backend = approval.backend
             self._approve_all_tools = approval.all_tools
             self._approval_timeout = approval.timeout  # None = indefinite, 0 = backend default
+            # Store permissions if provided (for CI-safe declarative policies)
+            self._approval_permissions = getattr(approval, 'permissions', None)
         elif isinstance(approval, dict):
             # Dict config: convert to ApprovalConfig
             approval_config = ApprovalConfig(**approval)
             self._approval_backend = approval_config.backend
             self._approve_all_tools = approval_config.all_tools
             self._approval_timeout = approval_config.timeout
+            self._approval_permissions = getattr(approval_config, 'permissions', None)
         else:
             # Plain backend object — dangerous tools only, backend default timeout
             self._approval_backend = approval
             self._approve_all_tools = False
             self._approval_timeout = 0
+            self._approval_permissions = None
         
         # Per-agent autonomy→approval bridge (G-BRIDGE-1 fix)
         # If autonomy level is full_auto and no explicit approval was set,
@@ -1872,8 +1975,24 @@ Your Goal: {self.goal}
         self._pending_approvals = {}
         self._approvals_lock = asyncio.Lock()
         
+        # Store the resolved tool_config for cloning (resolved earlier in __init__)
+        self._tool_config = _tool_config
+        
         # P8/G11: Tool timeout - prevent slow tools from blocking
-        self._tool_timeout = tool_timeout
+        self._tool_timeout = _tool_config.timeout if _tool_config else None
+        
+        # Store tool retry policy for tool execution with exponential backoff
+        self._tool_retry_policy = _tool_config.retry_policy if _tool_config else None
+        
+        # Retry configuration with jittered exponential backoff
+        if isinstance(retry, RetryBackoffConfig):
+            self._retry_config = retry
+        elif isinstance(retry, dict):
+            self._retry_config = RetryBackoffConfig(**retry)
+        elif retry is True:
+            self._retry_config = RetryBackoffConfig()  # Use defaults
+        else:
+            self._retry_config = None  # No retry configuration
         
         # Cache for system prompts and formatted tools with eager thread-safe lock
         # Use OrderedDict for LRU behavior
@@ -1977,10 +2096,26 @@ Your Goal: {self.goal}
         # Backend - external managed agent backend for hybrid execution
         self.backend = backend
         
-        # CLI Backend - external CLI backend for delegating full turns
+        # CLI Backend - external CLI backend for delegating full turns (DEPRECATED)
         self._cli_backend = None
         if cli_backend is not None:
+            from ..utils.deprecation import warn_deprecated_param
+            warn_deprecated_param(
+                "cli_backend",
+                since="1.0.0",
+                removal="2.0.0",
+                alternative="use 'runtime=' instead for model-scoped runtime configuration. For migration assistance, run: praisonai doctor fix --execute",
+                stacklevel=3
+            )
             self._cli_backend = self._resolve_cli_backend(cli_backend)
+        
+        # Runtime Configuration - model-scoped runtime selection
+        self._runtime_config = None
+        if runtime is not None:
+            self._runtime_config = self._resolve_runtime_config(runtime)
+        
+        # Runtime resolver for per-turn resolution
+        self._runtime_resolver = None  # Will be initialized on first use
 
         # Telemetry - lazy initialized via property for performance
         self.__telemetry = None
@@ -1988,6 +2123,19 @@ Your Goal: {self.goal}
         
         # Sandbox configuration - initialize SandboxMixin
         super().__init__(sandbox=sandbox)
+
+    @staticmethod
+    def _resolve_tool_config(tool_config):
+        """Resolve tool_config parameter with backward compatibility."""
+        # Import here to avoid circular imports
+        from ..config.feature_configs import ToolConfig, resolve_tools
+        
+        # Handle the new consolidated parameter
+        if tool_config is not None:
+            resolved_config = resolve_tools(tool_config)
+            return resolved_config
+        
+        return None
 
     def __deepcopy__(self, memo: dict) -> "Agent":
         """Custom deepcopy that creates fresh threading primitives.
@@ -2035,6 +2183,7 @@ Your Goal: {self.goal}
             
             # LLM configuration 
             'llm': self.llm,
+            'fallback_models': list(self.fallback_models) if hasattr(self, 'fallback_models') and self.fallback_models else None,
             'base_url': getattr(self, 'base_url', None),
             'api_key': getattr(self, 'api_key', None),
             'auth': getattr(self, 'auth', None),
@@ -2065,9 +2214,11 @@ Your Goal: {self.goal}
             'learn': getattr(self, '_learn_config', None),
             'tool_search': getattr(self, '_tool_search_config', None),
             
-            # Tool configuration
-            'tool_timeout': getattr(self, '_tool_timeout', None),
-            'parallel_tool_calls': getattr(self, 'parallel_tool_calls', False),
+            # Tool configuration - use consolidated config when available  
+            'tool_config': getattr(self, '_tool_config', None),
+            
+            # Retry configuration
+            'retry': getattr(self, '_retry_config', None),
             
             # CLI backend
             'cli_backend': getattr(self, '_cli_backend', None),
@@ -4245,33 +4396,95 @@ Summary:"""
         
         return ""
     
-    def store_memory(self, content: str, memory_type: str = "short_term", **kwargs: Any) -> None:
+    def store_memory(self, content: str, memory_type: str = "short_term", action: str = "add", **kwargs: Any) -> None:
         """
         Store content in memory.
         
         Args:
             content: Content to store
             memory_type: Type of memory (short_term, long_term, entity, episodic)
+            action: Type of operation ("add", "replace", "remove")
             **kwargs: Additional arguments for the memory method
         """
         if not self._memory_instance:
             return
         
-        # Use protocol names first (store_*), fallback to legacy names (add_*)
-        if memory_type == "short_term":
-            if hasattr(self._memory_instance, 'store_short_term'):
-                self._memory_instance.store_short_term(content, **kwargs)
-            elif hasattr(self._memory_instance, 'add_short_term'):
-                self._memory_instance.add_short_term(content, **kwargs)
-        elif memory_type == "long_term":
-            if hasattr(self._memory_instance, 'store_long_term'):
-                self._memory_instance.store_long_term(content, **kwargs)
-            elif hasattr(self._memory_instance, 'add_long_term'):
-                self._memory_instance.add_long_term(content, **kwargs)
-        elif memory_type == "entity" and hasattr(self._memory_instance, 'add_entity'):
-            self._memory_instance.add_entity(content, **kwargs)
-        elif memory_type == "episodic" and hasattr(self._memory_instance, 'add_episodic'):
-            self._memory_instance.add_episodic(content, **kwargs)
+        # Validate memory_type
+        supported_types = ["short_term", "long_term", "entity", "episodic"]
+        if memory_type not in supported_types:
+            raise ValueError(f"Unsupported memory_type '{memory_type}'. Supported: {supported_types}")
+        
+        # Perform the actual storage operation first
+        storage_success = False
+        try:
+            if action == "add":
+                # Use protocol names first (store_*), fallback to legacy names (add_*)
+                if memory_type == "short_term":
+                    if hasattr(self._memory_instance, 'store_short_term'):
+                        self._memory_instance.store_short_term(content, **kwargs)
+                        storage_success = True
+                    elif hasattr(self._memory_instance, 'add_short_term'):
+                        self._memory_instance.add_short_term(content, **kwargs)
+                        storage_success = True
+                elif memory_type == "long_term":
+                    if hasattr(self._memory_instance, 'store_long_term'):
+                        self._memory_instance.store_long_term(content, **kwargs)
+                        storage_success = True
+                    elif hasattr(self._memory_instance, 'add_long_term'):
+                        self._memory_instance.add_long_term(content, **kwargs)
+                        storage_success = True
+                elif memory_type == "entity" and hasattr(self._memory_instance, 'add_entity'):
+                    self._memory_instance.add_entity(content, **kwargs)
+                    storage_success = True
+                elif memory_type == "episodic" and hasattr(self._memory_instance, 'add_episodic'):
+                    self._memory_instance.add_episodic(content, **kwargs)
+                    storage_success = True
+            elif action == "replace":
+                # For replace operations - look for replace_ or update_ methods
+                method_name = f"replace_{memory_type}" if hasattr(self._memory_instance, f'replace_{memory_type}') else f"update_{memory_type}"
+                if hasattr(self._memory_instance, method_name):
+                    getattr(self._memory_instance, method_name)(content, **kwargs)
+                    storage_success = True
+                else:
+                    raise ValueError(f"Memory provider does not support 'replace' for {memory_type}")
+            elif action == "remove":
+                # For remove operations - look for remove_ or delete_ methods  
+                method_name = f"remove_{memory_type}" if hasattr(self._memory_instance, f'remove_{memory_type}') else f"delete_{memory_type}"
+                if hasattr(self._memory_instance, method_name):
+                    getattr(self._memory_instance, method_name)(content, **kwargs)
+                    storage_success = True
+                else:
+                    raise ValueError(f"Memory provider does not support 'remove' for {memory_type}")
+            else:
+                raise ValueError(f"Unsupported action '{action}'. Supported: add, replace, remove")
+                
+            if not storage_success:
+                raise ValueError(f"Memory provider does not support {memory_type} storage")
+                
+        except Exception as e:
+            logging.warning(f"[{self.name}] Memory storage failed: {e}")
+            raise
+        
+        # Only call on_memory_write hook AFTER successful storage
+        if storage_success:
+            try:
+                metadata = kwargs.get('metadata', None)
+                # Try async version first if in async context, fallback to sync
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                    # In async context - prefer async hook if available
+                    if hasattr(self._memory_instance, 'aon_memory_write'):
+                        # Schedule async hook without blocking (fire and forget)
+                        asyncio.create_task(self._memory_instance.aon_memory_write(action, memory_type, content, metadata))
+                    elif hasattr(self._memory_instance, 'on_memory_write'):
+                        self._memory_instance.on_memory_write(action, memory_type, content, metadata)
+                except RuntimeError:
+                    # Not in async context - use sync hook
+                    if hasattr(self._memory_instance, 'on_memory_write'):
+                        self._memory_instance.on_memory_write(action, memory_type, content, metadata)
+            except Exception as e:
+                logging.warning(f"[{self.name}] Memory on_memory_write hook failed: {e}")
     
     def _display_memory_info(self):
         """Display memory information to user in a friendly format."""
@@ -4825,6 +5038,22 @@ Answer:"""
             retry_count += 1
             logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {error}")
             
+            # Add exponential backoff delay to avoid hammering the LLM
+            execution_config = getattr(self, '_execution_config', None)
+            if execution_config is not None:
+                total_delay = BackoffPolicy.delay(
+                    retry_count,
+                    execution_config.retry_initial_delay,
+                    execution_config.retry_backoff_factor,
+                    execution_config.retry_jitter
+                )
+            else:
+                # Fall back to simple backoff if no execution config
+                total_delay = 1.0 * (2.0 ** (retry_count - 1))
+            
+            logging.info(f"Agent {self.name}: Waiting {total_delay:.2f}s before guardrail retry")
+            time.sleep(total_delay)
+            
             # Regenerate response for retry
             try:
                 retry_prompt = f"{prompt}\n\nNote: Previous response failed validation due to: {error}. Please provide an improved response."
@@ -4861,6 +5090,22 @@ Answer:"""
             
             retry_count += 1
             logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {error}")
+            
+            # Add exponential backoff delay to avoid hammering the LLM
+            execution_config = getattr(self, '_execution_config', None)
+            if execution_config is not None:
+                total_delay = BackoffPolicy.delay(
+                    retry_count,
+                    execution_config.retry_initial_delay,
+                    execution_config.retry_backoff_factor,
+                    execution_config.retry_jitter
+                )
+            else:
+                # Fall back to simple backoff if no execution config
+                total_delay = 1.0 * (2.0 ** (retry_count - 1))
+            
+            logging.info(f"Agent {self.name}: Waiting {total_delay:.2f}s before guardrail retry")
+            await asyncio.sleep(total_delay)
             
             # Regenerate response for retry (async version)
             try:
@@ -4950,17 +5195,163 @@ Answer:"""
         
         raise TypeError(f"Invalid cli_backend type: {type(cli_backend)}. Expected CliBackendProtocol instance or factory callable.")
     
-    async def _chat_via_cli_backend(self, prompt: str, **kwargs) -> Optional[str]:
+    def _resolve_runtime_config(self, runtime):
+        """Resolve runtime parameter to AgentRuntimeConfig instance.
+        
+        Args:
+            runtime: Runtime configuration parameter
+            
+        Returns:
+            AgentRuntimeConfig instance
+            
+        Raises:
+            TypeError: If runtime type is invalid
+            ValueError: If runtime configuration is invalid
+        """
+        try:
+            from ..runtime import AgentRuntimeConfig
+        except ImportError:
+            raise ImportError(
+                "Runtime configuration features requested but not available. "
+                "This should not happen in a properly installed praisonaiagents package."
+            )
+        
+        # If already an AgentRuntimeConfig instance, return as-is
+        if isinstance(runtime, AgentRuntimeConfig):
+            return runtime
+        
+        # If string, create config with runtime ID
+        if isinstance(runtime, str):
+            return AgentRuntimeConfig.from_runtime_id(runtime)
+        
+        # If dictionary, create config from dict
+        if isinstance(runtime, dict):
+            return AgentRuntimeConfig.from_dict(runtime)
+        
+        raise TypeError(f"Invalid runtime type: {type(runtime)}. Expected str, dict, or AgentRuntimeConfig instance.")
+    
+    def _get_runtime_resolver(self):
+        """Get or create runtime resolver instance (lazy initialization)."""
+        if self._runtime_resolver is None:
+            try:
+                from ..runtime.resolver import RuntimeResolver
+                self._runtime_resolver = RuntimeResolver()
+            except ImportError:
+                raise ImportError(
+                    "Runtime resolution features requested but not available. "
+                    "This should not happen in a properly installed praisonaiagents package."
+                )
+        return self._runtime_resolver
+    
+    async def _resolve_turn_runtime(self):
+        """Resolve runtime for current turn based on model and configuration.
+        
+        Returns:
+            Runtime instance if resolution succeeds, None otherwise
+        """
+        try:
+            from ..runtime.resolver import RuntimeResolutionContext
+        except ImportError:
+            return None
+        
+        # Create resolution context with current model and provider info
+        context = RuntimeResolutionContext(
+            model_name=getattr(self, 'llm', None),
+            provider_name=self._extract_provider_from_model(getattr(self, 'llm', None)),
+            agent_config={'agent_id': getattr(self, 'agent_id', None)}
+        )
+        
+        try:
+            resolver = self._get_runtime_resolver()
+            result = resolver.resolve_runtime_instance(
+                context=context,
+                model_runtime_configs=getattr(self, '_model_runtime_configs', None),
+                provider_runtime_configs=getattr(self, '_provider_runtime_configs', None),
+                legacy_cli_backend=getattr(self, '_cli_backend', None)
+            )
+            
+            if result and result.runtime:
+                return result.runtime
+            
+        except (ValueError, RuntimeError) as e:
+            # Only fall back for registry not initialized, propagate configuration errors
+            if "not initialized" in str(e).lower():
+                # Registry not initialized - this is expected in SDK-only mode
+                pass
+            else:
+                # Configuration error (unknown runtime ID etc.) - fail closed
+                raise RuntimeError(
+                    f"Runtime resolution failed for agent={getattr(self, 'display_name', 'unknown')!r}, "
+                    f"model={getattr(self, 'llm', None)!r}: {e}. "
+                    "Fix the runtime ID/configuration or remove the runtime override."
+                ) from e
+        
+        return None
+    
+    def _extract_provider_from_model(self, model_name):
+        """Extract provider name from model name.
+        
+        Args:
+            model_name: Model name string (e.g., "anthropic/claude-3-sonnet")
+            
+        Returns:
+            Provider name if detectable, None otherwise
+        """
+        if not model_name or not isinstance(model_name, str):
+            return None
+        
+        # Common provider patterns
+        if '/' in model_name:
+            return model_name.split('/')[0]
+        
+        # Provider inference based on model name patterns
+        model_lower = model_name.lower()
+        if 'claude' in model_lower or 'anthropic' in model_lower:
+            return 'anthropic'
+        elif 'gpt' in model_lower or 'openai' in model_lower:
+            return 'openai'
+        elif 'gemini' in model_lower or 'google' in model_lower:
+            return 'google'
+        elif 'llama' in model_lower:
+            return 'meta'
+        
+        return None
+    
+    async def _chat_via_runtime(self, runtime_instance, prompt: str, **kwargs) -> Optional[str]:
+        """Chat implementation using resolved runtime instance.
+        
+        This is similar to _chat_via_cli_backend but uses the resolved runtime
+        from the model-scoped runtime resolution system.
+        
+        Args:
+            runtime_instance: Resolved runtime instance (CliBackendProtocol)
+            prompt: User prompt
+            **kwargs: Additional chat parameters
+            
+        Returns:
+            Runtime response content
+        """
+        if not runtime_instance:
+            raise RuntimeError("Runtime instance is None")
+        
+        # Delegate to CLI backend implementation with runtime instance
+        # Pass runtime instance directly to avoid mutating shared state
+        return await self._chat_via_cli_backend(prompt=prompt, cli_backend=runtime_instance, **kwargs)
+    
+    async def _chat_via_cli_backend(self, prompt: str, cli_backend: Any = None, **kwargs) -> Optional[str]:
         """Chat implementation using CLI backend delegation.
         
         Args:
             prompt: User prompt
+            cli_backend: Optional specific backend instance to use (for runtime delegation)
             **kwargs: Additional chat parameters (passed through as metadata)
             
         Returns:
             CLI backend response content
         """
-        if not self._cli_backend:
+        # Use provided backend or fall back to instance backend
+        backend = cli_backend or self._cli_backend
+        if not backend:
             raise RuntimeError("CLI backend not configured")
         
         try:
@@ -4999,7 +5390,7 @@ Answer:"""
                     images = None
             
             # Execute CLI backend
-            result = await self._cli_backend.execute(
+            result = await backend.execute(
                 prompt=prompt,
                 session=session_binding,
                 images=images,

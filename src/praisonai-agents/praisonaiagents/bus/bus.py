@@ -170,6 +170,17 @@ class EventBus:
         Returns:
             The published Event object
         """
+        # Fast path: if no subscribers, return a minimal event without expensive operations
+        if not self._subscribers:
+            # Convert EventType enum to string
+            type_str = event_type.value if isinstance(event_type, EventType) else event_type
+            return Event(
+                type=type_str,
+                data=data or {},
+                source=source,
+                metadata=metadata or {},
+            )
+        
         # Convert EventType enum to string
         type_str = event_type.value if isinstance(event_type, EventType) else event_type
         
@@ -193,6 +204,10 @@ class EventBus:
             The published event
         """
         logger.debug(f"Publishing event: {event.type}")
+        
+        # Fast path: if no subscribers, skip expensive work
+        if not self._subscribers:
+            return event
         
         # Store in history
         with self._lock:
@@ -244,6 +259,15 @@ class EventBus:
             The published Event object
         """
         type_str = event_type.value if isinstance(event_type, EventType) else event_type
+        
+        # Fast path: if no subscribers, return a minimal event without expensive operations
+        if not self._subscribers:
+            return Event(
+                type=type_str,
+                data=data or {},
+                source=source,
+                metadata=metadata or {},
+            )
         
         event = Event(
             type=type_str,
@@ -320,6 +344,11 @@ class EventBus:
         """Get the number of subscribers."""
         with self._lock:
             return len(self._subscribers)
+    
+    @property 
+    def has_subscribers(self) -> bool:
+        """Check if there are any subscribers (lock-free for performance)."""
+        return bool(self._subscribers)
     
     def __repr__(self) -> str:
         return f"EventBus(subscribers={self.subscriber_count})"

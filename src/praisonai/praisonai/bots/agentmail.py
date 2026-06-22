@@ -30,7 +30,6 @@ from praisonaiagents.bots import (
     HealthResult,
 )
 
-from ._session import BotSessionManager
 from ._email_utils import is_auto_reply, is_blocked_sender, extract_email_address
 
 logger = logging.getLogger(__name__)
@@ -111,7 +110,13 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
         
         # Session manager for conversation state
         self.config = config or BotConfig()
-        self._session = BotSessionManager(self.config)
+        
+        # Initialize allow_silence from config
+        self._allow_silence = getattr(self.config, 'allow_silence', False)
+        
+        # Use helper to build session manager
+        from ._session import build_session_manager
+        self._session = build_session_manager(self.config, platform="agentmail")
         
         # Resolve mode: explicit param > config > default
         if mode:
@@ -661,6 +666,10 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
                     self._agent,
                     sender_id,
                     body,
+                    chat_id=sender_id,
+                    user_name=message.sender.display_name if message.sender else "",
+                    message_id=message.message_id,
+                    account=self._config.get("account", "default"),
                 )
                 
                 if response:
@@ -703,7 +712,20 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
             body = str(content)
         
         # Fire sending hook
-        self.fire_message_sending(channel_id, body)
+        send_result = self.fire_message_sending(channel_id, body, reply_to=reply_to)
+        if send_result.get("cancel"):
+            # Honor intentional silence / hook cancellation
+            return BotMessage(
+                message_id=str(uuid.uuid4()),
+                content="",
+                message_type=MessageType.TEXT,
+                sender=self._bot_user,
+                channel=BotChannel(channel_id=channel_id, name=channel_id),
+                reply_to=reply_to,
+                thread_id=thread_id,
+                metadata={"subject": subject, "silent": True},
+            )
+        body = send_result.get("content", body)
         
         client = self._get_client()
         

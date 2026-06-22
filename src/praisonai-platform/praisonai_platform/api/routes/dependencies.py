@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from praisonaiagents.auth import AuthIdentity
 
-from ..deps import get_db, require_issue_in_workspace, require_workspace_member
+from ..deps import get_db, require_delete_permission, require_issue_in_workspace, require_workspace_member
 from ...services.dependency_service import DependencyService
 from ..schemas import DependencyCreate, DependencyResponse
 
@@ -58,12 +58,21 @@ async def delete_dependency(
     session: AsyncSession = Depends(get_db),
 ):
     await require_issue_in_workspace(workspace_id, issue_id, session)
+    from ...services.issue_service import IssueService
+
+    issue_svc = IssueService(session)
+    issue = await issue_svc.get(issue_id, workspace_id=workspace_id)
+    if issue is None:
+        raise HTTPException(status_code=404, detail="Issue not found")
     svc = DependencyService(session)
     dep = await svc.get(dep_id)
     if dep is None:
         raise HTTPException(status_code=404, detail="Dependency not found")
     if dep.issue_id != issue_id and dep.depends_on_issue_id != issue_id:
         raise HTTPException(status_code=404, detail="Dependency not found")
+    await require_delete_permission(
+        workspace_id, user, session, resource_owner_id=issue.creator_id
+    )
     deleted = await svc.delete(dep_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Dependency not found")

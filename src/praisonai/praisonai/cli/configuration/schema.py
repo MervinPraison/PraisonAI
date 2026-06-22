@@ -9,6 +9,21 @@ from typing import Any, Dict, List, Optional, Union, Literal
 
 
 @dataclass
+class AgentConfig:
+    """Agent configuration defaults."""
+    model: Optional[str] = None
+    provider: Optional[str] = None
+    base_url: Optional[str] = None
+    tools: List[str] = field(default_factory=list)
+    toolset: Optional[str] = None
+    default_agent: Optional[str] = None
+    memory: Optional[Union[bool, Dict[str, Any]]] = None
+    stream: bool = True
+    temperature: float = 0.7
+    max_tokens: int = 16000
+
+
+@dataclass
 class OutputConfig:
     """Output configuration."""
     format: str = "text"  # text, json, stream-json
@@ -82,17 +97,37 @@ class SessionConfig:
 
 
 @dataclass
+class LLMConfig:
+    """LLM configuration for default model and provider settings."""
+    model: str = "gpt-4o-mini"
+    provider: Optional[str] = None
+    base_url: Optional[str] = None
+    temperature: float = 0.7
+    max_tokens: int = 16000
+
+
+@dataclass
+class RulesConfig:
+    """Rules/instructions configuration."""
+    auto: bool = True  # Auto-inject project instruction files
+    max_chars: int = 32000  # Maximum total characters from rules
+
+
+@dataclass
 class ConfigSchema:
     """
     Complete configuration schema.
     
     Represents all configurable options for PraisonAI CLI.
     """
+    agent: AgentConfig = field(default_factory=AgentConfig)
     output: OutputConfig = field(default_factory=OutputConfig)
     traces: TracesConfig = field(default_factory=TracesConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
-    model: ModelConfig = field(default_factory=ModelConfig)
+    model: ModelConfig = field(default_factory=ModelConfig)  # Deprecated
+    llm: LLMConfig = field(default_factory=LLMConfig)
     session: SessionConfig = field(default_factory=SessionConfig)
+    rules: RulesConfig = field(default_factory=RulesConfig)
     
     # Additional settings stored as dict for flexibility
     extra: Dict[str, Any] = field(default_factory=dict)
@@ -100,6 +135,18 @@ class ConfigSchema:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
+            "agent": {
+                "model": self.agent.model,
+                "provider": self.agent.provider,
+                "base_url": self.agent.base_url,
+                "tools": self.agent.tools,
+                "toolset": self.agent.toolset,
+                "default_agent": self.agent.default_agent,
+                "memory": self.agent.memory,
+                "stream": self.agent.stream,
+                "temperature": self.agent.temperature,
+                "max_tokens": self.agent.max_tokens,
+            },
             "output": {
                 "format": self.output.format,
                 "color": self.output.color,
@@ -123,9 +170,20 @@ class ConfigSchema:
                 "temperature": self.model.temperature,
                 "max_tokens": self.model.max_tokens,
             },
+            "llm": {
+                "model": self.llm.model,
+                "provider": self.llm.provider,
+                "base_url": self.llm.base_url,
+                "temperature": self.llm.temperature,
+                "max_tokens": self.llm.max_tokens,
+            },
             "session": {
                 "auto_save": self.session.auto_save,
                 "history_limit": self.session.history_limit,
+            },
+            "rules": {
+                "auto": self.rules.auto,
+                "max_chars": self.rules.max_chars,
             },
             **self.extra,
         }
@@ -161,14 +219,17 @@ class ConfigSchema:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ConfigSchema":
         """Create from dictionary."""
+        agent_data = data.get("agent", {})
         output_data = data.get("output", {})
         traces_data = data.get("traces", {})
         mcp_data = data.get("mcp", {})
         model_data = data.get("model", {})
+        llm_data = data.get("llm", {})
         session_data = data.get("session", {})
+        rules_data = data.get("rules", {})
         
         # Extract known keys
-        known_keys = {"output", "traces", "mcp", "model", "session"}
+        known_keys = {"agent", "output", "traces", "mcp", "model", "llm", "session", "rules"}
         extra = {k: v for k, v in data.items() if k not in known_keys}
         
         # Parse MCP servers
@@ -203,6 +264,18 @@ class ConfigSchema:
                 )
         
         return cls(
+            agent=AgentConfig(
+                model=agent_data.get("model"),
+                provider=agent_data.get("provider"),
+                base_url=agent_data.get("base_url"),
+                tools=agent_data.get("tools", []),
+                toolset=agent_data.get("toolset"),
+                default_agent=agent_data.get("default_agent"),
+                memory=agent_data.get("memory"),
+                stream=agent_data.get("stream", True),
+                temperature=agent_data.get("temperature", 0.7),
+                max_tokens=agent_data.get("max_tokens", 16000),
+            ),
             output=OutputConfig(
                 format=output_data.get("format", "text"),
                 color=output_data.get("color", True),
@@ -221,9 +294,20 @@ class ConfigSchema:
                 temperature=model_data.get("temperature", 0.7),
                 max_tokens=model_data.get("max_tokens", 16000),
             ),
+            llm=LLMConfig(
+                model=llm_data.get("model", "gpt-4o-mini"),
+                provider=llm_data.get("provider"),
+                base_url=llm_data.get("base_url"),
+                temperature=llm_data.get("temperature", 0.7),
+                max_tokens=llm_data.get("max_tokens", 16000),
+            ),
             session=SessionConfig(
                 auto_save=session_data.get("auto_save", False),
                 history_limit=session_data.get("history_limit", 10),
+            ),
+            rules=RulesConfig(
+                auto=rules_data.get("auto", True),
+                max_chars=rules_data.get("max_chars", 32000),
             ),
             extra=extra,
         )

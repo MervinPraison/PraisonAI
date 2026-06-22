@@ -5,9 +5,9 @@ Demonstrates web search with consolidated params.
 Presets: duckduckgo, tavily, google, bing, serper, search_only, fetch_only
 """
 
-from praisonaiagents import Agent
+from praisonaiagents import Agent, WebConfig
 
-# Basic: Enable web search with preset
+# Basic: Enable web search with preset (search only — fetch needs Claude)
 agent = Agent(
     instructions="You are a research assistant with web access.",
     web="search_only",  # Compatible across models without web_fetch

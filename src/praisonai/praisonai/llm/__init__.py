@@ -5,53 +5,33 @@ This module provides LLM provider registry and utilities for the CLI wrapper.
 The core LLM functionality is in praisonaiagents.llm.
 """
 
-# Lazy loading for performance
-_lazy_cache = {}
+from .._lazy_cache import lazy_get
 
+_LAZY_ATTRS = {
+    "LLMProviderRegistry":      lambda: __import__("praisonai.llm.registry", fromlist=["LLMProviderRegistry"]).LLMProviderRegistry,
+    "get_default_llm_registry": lambda: __import__("praisonai.llm.registry", fromlist=["get_default_llm_registry"]).get_default_llm_registry,
+    "register_llm_provider":    lambda: __import__("praisonai.llm.registry", fromlist=["register_llm_provider"]).register_llm_provider,
+    "unregister_llm_provider":  lambda: __import__("praisonai.llm.registry", fromlist=["unregister_llm_provider"]).unregister_llm_provider,
+    "has_llm_provider":         lambda: __import__("praisonai.llm.registry", fromlist=["has_llm_provider"]).has_llm_provider,
+    "list_llm_providers":       lambda: __import__("praisonai.llm.registry", fromlist=["list_llm_providers"]).list_llm_providers,
+    "create_llm_provider":      lambda: __import__("praisonai.llm.registry", fromlist=["create_llm_provider"]).create_llm_provider,
+    "parse_model_string":       lambda: __import__("praisonai.llm.registry", fromlist=["parse_model_string"]).parse_model_string,
+    "_reset_default_registry":  lambda: __import__("praisonai.llm.registry", fromlist=["_reset_default_registry"])._reset_default_registry,
+    # Gateway providers
+    "OpenRouterProvider":       lambda: __import__("praisonai.llm.gateways", fromlist=["OpenRouterProvider"]).OpenRouterProvider,
+    "LiteLLMProxyProvider":     lambda: __import__("praisonai.llm.gateways", fromlist=["LiteLLMProxyProvider"]).LiteLLMProxyProvider,
+    "CustomGatewayProvider":    lambda: __import__("praisonai.llm.gateways", fromlist=["CustomGatewayProvider"]).CustomGatewayProvider,
+    "register_gateway_providers": lambda: __import__("praisonai.llm.gateways", fromlist=["register_gateway_providers"]).register_gateway_providers,
+}
 
 def __getattr__(name):
     """Lazy load LLM registry classes."""
-    if name in _lazy_cache:
-        return _lazy_cache[name]
-    
-    if name == "LLMProviderRegistry":
-        from .registry import LLMProviderRegistry
-        _lazy_cache[name] = LLMProviderRegistry
-        return LLMProviderRegistry
-    elif name == "get_default_llm_registry":
-        from .registry import get_default_llm_registry
-        _lazy_cache[name] = get_default_llm_registry
-        return get_default_llm_registry
-    elif name == "register_llm_provider":
-        from .registry import register_llm_provider
-        _lazy_cache[name] = register_llm_provider
-        return register_llm_provider
-    elif name == "unregister_llm_provider":
-        from .registry import unregister_llm_provider
-        _lazy_cache[name] = unregister_llm_provider
-        return unregister_llm_provider
-    elif name == "has_llm_provider":
-        from .registry import has_llm_provider
-        _lazy_cache[name] = has_llm_provider
-        return has_llm_provider
-    elif name == "list_llm_providers":
-        from .registry import list_llm_providers
-        _lazy_cache[name] = list_llm_providers
-        return list_llm_providers
-    elif name == "create_llm_provider":
-        from .registry import create_llm_provider
-        _lazy_cache[name] = create_llm_provider
-        return create_llm_provider
-    elif name == "parse_model_string":
-        from .registry import parse_model_string
-        _lazy_cache[name] = parse_model_string
-        return parse_model_string
-    elif name == "_reset_default_registry":
-        from .registry import _reset_default_registry
-        _lazy_cache[name] = _reset_default_registry
-        return _reset_default_registry
-    
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    if name not in _LAZY_ATTRS:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = lazy_get(f"llm:{name}", _LAZY_ATTRS[name])
+    if value is None:
+        raise AttributeError(f"module {__name__!r} cannot load attribute {name!r} due to import failure")
+    return value
 
 
 __all__ = [
@@ -64,7 +44,26 @@ __all__ = [
     "create_llm_provider",
     "parse_model_string",
     "embedding",
+    # Gateway providers
+    "OpenRouterProvider",
+    "LiteLLMProxyProvider",
+    "CustomGatewayProvider",
+    "register_gateway_providers",
 ]
+
+# Eagerly register gateway providers so create_llm_provider("openrouter/...") works
+# without needing to explicitly access a gateway class first
+def _ensure_gateways_registered():
+    """Ensure gateway providers are registered on module import."""
+    try:
+        from .gateways import register_gateway_providers
+        # This will only run once due to module-level call in gateways.py
+        register_gateway_providers()
+    except ImportError:
+        # Gateways module not available, skip registration
+        pass
+
+_ensure_gateways_registered()
 
 
 def embedding(text, model="text-embedding-3-small", **kwargs):

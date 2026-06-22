@@ -10,55 +10,50 @@ This module uses FULL LAZY LOADING for all heavy dependencies:
 
 This ensures minimal import-time overhead.
 """
-from pydantic import BaseModel
 from typing import Any, Dict, List, Optional, Type, TypeVar
 import os
 import json
 import asyncio
-import yaml
 import threading
-from rich import print
 from praisonai._logging import get_logger
 
-# Type variable for Pydantic models
-T = TypeVar('T', bound=BaseModel)
+# Type variable for Pydantic models - will be bound at runtime
+T = TypeVar('T')
+
+# Module-level cache for models (for backward compatibility)
+_models_cache: Dict = {}
+_models_lock = threading.Lock()
 
 # =============================================================================
 # THREAD-SAFE LAZY LOADING INFRASTRUCTURE - All heavy imports are deferred
 # =============================================================================
 
-import threading
+from ._lazy_cache import lazy_get
 
-# Thread-safe lazy cache for optional dependencies
-_optional_lock = threading.Lock()
-_optional_cache: dict[str, object] = {}
+# Module-level cache for lazily constructed Pydantic workflow models.
+# Populated on first call to _get_workflow_models() / _get_job_workflow_models().
+_models_cache: Dict[str, Any] = {}
+_models_lock = threading.Lock()
 
+def _rich_print(*args, **kwargs):
+    """Lazy-loaded rich.print wrapper."""
+    from rich import print as rich_print_impl
+    return rich_print_impl(*args, **kwargs)
 
-def _load_optional(key: str, loader):
-    """Thread-safe lazy loading for optional dependencies.
-    
-    Args:
-        key: Unique key for the dependency
-        loader: Function that imports and returns the dependency
-        
-    Returns:
-        The loaded dependency or None if import fails
-    """
-    if key in _optional_cache:
-        return _optional_cache[key]
-    
-    with _optional_lock:
-        if key in _optional_cache:
-            return _optional_cache[key]
-        
-        try:
-            _optional_cache[key] = loader()
-        except ImportError:
-            _optional_cache[key] = None
-        
-        return _optional_cache[key]
+def _yaml_dump(data, stream, **kwargs):
+    """Lazy-loaded yaml.dump wrapper."""
+    import yaml
+    return yaml.dump(data, stream, **kwargs)
+
+def _yaml_safe_load(stream):
+    """Lazy-loaded yaml.safe_load wrapper."""
+    import yaml
+    return yaml.safe_load(stream)
 
 
+
+
+# OpenAI client creation removed - create per-call instead of global cache
 
 
 # --- CrewAI lazy loading ---
@@ -70,7 +65,7 @@ from ._framework_availability import is_available
 
 def _get_crewai():
     """Lazy load crewai classes (thread-safe)."""
-    return _load_optional("crewai_classes", lambda: (
+    return lazy_get("crewai_classes", lambda: (
         __import__("crewai", fromlist=["Agent", "Task", "Crew"]).Agent,
         __import__("crewai", fromlist=["Agent", "Task", "Crew"]).Task,
         __import__("crewai", fromlist=["Agent", "Task", "Crew"]).Crew,
@@ -79,7 +74,7 @@ def _get_crewai():
 
 def _get_autogen():
     """Lazy load autogen module (thread-safe)."""
-    return _load_optional("autogen_module", lambda: __import__("autogen"))
+    return lazy_get("autogen_module", lambda: __import__("autogen"))
 
 
 def _get_autogen_v4():
@@ -89,7 +84,7 @@ def _get_autogen_v4():
         from autogen_ext.models.openai import OpenAIChatCompletionClient
         return (AssistantAgent, OpenAIChatCompletionClient)
     
-    return _load_optional("autogen_v4_classes", autogen_v4_loader)
+    return lazy_get("autogen_v4_classes", autogen_v4_loader)
 
 
 def _get_praisonai():
@@ -98,7 +93,7 @@ def _get_praisonai():
         from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, AgentTeam as Agents
         return (PraisonAgent, PraisonTask, Agents)
     
-    return _load_optional("praisonai_classes", praisonai_loader)
+    return lazy_get("praisonai_classes", praisonai_loader)
 
 
 # --- PraisonAI Tools lazy loading ---
@@ -132,12 +127,12 @@ def _get_praisonai_tools():
             'YoutubeVideoSearchTool': YoutubeVideoSearchTool,
         }
     
-    return _load_optional("praisonai_tools_dict", tools_loader)
+    return lazy_get("praisonai_tools_dict", tools_loader)
 
 
 def _get_litellm():
     """Lazy load litellm module."""
-    result = _load_optional("litellm", lambda: __import__("litellm"))
+    result = lazy_get("litellm", lambda: __import__("litellm"))
     if result is None:
         raise ImportError("Install with: pip install litellm")
     return result
@@ -601,51 +596,111 @@ class BaseAutoGenerator:
             return 'simple'
         else:
             return 'moderate'
+    
+    # Pattern keywords for shared recommend_pattern implementation
+    _PATTERN_KEYWORDS = {
+        "evaluator-optimizer": ['refine', 'improve', 'iterate', 'quality', 'review', 'feedback', 'polish', 'optimize'],
+        "orchestrator-workers": ['complex', 'comprehensive', 'multi-step', 'coordinate', 'delegate', 'break down', 'analyze and'],
+        "routing": ['classify', 'categorize', 'route', 'different types', 'depending on', 'if...then'],
+        "parallel": ['multiple', 'concurrent', 'parallel', 'simultaneously', 'different sources', 'compare', 'various'],
+    }
+    
+    def recommend_pattern(self, topic: Optional[str] = None) -> str:
+        """
+        Recommend the best workflow pattern based on task characteristics.
+        Shared implementation for AutoGenerator and WorkflowAutoGenerator.
+        
+        Args:
+            topic: The task description (uses self.topic if not provided)
+            
+        Returns:
+            str: Recommended pattern name
+        """
+        task_lower = (topic or self.topic).lower()
+        for pattern, keywords in self._PATTERN_KEYWORDS.items():
+            if any(kw in task_lower for kw in keywords):
+                return pattern
+        return "sequential"
+    
+    @staticmethod
+    def _format_role(role_details: Dict[str, Any]) -> Dict[str, Any]:
+        """Shared role formatting for YAML serialization."""
+        return {
+            "backstory": role_details['backstory'],
+            "goal": role_details['goal'],
+            "role": role_details['role'],
+            "tasks": {},
+            "tools": role_details.get('tools', []),
+        }
+    
+    @staticmethod
+    def _format_task(task_details: Dict[str, Any]) -> Dict[str, Any]:
+        """Shared task formatting for YAML serialization."""
+        return {
+            "description": task_details['description'],
+            "expected_output": task_details['expected_output'],
+        }
 
 
 # =============================================================================
-# Pydantic Models for Structured Output
+# Pydantic Models for Structured Output - Lazy Loaded
 # =============================================================================
 
-class TaskDetails(BaseModel):
-    """Details for a single task."""
-    description: str
-    expected_output: str
-
-class RoleDetails(BaseModel):
-    """Details for a single role/agent."""
-    role: str
-    goal: str
-    backstory: str
-    tasks: Dict[str, TaskDetails]
-    tools: List[str]
-
-class TeamStructure(BaseModel):
-    """Structure for multi-agent team."""
-    roles: Dict[str, RoleDetails]
-
-class SingleAgentStructure(BaseModel):
-    """Structure for single-agent generation (Anthropic's 'start simple' principle)."""
-    name: str
-    role: str
-    goal: str
-    backstory: str
-    instructions: str
-    tools: List[str] = []
-    task_description: str
-    expected_output: str
-
-class PatternRecommendation(BaseModel):
-    """LLM-based pattern recommendation with reasoning."""
-    pattern: str  # sequential, parallel, routing, orchestrator-workers, evaluator-optimizer
-    reasoning: str  # Why this pattern was chosen
-    confidence: float  # 0.0 to 1.0 confidence score
-
-class ValidationGate(BaseModel):
-    """Validation gate for prompt chaining workflows."""
-    criteria: str  # What to validate
-    pass_action: str  # Action if validation passes (e.g., "continue", "next_step")
-    fail_action: str  # Action if validation fails (e.g., "retry", "escalate", "abort")
+def _get_team_models():
+    """Get team structure models, creating them on first use."""
+    def _create_team_models():
+        from pydantic import BaseModel
+        
+        class TaskDetails(BaseModel):
+            """Details for a single task."""
+            description: str
+            expected_output: str
+        
+        class RoleDetails(BaseModel):
+            """Details for a single role/agent."""
+            role: str
+            goal: str
+            backstory: str
+            tasks: Dict[str, TaskDetails]
+            tools: List[str]
+        
+        class TeamStructure(BaseModel):
+            """Structure for multi-agent team."""
+            roles: Dict[str, RoleDetails]
+        
+        class SingleAgentStructure(BaseModel):
+            """Structure for single-agent generation (Anthropic's 'start simple' principle)."""
+            name: str
+            role: str
+            goal: str
+            backstory: str
+            instructions: str
+            tools: List[str] = []
+            task_description: str
+            expected_output: str
+        
+        class PatternRecommendation(BaseModel):
+            """LLM-based pattern recommendation with reasoning."""
+            pattern: str  # sequential, parallel, routing, orchestrator-workers, evaluator-optimizer
+            reasoning: str  # Why this pattern was chosen
+            confidence: float  # 0.0 to 1.0 confidence score
+        
+        class ValidationGate(BaseModel):
+            """Validation gate for prompt chaining workflows."""
+            criteria: str  # What to validate
+            pass_action: str  # Action if validation passes (e.g., "continue", "next_step")
+            fail_action: str  # Action if validation fails (e.g., "retry", "escalate", "abort")
+        
+        return {
+            'TaskDetails': TaskDetails,
+            'RoleDetails': RoleDetails,
+            'TeamStructure': TeamStructure,
+            'SingleAgentStructure': SingleAgentStructure,
+            'PatternRecommendation': PatternRecommendation,
+            'ValidationGate': ValidationGate
+        }
+    
+    return lazy_get('team_models', _create_team_models)
 
 class AutoGenerator(BaseAutoGenerator):
     """
@@ -707,36 +762,6 @@ class AutoGenerator(BaseAutoGenerator):
         self.pattern = pattern
         self.single_agent = single_agent
     
-    def recommend_pattern(self, topic: str = None) -> str:
-        """
-        Recommend the best workflow pattern based on task characteristics.
-        
-        Args:
-            topic: The task description (uses self.topic if not provided)
-            
-        Returns:
-            str: Recommended pattern name
-        """
-        task = topic or self.topic
-        task_lower = task.lower()
-        
-        # Keywords that suggest specific patterns
-        parallel_keywords = ['multiple', 'concurrent', 'parallel', 'simultaneously', 'different sources', 'compare', 'various']
-        routing_keywords = ['classify', 'categorize', 'route', 'different types', 'depending on', 'if...then']
-        orchestrator_keywords = ['complex', 'comprehensive', 'multi-step', 'coordinate', 'delegate', 'break down', 'analyze and']
-        evaluator_keywords = ['refine', 'improve', 'iterate', 'quality', 'review', 'feedback', 'polish', 'optimize']
-        
-        # Check for pattern indicators
-        if any(kw in task_lower for kw in evaluator_keywords):
-            return "evaluator-optimizer"
-        elif any(kw in task_lower for kw in orchestrator_keywords):
-            return "orchestrator-workers"
-        elif any(kw in task_lower for kw in routing_keywords):
-            return "routing"
-        elif any(kw in task_lower for kw in parallel_keywords):
-            return "parallel"
-        else:
-            return "sequential"
 
     def generate(self, merge=False):
         """
@@ -754,10 +779,10 @@ class AutoGenerator(BaseAutoGenerator):
         Usage:
             generator = AutoGenerator(framework="crewai", topic="Create a movie script about Cat in Mars")
             path = generator.generate()
-            print(path)
+            _rich_print(path)
         """
         response = self._structured_completion(
-            response_model=TeamStructure,
+            response_model=_get_team_models()['TeamStructure'],
             messages=[
                 {"role": "system", "content": "You are a helpful assistant designed to output complex team structures."},
                 {"role": "user", "content": self.get_user_content()}
@@ -784,10 +809,10 @@ class AutoGenerator(BaseAutoGenerator):
         Usage:
             async with AutoGenerator(framework="crewai", topic="Create a movie script about Cat in Mars") as gen:
                 path = await gen.agenerate()
-                print(path)
+                _rich_print(path)
         """
         response = await self._astructured_completion(
-            response_model=TeamStructure,
+            response_model=_get_team_models()['TeamStructure'],
             messages=[
                 {"role": "system", "content": "You are a helpful assistant designed to output complex team structures."},
                 {"role": "user", "content": self.get_user_content()}
@@ -819,23 +844,13 @@ class AutoGenerator(BaseAutoGenerator):
             }
 
             for role_id, role_details in json_data['roles'].items():
-                yaml_data['roles'][role_id] = {
-                    "backstory": "" + role_details['backstory'],
-                    "goal": role_details['goal'],
-                    "role": role_details['role'],
-                    "tasks": {},
-                    "tools": role_details.get('tools', [])
-                }
-
+                yaml_data['roles'][role_id] = self._format_role(role_details)
                 for task_id, task_details in role_details['tasks'].items():
-                    yaml_data['roles'][role_id]['tasks'][task_id] = {
-                        "description": "" + task_details['description'],
-                        "expected_output": "" + task_details['expected_output']
-                    }
+                    yaml_data['roles'][role_id]['tasks'][task_id] = self._format_task(task_details)
 
         # Save to YAML file, maintaining the order
         with open(self.agent_file, 'w') as f:
-            yaml.dump(yaml_data, f, allow_unicode=True, sort_keys=False)
+            _yaml_dump(yaml_data, f, allow_unicode=True, sort_keys=False)
 
     def merge_with_existing_agents(self, new_json_data):
         """
@@ -850,14 +865,23 @@ class AutoGenerator(BaseAutoGenerator):
         try:
             # Load existing agents.yaml
             with open(self.agent_file, 'r') as f:
-                existing_data = yaml.safe_load(f)
+                existing_data = _yaml_safe_load(f)
             
             if not existing_data:
                 # If existing file is empty, treat as new file
                 existing_data = {"roles": {}, "dependencies": []}
-        except (yaml.YAMLError, FileNotFoundError) as e:
+        except FileNotFoundError as e:
             logger.warning(f"Could not load existing agents file {self.agent_file}: {e}")
             logger.warning("Creating new file instead of merging")
+            existing_data = {"roles": {}, "dependencies": []}
+        except Exception as e:
+            # Only catch YAML parsing errors, not OS-level errors
+            if "yaml" in type(e).__module__.lower() or "YAML" in str(type(e)):
+                logger.warning(f"Could not parse existing agents file {self.agent_file}: {e}")
+                logger.warning("Creating new file instead of merging")
+            else:
+                # Re-raise OS-level errors like PermissionError, OSError, etc.
+                raise
             existing_data = {"roles": {}, "dependencies": []}
         
         # Start with existing data structure
@@ -889,20 +913,9 @@ class AutoGenerator(BaseAutoGenerator):
                 counter += 1
             
             # Add the new role
-            merged_data['roles'][final_role_id] = {
-                "backstory": "" + role_details['backstory'],
-                "goal": role_details['goal'],
-                "role": role_details['role'],
-                "tasks": {},
-                "tools": role_details.get('tools', [])
-            }
-            
-            # Add tasks for this role
+            merged_data['roles'][final_role_id] = self._format_role(role_details)
             for task_id, task_details in role_details['tasks'].items():
-                merged_data['roles'][final_role_id]['tasks'][task_id] = {
-                    "description": "" + task_details['description'],
-                    "expected_output": "" + task_details['expected_output']
-                }
+                merged_data['roles'][final_role_id]['tasks'][task_id] = self._format_task(task_details)
         
         return merged_data
 
@@ -929,7 +942,7 @@ class AutoGenerator(BaseAutoGenerator):
         Usage:
             generator = AutoGenerator(framework="crewai", topic="Create a movie script about Cat in Mars")
             prompt = generator.get_user_content()
-            print(prompt)
+            _rich_print(prompt)
         """
         # Pattern-specific guidance
         pattern_guidance = {
@@ -1040,37 +1053,57 @@ Use the recommended tools: {', '.join(recommended_tools)}
 # Workflow Auto-Generation (Feature Parity)
 # =============================================================================
 
-class WorkflowStepDetails(BaseModel):
-    """Details for a workflow step."""
-    agent: str
-    action: str
-    expected_output: Optional[str] = None
-
-class WorkflowRouteDetails(BaseModel):
-    """Details for a route step."""
-    name: str
-    route: Dict[str, List[str]]
-
-class WorkflowParallelDetails(BaseModel):
-    """Details for a parallel step."""
-    name: str
-    parallel: List[WorkflowStepDetails]
-
-class WorkflowAgentDetails(BaseModel):
-    """Details for a workflow agent."""
-    name: str
-    role: str
-    goal: str
-    instructions: str
-    tools: Optional[List[str]] = None
-
-class WorkflowStructure(BaseModel):
-    """Structure for auto-generated workflow."""
-    name: str
-    description: str
-    agents: Dict[str, WorkflowAgentDetails]
-    steps: List[Dict]  # Can be agent steps, route, parallel, etc.
-    gates: Optional[List[ValidationGate]] = None  # Optional validation gates
+def _get_workflow_models():
+    """Get workflow structure models, creating them on first use."""
+    if 'workflow_models' in _models_cache:
+        return _models_cache['workflow_models']
+    
+    with _models_lock:
+        if 'workflow_models' in _models_cache:
+            return _models_cache['workflow_models']
+        
+        from pydantic import BaseModel
+        
+        class WorkflowStepDetails(BaseModel):
+            """Details for a workflow step."""
+            agent: str
+            action: str
+            expected_output: Optional[str] = None
+        
+        class WorkflowRouteDetails(BaseModel):
+            """Details for a route step."""
+            name: str
+            route: Dict[str, List[str]]
+        
+        class WorkflowParallelDetails(BaseModel):
+            """Details for a parallel step."""
+            name: str
+            parallel: List[WorkflowStepDetails]
+        
+        class WorkflowAgentDetails(BaseModel):
+            """Details for a workflow agent."""
+            name: str
+            role: str
+            goal: str
+            instructions: str
+            tools: Optional[List[str]] = None
+        
+        class WorkflowStructure(BaseModel):
+            """Structure for auto-generated workflow."""
+            name: str
+            description: str
+            agents: Dict[str, WorkflowAgentDetails]
+            steps: List[Dict]  # Can be agent steps, route, parallel, etc.
+            gates: Optional[List[Any]] = None  # Optional validation gates, ValidationGate type resolved at runtime
+        
+        _models_cache['workflow_models'] = {
+            'WorkflowStepDetails': WorkflowStepDetails,
+            'WorkflowRouteDetails': WorkflowRouteDetails,
+            'WorkflowParallelDetails': WorkflowParallelDetails,
+            'WorkflowAgentDetails': WorkflowAgentDetails,
+            'WorkflowStructure': WorkflowStructure
+        }
+        return _models_cache['workflow_models']
 
 
 class WorkflowAutoGenerator(BaseAutoGenerator):
@@ -1107,44 +1140,6 @@ class WorkflowAutoGenerator(BaseAutoGenerator):
         self.framework = framework
         self.single_agent = single_agent
     
-    def recommend_pattern(self, topic: str = None) -> str:
-        """
-        Recommend the best workflow pattern based on task characteristics.
-        
-        Args:
-            topic: The task description (uses self.topic if not provided)
-            
-        Returns:
-            str: Recommended pattern name
-            
-        Pattern recommendations based on Anthropic's best practices:
-        - sequential: Clear step-by-step dependencies
-        - parallel: Independent subtasks that can run concurrently
-        - routing: Different input types need different handling
-        - orchestrator-workers: Complex tasks needing dynamic decomposition
-        - evaluator-optimizer: Tasks requiring iterative refinement
-        """
-        task = topic or self.topic
-        task_lower = task.lower()
-        
-        # Keywords that suggest specific patterns
-        parallel_keywords = ['multiple', 'concurrent', 'parallel', 'simultaneously', 'different sources', 'compare', 'various']
-        routing_keywords = ['classify', 'categorize', 'route', 'different types', 'depending on', 'if...then']
-        orchestrator_keywords = ['complex', 'comprehensive', 'multi-step', 'coordinate', 'delegate', 'break down', 'analyze and']
-        evaluator_keywords = ['refine', 'improve', 'iterate', 'quality', 'review', 'feedback', 'polish', 'optimize']
-        
-        # Check for pattern indicators
-        if any(kw in task_lower for kw in evaluator_keywords):
-            return "evaluator-optimizer"
-        elif any(kw in task_lower for kw in orchestrator_keywords):
-            return "orchestrator-workers"
-        elif any(kw in task_lower for kw in routing_keywords):
-            return "routing"
-        elif any(kw in task_lower for kw in parallel_keywords):
-            return "parallel"
-        else:
-            return "sequential"
-    
     def recommend_pattern_llm(self, topic: str = None) -> PatternRecommendation:
         """
         Use LLM to recommend the best workflow pattern with reasoning.
@@ -1175,7 +1170,7 @@ Respond with:
 """
         
         response = self._structured_completion(
-            response_model=PatternRecommendation,
+            response_model=_get_team_models()['PatternRecommendation'],
             messages=[
                 {"role": "system", "content": "You are an expert at designing AI agent workflows."},
                 {"role": "user", "content": prompt}
@@ -1197,7 +1192,7 @@ Respond with:
             Path to the generated workflow file
         """
         response = self._structured_completion(
-            response_model=WorkflowStructure,
+            response_model=_get_workflow_models()['WorkflowStructure'],
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that designs workflow structures."},
                 {"role": "user", "content": self._get_prompt(pattern)}
@@ -1223,7 +1218,7 @@ Respond with:
             Path to the generated workflow file
         """
         response = await self._astructured_completion(
-            response_model=WorkflowStructure,
+            response_model=_get_workflow_models()['WorkflowStructure'],
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that designs workflow structures."},
                 {"role": "user", "content": self._get_prompt(pattern)}
@@ -1248,13 +1243,21 @@ Respond with:
         """
         try:
             with open(self.workflow_file, 'r') as f:
-                existing_data = yaml.safe_load(f)
+                existing_data = _yaml_safe_load(f)
             
             if not existing_data:
                 return new_data
-        except (yaml.YAMLError, FileNotFoundError) as e:
+        except FileNotFoundError as e:
             logger.warning(f"Could not load existing workflow file {self.workflow_file}: {e}")
             return new_data
+        except Exception as e:
+            # Only catch YAML parsing errors, not OS-level errors  
+            if "yaml" in type(e).__module__.lower() or "YAML" in str(type(e)):
+                logger.warning(f"Could not parse existing workflow file {self.workflow_file}: {e}")
+                return new_data
+            else:
+                # Re-raise OS-level errors like PermissionError, OSError, etc.
+                raise
         
         # Merge agents (avoid duplicates)
         merged_agents = existing_data.get('agents', {}).copy()
@@ -1459,7 +1462,7 @@ Example structure:
         # Write to file
         full_path = os.path.abspath(self.workflow_file)
         with open(full_path, 'w') as f:
-            yaml.dump(workflow_yaml, f, default_flow_style=False, sort_keys=False)
+            _yaml_dump(workflow_yaml, f, default_flow_style=False, sort_keys=False)
         
         return full_path
 
@@ -1468,18 +1471,34 @@ Example structure:
 # Job Workflow Auto Generator (Strategy 4)
 # =============================================================================
 
-class JobWorkflowStep(BaseModel):
-    """A single step in a job workflow."""
-    name: str
-    step_type: str  # "agent", "judge", "approve", "run", "action"
-    config: Dict[str, Any]
-
-
-class JobWorkflowStructure(BaseModel):
-    """Structure for a job workflow with agent-centric steps."""
-    name: str
-    description: str
-    steps: List[JobWorkflowStep]
+def _get_job_workflow_models():
+    """Get job workflow models, creating them on first use."""
+    if 'job_workflow_models' in _models_cache:
+        return _models_cache['job_workflow_models']
+    
+    with _models_lock:
+        if 'job_workflow_models' in _models_cache:
+            return _models_cache['job_workflow_models']
+        
+        from pydantic import BaseModel
+        
+        class JobWorkflowStep(BaseModel):
+            """A single step in a job workflow."""
+            name: str
+            step_type: str  # "agent", "judge", "approve", "run", "action"
+            config: Dict[str, Any]
+        
+        class JobWorkflowStructure(BaseModel):
+            """Structure for a job workflow with agent-centric steps."""
+            name: str
+            description: str
+            steps: List[JobWorkflowStep]
+        
+        _models_cache['job_workflow_models'] = {
+            'JobWorkflowStep': JobWorkflowStep,
+            'JobWorkflowStructure': JobWorkflowStructure
+        }
+        return _models_cache['job_workflow_models']
 
 
 class JobWorkflowAutoGenerator(BaseAutoGenerator):
@@ -1527,7 +1546,7 @@ class JobWorkflowAutoGenerator(BaseAutoGenerator):
         prompt = self._get_prompt(include_judge, include_approve)
         
         response = self._structured_completion(
-            response_model=JobWorkflowStructure,
+            response_model=_get_job_workflow_models()['JobWorkflowStructure'],
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that designs job workflow structures with AI agent steps."},
                 {"role": "user", "content": prompt}
@@ -1550,7 +1569,7 @@ class JobWorkflowAutoGenerator(BaseAutoGenerator):
         prompt = self._get_prompt(include_judge, include_approve)
         
         response = await self._astructured_completion(
-            response_model=JobWorkflowStructure,
+            response_model=_get_job_workflow_models()['JobWorkflowStructure'],
             messages=[
                 {"role": "system", "content": "You are a helpful assistant that designs job workflow structures with AI agent steps."},
                 {"role": "user", "content": prompt}
@@ -1592,7 +1611,7 @@ Generate a workflow for: {self.topic}
 """
         return prompt
     
-    def _save_workflow(self, data: JobWorkflowStructure) -> str:
+    def _save_workflow(self, data: Any) -> str:  # JobWorkflowStructure at runtime
         """Save the job workflow to a YAML file."""
         # Build the workflow YAML structure
         workflow_yaml = {
@@ -1646,6 +1665,6 @@ Generate a workflow for: {self.topic}
         # Write to file
         full_path = os.path.abspath(self.workflow_file)
         with open(full_path, 'w') as f:
-            yaml.dump(workflow_yaml, f, default_flow_style=False, sort_keys=False)
+            _yaml_dump(workflow_yaml, f, default_flow_style=False, sort_keys=False)
         
         return full_path

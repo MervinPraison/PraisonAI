@@ -53,7 +53,6 @@ class CrewAIAdapter(BaseFrameworkAdapter):
         import os
         from crewai import Agent, Task, Crew
         from crewai.telemetry import Telemetry
-        from ..inc import PraisonAIModel
         from .._framework_availability import is_available
         
         # Suppress crewai.cli.config logger (scoped to when CrewAI is actually used)
@@ -75,33 +74,11 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                 agent_tools = [tools_dict[tool] for tool in details.get('tools', []) 
                              if tools_dict and tool in tools_dict]
                 
-                # Configure LLM
-                llm_model = details.get('llm')
-                if llm_model:
-                    llm = PraisonAIModel(
-                        model=llm_model.get("model") or os.environ.get("MODEL_NAME") or "openai/gpt-4o-mini",
-                        base_url=llm_config[0].get('base_url') if llm_config else None,
-                        api_key=llm_config[0].get('api_key') if llm_config else None
-                    ).get_model()
-                else:
-                    llm = PraisonAIModel(
-                        base_url=llm_config[0].get('base_url') if llm_config else None,
-                        api_key=llm_config[0].get('api_key') if llm_config else None
-                    ).get_model()
+                # Configure LLM using shared resolver
+                llm = self._resolve_llm(details.get('llm'), llm_config)
 
-                # Configure function calling LLM
-                function_calling_llm_model = details.get('function_calling_llm')
-                if function_calling_llm_model:
-                    function_calling_llm = PraisonAIModel(
-                        model=function_calling_llm_model.get("model") or os.environ.get("MODEL_NAME") or "openai/gpt-4o-mini",
-                        base_url=llm_config[0].get('base_url') if llm_config else None,
-                        api_key=llm_config[0].get('api_key') if llm_config else None
-                    ).get_model()
-                else:
-                    function_calling_llm = PraisonAIModel(
-                        base_url=llm_config[0].get('base_url') if llm_config else None,
-                        api_key=llm_config[0].get('api_key') if llm_config else None
-                    ).get_model()
+                # Configure function calling LLM using shared resolver
+                function_calling_llm = self._resolve_llm(details.get('function_calling_llm'), llm_config)
 
                 # Create CrewAI agent with full feature set
                 agent = Agent(
@@ -187,13 +164,9 @@ class CrewAIAdapter(BaseFrameworkAdapter):
             response = crew.kickoff()
             result = f"### Task Output ###\n{response}"
             
-            # AgentOps integration if available
-            if is_available("agentops"):
-                import agentops
-                try:
-                    agentops.end_session("Success")
-                except Exception as e:  # noqa: BLE001 -- agentops errors must not crash the caller
-                    logger.warning(f"agentops.end_session failed: {e}")
+            # Close observability session
+            from ..observability.hooks import finalize_observability
+            finalize_observability(self.name, status="Success")
                 
             return result
     

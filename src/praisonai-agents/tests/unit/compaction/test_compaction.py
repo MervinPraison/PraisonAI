@@ -9,11 +9,14 @@ Tests cover:
 """
 
 import pytest
+import asyncio
+from unittest.mock import AsyncMock, Mock
 
 from praisonaiagents.compaction.config import CompactionConfig
 from praisonaiagents.compaction.strategy import CompactionStrategy
 from praisonaiagents.compaction.result import CompactionResult
 from praisonaiagents.compaction.compactor import ContextCompactor
+from praisonaiagents.config.feature_configs import ExecutionConfig
 
 
 # =============================================================================
@@ -59,6 +62,7 @@ class TestCompactionStrategy:
         assert CompactionStrategy.SUMMARIZE.value == "summarize"
         assert CompactionStrategy.SLIDING.value == "sliding"
         assert CompactionStrategy.SMART.value == "smart"
+        assert CompactionStrategy.LLM_SUMMARIZE.value == "llm_summarize"
     
     def test_strategy_from_string(self):
         """Test creating strategy from string."""
@@ -246,6 +250,19 @@ class TestContextCompactor:
         assert len(compacted) < len(messages)
         assert result.was_compacted
         assert result.strategy_used == CompactionStrategy.TRUNCATE
+
+    def test_truncate_does_not_infinite_loop_on_system_only_overflow(self):
+        """System-only messages over budget must not hang truncation."""
+        compactor = ContextCompactor(max_tokens=10, target_tokens=5, preserve_recent=0)
+        messages = [
+            {"role": "system", "content": "x" * 200},
+            {"role": "system", "content": "y" * 200},
+        ]
+
+        result = compactor._truncate(messages)
+
+        assert len(result) == 2
+        assert compactor.count_total_tokens(result) > compactor.target_tokens
     
     def test_compactor_compact_sliding(self, compactor, messages):
         """Test sliding window strategy."""
@@ -308,6 +325,150 @@ class TestContextCompactor:
         tokens = compactor.count_message_tokens(message)
         
         assert tokens > 0
+    
+    def test_compactor_llm_summarize_sync_no_function(self):
+        """Test LLM_SUMMARIZE strategy without LLM function (sync fallback)."""
+        compactor = ContextCompactor(max_tokens=10, preserve_recent=1)
+        compactor.strategy = CompactionStrategy.LLM_SUMMARIZE
+        # No llm_summarize_fn provided - should fallback to naive summarization
+        
+        messages = [
+            {"role": "user", "content": "This is a very long message that should exceed the token limit."},
+            {"role": "assistant", "content": "This is another long response."},
+            {"role": "user", "content": "More content here."},
+        ]
+        
+        compacted, result = compactor.compact(messages)
+        
+        # Should fallback to naive summarization 
+        assert result.strategy_used == CompactionStrategy.LLM_SUMMARIZE
+        assert len(compacted) < len(messages)
+    
+    @pytest.mark.asyncio
+    async def test_compactor_llm_summarize_async_with_function(self):
+        """Test LLM_SUMMARIZE strategy with async LLM function."""
+        # Mock LLM function
+        mock_llm_fn = AsyncMock(return_value="This is a test summary of the conversation.")
+        
+        compactor = ContextCompactor(
+            max_tokens=10, 
+            preserve_recent=1,
+            llm_summarize_fn=mock_llm_fn
+        )
+        compactor.strategy = CompactionStrategy.LLM_SUMMARIZE
+        
+        messages = [
+            {"role": "user", "content": "This is a very long message that should exceed the token limit."},
+            {"role": "assistant", "content": "This is another long response."},
+            {"role": "user", "content": "More content here."},
+        ]
+        
+        compacted, result = compactor.compact_async(messages)
+        
+        assert result.strategy_used == CompactionStrategy.LLM_SUMMARIZE
+        assert len(compacted) < len(messages)
+        
+        # Check that LLM function was called
+        mock_llm_fn.assert_called_once()
+        
+        # Check that summary was added
+        summary_msgs = [m for m in compacted if m.get("_llm_generated")]
+        assert len(summary_msgs) == 1
+        assert "This is a test summary" in summary_msgs[0]["content"]
+    
+    @pytest.mark.asyncio
+    async def test_compactor_llm_summarize_async_failure_fallback(self):
+        """Test LLM_SUMMARIZE strategy with failing LLM function."""
+        # Mock LLM function that fails
+        mock_llm_fn = AsyncMock(side_effect=Exception("LLM API failure"))
+        
+        compactor = ContextCompactor(
+            max_tokens=10, 
+            preserve_recent=1,
+            llm_summarize_fn=mock_llm_fn
+        )
+        compactor.strategy = CompactionStrategy.LLM_SUMMARIZE
+        
+        messages = [
+            {"role": "user", "content": "This is a very long message that should exceed the token limit."},
+            {"role": "assistant", "content": "This is another long response."},
+        ]
+        
+        compacted, result = compactor.compact_async(messages)
+        
+        # Should fallback to naive summarization and not crash
+        assert result.strategy_used == CompactionStrategy.LLM_SUMMARIZE
+        assert len(compacted) <= len(messages)
+        
+        # Check that a fallback summary was added 
+        fallback_msgs = [m for m in compacted if m.get("_fallback")]
+        assert len(fallback_msgs) <= 1  # May have fallback summary
+    
+    def test_compactor_format_messages_for_summary(self):
+        """Test _format_messages_for_summary method."""
+        compactor = ContextCompactor()
+        
+        messages = [
+            {"role": "user", "content": "Hello, how are you?"},
+            {
+                "role": "assistant", 
+                "content": "I'm doing well!",
+                "tool_calls": [{"function": {"name": "weather_tool"}}]
+            },
+            {"role": "tool", "tool_call_id": "123", "content": "Weather is sunny"},
+            {"role": "user", "content": "Great!"},
+        ]
+        
+        formatted = compactor._format_messages_for_summary(messages)
+        
+        assert "1. user: Hello, how are you?" in formatted
+        assert "2. assistant: Called tools: weather_tool" in formatted
+        assert "tool 123" in formatted
+        assert "4. user: Great!" in formatted
+
+
+# =============================================================================
+# ExecutionConfig Tests for compaction_strategy
+# =============================================================================
+
+class TestExecutionConfigCompactionStrategy:
+    """Tests for ExecutionConfig.compaction_strategy field."""
+    
+    def test_compaction_strategy_default(self):
+        """Test that compaction_strategy defaults to None."""
+        config = ExecutionConfig()
+        assert config.compaction_strategy is None
+    
+    def test_compaction_strategy_set_enum(self):
+        """Test setting compaction_strategy with enum value."""
+        config = ExecutionConfig(compaction_strategy=CompactionStrategy.LLM_SUMMARIZE)
+        assert config.compaction_strategy == CompactionStrategy.LLM_SUMMARIZE
+    
+    def test_compaction_strategy_to_dict_none(self):
+        """Test to_dict with None compaction_strategy."""
+        config = ExecutionConfig()
+        data = config.to_dict()
+        assert data["compaction_strategy"] is None
+    
+    def test_compaction_strategy_to_dict_enum(self):
+        """Test to_dict with enum compaction_strategy."""
+        config = ExecutionConfig(compaction_strategy=CompactionStrategy.LLM_SUMMARIZE)
+        data = config.to_dict()
+        assert data["compaction_strategy"] == "llm_summarize"
+    
+    def test_compaction_strategy_serialization_safety(self):
+        """Test that serialization handles edge cases safely."""
+        config = ExecutionConfig()
+        
+        # Test with None strategy
+        assert config.compaction_strategy is None
+        data = config.to_dict()
+        assert data["compaction_strategy"] is None
+        
+        # Test with enum strategy
+        config.compaction_strategy = CompactionStrategy.TRUNCATE
+        data = config.to_dict()
+        assert data["compaction_strategy"] == "truncate"
 
 
 if __name__ == "__main__":

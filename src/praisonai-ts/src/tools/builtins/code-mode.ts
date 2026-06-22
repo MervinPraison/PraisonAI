@@ -5,6 +5,7 @@
  * Allows writing code to a sandbox FS, importing tools, and running them.
  */
 
+import { runInNewContext } from 'node:vm';
 import type { ToolMetadata, PraisonTool, ToolExecutionContext } from '../registry/types';
 
 export const CODE_MODE_METADATA: ToolMetadata = {
@@ -111,6 +112,10 @@ export function codeMode(config?: CodeModeConfig): PraisonTool<CodeModeInput, Co
         /import\s+.*from\s+['"]child_process['"]/,
         /process\.exit/,
         /eval\s*\(/,
+        /Function\s*\(/,
+        /\.constructor/,
+        /globalThis/,
+        /\bprocess\b/,
       ];
 
       if (!settings.allowNetwork) {
@@ -152,44 +157,35 @@ export function codeMode(config?: CodeModeConfig): PraisonTool<CodeModeInput, Co
       }
 
       try {
-        // Create a sandboxed execution context
-        // In a real implementation, this would use a proper sandbox like vm2 or isolated-vm
-        // For now, we provide a safe execution wrapper
-        
-        const sandbox = {
+        const stdout: string[] = [];
+        const stderr: string[] = [];
+
+        const sandboxContext = {
           console: {
             log: (...args: unknown[]) => stdout.push(args.map(String).join(' ')),
             error: (...args: unknown[]) => stderr.push(args.map(String).join(' ')),
             warn: (...args: unknown[]) => stderr.push(args.map(String).join(' ')),
           },
-          setTimeout: undefined,
-          setInterval: undefined,
-          setImmediate: undefined,
-          process: undefined,
-          require: undefined,
           __dirname: '/sandbox',
           __filename: '/sandbox/index.js',
           env: env || {},
           files: files || {},
         };
 
-        const stdout: string[] = [];
-        const stderr: string[] = [];
-
-        // Execute with timeout
         const timeoutPromise = new Promise<never>((_, reject) => {
           setTimeout(() => reject(new Error('Execution timeout')), settings.timeoutMs);
         });
 
         const executePromise = new Promise<string>((resolve, reject) => {
           try {
-            // Create a function from the code
-            const fn = new Function(
-              'sandbox',
-              `with (sandbox) { ${code} }`
-            );
-            const result = fn(sandbox);
-            resolve(String(result ?? ''));
+            const wrappedCode = `(async function() { ${code} })()`;
+            const result = runInNewContext(wrappedCode, sandboxContext, {
+              timeout: settings.timeoutMs,
+              displayErrors: true,
+            });
+            Promise.resolve(result)
+              .then((value) => resolve(String(value ?? '')))
+              .catch(reject);
           } catch (error) {
             reject(error);
           }

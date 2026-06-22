@@ -21,7 +21,6 @@ Example:
 """
 
 from typing import Any, Callable, Dict, List, Optional, Type, Union
-import threading
 from .._registry import PluginRegistry
 
 
@@ -174,10 +173,7 @@ class LLMProviderRegistry(PluginRegistry[ProviderType]):
 # Default Registry Instance (No Singleton)
 # ============================================================================
 
-# Default module-level registry instance
-_default_llm_registry: Optional[LLMProviderRegistry] = None
-_default_llm_lock = threading.Lock()
-
+# Default registry access - replaced by LLMProviderRegistry.default()
 def get_default_llm_registry() -> LLMProviderRegistry:
     """
     Get the default global LLM provider registry.
@@ -185,12 +181,7 @@ def get_default_llm_registry() -> LLMProviderRegistry:
     This is the registry used by create_llm_provider() when no custom registry
     is specified. Uses lazy initialization pattern.
     """
-    global _default_llm_registry
-    if _default_llm_registry is None:
-        with _default_llm_lock:
-            if _default_llm_registry is None:
-                _default_llm_registry = LLMProviderRegistry()
-    return _default_llm_registry
+    return LLMProviderRegistry.default()
 
 
 def _get_builtin_provider_loaders() -> Dict[str, Callable[[], ProviderType]]:
@@ -344,8 +335,11 @@ def parse_model_string(model: str) -> Dict[str, str]:
     if model_lower.startswith("gemini-"):
         return {"provider_id": "google", "model_id": model}
     
-    # Default to openai
-    return {"provider_id": "openai", "model_id": model}
+    # Unable to infer provider - fail loudly
+    raise ValueError(
+        f"Cannot infer provider from model {model!r}. "
+        "Use the 'provider/model' form, e.g. 'ollama/llama3', 'bedrock/anthropic.claude-3-sonnet'."
+    )
 
 
 def create_llm_provider(
@@ -412,6 +406,6 @@ def create_llm_provider(
 
 def _reset_default_registry() -> None:
     """Reset the default registry (mainly for testing)."""
-    global _default_llm_registry
-    with _default_llm_lock:
-        _default_llm_registry = None
+    # Clear the cached default instance (stored on the subclass __dict__ by default())
+    if '_default_instance' in LLMProviderRegistry.__dict__:
+        delattr(LLMProviderRegistry, '_default_instance')

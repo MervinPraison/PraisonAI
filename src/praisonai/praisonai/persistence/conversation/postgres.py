@@ -1,5 +1,5 @@
 """
-PostgreSQL implementation of ConversationStore.
+PostgreSQL implementation using the SQL base template.
 
 Requires: psycopg2-binary or psycopg2
 Install: pip install psycopg2-binary
@@ -7,28 +7,18 @@ Install: pip install psycopg2-binary
 
 import json
 import logging
-import time as _time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
-from .base import ConversationStore, ConversationSession, ConversationMessage, validate_identifier
+from ._sql_base import _SQLConversationStoreBase
+from .base import validate_identifier
 
 logger = logging.getLogger(__name__)
 
-# Hostnames that indicate serverless/cloud Postgres providers
-_SERVERLESS_HOSTS = (
-    ".neon.tech",
-    ".cockroachlabs.cloud",
-    ".cockroachlabs.com",
-    ".xata.sh",
-    ".supabase.com",
-    ".supabase.co",
-)
 
-
-class PostgresConversationStore(ConversationStore):
+class PostgresConversationStore(_SQLConversationStoreBase):
     """
-    PostgreSQL-based conversation store.
+    PostgreSQL-based conversation store using the unified SQL template.
     
     Connection URL format: postgresql://user:password@host:port/database
     
@@ -38,14 +28,25 @@ class PostgresConversationStore(ConversationStore):
         )
     """
     
-    SCHEMA_VERSION = "1.0.0"
+    # Dialect-specific settings
+    _json_type = "JSONB"
+    _float_type = "DOUBLE PRECISION" 
+    _param = "%s"
+    _serverless_hosts = (
+        ".neon.tech",
+        ".cockroachlabs.cloud", 
+        ".cockroachlabs.com",
+        ".xata.sh",
+        ".supabase.com",
+        ".supabase.co",
+    )
     
     def __init__(
         self,
         url: Optional[str] = None,
         host: str = "localhost",
         port: int = 5432,
-        database: str = "praisonai",
+        database: str = "praisonai", 
         user: str = "postgres",
         password: str = "",
         schema: str = "public",
@@ -65,7 +66,7 @@ class PostgresConversationStore(ConversationStore):
             database: Database name
             user: Database user
             password: Database password
-            schema: PostgreSQL schema
+            schema: PostgreSQL schema 
             table_prefix: Prefix for table names
             auto_create_tables: Create tables if they don't exist
             pool_size: Connection pool size
@@ -86,400 +87,164 @@ class PostgresConversationStore(ConversationStore):
         self._RealDictCursor = RealDictCursor
         
         validate_identifier(schema, "schema")
-        validate_identifier(table_prefix, "table_prefix")
         self.schema = schema
-        self.table_prefix = table_prefix
-        self.sessions_table = f"{schema}.{table_prefix}sessions"
-        self.messages_table = f"{schema}.{table_prefix}messages"
+        self.pool_size = pool_size
         
-        # Serverless-resilient settings
-        self._serverless = self._is_serverless(url) if url else False
-        self._max_retries = max_retries if self._serverless else 1
-        self._retry_delay = retry_delay
+        # Store connection parameters
+        self.url = url
+        self.host = host
+        self.port = port
+        self.database = database
+        self.user = user
+        self.password = password
         
         # Auto-enforce SSL for serverless providers
         if url:
             url = self._ensure_ssl(url)
+            self.url = url
         
-        # Build connection params
-        connect_timeout = 30 if self._serverless else 5
-        if url:
-            # Append connect_timeout for serverless if not already set
-            if self._serverless and "connect_timeout" not in url:
-                separator = "&" if "?" in url else "?"
-                url = f"{url}{separator}connect_timeout={connect_timeout}"
-            self._pool = pg_pool.ThreadedConnectionPool(1, pool_size, url)
-        else:
-            self._pool = pg_pool.ThreadedConnectionPool(
-                1, pool_size,
-                host=host,
-                port=port,
-                database=database,
-                user=user,
-                password=password,
-                connect_timeout=connect_timeout,
-            )
+        # Initialize via parent (handles table creation)
+        super().__init__(
+            table_prefix=table_prefix,
+            auto_create_tables=auto_create_tables, 
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+            url=url
+        )
         
         if self._serverless:
             logger.info("Serverless PostgreSQL detected — retry and SSL enabled")
+    
+    @property
+    def _transient_errors(self) -> tuple:
+        """PostgreSQL connection errors that should trigger retry.""" 
+        return (self._psycopg2.OperationalError,)
+    
+    @property
+    def sessions_table(self) -> str:
+        """Override to include schema prefix."""
+        return f"{self.schema}.{self.table_prefix}sessions"
         
-        if auto_create_tables:
-            self._create_tables()
-
+    @property
+    def messages_table(self) -> str:
+        """Override to include schema prefix."""
+        return f"{self.schema}.{self.table_prefix}messages"
+    
+    @property
+    def _sessions_ddl(self) -> str:
+        """Sessions table DDL without schema creation."""
+        return f"""
+            CREATE TABLE IF NOT EXISTS {self.sessions_table} (
+                session_id  {self._id_type} PRIMARY KEY,
+                user_id     {self._id_type},
+                agent_id    {self._id_type},
+                name        {self._id_type},
+                state       {self._json_type},
+                metadata    {self._json_type},
+                created_at  {self._float_type},
+                updated_at  {self._float_type}
+            )
+        """
+    
+    def _create_tables(self) -> None:
+        """Create schema and tables."""
+        def create_schema_and_tables(conn):
+            # Create schema first (separate statement)
+            self._execute(conn, f"CREATE SCHEMA IF NOT EXISTS {self.schema}")
+            
+            # Create tables
+            self._execute(conn, self._sessions_ddl)
+            self._execute(conn, self._messages_ddl)
+            
+            # Create indexes
+            for index_sql in self._session_indexes + self._message_indexes:
+                self._execute(conn, index_sql)
+        
+        self._execute_with_retry(self._run_with_conn, create_schema_and_tables)
+    
+    def _connect(self) -> Any:
+        """Establish PostgreSQL connection pool."""
+        from psycopg2 import pool as pg_pool
+        
+        connect_timeout = 30 if self._serverless else 5
+        
+        if self.url:
+            # Append connect_timeout for serverless if not already set
+            url = self.url
+            if self._serverless and "connect_timeout" not in url:
+                separator = "&" if "?" in url else "?"
+                url = f"{url}{separator}connect_timeout={connect_timeout}"
+            self._pool = pg_pool.ThreadedConnectionPool(1, self.pool_size, url)
+        else:
+            self._pool = pg_pool.ThreadedConnectionPool(
+                1, self.pool_size,
+                host=self.host,
+                port=self.port,
+                database=self.database,
+                user=self.user,
+                password=self.password,
+                connect_timeout=connect_timeout,
+            )
+        
+        return self._pool
+    
+    def _get_conn(self) -> Any:
+        """Get a connection from the pool."""
+        return self._pool.getconn()
+    
+    def _put_conn(self, conn: Any, close: bool = False) -> None:
+        """Return a connection to the pool or close it."""
+        self._pool.putconn(conn, close=close)
+    
+    def _execute(self, conn: Any, sql: str, params: tuple = ()) -> Any:
+        """Execute SQL statement."""
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            if sql.strip().upper().startswith(('INSERT', 'UPDATE', 'DELETE')):
+                return cur.rowcount
+            return None
+    
+    def _fetchone(self, conn: Any, sql: str, params: tuple = ()) -> Optional[Dict[str, Any]]:
+        """Execute SELECT and return one row as dict."""
+        with conn.cursor(cursor_factory=self._RealDictCursor) as cur:
+            cur.execute(sql, params)
+            row = cur.fetchone()
+            return dict(row) if row else None
+    
+    def _fetchall(self, conn: Any, sql: str, params: tuple = ()) -> List[Dict[str, Any]]:
+        """Execute SELECT and return all rows as list of dicts.""" 
+        with conn.cursor(cursor_factory=self._RealDictCursor) as cur:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+            return [dict(row) for row in rows]
+    
+    def close(self) -> None:
+        """Close the connection pool."""
+        if hasattr(self, '_pool') and self._pool:
+            self._pool.closeall()
+    
+    # =========================================================================
+    # Utility Methods
+    # =========================================================================
+    
     @staticmethod
     def _is_serverless(url: str) -> bool:
-        """Detect if the URL points to a serverless/cloud Postgres provider."""
+        """Check if URL points to a serverless PostgreSQL provider."""
         if not url:
             return False
-        url_lower = url.lower()
-        return any(host in url_lower for host in _SERVERLESS_HOSTS)
-
+        try:
+            parsed = urlparse(url)
+            hostname = parsed.hostname or ""
+            return any(hostname.endswith(host) for host in PostgresConversationStore._serverless_hosts)
+        except Exception:
+            return False
+    
     @staticmethod
     def _ensure_ssl(url: str) -> str:
-        """Auto-append sslmode=require for serverless providers if not already set."""
+        """Ensure SSL is enabled for serverless PostgreSQL connections."""
         if not PostgresConversationStore._is_serverless(url):
             return url
         if "sslmode=" in url.lower():
             return url
         separator = "&" if "?" in url else "?"
         return f"{url}{separator}sslmode=require"
-
-    def _execute_with_retry(self, operation: Callable, *args, **kwargs):
-        """Execute a database operation with retry logic for serverless cold-start.
-        
-        On OperationalError (stale/broken connection), discards the connection,
-        gets a fresh one from the pool, and retries.
-        """
-        last_error = None
-        for attempt in range(self._max_retries):
-            conn = self._get_conn()
-            try:
-                result = operation(conn, *args, **kwargs)
-                self._put_conn(conn)
-                return result
-            except self._psycopg2.OperationalError as e:
-                last_error = e
-                logger.warning(
-                    f"Connection error (attempt {attempt + 1}/{self._max_retries}): {e}"
-                )
-                # Discard broken connection
-                try:
-                    self._pool.putconn(conn, close=True)
-                except Exception:
-                    pass
-                if attempt < self._max_retries - 1:
-                    _time.sleep(self._retry_delay * (2 ** attempt))
-            except Exception:
-                self._put_conn(conn)
-                raise
-        raise last_error
-    
-    def _get_conn(self):
-        """Get a connection from the pool."""
-        return self._pool.getconn()
-    
-    def _put_conn(self, conn):
-        """Return a connection to the pool."""
-        self._pool.putconn(conn)
-    
-    def _create_tables(self) -> None:
-        """Create tables if they don't exist."""
-        conn = self._get_conn()
-        try:
-            with conn.cursor() as cur:
-                # Create schema if not exists
-                cur.execute(f"CREATE SCHEMA IF NOT EXISTS {self.schema}")
-                
-                # Sessions table
-                cur.execute(f"""
-                    CREATE TABLE IF NOT EXISTS {self.sessions_table} (
-                        session_id VARCHAR(255) PRIMARY KEY,
-                        user_id VARCHAR(255),
-                        agent_id VARCHAR(255),
-                        name VARCHAR(255),
-                        state JSONB,
-                        metadata JSONB,
-                        created_at DOUBLE PRECISION,
-                        updated_at DOUBLE PRECISION
-                    )
-                """)
-                
-                # Sessions indexes
-                cur.execute(f"""
-                    CREATE INDEX IF NOT EXISTS idx_{self.table_prefix}sessions_user 
-                    ON {self.sessions_table}(user_id)
-                """)
-                cur.execute(f"""
-                    CREATE INDEX IF NOT EXISTS idx_{self.table_prefix}sessions_agent 
-                    ON {self.sessions_table}(agent_id)
-                """)
-                cur.execute(f"""
-                    CREATE INDEX IF NOT EXISTS idx_{self.table_prefix}sessions_updated 
-                    ON {self.sessions_table}(updated_at DESC)
-                """)
-                
-                # Messages table
-                cur.execute(f"""
-                    CREATE TABLE IF NOT EXISTS {self.messages_table} (
-                        id VARCHAR(255) PRIMARY KEY,
-                        session_id VARCHAR(255) NOT NULL 
-                            REFERENCES {self.sessions_table}(session_id) ON DELETE CASCADE,
-                        role VARCHAR(50) NOT NULL,
-                        content TEXT,
-                        tool_calls JSONB,
-                        tool_call_id VARCHAR(255),
-                        metadata JSONB,
-                        created_at DOUBLE PRECISION DEFAULT EXTRACT(EPOCH FROM NOW())
-                    )
-                """)
-                
-                # Messages indexes
-                cur.execute(f"""
-                    CREATE INDEX IF NOT EXISTS idx_{self.table_prefix}messages_session 
-                    ON {self.messages_table}(session_id)
-                """)
-                cur.execute(f"""
-                    CREATE INDEX IF NOT EXISTS idx_{self.table_prefix}messages_created 
-                    ON {self.messages_table}(session_id, created_at)
-                """)
-                
-                conn.commit()
-                logger.info(f"PostgreSQL tables created: {self.sessions_table}, {self.messages_table}")
-        finally:
-            self._put_conn(conn)
-    
-    def create_session(self, session: ConversationSession) -> ConversationSession:
-        """Create a new session."""
-        conn = self._get_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(f"""
-                    INSERT INTO {self.sessions_table} 
-                    (session_id, user_id, agent_id, name, state, metadata, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    RETURNING session_id
-                """, (
-                    session.session_id,
-                    session.user_id,
-                    session.agent_id,
-                    session.name,
-                    json.dumps(session.state) if session.state else None,
-                    json.dumps(session.metadata) if session.metadata else None,
-                    session.created_at,
-                    session.updated_at,
-                ))
-                conn.commit()
-                return session
-        finally:
-            self._put_conn(conn)
-    
-    def get_session(self, session_id: str) -> Optional[ConversationSession]:
-        """Get a session by ID."""
-        conn = self._get_conn()
-        try:
-            with conn.cursor(cursor_factory=self._RealDictCursor) as cur:
-                cur.execute(f"""
-                    SELECT * FROM {self.sessions_table} WHERE session_id = %s
-                """, (session_id,))
-                row = cur.fetchone()
-                if not row:
-                    return None
-                return ConversationSession(
-                    session_id=row["session_id"],
-                    user_id=row["user_id"],
-                    agent_id=row["agent_id"],
-                    name=row["name"],
-                    state=row["state"],
-                    metadata=row["metadata"],
-                    created_at=row["created_at"],
-                    updated_at=row["updated_at"],
-                )
-        finally:
-            self._put_conn(conn)
-    
-    def update_session(self, session: ConversationSession) -> ConversationSession:
-        """Update an existing session."""
-        conn = self._get_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(f"""
-                    UPDATE {self.sessions_table}
-                    SET user_id = %s, agent_id = %s, name = %s, 
-                        state = %s, metadata = %s, updated_at = %s
-                    WHERE session_id = %s
-                """, (
-                    session.user_id,
-                    session.agent_id,
-                    session.name,
-                    json.dumps(session.state) if session.state else None,
-                    json.dumps(session.metadata) if session.metadata else None,
-                    session.updated_at,
-                    session.session_id,
-                ))
-                conn.commit()
-                return session
-        finally:
-            self._put_conn(conn)
-    
-    def delete_session(self, session_id: str) -> bool:
-        """Delete a session and all its messages."""
-        conn = self._get_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(f"""
-                    DELETE FROM {self.sessions_table} WHERE session_id = %s
-                """, (session_id,))
-                deleted = cur.rowcount > 0
-                conn.commit()
-                return deleted
-        finally:
-            self._put_conn(conn)
-    
-    def list_sessions(
-        self,
-        user_id: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        limit: int = 100,
-        offset: int = 0
-    ) -> List[ConversationSession]:
-        """List sessions, optionally filtered by user or agent."""
-        conn = self._get_conn()
-        try:
-            with conn.cursor(cursor_factory=self._RealDictCursor) as cur:
-                conditions = []
-                params = []
-                
-                if user_id:
-                    conditions.append("user_id = %s")
-                    params.append(user_id)
-                if agent_id:
-                    conditions.append("agent_id = %s")
-                    params.append(agent_id)
-                
-                where_clause = ""
-                if conditions:
-                    where_clause = "WHERE " + " AND ".join(conditions)
-                
-                params.extend([limit, offset])
-                
-                cur.execute(f"""
-                    SELECT * FROM {self.sessions_table}
-                    {where_clause}
-                    ORDER BY updated_at DESC
-                    LIMIT %s OFFSET %s
-                """, params)
-                
-                return [
-                    ConversationSession(
-                        session_id=row["session_id"],
-                        user_id=row["user_id"],
-                        agent_id=row["agent_id"],
-                        name=row["name"],
-                        state=row["state"],
-                        metadata=row["metadata"],
-                        created_at=row["created_at"],
-                        updated_at=row["updated_at"],
-                    )
-                    for row in cur.fetchall()
-                ]
-        finally:
-            self._put_conn(conn)
-    
-    def add_message(self, session_id: str, message: ConversationMessage) -> ConversationMessage:
-        """Add a message to a session."""
-        message.session_id = session_id
-        conn = self._get_conn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(f"""
-                    INSERT INTO {self.messages_table}
-                    (id, session_id, role, content, tool_calls, tool_call_id, metadata, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """, (
-                    message.id,
-                    session_id,
-                    message.role,
-                    message.content,
-                    json.dumps(message.tool_calls) if message.tool_calls else None,
-                    message.tool_call_id,
-                    json.dumps(message.metadata) if message.metadata else None,
-                    message.created_at,
-                ))
-                conn.commit()
-                return message
-        finally:
-            self._put_conn(conn)
-    
-    def get_messages(
-        self,
-        session_id: str,
-        limit: Optional[int] = None,
-        before: Optional[float] = None,
-        after: Optional[float] = None
-    ) -> List[ConversationMessage]:
-        """Get messages from a session."""
-        conn = self._get_conn()
-        try:
-            with conn.cursor(cursor_factory=self._RealDictCursor) as cur:
-                conditions = ["session_id = %s"]
-                params: List[Any] = [session_id]
-                
-                if before:
-                    conditions.append("created_at < %s")
-                    params.append(before)
-                if after:
-                    conditions.append("created_at > %s")
-                    params.append(after)
-                
-                where_clause = "WHERE " + " AND ".join(conditions)
-                limit_clause = f"LIMIT {limit}" if limit else ""
-                
-                cur.execute(f"""
-                    SELECT * FROM {self.messages_table}
-                    {where_clause}
-                    ORDER BY created_at ASC
-                    {limit_clause}
-                """, params)
-                
-                return [
-                    ConversationMessage(
-                        id=row["id"],
-                        session_id=row["session_id"],
-                        role=row["role"],
-                        content=row["content"],
-                        tool_calls=row["tool_calls"],
-                        tool_call_id=row["tool_call_id"],
-                        metadata=row["metadata"],
-                        created_at=row["created_at"],
-                    )
-                    for row in cur.fetchall()
-                ]
-        finally:
-            self._put_conn(conn)
-    
-    def delete_messages(self, session_id: str, message_ids: Optional[List[str]] = None) -> int:
-        """Delete messages. If message_ids is None, delete all messages in session."""
-        conn = self._get_conn()
-        try:
-            with conn.cursor() as cur:
-                if message_ids:
-                    placeholders = ",".join(["%s"] * len(message_ids))
-                    cur.execute(f"""
-                        DELETE FROM {self.messages_table}
-                        WHERE session_id = %s AND id IN ({placeholders})
-                    """, [session_id] + message_ids)
-                else:
-                    cur.execute(f"""
-                        DELETE FROM {self.messages_table} WHERE session_id = %s
-                    """, (session_id,))
-                deleted = cur.rowcount
-                conn.commit()
-                return deleted
-        finally:
-            self._put_conn(conn)
-    
-    def close(self) -> None:
-        """Close the store and release resources."""
-        if self._pool:
-            self._pool.closeall()
-            self._pool = None

@@ -299,7 +299,9 @@ class GatewayHandler:
 
 
 def handle_gateway_command(args) -> int:
-    """Handle gateway CLI command. [DEPRECATED]
+    """Handle gateway CLI command.
+    
+    Now uses the unified configuration schema for all bot/gateway operations.
     
     Args:
         args: List of CLI arguments (from main.py unknown_args) or argparse Namespace.
@@ -351,59 +353,3 @@ def handle_gateway_command(args) -> int:
         print("Available commands: start, status")
         return 1
     return 0
-
-
-def add_gateway_parser(subparsers) -> None:
-    """Add gateway subparser to CLI."""
-    gateway_parser = subparsers.add_parser(
-        "gateway",
-        help="Manage the WebSocket gateway",
-    )
-    
-    gateway_subparsers = gateway_parser.add_subparsers(
-        dest="gateway_command",
-        help="Gateway commands",
-    )
-    
-    start_parser = gateway_subparsers.add_parser(
-        "start",
-        help="Start the gateway server",
-    )
-    start_parser.add_argument(
-        "--host",
-        default="127.0.0.1",
-        help="Host to bind to (default: 127.0.0.1)",
-    )
-    start_parser.add_argument(
-        "--port",
-        type=int,
-        default=8765,
-        help="Port to listen on (default: 8765)",
-    )
-    start_parser.add_argument(
-        "--agents",
-        help="Path to agent configuration file",
-    )
-    start_parser.add_argument(
-        "--config",
-        dest="config_file",
-        help="Path to gateway.yaml for multi-bot mode",
-    )
-    
-    status_parser = gateway_subparsers.add_parser(
-        "status",
-        help="Check gateway status",
-    )
-    status_parser.add_argument(
-        "--host",
-        default="127.0.0.1",
-        help="Gateway host (default: 127.0.0.1)",
-    )
-    status_parser.add_argument(
-        "--port",
-        type=int,
-        default=8765,
-        help="Gateway port (default: 8765)",
-    )
-    
-    gateway_parser.set_defaults(func=handle_gateway_command)

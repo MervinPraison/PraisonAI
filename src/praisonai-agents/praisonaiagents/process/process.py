@@ -9,6 +9,7 @@ from ..agent.agent import Agent
 from ..task.task import Task
 from ..main import display_error
 from ..llm import LLM
+from ..run_outcome import AgentRunOutcome, RunStatus, validate_decision_string
 import csv
 import os
 
@@ -18,6 +19,7 @@ class LoopItems(BaseModel):
 
 class Process:
     DEFAULT_RETRY_LIMIT = 3  # Predefined retry limit in a common place
+    # Legacy validation decisions - deprecated in favor of typed outcomes
     VALIDATION_FAILURE_DECISIONS = ["invalid", "retry", "failed", "error", "unsuccessful", "fail", "errors", "reject", "rejected", "incomplete"]  # Decision strings that trigger validation feedback
 
     def __init__(
@@ -76,6 +78,105 @@ class Process:
         """Create and return a configured LLM instance for manager tasks."""
         return LLM(model=self.manager_llm, temperature=0.7)
 
+    def _process_validation_outcome(
+        self, 
+        decision_str: str, 
+        current_task, 
+        elapsed_s: float = 0.0
+    ) -> AgentRunOutcome:
+        """
+        Process validation decision using typed outcomes.
+        
+        Converts legacy validation decision strings to typed AgentRunOutcome
+        for structured error handling and exhaustive matching.
+        
+        Args:
+            decision_str: Raw validation decision string from LLM
+            current_task: Task that performed the validation
+            elapsed_s: Execution time for the validation
+            
+        Returns:
+            AgentRunOutcome with typed status and structured metadata
+        """
+        # Convert decision string to typed status
+        status = validate_decision_string(decision_str)
+        
+        # Extract task and agent context
+        agent_name = current_task.agent.name if current_task and current_task.agent else "unknown"
+        task_name = current_task.name if current_task else "unknown"
+        
+        # Find the task that was validated
+        validated_task = None
+        rejected_output = None
+        
+        if current_task:
+            # Find the task that produced the output being validated
+            if current_task.previous_tasks:
+                # For validation tasks, typically validate the most recent previous task
+                prev_task_name = current_task.previous_tasks[-1]
+                validated_task = next((t for t in self.tasks.values() if t.name == prev_task_name), None)
+            elif current_task.context:
+                # If no previous_tasks, check context for the validated task
+                for ctx_task in reversed(current_task.context):
+                    if ctx_task.result and ctx_task.name != current_task.name:
+                        validated_task = ctx_task
+                        break
+            
+            if validated_task and validated_task.result:
+                rejected_output = validated_task.result.raw
+        
+        # Create structured context
+        context = {
+            "validation_response": decision_str,
+            "validation_details": current_task.result.raw if current_task and current_task.result else None,
+            "rejected_output": rejected_output,
+            "validator_task": task_name,
+            "validated_task": validated_task.name if validated_task else None,
+        }
+        
+        # Create appropriate outcome based on status
+        if status == "success":
+            return AgentRunOutcome.success(
+                output=current_task.result.raw if current_task and current_task.result else "",
+                elapsed_s=elapsed_s,
+                agent_name=agent_name,
+                run_id=getattr(current_task, 'run_id', None),
+                context=context,
+            )
+        elif status == "timeout":
+            return AgentRunOutcome.timeout(
+                error=f"Validation timed out: {decision_str}",
+                elapsed_s=elapsed_s,
+                agent_name=agent_name,
+                run_id=getattr(current_task, 'run_id', None),
+                context=context,
+            )
+        elif status == "cancelled":
+            return AgentRunOutcome.cancelled(
+                error=f"Validation was cancelled: {decision_str}",
+                elapsed_s=elapsed_s,
+                agent_name=agent_name,
+                run_id=getattr(current_task, 'run_id', None),
+                context=context,
+            )
+        elif status == "invalid_output":
+            return AgentRunOutcome.invalid_output(
+                error=f"Validation failed: {decision_str}",
+                elapsed_s=elapsed_s,
+                agent_name=agent_name,
+                run_id=getattr(current_task, 'run_id', None),
+                context=context,
+            )
+        else:  # status == "failure"
+            return AgentRunOutcome.failure(
+                error=f"Validation failed: {decision_str}",
+                error_category="validation",
+                elapsed_s=elapsed_s,
+                agent_name=agent_name,
+                run_id=getattr(current_task, 'run_id', None),
+                context=context,
+            )
+
     def _parse_manager_instructions(self, response, ManagerInstructions):
         """Parse LLM response and return ManagerInstructions instance.
         
@@ -95,8 +196,13 @@ class Process:
         except (json.JSONDecodeError, ValueError, TypeError) as e:
             raise Exception(f"Failed to parse response: {response}") from e
 
-    def _create_loop_subtasks(self, loop_task: Task):
-        """Create subtasks for a loop task from input file."""
+    def _create_loop_subtasks(self, loop_task: Task, decision_mode: bool = False):
+        """Create subtasks for a loop task from input file.
+        
+        Args:
+            loop_task: The loop task to create subtasks for
+            decision_mode: If True, create decision-type subtasks with conditions (for start tasks)
+        """
         if not loop_task.input_file:
             logging.warning(f"_create_loop_subtasks called for {loop_task.name} but no input_file specified")
             return
@@ -128,20 +234,45 @@ class Process:
                         task_count += 1
                         logging.debug(f"Creating subtask from CSV row {i+1}: {task_desc}")
 
-                        row_task = Task(
-                            description=f"{loop_task.description}\n{task_desc}" if loop_task.description else task_desc,
-                            agent=loop_task.agent,
-                            name=f"{loop_task.name}_{task_count}" if loop_task.name else task_desc,
-                            expected_output=getattr(loop_task, 'expected_output', None),
-                            on_task_complete=loop_task.callback,  # Inherit callback from parent loop task
-                            is_start=(task_count == 1),
-                            task_type="task"
-                        )
+                        # Configure task based on decision_mode
+                        if decision_mode:
+                            # For start tasks: create decision-type tasks with conditions and inherited next_tasks
+                            inherited_next_tasks = loop_task.next_tasks if loop_task.next_tasks else []
+                            row_name = f"{loop_task.name}_{task_count}" if loop_task.name else task_desc
+                            row_task = Task(
+                                description=f"{loop_task.description}\n{task_desc}" if loop_task.description else task_desc,
+                                agent=loop_task.agent,
+                                name=row_name,
+                                expected_output=getattr(loop_task, 'expected_output', None),
+                                on_task_complete=loop_task.callback,  # Inherit callback from parent loop task
+                                is_start=(task_count == 1),
+                                task_type="decision",  # Change to decision type for start tasks
+                                next_tasks=inherited_next_tasks,  # Inherit parent's next tasks
+                                condition={
+                                    "done": inherited_next_tasks if inherited_next_tasks else [],
+                                    "retry": [row_name],
+                                    "exit": []  # Empty list for exit condition
+                                }
+                            )
+                        else:
+                            # For regular loop tasks: create basic task-type subtasks
+                            row_task = Task(
+                                description=f"{loop_task.description}\n{task_desc}" if loop_task.description else task_desc,
+                                agent=loop_task.agent,
+                                name=f"{loop_task.name}_{task_count}" if loop_task.name else task_desc,
+                                expected_output=getattr(loop_task, 'expected_output', None),
+                                on_task_complete=loop_task.callback,  # Inherit callback from parent loop task
+                                is_start=(task_count == 1),
+                                task_type="task"
+                            )
+                        
                         self.tasks[row_task.id] = row_task
                         new_tasks.append(row_task)
 
                         if previous_task:
                             previous_task.next_tasks = [row_task.name]
+                            if decision_mode:
+                                previous_task.condition["done"] = [row_task.name]  # Use "done" consistently for decision tasks
                         previous_task = row_task
 
                     logging.info(f"Created {task_count} subtasks from CSV file for {loop_task.name}")
@@ -153,21 +284,42 @@ class Process:
                     for i, line in enumerate(lines):
                         if not line.strip():  # Skip empty lines
                             continue
-                            
-                        row_task = Task(
-                            description=f"{loop_task.description}\n{line.strip()}" if loop_task.description else line.strip(),
-                            agent=loop_task.agent,
-                            name=f"{loop_task.name}_{i+1}" if loop_task.name else line.strip(),
-                            expected_output=getattr(loop_task, 'expected_output', None),
-                            on_task_complete=loop_task.callback,  # Inherit callback from parent loop task
-                            is_start=(i == 0),
-                            task_type="task"
-                        )
+                        
+                        # Configure task based on decision_mode
+                        if decision_mode:
+                            # For start tasks: create tasks with conditions 
+                            row_task = Task(
+                                description=f"{loop_task.description}\n{line.strip()}" if loop_task.description else line.strip(),
+                                agent=loop_task.agent,
+                                name=f"{loop_task.name}_{i+1}" if loop_task.name else line.strip(),
+                                expected_output=getattr(loop_task, 'expected_output', None),
+                                on_task_complete=loop_task.callback,  # Inherit callback from parent loop task
+                                is_start=(i == 0),
+                                task_type="task",
+                                condition={
+                                    "complete": ["next"],
+                                    "retry": ["current"]
+                                }
+                            )
+                        else:
+                            # For regular loop tasks: create basic tasks
+                            row_task = Task(
+                                description=f"{loop_task.description}\n{line.strip()}" if loop_task.description else line.strip(),
+                                agent=loop_task.agent,
+                                name=f"{loop_task.name}_{i+1}" if loop_task.name else line.strip(),
+                                expected_output=getattr(loop_task, 'expected_output', None),
+                                on_task_complete=loop_task.callback,  # Inherit callback from parent loop task
+                                is_start=(i == 0),
+                                task_type="task"
+                            )
+                        
                         self.tasks[row_task.id] = row_task
                         new_tasks.append(row_task)
 
                         if previous_task:
                             previous_task.next_tasks = [row_task.name]
+                            if decision_mode:
+                                previous_task.condition["complete"] = [row_task.name]
                         previous_task = row_task
 
                     logging.info(f"Created {len(new_tasks)} subtasks from text file for {loop_task.name}")
@@ -175,7 +327,12 @@ class Process:
             if new_tasks and loop_task.next_tasks:
                 # Connect last subtask to loop task's next tasks
                 last_task = new_tasks[-1]
-                last_task.next_tasks = loop_task.next_tasks
+                if decision_mode:
+                    # For decision mode, ensure the last task points to parent's next tasks
+                    if not last_task.next_tasks:
+                        last_task.next_tasks = loop_task.next_tasks
+                else:
+                    last_task.next_tasks = loop_task.next_tasks
 
         except Exception as e:
             logging.error(f"Failed to create subtasks for loop task {loop_task.name}: {e}")
@@ -461,7 +618,6 @@ class Process:
 
         current_task = start_task
         visited_tasks = set()
-        loop_data = {}  # Store loop-specific data
 
         # TODO: start task with loop feature is not available in aworkflow method
 
@@ -631,9 +787,6 @@ Subtask: {st.name}
                 logging.debug(f"Task next_tasks: {current_task.next_tasks}")
                 yield task_id
                 visited_tasks.add(task_id)
-                # Reset description to original after execution to prevent context accumulation
-                if hasattr(current_task, '_original_description'):
-                    current_task.description = current_task._original_description
 
                 # Only end workflow if no next_tasks AND no conditions
                 if not current_task.next_tasks and not current_task.condition and not any(
@@ -671,22 +824,6 @@ Subtask: {st.name}
                         logging.debug(f"=== Skipping reset for loop/decision/subtask/parallel or rerun=False: {subtask_name} ===")
                         logging.debug(f"Keeping status as: {self.tasks[task_id].status}")
 
-            # Handle loop progression
-            if current_task.task_type == "loop":
-                loop_key = f"loop_{current_task.name}"
-                if loop_key in loop_data:
-                    loop_info = loop_data[loop_key]
-                    loop_info["index"] += 1
-                    has_more = loop_info["remaining"] > 0
-
-                    # Update result to trigger correct condition
-                    if current_task.result:
-                        result = current_task.result.raw
-                        if has_more:
-                            result += "\nmore"
-                        else:
-                            result += "\ndone"
-                        current_task.result.raw = result
 
             # Determine next task based on result
             next_task = None
@@ -714,35 +851,28 @@ Subtask: {st.name}
                             if next_task:
                                 next_task.status = "not started"  # Reset status to allow execution
                                 
-                                # Capture validation feedback for retry scenarios
+                                # NEW: Process validation outcome using typed system
+                                validation_outcome = self._process_validation_outcome(decision_str, current_task)
+                                
+                                # Store typed outcome on task for new callers
+                                next_task.validation_outcome = validation_outcome
+                                
+                                # Backward compatibility: legacy string-based validation feedback  
                                 if decision_str in Process.VALIDATION_FAILURE_DECISIONS:
                                     if current_task and current_task.result:
-                                        # Get the rejected output from the task that was validated
-                                        validated_task = None
-                                        # Find the task that produced the output being validated
-                                        if current_task.previous_tasks:
-                                            # For validation tasks, typically validate the most recent previous task
-                                            prev_task_name = current_task.previous_tasks[-1]
-                                            validated_task = next((t for t in self.tasks.values() if t.name == prev_task_name), None)
-                                        elif current_task.context:
-                                            # If no previous_tasks, check context for the validated task
-                                            # Use the most recent task with a result from context
-                                            for ctx_task in reversed(current_task.context):
-                                                if ctx_task.result and ctx_task.name != current_task.name:
-                                                    validated_task = ctx_task
-                                                    break
-                                        
-                                        feedback = {
+                                        feedback = validation_outcome.to_dict()
+                                        # Flatten context fields to top level for legacy compatibility
+                                        if 'context' in feedback and feedback['context']:
+                                            feedback.update(feedback['context'])
+                                        # Add legacy fields for backward compatibility
+                                        feedback.update({
                                             'validation_response': decision_str,
                                             'validation_details': current_task.result.raw,
-                                            'rejected_output': validated_task.result.raw if validated_task and validated_task.result else None,
-                                            'validator_task': current_task.name,
-                                            'validated_task': validated_task.name if validated_task else None
-                                        }
+                                        })
                                         next_task.validation_feedback = feedback
                                         logging.debug(f"Added validation feedback to {next_task.name}: {feedback['validation_response']} (validated task: {feedback.get('validated_task', 'None')})")
                                 
-                                logging.debug(f"Routing to {next_task.name} based on decision: {decision_str}")
+                                logging.debug(f"Routing to {next_task.name} based on decision: {decision_str} (outcome: {validation_outcome.status})")
                                 # Don't mark workflow as finished when following condition path
                                 await self._set_workflow_finished(False)
 
@@ -1018,104 +1148,29 @@ Provide a JSON with the structure:
         if start_task and start_task.task_type == "loop" and not start_task.input_file:
             start_task.input_file = "tasks.csv"
 
-        # --- If loop + input_file, read file & create tasks
+        # --- If loop + input_file, read file & create tasks using consolidated helper
         if start_task and start_task.task_type == "loop" and getattr(start_task, "input_file", None):
             try:
-                file_ext = os.path.splitext(start_task.input_file)[1].lower()
-                new_tasks = []
-
-                if file_ext == ".csv":
-                    with open(start_task.input_file, "r", encoding="utf-8") as f:
-                        reader = csv.reader(f, quotechar='"', escapechar='\\')  # Handle quoted/escaped fields
-                        previous_task = None
-                        task_count = 0
-
-                        for i, row in enumerate(reader):
-                            if not row:  # Skip truly empty rows
-                                continue
-
-                            # Properly handle Q&A pairs with potential commas
-                            task_desc = row[0].strip() if row else ""
-                            if len(row) > 1:
-                                # Preserve all fields in case of multiple commas
-                                question = row[0].strip()
-                                answer = ",".join(field.strip() for field in row[1:])
-                                task_desc = f"Question: {question}\nAnswer: {answer}"
-
-                            if not task_desc:  # Skip rows with empty content
-                                continue
-
-                            task_count += 1
-                            logging.debug(f"Processing CSV row {i+1}: {task_desc}")
-
-                            # Inherit next_tasks from parent loop task
-                            inherited_next_tasks = start_task.next_tasks if start_task.next_tasks else []
-
-                            row_task = Task(
-                                description=f"{start_task.description}\n{task_desc}" if start_task.description else task_desc,
-                                agent=start_task.agent,
-                                name=f"{start_task.name}_{task_count}" if start_task.name else task_desc,
-                                expected_output=getattr(start_task, 'expected_output', None),
-                                on_task_complete=start_task.callback,  # Inherit callback from parent loop task
-                                is_start=(task_count == 1),
-                                task_type="decision",  # Change to decision type
-                                next_tasks=inherited_next_tasks,  # Inherit parent's next tasks
-                                condition={
-                                    "done": inherited_next_tasks if inherited_next_tasks else ["next"],  # Use full inherited_next_tasks
-                                    "retry": ["current"],
-                                    "exit": []  # Empty list for exit condition
-                                }
-                            )
-                            self.tasks[row_task.id] = row_task
-                            new_tasks.append(row_task)
-
-                            if previous_task:
-                                previous_task.next_tasks = [row_task.name]
-                                previous_task.condition["done"] = [row_task.name]  # Use "done" consistently
-                            previous_task = row_task
-
-                            # For the last task in the loop, ensure it points to parent's next tasks
-                            if task_count > 0 and not row_task.next_tasks:
-                                row_task.next_tasks = inherited_next_tasks
-
-                        logging.info(f"Processed {task_count} rows from CSV file")
-                else:
-                    # If not CSV, read lines
-                    with open(start_task.input_file, "r", encoding="utf-8") as f:
-                        lines = f.read().splitlines()
-                        previous_task = None
-                        for i, line in enumerate(lines):
-                            row_task = Task(
-                                description=f"{start_task.description}\n{line.strip()}" if start_task.description else line.strip(),
-                                agent=start_task.agent,
-                                name=f"{start_task.name}_{i+1}" if start_task.name else line.strip(),
-                                expected_output=getattr(start_task, 'expected_output', None),
-                                on_task_complete=start_task.callback,  # Inherit callback from parent loop task
-                                is_start=(i == 0),
-                                task_type="task",
-                                condition={
-                                    "complete": ["next"],
-                                    "retry": ["current"]
-                                }
-                            )
-                            self.tasks[row_task.id] = row_task
-                            new_tasks.append(row_task)
-
-                            if previous_task:
-                                previous_task.next_tasks = [row_task.name]
-                                previous_task.condition["complete"] = [row_task.name]
-                            previous_task = row_task
-
-                if new_tasks:
-                    start_task = new_tasks[0]
-                    logging.info(f"Created {len(new_tasks)} tasks from: {start_task.input_file}")
+                parent_loop_task = start_task
+                parent_input_file = parent_loop_task.input_file
+                self._create_loop_subtasks(parent_loop_task, decision_mode=True)
+                # Get the first created subtask as the new start task
+                subtasks = [
+                    t for t in self.tasks.values()
+                    if t.name.startswith(parent_loop_task.name + "_")
+                ]
+                if subtasks:
+                    # Mark parent loop task as completed and find start subtask
+                    parent_loop_task.status = "completed"
+                    parent_loop_task._subtasks_created = True
+                    start_task = next((t for t in subtasks if t.is_start), subtasks[0])
+                    logging.info(f"Created {len(subtasks)} tasks from: {parent_input_file}")
             except Exception as e:
                 logging.error(f"Failed to read file tasks: {e}")
 
         # end of start task handling
         current_task = start_task
         visited_tasks = set()
-        loop_data = {}  # Store loop-specific data
 
         while current_task:
             current_iter += 1
@@ -1162,7 +1217,7 @@ Tasks by type:
                 break  # Exit immediately to prevent task reset
 
 
-            # Handle loop task file reading at runtime
+            # Handle loop task file reading at runtime using consolidated helper
             if (current_task.task_type == "loop" and
                 current_task is not start_task and
                 getattr(current_task, "_subtasks_created", False) is not True):
@@ -1172,66 +1227,18 @@ Tasks by type:
 
                 if getattr(current_task, "input_file", None):
                     try:
-                        file_ext = os.path.splitext(current_task.input_file)[1].lower()
-                        new_tasks = []
-
-                        if file_ext == ".csv":
-                            with open(current_task.input_file, "r", encoding="utf-8") as f:
-                                reader = csv.reader(f)
-                                previous_task = None
-                                for i, row in enumerate(reader):
-                                    if row:  # Skip empty rows
-                                        task_desc = row[0]  # Take first column
-                                        row_task = Task(
-                                            description=f"{current_task.description}\n{task_desc}" if current_task.description else task_desc,
-                                            agent=current_task.agent,
-                                            name=f"{current_task.name}_{i+1}" if current_task.name else task_desc,
-                                            expected_output=getattr(current_task, 'expected_output', None),
-                                            on_task_complete=current_task.callback,  # Inherit callback from parent loop task
-                                            is_start=(i == 0),
-                                            task_type="task",
-                                            condition={
-                                                "complete": ["next"],
-                                                "retry": ["current"]
-                                            }
-                                        )
-                                        self.tasks[row_task.id] = row_task
-                                        new_tasks.append(row_task)
-
-                                        if previous_task:
-                                            previous_task.next_tasks = [row_task.name]
-                                            previous_task.condition["complete"] = [row_task.name]
-                                        previous_task = row_task
-                        else:
-                            with open(current_task.input_file, "r", encoding="utf-8") as f:
-                                lines = f.read().splitlines()
-                                previous_task = None
-                                for i, line in enumerate(lines):
-                                    row_task = Task(
-                                        description=f"{current_task.description}\n{line.strip()}" if current_task.description else line.strip(),
-                                        agent=current_task.agent,
-                                        name=f"{current_task.name}_{i+1}" if current_task.name else line.strip(),
-                                        expected_output=getattr(current_task, 'expected_output', None),
-                                        on_task_complete=current_task.callback,  # Inherit callback from parent loop task
-                                        is_start=(i == 0),
-                                        task_type="task",
-                                        condition={
-                                            "complete": ["next"],
-                                            "retry": ["current"]
-                                        }
-                                    )
-                                    self.tasks[row_task.id] = row_task
-                                    new_tasks.append(row_task)
-
-                                    if previous_task:
-                                        previous_task.next_tasks = [row_task.name]
-                                        previous_task.condition["complete"] = [row_task.name]
-                                    previous_task = row_task
-
-                        if new_tasks:
-                            current_task.next_tasks = [new_tasks[0].name]
+                        self._create_loop_subtasks(current_task, decision_mode=False)
+                        # Update current task to point to first subtask
+                        subtasks = [
+                            t for t in self.tasks.values()
+                            if t.name.startswith(current_task.name + "_")
+                        ]
+                        if subtasks:
+                            # Find first subtask by is_start flag or first in list
+                            first_subtask = next((t for t in subtasks if t.is_start), subtasks[0])
+                            current_task.next_tasks = [first_subtask.name]
                             current_task._subtasks_created = True
-                            logging.info(f"Created {len(new_tasks)} tasks from: {current_task.input_file} for loop task {current_task.name}")
+                            logging.info(f"Created {len(subtasks)} tasks from: {current_task.input_file} for loop task {current_task.name}")
                     except Exception as e:
                         logging.error(f"Failed to read file tasks for loop task {current_task.name}: {e}")
 
@@ -1357,9 +1364,6 @@ Subtask: {st.name}
                 logging.debug(f"Task next_tasks: {current_task.next_tasks}")
                 yield task_id
                 visited_tasks.add(task_id)
-                # Reset description to original after execution to prevent context accumulation
-                if hasattr(current_task, '_original_description'):
-                    current_task.description = current_task._original_description
 
                 # Only end workflow if no next_tasks AND no conditions
                 if not current_task.next_tasks and not current_task.condition and not any(
@@ -1395,22 +1399,6 @@ Subtask: {st.name}
                     logging.debug(f"Keeping status as: {self.tasks[task_id].status}")
 
 
-            # Handle loop progression
-            if current_task.task_type == "loop":
-                loop_key = f"loop_{current_task.name}"
-                if loop_key in loop_data:
-                    loop_info = loop_data[loop_key]
-                    loop_info["index"] += 1
-                    has_more = loop_info["remaining"] > 0
-
-                    # Update result to trigger correct condition
-                    if current_task.result:
-                        result = current_task.result.raw
-                        if has_more:
-                            result += "\nmore"
-                        else:
-                            result += "\ndone"
-                        current_task.result.raw = result
 
             # Determine next task based on result
             next_task = None
@@ -1438,35 +1426,28 @@ Subtask: {st.name}
                             if next_task:
                                 next_task.status = "not started"  # Reset status to allow execution
                                 
-                                # Capture validation feedback for retry scenarios
+                                # NEW: Process validation outcome using typed system
+                                validation_outcome = self._process_validation_outcome(decision_str, current_task)
+                                
+                                # Store typed outcome on task for new callers
+                                next_task.validation_outcome = validation_outcome
+                                
+                                # Backward compatibility: legacy string-based validation feedback
                                 if decision_str in Process.VALIDATION_FAILURE_DECISIONS:
                                     if current_task and current_task.result:
-                                        # Get the rejected output from the task that was validated
-                                        validated_task = None
-                                        # Find the task that produced the output being validated
-                                        if current_task.previous_tasks:
-                                            # For validation tasks, typically validate the most recent previous task
-                                            prev_task_name = current_task.previous_tasks[-1]
-                                            validated_task = next((t for t in self.tasks.values() if t.name == prev_task_name), None)
-                                        elif current_task.context:
-                                            # If no previous_tasks, check context for the validated task
-                                            # Use the most recent task with a result from context
-                                            for ctx_task in reversed(current_task.context):
-                                                if ctx_task.result and ctx_task.name != current_task.name:
-                                                    validated_task = ctx_task
-                                                    break
-                                        
-                                        feedback = {
+                                        feedback = validation_outcome.to_dict()
+                                        # Flatten context fields to top level for legacy compatibility
+                                        if 'context' in feedback and feedback['context']:
+                                            feedback.update(feedback['context'])
+                                        # Add legacy fields for backward compatibility
+                                        feedback.update({
                                             'validation_response': decision_str,
                                             'validation_details': current_task.result.raw,
-                                            'rejected_output': validated_task.result.raw if validated_task and validated_task.result else None,
-                                            'validator_task': current_task.name,
-                                            'validated_task': validated_task.name if validated_task else None
-                                        }
+                                        })
                                         next_task.validation_feedback = feedback
                                         logging.debug(f"Added validation feedback to {next_task.name}: {feedback['validation_response']} (validated task: {feedback.get('validated_task', 'None')})")
                                 
-                                logging.debug(f"Routing to {next_task.name} based on decision: {decision_str}")
+                                logging.debug(f"Routing to {next_task.name} based on decision: {decision_str} (outcome: {validation_outcome.status})")
                                 # Don't mark workflow as finished when following condition path
                                 self._set_workflow_finished_sync(False)
 

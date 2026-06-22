@@ -18,7 +18,7 @@ Zero Performance Impact:
 """
 
 from typing import (
-    Protocol, List, Dict, Any, Optional,
+    Protocol, List, Dict, Any, Optional, Union,
     runtime_checkable, Tuple
 )
 from dataclasses import dataclass, field
@@ -394,3 +394,272 @@ def cleanup_orphaned_parents(messages: List[Dict[str, Any]]) -> List[Dict[str, A
             result.append(msg)
     
     return result
+
+
+# ============================================================================
+# Context Compaction Policy Protocol (Added for Issue #1817)
+# ============================================================================
+
+class CompactionRoute(str, Enum):
+    """Routes for context handling decisions."""
+    FITS = "fits"                      # Context fits, proceed normally
+    COMPACT_NEEDED = "compact_needed"   # Need compaction before LLM call
+    TRUNCATE_TOOLS = "truncate_tools"   # Truncate tool results first
+    COMPACT_THEN_TRUNCATE = "compact_then_truncate"  # Both needed
+
+
+class CompactionStrategy(str, Enum):
+    """Strategy for context compaction."""
+    TRUNCATE = "truncate"              # Remove oldest messages
+    SUMMARISE = "summarise"            # Summarize old messages
+    DROP_OLDEST_TOOLS = "drop_oldest_tools"  # Remove old tool outputs
+    SLIDING_WINDOW = "sliding_window"  # Keep recent messages only
+
+
+class ContextBudgetResult:
+    """Result of context budget analysis."""
+    def __init__(
+        self,
+        route: CompactionRoute,
+        current_tokens: int,
+        available_tokens: int,
+        utilization: float,
+        needs_action: bool,
+        recommended_strategy: CompactionStrategy,
+        details: Dict[str, Any]
+    ):
+        self.route = route
+        self.current_tokens = current_tokens
+        self.available_tokens = available_tokens
+        self.utilization = utilization
+        self.needs_action = needs_action
+        self.recommended_strategy = recommended_strategy
+        self.details = details
+
+
+@runtime_checkable
+class ContextCompactionPolicyProtocol(Protocol):
+    """
+    Protocol for context compaction policy implementations.
+    
+    As per AGENTS.md: "Core SDK uses typing.Protocol for all extension points"
+    This defines the interface that all compaction policies must implement.
+    """
+    
+    # Configuration attributes
+    trigger_at: float
+    strategy: Union[str, CompactionStrategy]
+    preserve_last_n_turns: int
+    max_compaction_attempts: int
+    target_utilization: float
+    aggressive_tool_truncation: bool
+    model_overrides: Optional[Dict[str, Dict[str, Any]]]
+    
+    def compute_context_budget(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str = "gpt-4o-mini",
+        tools: Optional[List[Dict[str, Any]]] = None,
+        system_prompt: Optional[str] = None
+    ) -> ContextBudgetResult:
+        """
+        Compute context budget and determine route before LLM call.
+        
+        Args:
+            messages: Current conversation history
+            model: Model name for context window lookup
+            tools: Tool schemas (if any)
+            system_prompt: System prompt content
+            
+        Returns:
+            ContextBudgetResult with routing decision
+        """
+        ...
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert policy to dictionary for serialization."""
+        ...
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ContextCompactionPolicyProtocol":
+        """Create policy from dictionary."""
+        ...
+
+
+def get_default_policy() -> ContextCompactionPolicyProtocol:
+    """Get the default context compaction policy."""
+    from .adapters import get_default_policy_impl
+    return get_default_policy_impl()
+
+
+# ============================================================================
+# Conversation Compaction Protocols
+# ============================================================================
+
+@dataclass
+class ConversationContext:
+    """
+    Structured representation of conversation context for intelligent compaction.
+    
+    Preserves critical elements that maintain conversation continuity.
+    """
+    # Conversation flow
+    main_topic: str = ""
+    current_goal: str = ""
+    progress_summary: str = ""
+    
+    # Critical decisions and outcomes
+    key_decisions: List[str] = field(default_factory=list)
+    important_facts: List[str] = field(default_factory=list)
+    action_items: List[str] = field(default_factory=list)
+    
+    # Context preservation
+    user_preferences: List[str] = field(default_factory=list)
+    tool_results_summary: List[str] = field(default_factory=list)
+    conversation_tone: str = "professional"
+    
+    # Metadata
+    original_message_count: int = 0
+    compacted_message_count: int = 0
+    compaction_timestamp: float = field(default_factory=time.time)
+    
+    def to_summary_message(self) -> Dict[str, Any]:
+        """Convert to a structured summary message for conversation continuity."""
+        parts = []
+        
+        if self.main_topic:
+            parts.append(f"📋 **Topic**: {self.main_topic}")
+        
+        if self.current_goal:
+            parts.append(f"🎯 **Current Goal**: {self.current_goal}")
+        
+        if self.progress_summary:
+            parts.append(f"📈 **Progress**: {self.progress_summary}")
+        
+        if self.key_decisions:
+            decisions_text = "\n".join(f"• {decision}" for decision in self.key_decisions[-3:])  # Last 3 decisions
+            parts.append(f"🔑 **Key Decisions**:\n{decisions_text}")
+        
+        if self.important_facts:
+            facts_text = "\n".join(f"• {fact}" for fact in self.important_facts[-5:])  # Last 5 facts
+            parts.append(f"💡 **Important Context**:\n{facts_text}")
+        
+        if self.action_items:
+            items_text = "\n".join(f"• {item}" for item in self.action_items[-3:])  # Last 3 items
+            parts.append(f"✅ **Action Items**:\n{items_text}")
+        
+        if self.user_preferences:
+            prefs_text = ", ".join(self.user_preferences[-3:])
+            parts.append(f"⚙️ **User Preferences**: {prefs_text}")
+        
+        if self.tool_results_summary:
+            tools_text = "\n".join(f"• {summary}" for summary in self.tool_results_summary[-3:])
+            parts.append(f"🔧 **Recent Tool Results**:\n{tools_text}")
+        
+        content = "\n\n".join(parts) if parts else "Previous conversation context preserved"
+        
+        return {
+            "role": "system",
+            "content": f"[💬 **Conversation Summary** - {self.original_message_count} messages compacted]\n\n{content}",
+            "_metadata": {
+                "is_summary": True,
+                "is_conversation_summary": True,
+                "summary_id": hashlib.sha256(f"{self.compaction_timestamp}_{content}".encode()).hexdigest()[:16],
+                "original_message_count": self.original_message_count,
+                "compacted_message_count": self.compacted_message_count,
+                "compaction_timestamp": self.compaction_timestamp,
+                "conversation_tone": self.conversation_tone,
+            }
+        }
+
+
+@runtime_checkable
+class ConversationAnalyzerProtocol(Protocol):
+    """
+    Protocol for analyzing conversation messages to extract structured context.
+    
+    Implementations can use LLM-based analysis, rule-based extraction,
+    or hybrid approaches to understand conversation flow and content.
+    """
+    
+    def analyze_conversation(self, messages: List[Dict[str, Any]]) -> ConversationContext:
+        """
+        Analyze a conversation to extract structured context.
+        
+        Args:
+            messages: List of conversation messages to analyze
+            
+        Returns:
+            ConversationContext with extracted information
+        """
+        ...
+    
+    def extract_key_decisions(self, messages: List[Dict[str, Any]]) -> List[str]:
+        """Extract key decisions made in the conversation."""
+        ...
+    
+    def identify_main_topic(self, messages: List[Dict[str, Any]]) -> str:
+        """Identify the main topic or theme of the conversation."""
+        ...
+    
+    def summarize_progress(self, messages: List[Dict[str, Any]]) -> str:
+        """Summarize progress made towards goals."""
+        ...
+
+
+@runtime_checkable
+class ConversationCompactorProtocol(Protocol):
+    """
+    Protocol for intelligent conversation compaction that preserves continuity.
+    
+    Replaces groups of messages with structured summaries that maintain
+    conversation flow and critical context.
+    """
+    
+    def compact_conversation(
+        self, 
+        messages: List[Dict[str, Any]], 
+        target_tokens: int,
+        preserve_recent: int = 5
+    ) -> Tuple[List[Dict[str, Any]], ConversationContext]:
+        """
+        Compact a conversation while preserving continuity.
+        
+        Args:
+            messages: Messages to compact
+            target_tokens: Target token count after compaction
+            preserve_recent: Number of recent messages to keep intact
+            
+        Returns:
+            Tuple of (compacted_messages, conversation_context)
+        """
+        ...
+    
+    def should_compact(self, messages: List[Dict[str, Any]], threshold_tokens: int) -> bool:
+        """Determine if conversation should be compacted."""
+        ...
+    
+    def find_compaction_boundaries(self, messages: List[Dict[str, Any]]) -> List[Tuple[int, int]]:
+        """Find natural boundaries for compaction (e.g., topic changes, task completions)."""
+        ...
+
+
+# Default implementation hint for lazy loading
+def get_conversation_analyzer(strategy: str = "hybrid") -> ConversationAnalyzerProtocol:
+    """Get conversation analyzer implementation (lazy loaded)."""
+    # Implementation will be in manager.py to avoid circular imports
+    raise NotImplementedError("Use get_conversation_analyzer from manager module")
+
+
+def get_conversation_compactor(
+    analyzer: ConversationAnalyzerProtocol,
+    llm_summarize_fn: Optional[callable] = None
+) -> ConversationCompactorProtocol:
+    """Get conversation compactor implementation (lazy loaded)."""
+    # Implementation will be in manager.py to avoid circular imports  
+    raise NotImplementedError("Use get_conversation_compactor from manager module")
+
+
+# Backward compatibility aliases (deprecated)
+ConversationAnalyzer = ConversationAnalyzerProtocol
+ConversationCompactor = ConversationCompactorProtocol

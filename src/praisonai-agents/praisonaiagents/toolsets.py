@@ -1,0 +1,384 @@
+"""Named toolset groups for organizing tools into reusable collections.
+
+This module provides functionality to define named groups of tools that can be
+enabled or disabled as a unit, supporting composition via includes and 
+scenario-specific agent deployments.
+
+Usage:
+    from praisonaiagents import toolsets
+    
+    # Define toolsets
+    toolsets.register_toolset("web", tools=["internet_search", "crawl4ai"])
+    toolsets.register_toolset("files", tools=["read_file", "write_file"])
+    toolsets.register_toolset("research", includes=["web", "files"])
+    
+    # Use in agent
+    agent = Agent(role="researcher", toolsets=["research"])
+"""
+
+import logging
+import threading
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Set
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ToolsetSpec:
+    """Specification for a named toolset group.
+    
+    Attributes:
+        name: Unique name for the toolset
+        tools: List of tool names included directly in this toolset
+        includes: List of other toolset names to include (recursive composition)
+        description: Optional description of the toolset's purpose
+    """
+    name: str
+    tools: List[str] = field(default_factory=list)
+    includes: List[str] = field(default_factory=list)
+    description: str = ""
+
+
+class ToolsetRegistry:
+    """Registry for managing named toolset groups.
+    
+    Provides thread-safe registration and resolution of toolset groups,
+    with support for recursive composition via includes.
+    """
+    
+    def __init__(self):
+        self._toolsets: Dict[str, ToolsetSpec] = {}
+        self._lock = threading.RLock()  # Thread-safe for multi-agent scenarios
+        self._prebuilt_loaded = False
+    
+    def register_toolset(
+        self,
+        name: str,
+        tools: Optional[List[str]] = None,
+        includes: Optional[List[str]] = None,
+        description: str = "",
+        overwrite: bool = False
+    ) -> None:
+        """Register a named toolset.
+        
+        Args:
+            name: Unique name for the toolset
+            tools: List of tool names to include directly
+            includes: List of other toolset names to include
+            description: Optional description
+            overwrite: If True, overwrite existing toolset with same name
+            
+        Raises:
+            ValueError: If toolset already exists and overwrite=False
+        """
+        with self._lock:
+            if name in self._toolsets and not overwrite:
+                logger.debug(f"Toolset '{name}' already registered, skipping")
+                return
+                
+            toolset = ToolsetSpec(
+                name=name,
+                tools=list(tools) if tools else [],
+                includes=list(includes) if includes else [],
+                description=description
+            )
+            self._toolsets[name] = toolset
+            logger.debug(f"Registered toolset: {name}")
+    
+    def unregister_toolset(self, name: str) -> bool:
+        """Remove a toolset from the registry.
+        
+        Args:
+            name: Toolset name to remove
+            
+        Returns:
+            True if toolset was removed, False if not found
+        """
+        with self._lock:
+            if name in self._toolsets:
+                del self._toolsets[name]
+                logger.debug(f"Unregistered toolset: {name}")
+                return True
+            return False
+    
+    def get_toolset(self, name: str) -> Optional[ToolsetSpec]:
+        """Get a toolset by name.
+        
+        Args:
+            name: Toolset name
+            
+        Returns:
+            ToolsetSpec or None if not found
+        """
+        with self._lock:
+            self._ensure_prebuilt_loaded()
+            spec = self._toolsets.get(name)
+            if spec is None:
+                return None
+            # Return defensive copy to prevent external mutation
+            return ToolsetSpec(
+                name=spec.name,
+                tools=list(spec.tools),
+                includes=list(spec.includes),
+                description=spec.description,
+            )
+    
+    def list_toolsets(self) -> List[str]:
+        """List all registered toolset names."""
+        with self._lock:
+            self._ensure_prebuilt_loaded()
+            return list(self._toolsets.keys())
+    
+    def resolve_toolset(self, name: str) -> List[str]:
+        """Resolve a toolset name to a flat list of tool names.
+        
+        Recursively expands includes to produce the final list of tools.
+        Handles circular dependencies by tracking visited toolsets.
+        
+        Args:
+            name: Toolset name to resolve
+            
+        Returns:
+            List of unique tool names
+            
+        Raises:
+            ValueError: If toolset not found or circular dependency detected
+        """
+        with self._lock:
+            self._ensure_prebuilt_loaded()
+            tools = self._resolve_toolset_recursive(name, set())
+            # Ensure uniqueness while preserving order
+            seen = set()
+            unique_tools = []
+            for tool in tools:
+                if tool not in seen:
+                    seen.add(tool)
+                    unique_tools.append(tool)
+            return unique_tools
+    
+    def resolve_toolsets(self, names: List[str]) -> List[str]:
+        """Resolve multiple toolset names to a flat list of tool names.
+        
+        Args:
+            names: List of toolset names to resolve
+            
+        Returns:
+            List of unique tool names from all toolsets
+        """
+        with self._lock:
+            all_tools = []
+            for name in names:
+                tools = self.resolve_toolset(name)
+                all_tools.extend(tools)
+            # Return unique tools while preserving order
+            seen = set()
+            unique_tools = []
+            for tool in all_tools:
+                if tool not in seen:
+                    seen.add(tool)
+                    unique_tools.append(tool)
+            return unique_tools
+    
+    def _resolve_toolset_recursive(self, name: str, visited: Set[str]) -> List[str]:
+        """Recursive helper for toolset resolution with cycle detection."""
+        if name in visited:
+            raise ValueError(f"Circular dependency detected in toolset: {name}")
+        
+        toolset = self._toolsets.get(name)
+        if toolset is None:
+            raise ValueError(f"Toolset not found: {name}")
+        
+        visited.add(name)
+        
+        # Collect tools from this toolset
+        all_tools = list(toolset.tools)
+        
+        # Recursively resolve included toolsets
+        for include_name in toolset.includes:
+            included_tools = self._resolve_toolset_recursive(include_name, visited.copy())
+            all_tools.extend(included_tools)
+        
+        return all_tools
+    
+    def _ensure_prebuilt_loaded(self):
+        """Ensure prebuilt toolsets are loaded exactly once."""
+        if not self._prebuilt_loaded:
+            self._load_prebuilt_toolsets()
+            self._prebuilt_loaded = True
+    
+    def _load_prebuilt_toolsets(self):
+        """Load standard prebuilt toolsets that ship with PraisonAI."""
+        # Web-related tools
+        self.register_toolset(
+            "web",
+            tools=["internet_search", "duckduckgo", "searxng_search", "tavily_search", "exa_search"],
+            description="Web search and crawling tools"
+        )
+        
+        # File system tools
+        self.register_toolset(
+            "files", 
+            tools=["read_file", "write_file", "list_files", "get_file_info", "copy_file", "move_file", "delete_file"],
+            description="File system operations"
+        )
+        
+        # Code execution tools
+        self.register_toolset(
+            "code",
+            tools=["execute_code", "analyze_code", "format_code", "lint_code"],
+            description="Python code execution and analysis"
+        )
+        
+        # System administration tools
+        self.register_toolset(
+            "system",
+            tools=["execute_command", "list_processes", "kill_process", "get_system_info"],
+            description="System administration and shell operations"
+        )
+        
+        # Web scraping/crawling tools
+        self.register_toolset(
+            "scraping",
+            tools=["scrape_page", "extract_links", "crawl", "extract_text"],
+            description="Web page scraping and content extraction"
+        )
+        
+        # Research workflow (composition example)
+        self.register_toolset(
+            "research",
+            tools=[],  # No direct tools, only composed ones
+            includes=["web", "files", "scraping"],
+            description="Complete research workflow with web search, file ops, and scraping"
+        )
+        
+        # Safe toolset for restricted environments
+        self.register_toolset(
+            "safe",
+            tools=["internet_search", "read_file", "tavily_search"],
+            description="Minimal safe toolset for restricted environments"
+        )
+        
+        # Development workflow
+        self.register_toolset(
+            "development",
+            tools=[],
+            includes=["code", "files", "system"],
+            description="Complete development workflow with code execution, files, and system access"
+        )
+        
+        logger.debug("Loaded prebuilt toolsets: web, files, code, system, scraping, research, safe, development")
+    
+    def clear(self) -> None:
+        """Clear all registered toolsets."""
+        with self._lock:
+            self._toolsets.clear()
+            self._prebuilt_loaded = False
+    
+    def __contains__(self, name: str) -> bool:
+        with self._lock:
+            self._ensure_prebuilt_loaded()
+            return name in self._toolsets
+    
+    def __len__(self) -> int:
+        with self._lock:
+            self._ensure_prebuilt_loaded()
+            return len(self._toolsets)
+    
+    def __repr__(self) -> str:
+        with self._lock:
+            self._ensure_prebuilt_loaded()
+            return f"ToolsetRegistry(toolsets={len(self._toolsets)})"
+
+
+# Global registry instance (protected by _registry_lock for thread safety)
+_registry_lock = threading.Lock()
+_global_registry: Optional[ToolsetRegistry] = None
+
+
+def get_toolset_registry() -> ToolsetRegistry:
+    """Get the global toolset registry instance. Thread-safe singleton."""
+    global _global_registry
+    if _global_registry is None:
+        with _registry_lock:
+            # Double-checked locking pattern
+            if _global_registry is None:
+                _global_registry = ToolsetRegistry()
+    return _global_registry
+
+
+def register_toolset(
+    name: str,
+    tools: Optional[List[str]] = None,
+    includes: Optional[List[str]] = None,
+    description: str = "",
+    overwrite: bool = False
+) -> None:
+    """Register a named toolset with the global registry.
+    
+    Args:
+        name: Unique name for the toolset
+        tools: List of tool names to include directly
+        includes: List of other toolset names to include
+        description: Optional description
+        overwrite: If True, overwrite existing toolset
+    """
+    get_toolset_registry().register_toolset(name, tools, includes, description, overwrite)
+
+
+def resolve_toolset(name: str) -> List[str]:
+    """Resolve a toolset name to a flat list of tool names.
+    
+    Args:
+        name: Toolset name to resolve
+        
+    Returns:
+        List of unique tool names
+    """
+    return get_toolset_registry().resolve_toolset(name)
+
+
+def resolve_toolsets(names: List[str]) -> List[str]:
+    """Resolve multiple toolset names to a flat list of tool names.
+    
+    Args:
+        names: List of toolset names to resolve
+        
+    Returns:
+        List of unique tool names from all toolsets
+    """
+    return get_toolset_registry().resolve_toolsets(names)
+
+
+def list_toolsets() -> List[str]:
+    """List all registered toolset names."""
+    return get_toolset_registry().list_toolsets()
+
+
+def get_toolset(name: str) -> Optional[ToolsetSpec]:
+    """Get a toolset by name."""
+    return get_toolset_registry().get_toolset(name)
+
+
+def unregister_toolset(name: str) -> bool:
+    """Remove a toolset from the global registry.
+    
+    Args:
+        name: Toolset name to remove
+        
+    Returns:
+        True if removed, False if not found
+    """
+    return get_toolset_registry().unregister_toolset(name)
+
+
+def has_toolset(name: str) -> bool:
+    """Check if a toolset is registered.
+    
+    Args:
+        name: Toolset name to check
+        
+    Returns:
+        True if toolset exists, False otherwise
+    """
+    return name in get_toolset_registry()

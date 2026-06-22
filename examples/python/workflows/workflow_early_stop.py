@@ -6,9 +6,8 @@ functions that return StepResult with stop_workflow=True.
 """
 
 from praisonaiagents import (
-    Workflow, Task, WorkflowContext, StepResult
+    AgentFlow, Task, WorkflowContext, StepResult
 )
-from praisonaiagents import AgentFlowManager
 
 # Custom validator that can stop the workflow
 def validate_data(context: WorkflowContext) -> StepResult:
@@ -50,20 +49,13 @@ workflow = AgentFlow(
 )
 
 if __name__ == "__main__":
-    manager = WorkflowManager()
-    manager.workflows["Data Processing"] = workflow
-    
-    # Test with invalid data (will stop early)
     print("=== Testing with invalid data ===")
-    result = manager.execute("Data Processing", default_llm="gpt-4o-mini")
-    
-    for step_result in result["results"]:
-        print(f"  {step_result['step']}: {step_result['output']}")
-    
-    # Test with valid data (will complete)
+    result = workflow.run("", llm="gpt-4o-mini", verbose=True)
+    for step in result.get("steps", []):
+        print(f"  {step.get('step', 'step')}: {step.get('output', step.get('status'))}")
+
     print("\n=== Testing with valid data ===")
     workflow.variables["data"] = {"value": 42}
-    result = manager.execute("Data Processing", default_llm="gpt-4o-mini")
-    
-    for step_result in result["results"]:
-        print(f"  {step_result['step']}: {step_result['status']}")
+    result = workflow.run("", llm="gpt-4o-mini", verbose=True)
+    for step in result.get("steps", []):
+        print(f"  {step.get('step', 'step')}: {step.get('status', 'completed')}")

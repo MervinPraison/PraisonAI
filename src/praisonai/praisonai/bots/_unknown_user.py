@@ -132,7 +132,7 @@ class UnknownUserHandler:
                     owner_user_id=owner_user_id,
                     user_name=user_name,
                     code=code,
-                    channel=channel,
+                    channel=channel_type,
                     user_id=user_id
                 )
                 

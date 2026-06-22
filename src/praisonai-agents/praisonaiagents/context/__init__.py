@@ -100,6 +100,7 @@ __all__ = [
     "NonDestructiveOptimizer",
     "SummarizeOptimizer",
     "LLMSummarizeOptimizer",
+    "ConversationOptimizer",
     "SmartOptimizer",
     "get_optimizer",
     "get_effective_history",
@@ -136,6 +137,16 @@ __all__ = [
     "validate_message_schema",
     "get_effective_history",
     "cleanup_orphaned_parents",
+    # Conversation Compaction (NEW)
+    "ConversationContext",
+    "ConversationAnalyzerProtocol", 
+    "ConversationCompactorProtocol",
+    "ConversationAnalyzer",  # backward compatibility
+    "ConversationCompactor",  # backward compatibility
+    "HybridConversationAnalyzer",
+    "IntelligentConversationCompactor",
+    "get_conversation_analyzer",
+    "get_conversation_compactor",
     # Store (NEW)
     "ContextStoreImpl",
     "ContextViewImpl",
@@ -169,6 +180,16 @@ __all__ = [
     "TerminalLoggerProtocol",
     "compute_checksum",
     "generate_summary",
+    # Context Compaction Policy
+    "ContextCompactionPolicy",
+    "ContextCompactionPolicyProtocol",
+    "CompactionRoute",
+    "CompactionStrategy", 
+    "ContextBudgetResult",
+    "get_default_policy",
+    "CONSERVATIVE_POLICY",
+    "BALANCED_POLICY",
+    "AGGRESSIVE_POLICY",
 ]
 
 
@@ -205,7 +226,7 @@ def __getattr__(name: str):
     # Optimization
     if name in ("BaseOptimizer", "TruncateOptimizer", "SlidingWindowOptimizer",
                 "PruneToolsOptimizer", "NonDestructiveOptimizer", "SummarizeOptimizer",
-                "LLMSummarizeOptimizer", "SmartOptimizer", "get_optimizer"):
+                "LLMSummarizeOptimizer", "ConversationOptimizer", "SmartOptimizer", "get_optimizer"):
         from . import optimizer
         return getattr(optimizer, name)
     
@@ -228,7 +249,9 @@ def __getattr__(name: str):
     # Protocols
     if name in ("ContextView", "ContextMutator", "ContextMessage",
                 "MessageMetadata", "MessageRole", "validate_message_schema",
-                "cleanup_orphaned_parents"):
+                "cleanup_orphaned_parents", "ConversationContext", 
+                "ConversationAnalyzerProtocol", "ConversationCompactorProtocol",
+                "ConversationAnalyzer", "ConversationCompactor"):
         from . import protocols
         return getattr(protocols, name)
     
@@ -281,5 +304,18 @@ def __getattr__(name: str):
     if name in ("ContextAggregator", "AggregatedContext", "create_aggregator_from_config"):
         from . import aggregator
         return getattr(aggregator, name)
+    
+    # Context Compaction Policy
+    if name in ("ContextCompactionPolicy", "ContextCompactionPolicyProtocol", "CompactionRoute", "CompactionStrategy",
+                "ContextBudgetResult", "get_default_policy", "CONSERVATIVE_POLICY", 
+                "BALANCED_POLICY", "AGGRESSIVE_POLICY"):
+        from . import policy
+        return getattr(policy, name)
+    
+    # Conversation Compaction implementations
+    if name in ("HybridConversationAnalyzer", "IntelligentConversationCompactor", 
+                "get_conversation_analyzer", "get_conversation_compactor"):
+        from . import conversation
+        return getattr(conversation, name)
     
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

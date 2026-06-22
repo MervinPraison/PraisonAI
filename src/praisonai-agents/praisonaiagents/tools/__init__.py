@@ -1,11 +1,8 @@
 """Tools package for PraisonAI Agents - uses lazy loading for performance"""
 from importlib import import_module
 from typing import Any
-import threading
 
-# Thread-safe lazy loading cache
-_tools_lock = threading.Lock()
-_tools_lazy_cache = {}
+# Note: actual lazy loading cache is implemented with _loaded_classes in __getattr__
 
 # Export core tool items for organized imports (lightweight)
 from .base import BaseTool, ToolResult, ToolValidationError, validate_tool
@@ -170,6 +167,13 @@ TOOL_MAPPINGS = {
     'github_commit_and_push': ('.github_tools', None),
     'github_create_pull_request': ('.github_tools', None),
     'github_tools': ('.github_tools', None),
+    
+    # JIRA Tools (watch and monitor JIRA issues/projects)
+    'jira_watch_issue': ('.jira_tools', None),
+    'jira_watch_project': ('.jira_tools', None),
+    'jira_get_issue_info': ('.jira_tools', None),
+    'jira_search_issues': ('.jira_tools', None),
+    'jira_tools': ('.jira_tools', None),
     
     # Schedule Tools (agent-centric scheduling)
     'schedule_add': ('.schedule_tools', None),
@@ -338,6 +342,7 @@ def __getattr__(name: str) -> Any:
             'web_crawl', 'crawl_web', 'get_available_crawl_providers',
             'run_skill_script', 'read_skill_file', 'list_skill_scripts', 'create_skill_tools',
             'github_create_branch', 'github_commit_and_push', 'github_create_pull_request',
+            'jira_watch_issue', 'jira_watch_project', 'jira_get_issue_info', 'jira_search_issues',
             'schedule_add', 'schedule_list', 'schedule_remove',
             'ast_grep_search', 'ast_grep_rewrite', 'ast_grep_scan', 'is_ast_grep_available', 'get_ast_grep_tools',
             'store_memory', 'search_memory',
@@ -348,7 +353,7 @@ def __getattr__(name: str) -> Any:
             'clarify'
         ]:
             return getattr(module, name)
-        if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools', 'github_tools', 'schedule_tools', 'ast_grep_tools', 'email_tools']:
+        if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools', 'github_tools', 'jira_tools', 'schedule_tools', 'ast_grep_tools', 'email_tools']:
             return module  # Returns the callable module
         return getattr(module, name)
     else:

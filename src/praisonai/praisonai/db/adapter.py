@@ -138,9 +138,17 @@ class PraisonAIDB:
                 return "qdrant"
             elif "weaviate" in url_lower:
                 return "weaviate"
+            # Unable to infer - must fail loudly
+            raise ValueError(
+                f"Unable to infer DB backend from URL {url!r}; "
+                "use a recognised scheme (sqlite://, postgres://, redis://, etc.)"
+            )
         
-        # Default fallback
-        return "sqlite"
+        # Unknown scheme - fail loudly
+        raise ValueError(
+            f"Unable to infer DB backend from URL {url!r}; "
+            "supported schemes: postgres://, mysql://, sqlite://, redis://, libsql://, http(s)://"
+        )
     
     def on_agent_start(
         self,
@@ -195,6 +203,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when user sends a message."""
+        self._init_stores()
         if not self._conversation_store:
             return
         
@@ -218,6 +227,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when agent produces a response."""
+        self._init_stores()
         if not self._conversation_store:
             return
         
@@ -243,6 +253,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when a tool is executed."""
+        self._init_stores()
         if not self._conversation_store:
             return
         
@@ -273,6 +284,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when agent session ends."""
+        self._init_stores()
         if not self._conversation_store:
             return
         
@@ -290,6 +302,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when a new run (turn) starts."""
+        self._init_stores()
         # Store run start in state if available (even without conversation store)
         if self._state_store:
             run_key = f"run:{session_id}:{run_id}"
@@ -316,6 +329,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when a run (turn) ends."""
+        self._init_stores()
         if self._state_store:
             run_key = f"run:{session_id}:{run_id}"
             run_data = self._state_store.get(run_key) or {}
@@ -447,6 +461,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when a new trace starts."""
+        self._init_stores()
         if self._state_store:
             trace_key = f"trace:{trace_id}"
             self._state_store.set(trace_key, {
@@ -468,6 +483,7 @@ class PraisonAIDB:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when a trace ends."""
+        self._init_stores()
         if self._state_store:
             trace_key = f"trace:{trace_id}"
             trace_data = self._state_store.get(trace_key) or {}
@@ -487,6 +503,7 @@ class PraisonAIDB:
         attributes: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when a new span starts."""
+        self._init_stores()
         if self._state_store:
             span_key = f"span:{span_id}"
             self._state_store.set(span_key, {
@@ -507,6 +524,7 @@ class PraisonAIDB:
         attributes: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when a span ends."""
+        self._init_stores()
         if self._state_store:
             span_key = f"span:{span_id}"
             span_data = self._state_store.get(span_key) or {}

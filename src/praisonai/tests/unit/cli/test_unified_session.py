@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import pytest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from datetime import datetime
 
@@ -262,6 +263,52 @@ class TestUnifiedSessionStore:
         session = store.load("nonexistent")
         
         assert session is None
+
+    def test_stale_cache_write_preserves_concurrent_updates(self, temp_session_dir):
+        """Stale in-process cache must not clobber messages written by another store."""
+        writer = UnifiedSessionStore(session_dir=temp_session_dir)
+        reader = UnifiedSessionStore(session_dir=temp_session_dir)
+
+        session = UnifiedSession(session_id="shared")
+        session.add_user_message("warm cache")
+        writer.save(session)
+        stale = reader.load("shared")
+
+        writer_session = writer.load("shared")
+        writer_session.add_user_message("from writer")
+        writer_session.add_assistant_message("writer reply")
+        writer.save(writer_session)
+
+        stale.add_user_message("from reader")
+        stale.add_assistant_message("reader reply")
+        reader.save(stale)
+
+        final = writer.load("shared")
+        assert len(final.messages) == 5
+        assert final.messages[1]["content"] == "from writer"
+        assert final.messages[3]["content"] == "from reader"
+
+    def test_concurrent_saves_preserve_all_messages(self, temp_session_dir):
+        """Concurrent full-session saves should not lose chat history."""
+        session_id = "concurrent"
+
+        def writer(store: UnifiedSessionStore, label: str) -> None:
+            session = store.get_or_create(session_id)
+            session.add_user_message(f"Message from {label}")
+            store.save(session)
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [
+                executor.submit(writer, UnifiedSessionStore(session_dir=temp_session_dir), f"w{i}")
+                for i in range(8)
+            ]
+            for future in futures:
+                future.result()
+
+        final_store = UnifiedSessionStore(session_dir=temp_session_dir)
+        final = final_store.load(session_id)
+        assert final is not None
+        assert final.message_count == 8
 
 
 class TestGlobalSessionStore:

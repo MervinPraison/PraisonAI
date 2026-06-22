@@ -141,22 +141,6 @@ class LiteLLMAdapter:
         
         return self._convert_response_to_standard_format(response)
     
-    def _convert_messages_to_prompt(self, messages: List[Dict[str, Any]]) -> str:
-        """Convert OpenAI-style messages to prompt string."""
-        if not messages:
-            return ""
-        
-        # If single message, return its content
-        if len(messages) == 1:
-            return messages[0].get('content', '')
-        
-        # For multiple messages, use the last user message as prompt
-        for msg in reversed(messages):
-            if msg.get('role') == 'user':
-                return msg.get('content', '')
-        
-        return messages[-1].get('content', '') if messages else ''
-    
     async def _convert_stream_response(self, response_stream) -> AsyncIterator[Dict[str, Any]]:
         """Convert LLM stream response to standard format."""
         # Implementation depends on the actual stream format from LLM.get_response_async

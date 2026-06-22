@@ -8,6 +8,7 @@ for both builtin and user tools.
 
 import logging
 import threading
+import weakref
 from typing import Dict, Callable, List, Optional, Any
 import inspect
 
@@ -20,6 +21,7 @@ class ToolRegistry:
     def __init__(self):
         self._functions: Dict[str, Callable] = {}
         self._lock = threading.Lock()
+        self._resolvers: List[weakref.ref] = []  # Track multiple resolvers with weak refs
         # Note: AutoGen-specific adapters moved to framework_adapters.autogen
         
     def register_function(self, name: str, func: Callable) -> None:
@@ -29,6 +31,8 @@ class ToolRegistry:
         with self._lock:
             self._functions[name] = func
         logger.debug(f"Registered function tool: {name}")
+        # Invalidate all resolver caches for this tool
+        self._notify_invalidate(name)
     
     def register_autogen_adapter(self, tool_type_name: str, adapter: Callable, _suppress_deprecation_warning: bool = False) -> None:
         """Deprecated: AutoGen adapters moved to framework_adapters.autogen module."""
@@ -101,6 +105,38 @@ class ToolRegistry:
             if hasattr(self, '_autogen_adapters'):
                 self._autogen_adapters.clear()
         logger.debug("Cleared tool registry")
+        # Invalidate all resolver caches
+        self._notify_invalidate()
+    
+    def set_resolver(self, resolver) -> None:
+        """Set the resolver for cache invalidation.
+        
+        Args:
+            resolver: ToolResolver instance to notify on changes
+        """
+        with self._lock:
+            self._resolvers.append(weakref.ref(resolver))
+    
+    def _notify_invalidate(self, name: Optional[str] = None) -> None:
+        """Notify all resolvers to invalidate their caches.
+        
+        Args:
+            name: Optional tool name to invalidate. If None, invalidate all.
+        """
+        with self._lock:
+            alive = []
+            for ref in self._resolvers:
+                r = ref()
+                if r is not None:
+                    alive.append(ref)
+            # Clean up dead references
+            self._resolvers = alive
+        
+        # Notify outside lock to avoid holding lock during external calls
+        for ref in alive:
+            r = ref()
+            if r is not None:
+                r.invalidate(name)
     
     def register_from_module(self, module: Any) -> List[str]:
         """

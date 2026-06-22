@@ -62,12 +62,15 @@ class DeliveryTarget:
         thread_id: Optional thread ID for threaded delivery.
         session_id: Optional session ID to preserve conversation
                     context when the cron fires.
+        deliver: Optional routing token (e.g., "origin", "telegram", "all").
+                 Takes precedence over channel/channel_id when set.
     """
 
     channel: str = ""
     channel_id: str = ""
     thread_id: Optional[str] = None
     session_id: Optional[str] = None
+    deliver: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {
@@ -78,6 +81,8 @@ class DeliveryTarget:
             d["thread_id"] = self.thread_id
         if self.session_id is not None:
             d["session_id"] = self.session_id
+        if self.deliver:
+            d["deliver"] = self.deliver
         return d
 
     @classmethod
@@ -87,6 +92,7 @@ class DeliveryTarget:
             channel_id=d.get("channel_id", ""),
             thread_id=d.get("thread_id"),
             session_id=d.get("session_id"),
+            deliver=d.get("deliver", ""),
         )
 
 
@@ -158,6 +164,8 @@ class ScheduleJob:
         last_run_at: Epoch timestamp of most recent execution.
         delivery: Optional delivery target for routing results back
                   to a channel bot (e.g. Telegram chat).
+        origin: Optional original delivery target where the job was created
+                (for "origin" token resolution).
     """
 
     name: str = ""
@@ -171,6 +179,7 @@ class ScheduleJob:
     created_at: float = field(default_factory=time.time)
     last_run_at: Optional[float] = None
     delivery: Optional[DeliveryTarget] = None
+    origin: Optional[DeliveryTarget] = None
 
     # ── serialisation ────────────────────────────────────────────────
 
@@ -189,12 +198,15 @@ class ScheduleJob:
         }
         if self.delivery is not None:
             d["delivery"] = self.delivery.to_dict()
+        if self.origin is not None:
+            d["origin"] = self.origin.to_dict()
         return d
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "ScheduleJob":
         sched_data = d.get("schedule", {})
         delivery_data = d.get("delivery")
+        origin_data = d.get("origin")
         return cls(
             id=d.get("id", uuid.uuid4().hex[:12]),
             name=d.get("name", ""),
@@ -207,4 +219,5 @@ class ScheduleJob:
             created_at=d.get("created_at", time.time()),
             last_run_at=d.get("last_run_at"),
             delivery=DeliveryTarget.from_dict(delivery_data) if isinstance(delivery_data, dict) else None,
+            origin=DeliveryTarget.from_dict(origin_data) if isinstance(origin_data, dict) else None,
         )

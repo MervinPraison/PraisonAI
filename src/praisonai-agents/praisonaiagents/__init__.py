@@ -114,6 +114,9 @@ def _get_lazy_cache():
 # ============================================================================
 
 _LAZY_IMPORTS = {
+    # Version information (lazy loaded to avoid file I/O on import)
+    '__version__': ('praisonaiagents._version', '__version__'),
+    
     # Tools (moved from eager imports for lazy loading)
     'Tools': ('praisonaiagents.tools.tools', 'Tools'),
     'BaseTool': ('praisonaiagents.tools.base', 'BaseTool'),
@@ -126,6 +129,23 @@ _LAZY_IMPORTS = {
     'register_tool': ('praisonaiagents.tools.registry', 'register_tool'),
     'get_tool': ('praisonaiagents.tools.registry', 'get_tool'),
     'ToolRegistry': ('praisonaiagents.tools.registry', 'ToolRegistry'),
+    
+    # Toolsets (named toolset groups)
+    'ToolsetSpec': ('praisonaiagents.toolsets', 'ToolsetSpec'),
+    'ToolsetRegistry': ('praisonaiagents.toolsets', 'ToolsetRegistry'),
+    'get_toolset_registry': ('praisonaiagents.toolsets', 'get_toolset_registry'),
+    'register_toolset': ('praisonaiagents.toolsets', 'register_toolset'),
+    'resolve_toolset': ('praisonaiagents.toolsets', 'resolve_toolset'),
+    'resolve_toolsets': ('praisonaiagents.toolsets', 'resolve_toolsets'),
+    'list_toolsets': ('praisonaiagents.toolsets', 'list_toolsets'),
+    'get_toolset': ('praisonaiagents.toolsets', 'get_toolset'),
+    'unregister_toolset': ('praisonaiagents.toolsets', 'unregister_toolset'),
+    'has_toolset': ('praisonaiagents.toolsets', 'has_toolset'),
+    
+    # Run outcomes - typed validation and agent execution results
+    'AgentRunOutcome': ('praisonaiagents.run_outcome', 'AgentRunOutcome'),
+    'RunStatus': ('praisonaiagents.run_outcome', 'RunStatus'),
+    'validate_decision_string': ('praisonaiagents.run_outcome', 'validate_decision_string'),
     
     # Main display utilities (imports rich)
     'TaskOutput': ('praisonaiagents.main', 'TaskOutput'),
@@ -174,6 +194,7 @@ _LAZY_IMPORTS = {
     'RECOMMENDED_PROMPT_PREFIX': ('praisonaiagents.agent.handoff', 'RECOMMENDED_PROMPT_PREFIX'),
     'prompt_with_handoff_instructions': ('praisonaiagents.agent.handoff', 'prompt_with_handoff_instructions'),
     'HandoffConfig': ('praisonaiagents.agent.handoff', 'HandoffConfig'),
+    'HandoffToolPolicy': ('praisonaiagents.agent.handoff', 'HandoffToolPolicy'),
     'HandoffResult': ('praisonaiagents.agent.handoff', 'HandoffResult'),
     'HandoffInputData': ('praisonaiagents.agent.handoff', 'HandoffInputData'),
     'ContextPolicy': ('praisonaiagents.agent.handoff', 'ContextPolicy'),
@@ -211,6 +232,7 @@ _LAZY_IMPORTS = {
     
     # Agent classes
     'Agent': ('praisonaiagents.agent.agent', 'Agent'),
+    'RetryBackoffConfig': ('praisonaiagents.agent.retry_utils', 'RetryBackoffConfig'),
     'BudgetExceededError': ('praisonaiagents.errors', 'BudgetExceededError'),
     
     # Error hierarchy - structured exception handling
@@ -386,6 +408,17 @@ _LAZY_IMPORTS = {
     'MultiAgentMemoryConfig': ('praisonaiagents.config.feature_configs', 'MultiAgentMemoryConfig'),
     'ToolSearchConfig': ('praisonaiagents.config.feature_configs', 'ToolSearchConfig'),
     
+    # Context compaction policies
+    'ContextCompactionPolicy': ('praisonaiagents.context.policy', 'ContextCompactionPolicy'),
+    'ContextCompactionPolicyProtocol': ('praisonaiagents.context.policy', 'ContextCompactionPolicyProtocol'),
+    'CompactionRoute': ('praisonaiagents.context.policy', 'CompactionRoute'),
+    'CompactionStrategy': ('praisonaiagents.context.policy', 'CompactionStrategy'),
+    'ContextBudgetResult': ('praisonaiagents.context.policy', 'ContextBudgetResult'),
+    'get_default_policy': ('praisonaiagents.context.policy', 'get_default_policy'),
+    'CONSERVATIVE_POLICY': ('praisonaiagents.context.policy', 'CONSERVATIVE_POLICY'),
+    'BALANCED_POLICY': ('praisonaiagents.context.policy', 'BALANCED_POLICY'),
+    'AGGRESSIVE_POLICY': ('praisonaiagents.context.policy', 'AGGRESSIVE_POLICY'),
+    
     # Parameter resolver
     'resolve': ('praisonaiagents.config.param_resolver', 'resolve'),
     'ArrayMode': ('praisonaiagents.config.param_resolver', 'ArrayMode'),
@@ -444,7 +477,7 @@ _LAZY_IMPORTS = {
     'GatewayClientProtocol': ('praisonaiagents.gateway.protocols', 'GatewayClientProtocol'),
     'GatewayEvent': ('praisonaiagents.gateway.protocols', 'GatewayEvent'),
     'GatewayMessage': ('praisonaiagents.gateway.protocols', 'GatewayMessage'),
-    'EventType': ('praisonaiagents.gateway.protocols', 'EventType'),
+    'GatewayEventType': ('praisonaiagents.gateway.protocols', 'EventType'),
     'GatewayConfig': ('praisonaiagents.gateway.config', 'GatewayConfig'),
     'SessionConfig': ('praisonaiagents.gateway.config', 'SessionConfig'),
     
@@ -626,6 +659,11 @@ def _custom_handler(name, cache):
         mod = importlib.import_module('.db', 'praisonaiagents')
         cache['db'] = mod
         return mod
+    if name == 'toolsets':
+        import importlib
+        mod = importlib.import_module('.toolsets', 'praisonaiagents')
+        cache['toolsets'] = mod
+        return mod
     
     raise AttributeError(f"Not handled by custom_handler: {name}")
 
@@ -741,8 +779,12 @@ def warmup(include_litellm: bool = False, include_openai: bool = True) -> dict:
 # ============================================================================
 
 __all__ = [
+    # Version information
+    '__version__',
+    
     # Core classes - the essentials
     'Agent',
+    'RetryBackoffConfig',
     'AgentTeam',  # Primary class for multi-agent coordination (v1.0+)
     'AgentManager',  # Silent alias for AgentTeam
     'Agents',  # Deprecated alias for AgentTeam (emits warning)

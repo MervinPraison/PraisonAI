@@ -10,6 +10,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from .base import StateStore
+from ...storage import RedisStorageAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,8 @@ logger = logging.getLogger(__name__)
 class RedisStateStore(StateStore):
     """
     Redis-based state store for fast key-value operations.
+    
+    This is now a thin wrapper around RedisStorageAdapter to avoid duplication.
     
     Example:
         store = RedisStateStore(
@@ -46,43 +49,37 @@ class RedisStateStore(StateStore):
             db: Redis database number
             password: Redis password
             prefix: Key prefix for namespacing
-            decode_responses: Decode bytes to strings
+            decode_responses: Decode bytes to strings (for compatibility, not used)
             socket_timeout: Socket timeout in seconds
-            max_connections: Max connections in pool
+            max_connections: Max connections in pool (for compatibility, not used)
         """
-        try:
-            import redis as redis_lib
-        except ImportError:
-            raise ImportError(
-                "redis is required for Redis support. "
-                "Install with: pip install redis"
-            )
+        # Build URL from components if not provided
+        if not url:
+            if password:
+                url = f"redis://:{password}@{host}:{port}/{db}"
+            else:
+                url = f"redis://{host}:{port}/{db}"
         
-        self._redis_lib = redis_lib
+        # Use the canonical storage adapter
+        self._adapter = RedisStorageAdapter(
+            url=url,
+            prefix=prefix,
+            db=db,
+            password=password,
+            socket_timeout=float(socket_timeout),
+        )
+        
+        # Store for compatibility
         self.prefix = prefix
         
-        if url:
-            self._client = redis_lib.from_url(
-                url,
-                decode_responses=decode_responses,
-                socket_timeout=socket_timeout,
-                max_connections=max_connections,
-            )
-        else:
-            pool = redis_lib.ConnectionPool(
-                host=host,
-                port=port,
-                db=db,
-                password=password,
-                decode_responses=decode_responses,
-                socket_timeout=socket_timeout,
-                max_connections=max_connections,
-            )
-            self._client = redis_lib.Redis(connection_pool=pool)
+        # Keep reference to redis client for advanced operations
+        self._client = self._adapter._get_client()
         
-        # Test connection
-        self._client.ping()
-        logger.info(f"Connected to Redis at {url or f'{host}:{port}'}")
+        # Mask password in log output
+        log_url = url
+        if password and "@" in url:
+            log_url = url.replace(f":{password}@", ":****@")
+        logger.info(f"Connected to Redis at {log_url}")
     
     def _key(self, key: str) -> str:
         """Add prefix to key."""
@@ -90,14 +87,13 @@ class RedisStateStore(StateStore):
     
     def get(self, key: str) -> Optional[Any]:
         """Get a value by key."""
-        value = self._client.get(self._key(key))
-        if value is None:
+        data = self._adapter.load(key)
+        if data is None:
             return None
-        # Try to deserialize JSON
-        try:
-            return json.loads(value)
-        except (json.JSONDecodeError, TypeError):
-            return value
+        # Unwrap value if it was wrapped for dict storage (check for marker)
+        if isinstance(data, dict) and "__wrapped__" in data and "value" in data:
+            return data["value"]
+        return data
     
     def set(
         self,
@@ -106,18 +102,22 @@ class RedisStateStore(StateStore):
         ttl: Optional[int] = None
     ) -> None:
         """Set a value with optional TTL."""
-        # Serialize non-string values
-        if not isinstance(value, str):
-            value = json.dumps(value)
+        # Wrap non-dict values for adapter (expects dict)
+        if not isinstance(value, dict):
+            value = {"value": value, "__wrapped__": True}
         
+        # Store with TTL if needed
         if ttl:
-            self._client.setex(self._key(key), ttl, value)
+            # Use the existing client with setex for TTL
+            full_key = self._key(key)
+            json_data = json.dumps(value, default=str, ensure_ascii=False)
+            self._client.setex(full_key, ttl, json_data)
         else:
-            self._client.set(self._key(key), value)
+            self._adapter.save(key, value)
     
     def delete(self, key: str) -> bool:
         """Delete a key."""
-        return self._client.delete(self._key(key)) > 0
+        return self._adapter.delete(key)
     
     def exists(self, key: str) -> bool:
         """Check if a key exists."""
@@ -129,7 +129,21 @@ class RedisStateStore(StateStore):
         keys = self._client.keys(full_pattern)
         # Remove prefix from returned keys
         prefix_len = len(self.prefix)
-        return [k[prefix_len:] if k.startswith(self.prefix) else k for k in keys]
+        prefix_bytes = self.prefix.encode('utf-8')
+        result = []
+        for k in keys:
+            # Handle both bytes and string keys
+            if isinstance(k, bytes):
+                if k.startswith(prefix_bytes):
+                    result.append(k[prefix_len:].decode('utf-8'))
+                else:
+                    result.append(k.decode('utf-8'))
+            else:
+                if k.startswith(self.prefix):
+                    result.append(k[prefix_len:])
+                else:
+                    result.append(k)
+        return result
     
     def ttl(self, key: str) -> Optional[int]:
         """Get remaining TTL in seconds."""
@@ -163,10 +177,21 @@ class RedisStateStore(StateStore):
         data = self._client.hgetall(self._key(key))
         result = {}
         for k, v in data.items():
-            try:
-                result[k] = json.loads(v)
-            except (json.JSONDecodeError, TypeError):
-                result[k] = v
+            # Handle bytes keys
+            field_key = k.decode('utf-8') if isinstance(k, bytes) else k
+            # Handle bytes values
+            field_val = v
+            if isinstance(field_val, bytes):
+                try:
+                    field_val = json.loads(field_val.decode('utf-8'))
+                except (json.JSONDecodeError, ValueError):
+                    field_val = field_val.decode('utf-8')
+            else:
+                try:
+                    field_val = json.loads(field_val)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            result[field_key] = field_val
         return result
     
     def hdel(self, key: str, *fields: str) -> int:

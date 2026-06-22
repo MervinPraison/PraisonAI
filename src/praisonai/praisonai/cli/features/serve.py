@@ -19,6 +19,36 @@ import logging
 from typing import Any, Dict, List, Optional
 
 
+def _install_api_key_middleware(
+    app: Any,
+    api_key: Optional[str],
+    public_paths: Optional[set] = None,
+) -> None:
+    """Enforce --api-key on serve endpoints when a key is configured."""
+    if not api_key:
+        return
+
+    import hmac
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.responses import JSONResponse
+
+    public = public_paths or {"/health", "/", "/.well-known/agent.json"}
+
+    class APIKeyMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            path = request.url.path
+            if path in public or path.startswith("/__praisonai__/"):
+                return await call_next(request)
+            auth = request.headers.get("Authorization", "")
+            header_key = request.headers.get("X-API-Key", "")
+            token = auth[7:] if auth.startswith("Bearer ") else header_key
+            if not token or not hmac.compare_digest(token, api_key):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            return await call_next(request)
+
+    app.add_middleware(APIKeyMiddleware)
+
+
 class ServeHandler:
     """
     CLI handler for serve operations.
@@ -407,6 +437,8 @@ Launch PraisonAI servers with unified discovery support.
                 "endpoints": [path, "/agents/{agent_name}", "/api/v1/agents/{agent_id}/invoke"],
                 "discovery": "/__praisonai__/discovery",
             }
+
+        _install_api_key_middleware(app, config.get("api_key"))
         
         return app
     
@@ -513,58 +545,6 @@ Launch PraisonAI servers with unified discovery support.
             self._print_error(str(e))
             return self.EXIT_GENERAL_ERROR
     
-    def _create_mcp_app(self, config: Dict[str, Any]) -> Any:
-        """Create FastAPI app for MCP server."""
-        from fastapi import FastAPI
-        
-        from praisonai.endpoints.discovery import (
-            create_discovery_document,
-            ProviderInfo,
-        )
-        from praisonai.endpoints.server import add_discovery_routes
-        
-        # Create discovery document
-        discovery = create_discovery_document(server_name="praisonai-mcp")
-        discovery.add_provider(ProviderInfo(
-            type="mcp",
-            name="MCP Server",
-            description=f"MCP server ({config['transport']} transport)",
-            capabilities=["list-tools", "call-tool"],
-        ))
-        
-        app = FastAPI(
-            title="PraisonAI MCP Server",
-            description="MCP protocol server",
-        )
-        
-        add_discovery_routes(app, discovery)
-        
-        # MCP tools endpoint
-        @app.get("/mcp/tools")
-        async def list_tools():
-            """List available MCP tools."""
-            # TODO: Load tools from config or registry
-            return {"tools": []}
-        
-        @app.post("/mcp/tools/call")
-        async def call_tool(request_data: dict):
-            """Call an MCP tool."""
-            tool_name = request_data.get("tool")
-            _ = request_data.get("arguments", {})  # Arguments for tool
-            
-            # TODO: Execute tool
-            return {"result": None, "tool": tool_name}
-        
-        @app.get("/")
-        async def root():
-            return {
-                "message": "PraisonAI MCP Server",
-                "transport": config["transport"],
-                "discovery": "/__praisonai__/discovery",
-            }
-        
-        return app
-    
     def cmd_tools(self, args: List[str]) -> int:
         """Launch tools as MCP server (DEPRECATED - use 'praisonai mcp serve' instead)."""
         import sys
@@ -598,50 +578,6 @@ Launch PraisonAI servers with unified discovery support.
         except Exception as e:
             self._print_error(str(e))
             return self.EXIT_GENERAL_ERROR
-    
-    def _create_tools_app(self, config: Dict[str, Any]) -> Any:
-        """Create FastAPI app for tools MCP server."""
-        from fastapi import FastAPI
-        
-        from praisonai.endpoints.discovery import (
-            create_discovery_document,
-            ProviderInfo,
-        )
-        from praisonai.endpoints.server import add_discovery_routes
-        
-        discovery = create_discovery_document(server_name="praisonai-tools-mcp")
-        discovery.add_provider(ProviderInfo(
-            type="tools-mcp",
-            name="Tools MCP Server",
-            description="Python tools exposed as MCP server",
-            capabilities=["list-tools", "call-tool"],
-        ))
-        
-        app = FastAPI(
-            title="PraisonAI Tools MCP Server",
-            description="Tools exposed as MCP server",
-        )
-        
-        add_discovery_routes(app, discovery)
-        
-        @app.get("/tools")
-        async def list_tools():
-            """List available tools."""
-            return {"tools": []}
-        
-        @app.post("/tools/call")
-        async def call_tool(request_data: dict):
-            """Call a tool."""
-            return {"result": None}
-        
-        @app.get("/")
-        async def root():
-            return {
-                "message": "PraisonAI Tools MCP Server",
-                "discovery": "/__praisonai__/discovery",
-            }
-        
-        return app
     
     def cmd_a2a(self, args: List[str]) -> int:
         """Launch A2A protocol server."""
@@ -769,11 +705,19 @@ Launch PraisonAI servers with unified discovery support.
     
     def cmd_a2u(self, args: List[str]) -> int:
         """Launch A2U event stream server."""
+        import os
         spec = {
             "host": {"default": self.DEFAULT_HOST},
             "port": {"default": 8083, "type": "int"},
         }
         parsed = self._parse_args(args, spec)
+        host = parsed["host"]
+        if host not in ("127.0.0.1", "localhost", "::1") and not os.environ.get("A2U_AUTH_TOKEN"):
+            self._print_error(
+                "A2U_AUTH_TOKEN required for non-localhost binding. "
+                "Set A2U_AUTH_TOKEN or bind to 127.0.0.1"
+            )
+            return 4  # POLICY_DENIED
         
         try:
             self._print_success(f"Starting A2U server on {parsed['host']}:{parsed['port']}")
@@ -943,6 +887,8 @@ Launch PraisonAI servers with unified discovery support.
                 "description": "PraisonAI Unified Server",
                 "version": "1.0.0",
             }
+
+        _install_api_key_middleware(app, config.get("api_key"))
         
         return app
     

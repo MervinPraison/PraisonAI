@@ -10,7 +10,7 @@ Unified Handoff System:
 - Replaces/absorbs Agent.delegate() and SubagentDelegator functionality
 """
 
-from typing import Optional, Any, Callable, Dict, List, Union, TYPE_CHECKING
+from typing import Optional, Any, Callable, Dict, List, Union, TYPE_CHECKING, Literal, TypeVar, Type, Generic
 from dataclasses import dataclass, field
 from enum import Enum
 import inspect
@@ -19,6 +19,22 @@ from praisonaiagents._logging import get_logger
 import asyncio
 import threading
 import time
+import json
+
+try:
+    from pydantic import BaseModel, ValidationError as PydanticValidationError
+    PYDANTIC_AVAILABLE = True
+except ImportError:
+    PYDANTIC_AVAILABLE = False
+    if TYPE_CHECKING:
+        from pydantic import BaseModel, ValidationError as PydanticValidationError
+    else:
+        # Provide a safe sentinel for runtime
+        class BaseModel:  # type: ignore
+            pass
+        PydanticValidationError = Exception
+
+from ..run_outcome import AgentRunOutcome, RunStatus
 
 if TYPE_CHECKING:
     from .agent import Agent
@@ -33,6 +49,24 @@ class ContextPolicy(Enum):
     LAST_N = "last_n"   # Share last N messages
 
 @dataclass
+class HandoffToolPolicy:
+    """
+    Policy for tool boundary enforcement during handoff.
+    
+    Defines how tools are filtered when handing off to a target agent.
+    Default mode is 'intersect' for security by default - sub-agents only
+    get tools that both they and the source agent have access to.
+    
+    Attributes:
+        mode: Tool filtering mode
+            - "intersect": Target gets intersection of source and target tools (DEFAULT - secure)
+            - "passthrough": Target keeps its full tool set (legacy behavior - opt-in)
+        blocked_tools: List of tool names to always strip, regardless of intersection
+    """
+    mode: Literal["intersect", "passthrough"] = "intersect"
+    blocked_tools: List[str] = field(default_factory=list)
+
+@dataclass
 class HandoffConfig:
     """
     Unified configuration for handoff behavior.
@@ -45,6 +79,7 @@ class HandoffConfig:
         max_context_tokens: Maximum tokens to include in context
         max_context_messages: Maximum messages to include (for LAST_N policy)
         preserve_system: Whether to preserve system messages in context
+        tool_policy: Tool boundary enforcement policy (NEW - security by default)
         timeout_seconds: Timeout for handoff execution
         max_concurrent: Maximum concurrent handoffs (0 = unlimited)
         detect_cycles: Enable cycle detection to prevent infinite loops
@@ -60,6 +95,9 @@ class HandoffConfig:
     max_context_tokens: int = 4000
     max_context_messages: int = 10
     preserve_system: bool = True
+    
+    # Tool security boundary (NEW)
+    tool_policy: HandoffToolPolicy = field(default_factory=HandoffToolPolicy)
     
     # Execution control
     timeout_seconds: float = 300.0
@@ -85,6 +123,10 @@ class HandoffConfig:
             "max_context_tokens": self.max_context_tokens,
             "max_context_messages": self.max_context_messages,
             "preserve_system": self.preserve_system,
+            "tool_policy": {
+                "mode": self.tool_policy.mode,
+                "blocked_tools": self.tool_policy.blocked_tools.copy()
+            },
             "timeout_seconds": self.timeout_seconds,
             "max_concurrent": self.max_concurrent,
             "detect_cycles": self.detect_cycles,
@@ -96,16 +138,29 @@ class HandoffConfig:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'HandoffConfig':
         """Create config from dictionary."""
-        if "context_policy" in data and isinstance(data["context_policy"], str):
-            data["context_policy"] = ContextPolicy(data["context_policy"])
-        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        data_copy = data.copy()
+        
+        # Handle context_policy enum conversion
+        if "context_policy" in data_copy and isinstance(data_copy["context_policy"], str):
+            data_copy["context_policy"] = ContextPolicy(data_copy["context_policy"])
+        
+        # Handle tool_policy conversion
+        if "tool_policy" in data_copy and isinstance(data_copy["tool_policy"], dict):
+            tool_policy_data = data_copy["tool_policy"]
+            data_copy["tool_policy"] = HandoffToolPolicy(
+                mode=tool_policy_data.get("mode", "intersect"),
+                blocked_tools=tool_policy_data.get("blocked_tools", [])
+            )
+        
+        return cls(**{k: v for k, v in data_copy.items() if k in cls.__dataclass_fields__})
 
 # Import structured error hierarchy from central errors module
 from ..errors import (
     HandoffError, 
     HandoffCycleError, 
     HandoffDepthError, 
-    HandoffTimeoutError
+    HandoffTimeoutError,
+    HandoffValidationError
 )
 
 # Thread-local storage for tracking handoff chains
@@ -147,7 +202,12 @@ class HandoffInputData:
 
 @dataclass 
 class HandoffResult:
-    """Result of a handoff operation."""
+    """
+    Result of a handoff operation.
+    
+    Now includes typed outcome information while maintaining backward
+    compatibility with the legacy boolean success field.
+    """
     success: bool
     response: Optional[str] = None
     target_agent: Optional[str] = None
@@ -155,6 +215,64 @@ class HandoffResult:
     duration_seconds: float = 0.0
     error: Optional[str] = None
     handoff_depth: int = 0
+    
+    # New typed outcome field
+    outcome: Optional[AgentRunOutcome] = None
+    
+    def __post_init__(self):
+        """Initialize outcome field if not provided."""
+        if self.outcome is None:
+            # Create outcome based on legacy success field
+            if self.success:
+                self.outcome = AgentRunOutcome.success(
+                    output=self.response or "",
+                    elapsed_s=self.duration_seconds,
+                    agent_name=self.target_agent,
+                    context={
+                        "source_agent": self.source_agent,
+                        "handoff_depth": self.handoff_depth,
+                    }
+                )
+            else:
+                error_text = (self.error or "").lower()
+                context = {
+                    "source_agent": self.source_agent,
+                    "handoff_depth": self.handoff_depth,
+                }
+                if any(keyword in error_text for keyword in ["timeout", "timed out"]):
+                    self.outcome = AgentRunOutcome.timeout(
+                        error=self.error or "Handoff failed",
+                        elapsed_s=self.duration_seconds,
+                        agent_name=self.target_agent,
+                        context=context,
+                    )
+                else:
+                    self.outcome = AgentRunOutcome.failure(
+                        error=self.error or "Handoff failed",
+                        elapsed_s=self.duration_seconds,
+                        agent_name=self.target_agent,
+                        context=context,
+                    )
+    
+    @classmethod
+    def from_outcome(
+        cls,
+        outcome: AgentRunOutcome,
+        target_agent: Optional[str] = None,
+        source_agent: Optional[str] = None,
+        handoff_depth: int = 0,
+    ) -> "HandoffResult":
+        """Create HandoffResult from AgentRunOutcome."""
+        return cls(
+            success=outcome.is_success(),
+            response=outcome.output,
+            target_agent=target_agent or outcome.agent_name,
+            source_agent=source_agent,
+            duration_seconds=outcome.elapsed_s,
+            error=outcome.error,
+            handoff_depth=handoff_depth,
+            outcome=outcome,
+        )
     
     
 class Handoff:
@@ -241,6 +359,52 @@ class Handoff:
             agent_desc += f" - {self.agent.goal}"
         return agent_desc
         
+    def _compute_effective_tools(self, source_agent: 'Agent') -> List[Any] | None:
+        """
+        Compute the effective tool set for the target agent based on tool policy.
+        
+        Args:
+            source_agent: The agent initiating the handoff
+            
+        Returns:
+            List of tools the target agent should have access to during handoff.
+            Returns None to indicate unrestricted access (for passthrough mode without blocked tools).
+            Returns [] to indicate no tools allowed (for intersect mode with empty intersection).
+        """
+        policy = self.config.tool_policy
+        
+        if policy.mode == "passthrough":
+            # Legacy behavior - target keeps its full tool set, minus blocked tools
+            if not policy.blocked_tools:
+                # No restrictions - return None so chat() uses the agent's configured tools
+                return None
+            else:
+                # Filter out blocked tools
+                target_tools = getattr(self.agent, 'tools', None) or []
+                effective_tools = [
+                    tool for tool in target_tools
+                    if getattr(tool, 'name', getattr(tool, '__name__', str(tool))) not in policy.blocked_tools
+                ]
+                return effective_tools
+        else:  # intersect mode (default)
+            # Security by default - intersection of source and target tools
+            source_tools = getattr(source_agent, 'tools', None) or []
+            source_tool_names = {
+                getattr(tool, 'name', getattr(tool, '__name__', str(tool)))
+                for tool in source_tools
+            }
+            
+            target_tools = getattr(self.agent, 'tools', None) or []
+            effective_tools = []
+            for tool in target_tools:
+                tool_name = getattr(tool, 'name', getattr(tool, '__name__', str(tool)))
+                if (tool_name in source_tool_names and 
+                    tool_name not in policy.blocked_tools):
+                    effective_tools.append(tool)
+            
+            # In intersect mode, empty list means no tools allowed - this is the security boundary
+            return effective_tools
+    
     def _check_safety(self, source_agent: 'Agent') -> None:
         """
         Check safety constraints before handoff.
@@ -402,8 +566,11 @@ class Handoff:
             
             logger.info(f"Programmatic handoff to {self.agent.name}")
             
-            # Execute with timeout if sync
-            response = self.agent.chat(full_prompt)
+            # Compute effective tools based on tool policy
+            effective_tools = self._compute_effective_tools(source_agent)
+            
+            # Execute with tool boundary enforcement
+            response = self.agent.chat(full_prompt, tools=effective_tools)
             
             result = HandoffResult(
                 success=True,
@@ -416,6 +583,20 @@ class Handoff:
             
             # Execute on_complete callback
             self._execute_callback(self.config.on_complete, source_agent, kwargs, result)
+            
+            # Call on_delegation hook on source agent's memory
+            if (hasattr(source_agent, '_memory_instance') and 
+                source_agent._memory_instance and
+                hasattr(source_agent._memory_instance, 'on_delegation')):
+                try:
+                    source_agent._memory_instance.on_delegation(
+                        task=full_prompt,
+                        result=result.response or "",
+                        agent_name=self.agent.name,
+                        metadata={"handoff_depth": result.handoff_depth}
+                    )
+                except Exception as e:
+                    logger.warning(f"[{source_agent.name}] Memory on_delegation hook failed: {e}")
             
             return result
             
@@ -491,15 +672,18 @@ class Handoff:
                 
                 logger.info(f"Async handoff to {self.agent.name}")
                 
-                # Execute - check for async chat method
-                if hasattr(self.agent, 'achat'):
-                    response = await self.agent.achat(full_prompt)
-                else:
-                    # Run sync chat in executor
-                    loop = asyncio.get_event_loop()
-                    response = await loop.run_in_executor(None, self.agent.chat, full_prompt)
+                # Compute effective tools based on tool policy
+                effective_tools = self._compute_effective_tools(source_agent)
                 
-                return HandoffResult(
+                # Execute with tool boundary enforcement - check for async chat method
+                if hasattr(self.agent, 'achat'):
+                    response = await self.agent.achat(full_prompt, tools=effective_tools)
+                else:
+                    # Run sync chat in executor with tool constraint
+                    loop = asyncio.get_event_loop()
+                    response = await loop.run_in_executor(None, lambda: self.agent.chat(full_prompt, tools=effective_tools))
+                
+                result = HandoffResult(
                     success=True,
                     response=str(response) if response else "",
                     target_agent=self.agent.name,
@@ -507,6 +691,22 @@ class Handoff:
                     duration_seconds=time.time() - start_time,
                     handoff_depth=_get_handoff_depth(),
                 )
+                
+                # Call on_delegation hook on source agent's memory
+                if (hasattr(source_agent, '_memory_instance') and 
+                    source_agent._memory_instance and
+                    hasattr(source_agent._memory_instance, 'on_delegation')):
+                    try:
+                        source_agent._memory_instance.on_delegation(
+                            task=full_prompt,
+                            result=result.response or "",
+                            agent_name=self.agent.name,
+                            metadata={"handoff_depth": result.handoff_depth}
+                        )
+                    except Exception as e:
+                        logger.warning(f"[{source_agent.name}] Memory on_delegation hook failed: {e}")
+                
+                return result
             finally:
                 _pop_handoff()
         
@@ -609,11 +809,15 @@ class Handoff:
                 if kwargs and self.input_type:
                     context_info += f"Context: {kwargs} "
                 
-                # Execute the target agent
+                # Execute the target agent with tool boundary enforcement
                 if last_message:
                     prompt = context_info + last_message
                     logger.info(f"Handing off to {self.agent.name} with prompt: {prompt}")
-                    response = self.agent.chat(prompt)
+                    
+                    # Compute effective tools based on tool policy
+                    effective_tools = self._compute_effective_tools(source_agent)
+                    
+                    response = self.agent.chat(prompt, tools=effective_tools)
                     
                     result = HandoffResult(
                         success=True,
@@ -624,6 +828,20 @@ class Handoff:
                         handoff_depth=_get_handoff_depth(),
                     )
                     self._execute_callback(self.config.on_complete, source_agent, kwargs, result)
+                    
+                    # Call on_delegation hook on source agent's memory
+                    if (hasattr(source_agent, '_memory_instance') and 
+                        source_agent._memory_instance and
+                        hasattr(source_agent._memory_instance, 'on_delegation')):
+                        try:
+                            source_agent._memory_instance.on_delegation(
+                                task=prompt,
+                                result=result.response or "",
+                                agent_name=self.agent.name,
+                                metadata={"handoff_depth": result.handoff_depth}
+                            )
+                        except Exception as e:
+                            logger.warning(f"[{source_agent.name}] Memory on_delegation hook failed: {e}")
                     
                     return f"Handoff successful. {self.agent.name} response: {response}"
                 
@@ -682,13 +900,16 @@ def handoff(
     max_concurrent: Optional[int] = None,
     detect_cycles: Optional[bool] = None,
     max_depth: Optional[int] = None,
+    # Tool security boundary kwargs (NEW)
+    tool_policy_mode: Optional[Literal["intersect", "passthrough"]] = None,
+    blocked_tools: Optional[List[str]] = None,
 ) -> Handoff:
     """
     Create a handoff configuration for delegating tasks to another agent.
     
     This is a convenience function that creates a Handoff instance with the
     specified configuration. It supports both the legacy API and the new
-    unified HandoffConfig.
+    unified HandoffConfig with tool security boundary enforcement.
     
     Args:
         agent: The target agent to hand off to
@@ -703,29 +924,39 @@ def handoff(
         max_concurrent: Shorthand for config.max_concurrent
         detect_cycles: Shorthand for config.detect_cycles
         max_depth: Shorthand for config.max_depth
+        tool_policy_mode: Tool boundary mode ("intersect" = secure by default, "passthrough" = legacy)
+        blocked_tools: List of tool names to always block regardless of intersection
         
     Returns:
         A configured Handoff instance
         
     Example:
         ```python
-        from praisonaiagents import Agent, handoff, HandoffConfig
+        from praisonaiagents import Agent, handoff, HandoffConfig, HandoffToolPolicy
         
         billing_agent = Agent(name="Billing Agent")
-        refund_agent = Agent(name="Refund Agent")
+        refund_agent = Agent(name="Refund Agent") 
         
-        # Simple usage
+        # Simple usage (secure by default - tools intersected)
         triage_agent = Agent(
             name="Triage Agent",
             handoffs=[billing_agent, handoff(refund_agent)]
         )
         
-        # With config
+        # With tool security config
         triage_agent = Agent(
-            name="Triage Agent",
+            name="Triage Agent", 
             handoffs=[
-                handoff(billing_agent, context_policy="summary", timeout_seconds=60),
-                handoff(refund_agent, config=HandoffConfig(detect_cycles=True))
+                handoff(billing_agent, 
+                        tool_policy_mode="intersect",  # Only shared tools
+                        blocked_tools=["execute_code", "shell_tools"]),
+                handoff(refund_agent,
+                        config=HandoffConfig(
+                            tool_policy=HandoffToolPolicy(
+                                mode="passthrough",  # Legacy behavior
+                                blocked_tools=["dangerous_tool"]
+                            )
+                        ))
             ]
         )
         ```
@@ -745,6 +976,14 @@ def handoff(
         config.detect_cycles = detect_cycles
     if max_depth is not None:
         config.max_depth = max_depth
+    
+    # Apply tool policy kwargs to config
+    if tool_policy_mode is not None or blocked_tools is not None:
+        # Create new tool policy with updated values
+        config.tool_policy = HandoffToolPolicy(
+            mode=tool_policy_mode if tool_policy_mode is not None else config.tool_policy.mode,
+            blocked_tools=blocked_tools if blocked_tools is not None else config.tool_policy.blocked_tools
+        )
     
     return Handoff(
         agent=agent,
@@ -922,6 +1161,402 @@ async def parallel_handoffs(
             ))
     
     return processed_results
+
+
+# Type variable for generic typed handoff
+T = TypeVar("T", bound=BaseModel)
+
+
+class TypedHandoff(Handoff, Generic[T]):
+    """
+    Typed handoff with schema validation using Pydantic models.
+    
+    This class extends the base Handoff to add type safety through Pydantic schema validation.
+    The sender declares an output schema, the receiver expects that schema, and the framework
+    validates the payload at the boundary, raising HandoffValidationError if validation fails.
+    
+    The receiving agent's prompt is constructed from validated JSON rather than raw string
+    concatenation, enabling proper deserialization of structured data.
+    
+    Example:
+        ```python
+        from pydantic import BaseModel
+        from praisonaiagents.agent.handoff import TypedHandoff, HandoffValidationError
+        
+        class ResearchResult(BaseModel):
+            summary: str
+            citations: list[str] 
+            confidence: float
+            
+        # Create typed handoff
+        typed_handoff = TypedHandoff(
+            agent=writer_agent,
+            input_schema=ResearchResult
+        )
+        
+        # Valid payload
+        result = ResearchResult(
+            summary="AI research findings", 
+            citations=["ref1", "ref2"], 
+            confidence=0.92
+        )
+        response = typed_handoff.execute_programmatic(source_agent, result)
+        
+        # Invalid payload raises HandoffValidationError
+        bad_payload = {"summary": "...", "citations": "not-a-list"}
+        typed_handoff.execute_programmatic(source_agent, bad_payload)  # Raises error
+        ```
+    """
+    
+    def __init__(
+        self,
+        agent: 'Agent',
+        input_schema: Type[T],
+        tool_name_override: Optional[str] = None,
+        tool_description_override: Optional[str] = None,
+        on_handoff: Optional[Callable] = None,
+        input_filter: Optional[Union[Callable[[HandoffInputData], HandoffInputData], List[Callable[[HandoffInputData], HandoffInputData]]]] = None,
+        config: Optional[HandoffConfig] = None,
+    ):
+        """
+        Initialize a TypedHandoff with schema validation.
+        
+        Args:
+            agent: The target agent to hand off to
+            input_schema: Pydantic model class for payload validation
+            tool_name_override: Custom tool name (defaults to transfer_to_<agent_name>)
+            tool_description_override: Custom tool description
+            on_handoff: Callback function executed when handoff is invoked
+            input_filter: Function or list of functions to filter/transform input
+            config: HandoffConfig for advanced settings (context policy, timeouts, etc.)
+            
+        Raises:
+            ImportError: If Pydantic is not available
+            TypeError: If input_schema is not a Pydantic model
+        """
+        if not PYDANTIC_AVAILABLE:
+            raise ImportError(
+                "Pydantic is required for TypedHandoff. Install with: pip install pydantic"
+            )
+            
+        if not (inspect.isclass(input_schema) and issubclass(input_schema, BaseModel)):
+            raise TypeError(
+                f"input_schema must be a Pydantic BaseModel class, got {type(input_schema)}"
+            )
+        
+        super().__init__(
+            agent=agent,
+            tool_name_override=tool_name_override,
+            tool_description_override=tool_description_override,
+            on_handoff=on_handoff,
+            input_type=None,  # We handle typing ourselves
+            input_filter=input_filter,
+            config=config,
+        )
+        self._input_schema = input_schema
+    
+    def _validate_payload(self, payload: Union[T, dict, Any]) -> T:
+        """
+        Validate payload against the input schema.
+        
+        Args:
+            payload: The payload to validate - can be a Pydantic model instance,
+                    dict, or any object with model_dump() method
+                    
+        Returns:
+            Validated Pydantic model instance
+            
+        Raises:
+            HandoffValidationError: If validation fails
+        """
+        try:
+            if isinstance(payload, self._input_schema):
+                # Already the correct type, validate by re-parsing
+                validated = self._input_schema.model_validate(payload.model_dump())
+            elif isinstance(payload, dict):
+                # Dictionary - validate directly
+                validated = self._input_schema.model_validate(payload)
+            elif hasattr(payload, 'model_dump'):
+                # Another Pydantic model - convert via dict
+                validated = self._input_schema.model_validate(payload.model_dump())
+            else:
+                # Try to convert to dict first
+                if hasattr(payload, '__dict__'):
+                    payload_dict = payload.__dict__
+                else:
+                    payload_dict = dict(payload) if hasattr(payload, '__iter__') else {}
+                validated = self._input_schema.model_validate(payload_dict)
+                
+            return validated
+            
+        except PydanticValidationError as exc:
+            validation_errors = [
+                f"{err['loc']}: {err['msg']}" for err in exc.errors()
+            ] if hasattr(exc, 'errors') else [str(exc)]
+            
+            raise HandoffValidationError(
+                f"Handoff to '{self.agent.name}' received an invalid payload: {exc}",
+                source_agent="unknown",
+                target_agent=self.agent.name,
+                agent_id="unknown",
+                validation_errors=validation_errors
+            ) from exc
+        except Exception as exc:
+            raise HandoffValidationError(
+                f"Handoff to '{self.agent.name}' failed to validate payload: {exc}",
+                source_agent="unknown", 
+                target_agent=self.agent.name,
+                agent_id="unknown"
+            ) from exc
+    
+    def execute_programmatic(
+        self,
+        source_agent: 'Agent',
+        payload: Union[T, dict, str],
+        context: Optional[Dict[str, Any]] = None,
+    ) -> HandoffResult:
+        """
+        Execute typed handoff programmatically with schema validation.
+        
+        Args:
+            source_agent: The agent initiating the handoff
+            payload: The typed payload (Pydantic model instance or dict) OR
+                    a string prompt (for backward compatibility)
+            context: Optional additional context
+            
+        Returns:
+            HandoffResult with response or error
+            
+        Raises:
+            HandoffValidationError: If payload validation fails
+        """
+        # Handle backward compatibility: if payload is a string, treat as regular handoff
+        if isinstance(payload, str):
+            return super().execute_programmatic(source_agent, payload, context)
+        
+        start_time = time.time()
+        kwargs = context or {}
+        
+        try:
+            # Safety checks
+            self._check_safety(source_agent)
+            
+            # Track handoff chain
+            _push_handoff(source_agent.name)
+            
+            # Execute on_handoff callback
+            self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
+            
+            # Apply input filter if provided (fixes Greptile P1 issue)
+            _ = self._prepare_context(source_agent, kwargs)
+            
+            # Validate payload against schema
+            try:
+                validated_payload = self._validate_payload(payload)
+            except HandoffValidationError as e:
+                # Update error context with proper agent info (fixes Greptile P2 issue)
+                e.source_agent = source_agent.name
+                e.agent_id = source_agent.name
+                e.context["source_agent"] = source_agent.name
+                e.context["agent_id"] = source_agent.name
+                raise
+            
+            # Convert validated payload to structured JSON for the prompt
+            payload_json = validated_payload.model_dump_json(indent=2)
+            
+            # Build prompt with structured JSON instead of string concatenation
+            context_prefix = f"[Handoff from {source_agent.name}] "
+            if kwargs:
+                context_prefix += f"Additional context: {json.dumps(kwargs, indent=2)}\n"
+            
+            # The key improvement: structured JSON instead of str() concatenation
+            full_prompt = f"{context_prefix}Payload:\n{payload_json}"
+            
+            logger.info(f"Typed handoff to {self.agent.name} with validated payload")
+            
+            # Execute with timeout if sync
+            response = self.agent.chat(full_prompt)
+            
+            result = HandoffResult(
+                success=True,
+                response=str(response) if response else "",
+                target_agent=self.agent.name,
+                source_agent=source_agent.name,
+                duration_seconds=time.time() - start_time,
+                handoff_depth=_get_handoff_depth(),
+            )
+            
+            # Execute on_complete callback
+            self._execute_callback(self.config.on_complete, source_agent, kwargs, result)
+            
+            return result
+            
+        except (HandoffCycleError, HandoffDepthError, HandoffTimeoutError, HandoffValidationError) as e:
+            result = HandoffResult(
+                success=False,
+                target_agent=self.agent.name,
+                source_agent=source_agent.name,
+                duration_seconds=time.time() - start_time,
+                error=str(e),
+                handoff_depth=_get_handoff_depth(),
+            )
+            self._execute_callback(self.config.on_error, source_agent, kwargs, result)
+            raise
+        except Exception as e:
+            result = HandoffResult(
+                success=False,
+                target_agent=self.agent.name,
+                source_agent=source_agent.name,
+                duration_seconds=time.time() - start_time,
+                error=str(e),
+                handoff_depth=_get_handoff_depth(),
+            )
+            self._execute_callback(self.config.on_error, source_agent, kwargs, result)
+            logger.error(f"Typed handoff error: {e}")
+            return result
+        finally:
+            _pop_handoff()
+    
+    async def execute_async(
+        self,
+        source_agent: 'Agent',
+        payload: Union[T, dict, str],
+        context: Optional[Dict[str, Any]] = None,
+    ) -> HandoffResult:
+        """
+        Execute typed handoff asynchronously with schema validation.
+        
+        Args:
+            source_agent: The agent initiating the handoff
+            payload: The typed payload (Pydantic model instance or dict) OR
+                    a string prompt (for backward compatibility)
+            context: Optional additional context
+            
+        Returns:
+            HandoffResult with response or error
+            
+        Raises:
+            HandoffValidationError: If payload validation fails
+        """
+        # Handle backward compatibility: if payload is a string, treat as regular handoff
+        if isinstance(payload, str):
+            return await super().execute_async(source_agent, payload, context)
+        
+        # Initialize semaphore if needed (thread-safe)
+        if self.config.max_concurrent > 0 and Handoff._semaphore is None:
+            with Handoff._semaphore_lock:
+                if Handoff._semaphore is None:
+                    Handoff._semaphore = asyncio.Semaphore(self.config.max_concurrent)
+        
+        start_time = time.time()
+        kwargs = context or {}
+        
+        async def _execute():
+            try:
+                # Safety checks
+                self._check_safety(source_agent)
+                _push_handoff(source_agent.name)
+                
+                # Execute callback
+                self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
+                
+                # Apply input filter if provided (fixes Greptile P1 issue)
+                _ = self._prepare_context(source_agent, kwargs)
+                
+                # Validate payload against schema
+                try:
+                    validated_payload = self._validate_payload(payload)
+                except HandoffValidationError as e:
+                    # Update error context with proper agent info (fixes Greptile P2 issue)
+                    e.source_agent = source_agent.name
+                    e.agent_id = source_agent.name
+                    e.context["source_agent"] = source_agent.name
+                    e.context["agent_id"] = source_agent.name
+                    raise
+                
+                # Convert to structured JSON
+                payload_json = validated_payload.model_dump_json(indent=2)
+                
+                # Build prompt
+                context_prefix = f"[Handoff from {source_agent.name}] "
+                if kwargs:
+                    context_prefix += f"Additional context: {json.dumps(kwargs, indent=2)}\n"
+                
+                full_prompt = f"{context_prefix}Payload:\n{payload_json}"
+                
+                logger.info(f"Async typed handoff to {self.agent.name}")
+                
+                # Execute - check for async chat method
+                if hasattr(self.agent, 'achat'):
+                    response = await self.agent.achat(full_prompt)
+                else:
+                    # Run sync chat in executor
+                    loop = asyncio.get_event_loop()
+                    response = await loop.run_in_executor(None, self.agent.chat, full_prompt)
+                
+                return HandoffResult(
+                    success=True,
+                    response=str(response) if response else "",
+                    target_agent=self.agent.name,
+                    source_agent=source_agent.name,
+                    duration_seconds=time.time() - start_time,
+                    handoff_depth=_get_handoff_depth(),
+                )
+            finally:
+                _pop_handoff()
+        
+        try:
+            if self.config.max_concurrent > 0 and Handoff._semaphore:
+                async with Handoff._semaphore:
+                    if self.config.timeout_seconds > 0:
+                        result = await asyncio.wait_for(
+                            _execute(),
+                            timeout=self.config.timeout_seconds
+                        )
+                    else:
+                        result = await _execute()
+            else:
+                if self.config.timeout_seconds > 0:
+                    result = await asyncio.wait_for(
+                        _execute(),
+                        timeout=self.config.timeout_seconds
+                    )
+                else:
+                    result = await _execute()
+            
+            self._execute_callback(self.config.on_complete, source_agent, kwargs, result)
+            return result
+            
+        except asyncio.TimeoutError as err:
+            result = HandoffResult(
+                success=False,
+                target_agent=self.agent.name,
+                source_agent=source_agent.name,
+                duration_seconds=time.time() - start_time,
+                error=f"Timeout after {self.config.timeout_seconds}s",
+                handoff_depth=_get_handoff_depth(),
+            )
+            self._execute_callback(self.config.on_error, source_agent, kwargs, result)
+            raise HandoffTimeoutError(
+                f"Typed handoff to {self.agent.name} timed out after {self.config.timeout_seconds}s",
+                timeout_seconds=self.config.timeout_seconds,
+                source_agent=source_agent.name,
+                target_agent=self.agent.name,
+                agent_id=source_agent.name
+            ) from err
+        except Exception as e:
+            result = HandoffResult(
+                success=False,
+                target_agent=self.agent.name,
+                source_agent=source_agent.name,
+                duration_seconds=time.time() - start_time,
+                error=str(e),
+                handoff_depth=_get_handoff_depth(),
+            )
+            self._execute_callback(self.config.on_error, source_agent, kwargs, result)
+            if isinstance(e, (HandoffCycleError, HandoffDepthError, HandoffValidationError)):
+                raise
+            return result
 
 
 def prompt_with_handoff_instructions(base_prompt: str, agent: 'Agent') -> str:

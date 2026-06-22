@@ -134,24 +134,28 @@ from fastapi import HTTPException, status
 @app.api_route("/", methods=["GET", "POST"])
 async def handle_incoming_call(request: Request):
     """Handle incoming call and return TwiML response to connect to Media Stream."""
-    if CALL_SERVER_TOKEN:
-        token = request.query_params.get("token")
-        if not token:
-            auth = request.headers.get("Authorization", "")
-            if auth.startswith("Bearer "):
-                token = auth.split(" ")[1]
-            elif auth.startswith("Basic "):
-                try:
-                    import base64
-                    decoded = base64.b64decode(auth[6:]).decode("utf-8")
-                    if ":" in decoded:
-                        token = decoded.split(":", 1)[1]  # Use Password as token
-                    else:
-                        token = decoded
-                except Exception:
-                    pass
-        if token != CALL_SERVER_TOKEN:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+    if not CALL_SERVER_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="CALL_SERVER_TOKEN is not configured",
+        )
+    token = request.query_params.get("token")
+    if not token:
+        auth = request.headers.get("Authorization", "")
+        if auth.startswith("Bearer "):
+            token = auth.split(" ")[1]
+        elif auth.startswith("Basic "):
+            try:
+                import base64
+                decoded = base64.b64decode(auth[6:]).decode("utf-8")
+                if ":" in decoded:
+                    token = decoded.split(":", 1)[1]
+                else:
+                    token = decoded
+            except Exception:
+                pass
+    if token != CALL_SERVER_TOKEN:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
 
     response = VoiceResponse()
     response.say("")
@@ -174,11 +178,13 @@ async def handle_media_stream(websocket: WebSocket):
     global active_connections
     
     # 1. Authentication
-    if CALL_SERVER_TOKEN:
-        token = websocket.query_params.get("token")
-        if token != CALL_SERVER_TOKEN:
-            await websocket.close(code=4003, reason="Unauthorized")
-            return
+    if not CALL_SERVER_TOKEN:
+        await websocket.close(code=4003, reason="CALL_SERVER_TOKEN not configured")
+        return
+    token = websocket.query_params.get("token")
+    if token != CALL_SERVER_TOKEN:
+        await websocket.close(code=4003, reason="Unauthorized")
+        return
             
     # 2. Rate Limiting Request Rate
     client_ip = websocket.client.host if websocket.client else "unknown"
@@ -351,22 +357,30 @@ def setup_public_url(port):
     print(f"Praison AI Voice URL: {public_url}")
     return public_url
 
-def run_server(port: int, use_public: bool = False):
+def run_server(port: int, host: str = "127.0.0.1", use_public: bool = False):
     """Run the FastAPI server using uvicorn."""
     if not OPENAI_API_KEY:
         raise ValueError('Missing the OpenAI API key. Please set it in the .env file or configure it through the GUI.')
     
     if use_public:
         setup_public_url(port)
+        host = "0.0.0.0"  # ngrok needs all-interfaces
     else:
-        print(f"Starting Praison AI Call Server on http://localhost:{port}")
-    uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
+        print(f"Starting Praison AI Call Server on http://{host}:{port}")
+        
+    # Log warning if binding to all interfaces without public flag
+    if host == "0.0.0.0" and not use_public:
+        print("WARNING: Server is binding to all network interfaces (0.0.0.0). "
+              "This exposes the service to your local network.")
+    
+    uvicorn.run(app, host=host, port=port, log_level="warning")
 
 def main(args=None):
     """Run the Praison AI Call Server."""
     parser = argparse.ArgumentParser(description="Run the Praison AI Call Server.")
     parser.add_argument('--public', action='store_true', help="Use ngrok to expose the server publicly")
     parser.add_argument('--port', type=int, default=PORT, help="Port to run the server on")
+    parser.add_argument('--host', type=str, default="127.0.0.1", help="Host to bind the server to")
 
     if args is None:
         args = parser.parse_args()
@@ -374,9 +388,10 @@ def main(args=None):
         args = parser.parse_args(args)
 
     port = args.port
+    host = args.host
     use_public = args.public or PUBLIC
 
-    run_server(port=port, use_public=use_public)
+    run_server(port=port, host=host, use_public=use_public)
 
 if __name__ == "__main__":
     main()

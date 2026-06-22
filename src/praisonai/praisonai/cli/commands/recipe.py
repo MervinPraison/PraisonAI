@@ -562,6 +562,15 @@ def recipe_serve(
         print(f"   Auth: API Key enabled")
     if workers > 1:
         print(f"   Workers: {workers}")
+
+    auth_mode = serve_config.get("auth", "none")
+    if host not in ("127.0.0.1", "localhost") and auth_mode == "none" and not api_key:
+        print(
+            "\n\033[91mError:\033[0m Auth required for non-localhost binding. "
+            "Use --api-key or --auth api-key",
+            file=sys.stderr,
+        )
+        raise typer.Exit(1)
     
     try:
         from praisonai.recipe.serve import serve, load_config

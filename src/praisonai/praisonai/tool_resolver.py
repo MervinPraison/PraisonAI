@@ -28,14 +28,36 @@ import importlib.util
 import inspect
 import threading
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional
+from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol
 from types import MappingProxyType
 from ._safe_loader import load_user_module
 
 logger = logging.getLogger(__name__)
 
+
+class _ResolveResult:
+    """Internal result wrapper to distinguish cacheable vs non-cacheable failures."""
+    __slots__ = ("tool", "cacheable")
+
+    def __init__(self, tool, cacheable=True):
+        self.tool = tool
+        self.cacheable = cacheable
+
+
 # Sentinel for cache - needed because None is a valid cached result (tool not found)
 _SENTINEL = object()
+
+
+class ToolSource(Protocol):
+    """Protocol for anything that can provide tools."""
+    @property
+    def name(self) -> str:
+        """Name identifying this source for debugging."""
+        ...
+    
+    def lookup(self, name: str) -> Optional[Callable]:
+        """Look up a tool by name, returning None if not found."""
+        ...
 
 
 class ToolResolver:
@@ -57,12 +79,14 @@ class ToolResolver:
         self,
         tools_py_path: Optional[str] = None,
         registry: Optional["ToolRegistry"] = None,
+        sources: Optional[List[ToolSource]] = None,
     ):
         """Initialize the resolver.
         
         Args:
             tools_py_path: Optional path to tools.py. If None, uses ./tools.py
             registry: Optional ToolRegistry to include in resolution chain
+            sources: Optional list of ToolSource objects. If None, uses defaults.
         """
         from pathlib import Path
         # Resolve path eagerly in constructor to make binding explicit and inspectable
@@ -72,6 +96,14 @@ class ToolResolver:
         self._praisonai_tools_available: Optional[bool] = None
         self._local_tools_lock = threading.Lock()
         self._registry = registry
+        
+        # Initialize sources (future extension point)
+        if sources is not None:
+            self._sources = sources
+        else:
+            # Keep backward compatible sources inline for now
+            # TODO: Will be refactored to separate classes and integrated in resolve() in future
+            self._sources = None
         
         # Cache for resolved tools to avoid repeated resolution
         self._resolve_cache: Dict[str, Optional[Callable]] = {}
@@ -123,7 +155,7 @@ class ToolResolver:
             self._local_tools_loaded = True
             return self._local_tools_cache
     
-    def _resolve_from_praisonaiagents(self, name: str) -> Optional[Callable]:
+    def _resolve_from_praisonaiagents(self, name: str) -> _ResolveResult:
         """Resolve tool from praisonaiagents.tools.TOOL_MAPPINGS.
         
         Uses lazy loading via __getattr__ in praisonaiagents.tools.
@@ -132,7 +164,7 @@ class ToolResolver:
             name: Tool name to resolve
             
         Returns:
-            Callable if found, None otherwise
+            _ResolveResult with tool and cacheable flag
         """
         try:
             from praisonaiagents import tools as agent_tools
@@ -149,25 +181,29 @@ class ToolResolver:
                         logger.warning(
                             f"Tool '{name}' exists in TOOL_MAPPINGS but failed to load: {e}"
                         )
-                        return None
+                        # IMPORTANT: do NOT cache. The dep may be installed later.
+                        return _ResolveResult(None, cacheable=False)
                     if tool is not None:
                         logger.debug(f"Resolved '{name}' from praisonaiagents.tools")
-                        return tool
+                        return _ResolveResult(tool)
             
             # Also try direct attribute access (for non-TOOL_MAPPINGS items)
             tool = getattr(agent_tools, name, None)
             if tool is not None and callable(tool):
                 logger.debug(f"Resolved '{name}' from praisonaiagents.tools (direct)")
-                return tool
+                return _ResolveResult(tool)
                 
         except ImportError:
             logger.debug("praisonaiagents not available")
+            # SDK can be installed later
+            return _ResolveResult(None, cacheable=False)
         except AttributeError:
             pass
         except Exception as e:
             logger.debug(f"Error resolving '{name}' from praisonaiagents: {e}")
         
-        return None
+        # Genuinely not present
+        return _ResolveResult(None)
     
     def _resolve_from_praisonai_tools(self, name: str) -> Optional[Callable]:
         """Resolve tool from praisonai-tools package (external).
@@ -245,6 +281,21 @@ class ToolResolver:
         
         return None
     
+    def invalidate(self, name: Optional[str] = None) -> None:
+        """Invalidate cached tool lookups.
+        
+        Args:
+            name: If specified, invalidate only this tool. Otherwise clear all.
+        """
+        with self._resolve_cache_lock:
+            if name is None:
+                self._resolve_cache.clear()
+                logger.debug("Cleared entire tool resolution cache")
+            else:
+                if name in self._resolve_cache:
+                    del self._resolve_cache[name]
+                    logger.debug(f"Invalidated cached resolution for '{name}'")
+    
     def resolve(self, name: str, instantiate: bool = False) -> Optional[Callable]:
         """Resolve a tool name to a callable.
         
@@ -269,22 +320,19 @@ class ToolResolver:
         if not name:
             return None
 
-        # Fast path: cached result
-        cached = self._resolve_cache.get(name, _SENTINEL)
-        if cached is not _SENTINEL:
-            return cached
-
         # Load local tools outside the cache lock to prevent lock-order inversion
         local_tools = self._load_local_tools()
 
         with self._resolve_cache_lock:
-            # Double-check inside lock
+            # Check cache inside lock to prevent races
             cached = self._resolve_cache.get(name, _SENTINEL)
             if cached is not _SENTINEL:
-                # Apply instantiation to cached result if needed
                 if instantiate and self._is_class(cached):
                     return cached()
                 return cached
+
+            # Track if any source indicated a non-cacheable failure
+            allow_none_cache = True
 
             # 1. Check local tools.py first (highest priority)
             if name in local_tools:
@@ -304,12 +352,16 @@ class ToolResolver:
                 return tool
             
             # 3. Check praisonaiagents.tools
-            tool = self._resolve_from_praisonaiagents(name)
-            if tool is not None:
-                self._resolve_cache[name] = tool
-                if instantiate and self._is_class(tool):
-                    return tool()
-                return tool
+            result = self._resolve_from_praisonaiagents(name)
+            if result.tool is not None:
+                if result.cacheable:
+                    self._resolve_cache[name] = result.tool
+                if instantiate and self._is_class(result.tool):
+                    return result.tool()
+                return result.tool
+            elif not result.cacheable:
+                # Track that a non-cacheable failure occurred
+                allow_none_cache = False
             
             # 4. Check praisonai-tools package
             tool = self._resolve_from_praisonai_tools(name)
@@ -327,9 +379,12 @@ class ToolResolver:
                     return tool()
                 return tool
             
-            # Cache the None result to avoid repeated failed lookups
-            logger.warning(f"Tool '{name}' not found in any source")
-            self._resolve_cache[name] = None
+            # Cache None only if the failure was not transient
+            if allow_none_cache:
+                logger.warning(f"Tool '{name}' not found in any source")
+                self._resolve_cache[name] = None
+            else:
+                logger.debug(f"Tool '{name}' failed transiently; not caching None")
             return None
     
     def _is_class(self, obj) -> bool:
@@ -412,13 +467,13 @@ class ToolResolver:
         return available
     
     def validate_yaml_tools(self, yaml_config: Dict[str, Any]) -> List[str]:
-        """Validate that all tools referenced in YAML config can be resolved.
+        """Validate that all tools and toolsets referenced in YAML config can be resolved.
         
         Args:
             yaml_config: Parsed YAML configuration dict
             
         Returns:
-            List of tool names that could not be resolved (empty if all valid)
+            List of tool/toolset names that could not be resolved (empty if all valid)
         """
         missing = []
         
@@ -431,15 +486,32 @@ class ToolResolver:
             if not isinstance(role_config, dict):
                 continue
             
+            # Validate tools
             tools = role_config.get('tools', [])
-            if not tools:
-                continue
+            if tools:
+                for tool_name in tools:
+                    if not tool_name or not isinstance(tool_name, str):
+                        continue
+                    if not self.has_tool(tool_name.strip()):
+                        missing.append(tool_name)
             
-            for tool_name in tools:
-                if not tool_name or not isinstance(tool_name, str):
-                    continue
-                if not self.has_tool(tool_name.strip()):
-                    missing.append(tool_name)
+            # Validate toolsets
+            toolsets = role_config.get('toolsets', [])
+            if toolsets:
+                try:
+                    from praisonaiagents.toolsets import list_toolsets
+                    available_toolsets = set(list_toolsets())
+                    
+                    for toolset_name in toolsets:
+                        if not toolset_name or not isinstance(toolset_name, str):
+                            continue
+                        if toolset_name.strip() not in available_toolsets:
+                            missing.append(f"toolset:{toolset_name}")
+                except ImportError:
+                    # If toolsets module not available, mark all as missing
+                    for toolset_name in toolsets:
+                        if toolset_name and isinstance(toolset_name, str):
+                            missing.append(f"toolset:{toolset_name}")
         
         return list(set(missing))  # Remove duplicates
     
@@ -534,6 +606,151 @@ class ToolResolver:
                 continue
         
         return result
+    
+    def resolve_toolsets(self, toolset_names: List[str]) -> List[Callable]:
+        """Resolve named toolset groups to callables.
+        
+        Expands each toolset to tool names, then resolves to callables.
+        
+        Args:
+            toolset_names: List of toolset names to resolve
+            
+        Returns:
+            List of resolved callables from all toolsets
+        """
+        if not toolset_names:
+            return []
+        
+        try:
+            from praisonaiagents.toolsets import resolve_toolsets
+            
+            # Resolve toolset names to tool names
+            tool_names = resolve_toolsets(toolset_names)
+            logger.debug(f"Resolved toolsets {toolset_names} to tools: {tool_names}")
+            
+            # Resolve tool names to callables
+            return self.resolve_many(tool_names)
+            
+        except ImportError as e:
+            logger.warning(f"Toolset support unavailable: {e}")
+            return []
+    
+    def resolve_all_from_yaml(self, yaml_config: Dict[str, Any]) -> Dict[str, Callable]:
+        """Resolve every tool name referenced in a parsed YAML config.
+
+        Walks roles[*].tools and roles[*].tasks[*].tools, resolves each via
+        self.resolve(), instantiates classes, and merges in local tools.py /
+        tools/ contents. Returns a {name: callable} dict ready for the adapter.
+        """
+        tools_dict: Dict[str, Callable] = {}
+        needed: set[str] = set()
+        for role_cfg in yaml_config.get('roles', {}).values():
+            for t in role_cfg.get('tools') or []:
+                if isinstance(t, str) and t.strip():
+                    needed.add(t.strip())
+            tasks = role_cfg.get('tasks') or {}
+            # Handle both dict and list formats for tasks
+            if isinstance(tasks, dict):
+                task_list = tasks.values()
+            elif isinstance(tasks, list):
+                task_list = tasks
+            else:
+                task_list = []
+            
+            for task_cfg in task_list:
+                if not isinstance(task_cfg, dict):
+                    continue
+                for t in task_cfg.get('tools') or []:
+                    if isinstance(t, str) and t.strip():
+                        needed.add(t.strip())
+
+        for name in needed:
+            resolved = self.resolve(name)
+            if resolved is None:
+                logger.warning("Tool %r not found", name)
+                continue
+            tools_dict[name] = resolved() if inspect.isclass(resolved) else resolved
+
+        # Restore original mutual exclusion: tools.py OR tools/ directory, not both
+        root_directory = os.getcwd()
+        tools_py_path = os.path.join(root_directory, 'tools.py')
+        tools_dir = Path(root_directory) / 'tools'
+        
+        # Load from tools.py if it exists
+        local_tools = self.get_local_tool_classes()
+        if local_tools:
+            tools_dict.update(local_tools)
+            if os.path.isfile(tools_py_path):
+                logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
+        # Otherwise load from tools/ directory if it exists
+        elif tools_dir.is_dir():
+            tools_dict.update(self.get_local_tool_classes_from_dir(tools_dir))
+            logger.debug("tools folder exists in the root directory")
+        return tools_dict
+
+
+    def load_functions_from_module(self, module_path: str) -> Dict[str, Callable]:
+        """Public replacement for AgentsGenerator.load_tools_from_module."""
+        from ._safe_loader import load_user_module
+        module = load_user_module(module_path, name="tools_module")
+        return {} if module is None else {
+            name: obj for name, obj in inspect.getmembers(module)
+            if inspect.isfunction(obj) or callable(obj)
+        }
+
+
+    def load_classes_from_module(self, module_path: str) -> Dict[str, Callable]:
+        """Public replacement for AgentsGenerator.load_tools_from_module_class.
+        Promotes _extract_tool_classes from private to public."""
+        from ._safe_loader import load_user_module
+        module = load_user_module(module_path, name="tools_module")
+        return {} if module is None else self._extract_tool_classes(module)
+
+
+    def load_functions_from_package(self, package_path: Path | str) -> Dict[str, Callable]:
+        """Safe replacement that uses _safe_loader instead of importlib."""
+        pkg = Path(package_path)
+        out: Dict[str, Callable] = {}
+        for py in pkg.glob("*.py"):
+            if py.name.startswith("__"):
+                continue
+            out.update(self.load_functions_from_module(str(py.resolve())))
+        return out
+    
+    def resolve_tools_and_toolsets(
+        self, 
+        tool_names: Optional[List[str]] = None,
+        toolset_names: Optional[List[str]] = None
+    ) -> List[Callable]:
+        """Resolve both individual tools and toolset groups to callables.
+        
+        Args:
+            tool_names: List of individual tool names
+            toolset_names: List of toolset names to expand
+            
+        Returns:
+            Combined list of callables from tools and toolsets
+        """
+        all_tools = []
+        
+        # Add explicit tools
+        if tool_names:
+            all_tools.extend(self.resolve_many(tool_names))
+        
+        # Add toolset tools
+        if toolset_names:
+            all_tools.extend(self.resolve_toolsets(toolset_names))
+        
+        # Deduplicate while preserving order
+        deduped: List[Callable] = []
+        seen: set[int] = set()
+        for tool in all_tools:
+            marker = id(tool)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            deduped.append(tool)
+        return deduped
 
 
 # Context-local resolver for multi-project safety
@@ -637,5 +854,36 @@ def validate_yaml_tools(yaml_config: Dict[str, Any], resolver: Optional[ToolReso
         List of missing tool names
     """
     return (resolver or _get_default_resolver()).validate_yaml_tools(yaml_config)
+
+
+def resolve_toolsets(toolset_names: List[str], resolver: Optional[ToolResolver] = None) -> List[Callable]:
+    """Resolve named toolset groups to callables.
+    
+    Args:
+        toolset_names: List of toolset names to resolve
+        resolver: Optional resolver instance. If None, uses cached default resolver.
+        
+    Returns:
+        List of resolved callables from all toolsets
+    """
+    return (resolver or _get_default_resolver()).resolve_toolsets(toolset_names)
+
+
+def resolve_tools_and_toolsets(
+    tool_names: Optional[List[str]] = None,
+    toolset_names: Optional[List[str]] = None,
+    resolver: Optional[ToolResolver] = None
+) -> List[Callable]:
+    """Resolve both individual tools and toolset groups to callables.
+    
+    Args:
+        tool_names: List of individual tool names
+        toolset_names: List of toolset names to expand
+        resolver: Optional resolver instance. If None, uses cached default resolver.
+        
+    Returns:
+        Combined list of callables from tools and toolsets
+    """
+    return (resolver or _get_default_resolver()).resolve_tools_and_toolsets(tool_names, toolset_names)
 
 

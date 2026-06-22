@@ -39,12 +39,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from praisonaiagents import Agent
 
+from praisonaiagents.bots.protocols import HealthReason, HealthResult, evaluate_channel_health
+from ..gateway.supervisor import ChannelSupervisor
+from ..gateway.health_monitor import ChannelHealthMonitor, HealthMonitorConfig
 from .bot import Bot
+from .delivery import DeliveryRouter, SessionSource
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +75,8 @@ class BotOS:
         platforms: Optional[List[str]] = None,
         config: Optional[Any] = None,
         identity_resolver: Optional[Any] = None,
+        health_monitor: Optional[HealthMonitorConfig] = None,
+        enable_supervision: bool = True,
     ):
         self._bots: Dict[str, Bot] = {}
         self._is_running = False
@@ -78,6 +85,21 @@ class BotOS:
         # gives cross-platform unified-user sessions out of the box.
         self._identity_resolver = identity_resolver
         self._tasks: List[asyncio.Task] = []
+        
+        # Initialize delivery router for proactive outbound messaging
+        self._delivery_router = DeliveryRouter(self)
+        
+        self._enable_supervision = enable_supervision
+        
+        # Initialize supervisor and health monitor if enabled
+        if self._enable_supervision:
+            self._supervisor = ChannelSupervisor(health_config=health_monitor)
+            self._health_monitor_config = health_monitor or HealthMonitorConfig()
+        else:
+            self._supervisor = None
+            self._health_monitor_config = None
+        
+        self._start_times: Dict[str, float] = {}  # Track bot start times
 
         # Register explicit bots
         if bots:
@@ -127,6 +149,11 @@ class BotOS:
     def get_bot(self, platform: str) -> Optional[Bot]:
         """Get a registered bot by platform name."""
         return self._bots.get(platform.lower())
+    
+    @property
+    def delivery_router(self) -> DeliveryRouter:
+        """Get the delivery router for proactive messaging."""
+        return self._delivery_router
 
     # ── Lifecycle ───────────────────────────────────────────────────
 
@@ -146,6 +173,14 @@ class BotOS:
 
         self._is_running = True
         logger.info(f"BotOS starting {len(self._bots)} bot(s): {', '.join(self._bots.keys())}")
+        
+        # Configure delivery router from bot configurations
+        self._configure_delivery_from_bots()
+
+        # Start health monitoring if enabled
+        if self._enable_supervision and self._supervisor:
+            await self._supervisor.start_health_monitoring()
+            logger.info("BotOS: health monitoring enabled")
 
         self._tasks = []
         for platform, bot in self._bots.items():
@@ -167,15 +202,28 @@ class BotOS:
         except asyncio.CancelledError:
             pass
         finally:
+            # Stop health monitoring
+            if self._enable_supervision and self._supervisor:
+                await self._supervisor.stop_health_monitoring()
             self._is_running = False
 
     async def _run_bot(self, platform: str, bot: Bot) -> None:
-        """Run a single bot with error isolation."""
-        try:
-            logger.info(f"BotOS: starting {platform}")
-            await bot.start()
-        except Exception as e:
-            logger.error(f"BotOS: {platform} failed: {e}")
+        """Run a single bot with error isolation and optional supervision."""
+        if self._enable_supervision and self._supervisor:
+            # Run with supervision and auto-recovery
+            async def start_bot(name: str, bot_instance: Bot) -> None:
+                self._start_times[name] = time.time()
+                await bot_instance.start()
+            
+            await self._supervisor.run(platform, bot, start_bot)
+        else:
+            # Original behavior without supervision
+            try:
+                logger.info(f"BotOS: starting {platform}")
+                self._start_times[platform] = time.time()
+                await bot.start()
+            except Exception as e:
+                logger.error(f"BotOS: {platform} failed: {e}")
 
     async def _run_schedule_loop(self) -> None:
         """Poll for due scheduled jobs and execute them.
@@ -271,20 +319,111 @@ class BotOS:
         result = await asyncio.to_thread(agent.chat, job.message)
         result_str = str(result) if result else None
 
-        # Deliver to originating platform if delivery target is set
+        # Deliver using the new delivery router
         delivered = False
         delivery = job.delivery
-        if delivery and delivery.channel and delivery.channel_id:
-            bot = self.get_bot(delivery.channel)
-            if bot:
-                try:
-                    await bot.send_message(delivery.channel_id, str(result))
-                    delivered = True
-                except Exception as e:
-                    logger.warning(f"BotOS: delivery to {delivery.channel} failed: {e}")
+        if delivery:
+            # Build origin context if available
+            origin = None
+            if delivery.channel and delivery.channel_id:
+                origin = SessionSource(
+                    platform=delivery.channel,
+                    channel_id=delivery.channel_id
+                )
+            
+            # Determine target - use explicit target if set, otherwise "origin"
+            target = getattr(delivery, 'target', None)
+            if not target and origin:
+                target = "origin"
+            
+            if target and result_str:
+                delivered = await self._delivery_router.deliver(
+                    target=target,
+                    text=result_str,
+                    origin=origin
+                )
 
         logger.info(f"BotOS: executed schedule job '{job.name}'")
         return (result_str, delivered)
+    
+    def _configure_delivery_from_bots(self) -> None:
+        """Configure delivery router from bot configurations."""
+        for platform, bot in self._bots.items():
+            # Check if bot has channel configuration
+            # Try _config first (for manually created bots), then _kwargs (from from_config())
+            config = getattr(bot, '_config', None)
+            kwargs = getattr(bot, '_kwargs', {})
+            
+            # Extract home_channel and aliases from config or kwargs
+            home_channel = None
+            aliases = {}
+            
+            if config:
+                home_channel = getattr(config, 'home_channel', None)
+                aliases = getattr(config, 'aliases', {})
+            elif kwargs:
+                home_channel = kwargs.get('home_channel')
+                aliases = kwargs.get('aliases', {})
+            
+            # Set home channel if configured
+            if home_channel:
+                self._delivery_router.directory.set_home_channel(platform, home_channel)
+            
+            # Add aliases if configured
+            for alias_name, channel_id in aliases.items():
+                self._delivery_router.directory.add_alias(alias_name, platform, channel_id)
+    
+    def configure_channels(self, config: Dict[str, Any]) -> None:
+        """
+        Configure channel directory from a dictionary.
+        
+        Args:
+            config: Dictionary with platform configurations
+            
+        Example::
+            
+            botos.configure_channels({
+                "telegram": {
+                    "home_channel": "123456",
+                    "aliases": {
+                        "ops-alerts": "123456",
+                        "dev-chat": "789012"
+                    }
+                },
+                "discord": {
+                    "home_channel": "456789"
+                }
+            })
+        """
+        self._delivery_router.configure_from_dict(config)
+    
+    async def deliver(self, target: str, text: str, origin: Optional[SessionSource] = None) -> bool:
+        """
+        Deliver a message to a target channel.
+        
+        Args:
+            target: Target specification (origin|platform|platform:channel|alias)
+            text: Message content to deliver
+            origin: Optional source of the original request
+            
+        Returns:
+            True if delivered successfully, False otherwise
+            
+        Example::
+            
+            # Reply to origin
+            await botos.deliver("origin", "Hello!", origin=source)
+            
+            # Send to specific platform's home channel
+            await botos.deliver("telegram", "Alert!")
+            
+            # Send to specific channel
+            await botos.deliver("telegram:123456", "Build complete")
+            
+            # Send to aliased channel
+            await botos.deliver("ops-alerts", "Disk full")
+        """
+        return await self._delivery_router.deliver(target, text, origin)
 
     async def stop(self) -> None:
         """Gracefully stop all running bots."""
@@ -293,10 +432,17 @@ class BotOS:
 
         logger.info("BotOS stopping all bots...")
 
+        # Stop health monitoring first
+        if self._enable_supervision and self._supervisor:
+            await self._supervisor.stop_health_monitoring()
+
         # Stop each bot
         for platform, bot in self._bots.items():
             try:
                 await bot.stop()
+                # Cleanup supervisor state
+                if self._enable_supervision and self._supervisor:
+                    self._supervisor.cleanup(platform)
             except Exception as e:
                 logger.warning(f"BotOS: error stopping {platform}: {e}")
 
@@ -354,6 +500,10 @@ class BotOS:
                 token: ${TELEGRAM_BOT_TOKEN}
               discord:
                 token: ${DISCORD_BOT_TOKEN}
+            health:
+              interval: 300
+              startup_grace: 60
+              max_restarts_per_hour: 10
 
         Args:
             path: Path to YAML config file.
@@ -447,8 +597,107 @@ class BotOS:
             token = resolved.pop("token", None)
             bots.append(Bot(plat_name, agent=agent, token=token, **resolved))
 
-        return cls(bots=bots)
+        # Parse health configuration
+        health_cfg = raw.get("health")
+        health_monitor = None
+        if health_cfg and isinstance(health_cfg, dict):
+            health_monitor = HealthMonitorConfig.from_dict(health_cfg)
 
+        # Check if supervision is disabled (handle null supervision key)
+        supervision_cfg = raw.get("supervision") or {}
+        enable_supervision = supervision_cfg.get("enabled", True)
+
+        return cls(bots=bots, health_monitor=health_monitor, enable_supervision=enable_supervision)
+
+    async def health(self) -> Dict[str, HealthResult]:
+        """Get health status of all bots.
+        
+        Returns:
+            Dictionary mapping platform name to HealthResult
+        """
+        results = {}
+        current_time = time.time()
+        
+        for platform, bot in self._bots.items():
+            try:
+                if hasattr(bot, "health"):
+                    results[platform] = await bot.health()
+                else:
+                    # Construct basic health result
+                    uptime = None
+                    if platform in self._start_times:
+                        uptime = current_time - self._start_times[platform]
+                    
+                    results[platform] = HealthResult(
+                        ok=bot.is_running if hasattr(bot, "is_running") else False,
+                        platform=platform,
+                        is_running=bot.is_running if hasattr(bot, "is_running") else False,
+                        uptime_seconds=uptime,
+                    )
+            except Exception as e:
+                results[platform] = HealthResult(
+                    ok=False,
+                    platform=platform,
+                    is_running=False,
+                    error=str(e),
+                )
+        
+        return results
+    
+    def get_supervisor_status(self) -> Optional[Dict[str, Any]]:
+        """Get supervisor status if enabled.
+        
+        Returns:
+            Supervisor status dictionary or None if supervision disabled
+        """
+        if self._supervisor:
+            return {
+                "enabled": True,
+                "channels": self._supervisor.get_all_status(),
+                "health_monitor": self._supervisor.get_health_status(),
+            }
+        return {"enabled": False}
+    
+    def pause_bot(self, platform: str) -> bool:
+        """Pause a bot (only works with supervision enabled).
+        
+        Args:
+            platform: Platform name to pause
+            
+        Returns:
+            True if paused, False otherwise
+        """
+        if self._supervisor:
+            return self._supervisor.pause(platform)
+        return False
+    
+    def resume_bot(self, platform: str) -> bool:
+        """Resume a paused bot (only works with supervision enabled).
+        
+        Args:
+            platform: Platform name to resume
+            
+        Returns:
+            True if resumed, False otherwise
+        """
+        if self._supervisor:
+            return self._supervisor.resume(platform)
+        return False
+    
+    def reconnect_bot(self, platform: str) -> bool:
+        """Force reconnect a bot (only works with supervision enabled).
+        
+        Args:
+            platform: Platform name to reconnect
+            
+        Returns:
+            True if reconnect triggered, False otherwise
+        """
+        if self._supervisor:
+            return self._supervisor.reconnect(platform)
+        return False
+    
     def __repr__(self) -> str:
         platforms = list(self._bots.keys())
-        return f"BotOS(platforms={platforms!r}, running={self._is_running})"
+        supervised = "supervised" if self._enable_supervision else "unsupervised"
+        return f"BotOS(platforms={platforms!r}, running={self._is_running}, mode={supervised})"

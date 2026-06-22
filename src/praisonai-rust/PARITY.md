@@ -1,16 +1,16 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 336 | **Rust Features:** 667 | **Parity:** 84.8%
+> **Python Features:** 362 | **Rust Features:** 667 | **Parity:** 79.0%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 336 |
+| Python Core Features | 362 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **51** |
+| **Actual Gap Count** | **76** |
 | Language Limitations (N/A) | 5 |
-| **Parity** | **84.8%** |
+| **Parity** | **79.0%** |
 
 ## Implemented Features
 
@@ -695,24 +695,34 @@ These Python features cannot be directly implemented in Rust due to reserved key
 ## Missing Features
 
 - ❌ `A2UI`
+- ❌ `AGGRESSIVE_POLICY`
 - ❌ `AgentMessageEvent`
+- ❌ `AgentRunOutcome`
 - ❌ `AsyncLearnProtocol`
 - ❌ `AutoApproveBackend`
+- ❌ `BALANCED_POLICY`
 - ❌ `BaseTool`
 - ❌ `BotOSConfig`
 - ❌ `BotOSProtocol`
 - ❌ `BudgetExceededError`
+- ❌ `CONSERVATIVE_POLICY`
 - ❌ `CliBackendConfig`
 - ❌ `CliBackendDelta`
 - ❌ `CliBackendProtocol`
 - ❌ `CliBackendResult`
 - ❌ `CliSessionBinding`
+- ❌ `CompactionRoute`
+- ❌ `CompactionStrategy`
 - ❌ `ConsoleBackend`
+- ❌ `ContextBudgetResult`
+- ❌ `ContextCompactionPolicy`
+- ❌ `ContextCompactionPolicyProtocol`
 - ❌ `CustomToolUseEvent`
 - ❌ `DoomLoopDetector`
 - ❌ `ErrorContextProtocol`
 - ❌ `EscalationPipeline`
 - ❌ `EscalationStage`
+- ❌ `HandoffToolPolicy`
 - ❌ `Heartbeat`
 - ❌ `HeartbeatConfig`
 - ❌ `LLMError`
@@ -730,6 +740,8 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `ObservabilityHooks`
 - ❌ `PraisonAIConfigError`
 - ❌ `PraisonAIError`
+- ❌ `RetryBackoffConfig`
+- ❌ `RunStatus`
 - ❌ `SessionErrorEvent`
 - ❌ `SessionIdleEvent`
 - ❌ `StopReason`
@@ -738,12 +750,25 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `ToolSearchConfig`
 - ❌ `ToolUseEvent`
 - ❌ `ToolValidationError`
+- ❌ `ToolsetRegistry`
+- ❌ `ToolsetSpec`
+- ❌ `__version__`
 - ❌ `configure_structured_logging`
+- ❌ `get_default_policy`
 - ❌ `get_logger`
 - ❌ `get_registry`
 - ❌ `get_tool`
+- ❌ `get_toolset`
+- ❌ `get_toolset_registry`
+- ❌ `has_toolset`
+- ❌ `list_toolsets`
 - ❌ `parallel_handoffs`
 - ❌ `register_tool`
+- ❌ `register_toolset`
+- ❌ `resolve_toolset`
+- ❌ `resolve_toolsets`
+- ❌ `unregister_toolset`
+- ❌ `validate_decision_string`
 - ❌ `validate_tool`
 
 ---

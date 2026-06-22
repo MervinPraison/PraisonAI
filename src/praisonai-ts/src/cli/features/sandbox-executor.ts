@@ -67,6 +67,33 @@ export const DEFAULT_BLOCKED_PATHS = [
   '/proc'
 ];
 
+/** Shell metacharacters that enable command chaining or substitution */
+export const SHELL_METACHAR_PATTERN = /[;|&`><]|\$\([^)]*\)|\$\{/;
+
+/** Commands that typically require network access */
+export const NETWORK_COMMANDS = [
+  'curl', 'wget', 'nc', 'netcat', 'ssh', 'scp', 'sftp', 'ftp', 'telnet',
+  'ping', 'nslookup', 'dig', 'host', 'traceroute', 'tracepath', 'nmap',
+  'socat', 'openssl', 'node', 'python', 'python3', 'ruby', 'perl',
+];
+
+/** Environment variables commonly used for network/proxy configuration */
+const NETWORK_ENV_VARS = [
+  'http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY',
+  'ALL_PROXY', 'all_proxy', 'NO_PROXY', 'no_proxy',
+  'FTP_PROXY', 'ftp_proxy', 'SOCKS_PROXY', 'socks_proxy',
+];
+
+export function containsShellMetacharacters(command: string): boolean {
+  return SHELL_METACHAR_PATTERN.test(command);
+}
+
+function parseCommandParts(command: string): { cmd: string; args: string[] } {
+  const parts = command.trim().match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
+  const unquoted = parts.map((part) => part.replace(/^["']|["']$/g, ''));
+  return { cmd: unquoted[0] ?? '', args: unquoted.slice(1) };
+}
+
 /**
  * Command validator
  */
@@ -74,25 +101,41 @@ export class CommandValidator {
   private blockedCommands: string[];
   private blockedPaths: string[];
   private allowedCommands?: string[];
+  private networkIsolated: boolean;
 
   constructor(config: Partial<SandboxConfig> = {}) {
     this.blockedCommands = config.blockedCommands || DEFAULT_BLOCKED_COMMANDS;
     this.blockedPaths = config.blockedPaths || DEFAULT_BLOCKED_PATHS;
     this.allowedCommands = config.allowedCommands;
+    this.networkIsolated = config.mode === 'network-isolated';
   }
 
   /**
    * Validate a command
    */
   validate(command: string): { valid: boolean; reason?: string } {
-    const normalized = command.toLowerCase().trim();
+    const trimmed = command.trim();
+    if (!trimmed) {
+      return { valid: false, reason: 'Empty command' };
+    }
+
+    if (containsShellMetacharacters(trimmed)) {
+      return { valid: false, reason: 'Shell metacharacters are not allowed' };
+    }
+
+    const { cmd } = parseCommandParts(trimmed);
+    const normalized = trimmed.toLowerCase();
 
     // Check allowlist first if specified
     if (this.allowedCommands) {
-      const baseCmd = normalized.split(/\s+/)[0];
-      if (!this.allowedCommands.includes(baseCmd)) {
-        return { valid: false, reason: `Command '${baseCmd}' not in allowlist` };
+      if (!this.allowedCommands.includes(cmd.toLowerCase())) {
+        return { valid: false, reason: `Command '${cmd}' not in allowlist` };
       }
+    }
+
+    // network-isolated: reject network-oriented commands (proxy env alone is insufficient)
+    if (this.networkIsolated && NETWORK_COMMANDS.includes(cmd.toLowerCase())) {
+      return { valid: false, reason: `Network command '${cmd}' blocked in network-isolated mode` };
     }
 
     // Check blocked commands
@@ -195,20 +238,29 @@ export class SandboxExecutor {
   }
 
   /**
-   * Spawn the command
+   * Spawn the command without shell when allowlisted or in strict mode
    */
   private async spawn(command: string): Promise<Omit<ExecutionResult, 'duration'>> {
     const { spawn } = await import('child_process');
+    const env = this.buildEnv();
+    const useDirectSpawn = Boolean(this.config.allowedCommands) || this.config.mode === 'strict';
+    const { cmd, args } = parseCommandParts(command);
 
     return new Promise((resolve) => {
-      const env = this.buildEnv();
-      
-      const proc = spawn('sh', ['-c', command], {
-        cwd: this.config.cwd,
-        env,
-        timeout: this.config.timeout,
-        stdio: ['pipe', 'pipe', 'pipe']
-      });
+      const proc = useDirectSpawn
+        ? spawn(cmd, args, {
+            cwd: this.config.cwd,
+            env,
+            timeout: this.config.timeout,
+            shell: false,
+            stdio: ['pipe', 'pipe', 'pipe'],
+          })
+        : spawn('sh', ['-c', command], {
+            cwd: this.config.cwd,
+            env,
+            timeout: this.config.timeout,
+            stdio: ['pipe', 'pipe', 'pipe'],
+          });
 
       let stdout = '';
       let stderr = '';
@@ -275,7 +327,11 @@ export class SandboxExecutor {
         };
 
       case 'network-isolated':
-        // No network access (requires additional OS-level setup)
+        // Proxy env vars alone do not block network; also reject network commands in validator.
+        // Strip common proxy/network env vars as a defence-in-depth measure.
+        for (const key of NETWORK_ENV_VARS) {
+          delete baseEnv[key];
+        }
         return {
           ...baseEnv,
           http_proxy: 'http://localhost:0',
@@ -283,7 +339,7 @@ export class SandboxExecutor {
           HTTP_PROXY: 'http://localhost:0',
           HTTPS_PROXY: 'http://localhost:0',
           no_proxy: '',
-          NO_PROXY: ''
+          NO_PROXY: '',
         };
 
       case 'basic':
@@ -315,6 +371,7 @@ export class SandboxExecutor {
    */
   setMode(mode: SandboxMode): void {
     this.config.mode = mode;
+    this.validator = new CommandValidator(this.config);
   }
 }
 

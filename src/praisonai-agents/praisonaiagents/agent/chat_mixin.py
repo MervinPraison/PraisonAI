@@ -87,12 +87,41 @@ Your Goal: {self.goal}"""
         
         # Add memory context if memory is enabled
         if self._memory_instance:
-            memory_context = self.get_memory_context()
-            if memory_context:
-                system_prompt += f"\n\n## Memory (Information you remember about the user)\n{memory_context}"
-                # Display memory info to user if verbose
-                if self.verbose:
-                    self._display_memory_info()
+            # Use cache-optimized context if model supports prompt caching and cache boundary is requested
+            use_cache_boundaries = hasattr(self, '_model_supports_prompt_caching') and self._model_supports_prompt_caching()
+            if use_cache_boundaries and hasattr(self._memory_instance, 'build_cache_optimized_context'):
+                try:
+                    # Get the goal/task description for context building
+                    task_desc = getattr(self, 'goal', '') or 'general assistance'
+                    cache_result = self._memory_instance.build_cache_optimized_context(
+                        task_descr=task_desc,
+                        include_cache_boundary=True
+                    )
+                    memory_context = cache_result.get('stable_prefix', '')
+                    cache_boundary = cache_result.get('cache_boundary', '')
+                    if memory_context:
+                        system_prompt += f"\n\n## Memory (Information you remember about the user)\n{memory_context}"
+                        if cache_boundary:
+                            system_prompt += cache_boundary
+                        # Display memory info to user if verbose
+                        if self.verbose:
+                            self._display_memory_info()
+                except (AttributeError, KeyError, TypeError) as e:
+                    # Fall back to standard memory context if cache optimization fails
+                    memory_context = self.get_memory_context()
+                    if memory_context:
+                        system_prompt += f"\n\n## Memory (Information you remember about the user)\n{memory_context}"
+                        # Display memory info to user if verbose
+                        if self.verbose:
+                            self._display_memory_info()
+            else:
+                # Standard memory context without cache boundaries
+                memory_context = self.get_memory_context()
+                if memory_context:
+                    system_prompt += f"\n\n## Memory (Information you remember about the user)\n{memory_context}"
+                    # Display memory info to user if verbose
+                    if self.verbose:
+                        self._display_memory_info()
             
             # Add learn context if learn is enabled (auto-inject when memory="learn")
             learn_context = self.get_learn_context()
@@ -105,6 +134,60 @@ Your Goal: {self.goal}"""
             if skills_prompt:
                 system_prompt += f"\n\n## Available Skills\n{skills_prompt}"
                 system_prompt += "\n\nWhen a skill is relevant to the task, read its SKILL.md file to get detailed instructions. If the skill has scripts in its scripts/ directory, you can execute them using the execute_code or run_script tool."
+        
+        # Cache the base system prompt BEFORE adding session context
+        # Session context is per-turn and should not be cached
+        if cache_key:
+            self._cache_put(self._system_prompt_cache, cache_key, system_prompt)
+        
+        # Add session context (platform awareness) if available - AFTER caching
+        try:
+            from ..session.context import get_session_context
+            session_ctx = get_session_context()
+            
+            # Format session context into prompt if origin or targets are present
+            if session_ctx.origin or session_ctx.reachable_targets:
+                context_parts = []
+                
+                # Add origin information
+                if session_ctx.origin:
+                    origin = session_ctx.origin
+                    origin_str = f"You are replying on {origin.platform}"
+                    if origin.chat_type and origin.chat_type != "unknown":
+                        origin_str += f" ({origin.chat_type}"
+                        if origin.display_name:
+                            origin_str += f' "{origin.display_name}"'
+                        origin_str += ")"
+                    if origin.thread_id:
+                        origin_str += f" in thread {origin.thread_id}"
+                    context_parts.append(origin_str + ".")
+                
+                # Add reachable targets
+                if session_ctx.reachable_targets:
+                    target_descriptions = []
+                    for target in session_ctx.reachable_targets:
+                        desc = f"{target.name}"
+                        if target.kind == "home":
+                            desc += f" ({target.platform}, home channel)"
+                        elif target.kind == "alias":
+                            desc += f" ({target.platform}:{target.channel_id})"
+                        target_descriptions.append(desc)
+                    
+                    if target_descriptions:
+                        context_parts.append(
+                            f"Reachable delivery targets: {', '.join(target_descriptions)}."
+                        )
+                
+                if context_parts:
+                    system_prompt += "\n\n## Session Context\n" + "\n".join(context_parts)
+        except ImportError:
+            # Session context module not available, continue without it
+            pass
+        except Exception as e:
+            # Log unexpected errors but continue
+            import logging
+            logging.debug(f"Session context injection failed: {e}", exc_info=True)
+            pass
         
         # Add tool usage instructions if tools are available
         # Use provided tools or fall back to self.tools
@@ -136,10 +219,16 @@ Your Goal: {self.goal}"""
                 system_prompt += f"\n\nYou have access to the following tools: {', '.join(tool_names)}. Use these tools when appropriate to help complete your tasks. Always use tools when they can help provide accurate information or perform actions."
                 system_prompt += "\n\nExplain Before Acting: Before calling a tool, provide a brief one-sentence explanation of what you are about to do and why. Skip explanations only for repetitive low-level operations where narration would be noisy. When performing a batch of similar operations (e.g. searching for multiple items), explain the group once rather than narrating each call individually."
         
-        # Cache the generated system prompt (only if cache_key is set, i.e., memory not enabled)
-        # Use LRU eviction to prevent unbounded growth
-        if cache_key:
-            self._cache_put(self._system_prompt_cache, cache_key, system_prompt)
+        # Add prompt injection protection instructions for external tool results
+        try:
+            from ..tools.trust import get_system_prompt_addition
+            trust_instructions = get_system_prompt_addition()
+            if trust_instructions:
+                system_prompt += f"\n\n## Security: {trust_instructions}"
+        except ImportError:
+            pass  # Trust module not available, skip security instructions
+        
+        # Note: Caching is done BEFORE session context injection to avoid cross-user leakage
         return system_prompt
 
     def _build_response_format(self, schema_model):
@@ -230,7 +319,7 @@ Your Goal: {self.goal}"""
         try:
             from ..llm.model_capabilities import supports_structured_outputs
         except ImportError:
-            return False  # Module genuinely not available — acceptable
+            return False  # Module genuinely not available - acceptable
 
         try:
             return supports_structured_outputs(self.llm)
@@ -334,13 +423,19 @@ Your Goal: {self.goal}"""
         - Tool Search progressive disclosure (if enabled)
         
         Args:
-            tools: List of tools in various formats or None to use self.tools
+            tools: List of tools in various formats or None to use self.tools.
+                  Note: [] (empty list) means explicitly no tools (security boundary),
+                        None means inherit from self.tools
             
         Returns:
             List of formatted tools or empty list
         """
+        # Security fix: Distinguish None (inherit) vs [] (explicit deny)
         if tools is None:
             tools = self.tools
+        elif isinstance(tools, list) and len(tools) == 0:
+            # Explicit empty list - return immediately to enforce boundary
+            return []
         
         if not tools:
             return []
@@ -436,6 +531,17 @@ Your Goal: {self.goal}"""
                 cleaned_tools.append(tool_copy)
             else:
                 cleaned_tools.append(tool)
+        
+        # Sort tools deterministically for cache stability
+        def sort_formatted_tools(tools_list):
+            """Sort already-formatted tool schemas by function name."""
+            def sort_key(tool):
+                if isinstance(tool, dict) and tool.get('type') == 'function':
+                    return str(tool.get('function', {}).get('name') or '')
+                return ''
+            return sorted(tools_list, key=sort_key)
+        
+        cleaned_tools = sort_formatted_tools(cleaned_tools)
         
         # Cache the formatted tools with LRU eviction, including tool search metadata
         self._cache_put(
@@ -549,41 +655,349 @@ Your Goal: {self.goal}"""
             emit_events=True
         )
 
-    def _chat_completion(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, _retry_depth=0):
+    def _get_compaction_policy(self):
+        """
+        Get the active compaction policy for this agent.
+        
+        Shared logic used by both sync and async context budget computation.
+        """
+        from ..context.policy import get_default_policy
+        
+        # Get execution config and policy
+        _execution_cfg = getattr(self, 'execution', None)
+        
+        if _execution_cfg:
+            compaction_setting = getattr(_execution_cfg, 'context_compaction', True)
+            if compaction_setting is False:
+                # Explicitly disabled 
+                return None
+            elif compaction_setting is True:
+                # Use default policy
+                return get_default_policy()
+            else:
+                # Custom policy provided
+                return compaction_setting
+        else:
+            # No execution config - use safe default
+            return get_default_policy()
+
+    def _compute_context_budget_core(self, messages, tools=None, system_prompt=None):
+        """
+        Core context budget computation logic shared by sync and async versions.
+        
+        Returns:
+            tuple: (policy, budget_result) or (None, None) if compaction disabled
+        """
+        import logging
+        
+        # Get policy (None means disabled)
+        policy = self._get_compaction_policy()
+        if policy is None:
+            return None, None
+        
+        # Get model name for context window lookup
+        model_name = self.llm if isinstance(self.llm, str) else "gpt-4o-mini"
+        
+        # Compute budget using the policy
+        budget_result = policy.compute_context_budget(
+            messages=messages,
+            model=model_name,
+            tools=tools,
+            system_prompt=system_prompt
+        )
+        
+        # Log budget analysis if enabled
+        if getattr(self, '_verbose_context', False):
+            logging.info(
+                f"[context-budget] {self.name}: {budget_result.current_tokens} tokens, "
+                f"{budget_result.utilization:.1%} utilization, route: {budget_result.route.value}"
+            )
+        
+        return policy, budget_result
+
+    def _compute_context_budget_and_route(self, messages, tools=None, system_prompt=None):
+        """
+        Compute context budget and determine proactive route BEFORE LLM call.
+        
+        Replaces the old opt-in reactive approach with proactive budget checking.
+        
+        Returns:
+            tuple: (route, compacted_messages) where route is from CompactionRoute enum
+        """
+        from ..context.policy import CompactionRoute
+        from ..compaction import ContextCompactor
+        
+        # Use shared core logic
+        policy, budget_result = self._compute_context_budget_core(messages, tools, system_prompt)
+        
+        # If compaction disabled, return unchanged
+        if policy is None:
+            return CompactionRoute.FITS, messages
+        
+        # Handle the routing decision
+        if budget_result.route == CompactionRoute.FITS:
+            return CompactionRoute.FITS, messages
+        
+        # Need some form of compaction - get max tokens for compactor
+        _execution_cfg = getattr(self, 'execution', None)
+        max_tokens = getattr(_execution_cfg, 'max_context_tokens', None) if _execution_cfg else None
+        if max_tokens is None:
+            # Use 90% of available tokens as max to leave room for output
+            max_tokens = int(budget_result.available_tokens * 0.9)
+        
+        # Create compactor with policy-driven settings
+        compactor = ContextCompactor(
+            max_tokens=max_tokens,
+            target_tokens=int(max_tokens * policy.target_utilization),
+            preserve_recent=policy.preserve_last_n_turns
+        )
+        
+        # Apply compaction based on route
+        if budget_result.route == CompactionRoute.COMPACT_NEEDED:
+            return self._apply_compaction(messages, compactor, policy)
+        elif budget_result.route == CompactionRoute.TRUNCATE_TOOLS:
+            return self._apply_tool_truncation(messages, compactor, policy)
+        elif budget_result.route == CompactionRoute.COMPACT_THEN_TRUNCATE:
+            # First try compaction
+            route, compacted_messages = self._apply_compaction(messages, compactor, policy)
+            # If still over budget, also truncate tools
+            if compactor.needs_compaction(compacted_messages):
+                return self._apply_tool_truncation(compacted_messages, compactor, policy)
+            return route, compacted_messages
+        
+        return CompactionRoute.FITS, messages
+
+    def _apply_compaction(self, messages, compactor, policy):
+        """Apply standard context compaction."""
+        from ..compaction.strategy import CompactionStrategy as LegacyStrategy
+        from ..hooks import HookEvent as _HookEvent
+        import logging
+        
+        # Map policy strategy to compactor strategy
+        strategy_map = {
+            "truncate": LegacyStrategy.TRUNCATE,
+            "summarise": LegacyStrategy.SUMMARIZE,
+            "drop_oldest_tools": LegacyStrategy.PRUNE,
+            "sliding_window": LegacyStrategy.SLIDING,
+        }
+        
+        compactor.strategy = strategy_map.get(policy.strategy.value, LegacyStrategy.PRUNE)
+        
+        # Execute hooks
+        try:
+            self._hook_runner.execute_sync(_HookEvent.BEFORE_COMPACTION, None)
+        except Exception as e:
+            logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
+            if getattr(self, '_strict_hooks', False):
+                raise
+        
+        # Perform compaction
+        compacted_msgs, result = compactor.compact(messages)
+        
+        logging.info(
+            f"[proactive-compaction] {self.name}: {result.original_tokens}→{result.compacted_tokens} tokens "
+            f"({result.messages_removed} messages removed, strategy: {policy.strategy.value})"
+        )
+        
+        try:
+            self._hook_runner.execute_sync(_HookEvent.AFTER_COMPACTION, result)
+        except Exception as e:
+            logging.warning(f"AFTER_COMPACTION hook failed: {e}")
+            if getattr(self, '_strict_hooks', False):
+                raise
+        
+        from ..context.policy import CompactionRoute
+        return CompactionRoute.COMPACT_NEEDED, compacted_msgs
+
+    def _apply_tool_truncation(self, messages, compactor, policy):
+        """Apply targeted tool output truncation."""
+        from ..context.policy import CompactionRoute
+        import logging
+        
+        # Create a copy to avoid modifying original
+        truncated_msgs = []
+        
+        for msg in messages:
+            if msg.get("role") == "tool" or msg.get("tool_call_id"):
+                content = msg.get("content", "")
+                if isinstance(content, str) and len(content) > 1000:
+                    # Truncate large tool outputs
+                    truncated_msg = msg.copy()
+                    head = content[:300]
+                    tail = content[-200:] if len(content) > 500 else ""
+                    truncated_msg["content"] = f"{head}\n...[truncated {len(content):,} chars for context budget]...\n{tail}"
+                    truncated_msgs.append(truncated_msg)
+                    continue
+            
+            truncated_msgs.append(msg)
+        
+        original_tokens = compactor.count_total_tokens(messages)
+        new_tokens = compactor.count_total_tokens(truncated_msgs)
+        
+        logging.info(
+            f"[tool-truncation] {self.name}: {original_tokens}→{new_tokens} tokens "
+            f"(truncated large tool outputs)"
+        )
+        
+        return CompactionRoute.TRUNCATE_TOOLS, truncated_msgs
+
+    async def _compute_context_budget_and_route_async(self, messages, tools=None, system_prompt=None):
+        """Async version of _compute_context_budget_and_route."""
+        from ..context.policy import CompactionRoute
+        from ..compaction import ContextCompactor
+        
+        # Use shared core logic (synchronous part)
+        policy, budget_result = self._compute_context_budget_core(messages, tools, system_prompt)
+        
+        # If compaction disabled, return unchanged
+        if policy is None:
+            return CompactionRoute.FITS, messages
+        
+        # Handle the routing decision
+        if budget_result.route == CompactionRoute.FITS:
+            return CompactionRoute.FITS, messages
+        
+        # Need some form of compaction - get max tokens for compactor
+        _execution_cfg = getattr(self, 'execution', None)
+        max_tokens = getattr(_execution_cfg, 'max_context_tokens', None) if _execution_cfg else None
+        if max_tokens is None:
+            # Use 90% of available tokens as max to leave room for output
+            max_tokens = int(budget_result.available_tokens * 0.9)
+        
+        # Create compactor with policy-driven settings
+        compactor = ContextCompactor(
+            max_tokens=max_tokens,
+            target_tokens=int(max_tokens * policy.target_utilization),
+            preserve_recent=policy.preserve_last_n_turns
+        )
+        
+        # Apply compaction based on route
+        if budget_result.route == CompactionRoute.COMPACT_NEEDED:
+            return await self._apply_compaction_async(messages, compactor, policy)
+        elif budget_result.route == CompactionRoute.TRUNCATE_TOOLS:
+            return await self._apply_tool_truncation_async(messages, compactor, policy)
+        elif budget_result.route == CompactionRoute.COMPACT_THEN_TRUNCATE:
+            # First try compaction
+            route, compacted_messages = await self._apply_compaction_async(messages, compactor, policy)
+            # If still over budget, also truncate tools
+            if compactor.needs_compaction(compacted_messages):
+                return await self._apply_tool_truncation_async(compacted_messages, compactor, policy)
+            return route, compacted_messages
+        
+        return CompactionRoute.FITS, messages
+
+    async def _apply_compaction_async(self, messages, compactor, policy):
+        """Async version of _apply_compaction."""
+        from ..compaction.strategy import CompactionStrategy as LegacyStrategy
+        from ..hooks import HookEvent as _HookEvent
+        import logging
+        
+        # Map policy strategy to compactor strategy
+        strategy_map = {
+            "truncate": LegacyStrategy.TRUNCATE,
+            "summarise": LegacyStrategy.SUMMARIZE,
+            "drop_oldest_tools": LegacyStrategy.PRUNE,
+            "sliding_window": LegacyStrategy.SLIDING,
+        }
+        
+        compactor.strategy = strategy_map.get(policy.strategy.value, LegacyStrategy.PRUNE)
+        
+        # Execute hooks
+        try:
+            await self._hook_runner.execute(_HookEvent.BEFORE_COMPACTION, None)
+        except Exception as e:
+            logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
+            if getattr(self, '_strict_hooks', False):
+                raise
+        
+        # Perform compaction
+        compacted_msgs, result = compactor.compact(messages)
+        
+        logging.info(
+            f"[proactive-compaction-async] {self.name}: {result.original_tokens}→{result.compacted_tokens} tokens "
+            f"({result.messages_removed} messages removed, strategy: {policy.strategy.value})"
+        )
+        
+        try:
+            await self._hook_runner.execute(_HookEvent.AFTER_COMPACTION, result)
+        except Exception as e:
+            logging.warning(f"AFTER_COMPACTION hook failed: {e}")
+            if getattr(self, '_strict_hooks', False):
+                raise
+        
+        from ..context.policy import CompactionRoute
+        return CompactionRoute.COMPACT_NEEDED, compacted_msgs
+
+    async def _apply_tool_truncation_async(self, messages, compactor, policy):
+        """Async version of _apply_tool_truncation."""
+        from ..context.policy import CompactionRoute
+        import logging
+        
+        # Create a copy to avoid modifying original
+        truncated_msgs = []
+        
+        for msg in messages:
+            if msg.get("role") == "tool" or msg.get("tool_call_id"):
+                content = msg.get("content", "")
+                if isinstance(content, str) and len(content) > 1000:
+                    # Truncate large tool outputs
+                    truncated_msg = msg.copy()
+                    head = content[:300]
+                    tail = content[-200:] if len(content) > 500 else ""
+                    truncated_msg["content"] = f"{head}\n...[truncated {len(content):,} chars for context budget]...\n{tail}"
+                    truncated_msgs.append(truncated_msg)
+                    continue
+            
+            truncated_msgs.append(msg)
+        
+        original_tokens = compactor.count_total_tokens(messages)
+        new_tokens = compactor.count_total_tokens(truncated_msgs)
+        
+        logging.info(
+            f"[tool-truncation-async] {self.name}: {original_tokens}→{new_tokens} tokens "
+            f"(truncated large tool outputs)"
+        )
+        
+        return CompactionRoute.TRUNCATE_TOOLS, truncated_msgs
+
+    def _get_next_fallback_model(self, fallback_index):
+        """Get the next fallback model from the chain, if available.
+        
+        Args:
+            fallback_index: Current index in the fallback chain (0-based)
+            
+        Returns:
+            str or None: Next model name if available, None otherwise
+        """
+        if not hasattr(self, 'fallback_models') or not self.fallback_models:
+            return None
+        if fallback_index >= len(self.fallback_models):
+            return None
+        return self.fallback_models[fallback_index]
+
+    def _chat_completion(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, _retry_depth=0, _fallback_index=0):
         start_time = time.time()
 
+        # --- Proactive Context Budget Management (default-on) ---
+        # Analyzes token budget BEFORE LLM call and applies appropriate strategy
+        try:
+            route, compacted_messages = self._compute_context_budget_and_route(
+                messages=messages, 
+                tools=tools,
+                system_prompt=None  # Already included in messages from _build_messages()
+            )
+            # Update messages in-place so callers see the changes
+            messages[:] = compacted_messages
+        except Exception as _ce:
+            # Fallback to original messages if proactive handling fails
+            if getattr(self, '_strict_hooks', False):
+                raise
+            logging.debug(f"[proactive-context] fallback to original messages: {_ce}")
+        
         # --- Context compaction (opt-in via ExecutionConfig.context_compaction) ---
         # Compacts message history before sending to LLM. Zero overhead when disabled.
-        _execution_cfg = getattr(self, 'execution', None)
-        if _execution_cfg and getattr(_execution_cfg, 'context_compaction', False):
-            try:
-                from ..compaction import ContextCompactor
-                from ..hooks import HookEvent as _HookEvent
-                _max_tok = getattr(_execution_cfg, 'max_context_tokens', None) or 8000
-                _compactor = ContextCompactor(max_tokens=_max_tok)
-                if _compactor.needs_compaction(messages):
-                    try:
-                        self._hook_runner.execute_sync(_HookEvent.BEFORE_COMPACTION, None)
-                    except Exception as e:
-                        logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
-                        if getattr(self, '_strict_hooks', False):
-                            raise
-                    compacted_msgs, _cr = _compactor.compact(messages)
-                    messages[:] = compacted_msgs  # in-place update so callers see the change
-                    logging.info(
-                        f"[compaction] {self.name}: {_cr.original_tokens}→{_cr.compacted_tokens} tokens "
-                        f"({_cr.messages_removed} messages removed)"
-                    )
-                    try:
-                        self._hook_runner.execute_sync(_HookEvent.AFTER_COMPACTION, None)
-                    except Exception as e:
-                        logging.warning(f"AFTER_COMPACTION hook failed: {e}")
-                        if getattr(self, '_strict_hooks', False):
-                            raise
-            except Exception as _ce:
-                if getattr(self, '_strict_hooks', False):
-                    raise
-                logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
+        from ..hooks import HookEvent as _HookEvent
+        self._apply_context_compaction(messages, _HookEvent)
 
         # Trigger BEFORE_LLM hook
         from ..hooks import HookEvent, BeforeLLMInput
@@ -598,7 +1012,7 @@ Your Goal: {self.goal}"""
             temperature=temperature
         )
         self._hook_runner.execute_sync(HookEvent.BEFORE_LLM, before_llm_input)
-        # C7 — honour any BEFORE_LLM hook that mutated the message stream
+        # C7 - honour any BEFORE_LLM hook that mutated the message stream
         # (e.g. PII redactor). The runner applies modified_input in-place on
         # before_llm_input.messages; adopt that value for the actual LLM call.
         messages = before_llm_input.messages
@@ -625,7 +1039,7 @@ Your Goal: {self.goal}"""
             try:
                 # First attempt: try with streaming enabled for better user experience
                 stream_callback = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
-                final_response = self._execute_unified_chat_completion(
+                final_response = self._chat_completion_with_retry(
                     messages=messages,
                     temperature=temperature,
                     tools=formatted_tools,
@@ -646,7 +1060,11 @@ Your Goal: {self.goal}"""
                     stream = False  # Set for the main execution below
                 else:
                     raise  # Re-raise if it's a different ValueError
-            except Exception:
+            except Exception as e:
+                from ..errors import LLMError
+                # Don't retry if it's an LLMError that has exhausted retries
+                if isinstance(e, LLMError):
+                    raise  # Re-raise LLMErrors immediately to avoid double retry
                 # For any other exception, fall back to non-streaming
                 logging.debug(f"{self.name}: Streaming attempt failed, falling back to non-streaming")
                 stream = False  # Set for the main execution below
@@ -657,7 +1075,7 @@ Your Goal: {self.goal}"""
             # UNIFIED: Single protocol-driven dispatch path (fixes DRY violation)
             # All LLM providers now go through unified dispatcher for consistency and maintainability
             stream_callback = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
-            final_response = self._execute_unified_chat_completion(
+            final_response = self._chat_completion_with_retry(
                 messages=messages,
                 temperature=temperature,
                 tools=formatted_tools,
@@ -743,56 +1161,6 @@ Your Goal: {self.goal}"""
             raise
         except Exception as e:
             from ..errors import LLMError
-            error_str = str(e).lower()
-            
-            # Check if this is a context overflow error
-            context_overflow_phrases = [
-                "maximum context length",
-                "context window is too long", 
-                "context length exceeded",
-                "context_length_exceeded",
-                "token limit",
-                "too many tokens"
-            ]
-            is_overflow = any(phrase in error_str for phrase in context_overflow_phrases)
-            
-            if is_overflow and self.context_manager:
-                # Attempt overflow recovery with emergency truncation
-                logging.warning(f"[{self.name}] Context overflow detected, attempting recovery...")
-                try:
-                    from ..context.budgeter import get_model_limit
-                    from ..context.tokens import estimate_messages_tokens
-                    
-                    model_name = self.llm if isinstance(self.llm, str) else "gpt-4o-mini"
-                    model_limit = get_model_limit(model_name)
-                    target = int(model_limit * 0.7)  # Target 70% of limit for safety
-                    
-                    # Apply emergency truncation
-                    truncated_messages = self.context_manager.emergency_truncate(messages, target)
-                    
-                    logging.info(
-                        f"[{self.name}] Emergency truncation: {estimate_messages_tokens(messages)} -> "
-                        f"{estimate_messages_tokens(truncated_messages)} tokens"
-                    )
-                    
-                    # Retry with truncated messages (recursive call with depth limit)
-                    if _retry_depth < 2:
-                        return self._chat_completion(
-                            truncated_messages, temperature, tools, stream, 
-                            reasoning_steps, task_name, task_description, task_id, response_format, 
-                            _retry_depth=_retry_depth + 1
-                        )
-                    else:
-                        logging.error(f"[{self.name}] Context overflow retry limit exceeded")
-                        raise LLMError(
-                            f"Context overflow could not be resolved after {_retry_depth} attempts", 
-                            model_name=model_name, agent_id=self.name, is_retryable=False
-                        ) from e
-                except LLMError:
-                    # Re-raise LLMError (including depth limit errors) without swallowing
-                    raise
-                except Exception as recovery_error:
-                    logging.error(f"[{self.name}] Overflow recovery failed: {recovery_error}")
             
             # Emit LLM response trace event on error
             _duration_ms = (time.time() - start_time) * 1000
@@ -803,36 +1171,130 @@ Your Goal: {self.goal}"""
                 response_content=str(e),  # Include error for context replay
             )
             
-            # Classify and raise structured error with improved transient failure detection
+            # Use structured error classification for all error types (replaces legacy heuristic checks)
+            from ..llm.error_classifier import classify_llm_error
+            from ..llm.retry_utils import jittered_backoff
+            
             model_name = self.llm if isinstance(self.llm, str) else "unknown"
             session_id = getattr(self, '_session_id', 'unknown')
             
-            # Check for retryable errors (rate limits, transient network issues, provider errors)
-            retryable_indicators = [
-                "rate limit", "429", "too many requests",
-                "timeout", "connection reset", "connection error", "socket error",
-                "500", "502", "503", "504", "service unavailable", "internal server error",
-                "dns", "network", "connection refused"
-            ]
+            # Determine provider from model name or use default
+            provider = "openai"  # Default assumption
+            if "claude" in model_name.lower() or "anthropic" in model_name.lower():
+                provider = "anthropic"
+            elif "azure" in model_name.lower():
+                provider = "azure"
             
-            # Check for non-retryable errors (auth issues)
-            auth_indicators = ["401", "403", "authentication", "unauthorized", "invalid_api_key"]
+            # Get token counts for context-aware classification
+            prompt_tokens = 0
+            context_length = 0
+            try:
+                from ..context.tokens import estimate_messages_tokens
+                prompt_tokens = estimate_messages_tokens(messages)
+                context_length = prompt_tokens
+            except Exception:
+                pass  # Token estimation failed, continue without counts
             
-            if any(phrase in error_str.lower() for phrase in retryable_indicators):
-                is_retryable = True
-            elif any(phrase in error_str.lower() for phrase in auth_indicators):
-                is_retryable = False
-            else:
-                # Default to retryable for unknown errors to be more resilient
-                is_retryable = True
+            # Classify error with structured recovery hints
+            classification = classify_llm_error(
+                e,
+                provider=provider,
+                model=model_name,
+                prompt_tokens=prompt_tokens,
+                context_length=context_length,
+                retry_depth=_retry_depth,
+            )
             
-            # Create LLMError with contextual metadata
+            # Execute recovery actions based on classification
+            if classification.should_compress_context and self.context_manager:
+                try:
+                    from ..context.budgeter import get_model_limit
+                    model_limit = get_model_limit(model_name)
+                    target = int(model_limit * 0.7)  # Target 70% of limit for safety
+                    
+                    # Apply emergency truncation
+                    truncated_messages = self.context_manager.emergency_truncate(messages, target)
+                    
+                    logging.info(f"[{self.name}] {classification.user_message}")
+                    
+                    # Retry with compressed context (recursive call with depth limit)
+                    if _retry_depth < 2:
+                        return self._chat_completion(
+                            truncated_messages, temperature, tools, stream, 
+                            reasoning_steps, task_name, task_description, task_id, response_format, 
+                            _retry_depth=_retry_depth + 1,
+                            _fallback_index=_fallback_index
+                        )
+                except Exception as compression_error:
+                    logging.error(f"[{self.name}] Context compression failed: {compression_error}")
+            
+            if classification.should_rotate_credential:
+                # TODO: Implement credential rotation when available
+                logging.warning(f"[{self.name}] {classification.user_message} (credential rotation not yet implemented)")
+                # Don't retry without actual credential rotation
+                
+            elif classification.should_fallback_model:
+                # Try next model in the fallback chain
+                next_model = self._get_next_fallback_model(_fallback_index)
+                if next_model:
+                    current_model = self.llm if isinstance(self.llm, str) else str(self.llm)
+                    logging.info(f"[{self.name}] {current_model} unavailable — falling back to {next_model}")
+                    
+                    # Apply backoff if suggested
+                    if classification.backoff_seconds and classification.backoff_seconds > 0:
+                        time.sleep(classification.backoff_seconds)
+                    
+                    # Temporarily override the model and clear dispatcher cache for this call
+                    original_llm = self.llm
+                    original_dispatcher = getattr(self, '_unified_dispatcher', None)
+                    try:
+                        self.llm = next_model
+                        self._unified_dispatcher = None  # Force recreation with new model
+                        return self._chat_completion(
+                            messages, temperature, tools, stream,
+                            reasoning_steps, task_name, task_description, task_id, response_format,
+                            _retry_depth=_retry_depth + 1,
+                            _fallback_index=_fallback_index + 1
+                        )
+                    finally:
+                        self.llm = original_llm
+                        self._unified_dispatcher = original_dispatcher  # Restore original dispatcher
+                else:
+                    logging.warning(f"[{self.name}] {classification.user_message} (no more fallback models available)")
+                    # Continue to error handling without retry
+                
+            elif classification.is_retryable and classification.backoff_seconds > 0:
+                if _retry_depth < 2:  # Limit retry attempts
+                    logging.info(f"[{self.name}] {classification.user_message} (waiting {classification.backoff_seconds:.1f}s)")
+                    time.sleep(classification.backoff_seconds)
+                    return self._chat_completion(
+                        messages, temperature, tools, stream, 
+                        reasoning_steps, task_name, task_description, task_id, response_format, 
+                        _retry_depth=_retry_depth + 1,
+                        _fallback_index=_fallback_index
+                    )
+            
+            # Include remediation hints for unimplemented recovery actions
+            user_message = classification.user_message
+            if classification.should_rotate_credential:
+                user_message += " Credential rotation is not yet implemented."
+            if classification.should_fallback_model:
+                if not self.fallback_models:
+                    user_message += " No fallback models configured."
+                elif _fallback_index >= len(self.fallback_models):
+                    user_message += f" All {len(self.fallback_models)} fallback models exhausted."
+            
+            # Create LLMError with classification context
             error = LLMError(
                 str(e),
                 model_name=model_name,
                 agent_id=self.name,
-                is_retryable=is_retryable,
-                context={"session_id": session_id},
+                is_retryable=classification.is_retryable,
+                context={
+                    "session_id": session_id,
+                    "error_category": classification.error_category,
+                    "user_message": user_message,
+                },
             )
             
             # Call error hook if available for error interception
@@ -843,6 +1305,184 @@ Your Goal: {self.goal}"""
                     logging.debug(f"Error in on_error hook: {hook_error}")
             
             raise error from e
+
+    async def _handle_async_llm_error(
+        self, 
+        exc: Exception, 
+        messages, 
+        temperature=1.0, 
+        tools=None, 
+        stream=True,
+        reasoning_steps=False,
+        task_name=None,
+        task_description=None,
+        task_id=None,
+        response_format=None,
+        stream_callback=None,
+        emit_events=True,
+        _retry_depth=0,
+        _fallback_index=0
+    ):
+        """
+        Handle LLM errors in async context using structured classification.
+        Mirrors the sync error handling logic but with async-compatible primitives.
+        """
+        import asyncio
+        from ..llm.error_classifier import classify_llm_error
+        from ..errors import LLMError
+        
+        model_name = self.llm if isinstance(self.llm, str) else "unknown"
+        session_id = getattr(self, '_session_id', 'unknown')
+        
+        # Determine provider from model name or use default
+        provider = "openai"  # Default assumption
+        if "claude" in model_name.lower() or "anthropic" in model_name.lower():
+            provider = "anthropic"
+        elif "azure" in model_name.lower():
+            provider = "azure"
+        
+        # Get token counts for context-aware classification
+        prompt_tokens = 0
+        context_length = 0
+        try:
+            from ..context.tokens import estimate_messages_tokens
+            prompt_tokens = estimate_messages_tokens(messages)
+            context_length = prompt_tokens
+        except Exception:
+            pass  # Token estimation failed, continue without counts
+        
+        # Classify error with structured recovery hints
+        classification = classify_llm_error(
+            exc,
+            provider=provider,
+            model=model_name,
+            prompt_tokens=prompt_tokens,
+            context_length=context_length,
+            retry_depth=_retry_depth,
+        )
+        
+        # Execute recovery actions based on classification (async-compatible)
+        if classification.should_compress_context and self.context_manager:
+            try:
+                from ..context.budgeter import get_model_limit
+                model_limit = get_model_limit(model_name)
+                target = int(model_limit * 0.7)  # Target 70% of limit for safety
+                
+                # Apply emergency truncation
+                truncated_messages = self.context_manager.emergency_truncate(messages, target)
+                
+                logging.info(f"[{self.name}] {classification.user_message}")
+                
+                # Retry with compressed context (recursive call with depth limit)
+                if _retry_depth < 2:
+                    # Need to call the full async method that includes error handling
+                    try:
+                        return await self._execute_unified_achat_completion(
+                            truncated_messages, temperature, tools, stream, 
+                            reasoning_steps, task_name, task_description, task_id, response_format,
+                            stream_callback, emit_events
+                        )
+                    except Exception as retry_error:
+                        return await self._handle_async_llm_error(
+                            retry_error, truncated_messages, temperature, tools, stream,
+                            reasoning_steps, task_name, task_description, task_id, response_format,
+                            stream_callback, emit_events, _retry_depth + 1, _fallback_index
+                        )
+            except Exception as compression_error:
+                logging.error(f"[{self.name}] Context compression failed: {compression_error}")
+        
+        if classification.should_rotate_credential:
+            # TODO: Implement credential rotation when available
+            logging.warning(f"[{self.name}] {classification.user_message} (credential rotation not yet implemented)")
+            # Don't retry without actual credential rotation
+            
+        elif classification.should_fallback_model:
+            # Try next model in the fallback chain
+            next_model = self._get_next_fallback_model(_fallback_index)
+            if next_model:
+                current_model = self.llm if isinstance(self.llm, str) else str(self.llm)
+                logging.info(f"[{self.name}] {current_model} unavailable — falling back to {next_model}")
+                
+                # Apply backoff if suggested
+                if classification.backoff_seconds and classification.backoff_seconds > 0:
+                    await asyncio.sleep(classification.backoff_seconds)
+                
+                # Temporarily override the model and clear dispatcher cache for this call
+                original_llm = self.llm
+                original_dispatcher = getattr(self, '_unified_dispatcher', None)
+                try:
+                    self.llm = next_model
+                    self._unified_dispatcher = None  # Force recreation with new model
+                    return await self._execute_unified_achat_completion(
+                        messages, temperature, tools, stream,
+                        reasoning_steps, task_name, task_description, task_id, response_format,
+                        stream_callback, emit_events
+                    )
+                except Exception as retry_error:
+                    return await self._handle_async_llm_error(
+                        retry_error, messages, temperature, tools, stream,
+                        reasoning_steps, task_name, task_description, task_id, response_format,
+                        stream_callback, emit_events, _retry_depth + 1, _fallback_index + 1
+                    )
+                finally:
+                    self.llm = original_llm
+                    self._unified_dispatcher = original_dispatcher  # Restore original dispatcher
+            else:
+                logging.warning(f"[{self.name}] {classification.user_message} (no more fallback models available)")
+                # Continue to error handling without retry
+            
+        elif classification.is_retryable and classification.backoff_seconds > 0:
+            if _retry_depth < 2:  # Limit retry attempts
+                logging.info(f"[{self.name}] {classification.user_message} (waiting {classification.backoff_seconds:.1f}s)")
+                await asyncio.sleep(classification.backoff_seconds)
+                # Need to call the full async method that includes error handling
+                try:
+                    return await self._execute_unified_achat_completion(
+                        messages, temperature, tools, stream, 
+                        reasoning_steps, task_name, task_description, task_id, response_format,
+                        stream_callback, emit_events
+                    )
+                except Exception as retry_error:
+                    return await self._handle_async_llm_error(
+                        retry_error, messages, temperature, tools, stream,
+                        reasoning_steps, task_name, task_description, task_id, response_format,
+                        stream_callback, emit_events, _retry_depth + 1, _fallback_index
+                    )
+        
+        # Include remediation hints for unimplemented recovery actions
+        user_message = classification.user_message
+        if classification.should_rotate_credential:
+            user_message += " Credential rotation is not yet implemented."
+        if classification.should_fallback_model:
+            if not self.fallback_models:
+                user_message += " No fallback models configured."
+            elif _fallback_index >= len(self.fallback_models):
+                user_message += f" All {len(self.fallback_models)} fallback models exhausted."
+        
+        # Create LLMError with classification context
+        error = LLMError(
+            str(exc),
+            model_name=model_name,
+            agent_id=self.name,
+            is_retryable=classification.is_retryable,
+            context={
+                "session_id": session_id,
+                "error_category": classification.error_category,
+                "user_message": user_message,
+            },
+        )
+        
+        # Call error hook if available for error interception
+        if hasattr(self, 'on_error') and self.on_error:
+            try:
+                # Note: calling sync hook from async context - this is intentional
+                # for backward compatibility with existing hook implementations
+                self.on_error(error)
+            except Exception as hook_error:
+                logging.debug(f"Error in on_error hook: {hook_error}")
+        
+        # Raise the enriched error
+        raise error
 
     def _execute_unified_chat_completion(
         self, 
@@ -861,7 +1501,7 @@ Your Goal: {self.goal}"""
         """
         Execute unified chat completion using composition instead of runtime class mutation.
         
-        This method provides the same functionality as UnifiedChatMixin but uses
+        This method provides a unified dispatch for all LLM providers using
         composition for safety and maintainability.
         """
         from ..llm import create_llm_dispatcher
@@ -985,7 +1625,7 @@ Your Goal: {self.goal}"""
         """
         Execute unified async chat completion using composition instead of runtime class mutation.
         
-        This method provides the same functionality as UnifiedChatMixin but uses
+        This method provides a unified async dispatch for all LLM providers using
         composition for safety and maintainability.
         """
         from ..llm import create_llm_dispatcher
@@ -1048,8 +1688,12 @@ Your Goal: {self.goal}"""
             return final_response
             
         except Exception as e:
-            logging.error(f"Unified async chat completion failed: {e}")
-            raise
+            from ..errors import LLMError
+            # Apply the same structured error classification for async path
+            return await self._handle_async_llm_error(
+                e, messages, temperature, tools, stream, reasoning_steps,
+                task_name, task_description, task_id, response_format, stream_callback, emit_events
+            )
 
     async def _finalize_unified_achat_response(
         self,
@@ -1280,6 +1924,45 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             return messages, None
         
         try:
+            # First check if compression will be needed
+            self.context_manager._ledger.reset()
+            if system_prompt:
+                self.context_manager._ledger.track_system_prompt(system_prompt)
+            if tools:
+                self.context_manager._ledger.track_tools(tools or [])
+            self.context_manager._ledger.track_history(messages)
+            
+            utilization = self.context_manager._ledger.get_utilization()
+            needs_optimization = utilization >= self.context_manager.config.compact_threshold
+            
+            # Only call on_pre_compress hook when compression will actually occur
+            if needs_optimization and self._memory_instance:
+                try:
+                    # Try async version first if in async context, fallback to sync
+                    import asyncio
+                    summary = ""
+                    try:
+                        loop = asyncio.get_running_loop()
+                        # In async context - run async hook if available
+                        if hasattr(self._memory_instance, 'aon_pre_compress'):
+                            # Schedule async hook without blocking
+                            task = asyncio.create_task(self._memory_instance.aon_pre_compress(messages))
+                            # For now, we'll run sync hook to avoid blocking
+                            # TODO: Make this method async-aware or run async hook in background
+                            if hasattr(self._memory_instance, 'on_pre_compress'):
+                                summary = self._memory_instance.on_pre_compress(messages)
+                        elif hasattr(self._memory_instance, 'on_pre_compress'):
+                            summary = self._memory_instance.on_pre_compress(messages)
+                    except RuntimeError:
+                        # Not in async context - use sync hook
+                        if hasattr(self._memory_instance, 'on_pre_compress'):
+                            summary = self._memory_instance.on_pre_compress(messages)
+                    
+                    if summary:
+                        logging.debug(f"[{self.name}] Memory provider extracted: {summary[:100]}...")
+                except Exception as e:
+                    logging.warning(f"[{self.name}] Memory on_pre_compress hook failed: {e}")
+            
             # Process through context manager
             result = self.context_manager.process(
                 messages=messages,
@@ -1327,7 +2010,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             logging.warning(f"Context management error (continuing without): {e}")
             return messages, None
 
-    def _truncate_tool_output(self, tool_name: str, output: str) -> str:
+    def _truncate_tool_output(self, tool_name: str, output: str, tool_call_id: str | None = None) -> str:
         """
         Truncate tool output according to configured budget.
         
@@ -1336,6 +2019,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         Args:
             tool_name: Name of the tool
             output: Raw tool output
+            tool_call_id: Optional ID for the tool call
             
         Returns:
             Truncated output if over budget, otherwise original
@@ -1344,7 +2028,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             return output
         
         try:
-            return self.context_manager.truncate_tool_output(tool_name, output)
+            run_id = getattr(self, '_run_id', None)
+            return self.context_manager.truncate_tool_output(tool_name, output, tool_call_id, run_id)
         except Exception as e:
             logging.warning(f"Tool output truncation error: {e}")
             return output
@@ -1427,6 +2112,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # body before any backend/LLM call.
         prompt = self._resolve_skill_invocation(prompt)
 
+        # Check for steering messages before processing
+        if hasattr(self, '_check_steering_messages'):
+            try:
+                steering_msg = self._check_steering_messages()
+                if steering_msg:
+                    # Inject steering message into prompt with clear separator
+                    prompt = f"{prompt}\n\n{steering_msg}"
+            except Exception as e:
+                logger.warning(f"Steering check failed, continuing without steering: {e}")
+
         # Check if external managed backend is configured
         if hasattr(self, 'backend') and self.backend is not None:
             # Extract kwargs for delegation, excluding 'self' and function locals
@@ -1454,7 +2149,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
         
         try:
-            # C2 — cooperative cancellation: abort early if a pre-set token is given
+            # C2 - cooperative cancellation: abort early if a pre-set token is given
             _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
             if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
                 reason = getattr(_cancel, "reason", None) or "cancelled before LLM call"
@@ -1585,9 +2280,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if self._using_custom_llm:
             try:
                 # Special handling for MCP tools when using provider/model format
-                # Fix: Handle empty tools list properly - use self.tools if tools is None or empty
-                if tools is None or (isinstance(tools, list) and len(tools) == 0):
+                # Security fix: Distinguish None (inherit) vs [] (explicit deny)
+                if tools is None:
+                    # None means inherit agent's configured tools
                     tool_param = self.tools
+                elif isinstance(tools, list) and len(tools) == 0:
+                    # Empty list means explicitly deny all tools (security boundary)
+                    tool_param = []
                 else:
                     tool_param = tools
                 
@@ -1642,11 +2341,29 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     self._persist_message("user", normalized_content)
                 
                 try:
-                    # Apply context management before LLM call (auto-compaction)
-                    # Zero overhead when context=False
+                    # --- Proactive Context Budget Management (sync custom LLM path) ---
                     system_prompt_for_llm = self._build_system_prompt(tools)
+                    
+                    # Apply proactive context budget analysis before any other processing
+                    try:
+                        route, compacted_history = self._compute_context_budget_and_route(
+                            messages=self.chat_history,
+                            tools=tool_param,
+                            system_prompt=None  # Already included in messages from _build_messages()
+                        )
+                        # Use compacted history for further processing
+                        working_history = compacted_history
+                    except Exception as _ce:
+                        # Fallback to original chat history if proactive handling fails
+                        if getattr(self, '_strict_hooks', False):
+                            raise
+                        logging.debug(f"[proactive-context-sync] fallback to original history: {_ce}")
+                        working_history = self.chat_history
+                    
+                    # Apply legacy context management on the (possibly compacted) history
+                    # Zero overhead when context=False
                     processed_history, context_result = self._apply_context_management(
-                        messages=self.chat_history,
+                        messages=working_history,
                         system_prompt=system_prompt_for_llm,
                         tools=tool_param,
                     )
@@ -1676,6 +2393,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         task_id=task_id,
                         execute_tool_fn=self.execute_tool,
                         parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
+                        max_tool_calls_per_turn=getattr(getattr(self, "execution", None), "max_tool_calls_per_turn", 10),
                         reasoning_steps=reasoning_steps,
                         stream=stream
                     )
@@ -1686,11 +2404,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if effective_tool_choice:
                         llm_kwargs['tool_choice'] = effective_tool_choice
 
-                    # C1 — per-call seed overrides llm_instance.seed for determinism
+                    # C1 - per-call seed overrides llm_instance.seed for determinism
                     if seed is not None:
                         llm_kwargs['seed'] = seed
 
-                    # C2 — last-chance cancel check before handing to the LLM
+                    # C2 - last-chance cancel check before handing to the LLM
                     if cancel_token is not None and getattr(cancel_token, 'is_set', lambda: False)():
                         reason = getattr(cancel_token, 'reason', None) or 'cancelled'
                         raise InterruptedError(f"Agent chat cancelled: {reason}")
@@ -1801,7 +2519,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     agent_tools=agent_tools
                                 )
 
-                        response = self._chat_completion(messages, temperature=temperature, tools=tools if tools else None, reasoning_steps=reasoning_steps, stream=stream, task_name=task_name, task_description=task_description, task_id=task_id, response_format=response_format)
+                        response = self._chat_completion(messages, temperature=temperature, tools=tools, reasoning_steps=reasoning_steps, stream=stream, task_name=task_name, task_description=task_description, task_id=task_id, response_format=response_format)
                         if not response:
                             # Rollback chat history on response failure
                             self._truncate_chat_history(chat_history_length)
@@ -1954,8 +2672,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # If not satisfactory and not at max reflections, continue with regeneration
                             logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
                             messages.append({"role": "user", "content": "Now regenerate your response using the reflection you made"})
-                            # For custom LLMs during reflection, always use non-streaming to ensure complete responses
-                            use_stream = self.stream if not self._using_custom_llm else False
+                            # For reflection, always use non-streaming to ensure compatibility with sync adapters
+                            # and to avoid streaming complexity during regeneration process
+                            use_stream = False
                             response = self._chat_completion(messages, temperature=temperature, tools=None, stream=use_stream, task_name=task_name, task_description=task_description, task_id=task_id)
                             content = response.choices[0].message.content
                             response_text = content.strip() if content else ""
@@ -2001,6 +2720,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Slash-command invocation: /skill-name [args] renders the skill body.
         prompt = self._resolve_skill_invocation(prompt)
 
+        # Check for steering messages before processing
+        if hasattr(self, '_check_steering_messages'):
+            try:
+                steering_msg = self._check_steering_messages()
+                if steering_msg:
+                    # Inject steering message into prompt with clear separator
+                    prompt = f"{prompt}\n\n{steering_msg}"
+            except Exception as e:
+                logger.warning(f"Steering check failed, continuing without steering: {e}")
+
         # Emit context trace event (zero overhead when not set)
         from ..trace.context_events import get_context_emitter
         _trace_emitter = get_context_emitter()
@@ -2021,7 +2750,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     async def _achat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None, seed=None, cancel_token=None):
         """Internal async chat implementation (extracted for trace wrapping)."""
-        # C2 — cooperative cancellation: abort early if a pre-set token is given
+        # C2 - cooperative cancellation: abort early if a pre-set token is given
         _cancel = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
         if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
             reason = getattr(_cancel, "reason", None) or "cancelled before LLM call"
@@ -2116,44 +2845,34 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # Add user message to chat history BEFORE LLM call so handoffs can access it
                     self._append_to_chat_history({"role": "user", "content": normalized_content})
 
+                # --- Proactive Context Budget Management (async custom LLM path) ---
+                try:
+                    route, compacted_history = await self._compute_context_budget_and_route_async(
+                        messages=self.chat_history,
+                        tools=tools,
+                        system_prompt=None  # Already included in messages from _build_messages()
+                    )
+                    # Keep compacted history local until success - don't mutate shared state yet
+                    effective_history = compacted_history
+                except Exception as _ce:
+                    if getattr(self, '_strict_hooks', False):
+                        raise
+                    logging.debug(f"[proactive-context-async] fallback: {_ce}")
+                    effective_history = self.chat_history
+                    
                 # --- Context compaction (async custom LLM path) ---
-                _exec_cfg = getattr(self, 'execution', None)
-                if _exec_cfg and getattr(_exec_cfg, 'context_compaction', False):
-                    try:
-                        from ..compaction import ContextCompactor
-                        from ..hooks import HookEvent as _HE
-                        _mtok = getattr(_exec_cfg, 'max_context_tokens', None) or 8000
-                        _cw = ContextCompactor(max_tokens=_mtok)
-                        if _cw.needs_compaction(self.chat_history):
-                            try:
-                                await self._hook_runner.execute(_HE.BEFORE_COMPACTION, None)
-                            except Exception as e:
-                                logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
-                                if getattr(self, '_strict_hooks', False):
-                                    raise
-                            _ch, _cr = _cw.compact(self.chat_history)
-                            self._replace_chat_history(_ch)
-                            logging.info(
-                                f"[compaction] {self.name}: {_cr.original_tokens}→{_cr.compacted_tokens} tokens "
-                                f"({_cr.messages_removed} messages removed)"
-                            )
-                            try:
-                                await self._hook_runner.execute(_HE.AFTER_COMPACTION, None)
-                            except Exception as e:
-                                logging.warning(f"AFTER_COMPACTION hook failed: {e}")
-                                if getattr(self, '_strict_hooks', False):
-                                    raise
-                    except Exception as _ce:
-                        if getattr(self, '_strict_hooks', False):
-                            raise
-                        logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
+                from ..hooks import HookEvent as _HE
+                compacted = await self._apply_context_compaction_async(self.chat_history, _HE)
+                if compacted:
+                    # Use the modified chat_history after compaction
+                    pass
 
                 try:
-                    # C1 — per-call seed forwarding (async path)  
+                    # C1 - per-call seed forwarding (async path)  
                     llm_kwargs = {
                         'prompt': prompt,
                         'system_prompt': self._build_system_prompt(tools),
-                        'chat_history': self.chat_history,
+                        'chat_history': effective_history,
                         'temperature': temperature,
                         'tools': tools,
                         'output_json': output_json,
@@ -2172,20 +2891,25 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         'task_id': task_id,
                         'execute_tool_fn': self.execute_tool_async,
                         'parallel_tool_calls': getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
+                        'max_tool_calls_per_turn': getattr(getattr(self, "execution", None), "max_tool_calls_per_turn", 10),
                         'reasoning_steps': reasoning_steps,
                         'stream': stream
                     }
                     
-                    # C1 — per-call seed overrides llm_instance.seed for determinism  
+                    # C1 - per-call seed overrides llm_instance.seed for determinism  
                     if seed is not None:
                         llm_kwargs['seed'] = seed
                     
-                    # C2 — last-chance cancel check before handing to the LLM
+                    # C2 - last-chance cancel check before handing to the LLM
                     if _cancel is not None and getattr(_cancel, 'is_set', lambda: False)():
                         reason = getattr(_cancel, 'reason', None) or 'cancelled'
                         raise InterruptedError(f"Agent chat cancelled: {reason}")
                     
                     response_text = await self.llm_instance.get_response_async(**llm_kwargs)
+
+                    # LLM call succeeded - now it's safe to commit any compacted history
+                    if effective_history is not self.chat_history:
+                        self._replace_chat_history(effective_history)
 
                     self._append_to_chat_history({"role": "assistant", "content": response_text})
 
@@ -2233,31 +2957,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # Add user message to chat history BEFORE LLM call so handoffs can access it
                 self._append_to_chat_history({"role": "user", "content": normalized_content})
 
+            # --- Proactive Context Budget Management (async standard OpenAI path) ---
+            try:
+                route, compacted_messages = await self._compute_context_budget_and_route_async(
+                    messages=messages,
+                    tools=tools,
+                    system_prompt=None  # Already included in messages from _build_messages()
+                )
+                messages[:] = compacted_messages
+            except Exception as _ce2:
+                if getattr(self, '_strict_hooks', False):
+                    raise
+                logging.debug(f"[proactive-context-async-standard] fallback: {_ce2}")
+                
             # --- Context compaction (async standard OpenAI path) ---
-            _exec_cfg2 = getattr(self, 'execution', None)
-            if _exec_cfg2 and getattr(_exec_cfg2, 'context_compaction', False):
-                try:
-                    from ..compaction import ContextCompactor
-                    from ..hooks import HookEvent as _HE2
-                    _mtok2 = getattr(_exec_cfg2, 'max_context_tokens', None) or 8000
-                    _cw2 = ContextCompactor(max_tokens=_mtok2)
-                    if _cw2.needs_compaction(messages):
-                        try:
-                            await self._hook_runner.execute(_HE2.BEFORE_COMPACTION, None)
-                        except Exception:
-                            pass
-                        _cm2, _cr2 = _cw2.compact(messages)
-                        messages[:] = _cm2
-                        logging.info(
-                            f"[compaction] {self.name}: {_cr2.original_tokens}→{_cr2.compacted_tokens} tokens "
-                            f"({_cr2.messages_removed} messages removed)"
-                        )
-                        try:
-                            await self._hook_runner.execute(_HE2.AFTER_COMPACTION, None)
-                        except Exception:
-                            pass
-                except Exception as _ce2:
-                    logging.debug(f"[compaction] skipped (non-fatal): {_ce2}")
+            from ..hooks import HookEvent as _HE2
+            await self._apply_context_compaction_async(messages, _HE2)
 
             reflection_count = 0
             start_time = time.time()
@@ -2292,7 +3007,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             response_format = self._build_response_format(schema_model)
                         
                         # Use composition instead of runtime class mutation for safety
-                        response = await self._execute_unified_achat_completion(
+                        response = await self._achat_completion_with_retry(
                             messages=messages,
                             temperature=temperature,
                             tools=formatted_tools,
@@ -2464,7 +3179,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         {"role": "user", "content": "Now regenerate your response using the reflection you made"}
                                     ]
                                     
-                                    new_response = await self._execute_unified_achat_completion(
+                                    new_response = await self._achat_completion_with_retry(
                                         messages=regenerate_messages,
                                         temperature=temperature,
                                         tools=formatted_tools,
@@ -2917,7 +3632,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         task_description=kwargs.get('task_description'),
                         task_id=kwargs.get('task_id'),
                         execute_tool_fn=self.execute_tool,
-                        parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False)
+                        parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
+                        max_tool_calls_per_turn=getattr(getattr(self, "execution", None), "max_tool_calls_per_turn", 10)
                     ):
                         response_content += chunk
                         yield chunk
@@ -3147,3 +3863,355 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             response = self.chat(prompt, **kwargs)
             if response:
                 yield response
+
+    def _create_llm_summarize_function(self):
+        """
+        Create an async LLM summarization function for context compaction.
+        
+        Returns a callable that takes a prompt and returns an LLM response.
+        """
+        async def llm_summarize_async(prompt: str) -> str:
+            """Call the agent's LLM to summarize text."""
+            try:
+                # Use the agent's unified chat completion for summarization
+                summary_messages = [
+                    {"role": "user", "content": prompt}
+                ]
+                
+                response = await self._execute_unified_achat_completion(
+                    messages=summary_messages,
+                    temperature=0.3,  # Lower temperature for more consistent summaries
+                    tools=None,  # No tools for summarization
+                    stream=False,  # No streaming for internal summarization
+                    emit_events=False,  # Don't emit events for internal calls
+                )
+                
+                # Extract the content from response using existing method
+                extracted = self._extract_llm_response_content(response)
+                if not extracted or not str(extracted).strip():
+                    raise ValueError("LLM summarization returned empty content")
+                return str(extracted).strip()
+                    
+            except Exception as e:
+                logging.warning(f"LLM summarization call failed: {e}")
+                raise
+        
+        return llm_summarize_async
+
+    def _apply_context_compaction(self, messages, hook_event_class):
+        """
+        Apply context compaction to messages if enabled (sync version).
+        
+        Args:
+            messages: List of messages to potentially compact
+            hook_event_class: Hook event class to use for before/after hooks
+            
+        Returns:
+            bool: True if compaction was applied, False otherwise
+        """
+        _execution_cfg = getattr(self, 'execution', None)
+        if not (_execution_cfg and getattr(_execution_cfg, 'context_compaction', False)):
+            return False
+            
+        try:
+            from ..compaction import ContextCompactor
+            from ..compaction.strategy import CompactionStrategy
+            
+            _max_tok = getattr(_execution_cfg, 'max_context_tokens', None) or 8000
+            _strategy = getattr(_execution_cfg, 'compaction_strategy', None) or CompactionStrategy.TRUNCATE
+            
+            # Create LLM summarization function if strategy is LLM_SUMMARIZE
+            _llm_fn = None
+            if _strategy == CompactionStrategy.LLM_SUMMARIZE:
+                try:
+                    _llm_fn = self._create_llm_summarize_function()
+                except Exception as e:
+                    logging.warning(f"Failed to create LLM summarize function: {e}")
+            
+            _compactor = ContextCompactor(
+                max_tokens=_max_tok,
+                strategy=_strategy,
+                llm_summarize_fn=_llm_fn
+            )
+            
+            if not _compactor.needs_compaction(messages):
+                return False
+                
+            # Execute BEFORE_COMPACTION hook
+            try:
+                self._hook_runner.execute_sync(hook_event_class.BEFORE_COMPACTION, None)
+            except Exception as e:
+                logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
+                if getattr(self, '_strict_hooks', False):
+                    raise
+            
+            # Perform compaction
+            if _strategy == CompactionStrategy.LLM_SUMMARIZE and _llm_fn:
+                import asyncio
+                try:
+                    # Run async compaction in event loop
+                    compacted_msgs, _cr = asyncio.run(_compactor.compact_async(messages))
+                except RuntimeError:
+                    # If already in async context, fall back to sync (naive) compaction
+                    logging.warning(
+                        f"[compaction] {self.name}: LLM_SUMMARIZE fell back to naive summarization "
+                        f"(asyncio.run not available in sync context)"
+                    )
+                    compacted_msgs, _cr = _compactor.compact(messages)
+            else:
+                compacted_msgs, _cr = _compactor.compact(messages)
+            
+            messages[:] = compacted_msgs  # in-place update so callers see the change
+            logging.info(
+                f"[compaction] {self.name}: {_cr.original_tokens}→{_cr.compacted_tokens} tokens "
+                f"({_cr.messages_removed} messages removed, strategy={_cr.strategy_used.value})"
+            )
+            
+            # Execute AFTER_COMPACTION hook  
+            try:
+                self._hook_runner.execute_sync(hook_event_class.AFTER_COMPACTION, None)
+            except Exception as e:
+                logging.warning(f"AFTER_COMPACTION hook failed: {e}")
+                if getattr(self, '_strict_hooks', False):
+                    raise
+                    
+            return True
+            
+        except Exception as _ce:
+            if getattr(self, '_strict_hooks', False):
+                raise
+            logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
+            return False
+
+    async def _apply_context_compaction_async(self, messages, hook_event_class):
+        """
+        Apply context compaction to messages if enabled (async version).
+        
+        Args:
+            messages: List of messages to potentially compact
+            hook_event_class: Hook event class to use for before/after hooks
+            
+        Returns:
+            bool: True if compaction was applied, False otherwise
+        """
+        _execution_cfg = getattr(self, 'execution', None)
+        if not (_execution_cfg and getattr(_execution_cfg, 'context_compaction', False)):
+            return False
+            
+        try:
+            from ..compaction import ContextCompactor
+            from ..compaction.strategy import CompactionStrategy
+            
+            _max_tok = getattr(_execution_cfg, 'max_context_tokens', None) or 8000
+            _strategy = getattr(_execution_cfg, 'compaction_strategy', None) or CompactionStrategy.TRUNCATE
+            
+            # Create LLM summarization function if strategy is LLM_SUMMARIZE
+            _llm_fn = None
+            if _strategy == CompactionStrategy.LLM_SUMMARIZE:
+                try:
+                    _llm_fn = self._create_llm_summarize_function()
+                except Exception as e:
+                    logging.warning(f"Failed to create LLM summarize function: {e}")
+            
+            _compactor = ContextCompactor(
+                max_tokens=_max_tok,
+                strategy=_strategy,
+                llm_summarize_fn=_llm_fn
+            )
+            
+            if not _compactor.needs_compaction(messages):
+                return False
+                
+            # Execute BEFORE_COMPACTION hook
+            try:
+                await self._hook_runner.execute(hook_event_class.BEFORE_COMPACTION, None)
+            except Exception as e:
+                logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
+                if getattr(self, '_strict_hooks', False):
+                    raise
+            
+            # Perform compaction (use async version when available)
+            if _strategy == CompactionStrategy.LLM_SUMMARIZE and _llm_fn:
+                compacted_msgs, _cr = await _compactor.compact_async(messages)
+            else:
+                compacted_msgs, _cr = _compactor.compact(messages)
+            
+            # If messages is the same object as chat_history, replace chat history
+            # Otherwise, update the passed messages list in-place
+            if messages is self.chat_history:
+                self._replace_chat_history(compacted_msgs)
+            else:
+                messages[:] = compacted_msgs
+            logging.info(
+                f"[compaction] {self.name}: {_cr.original_tokens}→{_cr.compacted_tokens} tokens "
+                f"({_cr.messages_removed} messages removed, strategy={_cr.strategy_used.value})"
+            )
+            
+            # Execute AFTER_COMPACTION hook  
+            try:
+                await self._hook_runner.execute(hook_event_class.AFTER_COMPACTION, None)
+            except Exception as e:
+                logging.warning(f"AFTER_COMPACTION hook failed: {e}")
+                if getattr(self, '_strict_hooks', False):
+                    raise
+                    
+            return True
+            
+        except Exception as _ce:
+            if getattr(self, '_strict_hooks', False):
+                raise
+            logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
+            return False
+
+    def _chat_completion_with_retry(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
+        """
+        Wrapper for _execute_unified_chat_completion that adds jittered exponential backoff retry logic.
+        
+        This method wraps the unified chat completion call and adds retry capability for 
+        transient failures like rate limits, network errors, and service outages.
+        """
+        retry_config = getattr(self, '_retry_config', None)
+        if not retry_config:
+            return self._execute_unified_chat_completion(messages, temperature, tools, stream, reasoning_steps, 
+                                       task_name, task_description, task_id, response_format,
+                                       stream_callback=stream_callback, emit_events=emit_events)
+        
+        from .retry_utils import jittered_backoff
+        from ..hooks import HookEvent, OnRetryInput
+        import time
+        
+        max_attempts = retry_config.max_retries + 1
+        
+        for attempt in range(max_attempts):
+            try:
+                # Call the underlying unified chat completion directly to avoid infinite recursion
+                return self._execute_unified_chat_completion(messages, temperature, tools, stream, reasoning_steps, 
+                                           task_name, task_description, task_id, response_format,
+                                           stream_callback=stream_callback, emit_events=emit_events)
+            
+            except Exception as e:
+                from ..errors import LLMError
+                
+                # Only retry LLMErrors that are marked as retryable
+                if not isinstance(e, LLMError) or not e.is_retryable:
+                    raise  # Re-raise non-retryable errors immediately
+                
+                # If this is the last attempt, re-raise the error
+                if attempt >= max_attempts - 1:
+                    raise
+                
+                # Calculate delay for this retry attempt
+                delay = jittered_backoff(
+                    attempt,
+                    base_delay=retry_config.base_delay,
+                    max_delay=retry_config.max_delay,
+                    jitter_ratio=retry_config.jitter_ratio,
+                )
+                
+                # Fire OnRetry hook with delay information
+                retry_input = OnRetryInput(
+                    session_id=getattr(self, '_session_id', 'default'),
+                    cwd=os.getcwd(),
+                    event_name=HookEvent.ON_RETRY,
+                    timestamp=str(time.time()),
+                    agent_name=self.name,
+                    retry_count=attempt + 1,
+                    max_retries=retry_config.max_retries,
+                    error_message=str(e),
+                    operation="llm_request",
+                    delay_seconds=delay,
+                    attempt=attempt
+                )
+                self._hook_runner.execute_sync(HookEvent.ON_RETRY, retry_input)
+                
+                # Log retry attempt (buffered to avoid spam during transient failures)
+                logger.debug(f"[{self.name}] Retry {attempt + 1}/{max_attempts} after {delay:.1f}s: {str(e)[:100]}")
+                
+                # Sleep with interrupt awareness - make interruption terminal
+                interrupt_fn = getattr(self, '_is_interrupted', lambda: False)
+                sleep_start = time.time()
+                while time.time() - sleep_start < delay:
+                    if interrupt_fn():
+                        # Interruption is terminal - stop retrying
+                        raise RuntimeError("Agent interrupted during retry backoff")
+                    time.sleep(min(0.2, delay - (time.time() - sleep_start)))
+        
+        # This should never be reached, but just in case
+        raise RuntimeError("Retry loop completed without returning or raising an exception")
+
+    async def _achat_completion_with_retry(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
+        """
+        Async wrapper for _execute_unified_achat_completion that adds jittered exponential backoff retry logic.
+        
+        This method wraps the async chat completion call and adds retry capability for 
+        transient failures like rate limits, network errors, and service outages.
+        """
+        retry_config = getattr(self, '_retry_config', None)
+        if not retry_config:
+            return await self._execute_unified_achat_completion(
+                messages, temperature, tools, stream, reasoning_steps, 
+                task_name, task_description, task_id, response_format,
+                stream_callback=stream_callback, emit_events=emit_events
+            )
+        
+        from .retry_utils import jittered_backoff, interruptible_sleep
+        from ..hooks import HookEvent, OnRetryInput
+        import time
+        import asyncio
+        
+        max_attempts = retry_config.max_retries + 1
+        
+        for attempt in range(max_attempts):
+            try:
+                # Call the underlying unified chat completion directly to avoid infinite recursion
+                return await self._execute_unified_achat_completion(
+                    messages, temperature, tools, stream, reasoning_steps,
+                    task_name, task_description, task_id, response_format,
+                    stream_callback=stream_callback, emit_events=emit_events
+                )
+            
+            except Exception as e:
+                from ..errors import LLMError
+                
+                # Only retry LLMErrors that are marked as retryable
+                if not isinstance(e, LLMError) or not e.is_retryable:
+                    raise  # Re-raise non-retryable errors immediately
+                
+                # If this is the last attempt, re-raise the error
+                if attempt >= max_attempts - 1:
+                    raise
+                
+                # Calculate delay for this retry attempt
+                delay = jittered_backoff(
+                    attempt,
+                    base_delay=retry_config.base_delay,
+                    max_delay=retry_config.max_delay,
+                    jitter_ratio=retry_config.jitter_ratio,
+                )
+                
+                # Fire OnRetry hook with delay information
+                retry_input = OnRetryInput(
+                    session_id=getattr(self, '_session_id', 'default'),
+                    cwd=os.getcwd(),
+                    event_name=HookEvent.ON_RETRY,
+                    timestamp=str(time.time()),
+                    agent_name=self.name,
+                    retry_count=attempt + 1,
+                    max_retries=retry_config.max_retries,
+                    error_message=str(e),
+                    operation="async_llm_request",
+                    delay_seconds=delay,
+                    attempt=attempt
+                )
+                await self._hook_runner.execute_async(HookEvent.ON_RETRY, retry_input)
+                
+                # Log retry attempt
+                logger.debug(f"[{self.name}] Async retry {attempt + 1}/{max_attempts} after {delay:.1f}s: {str(e)[:100]}")
+                
+                # Async sleep with interrupt awareness using the helper
+                interrupt_fn = getattr(self, '_is_interrupted', lambda: False)
+                if not await interruptible_sleep(delay, interrupt_fn=interrupt_fn):
+                    raise RuntimeError("Agent interrupted during retry backoff")
+        
+        # This should never be reached, but just in case
+        raise RuntimeError("Async retry loop completed without returning or raising an exception")

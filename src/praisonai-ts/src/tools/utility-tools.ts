@@ -236,25 +236,67 @@ export async function scrapeUrl(url: string): Promise<ToolResult<{ title: string
 // UTILITY TOOLS
 // ============================================================================
 
+/** Shell metacharacters that enable command chaining or substitution */
+const SHELL_METACHAR_PATTERN = /[;|&`><]|\$\([^)]*\)|\$\{/;
+
+function containsShellMetacharacters(command: string): boolean {
+    return SHELL_METACHAR_PATTERN.test(command);
+}
+
+function parseCommandParts(command: string): string[] {
+    const parts = command.trim().match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
+    return parts.map((part) => part.replace(/^["']|["']$/g, ''));
+}
+
 /**
  * Execute shell command (safe version - read-only commands)
  */
 export async function shell(command: string): Promise<ToolResult<string>> {
-    // Only allow safe read-only commands
     const safeCommands = ['ls', 'cat', 'head', 'tail', 'wc', 'grep', 'find', 'echo', 'date', 'pwd', 'which'];
-    const firstWord = command.split(/\s+/)[0];
+    const trimmed = command.trim();
 
-    if (!safeCommands.includes(firstWord)) {
-        return { success: false, error: `Command not allowed: ${firstWord}` };
+    if (!trimmed) {
+        return { success: false, error: 'Empty command' };
+    }
+
+    if (containsShellMetacharacters(trimmed)) {
+        return { success: false, error: 'Shell metacharacters are not allowed' };
+    }
+
+    const parts = parseCommandParts(trimmed);
+    const cmd = parts[0];
+
+    if (!safeCommands.includes(cmd)) {
+        return { success: false, error: `Command not allowed: ${cmd}` };
     }
 
     try {
-        const { exec } = await import('child_process');
-        const { promisify } = await import('util');
-        const execAsync = promisify(exec);
+        const { spawn } = await import('child_process');
 
-        const { stdout, stderr } = await execAsync(command, { timeout: 5000 });
-        return { success: true, data: stdout || stderr };
+        const result = await new Promise<{ stdout: string; stderr: string; code: number }>((resolve, reject) => {
+            const proc = spawn(cmd, parts.slice(1), {
+                shell: false,
+                timeout: 5000,
+            });
+
+            let stdout = '';
+            let stderr = '';
+
+            proc.stdout?.on('data', (data) => { stdout += data.toString(); });
+            proc.stderr?.on('data', (data) => { stderr += data.toString(); });
+
+            proc.on('close', (code) => {
+                resolve({ stdout, stderr, code: code ?? 1 });
+            });
+
+            proc.on('error', reject);
+        });
+
+        if (result.code !== 0) {
+            return { success: false, error: result.stderr || `Exit code ${result.code}` };
+        }
+
+        return { success: true, data: result.stdout || result.stderr };
     } catch (error: any) {
         return { success: false, error: error.message ?? String(error) };
     }

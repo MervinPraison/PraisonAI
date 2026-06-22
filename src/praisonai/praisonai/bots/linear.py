@@ -33,7 +33,6 @@ from praisonaiagents.bots import (
 )
 
 from ._commands import format_status, format_help
-from ._session import BotSessionManager
 from ._rate_limit import RateLimiter
 from ._ack import AckReactor
 
@@ -91,15 +90,11 @@ class LinearBot(ChatCommandMixin, MessageHookMixin):
         self._started_at: Optional[float] = None
         self._bot_user: Optional[BotUser] = None
         
-        try:
-            from praisonaiagents.session import get_default_session_store
-            _store = get_default_session_store()
-        except Exception:
-            _store = None
-            
-        self._session_mgr = BotSessionManager(
-            store=_store,
-            platform="linear",
+        # Use helper to build session manager
+        from ._session import build_session_manager
+        self._session_mgr = build_session_manager(
+            self.config,
+            platform="linear"
         )
         self._message_handlers: List[Callable] = []
         self._runner: Any = None
@@ -240,12 +235,16 @@ class LinearBot(ChatCommandMixin, MessageHookMixin):
             # Read raw body for signature verification
             raw_body = await request.read()
             
-            # Verify signature if secret is configured
+            from praisonai.bots.webhook_security import webhooks_require_verification
+
             if self._signing_secret:
                 signature = request.headers.get("Linear-Signature", "")
                 if not self._verify_signature(raw_body, signature):
                     logger.warning("Invalid webhook signature")
                     return web.Response(status=401, text="Invalid signature")
+            elif webhooks_require_verification():
+                logger.warning("Webhook rejected: signing secret not configured")
+                return web.Response(status=401, text="Webhook verification not configured")
             
             # Parse JSON body
             try:

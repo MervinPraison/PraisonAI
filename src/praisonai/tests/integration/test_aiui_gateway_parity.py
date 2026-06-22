@@ -13,10 +13,10 @@ def test_gateway_start_wires_datastore(monkeypatch):
     import praisonaiui.server as srv
     from praisonai.integration import host_app
 
-    host_app._CONFIGURED = False
+    host_app.reset_configuration()
     backends.clear_backends()
     srv._provider = None
 
     host_app.configure_host(pages=["chat"])
     assert srv.get_datastore() is not None
-    assert "hooks" in backends.list_backends() or host_app._CONFIGURED
+    assert "hooks" in backends.list_backends() or host_app.is_configured()

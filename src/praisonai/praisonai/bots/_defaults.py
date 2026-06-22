@@ -161,7 +161,7 @@ def _resolve_tool_names_with_workspace(tool_names: List[str], workspace=None) ->
     """Resolve tool names to actual tool instances with workspace support."""
     try:
         from praisonaiagents.tools.profiles import resolve_profiles
-        from praisonaiagents.tools import ToolResolver
+        from praisonai.tool_resolver import ToolResolver
         
         # Split into workspace-aware and regular tools
         workspace_tools = {

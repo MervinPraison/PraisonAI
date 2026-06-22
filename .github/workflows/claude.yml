@@ -151,24 +151,40 @@ jobs:
         id: check_fork
         uses: actions/github-script@v7
         with:
+          github-token: ${{ steps.app-token.outputs.token }}
           script: |
-            const isPR = context.eventName === 'pull_request' || (context.payload.issue && context.payload.issue.pull_request);
-            if (isPR) {
-              const prNumber = context.payload.pull_request ? context.payload.pull_request.number : context.payload.issue.number;
-              const pr = await github.rest.pulls.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: prNumber
-              });
-              
-              core.setOutput('pr_branch', pr.data.head.ref);
-              
-              if (pr.data.head.repo && pr.data.head.repo.full_name !== context.repo.full_name) {
-                core.setOutput('is_fork', 'true');
-                core.setOutput('clone_url', pr.data.head.repo.clone_url);
-                core.setOutput('branch', pr.data.head.ref);
-                return;
-              }
+            const isPR = context.eventName === 'pull_request'
+              || context.eventName === 'pull_request_review'
+              || context.eventName === 'pull_request_review_comment'
+              || (context.payload.issue && context.payload.issue.pull_request);
+
+            if (!isPR) {
+              core.setOutput('is_pr', 'false');
+              core.setOutput('is_fork', 'false');
+              return;
+            }
+
+            const prNumber = context.payload.pull_request
+              ? context.payload.pull_request.number
+              : context.payload.issue.number;
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+
+            core.setOutput('is_pr', 'true');
+            core.setOutput('pr_number', String(prNumber));
+            core.setOutput('pr_branch', pr.data.head.ref);
+            core.setOutput('head_repo', pr.data.head.repo.full_name);
+            core.setOutput('merge_state', (pr.data.mergeable_state || pr.data.merge_state_status || '').toUpperCase());
+
+            const baseRepo = `${context.repo.owner}/${context.repo.repo}`;
+            if (pr.data.head.repo && pr.data.head.repo.full_name !== baseRepo) {
+              core.setOutput('is_fork', 'true');
+              core.setOutput('clone_url', pr.data.head.repo.clone_url);
+              core.setOutput('branch', pr.data.head.ref);
+              return;
             }
             core.setOutput('is_fork', 'false');
 
@@ -180,17 +196,19 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
 
       - name: Fetch PR branch and Setup Remote
-        if: github.event.issue.pull_request
+        if: steps.check_fork.outputs.is_pr == 'true'
         env:
           PR_BRANCH: ${{ steps.check_fork.outputs.pr_branch }}
+          PR_NUMBER: ${{ steps.check_fork.outputs.pr_number }}
           IS_FORK: ${{ steps.check_fork.outputs.is_fork }}
         run: |
-          # Fetch PR head from base repo and put it into local branch
-          git fetch origin pull/${{ github.event.issue.number }}/head:"${PR_BRANCH}"
-          
+          git fetch origin "pull/${PR_NUMBER}/head:${PR_BRANCH}"
+          git checkout "${PR_BRANCH}"
+          git fetch origin main
+
           # If it's a fork, make origin point to local to trick claude-code-action's `git fetch origin <branch>`
           if [ "${IS_FORK}" = "true" ]; then
-            git remote set-url origin file://$(pwd)
+            git remote set-url origin "file://$(pwd)"
           fi
 
       - uses: anthropics/claude-code-action@beta
@@ -200,11 +218,13 @@ jobs:
           allowed_bots: 'praisonai-triage-agent[bot]'
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ steps.app-token.outputs.token }}
+          model: opus
           trigger_phrase: "@claude"
           label_trigger: "claude"
 
           direct_prompt: |
-            ${{ steps.check_fork.outputs.is_fork == 'true' && 'CRITICAL: THIS IS A PULL REQUEST FROM A FORK. YOU DO NOT HAVE PUSH PERMISSIONS TO THIS REPOSITORY. ONLY READ FILES, VALIDATE CODE, AND PROVIDE YOUR COMMENTS/FEEDBACK DIRECTLY IN THIS PR VIA COMMENTS. DO NOT ATTEMPT TO PUSH OR CREATE PULL REQUESTS.\n\n' || 'NOTE: The branch is under MervinPraison/PraisonAI (not a fork). You are able to make modifications and push directly to this branch.\n\n' }}
+            ${{ steps.check_fork.outputs.is_fork == 'true' && 'CRITICAL: THIS IS A PULL REQUEST FROM A FORK. YOU DO NOT HAVE PUSH PERMISSIONS TO THIS REPOSITORY. ONLY READ FILES, VALIDATE CODE, AND PROVIDE YOUR COMMENTS/FEEDBACK DIRECTLY IN THIS PR VIA COMMENTS. DO NOT ATTEMPT TO PUSH OR CREATE PULL REQUESTS.\n\n' || (steps.check_fork.outputs.is_pr == 'true' && 'NOTE: The branch is under MervinPraison/PraisonAI (not a fork). You are able to make modifications and push directly to this branch.\n\n' || 'NOTE: This is an issue (not a PR). Create a new fix branch per STEP 3 below.\n\n') }}
+            ${{ steps.check_fork.outputs.is_pr == 'true' && format('CONTEXT: PR #{0} on branch {1}. head.repo={2}, is_fork={3}, merge_state={4}. NEVER treat cursor/*, claude/* branch names or bot authors as forks — only is_fork=true means fork.\n\n', steps.check_fork.outputs.pr_number, steps.check_fork.outputs.pr_branch, steps.check_fork.outputs.head_repo, steps.check_fork.outputs.is_fork, steps.check_fork.outputs.merge_state) || '' }}
             You are working on the PraisonAI SDK. Follow AGENTS.md strictly.
 
             STEP 0 — SETUP GIT IDENTITY & AUTH (GLOBAL — required for all repos):
@@ -233,15 +253,9 @@ jobs:
             - Is there a name collision with existing exports in __init__.py?
             If ANY of these conceptual checks fail (excluding routing), add a comment to the issue explaining why and close it. Do NOT create a PR.
 
-            STEP 3 — IMPLEMENT (for changes in THIS repo — PraisonAI):
-            - Create a fix branch: git checkout -b claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)
-            - Implement a minimal, focused fix
-            - Follow protocol-driven design: protocols in core SDK, heavy implementations in wrapper
-            - Keep changes small and backward-compatible
-            - Commit: git add -A && git commit -m "fix: <description> (fixes #$ISSUE_NUMBER)"
-            - Push: git push origin claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)
-            CRITICAL: After pushing, you MUST immediately run: gh pr create --title "fix: <title>" --body "Fixes #$ISSUE_NUMBER" --head claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)
-            Do NOT stop after pushing. Do NOT say "manually create a PR". Always create the PR automatically.
+            ${{ steps.check_fork.outputs.is_pr == 'true' && steps.check_fork.outputs.is_fork != 'true' && steps.check_fork.outputs.merge_state == 'DIRTY' && format('STEP 3 — RESOLVE MERGE CONFLICTS ON PR (branch: {0}, PR #{1}):\n- DO NOT create a new branch or PR\n- git fetch origin main && git rebase origin/main\n- Resolve conflicts: keep this PR intent, merge in main newer logic\n- git add -A && git rebase --continue (repeat until done)\n- git push --force-with-lease origin {0}\n- Run targeted pytest on changed paths\n- Comment files resolved and what you skipped\n', steps.check_fork.outputs.pr_branch, steps.check_fork.outputs.pr_number) || '' }}
+            ${{ steps.check_fork.outputs.is_pr == 'true' && steps.check_fork.outputs.is_fork != 'true' && steps.check_fork.outputs.merge_state != 'DIRTY' && format('STEP 3 — IMPLEMENT ON EXISTING PR (branch: {0}, PR #{1}):\n- DO NOT create a new branch or PR\n- git checkout {0}\n- Implement minimal, focused fixes from reviewer feedback\n- Follow protocol-driven design: protocols in core SDK, heavy implementations in wrapper\n- Keep changes small and backward-compatible\n- Commit: git add -A && git commit -m "fix: <description>"\n- Push: git push origin {0}\n- Comment a summary of exact files modified and what you skipped\n', steps.check_fork.outputs.pr_branch, steps.check_fork.outputs.pr_number) || '' }}
+            ${{ steps.check_fork.outputs.is_pr != 'true' && 'STEP 3 — IMPLEMENT (for changes in THIS repo — PraisonAI):\n- Create a fix branch: git checkout -b claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)\n- Implement a minimal, focused fix\n- Follow protocol-driven design: protocols in core SDK, heavy implementations in wrapper\n- Keep changes small and backward-compatible\n- Commit: git add -A && git commit -m "fix: <description> (fixes #$ISSUE_NUMBER)"\n- Push: git push origin claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)\nCRITICAL: After pushing, you MUST immediately run: gh pr create --title "fix: <title>" --body "Fixes #$ISSUE_NUMBER" --head claude/issue-$ISSUE_NUMBER-$(date +%Y%m%d)\nDo NOT stop after pushing. Do NOT say "manually create a PR". Always create the PR automatically.\n' || '' }}
 
             STEP 3-ALT — IMPLEMENT IN EXTERNAL REPO (for PraisonAI-Tools, PraisonAIDocs, PraisonAI-Plugins):
             When work must happen in a different repository, follow these steps EXACTLY. Do NOT attempt to use `cd`, as directory state is not preserved. Use `git -C` for all commands.
@@ -267,10 +281,7 @@ jobs:
             - For docs changes: verify files exist and are valid markdown/MDX
             - Ensure no regressions
 
-            STEP 5 — CREATE PR:
-            - Commit with descriptive message, push, and create PR using `gh pr create`
-            - For external repos, use `gh pr create -R MervinPraison/<REPO_NAME>`
-            CRITICAL: You MUST create the PR automatically using `gh pr create`. Do NOT just provide a link or say "manual push required".
+            ${{ steps.check_fork.outputs.is_pr == 'true' && 'STEP 5 — SKIP: Already on an open PR. Do NOT run gh pr create.\n' || 'STEP 5 — CREATE PR:\n- Commit with descriptive message, push, and create PR using `gh pr create`\n- For external repos, use `gh pr create -R MervinPraison/<REPO_NAME>`\nCRITICAL: You MUST create the PR automatically using `gh pr create`. Do NOT just provide a link or say "manual push required".\n' }}
             NOTE: If you worked on an external repo, the wrapper action will report "No commits" for the main repo at the end. This is expected, do not worry about it.
           allowed_tools: |
             Bash(git:*)

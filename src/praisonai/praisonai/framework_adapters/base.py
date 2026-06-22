@@ -20,8 +20,11 @@ class FrameworkAdapter(Protocol):
         """Check if the framework is available for import."""
         ...
     
-    def resolve(self) -> "FrameworkAdapter":
+    def resolve(self, *, config: Optional[Dict[str, Any]] = None) -> "FrameworkAdapter":
         """Pick the concrete adapter variant (e.g. autogen v0.2 vs v0.4).
+        
+        Args:
+            config: YAML configuration that may contain version preferences
         
         Returns:
             The resolved adapter instance (self or a different adapter)
@@ -92,56 +95,60 @@ class FrameworkAdapter(Protocol):
         """
         ...
     
-    async def arun(
-        self,
-        config: Dict[str, Any],
-        llm_config: List[Dict],
-        topic: str,
-        *,
-        tools_dict: Optional[Dict[str, Any]] = None,
-        agent_callback: Optional[Callable] = None,
-        task_callback: Optional[Callable] = None,
-        cli_config: Optional[Dict[str, Any]] = None,
-    ) -> str:
-        """
-        Run the framework asynchronously with given configuration.
-        
-        Args:
-            config: Framework configuration
-            llm_config: LLM configuration list
-            topic: Topic for the tasks
-            tools_dict: Available tools dictionary
-            agent_callback: Callback for agent events
-            task_callback: Callback for task events
-            cli_config: CLI configuration
-            
-        Returns:
-            Execution result as string
-        """
-        ...
-    
     def cleanup(self) -> None:
         """Clean up any resources after execution."""
         ...
+    
+    def resolve_variant(
+        self,
+        config: Dict[str, Any],
+        registry: "FrameworkAdapterRegistry",
+    ) -> "FrameworkAdapter":
+        """Resolve to the appropriate adapter variant based on config.
+        
+        Default implementation returns self. Adapters with multiple versions
+        (e.g., AutoGen v0.2 vs v0.4) should override this to select the
+        appropriate concrete implementation.
+        
+        Args:
+            config: Framework configuration that may contain version hints
+            registry: The adapter registry for creating other adapters if needed
+            
+        Returns:
+            The resolved FrameworkAdapter instance (may be self or another adapter)
+        """
+        return self
 
 
 class BaseFrameworkAdapter:
     """Base class for framework adapters providing common functionality."""
     
+    DEFAULT_MODEL = "openai/gpt-4o-mini"
+    
     def __init__(self):
-        self._tool_registry: Dict[str, Any] = {}
+        pass
+    
+    def resolve_variant(self, config: Dict[str, Any], registry: Any) -> "BaseFrameworkAdapter":
+        """Default implementation returns self."""
+        return self
+    
+    def _resolve_llm(self, spec, llm_config):
+        """Build a PraisonAIModel from a per-agent llm/function_calling_llm spec.
+        Accepts str, dict, or None. Single source of truth for all adapters."""
+        from ..inc import PraisonAIModel
+        import os
         
-    def register_tool(self, name: str, tool: Any) -> None:
-        """Register a tool in the adapter's local registry."""
-        self._tool_registry[name] = tool
-    
-    def get_tool(self, name: str) -> Optional[Any]:
-        """Get a tool from the adapter's local registry."""
-        return self._tool_registry.get(name)
-    
-    def list_tools(self) -> List[str]:
-        """List all registered tool names."""
-        return list(self._tool_registry.keys())
+        base = llm_config[0].get('base_url') if (llm_config and len(llm_config) > 0) else None
+        key = llm_config[0].get('api_key') if (llm_config and len(llm_config) > 0) else None
+
+        if isinstance(spec, str) and spec.strip():
+            model = spec.strip()
+        elif isinstance(spec, dict) and spec.get('model'):
+            model = spec['model']
+        else:
+            model = os.environ.get("MODEL_NAME") or self.DEFAULT_MODEL
+
+        return PraisonAIModel(model=model, base_url=base, api_key=key).get_model()
     
     def _format_template(self, template: str, **kwargs) -> str:
         """Safely format template string with given kwargs, preserving JSON-like braces."""
@@ -157,30 +164,7 @@ class BaseFrameworkAdapter:
         # Only substitute simple variable names like {topic}, not JSON like {"level":2}
         return re.sub(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', _sub, template)
     
-    async def arun(
-        self,
-        config: Dict[str, Any],
-        llm_config: List[Dict],
-        topic: str,
-        *,
-        tools_dict: Optional[Dict[str, Any]] = None,
-        agent_callback: Optional[Callable] = None,
-        task_callback: Optional[Callable] = None,
-        cli_config: Optional[Dict[str, Any]] = None,
-    ) -> str:
-        """
-        Default async implementation that falls back to thread-offloaded sync.
-        
-        Framework adapters with native async support should override this method.
-        """
-        import asyncio
-        return await asyncio.to_thread(
-            self.run, config, llm_config, topic,
-            tools_dict=tools_dict, agent_callback=agent_callback,
-            task_callback=task_callback, cli_config=cli_config
-        )
-    
-    def resolve(self) -> "FrameworkAdapter":
+    def resolve(self, *, config: Optional[Dict[str, Any]] = None) -> "FrameworkAdapter":
         """Default implementation returns self."""
         return self
     
@@ -200,8 +184,9 @@ class BaseFrameworkAdapter:
         cli_config: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
-        Safe default for sync-only adapters (crewai, autogen v0.2):
-        run the sync implementation in a worker thread, freeing the loop.
+        Safe default: run sync implementation in a worker thread.
+        
+        Framework adapters with native async support should override this method.
         """
         import asyncio
         return await asyncio.to_thread(
@@ -211,6 +196,7 @@ class BaseFrameworkAdapter:
             task_callback=task_callback,
             cli_config=cli_config
         )
+    
     def cleanup(self) -> None:
         """Clean up resources - default implementation does nothing."""
         pass

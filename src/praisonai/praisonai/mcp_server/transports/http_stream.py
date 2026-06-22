@@ -14,8 +14,10 @@ Implements the MCP Streamable HTTP transport (MCP 2025-11-25 spec):
 import asyncio
 import json
 import logging
+import os
 import time
 import uuid
+import hmac
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
@@ -90,6 +92,7 @@ class HTTPStreamTransport:
             self.cors_origins = [origin for origin in cors_origins if origin != "*"]
         self.api_key = api_key
         self.session_ttl = session_ttl
+        self.max_sessions = int(os.getenv("PRAISONAI_MCP_MAX_SESSIONS", "1000"))
         self.allow_client_termination = allow_client_termination
         self.response_mode = response_mode
         self.resumability_enabled = resumability_enabled
@@ -142,13 +145,17 @@ class HTTPStreamTransport:
         if self.allowed_origins is None:
             # No allowed origins configured - reject all Origin headers
             return False
-        
-        # Check if origin matches any allowed origin
-        for allowed in self.allowed_origins:
-            if request_origin == allowed or request_origin.startswith(allowed):
-                return True
-        
-        return False
+
+        from urllib.parse import urlparse
+        from praisonaiagents.mcp.mcp_security import is_valid_origin
+
+        allowed_hosts = []
+        for origin in self.allowed_origins:
+            host = urlparse(origin).hostname
+            if host:
+                allowed_hosts.append(host.lower())
+
+        return is_valid_origin(request_origin, allowed_hosts, allow_missing=False)
     
     def _validate_protocol_version(self, version: Optional[str]) -> bool:
         """Validate MCP-Protocol-Version header."""
@@ -169,8 +176,25 @@ class HTTPStreamTransport:
         except ImportError:
             raise ImportError("starlette required. Install with: pip install starlette")
         
+        def _check_auth(request: Request) -> Optional[Response]:
+            """Check authentication for all HTTP verbs.
+            
+            Returns:
+                None if auth passes, error Response if auth fails
+            """
+            if self.api_key:
+                auth_header = request.headers.get("Authorization", "")
+                if not auth_header.startswith("Bearer "):
+                    return JSONResponse({"error": "Unauthorized"}, status_code=401)
+                # Use constant-time comparison to prevent timing attacks
+                provided_key = auth_header[7:]
+                if not hmac.compare_digest(provided_key, self.api_key):
+                    return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            return None
+        
         async def mcp_post(request: Request) -> Response:
             """Handle POST requests (client→server messages)."""
+            self._cleanup_sessions()
             # Validate Origin header (MCP 2025-11-25 security requirement)
             origin = request.headers.get("Origin")
             if not self._validate_origin(origin):
@@ -189,13 +213,9 @@ class HTTPStreamTransport:
                 )
             
             # Check authentication
-            if self.api_key:
-                auth_header = request.headers.get("Authorization", "")
-                if not auth_header.startswith("Bearer ") or auth_header[7:] != self.api_key:
-                    return JSONResponse(
-                        {"error": "Unauthorized"},
-                        status_code=401,
-                    )
+            auth_result = _check_auth(request)
+            if auth_result is not None:
+                return auth_result
             
             # Get or create session (check both header casings for compatibility)
             session_id = request.headers.get("MCP-Session-Id") or request.headers.get("Mcp-Session-Id")
@@ -220,6 +240,11 @@ class HTTPStreamTransport:
             
             # Check if this is an initialize request
             if body.get("method") == "initialize":
+                if len(self._sessions) >= self.max_sessions:
+                    return JSONResponse(
+                        {"jsonrpc": "2.0", "id": body.get("id"), "error": {"code": -32000, "message": "Too many active sessions"}},
+                        status_code=503,
+                    )
                 # Create new session
                 new_session_id = str(uuid.uuid4())
                 self._sessions[new_session_id] = {
@@ -271,6 +296,11 @@ class HTTPStreamTransport:
         
         async def mcp_get(request: Request) -> Response:
             """Handle GET requests (server→client SSE stream)."""
+            # Check authentication first
+            auth_result = _check_auth(request)
+            if auth_result is not None:
+                return auth_result
+            
             # Check both header casings for compatibility
             session_id = request.headers.get("MCP-Session-Id") or request.headers.get("Mcp-Session-Id")
             if not session_id or session_id not in self._sessions:
@@ -309,6 +339,11 @@ class HTTPStreamTransport:
         
         async def mcp_delete(request: Request) -> Response:
             """Handle DELETE requests (session termination)."""
+            # Check authentication first to prevent information disclosure
+            auth_result = _check_auth(request)
+            if auth_result is not None:
+                return auth_result
+            
             if not self.allow_client_termination:
                 return Response(status_code=405)
             

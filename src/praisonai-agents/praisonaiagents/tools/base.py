@@ -15,9 +15,13 @@ Usage:
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Type, get_type_hints
+from typing import Any, Callable, Dict, List, Optional, Type, get_type_hints
 import inspect
+import json
 import logging
+import copy
+
+from .schema import annotation_to_json_schema, get_parameter_requirements, build_parameters_schema
 
 
 class ToolValidationError(Exception):
@@ -89,8 +93,12 @@ class BaseTool(ABC):
     version: str = "1.0.0"
     parameters: Optional[Dict[str, Any]] = None  # JSON Schema, auto-generated if None
     
-    def __init__(self):
-        """Initialize the tool and validate configuration."""
+    def __init__(self, dynamic_schema_overrides: Optional[Callable[[Dict[str, Any]], Dict[str, Any]]] = None):
+        """Initialize the tool and validate configuration.
+        
+        Args:
+            dynamic_schema_overrides: Optional function to dynamically modify tool schema at runtime
+        """
         if not self.name:
             # Use class name as default
             self.name = self.__class__.__name__.lower().replace("tool", "")
@@ -99,70 +107,44 @@ class BaseTool(ABC):
             # Use docstring as default
             self.description = self.__class__.__doc__ or f"Tool: {self.name}"
         
+        # Store dynamic schema override function
+        self._schema_override = dynamic_schema_overrides
+        
         # Auto-generate parameters schema if not provided
         if self.parameters is None:
             self.parameters = self._generate_parameters_schema()
     
     def _generate_parameters_schema(self) -> Dict[str, Any]:
         """Generate JSON Schema from run() method signature."""
-        schema = {
-            "type": "object",
-            "properties": {},
-            "required": []
-        }
-        
         try:
             sig = inspect.signature(self.run)
             hints = get_type_hints(self.run) if hasattr(self.run, '__annotations__') else {}
-            
-            for param_name, param in sig.parameters.items():
-                if param_name == 'self':
-                    continue
-                
-                # Get type hint
-                param_type = hints.get(param_name, Any)
-                json_type = self._python_type_to_json(param_type)
-                
-                # Build property schema
-                prop_schema = {"type": json_type}
-                
-                # Add description from docstring if available
-                # (Could parse docstring for param descriptions)
-                
-                schema["properties"][param_name] = prop_schema
-                
-                # Check if required (no default value)
-                if param.default is inspect.Parameter.empty:
-                    schema["required"].append(param_name)
-        except Exception as e:
+        except (ValueError, NameError, Exception) as e:
+            # Handle built-ins, forward references, and other signature/type issues
             logging.debug(f"Could not generate schema for {self.name}: {e}")
+            return {"type": "object", "properties": {}, "required": []}
         
-        return schema
+        # Use the new shared helper, skipping only 'self'
+        # Note: the TODO about parsing docstrings for param descriptions
+        # can be addressed in a future enhancement to build_parameters_schema
+        return build_parameters_schema(
+            sig,
+            hints,
+            skip={"self"},
+            func_name=self.name
+        )
     
     @staticmethod
     def _python_type_to_json(python_type: Type) -> str:
-        """Convert Python type to JSON Schema type."""
-        type_map = {
-            str: "string",
-            int: "integer",
-            float: "number",
-            bool: "boolean",
-            list: "array",
-            dict: "object",
-            type(None): "null"
-        }
+        """Convert Python type to JSON Schema type.
         
-        # Handle Optional, Union, etc.
-        origin = getattr(python_type, '__origin__', None)
-        if origin is not None:
-            # For List[X], return "array"
-            if origin is list:
-                return "array"
-            # For Dict[X, Y], return "object"
-            if origin is dict:
-                return "object"
-        
-        return type_map.get(python_type, "string")
+        DEPRECATED: Use annotation_to_json_schema() from schema.py instead.
+        This method is kept for backward compatibility but will be removed.
+        """
+        # Legacy fallback - delegate to new schema utility and extract type
+        from .schema import annotation_to_json_schema
+        schema = annotation_to_json_schema(python_type)
+        return schema.get("type", "string")
     
     @abstractmethod
     def run(self, **kwargs) -> Any:
@@ -196,15 +178,28 @@ class BaseTool(ABC):
             )
     
     def get_schema(self) -> Dict[str, Any]:
-        """Get OpenAI-compatible function schema for this tool."""
-        return {
+        """Get OpenAI-compatible function schema for this tool.
+        
+        Applies dynamic schema overrides if present.
+        """
+        base_schema = {
             "type": "function",
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": self.parameters
+                "parameters": copy.deepcopy(self.parameters)
             }
         }
+        
+        # Apply dynamic override if present
+        if hasattr(self, '_schema_override') and self._schema_override is not None:
+            try:
+                return self._schema_override(base_schema)
+            except Exception as e:
+                logging.warning(f"Dynamic schema override failed for tool '{self.name}': {e}")
+                return base_schema
+        
+        return base_schema
     
     def __str__(self) -> str:
         return f"{self.__class__.__name__}(name='{self.name}')"
@@ -419,6 +414,50 @@ def validate_tool_schema_consistency(tools: List[Any]) -> bool:
         names.add(name)
     
     return True
+
+
+def get_sorted_tool_schemas(tools: List[Any]) -> List[Dict[str, Any]]:
+    """Get tool schemas sorted by function name for deterministic ordering.
+    
+    This ensures tool schemas are always ordered consistently for prompt caching optimization.
+    
+    Args:
+        tools: List of tool objects (BaseTool instances, callables, etc.)
+        
+    Returns:
+        List of tool schemas sorted alphabetically by function name
+        
+    Raises:
+        ToolValidationError: If validation fails
+    """
+    if not tools:
+        return []
+        
+    # First validate all tools (reuse existing validation logic)
+    validate_tool_schema_consistency(tools)
+    
+    from .decorator import get_tool_schema
+    schemas = []
+    
+    for tool in tools:
+        # Get schema from different tool types
+        if isinstance(tool, BaseTool):
+            schema = tool.get_schema()
+        elif hasattr(tool, 'get_schema') and callable(getattr(tool, 'get_schema')):
+            schema = tool.get_schema()
+        elif callable(tool):
+            schema = get_tool_schema(tool)
+        else:
+            continue  # Skip invalid tools (validation already happened)
+            
+        if schema:
+            schemas.append(schema)
+    
+    # Sort schemas by function name for deterministic ordering
+    def sort_key(schema):
+        return schema.get("function", {}).get("name", "")
+    
+    return sorted(schemas, key=sort_key)
 
 
 # For backward compatibility - tools can also just be functions

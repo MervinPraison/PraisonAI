@@ -105,11 +105,14 @@ class ProjectService:
         await self._session.flush()
         return True
 
-    async def get_stats(self, project_id: str) -> dict:
-        """Get issue statistics for a project."""
+    async def get_stats(self, project_id: str, *, workspace_id: str) -> dict:
+        """Get issue statistics for a project within a workspace."""
         stmt = (
             select(Issue.status, func.count(Issue.id))
-            .where(Issue.project_id == project_id)
+            .where(
+                Issue.project_id == project_id,
+                Issue.workspace_id == workspace_id,
+            )
             .group_by(Issue.status)
         )
         result = await self._session.execute(stmt)

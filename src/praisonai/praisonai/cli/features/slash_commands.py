@@ -577,11 +577,15 @@ class SlashCommandHandler:
     Handler for integrating slash commands with PraisonAI CLI.
     """
     
-    def __init__(self, verbose: bool = False):
+    def __init__(self, verbose: bool = False, discover_custom: bool = True):
         self.verbose = verbose
         self.registry = create_default_registry()
         self.parser = SlashCommandParser(self.registry)
         self._context: Optional[CommandContext] = None
+        
+        # Discover and register custom commands
+        if discover_custom:
+            self._register_custom_commands()
     
     def set_context(self, context: CommandContext) -> None:
         """Set the command context."""
@@ -648,3 +652,41 @@ class SlashCommandHandler:
                 completions.append(f"/{name}")
         
         return sorted(completions)
+    
+    def _register_custom_commands(self) -> None:
+        """Discover and register custom command definitions."""
+        try:
+            from .custom_definitions import CustomDefinitionsDiscovery, interpolate_command_template
+            
+            discovery = CustomDefinitionsDiscovery()
+            discovery.discover()
+            
+            # Register each discovered command
+            for cmd_def in discovery.list_commands():
+                def make_action(cmd_name):
+                    # Closure to capture command name
+                    def action(context: CommandContext, args: str) -> Dict[str, Any]:
+                        prompt = interpolate_command_template(cmd_name, args)
+                        if prompt:
+                            # Submit as a prompt
+                            return {"type": "submit_prompt", "content": prompt}
+                        else:
+                            return {"type": "error", "message": f"Failed to load command: {cmd_name}"}
+                    return action
+                
+                command = SlashCommand(
+                    name=cmd_def.name,
+                    description=cmd_def.description or f"Custom command from {cmd_def.source}",
+                    action=make_action(cmd_def.name),
+                    kind=CommandKind.CUSTOM
+                )
+                self.registry.register(command)
+                
+                if self.verbose:
+                    logger.info(f"Registered custom command: {cmd_def.name} from {cmd_def.source}")
+        
+        except ImportError:
+            # Custom definitions module not available
+            pass
+        except Exception as e:
+            logger.warning(f"Failed to register custom commands: {e}")

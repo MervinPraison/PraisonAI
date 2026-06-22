@@ -4,10 +4,14 @@ Context Optimizer for PraisonAI Agents.
 Provides strategies for reducing context size when approaching limits.
 """
 
-from typing import Dict, List, Any, Optional
+import logging
+from typing import Dict, List, Any, Optional, Tuple
 from abc import ABC, abstractmethod
 from .models import ContextLedger, OptimizerStrategy, OptimizationResult
-from .tokens import estimate_messages_tokens
+from .tokens import estimate_messages_tokens, get_estimator
+from .compressor import ContextCompressor
+
+logger = logging.getLogger(__name__)
 
 
 class BaseOptimizer(ABC):
@@ -576,6 +580,227 @@ Summary:"""
             return ""
 
 
+class LLMContextCompressorOptimizer(BaseOptimizer):
+    """
+    Advanced LLM-driven context compression optimizer.
+    
+    Uses the dedicated ContextCompressor class to provide intelligent
+    summarization with session lineage tracking. Implements the design
+    from issue #1806.
+    """
+    
+    def __init__(
+        self,
+        llm_client: Optional[Any] = None,
+        auxiliary_model: Optional[str] = None,
+        protect_last_n_tokens: int = 20_000,
+        summary_target_tokens: int = 750,
+        enable_session_tracking: bool = True,
+        use_accurate_tokenizer: bool = True,
+    ):
+        """
+        Initialize LLM context compressor.
+        
+        Args:
+            llm_client: LLM client for summarization
+            auxiliary_model: Specific model for compression (e.g. "gpt-4o-mini")
+            protect_last_n_tokens: Tokens to preserve at end
+            summary_target_tokens: Target tokens for summary
+            enable_session_tracking: Track compression lineage
+            use_accurate_tokenizer: Use model-specific tokenizer if available
+        """
+        self.llm_client = llm_client
+        self.auxiliary_model = auxiliary_model or "gpt-4o-mini"
+        self.protect_last_n_tokens = protect_last_n_tokens
+        self.summary_target_tokens = summary_target_tokens
+        
+        # Initialize tokenizer
+        tokenizer = get_estimator(use_accurate=use_accurate_tokenizer)
+        
+        # Initialize compressor
+        self.compressor = ContextCompressor(
+            llm=llm_client,
+            tokenizer=tokenizer,
+            auxiliary_model=auxiliary_model,
+            enable_session_tracking=enable_session_tracking,
+        )
+    
+    def optimize(
+        self,
+        messages: List[Dict[str, Any]],
+        target_tokens: int,
+        ledger: Optional[ContextLedger] = None,
+    ) -> tuple:
+        """Optimize using LLM-driven context compression."""
+        original_tokens = estimate_messages_tokens(messages)
+        
+        if original_tokens <= target_tokens:
+            return messages, OptimizationResult(
+                original_tokens=original_tokens,
+                optimized_tokens=original_tokens,
+                tokens_saved=0,
+                strategy_used=OptimizerStrategy.SUMMARIZE,
+            )
+        
+        try:
+            # Use configured compressor with LLM (if available)
+            import asyncio
+            try:
+                # Try async compression with configured LLM
+                result = asyncio.run(self.compressor.compress(
+                    messages=messages,
+                    target_tokens=target_tokens,
+                    summary_target_tokens=self.summary_target_tokens,
+                    protect_last_n_tokens=self.protect_last_n_tokens,
+                ))
+            except:
+                # Fallback to sync compression if async fails
+                result = self._sync_compress(messages, target_tokens)
+            
+            optimized_tokens = estimate_messages_tokens(result.messages)
+            
+            return result.messages, OptimizationResult(
+                original_tokens=original_tokens,
+                optimized_tokens=optimized_tokens,
+                tokens_saved=result.tokens_saved,
+                strategy_used=OptimizerStrategy.SUMMARIZE,
+                messages_removed=result.middle_compressed_count,
+                summary_added=True,
+            )
+            
+        except Exception:
+            # Fallback to basic summarization on error
+            return self._fallback_summarize(messages, target_tokens)
+    
+    def _sync_compress(self, messages: List[Dict[str, Any]], target_tokens: int):
+        """Synchronous compression using deterministic summarization."""
+        from .compressor import CompressResult
+        
+        # Create a sync-compatible compressor
+        compressor = ContextCompressor(
+            llm=None,  # No LLM for sync fallback
+            enable_session_tracking=False,
+        )
+        
+        # Apply compression logic
+        head = compressor._protect_head(messages)
+        tail = compressor._find_tail_by_tokens(messages, self.protect_last_n_tokens)
+        
+        head_count = len(head)
+        tail_start = len(messages) - len(tail)
+        middle = messages[head_count:tail_start] if tail_start > head_count else []
+        
+        if middle:
+            # Create enhanced deterministic summary
+            summary_text = self._create_enhanced_summary(middle)
+            summary_msg = {
+                "role": "system",
+                "content": f"[Context Summary]\n{summary_text}",
+            }
+            compressed_messages = head + [summary_msg] + tail
+        else:
+            compressed_messages = head + tail
+        
+        original_tokens = estimate_messages_tokens(messages)
+        final_tokens = estimate_messages_tokens(compressed_messages)
+        
+        return CompressResult(
+            messages=compressed_messages,
+            tokens_saved=max(0, original_tokens - final_tokens),
+            original_tokens=original_tokens,
+            final_tokens=final_tokens,
+            compression_ratio=final_tokens / original_tokens if original_tokens > 0 else 1.0,
+            middle_compressed_count=len(middle),
+            head_preserved_count=len(head),
+            tail_preserved_count=len(tail),
+        )
+    
+    def _create_enhanced_summary(self, messages: List[Dict[str, Any]]) -> str:
+        """Create enhanced deterministic summary with structure preservation."""
+        summary_parts = []
+        
+        # Extract structured information
+        tasks_completed = []
+        tasks_in_progress = []
+        tool_usage = {}
+        file_operations = {}
+        key_decisions = []
+        
+        for msg in messages:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            
+            if role == "tool":
+                tool_name = msg.get("name", "unknown")
+                tool_usage[tool_name] = tool_usage.get(tool_name, 0) + 1
+                
+                # Track file operations
+                if isinstance(content, str):
+                    import re
+                    # Look for file operations
+                    if "created" in content.lower() or "written" in content.lower():
+                        file_matches = re.findall(r'[^\s]+\.[a-zA-Z]{1,4}', content)
+                        for file_match in file_matches:
+                            file_operations[file_match] = "created/modified"
+                    elif "read" in content.lower() or "found" in content.lower():
+                        file_matches = re.findall(r'[^\s]+\.[a-zA-Z]{1,4}', content)
+                        for file_match in file_matches:
+                            if file_match not in file_operations:
+                                file_operations[file_match] = "read"
+            
+            elif role == "assistant" and isinstance(content, str):
+                # Extract task completions and decisions
+                content_lower = content.lower()
+                if any(completion in content_lower for completion in 
+                       ["completed", "finished", "done", "successfully"]):
+                    tasks_completed.append(content[:150] + "..." if len(content) > 150 else content)
+                elif any(in_progress in content_lower for in_progress in 
+                         ["working on", "starting", "will now", "let me", "i'll"]):
+                    tasks_in_progress.append(content[:150] + "..." if len(content) > 150 else content)
+                
+                if any(decision in content_lower for decision in 
+                       ["decided", "chosen", "will use", "approach"]):
+                    key_decisions.append(content[:100] + "..." if len(content) > 100 else content)
+        
+        # Build structured summary
+        summary_parts.append(f"**Conversation Summary** ({len(messages)} messages compressed)")
+        
+        if tasks_completed:
+            summary_parts.append("**Completed Tasks:**")
+            for i, task in enumerate(tasks_completed[:3], 1):  # Limit to 3
+                summary_parts.append(f"  {i}. {task}")
+        
+        if tasks_in_progress:
+            summary_parts.append("**In Progress:**")
+            for task in tasks_in_progress[:2]:  # Limit to 2
+                summary_parts.append(f"  • {task}")
+        
+        if tool_usage:
+            tool_list = [f"{tool}({count})" for tool, count in tool_usage.items()]
+            summary_parts.append(f"**Tools Used:** {', '.join(tool_list)}")
+        
+        if file_operations:
+            files_summary = []
+            for file, op in list(file_operations.items())[:5]:  # Limit to 5 files
+                files_summary.append(f"{file} ({op})")
+            summary_parts.append(f"**Files:** {', '.join(files_summary)}")
+        
+        if key_decisions:
+            summary_parts.append("**Key Decisions:**")
+            for decision in key_decisions[:2]:  # Limit to 2
+                summary_parts.append(f"  • {decision}")
+        
+        return "\n".join(summary_parts)
+    
+    def _fallback_summarize(self, messages: List[Dict[str, Any]], target_tokens: int) -> tuple:
+        """Ultimate fallback using existing summarization."""
+        fallback = SummarizeOptimizer(
+            preserve_recent=5,
+            llm_summarize_fn=None,  # Use deterministic summary
+        )
+        return fallback.optimize(messages, target_tokens)
+
+
 class SmartOptimizer(BaseOptimizer):
     """
     Smart optimization combining multiple strategies.
@@ -703,6 +928,127 @@ class SmartOptimizer(BaseOptimizer):
         )
 
 
+class ConversationOptimizer(BaseOptimizer):
+    """
+    Conversation-aware compaction optimizer using intelligent analysis.
+    
+    Uses conversation analysis to understand context and create
+    structured summaries that preserve conversation continuity.
+    Implements the conversation compaction strategy from AGENTS.md.
+    """
+    
+    def __init__(
+        self,
+        llm_analyze_fn: Optional[callable] = None,
+        min_compaction_ratio: float = 0.3,
+        analyzer_strategy: str = "hybrid",
+        preserve_recent: int = 5,
+        llm_summarize_fn: Optional[callable] = None,
+    ):
+        """
+        Initialize conversation optimizer.
+        
+        Args:
+            llm_analyze_fn: Optional LLM function for conversation analysis
+            min_compaction_ratio: Minimum compression ratio to attempt compaction
+            analyzer_strategy: Strategy for conversation analysis ("hybrid", "rule_based", "keyword")
+            preserve_recent: Number of recent messages to keep intact
+            llm_summarize_fn: Optional LLM function for summarization
+        """
+        self.llm_analyze_fn = llm_analyze_fn
+        self.min_compaction_ratio = min_compaction_ratio
+        self.analyzer_strategy = analyzer_strategy
+        self.preserve_recent = preserve_recent
+        self.llm_summarize_fn = llm_summarize_fn
+        
+        # Lazy load conversation implementations
+        self._analyzer = None
+        self._compactor = None
+    
+    def optimize(
+        self,
+        messages: List[Dict[str, Any]],
+        target_tokens: int,
+        ledger: Optional[ContextLedger] = None,
+    ) -> Tuple[List[Dict[str, Any]], OptimizationResult]:
+        """
+        Optimize using conversation-aware compaction.
+        
+        Args:
+            messages: Messages to optimize
+            target_tokens: Target token count
+            ledger: Optional context ledger (unused)
+            
+        Returns:
+            Tuple of (optimized_messages, OptimizationResult)
+        """
+        original_tokens = estimate_messages_tokens(messages)
+        
+        if original_tokens <= target_tokens:
+            return messages, OptimizationResult(
+                original_tokens=original_tokens,
+                optimized_tokens=original_tokens,
+                tokens_saved=0,
+                strategy_used=OptimizerStrategy.CONVERSATION,
+            )
+        
+        # Check if compaction ratio would be meaningful
+        target_ratio = target_tokens / original_tokens
+        if target_ratio > (1 - self.min_compaction_ratio):
+            # Not enough reduction needed, fall back to smart optimizer
+            fallback = SmartOptimizer(preserve_recent=self.preserve_recent)
+            return fallback.optimize(messages, target_tokens, ledger)
+        
+        try:
+            # Lazy load conversation components
+            if self._analyzer is None:
+                self._load_conversation_components()
+            
+            # Perform conversation compaction
+            compacted_messages, _ = self._compactor.compact_conversation(
+                messages=messages,
+                target_tokens=target_tokens,
+                preserve_recent=self.preserve_recent
+            )
+            
+            optimized_tokens = estimate_messages_tokens(compacted_messages)
+            
+            return compacted_messages, OptimizationResult(
+                original_tokens=original_tokens,
+                optimized_tokens=optimized_tokens,
+                tokens_saved=original_tokens - optimized_tokens,
+                strategy_used=OptimizerStrategy.CONVERSATION,
+                summary_added=len(compacted_messages) != len(messages),
+            )
+            
+        except Exception as e:
+            # Fall back to smart optimizer on any error
+            logger.warning(
+                "ConversationOptimizer compaction failed, falling back to SmartOptimizer: %s", 
+                str(e)
+            )
+            fallback = SmartOptimizer(preserve_recent=self.preserve_recent)
+            return fallback.optimize(messages, target_tokens, ledger)
+    
+    def _load_conversation_components(self):
+        """Lazy load conversation analysis and compaction components."""
+        # Import conversation implementations (lazy to avoid circular imports)
+        from .conversation import HybridConversationAnalyzer, IntelligentConversationCompactor
+        
+        # Initialize analyzer
+        self._analyzer = HybridConversationAnalyzer(
+            llm_analyze_fn=self.llm_analyze_fn,
+            fallback_strategy=self.analyzer_strategy if self.analyzer_strategy != "hybrid" else "rule_based"
+        )
+        
+        # Initialize compactor
+        self._compactor = IntelligentConversationCompactor(
+            analyzer=self._analyzer,
+            llm_summarize_fn=self.llm_summarize_fn,
+            min_compaction_ratio=self.min_compaction_ratio,
+        )
+
+
 # Strategy registry
 OPTIMIZER_REGISTRY: Dict[OptimizerStrategy, type] = {
     OptimizerStrategy.TRUNCATE: TruncateOptimizer,
@@ -710,11 +1056,13 @@ OPTIMIZER_REGISTRY: Dict[OptimizerStrategy, type] = {
     OptimizerStrategy.PRUNE_TOOLS: PruneToolsOptimizer,
     OptimizerStrategy.NON_DESTRUCTIVE: NonDestructiveOptimizer,
     OptimizerStrategy.SUMMARIZE: SummarizeOptimizer,
+    OptimizerStrategy.CONVERSATION: ConversationOptimizer,
     OptimizerStrategy.SMART: SmartOptimizer,
 }
 
-# LLM summarizer available separately (not in registry as it needs client)
+# LLM summarizers available separately (not in registry as they need client)
 LLM_SUMMARIZE_OPTIMIZER = LLMSummarizeOptimizer
+LLM_CONTEXT_COMPRESSOR_OPTIMIZER = LLMContextCompressorOptimizer
 
 
 def get_optimizer(

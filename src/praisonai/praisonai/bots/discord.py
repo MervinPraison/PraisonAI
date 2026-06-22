@@ -22,9 +22,10 @@ from praisonaiagents.bots import (
     BotUser,
     BotChannel,
     MessageType,
+    PlatformCapabilities,
 )
 
-from ._commands import format_status, format_help
+from ._commands import format_status, format_help, handle_stop_command
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
 from ._ack import AckReactor
@@ -78,6 +79,9 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
         self._agent = agent
         self.config = config or BotConfig(token=token)
         
+        # Initialize allow_silence from config
+        self._allow_silence = getattr(self.config, 'allow_silence', False)
+        
         self._is_running = False
         self._bot_user: Optional[BotUser] = None
         self._client = None
@@ -85,14 +89,11 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
         self._message_handlers: List[Callable] = []
         self._command_handlers: Dict[str, Callable] = {}
         self._started_at: Optional[float] = None
-        try:
-            from praisonaiagents.session import get_default_session_store
-            _store = get_default_session_store()
-        except Exception:
-            _store = None
-        self._session: BotSessionManager = BotSessionManager(
-            store=_store,
-            platform="discord",
+        # Use helper to build session manager
+        from ._session import build_session_manager
+        self._session: BotSessionManager = build_session_manager(
+            self.config,
+            platform="discord"
         )
         self._debouncer: InboundDebouncer = InboundDebouncer(
             debounce_ms=self.config.debounce_ms,
@@ -105,6 +106,11 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
         # Pairing system
         self._pairing_store = PairingStore()
         self._pairing_callback_handler = PairingCallbackHandler(self._pairing_store)
+        
+        # Create adapter-specific registry and register handlers
+        from praisonaiagents.bots import create_registry
+        self._interactive_registry = create_registry()
+        self._register_interactive_handlers()
         self._bot_context: Optional[BotContext] = None
     
     @property
@@ -118,6 +124,39 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
     @property
     def bot_user(self) -> Optional[BotUser]:
         return self._bot_user
+    
+    @property
+    def capabilities(self) -> Dict[str, Any]:
+        """Discord supports edit, reactions, and typing."""
+        return {
+            "live_edit": True,
+            "reactions": True,
+            "typing": True,
+            "text_limit": 2000,  # Discord message limit
+            "edit_rate_limit": 1.0,
+            "reaction_rate_limit": 0.25,  # Discord has generous rate limits
+        }
+    
+    @property
+    def platform_capabilities(self) -> PlatformCapabilities:
+        """Return Discord platform capabilities."""
+        return self.default_capabilities()
+    
+    @classmethod
+    def default_capabilities(cls) -> PlatformCapabilities:
+        """Default Discord platform capabilities."""
+        return PlatformCapabilities(
+            max_message_length=2000,  # Discord's limit for regular messages
+            length_unit="codepoints",
+            supports_edit=True,  # Discord supports message editing
+            supports_typing=True,
+            markdown_dialect="discord_markdown",
+            needs_rate_limit=False,  # Discord.py handles rate limiting
+            edit_interval_ms=500,  # Discord is less restrictive on edits
+            max_files_per_message=10,
+            max_file_size_mb=8,  # Default Discord limit (varies by boost level)
+            supported_file_types=["*"],  # Discord supports most file types
+        )
     
     async def start(self) -> None:
         """Start the Discord bot."""
@@ -200,6 +239,11 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                 elif command == "help":
                     await message.reply(self._format_help())
                     return
+                elif command == "stop":
+                    user_id = str(message.author.id)
+                    response = handle_stop_command(self._session, user_id)
+                    await message.reply(response)
+                    return
                 elif command and command in self._command_handlers:
                     handler = self._command_handlers[command]
                     try:
@@ -251,6 +295,8 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                             self._agent, user_id, text_to_send,
                             chat_id=str(message.channel.id),
                             user_name=str(getattr(message.author, "name", "")),
+                            message_id=str(message.id),
+                            account=self._config.get("account", "default"),
                         )
                         send_result = self.fire_message_sending(
                             str(message.channel.id), str(response),
@@ -413,6 +459,36 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
             channel = self._client.get_channel(int(channel_id))
             if channel:
                 await channel.trigger_typing()
+    
+    async def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> bool:
+        """Add a reaction to a message."""
+        if not self._client:
+            return False
+        
+        try:
+            channel = self._client.get_channel(int(channel_id))
+            if channel:
+                message = await channel.fetch_message(int(message_id))
+                await message.add_reaction(emoji)
+                return True
+        except Exception as e:
+            logger.debug(f"Failed to add reaction: {e}")
+        return False
+    
+    async def remove_reaction(self, channel_id: str, message_id: str, emoji: str) -> bool:
+        """Remove a reaction from a message."""
+        if not self._client:
+            return False
+        
+        try:
+            channel = self._client.get_channel(int(channel_id))
+            if channel:
+                message = await channel.fetch_message(int(message_id))
+                await message.remove_reaction(emoji, self._client.user)
+                return True
+        except Exception as e:
+            logger.debug(f"Failed to remove reaction: {e}")
+        return False
     
     async def get_user(self, user_id: str) -> Optional[BotUser]:
         """Get user information."""
@@ -607,24 +683,138 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
         except Exception as e:
             logger.error(f"Failed to send reply: {e}")
     
+    def _register_interactive_handlers(self):
+        """Register handlers for interactive callbacks."""
+        registry = self._interactive_registry
+        
+        # Register handler for command callbacks
+        async def handle_command_callback(ctx):
+            """Handle command callbacks from buttons."""
+            payload = ctx.platform_data.get("decoded_payload", {})
+            command = payload.get("command", "")
+            
+            # Get the Discord interaction object
+            interaction = ctx.platform_data.get("interaction")
+            if not interaction:
+                return None
+            
+            # Parse the command (remove leading slash if present)
+            if command.startswith("/"):
+                command = command[1:]
+            
+            # Split command and args
+            parts = command.split(maxsplit=1)
+            cmd_name = parts[0] if parts else ""
+            cmd_args = parts[1] if len(parts) > 1 else ""
+            
+            # Check if command exists in handlers
+            if cmd_name in self._command_handlers:
+                handler = self._command_handlers[cmd_name]
+                try:
+                    # Create a minimal message object for the handler
+                    from praisonaiagents.bots import BotMessage, BotUser, BotChannel
+                    message = BotMessage(
+                        message_id=str(interaction.message.id) if interaction.message else "",
+                        content=f"/{command}",
+                        sender=BotUser(user_id=ctx.user_id),
+                        channel=BotChannel(
+                            channel_id=str(interaction.channel_id) if hasattr(interaction, "channel_id") else ""
+                        ),
+                        metadata={
+                            "command": cmd_name,
+                            "command_args": cmd_args
+                        }
+                    )
+                    
+                    if asyncio.iscoroutinefunction(handler):
+                        await handler(message)
+                    else:
+                        handler(message)
+                    
+                    # Update the message to show command was executed
+                    await interaction.edit_original_response(
+                        content=f"{interaction.message.content}\n\n✅ Command executed: /{cmd_name}",
+                        view=None
+                    )
+                    return f"Command {cmd_name} executed"
+                except Exception as e:
+                    logger.error(f"Command handler error: {e}")
+                    await interaction.edit_original_response(
+                        content=f"{interaction.message.content}\n\n❌ Error executing command",
+                        view=None
+                    )
+                    return f"Error: {e}"
+            
+            logger.debug(f"Unknown command from button: {cmd_name}")
+            return None
+        
+        # Register the command handler
+        registry.register("command", handle_command_callback)
+        
+        # Register handler for pairing callbacks using the new system
+        async def handle_pairing_callback(ctx):
+            """Handle pairing callbacks through the new registry."""
+            interaction = ctx.platform_data.get("interaction")
+            if not interaction:
+                return None
+            
+            # The pairing handler already exists, we just wrap it
+            result = await self._pairing_callback_handler.handle_approval_callback(
+                callback_data=ctx.callback_data,
+                owner_user_id=ctx.user_id,
+                bot_adapter=self
+            )
+            
+            # Update the message with result
+            if interaction.message:
+                await interaction.edit_original_response(
+                    content=f"{interaction.message.content}\n\n{result.message}",
+                    view=None  # Remove buttons
+                )
+            
+            return f"Pairing {result.action}"
+        
+        # Register the pairing handler
+        registry.register("pair", handle_pairing_callback)
+    
     async def _handle_pairing_interaction(self, interaction, custom_id: str):
-        """Handle button interaction for pairing approval."""
+        """Handle button interaction through the interactive registry."""
         try:
             # Defer the interaction
             await interaction.response.defer()
             
-            # Handle the pairing callback
-            result = await self._pairing_callback_handler.handle_approval_callback(
+            # Create interactive context
+            from praisonaiagents.bots import InteractiveContext
+            ctx = InteractiveContext(
                 callback_data=custom_id,
-                owner_user_id=str(interaction.user.id),
-                bot_adapter=self
+                user_id=str(interaction.user.id),
+                message_id=str(interaction.message.id) if interaction.message else None,
+                chat_id=str(interaction.channel_id) if hasattr(interaction, "channel_id") else None,
+                bot_adapter=self,
+                platform_data={
+                    "interaction": interaction,
+                }
             )
             
-            # Edit the message with result
-            await interaction.edit_original_response(
-                content=f"{interaction.message.content}\n\n{result.message}",
-                view=None  # Remove buttons
-            )
+            # Try to dispatch through the interactive registry
+            handled = await self._interactive_registry.dispatch(ctx)
+            
+            if not handled:
+                # Fallback: handle legacy pairing callbacks
+                if custom_id.startswith("pair:"):
+                    result = await self._pairing_callback_handler.handle_approval_callback(
+                        callback_data=custom_id,
+                        owner_user_id=str(interaction.user.id),
+                        bot_adapter=self
+                    )
+                    
+                    # Edit the message with result
+                    await interaction.edit_original_response(
+                        content=f"{interaction.message.content}\n\n{result.message}",
+                        view=None  # Remove buttons
+                    )
+                else:
+                    logger.debug(f"Unhandled callback: {custom_id}")
             
         except Exception as e:
             logger.error(f"Failed to handle pairing interaction: {e}")

@@ -6,7 +6,6 @@ Each item is processed individually with the loop variable.
 """
 
 from praisonaiagents import AgentFlow, Task
-from praisonaiagents import AgentFlowManager
 
 # Create a workflow with loop
 workflow = AgentFlow(
@@ -30,18 +29,12 @@ workflow = AgentFlow(
 )
 
 if __name__ == "__main__":
-    # Create manager and register workflow
-    manager = WorkflowManager()
-    manager.workflows["Process Items"] = workflow
-    
-    # Execute - will process each fruit in the list
-    result = manager.execute(
-        "Process Items",
-        default_llm="gpt-4o-mini"
-    )
-    
+    result = workflow.run("", llm="gpt-4o-mini", verbose=True)
     print("Workflow completed!")
-    for step_result in result["results"]:
-        print(f"  {step_result['step']}: {step_result['status']}")
-        if isinstance(step_result.get("output"), list):
-            print(f"    Loop processed {len(step_result['output'])} items")
+    for step in result.get("steps", []):
+        name = step.get("step", step.get("name", "unknown"))
+        status = step.get("status", "completed")
+        print(f"  {name}: {status}")
+        out = step.get("output")
+        if isinstance(out, list):
+            print(f"    Loop processed {len(out)} items")

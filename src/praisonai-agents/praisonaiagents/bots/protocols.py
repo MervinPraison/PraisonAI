@@ -22,12 +22,112 @@ from typing import (
     List,
     Optional,
     Protocol,
+    TypedDict,
     Union,
     runtime_checkable,
 )
 
 if TYPE_CHECKING:
     from ..agent import Agent
+
+
+class ChannelCapabilities(TypedDict, total=False):
+    """Declares what features a bot channel supports.
+    
+    This allows shared engines to adapt behavior based on platform capabilities,
+    enabling graceful degradation when features aren't available.
+    
+    Attributes:
+        live_edit: Whether the channel supports editing messages in place
+        reactions: Whether the channel supports adding reactions to messages
+        typing: Whether the channel supports typing indicators
+        text_limit: Maximum message length (0 = unlimited)
+        edit_rate_limit: Minimum seconds between edits (for throttling)
+        reaction_rate_limit: Minimum seconds between reactions
+    """
+    live_edit: bool
+    reactions: bool
+    typing: bool
+    text_limit: int
+    edit_rate_limit: float
+    reaction_rate_limit: float
+
+
+class RunStatus(Enum):
+    """Run status states for progress feedback.
+    
+    Used by status engines to show agent execution state through
+    reactions or status lines.
+    """
+    QUEUED = "queued"
+    THINKING = "thinking"
+    TOOL = "tool"
+    DONE = "done"
+    ERROR = "error"
+
+
+@dataclass(frozen=True)
+class PlatformCapabilities:
+    """Platform-specific capabilities descriptor for bot adapters.
+    
+    Declares what a messaging platform can do, enabling the shared delivery
+    machinery to apply features like streaming, rate limiting, and chunking
+    uniformly across all platforms.
+    
+    Attributes:
+        max_message_length: Maximum message length in the platform's unit
+        length_unit: Unit for message length ("codepoints" or "utf16")
+        supports_edit: Whether the platform supports in-place message edits (for streaming)
+        supports_typing: Whether the platform supports typing indicators
+        markdown_dialect: Markdown flavor the platform uses (e.g., "markdown", "telegram_markdown_v2")
+        needs_rate_limit: Whether the platform needs rate limiting
+        edit_interval_ms: Minimum milliseconds between message edits (for streaming)
+        max_files_per_message: Maximum number of file attachments per message
+        max_file_size_mb: Maximum file size in megabytes
+        supported_file_types: List of supported file extensions/mime types
+    """
+    
+    max_message_length: int = 4096
+    length_unit: str = "codepoints"  # "codepoints" or "utf16"
+    supports_edit: bool = False
+    supports_typing: bool = True
+    markdown_dialect: str = "markdown"
+    needs_rate_limit: bool = True
+    edit_interval_ms: int = 1000  # Minimum ms between edits
+    max_files_per_message: int = 1
+    max_file_size_mb: int = 10
+    supported_file_types: List[str] = field(default_factory=lambda: ["*"])
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "max_message_length": self.max_message_length,
+            "length_unit": self.length_unit,
+            "supports_edit": self.supports_edit,
+            "supports_typing": self.supports_typing,
+            "markdown_dialect": self.markdown_dialect,
+            "needs_rate_limit": self.needs_rate_limit,
+            "edit_interval_ms": self.edit_interval_ms,
+            "max_files_per_message": self.max_files_per_message,
+            "max_file_size_mb": self.max_file_size_mb,
+            "supported_file_types": self.supported_file_types,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "PlatformCapabilities":
+        """Create from dictionary."""
+        return cls(
+            max_message_length=data.get("max_message_length", 4096),
+            length_unit=data.get("length_unit", "codepoints"),
+            supports_edit=data.get("supports_edit", False),
+            supports_typing=data.get("supports_typing", True),
+            markdown_dialect=data.get("markdown_dialect", "markdown"),
+            needs_rate_limit=data.get("needs_rate_limit", True),
+            edit_interval_ms=data.get("edit_interval_ms", 1000),
+            max_files_per_message=data.get("max_files_per_message", 1),
+            max_file_size_mb=data.get("max_file_size_mb", 10),
+            supported_file_types=data.get("supported_file_types", ["*"]),
+        )
 
 
 class MessageType(str, Enum):
@@ -318,6 +418,80 @@ class ProbeResult:
         }
 
 
+class HealthReason(Enum):
+    """Reasons for channel health status."""
+    HEALTHY = "healthy"
+    NOT_RUNNING = "not-running"
+    DISCONNECTED = "disconnected"
+    STALE_SOCKET = "stale-socket"
+    STUCK = "stuck"
+    BUSY = "busy"
+    STARTUP_GRACE = "startup-grace"
+    ERROR = "error"
+    
+    @property
+    def is_recoverable(self) -> bool:
+        """Whether this reason indicates a recoverable state."""
+        return self in {
+            HealthReason.DISCONNECTED,
+            HealthReason.STALE_SOCKET,
+            HealthReason.STUCK,
+            HealthReason.ERROR,
+        }
+
+
+def evaluate_channel_health(
+    health: HealthResult,
+    startup_grace_seconds: float = 60.0,
+    stale_after_seconds: float = 120.0,
+    current_time: Optional[float] = None,
+) -> HealthReason:
+    """Evaluate channel health and return a reason.
+    
+    Pure function that evaluates a HealthResult and determines
+    the health reason based on various criteria.
+    
+    Args:
+        health: The health result to evaluate
+        startup_grace_seconds: Grace period for startup
+        stale_after_seconds: Time after which no activity is considered stale
+        current_time: Current timestamp (for testing)
+        
+    Returns:
+        HealthReason indicating the channel's health status
+    """
+    if current_time is None:
+        current_time = time.time()
+    
+    # Not running
+    if not health.is_running:
+        return HealthReason.NOT_RUNNING
+    
+    # Startup grace period
+    if health.uptime_seconds is not None and health.uptime_seconds < startup_grace_seconds:
+        return HealthReason.STARTUP_GRACE
+    
+    # Check for errors
+    if health.error:
+        return HealthReason.ERROR
+    
+    # Check probe result
+    if health.probe and not health.probe.ok:
+        return HealthReason.DISCONNECTED
+    
+    # Check for stale socket (no transport activity)
+    if health.last_activity is not None:
+        time_since_activity = current_time - health.last_activity
+        if time_since_activity > stale_after_seconds:
+            return HealthReason.STALE_SOCKET
+    
+    # Overall health status
+    if not health.ok:
+        return HealthReason.ERROR
+    
+    return HealthReason.HEALTHY
+
+
 @dataclass
 class HealthResult:
     """Detailed health status of a bot.
@@ -331,6 +505,8 @@ class HealthResult:
         sessions: Number of active sessions
         error: Error message (if unhealthy)
         details: Additional platform-specific health details
+        reason: Health status reason (optional)
+        last_activity: Last transport activity timestamp (optional)
     """
     
     ok: bool
@@ -341,6 +517,8 @@ class HealthResult:
     sessions: int = 0
     error: Optional[str] = None
     details: Dict[str, Any] = field(default_factory=dict)
+    reason: Optional[HealthReason] = None
+    last_activity: Optional[float] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -353,6 +531,8 @@ class HealthResult:
             "sessions": self.sessions,
             "error": self.error,
             "details": self.details,
+            "reason": self.reason.value if self.reason else None,
+            "last_activity": self.last_activity,
         }
 
 
@@ -386,6 +566,24 @@ class BotProtocol(Protocol):
     @property
     def bot_user(self) -> Optional[BotUser]:
         """The bot's user information."""
+        ...
+    
+    @property
+    def capabilities(self) -> ChannelCapabilities:
+        """Channel capabilities for feature discovery.
+        
+        Returns capabilities that shared engines use to adapt behavior.
+        Channels that don't support a feature should return False for it.
+        """
+        ...
+    
+    @property
+    def platform_capabilities(self) -> PlatformCapabilities:
+        """Platform capabilities descriptor.
+        
+        Returns the platform's capabilities for use by shared delivery code.
+        Adapters should override this to declare their specific capabilities.
+        """
         ...
     
     # Lifecycle methods
@@ -499,6 +697,33 @@ class BotProtocol(Protocol):
         """
         ...
     
+    # Reactions
+    async def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> bool:
+        """Add a reaction emoji to a message.
+        
+        Args:
+            channel_id: Channel containing the message
+            message_id: Message to react to
+            emoji: Emoji to add (Unicode or custom emoji ID)
+            
+        Returns:
+            True if reaction was added successfully
+        """
+        ...
+    
+    async def remove_reaction(self, channel_id: str, message_id: str, emoji: str) -> bool:
+        """Remove a reaction emoji from a message.
+        
+        Args:
+            channel_id: Channel containing the message
+            message_id: Message to remove reaction from
+            emoji: Emoji to remove
+            
+        Returns:
+            True if reaction was removed successfully
+        """
+        ...
+    
     # User/channel info
     async def get_user(self, user_id: str) -> Optional[BotUser]:
         """Get user information.
@@ -609,6 +834,55 @@ class ChatCommandProtocol(Protocol):
         
         Returns:
             List of ChatCommandInfo for all registered commands
+        """
+        ...
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SupportsPresentation — interactive UI presentation protocol
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+@runtime_checkable
+class SupportsPresentation(Protocol):
+    """Protocol for channel adapters that support presentations.
+    
+    Channel adapters implement this protocol to render
+    portable presentations as native widgets.
+    """
+    
+    @property
+    def presentation_limits(self) -> "PresentationLimits":
+        """Get channel-specific presentation limits."""
+        ...
+    
+    async def render_presentation(
+        self,
+        target: str,
+        presentation: "MessagePresentation",
+    ) -> Optional[str]:
+        """Render a presentation to a target (chat/channel).
+        
+        Args:
+            target: Target identifier (chat_id, channel_id, etc.)
+            presentation: The presentation to render
+            
+        Returns:
+            Message ID if sent successfully, None otherwise
+        """
+        ...
+    
+    def truncate_presentation(
+        self,
+        presentation: "MessagePresentation",
+    ) -> "MessagePresentation":
+        """Truncate a presentation to fit channel limits.
+        
+        Args:
+            presentation: The presentation to truncate
+            
+        Returns:
+            Truncated presentation that fits channel limits
         """
         ...
 

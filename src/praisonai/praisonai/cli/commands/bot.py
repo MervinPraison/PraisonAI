@@ -20,6 +20,74 @@ def _common_options():
     pass
 
 
+def _build_capabilities(
+    *,
+    browser: bool = False,
+    browser_profile: str = "default",
+    browser_headless: bool = False,
+    tools: Optional[List[str]] = None,
+    skills: Optional[List[str]] = None,
+    skills_dir: Optional[str] = None,
+    memory: bool = False,
+    memory_provider: str = "default",
+    knowledge: bool = False,
+    knowledge_sources: Optional[List[str]] = None,
+    web_search: bool = False,
+    web_provider: str = "duckduckgo",
+    sandbox: bool = False,
+    exec_enabled: bool = False,
+    auto_approve: bool = False,
+    model: Optional[str] = None,
+    thinking: Optional[str] = None,
+    tts: bool = False,
+    tts_voice: str = "alloy",
+    tts_model: Optional[str] = None,
+    auto_tts: bool = False,
+    stt: bool = False,
+    stt_model: Optional[str] = None,
+    stream: bool = False,
+    stream_edit_interval: int = 700,
+    session_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> "BotCapabilities":
+    """Build a BotCapabilities object from the given parameters.
+    
+    Centralizes the construction of BotCapabilities to avoid duplication
+    across different bot platform commands.
+    """
+    from ..features.bots_cli import BotCapabilities
+    
+    return BotCapabilities(
+        browser=browser,
+        browser_profile=browser_profile,
+        browser_headless=browser_headless,
+        tools=tools or [],
+        skills=skills or [],
+        skills_dir=skills_dir,
+        memory=memory,
+        memory_provider=memory_provider,
+        knowledge=knowledge,
+        knowledge_sources=knowledge_sources or [],
+        web_search=web_search,
+        web_search_provider=web_provider,
+        sandbox=sandbox,
+        exec_enabled=exec_enabled,
+        auto_approve=auto_approve,
+        model=model,
+        thinking=thinking,
+        tts=tts,
+        tts_voice=tts_voice,
+        tts_model=tts_model,
+        auto_tts=auto_tts,
+        stt=stt,
+        stt_model=stt_model,
+        stream=stream,
+        stream_edit_interval=stream_edit_interval,
+        session_id=session_id,
+        user_id=user_id,
+    )
+
+
 @app.command("start")
 def bot_start(
     config: str = typer.Option(
@@ -75,6 +143,11 @@ def bot_telegram(
     auto_tts: bool = typer.Option(False, "--auto-tts", help="Auto-convert all responses to speech"),
     stt: bool = typer.Option(False, "--stt", help="Enable STT tool for speech-to-text"),
     stt_model: Optional[str] = typer.Option(None, "--stt-model", help="STT model (default: openai/whisper-1)"),
+    stream: bool = typer.Option(False, "--stream", help="Enable progressive streaming responses (edit messages live)"),
+    stream_edit_interval: int = typer.Option(700, "--stream-edit-interval", help="Minimum interval between message edits in milliseconds"),
+    group_policy: str = typer.Option("mention_only", "--group-policy", help="Group behavior: respond_all, mention_only, command_only"),
+    allow_silence: bool = typer.Option(False, "--allow-silence", help="Allow agent to return NO_REPLY to stay silent"),
+    silence_token: Optional[str] = typer.Option(None, "--silence-token", help="Custom silence token (default: NO_REPLY)"),
 ):
     """Start a Telegram bot with full agent capabilities.
     
@@ -83,21 +156,21 @@ def bot_telegram(
         praisonai bot telegram --agent agents.yaml --browser --web
         praisonai bot telegram --tools DuckDuckGoTool WikipediaTool --memory
     """
-    from ..features.bots_cli import BotHandler, BotCapabilities
+    from ..features.bots_cli import BotHandler
     
-    capabilities = BotCapabilities(
+    capabilities = _build_capabilities(
         browser=browser,
         browser_profile=browser_profile,
         browser_headless=browser_headless,
-        tools=tools or [],
-        skills=skills or [],
+        tools=tools,
+        skills=skills,
         skills_dir=skills_dir,
         memory=memory,
         memory_provider=memory_provider,
         knowledge=knowledge,
-        knowledge_sources=knowledge_sources or [],
+        knowledge_sources=knowledge_sources,
         web_search=web_search,
-        web_search_provider=web_provider,
+        web_provider=web_provider,
         sandbox=sandbox,
         exec_enabled=exec_enabled,
         auto_approve=auto_approve,
@@ -109,6 +182,11 @@ def bot_telegram(
         auto_tts=auto_tts,
         stt=stt,
         stt_model=stt_model,
+        stream=stream,
+        stream_edit_interval=stream_edit_interval,
+        group_policy=group_policy,
+        allow_silence=allow_silence,
+        silence_token=silence_token,
         session_id=session_id,
         user_id=user_id,
     )
@@ -146,6 +224,9 @@ def bot_discord(
     auto_tts: bool = typer.Option(False, "--auto-tts", help="Auto-convert all responses to speech"),
     stt: bool = typer.Option(False, "--stt", help="Enable STT tool for speech-to-text"),
     stt_model: Optional[str] = typer.Option(None, "--stt-model", help="STT model (default: openai/whisper-1)"),
+    group_policy: str = typer.Option("mention_only", "--group-policy", help="Group behavior: respond_all, mention_only, command_only"),
+    allow_silence: bool = typer.Option(False, "--allow-silence", help="Allow agent to return NO_REPLY to stay silent"),
+    silence_token: Optional[str] = typer.Option(None, "--silence-token", help="Custom silence token (default: NO_REPLY)"),
 ):
     """Start a Discord bot with full agent capabilities.
     
@@ -154,21 +235,21 @@ def bot_discord(
         praisonai bot discord --agent agents.yaml --browser --web
         praisonai bot discord --tools DuckDuckGoTool --memory
     """
-    from ..features.bots_cli import BotHandler, BotCapabilities
+    from ..features.bots_cli import BotHandler
     
-    capabilities = BotCapabilities(
+    capabilities = _build_capabilities(
         browser=browser,
         browser_profile=browser_profile,
         browser_headless=browser_headless,
-        tools=tools or [],
-        skills=skills or [],
+        tools=tools,
+        skills=skills,
         skills_dir=skills_dir,
         memory=memory,
         memory_provider=memory_provider,
         knowledge=knowledge,
-        knowledge_sources=knowledge_sources or [],
+        knowledge_sources=knowledge_sources,
         web_search=web_search,
-        web_search_provider=web_provider,
+        web_provider=web_provider,
         sandbox=sandbox,
         exec_enabled=exec_enabled,
         auto_approve=auto_approve,
@@ -180,6 +261,9 @@ def bot_discord(
         auto_tts=auto_tts,
         stt=stt,
         stt_model=stt_model,
+        group_policy=group_policy,
+        allow_silence=allow_silence,
+        silence_token=silence_token,
         session_id=session_id,
         user_id=user_id,
     )
@@ -226,21 +310,21 @@ def bot_slack(
         praisonai bot slack --agent agents.yaml --browser --web
         praisonai bot slack --tools DuckDuckGoTool --memory --app-token $SLACK_APP_TOKEN
     """
-    from ..features.bots_cli import BotHandler, BotCapabilities
+    from ..features.bots_cli import BotHandler
     
-    capabilities = BotCapabilities(
+    capabilities = _build_capabilities(
         browser=browser,
         browser_profile=browser_profile,
         browser_headless=browser_headless,
-        tools=tools or [],
-        skills=skills or [],
+        tools=tools,
+        skills=skills,
         skills_dir=skills_dir,
         memory=memory,
         memory_provider=memory_provider,
         knowledge=knowledge,
-        knowledge_sources=knowledge_sources or [],
+        knowledge_sources=knowledge_sources,
         web_search=web_search,
-        web_search_provider=web_provider,
+        web_provider=web_provider,
         sandbox=sandbox,
         exec_enabled=exec_enabled,
         auto_approve=auto_approve,
@@ -309,21 +393,21 @@ def bot_whatsapp(
         praisonai bot whatsapp --mode web --creds-dir ~/.myapp/wa-creds
         praisonai bot whatsapp --agent agents.yaml --memory --web
     """
-    from ..features.bots_cli import BotHandler, BotCapabilities
+    from ..features.bots_cli import BotHandler
     
-    capabilities = BotCapabilities(
+    capabilities = _build_capabilities(
         browser=browser,
         browser_profile=browser_profile,
         browser_headless=browser_headless,
-        tools=tools or [],
-        skills=skills or [],
+        tools=tools,
+        skills=skills,
         skills_dir=skills_dir,
         memory=memory,
         memory_provider=memory_provider,
         knowledge=knowledge,
-        knowledge_sources=knowledge_sources or [],
+        knowledge_sources=knowledge_sources,
         web_search=web_search,
-        web_search_provider=web_provider,
+        web_provider=web_provider,
         sandbox=sandbox,
         exec_enabled=exec_enabled,
         auto_approve=auto_approve,
@@ -397,22 +481,22 @@ def bot_linear(
         praisonai bot linear --token $LINEAR_OAUTH_TOKEN --signing-secret $LINEAR_WEBHOOK_SECRET
         praisonai bot linear --agent agents.yaml --memory --web --tools linear_tools
     """
-    from ..features.bots_cli import BotHandler, BotCapabilities
+    from ..features.bots_cli import BotHandler
     
-    capabilities = BotCapabilities(
+    capabilities = _build_capabilities(
         model=model,
         browser=browser,
         browser_profile=browser_profile,
         browser_headless=browser_headless,
-        tools=tools or [],
-        skills=skills or [],
+        tools=tools,
+        skills=skills,
         skills_dir=skills_dir,
         memory=memory,
         memory_provider=memory_provider,
         knowledge=knowledge,
-        knowledge_sources=knowledge_sources or [],
+        knowledge_sources=knowledge_sources,
         web_search=web_search,
-        web_search_provider=web_provider,
+        web_provider=web_provider,
         sandbox=sandbox,
         exec_enabled=exec_enabled,
         auto_approve=auto_approve,
@@ -451,10 +535,10 @@ def bot_email(
         praisonai bot email --token $EMAIL_APP_PASSWORD --email user@gmail.com
         praisonai bot email --agent agents.yaml --memory
     """
-    from ..features.bots_cli import BotHandler, BotCapabilities
+    from ..features.bots_cli import BotHandler
     
-    capabilities = BotCapabilities(
-        tools=tools or [],
+    capabilities = _build_capabilities(
+        tools=tools,
         memory=memory,
         knowledge=knowledge,
         web_search=web_search,
@@ -493,10 +577,10 @@ def bot_agentmail(
         praisonai bot agentmail --inbox praison@agentmail.to
         praisonai bot agentmail --agent agents.yaml --memory
     """
-    from ..features.bots_cli import BotHandler, BotCapabilities
+    from ..features.bots_cli import BotHandler
     
-    capabilities = BotCapabilities(
-        tools=tools or [],
+    capabilities = _build_capabilities(
+        tools=tools,
         memory=memory,
         knowledge=knowledge,
         web_search=web_search,

@@ -117,12 +117,12 @@ class TestPairingAgentE2E:
         # Set callback secret via environment variable for consistent signatures
         os.environ["PRAISONAI_CALLBACK_SECRET"] = "test-secret-for-e2e"
         
-        # Simulate owner approval using real signed callback
+        # Simulate owner approval using callback payload from the approval DM
         keyboard = PairingUIBuilder.create_telegram_keyboard(
-            user_name="TestUser",
+            user_name=approval_dm["user_name"],
             code=code,
-            channel="telegram",
-            user_id="new-user-1",
+            channel=approval_dm["channel"],
+            user_id=approval_dm["user_id"],
         )
         callback_data = keyboard["inline_keyboard"][0][0]["callback_data"]  # Get approve button callback
         
@@ -191,7 +191,7 @@ class TestPairingAgentE2E:
         assert len(self.adapter.approval_dms) == 1
         
         approval_dm = self.adapter.approval_dms[0]
-        assert approval_dm["channel"] == "discord-dm-456"
+        assert approval_dm["channel"] == "discord"
         assert approval_dm["user_id"] == "discord-user-1"
         
     @pytest.mark.asyncio 

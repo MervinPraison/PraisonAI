@@ -60,6 +60,7 @@ def chat_main(
     ),
     no_memory: bool = typer.Option(False, "--no-memory", help="Disable memory"),
     tools: Optional[str] = typer.Option(None, "--tools", "-t", help="Tools file path"),
+    toolset: Optional[str] = typer.Option(None, "--toolset", help="Named toolset groups (comma-separated, e.g., web,files)"),
     user_id: Optional[str] = typer.Option(None, "--user-id", help="User ID for memory isolation"),
     session_id: Optional[str] = typer.Option(None, "--session", "-s", help="Session ID to resume"),
     continue_session: bool = typer.Option(False, "--continue", "-c", help="Continue last session"),
@@ -135,6 +136,7 @@ def chat_main(
     no_color: bool = typer.Option(False, "--no-color", help="Disable colors"),
     theme: str = typer.Option("default", "--theme", help="UI theme: default, dark, light, minimal"),
     compact: bool = typer.Option(False, "--compact", help="Compact output mode"),
+    no_rules: bool = typer.Option(False, "--no-rules", help="Disable auto-injection of project instruction files"),
 ):
     """
     Start terminal-native interactive chat mode.
@@ -208,6 +210,7 @@ def chat_main(
         workspace=workspace,
         debug=debug,
         autonomy_mode=autonomy,
+        no_rules=no_rules,
     )
     
     tui = AsyncTUI(config=tui_config)
@@ -285,6 +288,7 @@ def _run_legacy_terminal_chat(
     verbose: bool = False,
     memory: bool = False,
     tools: Optional[str] = None,
+    toolset: Optional[str] = None,
     user_id: Optional[str] = None,
     session_id: Optional[str] = None,
     continue_session: bool = False,
@@ -301,6 +305,7 @@ def _run_legacy_terminal_chat(
     args.verbose = verbose
     args.memory = memory
     args.tools = tools
+    args.toolset = toolset
     args.user_id = user_id
     args.resume_session = session_id if session_id else ('last' if continue_session else None)
     args.no_acp = no_acp

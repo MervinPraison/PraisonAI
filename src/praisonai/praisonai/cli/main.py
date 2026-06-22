@@ -6,55 +6,9 @@ import warnings
 import os
 import json
 
-# Warning filter support - now opt-in only (no global mutation at import)
-import atexit
-
-_SUPPRESSED_PATTERNS = (
-    "Pydantic serializer warnings",
-    "PydanticSerializationUnexpectedValue",
-    "Expected ",  # Narrowed from just "Expected" to avoid false positives
-    "StreamingChoices",
-    "serialized value may not be as expected",
-    "duckduckgo_search",
-)
-
-_installed = False
-_original_showwarning = None
-_original_filters = None
-
-def install_warning_filters() -> None:
-    """Install PraisonAI's noise filters. Idempotent. CLI-only."""
-    global _installed, _original_showwarning, _original_filters
-    if _installed:
-        return
-    _original_showwarning = warnings.showwarning
-    _original_filters = list(warnings.filters)
-
-    # Install filterwarnings for common patterns
-    for pattern in _SUPPRESSED_PATTERNS:
-        warnings.filterwarnings("ignore", message=f".*{pattern}.*")
-    warnings.filterwarnings("ignore", category=UserWarning, module="pydantic.*")
-
-    def _filtered_showwarning(message, category, filename, lineno, file=None, line=None):
-        msg_str = str(message)
-        if any(pattern in msg_str for pattern in _SUPPRESSED_PATTERNS):
-            return
-        if category is UserWarning and "pydantic" in filename.lower():
-            return
-        _original_showwarning(message, category, filename, lineno, file, line)
-
-    warnings.showwarning = _filtered_showwarning
-    atexit.register(_uninstall_warning_filters)
-    _installed = True
-
-def _uninstall_warning_filters() -> None:
-    """Restore original warnings behavior on exit."""
-    global _installed, _original_filters, _original_showwarning
-    if _installed and _original_showwarning is not None:
-        warnings.showwarning = _original_showwarning
-        if _original_filters is not None:
-            warnings.filters[:] = _original_filters
-        _installed = False
+# Re-export warning filter functions from the lightweight module
+# This maintains backward compatibility for any external importers
+from ._warnings import install_warning_filters, _uninstall_warning_filters, _SUPPRESSED_PATTERNS
 
 # Suppress crewai RuntimeWarning about module loading order (only in non-debug mode)
 # This warning is harmless and occurs when running as `python -m praisonai.cli.main`
@@ -158,27 +112,31 @@ def _get_agents_generator():
     from praisonai.agents_generator import AgentsGenerator
     return AgentsGenerator
 
-# Optional module imports with availability checks
-GRADIO_AVAILABLE = False
-CALL_MODULE_AVAILABLE = False
-CREWAI_AVAILABLE = False
-AUTOGEN_AVAILABLE = False
-PRAISONAI_AVAILABLE = False
-TRAIN_AVAILABLE = False
-
 # Use centralized availability detection
 from .._framework_availability import is_available
 
+# Define real module-level constants for internal use (prevents NameError)
+# These are evaluated on-demand for dynamic behavior
 GRADIO_AVAILABLE = is_available("gradio")
+CREWAI_AVAILABLE = is_available("crewai")
+AUTOGEN_AVAILABLE = is_available("autogen")
+PRAISONAI_AVAILABLE = is_available("praisonaiagents")
+TRAIN_AVAILABLE = is_available("unsloth")
+
+# Handle CALL_MODULE_AVAILABLE with exception guard
 try:
     import importlib.util
     CALL_MODULE_AVAILABLE = importlib.util.find_spec("praisonai.api.call") is not None
 except (ModuleNotFoundError, AttributeError):
     CALL_MODULE_AVAILABLE = False
-CREWAI_AVAILABLE = is_available("crewai")
-AUTOGEN_AVAILABLE = is_available("autogen")
-PRAISONAI_AVAILABLE = is_available("praisonaiagents")
-TRAIN_AVAILABLE = is_available("unsloth")
+
+# Module-level __getattr__ for backward compatibility with external access
+def __getattr__(name):
+    # For external backward compatibility, return the actual module-level values
+    if name in {"GRADIO_AVAILABLE", "CREWAI_AVAILABLE", "AUTOGEN_AVAILABLE",
+                "PRAISONAI_AVAILABLE", "TRAIN_AVAILABLE", "CALL_MODULE_AVAILABLE"}:
+        return globals()[name]
+    raise AttributeError(name)
 
 # Lazy import helpers for optional dependencies (defined after availability flags)
 def _get_call_module():
@@ -187,7 +145,8 @@ def _get_call_module():
     Raises:
         ImportError: If praisonai.api.call is not installed
     """
-    if not CALL_MODULE_AVAILABLE:
+    import importlib.util
+    if not importlib.util.find_spec("praisonai.api.call"):
         raise ImportError(
             "Call feature is not installed. Install with: pip install \"praisonai[call]\""
         )
@@ -362,12 +321,19 @@ class PraisonAI:
         original_agent_file = self.agent_file
         
         # Parse args - this returns both args and unknown_args
+        preserved_args = getattr(self, 'args', None)
         parse_result = self.parse_args()
         if isinstance(parse_result, tuple):
             args, unknown_args = parse_result
         else:
             args = parse_result
             unknown_args = []
+        
+        # Preserve project session flags set by ``praison run`` before parse_args()
+        if preserved_args and getattr(preserved_args, 'cli_project_sessions', False):
+            for attr in ('auto_save', 'resume_session', 'cli_project_sessions'):
+                if hasattr(preserved_args, attr):
+                    setattr(args, attr, getattr(preserved_args, attr))
         
         # Store args for use in handle_direct_prompt
         self.args = args
@@ -425,7 +391,6 @@ class PraisonAI:
             
             # Handle backends command
             elif args.command == "backends":
-                from rich import print
                 subcommand = unknown_args[0] if unknown_args and not unknown_args[0].startswith('-') else None
                 
                 if subcommand == "list" or subcommand is None:
@@ -620,7 +585,9 @@ class PraisonAI:
             return
 
         if getattr(args, 'call', False):
-            if not CALL_MODULE_AVAILABLE:
+            import importlib.util
+            call_available = importlib.util.find_spec("praisonai.api.call") is not None
+            if not call_available:
                 print("[red]ERROR: Call feature is not installed. Install with:[/red]")
                 print("\npip install \"praisonai[call]\"\n")
                 return
@@ -923,10 +890,12 @@ class PraisonAI:
             default_args.call = False
             default_args.public = False
             default_args.chat_mode = False
+            default_args.include_rules = None
+            default_args.no_rules = False
             return default_args
         
         # Define special commands
-        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'recipe', 'endpoints', 'audio', 'embed', 'embedding', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor', 'registry', 'package', 'install', 'uninstall', 'acp', 'debug', 'lsp', 'diag', 'browser', 'replay', 'bot', 'gateway', 'sandbox', 'wizard', 'migrate', 'security', 'persistence', 'paths', 'claw', 'github', 'managed', 'flow', 'dashboard', 'backends']
+        special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'recipe', 'endpoints', 'audio', 'embed', 'embedding', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor', 'registry', 'package', 'install', 'uninstall', 'acp', 'debug', 'lsp', 'diag', 'browser', 'replay', 'bot', 'gateway', 'sandbox', 'wizard', 'migrate', 'security', 'persistence', 'paths', 'claw', 'github', 'managed', 'flow', 'dashboard', 'backends', 'audit']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
         parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
@@ -959,6 +928,7 @@ class PraisonAI:
         parser.add_argument("--expand-prompt", action="store_true", help="Expand short prompt into detailed prompt (works with any command)")
         parser.add_argument("--expand-tools", type=str, help="Tools for prompt expander (e.g., 'internet_search' or path to tools.py)")
         parser.add_argument("--tools", "-t", type=str, help="Path to tools.py file for research agent")
+        parser.add_argument("--toolset", type=str, help="Named toolset groups (comma-separated, e.g., web,files,research)")
         parser.add_argument("--no-tools", action="store_true", help="Disable default built-in tools (for models that don't support tool calling)")
         parser.add_argument("--no-acp", action="store_true", help="Disable ACP tools (agentic file operations with plan/approve/apply)")
         parser.add_argument("--no-lsp", action="store_true", help="Disable LSP tools (code intelligence: symbols, definitions, references)")
@@ -988,6 +958,7 @@ class PraisonAI:
         # Memory arguments
         parser.add_argument("--memory", action="store_true", help="Enable file-based memory for agent")
         parser.add_argument("--user-id", type=str, help="User ID for memory isolation")
+        parser.add_argument("--message-steering", action="store_true", help="Enable real-time message steering for agents during execution")
         
         # Session management arguments
         parser.add_argument("--auto-save", type=str, metavar="NAME", help="Auto-save session with given name after each run")
@@ -995,6 +966,7 @@ class PraisonAI:
         
         # Rules arguments
         parser.add_argument("--include-rules", type=str, help="Include manual rules by name (comma-separated)")
+        parser.add_argument("--no-rules", action="store_true", help="Disable automatic project rule injection")
         
         # Workflow arguments (uses global --memory, --save, --verbose, --planning flags)
         parser.add_argument("--workflow", type=str, help="Run inline workflow steps (format: 'step1:action1,step2:action2')")
@@ -1093,6 +1065,16 @@ class PraisonAI:
         # P8/G11: Tool timeout - prevent slow tools from blocking
         parser.add_argument("--tool-timeout", type=int, default=60,
                           help="Timeout in seconds for each tool call (default: 60)")
+        
+        # Tool retry policy - handle transient failures with exponential backoff
+        parser.add_argument("--tool-retry-attempts", type=int, default=3,
+                          help="Maximum retry attempts for tool failures (default: 3)")
+        parser.add_argument("--tool-retry-delay", type=int, default=1000,
+                          help="Initial retry delay in milliseconds (default: 1000)")
+        parser.add_argument("--tool-retry-backoff", type=float, default=2.0,
+                          help="Retry backoff multiplier (default: 2.0)")
+        parser.add_argument("--tool-retry-on", type=str, default="timeout,rate_limit,connection_error",
+                          help="Error types to retry (comma-separated, default: timeout,rate_limit,connection_error)")
         
         # Tool Approval - control tool execution approval
         parser.add_argument("--trust", action="store_true", help="Auto-approve all tool executions (skip approval prompts)")
@@ -1252,7 +1234,8 @@ class PraisonAI:
 
         # Handle both command and flag versions for call
         if args.command == 'call' or args.call:
-            if not CALL_MODULE_AVAILABLE:
+            import importlib.util
+            if not importlib.util.find_spec("praisonai.api.call"):
                 print("[red]ERROR: Call feature is not installed. Install with:[/red]")
                 print("\npip install \"praisonai[call]\"\n")
                 sys.exit(1)
@@ -1279,7 +1262,8 @@ class PraisonAI:
                 sys.exit(0)
 
             elif args.command == 'call':
-                if not CALL_MODULE_AVAILABLE:
+                import importlib.util
+                if not importlib.util.find_spec("praisonai.api.call"):
                     print("[red]ERROR: Call feature is not installed. Install with:[/red]")
                     print("\npip install \"praisonai[call]\"\n")
                     sys.exit(1)
@@ -1515,7 +1499,8 @@ class PraisonAI:
             elif args.command == 'profile':
                 # Profile command - delegate to Typer CLI for new profiler
                 # This routes to commands/profile.py which has query, imports, startup subcommands
-                from .app import app as typer_app
+                from .app import app as typer_app, register_commands
+                register_commands()
                 import sys as _sys
                 _sys.argv = ['praisonai', 'profile'] + unknown_args
                 typer_app()
@@ -2140,25 +2125,49 @@ class PraisonAI:
             except Exception as e:
                 print(f"[yellow]Warning: Failed to load tools from {tools_path}: {e}[/yellow]")
         else:
-            # Treat as comma-separated tool names
-            try:
-                from praisonaiagents.tools import TOOL_MAPPINGS
-                import praisonaiagents.tools as tools_module
-                
-                tool_names = [t.strip() for t in tools_path.split(',')]
-                for tool_name in tool_names:
-                    if tool_name in TOOL_MAPPINGS:
-                        try:
-                            tool = getattr(tools_module, tool_name)
-                            tools_list.append(tool)
-                        except Exception as e:
-                            print(f"[yellow]Warning: Failed to load tool '{tool_name}': {e}[/yellow]")
+            # Comma-separated names: use the unified resolver so CLI == YAML == Python
+            from ..tool_resolver import ToolResolver
+            resolver = ToolResolver()
+            tool_names = [t.strip() for t in tools_path.split(',') if t.strip()]
+            for tool_name in tool_names:
+                try:
+                    tool = resolver.resolve(tool_name, instantiate=True)
+                    if tool is not None:
+                        tools_list.append(tool)
                     else:
                         print(f"[yellow]Warning: Unknown tool '{tool_name}'[/yellow]")
-                if tools_list:
-                    print(f"[cyan]Loaded {len(tools_list)} built-in tools[/cyan]")
-            except ImportError:
-                print("[yellow]Warning: Could not import tools module[/yellow]")
+                except Exception as e:
+                    print(f"[yellow]Warning: Failed to load tool '{tool_name}': {e}[/yellow]")
+            if tools_list:
+                print(f"[cyan]Loaded {len(tools_list)} tools[/cyan]")
+        
+        return tools_list
+    
+    def _load_toolsets(self, toolset_names: list) -> list:
+        """
+        Load tools from named toolset groups.
+        
+        Args:
+            toolset_names: List of toolset names to resolve
+            
+        Returns:
+            List of tool functions from all toolsets
+        """
+        tools_list = []
+        if not toolset_names:
+            return tools_list
+        
+        try:
+            from ..tool_resolver import resolve_toolsets
+            tools_list = resolve_toolsets(toolset_names)
+            
+            if tools_list:
+                print(f"[cyan]Loaded {len(tools_list)} tools from toolsets: {', '.join(toolset_names)}[/cyan]")
+            else:
+                print(f"[yellow]Warning: No tools found for toolsets: {', '.join(toolset_names)}[/yellow]")
+                
+        except Exception as e:
+            print(f"[yellow]Warning: Failed to load toolsets {toolset_names}: {e}[/yellow]")
         
         return tools_list
 
@@ -4112,6 +4121,22 @@ Do NOT add any explanations or formatting."""
         tool_timeout = getattr(self.args, 'tool_timeout', None)
         if tool_timeout is not None:
             cli_config['tool_timeout'] = tool_timeout
+        
+        # Extract --tool-retry-* flags for retry policy
+        retry_attempts = getattr(self.args, 'tool_retry_attempts', 3)
+        retry_delay = getattr(self.args, 'tool_retry_delay', 1000)
+        retry_backoff = getattr(self.args, 'tool_retry_backoff', 2.0)
+        retry_on_str = getattr(self.args, 'tool_retry_on', "timeout,rate_limit,connection_error")
+        retry_on = set(error_type.strip() for error_type in retry_on_str.split(',') if error_type.strip())
+        
+        if retry_attempts > 1:  # Only create retry policy if retries are enabled
+            from praisonaiagents.tools.retry import RetryPolicy
+            cli_config['tool_retry_policy'] = RetryPolicy(
+                max_attempts=retry_attempts,
+                initial_delay_ms=retry_delay,
+                backoff_factor=retry_backoff,
+                retry_on=retry_on
+            )
             
         # Extract --planning-tools flag
         planning_tools = getattr(self.args, 'planning_tools', None)
@@ -4189,6 +4214,15 @@ Do NOT add any explanations or formatting."""
         handoff_detect_cycles = getattr(self.args, 'handoff_detect_cycles', None)
         if handoff_detect_cycles is not None:
             cli_config['handoff_detect_cycles'] = handoff_detect_cycles
+
+        if getattr(self.args, 'cli_project_sessions', False):
+            from .state.project_sessions import build_cli_memory_config
+            memory_cfg = build_cli_memory_config(
+                getattr(self.args, 'resume_session', None),
+                getattr(self.args, 'auto_save', None),
+            )
+            if memory_cfg is not None:
+                cli_config['memory'] = memory_cfg
             
         return cli_config
 
@@ -4230,9 +4264,64 @@ Do NOT add any explanations or formatting."""
         # Apply prompt expansion if enabled
         prompt = self._expand_prompt_if_enabled(prompt)
         
-        # Prepend mention context to prompt
-        if mention_context:
+        # Auto-inject project instruction files unless disabled
+        rules_context = ""
+        try:
+            should_load_rules = False
+            max_chars = 32000  # Default cap
+            include_manual = None
+            
+            # First check for explicit --no-rules flag
+            if hasattr(self, 'args') and getattr(self.args, 'no_rules', False):
+                should_load_rules = False
+            else:
+                # Check for manual include_rules
+                include_rules = getattr(self.args, 'include_rules', None) if hasattr(self, 'args') else None
+                if include_rules:
+                    if include_rules == "auto":
+                        should_load_rules = True
+                    else:
+                        include_manual = [name.strip() for name in include_rules.split(",") if name.strip()]
+                        should_load_rules = bool(include_manual)
+                else:
+                    # Check config for auto rules
+                    try:
+                        from praisonai.cli.configuration.loader import load_config
+                        config = load_config()
+                        should_load_rules = config.rules.auto
+                        max_chars = config.rules.max_chars
+                    except Exception:
+                        pass  # Config not available, use defaults
+            
+            if should_load_rules:
+                from praisonaiagents.memory import RulesManager
+                rules_manager = RulesManager(workspace_path=os.getcwd(), verbose=getattr(self.args, 'verbose', 0))
+                rules_context = rules_manager.build_rules_context(
+                    include_manual=include_manual,
+                    max_chars=max_chars
+                )
+                if rules_context and getattr(self.args, 'verbose', 0):
+                    # Show loaded files in verbose mode
+                    active_rules = rules_manager.get_active_rules()
+                    loaded_files = []
+                    for rule in active_rules:
+                        if rule.file_path and rule.priority >= 500:  # Root instruction files
+                            loaded_files.append(os.path.basename(rule.file_path))
+                    if loaded_files:
+                        print(f"[cyan]Loaded project instructions: {', '.join(loaded_files)}[/cyan]")
+        except ImportError:
+            pass  # RulesManager not available
+        except Exception as e:
+            if hasattr(self, 'args') and getattr(self.args, 'verbose', 0):
+                logging.debug(f"Error loading rules: {e}")
+        
+        # Prepend mention context and rules context to prompt
+        if mention_context and rules_context:
+            prompt = f"{mention_context}{rules_context}\n\n# Task:\n{prompt}"
+        elif mention_context:
             prompt = f"{mention_context}# Task:\n{prompt}"
+        elif rules_context:
+            prompt = f"{rules_context}\n\n# Task:\n{prompt}"
         
         if PRAISONAI_AVAILABLE:
             from praisonaiagents import Agent as PraisonAgent
@@ -4327,10 +4416,22 @@ Do NOT add any explanations or formatting."""
                         existing_tools = agent_config.get('tools', [])
                         if isinstance(existing_tools, list):
                             existing_tools.extend(tools_list)
+                            agent_config["tools"] = existing_tools
                         else:
-                            existing_tools = tools_list
-                        agent_config['tools'] = existing_tools
-                        print(f"[bold cyan]Tools loaded: {len(tools_list)} tool(s) available for agent[/bold cyan]")
+                            agent_config["tools"] = tools_list
+                
+                # Load toolsets if specified (--toolset flag)
+                if getattr(self.args, 'toolset', None):
+                    toolset_names = [name.strip() for name in self.args.toolset.split(',') if name.strip()]
+                    toolset_tools = self._load_toolsets(toolset_names) if toolset_names else []
+                    if toolset_tools:
+                        existing_tools = agent_config.get('tools', [])
+                        if isinstance(existing_tools, list):
+                            existing_tools.extend(toolset_tools)
+                            agent_config["tools"] = existing_tools
+                        else:
+                            agent_config["tools"] = toolset_tools
+                        print(f"[bold cyan]Toolsets loaded: {len(toolset_tools)} tool(s) from {self.args.toolset}[/bold cyan]")
                 
                 # Planning Mode
                 if getattr(self.args, 'planning', False):
@@ -4358,6 +4459,22 @@ Do NOT add any explanations or formatting."""
                 if tool_timeout and tool_timeout > 0:
                     agent_config["tool_timeout"] = tool_timeout
                 
+                # Tool retry policy - handle transient failures with exponential backoff
+                retry_attempts = getattr(self.args, 'tool_retry_attempts', 3)
+                retry_delay = getattr(self.args, 'tool_retry_delay', 1000)
+                retry_backoff = getattr(self.args, 'tool_retry_backoff', 2.0)
+                retry_on_str = getattr(self.args, 'tool_retry_on', "timeout,rate_limit,connection_error")
+                retry_on = set(error_type.strip() for error_type in retry_on_str.split(',') if error_type.strip())
+                
+                if retry_attempts > 1:  # Only create retry policy if retries are enabled
+                    from praisonaiagents.tools.retry import RetryPolicy
+                    agent_config["tool_retry_policy"] = RetryPolicy(
+                        max_attempts=retry_attempts,
+                        initial_delay_ms=retry_delay,
+                        backoff_factor=retry_backoff,
+                        retry_on=retry_on
+                    )
+                
                 # Memory
                 if getattr(self.args, 'memory', False):
                     memory_kwargs = {}
@@ -4372,6 +4489,16 @@ Do NOT add any explanations or formatting."""
                     else:
                         agent_config["memory"] = True
                     print("[bold cyan]Memory enabled - agent will remember context across sessions[/bold cyan]")
+                elif getattr(self.args, 'cli_project_sessions', False) and (
+                    getattr(self.args, 'resume_session', None) or getattr(self.args, 'auto_save', None)
+                ):
+                    from .state.project_sessions import build_cli_memory_config
+                    agent_config["memory"] = build_cli_memory_config(
+                        getattr(self.args, 'resume_session', None),
+                        getattr(self.args, 'auto_save', None),
+                    )
+                    session_label = agent_config['memory'].auto_save or agent_config['memory'].session_id
+                    print(f"[bold cyan]Project session enabled - session '{session_label}'[/bold cyan]")
                 elif getattr(self.args, 'auto_save', None):
                     from praisonaiagents import MemoryConfig
                     agent_config["memory"] = MemoryConfig(auto_save=self.args.auto_save)
@@ -4382,6 +4509,23 @@ Do NOT add any explanations or formatting."""
                         agent_config["memory"] = True  # History requires memory
                     # Note: history_in_context param removed - history loading now via context= param
                     print(f"[bold cyan]History enabled - loading context from last {self.args.history} session(s)[/bold cyan]")
+
+                # CLI session continuity from `praison run --continue/--session`
+                # Only apply for resume sessions, not plain --auto-save
+                _resume_id = getattr(self.args, 'resume_session', None)
+                if _resume_id:
+                    _auto_save_id = getattr(self.args, 'auto_save', None)
+                    from praisonai.cli.utils.project import build_cli_memory_config
+                    _session_cfg = build_cli_memory_config(
+                        session_id=_resume_id,
+                        auto_save=_auto_save_id,
+                    )
+                    if _session_cfg:
+                        agent_config["memory"] = _session_cfg
+                        print(
+                            f"[bold cyan]Session continuity enabled - "
+                            f"session '{_session_cfg.session_id}'[/bold cyan]"
+                        )
                 
                 # Claude Memory Tool (Anthropic only)
                 if getattr(self.args, 'claude_memory', False):
@@ -4396,6 +4540,11 @@ Do NOT add any explanations or formatting."""
                         print("[bold cyan]Claude Memory Tool enabled - Claude will autonomously manage memories[/bold cyan]")
                     else:
                         print("[yellow]Warning: --claude-memory requires an Anthropic model (--llm anthropic/...)[/yellow]")
+                
+                # Message Steering
+                if getattr(self.args, 'message_steering', False):
+                    agent_config["message_steering"] = True
+                    print("[bold cyan]Message steering enabled - agent can receive guidance during execution[/bold cyan]")
                 
                 # ===== NEW CLI FEATURES INTEGRATION =====
                 
@@ -4650,6 +4799,13 @@ Do NOT add any explanations or formatting."""
                 flow.display_workflow_start("Direct Prompt", ["DirectAgent"])
             
             agent = PraisonAgent(**agent_config)
+
+            if hasattr(self, 'args') and getattr(self.args, 'cli_project_sessions', False):
+                session_id = getattr(self.args, 'resume_session', None) or getattr(self.args, 'auto_save', None)
+                auto_save = getattr(self.args, 'auto_save', None)
+                if session_id:
+                    from .state.project_sessions import apply_cli_session_continuity
+                    apply_cli_session_continuity(agent, session_id, auto_save=auto_save)
             
             # AutoRag - Automatic RAG retrieval decision
             if hasattr(self, 'args') and getattr(self.args, 'auto_rag', False):

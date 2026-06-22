@@ -21,8 +21,10 @@ from pydantic import BaseModel
 import time
 import json
 import xml.etree.ElementTree as ET
+from ..errors import AgentErrorKind, FailoverDecision, IdleTimeoutBreaker
 # Gap 2: Tool call execution imports
 from ..tools.call_executor import ToolCall, create_tool_call_executor
+from ..tools.schema import annotation_to_json_schema, get_parameter_requirements
 # Display functions - lazy loaded to avoid importing rich at startup
 # These are only needed when output=verbose
 _display_module = None
@@ -362,6 +364,7 @@ Respond with ONLY a valid JSON tool call in this format:
         claude_memory: Optional[Union[bool, Any]] = None,
         failover_manager: Optional[FailoverManagerProtocol] = None,
         auth: Optional[str] = None,           # NEW: "claude-code", "codex", "gemini-cli", "qwen-cli"
+        max_iter: Optional[int] = None,       # NEW: maximum iterations for tool calling loops
         **extra_settings
     ):
         # Configure logging only once at the class level
@@ -404,6 +407,8 @@ Respond with ONLY a valid JSON tool call in this format:
         self.claude_memory = claude_memory
         self._claude_memory_tool = None  # Lazy initialized
         self._console = None  # Lazy load console when needed
+        self.max_iter = max_iter or 20  # Default to 20 to match ExecutionConfig default
+        self._idle_timeout_breaker = IdleTimeoutBreaker()  # Circuit breaker for idle timeouts
         self.chat_history = []
         self.verbose = extra_settings.get('verbose', True)
         self.markdown = extra_settings.get('markdown', True)
@@ -664,14 +669,13 @@ Respond with ONLY a valid JSON tool call in this format:
             'ratelimit',
             'too many request',
             'resource_exhausted',
-            'quota exceeded',
             'tokens per minute',
         ]
 
         return any(indicator in error_str or indicator in error_type for indicator in indicators)
 
-    def _classify_error_and_should_retry(self, error: Exception, attempt: int = 1) -> tuple[str, bool, float]:
-        """Classify error and determine retry strategy using G5 error classifier.
+    def _classify_error_and_should_retry_legacy(self, error: Exception, attempt: int = 1) -> tuple[str, bool, float]:
+        """Legacy error classification - deprecated, use resolve_failover_decision() instead.
         
         Args:
             error: Exception to classify
@@ -680,30 +684,200 @@ Respond with ONLY a valid JSON tool call in this format:
         Returns:
             Tuple of (category, should_retry, retry_delay)
         """
-        try:
-            from .error_classifier import classify_error, should_retry, get_retry_delay, extract_retry_after
+        import warnings
+        warnings.warn(
+            "_classify_error_and_should_retry is deprecated, use resolve_failover_decision() instead",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        
+        # Delegate to new typed classification system
+        decision = self.resolve_failover_decision(error, {"attempt": attempt, "max_retries": self._max_retries})
+        return decision.reason, decision.is_retryable, decision.backoff_ms / 1000.0
+    
+    # Backward compatibility alias for existing code
+    _classify_error_and_should_retry = _classify_error_and_should_retry_legacy
+    
+    def classify_error_kind(self, error: Exception) -> AgentErrorKind:
+        """
+        Classify error into typed AgentErrorKind instead of freeform strings.
+        
+        Replaces scattered regex checks with systematic classification.
+        
+        Args:
+            error: Exception to classify
             
-            category = classify_error(error)
-            can_retry = should_retry(category)
+        Returns:
+            AgentErrorKind: Typed error classification
+        """
+        error_str = str(error).lower()
+        error_type = type(error).__name__.lower()
+        
+        # Check for permanent auth errors first (non-retryable)
+        if any(indicator in error_str for indicator in [
+            "invalid api key", "api key not found", "invalid_api_key", 
+            "incorrect api key", "authentication_error"
+        ]):
+            return "auth_permanent"
+        
+        # Retryable authentication errors
+        if any(indicator in error_str for indicator in [
+            "unauthorized", "api key", "authentication failed",
+            "invalid_request_error", "openai_error"
+        ]):
+            return "auth"
+        
+        # Billing/quota issues (must be checked before generic 429/rate-limit)
+        if any(indicator in error_str for indicator in [
+            "insufficient quota", "quota exceeded", "billing", "credit",
+            "payment required", "subscription required", "plan limit"
+        ]):
+            return "billing"
+        
+        # Rate limiting 
+        if any(indicator in error_str for indicator in [
+            "rate limit", "ratelimit", "too many request", "resource_exhausted",
+            "usage limit", "429"
+        ]) or "429" in str(getattr(error, "status_code", "")):
+            return "rate_limit"
+        
+        # Context length exceeded
+        if any(indicator in error_str for indicator in [
+            "maximum context length", "context window is too long", 
+            "context length exceeded", "context_length_exceeded",
+            "input too long", "prompt too long"
+        ]):
+            return "context_overflow"
+        
+        # Model not found/available
+        if any(indicator in error_str for indicator in [
+            "model not found", "model_not_found", "unknown model",
+            "invalid model", "model does not exist", "model not available"
+        ]):
+            return "model_not_found"
+        
+        # Empty or malformed responses
+        if any(indicator in error_str for indicator in [
+            "empty response", "no response", "invalid response format",
+            "json decode error", "unexpected end of json", "malformed response"
+        ]):
+            return "empty_response"
+        
+        # Service overloaded
+        if any(indicator in error_str for indicator in [
+            "overloaded", "service unavailable", "temporarily unavailable",
+            "server overloaded", "503", "502", "500"
+        ]):
+            return "overloaded"
+        
+        # Timeout (potential idle timeout)
+        if any(indicator in error_str for indicator in [
+            "timeout", "timed out", "connection timeout", "read timeout",
+            "request timeout", "deadline exceeded"
+        ]):
+            return "idle_timeout"
+        
+        # Format errors
+        if any(indicator in error_str for indicator in [
+            "validation error", "invalid format", "parse error",
+            "malformed", "invalid json", "schema error"
+        ]):
+            return "format_error"
+        
+        # Default fallback
+        return "unknown"
+    
+    def resolve_failover_decision(self, error: Exception, attempt_state: dict) -> FailoverDecision:
+        """
+        Resolve failover decision based on error kind and attempt state.
+        
+        Separates classification (error kind) from action (what to do),
+        making the policy independently testable and overridable.
+        
+        Args:
+            error: Exception that occurred
+            attempt_state: Dict with attempt info like {"attempt": 1, "max_retries": 3}
             
-            if not can_retry:
-                return category.value, False, 0.0
+        Returns:
+            FailoverDecision: Action to take with reasoning
+        """
+        error_kind = self.classify_error_kind(error)
+        attempt = attempt_state.get("attempt", 1)
+        max_retries = attempt_state.get("max_retries", self._max_retries)
+        
+        # Non-retryable errors (includes billing errors)
+        if error_kind in ["auth_permanent", "model_not_found", "format_error", "billing"]:
+            return FailoverDecision(
+                action="surface_error",
+                reason=error_kind,
+                is_retryable=False
+            )
+        
+        # Exceeded retry limit
+        if attempt > max_retries:
+            return FailoverDecision(
+                action="surface_error", 
+                reason=error_kind,
+                is_retryable=False
+            )
+        
+        # Rate limiting - extract retry delay
+        if error_kind == "rate_limit":
+            backoff = self._parse_retry_delay(str(error))  # Returns seconds
+            if backoff == 0:  # No specific delay found, use exponential backoff
+                backoff = min(2 ** (attempt - 1), 60)  # 1s, 2s, 4s, ... cap at 60s
+            return FailoverDecision(
+                action="retry",
+                reason=error_kind, 
+                backoff_ms=int(backoff * 1000),
+                is_retryable=True
+            )
+        
+        # Auth errors - try profile rotation if available
+        if error_kind == "auth" and self._failover_manager:
+            return FailoverDecision(
+                action="rotate_profile",
+                reason=error_kind,
+                backoff_ms=1000,  # Brief delay before trying new profile
+                is_retryable=True
+            )
+        
+        # Overloaded/timeout - retry with exponential backoff
+        if error_kind in ["overloaded", "idle_timeout"]:
+            # For idle timeouts, check circuit breaker
+            if error_kind == "idle_timeout":
+                breaker_hit = self._idle_timeout_breaker.record_idle_timeout()
+                if breaker_hit:
+                    return FailoverDecision(
+                        action="surface_error",
+                        reason="idle_timeout", 
+                        is_retryable=False
+                    )
             
-            # For rate limits, try to extract specific retry-after first
-            if category.value == "rate_limit":
-                retry_after = extract_retry_after(error)
-                if retry_after:
-                    return category.value, True, retry_after
-            
-            # Use category-specific delay calculation with proper attempt
-            delay = get_retry_delay(category, attempt=attempt, base_delay=self._retry_delay)
-            return category.value, True, delay
-            
-        except ImportError:
-            # Fallback to legacy rate limit detection
-            is_rate_limit = self._is_rate_limit_error(error)
-            delay = self._parse_retry_delay(str(error)) if is_rate_limit else 0.0
-            return "rate_limit" if is_rate_limit else "unknown", is_rate_limit, delay
+            backoff = min(2000 * (2 ** (attempt - 1)), 30000)  # 2s, 4s, 8s, ... cap at 30s
+            return FailoverDecision(
+                action="retry",
+                reason=error_kind,
+                backoff_ms=backoff,
+                is_retryable=True
+            )
+        
+        # Context overflow - non-retryable without intervention
+        if error_kind == "context_overflow":
+            return FailoverDecision(
+                action="surface_error",
+                reason=error_kind,
+                is_retryable=False
+            )
+        
+        # Unknown/other errors - limited retry with short backoff
+        backoff = 1000 * attempt  # Linear backoff: 1s, 2s, 3s
+        return FailoverDecision(
+            action="retry" if attempt <= 2 else "surface_error",
+            reason=error_kind,
+            backoff_ms=backoff,
+            is_retryable=attempt <= 2
+        )
 
     def _switch_to_profile(self, profile: "AuthProfile") -> None:
         """Switch to a new auth profile for failover.
@@ -776,14 +950,23 @@ Respond with ONLY a valid JSON tool call in this format:
                 # Mark success if failover is configured
                 if self._failover_manager and self._current_profile:
                     self._failover_manager.mark_success(self._current_profile)
+                
+                # Reset idle timeout circuit breaker on success
+                self._idle_timeout_breaker.reset()
                     
                 return result
 
             except Exception as e:
-                category, can_retry, retry_delay = self._classify_error_and_should_retry(e, attempt + 1)
+                # Use new typed failover decision instead of old classification
+                decision = self.resolve_failover_decision(e, {"attempt": attempt + 1, "max_retries": self._max_retries})
                 
                 last_error = e
                 error_str = str(e)
+                
+                # Map decision to old variables for compatibility with existing logic
+                category = decision.reason
+                can_retry = decision.is_retryable
+                retry_delay = decision.backoff_ms / 1000.0  # Convert ms to seconds
 
                 # Check for auth errors and try refreshing subscription credentials
                 if category == "auth" and self._auth_provider_id and attempt == 0:
@@ -800,8 +983,27 @@ Respond with ONLY a valid JSON tool call in this format:
                     except Exception as refresh_error:
                         logging.warning(f"Failed to refresh subscription credentials: {refresh_error}")
 
-                # Failover: mark failure and try next profile (do this before early exit)
-                if self._failover_manager and self._current_profile:
+                # Handle different failover decision actions
+                if decision.action == "rotate_profile" and self._failover_manager:
+                    if self._current_profile:
+                        is_rate_limit = (category == "rate_limit")
+                        self._failover_manager.mark_failure(
+                            self._current_profile, error_str, is_rate_limit=is_rate_limit
+                        )
+                    next_profile = self._failover_manager.get_next_profile()
+                    if next_profile and next_profile != self._current_profile:
+                        self._switch_to_profile(next_profile)
+                        self._current_profile = next_profile
+                        # Update the kwargs with new profile values for the next retry
+                        if "api_key" in kwargs:
+                            kwargs["api_key"] = self.api_key
+                        if "base_url" in kwargs:
+                            kwargs["base_url"] = self.base_url
+                        if "model" in kwargs:
+                            kwargs["model"] = self.model
+                        logging.info(f"Failover: switched to profile '{next_profile.name}'")
+                # Legacy failover for compatibility (when decision is retry but failover is configured)
+                elif self._failover_manager and self._current_profile and decision.action == "retry":
                     is_rate_limit = (category == "rate_limit")
                     self._failover_manager.mark_failure(
                         self._current_profile, error_str, is_rate_limit=is_rate_limit
@@ -822,7 +1024,7 @@ Respond with ONLY a valid JSON tool call in this format:
                         retry_delay = 0.0
                         logging.info(f"Failover: switched to profile '{next_profile.name}'")
                 
-                if not can_retry:
+                if decision.action == "surface_error" or not can_retry:
                     raise
 
                 if attempt < self._max_retries:
@@ -880,14 +1082,23 @@ Respond with ONLY a valid JSON tool call in this format:
                 # Mark success if failover is configured
                 if self._failover_manager and self._current_profile:
                     self._failover_manager.mark_success(self._current_profile)
+                
+                # Reset idle timeout circuit breaker on success
+                self._idle_timeout_breaker.reset()
                     
                 return result
 
             except Exception as e:
-                category, can_retry, retry_delay = self._classify_error_and_should_retry(e, attempt + 1)
+                # Use new typed failover decision instead of old classification
+                decision = self.resolve_failover_decision(e, {"attempt": attempt + 1, "max_retries": self._max_retries})
                 
                 last_error = e
                 error_str = str(e)
+                
+                # Map decision to old variables for compatibility with existing logic
+                category = decision.reason
+                can_retry = decision.is_retryable
+                retry_delay = decision.backoff_ms / 1000.0  # Convert ms to seconds
 
                 # Check for auth errors and try refreshing subscription credentials
                 if category == "auth" and self._auth_provider_id and attempt == 0:
@@ -904,8 +1115,27 @@ Respond with ONLY a valid JSON tool call in this format:
                     except Exception as refresh_error:
                         logging.warning(f"Failed to refresh subscription credentials: {refresh_error}")
 
-                # Failover: mark failure and try next profile (do this before early exit)
-                if self._failover_manager and self._current_profile:
+                # Handle different failover decision actions
+                if decision.action == "rotate_profile" and self._failover_manager:
+                    if self._current_profile:
+                        is_rate_limit = (category == "rate_limit")
+                        self._failover_manager.mark_failure(
+                            self._current_profile, error_str, is_rate_limit=is_rate_limit
+                        )
+                    next_profile = self._failover_manager.get_next_profile()
+                    if next_profile and next_profile != self._current_profile:
+                        self._switch_to_profile(next_profile)
+                        self._current_profile = next_profile
+                        # Update the kwargs with new profile values for the next retry
+                        if "api_key" in kwargs:
+                            kwargs["api_key"] = self.api_key
+                        if "base_url" in kwargs:
+                            kwargs["base_url"] = self.base_url
+                        if "model" in kwargs:
+                            kwargs["model"] = self.model
+                        logging.info(f"Failover: switched to profile '{next_profile.name}'")
+                # Legacy failover for compatibility (when decision is retry but failover is configured)
+                elif self._failover_manager and self._current_profile and decision.action == "retry":
                     is_rate_limit = (category == "rate_limit")
                     self._failover_manager.mark_failure(
                         self._current_profile, error_str, is_rate_limit=is_rate_limit
@@ -926,7 +1156,7 @@ Respond with ONLY a valid JSON tool call in this format:
                         retry_delay = 0.0
                         logging.info(f"Failover: switched to profile '{next_profile.name}'")
                 
-                if not can_retry:
+                if decision.action == "surface_error" or not can_retry:
                     raise
 
                 if attempt < self._max_retries:
@@ -1534,7 +1764,7 @@ Now provide your final answer using this result. Summarize the information natur
             should_summarize = self._provider_adapter.should_summarize_tools(iteration_count)
         else:
             # Conservative fallback without provider detection
-            should_summarize = iteration_count >= 5  # Conservative default
+            should_summarize = iteration_count >= self.max_iter  # Use configurable max_iter
             
         if not should_summarize:
             return False, None, iteration_count
@@ -1837,6 +2067,7 @@ Now provide your final answer using this result. Summarize the information natur
         task_id: Optional[str] = None,
         execute_tool_fn: Optional[Callable] = None,
         parallel_tool_calls: bool = False,  # Gap 2: Enable parallel tool execution
+        max_tool_calls_per_turn: int = 10,  # Loop guardrails
         stream: bool = True,
         stream_callback: Optional[Callable] = None,
         emit_events: bool = False,
@@ -1959,8 +2190,9 @@ Now provide your final answer using this result. Summarize the information natur
                     )
 
             # Sequential tool calling loop - similar to agent.py
-            max_iterations = 10  # Prevent infinite loops
+            max_iterations = self.max_iter  # Use configurable iteration limit
             iteration_count = 0
+            tool_call_count = 0  # Track total tool calls for guardrails
             final_response_text = ""
             response_text = ""  # Initialize to prevent UnboundLocalError on API errors
             stored_reasoning_content = None  # Store reasoning content from tool execution
@@ -2140,8 +2372,8 @@ Now provide your final answer using this result. Summarize the information natur
                                     "content": content,
                                 })
 
-                            # Safety: break after 5 iterations
-                            if iteration_count >= 5:
+                            # Safety: break after max_iter iterations
+                            if iteration_count >= self.max_iter:
                                 final_response_text = response_text.strip() if response_text else "Task completed."
                                 break
 
@@ -2820,6 +3052,18 @@ Now provide your final answer using this result. Summarize the information natur
                         tool_results = []  # Store current iteration tool results
                         tool_result_mapping = {}  # Store function results by name for Ollama chaining
                         
+                        # Guardrail: Check tool call limit to prevent infinite loops
+                        # Allow execution if we haven't reached the limit yet, but limit the batch size
+                        if tool_call_count >= max_tool_calls_per_turn:
+                            logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
+                            final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
+                            break
+                        elif tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
+                            # Limit the batch to stay within the total limit
+                            remaining_calls = max_tool_calls_per_turn - tool_call_count
+                            tool_calls = tool_calls[:remaining_calls]
+                            logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
+                        
                         for tool_call in tool_calls:
                             # Handle both object and dict access patterns
                             is_ollama = self._is_ollama_provider()
@@ -2840,7 +3084,8 @@ Now provide your final answer using this result. Summarize the information natur
 
                             logging.debug(f"[TOOL_EXEC_DEBUG] About to execute tool {function_name} with args: {arguments}")
                             tool_result = execute_tool_fn(function_name, arguments, tool_call_id=tool_call_id)
-                            logging.debug(f"[TOOL_EXEC_DEBUG] Tool execution result: {tool_result}")
+                            tool_call_count += 1  # Increment tool call counter for guardrails
+                            logging.debug(f"[TOOL_EXEC_DEBUG] Tool execution result: {tool_result} (call #{tool_call_count})")
                             tool_results.append(tool_result)  # Store the result
                             accumulated_tool_results.append(tool_result)  # Accumulate across iterations
                             
@@ -2934,7 +3179,7 @@ Now provide your final answer using this result. Summarize the information natur
                             continue
                         
                         # Safety check: prevent infinite loops for any provider
-                        if iteration_count >= 5:
+                        if iteration_count >= self.max_iter:
                             if tool_results:
                                 final_response_text = "Task completed successfully based on tool execution results."
                             else:
@@ -3352,6 +3597,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         task_id: Optional[str] = None,
         execute_tool_fn: Optional[Callable] = None,
         parallel_tool_calls: bool = False,  # Gap 2: Enable parallel tool execution
+        max_tool_calls_per_turn: int = 10,  # Loop guardrails
         **kwargs
     ):
         """Generator that yields real-time response chunks from the LLM.
@@ -3498,6 +3744,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                     # After streaming completes, handle tool calls if present
                     if tool_calls and execute_tool_fn:
+                        # Guardrail: Check tool call limit to prevent infinite loops
+                        if len(tool_calls) > max_tool_calls_per_turn:
+                            logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
+                            error_message = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
+                            yield error_message
+                            return
+                        
                         # Add assistant message with tool calls to conversation
                         if self._is_ollama_provider():
                             messages.append({
@@ -3674,6 +3927,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         task_description: Optional[str] = None,
         task_id: Optional[str] = None,
         execute_tool_fn: Optional[Callable] = None,
+        max_tool_calls_per_turn: int = 10,  # Loop guardrails
         stream: bool = True,
         **kwargs
     ) -> str:
@@ -3750,8 +4004,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             formatted_tools = self._format_tools_for_litellm(tools)
 
             # Initialize variables for iteration loop
-            max_iterations = 50  # Prevent infinite loops
+            max_iterations = self.max_iter  # Use configurable iteration limit
             iteration_count = 0
+            tool_call_count = 0  # Track total tool calls for guardrails
             final_response_text = ""
             stored_reasoning_content = None  # Store reasoning content from tool execution
             accumulated_tool_results = []  # Store all tool results across iterations
@@ -3824,6 +4079,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             "tool_calls": serializable_tool_calls,
                         })
 
+                        # Guardrail: Check tool call limit to prevent infinite loops
+                        # Allow execution if we haven't reached the limit yet, but limit the batch size
+                        if tool_call_count >= max_tool_calls_per_turn:
+                            logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
+                            final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
+                            break
+                        elif tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
+                            # Limit the batch to stay within the total limit
+                            remaining_calls = max_tool_calls_per_turn - tool_call_count
+                            tool_calls = tool_calls[:remaining_calls]
+                            logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
+                        
                         for tool_call in tool_calls:
                             function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call)
                             logging.debug(f"[RESPONSES_API_ASYNC] Executing tool {function_name}")
@@ -3831,6 +4098,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 tool_result = await execute_tool_fn(function_name, arguments, tool_call_id=tool_call_id)
                             else:
                                 tool_result = execute_tool_fn(function_name, arguments, tool_call_id=tool_call_id)
+                            tool_call_count += 1  # Increment tool call counter for guardrails
                             accumulated_tool_results.append(tool_result)
 
                             if verbose:
@@ -3851,7 +4119,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 "content": content,
                             })
 
-                        if iteration_count >= 5:
+                        if iteration_count >= self.max_iter:
                             final_response_text = response_text.strip() if response_text else "Task completed."
                             break
 
@@ -4037,6 +4305,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             "tool_calls": serializable_tool_calls
                         })
                     
+                    # Guardrail: Check tool call limit to prevent infinite loops
+                    # Allow execution if we haven't reached the limit yet, but limit the batch size
+                    if tool_call_count >= max_tool_calls_per_turn:
+                        logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
+                        final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
+                        break
+                    elif tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
+                        # Limit the batch to stay within the total limit
+                        remaining_calls = max_tool_calls_per_turn - tool_call_count
+                        tool_calls = tool_calls[:remaining_calls]
+                        logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
+                    
                     tool_results = []  # Store current iteration tool results
                     for tool_call in tool_calls:
                         # Handle both object and dict access patterns
@@ -4048,6 +4328,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, tools)
 
                         tool_result = await execute_tool_fn(function_name, arguments)
+                        tool_call_count += 1  # Increment tool call counter for guardrails
                         tool_results.append(tool_result)  # Store the result
                         accumulated_tool_results.append(tool_result)  # Accumulate across iterations
 
@@ -4231,7 +4512,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         continue
                     
                     # Safety check: prevent infinite loops for any provider
-                    if iteration_count >= 20:
+                    if iteration_count >= self.max_iter:
                         if tool_results:
                             final_response_text = "Task completed successfully based on tool execution results."
                         else:
@@ -4686,6 +4967,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             'task_name', 'task_description', 'task_id',  # Task metadata
             'execute_tool_fn', 'stream_callback', 'emit_events',  # Callbacks
             'console',  # Rich console
+            'max_tool_calls_per_turn', 'parallel_tool_calls',  # Tool execution settings
         ]
         for param in internal_params:
             params.pop(param, None)
@@ -5468,8 +5750,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if content:
                             response_text += content
                             live.update(_get_display_functions()['display_generating'](response_text, start_time))
-                        if content:
-                            response_text += content
             else:
                 # Use retry wrapper for non-streaming calls
                 response = self._completion_with_retry(**completion_params)
@@ -5565,8 +5845,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if content:
                             response_text += content
                             live.update(_get_display_functions()['display_generating'](response_text, start_time))
-                        if content:
-                            response_text += content
             else:
                 # Use retry wrapper for non-streaming async calls
                 response = await self._acompletion_with_retry(**completion_params)
@@ -5605,34 +5883,74 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             function_name = function_or_name
             logging.debug(f"Attempting to generate tool definition for: {function_name}")
             
-            # First try to get the tool definition if it exists
-            tool_def_name = f"{function_name}_definition"
-            tool_def = globals().get(tool_def_name)
-            logging.debug(f"Looking for {tool_def_name} in globals: {tool_def is not None}")
-            
-            if not tool_def:
-                import __main__
-                tool_def = getattr(__main__, tool_def_name, None)
-                logging.debug(f"Looking for {tool_def_name} in __main__: {tool_def is not None}")
-            
-            if tool_def:
-                logging.debug(f"Found tool definition: {tool_def}")
-                return tool_def
-
-            # Try to find the function
-            func = globals().get(function_name)
-            logging.debug(f"Looking for {function_name} in globals: {func is not None}")
-            
-            if not func:
-                import __main__
-                func = getattr(__main__, function_name, None)
-                logging.debug(f"Looking for {function_name} in __main__: {func is not None}")
-            
-            if not func or not callable(func):
-                logging.debug(f"Function {function_name} not found or not callable")
-                return None
+            # First try to get from the tool registry (preferred method)
+            try:
+                from ..tools.registry import get_registry
+                registry = get_registry()
+                tool = registry.get(function_name)
+                if tool:
+                    logging.debug(f"Found tool in registry: {function_name}")
+                    # If it's a BaseTool, get its schema
+                    if hasattr(tool, 'get_schema'):
+                        tool_def = tool.get_schema()
+                        # Apply same normalization as the callable path
+                        if (
+                            isinstance(tool_def, dict)
+                            and isinstance(tool_def.get("function"), dict)
+                            and isinstance(tool_def["function"].get("parameters"), dict)
+                        ):
+                            tool_def = tool_def.copy()
+                            tool_def["function"] = tool_def["function"].copy()
+                            tool_def["function"]["parameters"] = self._fix_array_schemas(
+                                tool_def["function"]["parameters"]
+                            )
+                        return tool_def
+                    # If it's a callable, use it as func
+                    if callable(tool):
+                        func = tool
+                    else:
+                        logging.debug(f"Tool {function_name} in registry is not callable")
+                        return None
+                else:
+                    logging.debug(f"Tool {function_name} not found in registry, falling back to globals/__main__")
+                    # Fall back to globals and __main__ for backward compatibility
+                    tool_def_name = f"{function_name}_definition"
+                    tool_def = globals().get(tool_def_name)
+                    if not tool_def:
+                        import __main__
+                        tool_def = getattr(__main__, tool_def_name, None)
+                    if tool_def:
+                        return tool_def
+                    
+                    func = globals().get(function_name)
+                    if not func:
+                        import __main__
+                        func = getattr(__main__, function_name, None)
+                    if not func or not callable(func):
+                        logging.debug(f"Function {function_name} not found or not callable")
+                        return None
+            except ImportError:
+                logging.debug("Tool registry not available, falling back to globals/__main__")
+                # Fall back to globals and __main__ when registry unavailable
+                tool_def_name = f"{function_name}_definition"
+                tool_def = globals().get(tool_def_name)
+                if not tool_def:
+                    import __main__
+                    tool_def = getattr(__main__, tool_def_name, None)
+                if tool_def:
+                    return tool_def
+                
+                func = globals().get(function_name)
+                if not func:
+                    import __main__
+                    func = getattr(__main__, function_name, None)
+                if not func or not callable(func):
+                    logging.debug(f"Function {function_name} not found or not callable")
+                    return None
 
         import inspect
+        from typing import get_type_hints
+        
         # Handle Langchain and CrewAI tools
         if inspect.isclass(func) and hasattr(func, 'run') and not hasattr(func, '_run'):
             original_func = func
@@ -5680,26 +5998,26 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         
         logging.debug(f"Parameter descriptions: {param_descriptions}")
 
+        # Get type hints for proper schema generation
+        try:
+            hints = get_type_hints(func) if getattr(func, "__annotations__", None) else {}
+        except (NameError, TypeError, AttributeError):
+            hints = getattr(func, "__annotations__", {}) or {}
+
         for name, param in parameters_list:
-            param_type = "string"  # Default type
-            if param.annotation != inspect.Parameter.empty:
-                if param.annotation == int:
-                    param_type = "integer"
-                elif param.annotation == float:
-                    param_type = "number"
-                elif param.annotation == bool:
-                    param_type = "boolean"
-                elif param.annotation == list:
-                    param_type = "array"
-                elif param.annotation == dict:
-                    param_type = "object"
+            # Get type annotation
+            param_type = hints.get(name, param.annotation if param.annotation != inspect.Parameter.empty else str)
             
-            parameters["properties"][name] = {
-                "type": param_type,
-                "description": param_descriptions.get(name, "Parameter description not available")
-            }
+            # Use new schema utility for proper type handling
+            prop_schema = annotation_to_json_schema(param_type)
             
-            if param.default == inspect.Parameter.empty:
+            # Add description from docstring
+            prop_schema["description"] = param_descriptions.get(name, "Parameter description not available")
+            
+            parameters["properties"][name] = prop_schema
+            
+            # Check if required using improved logic
+            if get_parameter_requirements(sig, name):
                 parameters["required"].append(name)
         
         logging.debug(f"Generated parameters: {parameters}")

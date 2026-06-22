@@ -15,7 +15,7 @@ Usage::
     agent = Agent(
         name="assistant",
         tools=[execute_command],
-        approval=HTTPApproval(host="0.0.0.0", port=8899),
+        approval=HTTPApproval(host="127.0.0.1", port=8899),
     )
 """
 
@@ -131,17 +131,20 @@ class HTTPApproval:
 
     def _build_html(self, request_id: str, info: Dict[str, Any]) -> str:
         """Build a minimal approval page."""
-        tool_name = info.get("tool_name", "unknown")
-        risk_level = info.get("risk_level", "unknown")
-        agent_name = info.get("agent_name", "")
+        import html as html_module
+
+        tool_name = html_module.escape(str(info.get("tool_name", "unknown")))
+        risk_level = html_module.escape(str(info.get("risk_level", "unknown")))
+        agent_name = html_module.escape(str(info.get("agent_name", "")))
         arguments = info.get("arguments", {})
 
         args_html = ""
         for k, v in arguments.items():
-            val_str = str(v)
+            val_str = html_module.escape(str(v))
             if len(val_str) > 200:
                 val_str = val_str[:197] + "..."
-            args_html += f"<tr><td><code>{k}</code></td><td><code>{val_str}</code></td></tr>"
+            key_str = html_module.escape(str(k))
+            args_html += f"<tr><td><code>{key_str}</code></td><td><code>{val_str}</code></td></tr>"
 
         risk_colors = {
             "critical": "#FF0000", "high": "#FF8C00",

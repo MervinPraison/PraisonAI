@@ -100,6 +100,9 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         self._agent = agent
         self.config = config or BotConfig(token=token)
         
+        # Initialize allow_silence from config
+        self._allow_silence = getattr(self.config, 'allow_silence', False)
+        
         # Email-specific config
         self._email_address = email_address or os.environ.get("EMAIL_ADDRESS", "")
         self._imap_server = imap_server or os.environ.get("EMAIL_IMAP_SERVER", "imap.gmail.com")
@@ -116,14 +119,11 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         self._started_at: Optional[float] = None
         self._processed_uids: set = set()  # Track processed email UIDs
         
-        try:
-            from praisonaiagents.session import get_default_session_store
-            _store = get_default_session_store()
-        except Exception:
-            _store = None
-        self._session: BotSessionManager = BotSessionManager(
-            store=_store,
-            platform="email",
+        # Use helper to build session manager
+        from ._session import build_session_manager
+        self._session: BotSessionManager = build_session_manager(
+            self.config,
+            platform="email"
         )
         
         self._stop_event: Optional[asyncio.Event] = None
@@ -140,6 +140,18 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
     @property
     def bot_user(self) -> Optional[BotUser]:
         return self._bot_user
+    
+    @property
+    def capabilities(self) -> Dict[str, Any]:
+        """Email has no real-time capabilities."""
+        return {
+            "live_edit": False,  # Email is immutable
+            "reactions": False,  # No reactions in email
+            "typing": False,  # No typing indicators
+            "text_limit": 0,  # No practical limit
+            "edit_rate_limit": 0,
+            "reaction_rate_limit": 0,
+        }
     
     def set_agent(self, agent: "Agent") -> None:
         """Set the agent that handles messages."""
@@ -396,6 +408,10 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
                     self._agent,
                     message.sender.user_id,
                     body,
+                    chat_id=message.sender.user_id,
+                    user_name=message.sender.display_name or "",
+                    message_id=message.message_id,
+                    account=self._config.get("account", "default"),
                 )
                 
                 if response:
@@ -419,11 +435,13 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         reply_to: Optional[str] = None,
         thread_id: Optional[str] = None,
     ) -> BotMessage:
-        """Send an email message.
+        """Send an email message with optional CC and BCC recipients.
         
         Args:
             channel_id: Recipient email address
-            content: Message content (str or {"subject": ..., "body": ...})
+            content: Message content. Can be:
+                - str: Plain text message body
+                - dict: {"subject": str, "body": str, "html": str, "cc": str/list, "bcc": str/list}
             reply_to: Message-ID to reply to (sets In-Reply-To header)
             thread_id: References chain (sets References header)
             
@@ -432,17 +450,33 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         """
         # Fire sending hook
         content_str = content.get("body", "") if isinstance(content, dict) else str(content)
-        self.fire_message_sending(channel_id, content_str)
+        send_result = self.fire_message_sending(channel_id, content_str)
+        if send_result.get("cancel"):
+            return BotMessage(
+                message_id="",
+                content="",
+                message_type=MessageType.TEXT,
+                sender=self._bot_user,
+                channel=BotChannel(channel_id=channel_id, name=channel_id),
+                reply_to=reply_to,
+                thread_id=thread_id,
+                metadata={"silent": True},
+            )
+        content_str = send_result.get("content", content_str)
         
         # Parse content
         if isinstance(content, dict):
             subject = content.get("subject", "Message from PraisonAI")
-            body = content.get("body", "")
+            body = content_str
             html = content.get("html")
+            cc = content.get("cc")
+            bcc = content.get("bcc")
         else:
             subject = "Message from PraisonAI"
-            body = str(content)
+            body = content_str
             html = None
+            cc = None
+            bcc = None
         
         # Build email
         if html:
@@ -455,6 +489,18 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         msg["From"] = self._email_address
         msg["To"] = channel_id
         msg["Subject"] = subject
+        
+        # Add CC and BCC headers if provided
+        from praisonaiagents.tools.email_tools import _parse_email_list
+        all_recipients = [channel_id]
+        if cc:
+            cc_list = _parse_email_list(cc)
+            msg["CC"] = ", ".join(cc_list)
+            all_recipients.extend(cc_list)
+        if bcc:
+            bcc_list = _parse_email_list(bcc)
+            all_recipients.extend(bcc_list)
+            # Note: BCC is not added to headers (by design)
         
         # Generate unique Message-ID
         domain = self._email_address.split("@")[-1]
@@ -473,7 +519,7 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         
         # Send via SMTP
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, self._send_smtp, msg)
+        await loop.run_in_executor(None, self._send_smtp, msg, all_recipients)
         
         # Create BotMessage for return
         bot_message = BotMessage(
@@ -492,12 +538,12 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
         
         return bot_message
     
-    def _send_smtp(self, msg: MIMEText) -> None:
+    def _send_smtp(self, msg: MIMEText, to_addrs: List[str]) -> None:
         """Send email via SMTP (sync, runs in executor)."""
         with smtplib.SMTP(self._smtp_server, self._smtp_port) as server:
             server.starttls()
             server.login(self._email_address, self._token)
-            server.send_message(msg)
+            server.send_message(msg, to_addrs=to_addrs)
     
     async def edit_message(
         self,
@@ -538,6 +584,14 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
     async def send_typing(self, channel_id: str) -> None:
         """Send typing indicator (no-op for email)."""
         pass
+    
+    async def add_reaction(self, channel_id: str, message_id: str, emoji: str) -> bool:
+        """Add a reaction (no-op for email)."""
+        return False
+    
+    async def remove_reaction(self, channel_id: str, message_id: str, emoji: str) -> bool:
+        """Remove a reaction (no-op for email)."""
+        return False
     
     async def get_user(self, user_id: str) -> Optional[BotUser]:
         """Get user information."""

@@ -30,6 +30,8 @@ __all__ = [
     'replay_app',
     'github_app',
     'langextract_app',
+    'agent_app',
+    'command_app',
 ]
 
 
@@ -104,4 +106,10 @@ def __getattr__(name: str):
     elif name == 'langextract_app':
         from .langextract import app as langextract_app
         return langextract_app
+    elif name == 'agent_app':
+        from .agent import app as agent_app
+        return agent_app
+    elif name == 'command_app':
+        from .command import app as command_app
+        return command_app
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

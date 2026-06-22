@@ -14,6 +14,9 @@ from datetime import datetime
 class SearchMixin:
     """Mixin class containing search and retrieval methods for the Memory class."""
     
+    # Allowed table names for SQLite queries to prevent SQL injection
+    _ALLOWED_SQLITE_TABLES = frozenset({"short_term", "long_term"})
+    
     def search_short_term(self, query: str, limit: int = 5, metadata_filter: Optional[Dict] = None, 
                          min_quality: Optional[float] = None, user_id: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]:
         """
@@ -170,10 +173,10 @@ class SearchMixin:
         
         return self._format_vector_results(results)
     
-    def _search_mongodb_stm(self, query: str, limit: int, metadata_filter: Optional[Dict],
-                           min_quality: Optional[float], user_id: Optional[str]) -> List[Dict[str, Any]]:
-        """Search short-term memory in MongoDB."""
-        if not hasattr(self, 'stm_collection'):
+    def _search_mongodb(self, collection, query: str, limit: int, metadata_filter: Optional[Dict],
+                        min_quality: Optional[float], user_id: Optional[str]) -> List[Dict[str, Any]]:
+        """Search MongoDB collection with given parameters."""
+        if not collection:
             return []
         
         # Build search filter
@@ -191,120 +194,82 @@ class SearchMixin:
             search_filter["metadata.user_id"] = user_id
         
         # Perform search with text score
-        cursor = self.stm_collection.find(
+        cursor = collection.find(
             search_filter,
             {"score": {"$meta": "textScore"}}
         ).sort([("score", {"$meta": "textScore"})]).limit(limit)
         
         return [self._format_mongodb_result(doc) for doc in cursor]
+    
+    def _search_mongodb_stm(self, query: str, limit: int, metadata_filter: Optional[Dict],
+                           min_quality: Optional[float], user_id: Optional[str]) -> List[Dict[str, Any]]:
+        """Search short-term memory in MongoDB."""
+        collection = getattr(self, 'stm_collection', None)
+        return self._search_mongodb(collection, query, limit, metadata_filter, min_quality, user_id)
     
     def _search_mongodb_ltm(self, query: str, limit: int, metadata_filter: Optional[Dict],
                            min_quality: Optional[float], user_id: Optional[str]) -> List[Dict[str, Any]]:
         """Search long-term memory in MongoDB."""
-        if not hasattr(self, 'ltm_collection'):
+        collection = getattr(self, 'ltm_collection', None)
+        return self._search_mongodb(collection, query, limit, metadata_filter, min_quality, user_id)
+    
+    def _search_sqlite(self, conn, table: str, query: str, limit: int, metadata_filter: Optional[Dict],
+                       min_quality: Optional[float], user_id: Optional[str]) -> List[Dict[str, Any]]:
+        """Search SQLite table with given parameters."""
+        if not conn:
             return []
         
-        # Build search filter
-        search_filter = {"$text": {"$search": query}}
+        # Validate table name to prevent SQL injection
+        if table not in self._ALLOWED_SQLITE_TABLES:
+            allowed = ", ".join(sorted(self._ALLOWED_SQLITE_TABLES))
+            raise ValueError(f"Invalid table name: {table}. Allowed tables: {allowed}")
         
-        # Add additional filters
-        if metadata_filter:
-            for key, value in metadata_filter.items():
-                search_filter[f"metadata.{key}"] = value
+        # Build WHERE clause
+        where_clauses = ["content LIKE ?"]
+        params = [f"%{query}%"]
         
         if min_quality is not None:
-            search_filter["quality_score"] = {"$gte": min_quality}
+            where_clauses.append("quality_score >= ?")
+            params.append(min_quality)
+        
+        # Simple metadata filtering (JSON contains check)
+        if metadata_filter:
+            for key, value in metadata_filter.items():
+                where_clauses.append("metadata LIKE ?")
+                params.append(f'%"{key}": "{value}"%')
         
         if user_id:
-            search_filter["metadata.user_id"] = user_id
+            where_clauses.append("metadata LIKE ?")
+            params.append(f'%"user_id": "{user_id}"%')
         
-        # Perform search with text score
-        cursor = self.ltm_collection.find(
-            search_filter,
-            {"score": {"$meta": "textScore"}}
-        ).sort([("score", {"$meta": "textScore"})]).limit(limit)
+        where_clause = " AND ".join(where_clauses)
         
-        return [self._format_mongodb_result(doc) for doc in cursor]
+        query_sql = f"""
+            SELECT id, content, metadata, timestamp, quality_score
+            FROM {table}
+            WHERE {where_clause}
+            ORDER BY quality_score DESC, timestamp DESC
+            LIMIT ?
+        """
+        
+        params.append(limit)
+        
+        cursor = conn.execute(query_sql, params)
+        rows = cursor.fetchall()
+        
+        return [self._format_sqlite_result(dict(row)) for row in rows]
     
     def _search_sqlite_stm(self, query: str, limit: int, metadata_filter: Optional[Dict],
                           min_quality: Optional[float], user_id: Optional[str]) -> List[Dict[str, Any]]:
         """Search short-term memory in SQLite."""
-        conn = self._get_stm_conn()
-        
-        # Build WHERE clause
-        where_clauses = ["content LIKE ?"]
-        params = [f"%{query}%"]
-        
-        if min_quality is not None:
-            where_clauses.append("quality_score >= ?")
-            params.append(min_quality)
-        
-        # Simple metadata filtering (JSON contains check)
-        if metadata_filter:
-            for key, value in metadata_filter.items():
-                where_clauses.append("metadata LIKE ?")
-                params.append(f'%"{key}": "{value}"%')
-        
-        if user_id:
-            where_clauses.append("metadata LIKE ?")
-            params.append(f'%"user_id": "{user_id}"%')
-        
-        where_clause = " AND ".join(where_clauses)
-        
-        query_sql = f"""
-            SELECT id, content, metadata, timestamp, quality_score
-            FROM short_term
-            WHERE {where_clause}
-            ORDER BY quality_score DESC, timestamp DESC
-            LIMIT ?
-        """
-        
-        params.append(limit)
-        
-        cursor = conn.execute(query_sql, params)
-        rows = cursor.fetchall()
-        
-        return [self._format_sqlite_result(dict(row)) for row in rows]
+        conn = self._get_stm_conn()  # Let AttributeError propagate naturally
+        return self._search_sqlite(conn, "short_term", query, limit, metadata_filter, min_quality, user_id)
     
     def _search_sqlite_ltm(self, query: str, limit: int, metadata_filter: Optional[Dict],
                           min_quality: Optional[float], user_id: Optional[str]) -> List[Dict[str, Any]]:
         """Search long-term memory in SQLite."""
-        conn = self._get_ltm_conn()
-        
-        # Build WHERE clause
-        where_clauses = ["content LIKE ?"]
-        params = [f"%{query}%"]
-        
-        if min_quality is not None:
-            where_clauses.append("quality_score >= ?")
-            params.append(min_quality)
-        
-        # Simple metadata filtering (JSON contains check)
-        if metadata_filter:
-            for key, value in metadata_filter.items():
-                where_clauses.append("metadata LIKE ?")
-                params.append(f'%"{key}": "{value}"%')
-        
-        if user_id:
-            where_clauses.append("metadata LIKE ?")
-            params.append(f'%"user_id": "{user_id}"%')
-        
-        where_clause = " AND ".join(where_clauses)
-        
-        query_sql = f"""
-            SELECT id, content, metadata, timestamp, quality_score
-            FROM long_term
-            WHERE {where_clause}
-            ORDER BY quality_score DESC, timestamp DESC
-            LIMIT ?
-        """
-        
-        params.append(limit)
-        
-        cursor = conn.execute(query_sql, params)
-        rows = cursor.fetchall()
-        
-        return [self._format_sqlite_result(dict(row)) for row in rows]
+        conn = self._get_ltm_conn()  # Let AttributeError propagate naturally
+        return self._search_sqlite(conn, "long_term", query, limit, metadata_filter, min_quality, user_id)
     
     def _format_vector_results(self, results: Dict) -> List[Dict[str, Any]]:
         """Format ChromaDB vector search results."""

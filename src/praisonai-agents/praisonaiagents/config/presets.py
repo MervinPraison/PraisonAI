@@ -239,12 +239,12 @@ EXECUTION_PRESETS: Dict[str, Dict[str, Any]] = {
 # =============================================================================
 
 WEB_PRESETS: Dict[str, Dict[str, Any]] = {
-    # Providers
-    "duckduckgo": {"search": True, "fetch": True, "search_provider": "duckduckgo"},
-    "tavily": {"search": True, "fetch": True, "search_provider": "tavily"},
-    "google": {"search": True, "fetch": True, "search_provider": "google"},
-    "bing": {"search": True, "fetch": True, "search_provider": "bing"},
-    "serper": {"search": True, "fetch": True, "search_provider": "serper"},
+    # Providers - fetch disabled by default for OpenAI model compatibility
+    "duckduckgo": {"search": True, "fetch": False, "search_provider": "duckduckgo"},
+    "tavily": {"search": True, "fetch": False, "search_provider": "tavily"},
+    "google": {"search": True, "fetch": False, "search_provider": "google"},
+    "bing": {"search": True, "fetch": False, "search_provider": "bing"},
+    "serper": {"search": True, "fetch": False, "search_provider": "serper"},
     # Modes
     "search_only": {"search": True, "fetch": False},
     "fetch_only": {"search": False, "fetch": True},
@@ -322,8 +322,8 @@ CACHING_PRESETS: Dict[str, Dict[str, Any]] = {
 # =============================================================================
 
 MULTI_AGENT_OUTPUT_PRESETS: Dict[str, Dict[str, Any]] = {
-    "verbose": {"verbose": 2, "stream": True},
-    "minimal": {"verbose": 1, "stream": True},
+    "verbose": {"verbose": 2, "stream": False},
+    "minimal": {"verbose": 1, "stream": False},
     "silent": {"verbose": 0, "stream": False},
 }
 

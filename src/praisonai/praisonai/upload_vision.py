@@ -7,13 +7,25 @@ It reads configuration from config.yaml and provides options to upload in differ
 
 import os
 import yaml
-import torch
 import shutil
 import subprocess
-from unsloth import FastVisionModel
+
+
+def _lazy_import_vision_upload_deps():
+    """Import heavy vision deps only when needed (mirrors train_vision.py)."""
+    try:
+        import torch
+        from unsloth import FastVisionModel
+        globals().update({"torch": torch, "FastVisionModel": FastVisionModel})
+    except ImportError as e:
+        raise ImportError(
+            "Vision upload dependencies missing. "
+            "Install with: pip install torch unsloth"
+        ) from e
 
 class UploadVisionModel:
     def __init__(self, config_path="config.yaml"):
+        _lazy_import_vision_upload_deps()
         self.load_config(config_path)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = None

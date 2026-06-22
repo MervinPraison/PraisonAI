@@ -26,6 +26,7 @@ __all__ = [
     "OutputPreset",
     "ExecutionPreset",
     # Config classes
+    "LLMConfig",
     "MemoryConfig",
     "KnowledgeConfig",
     "PlanningConfig",
@@ -110,6 +111,7 @@ _MODULE_MAP = {
     "WebSearchProvider": "feature_configs",
     "OutputPreset": "feature_configs",
     "ExecutionPreset": "feature_configs",
+    "LLMConfig": "feature_configs",
     "MemoryConfig": "feature_configs",
     "KnowledgeConfig": "feature_configs",
     "PlanningConfig": "feature_configs",

@@ -23,6 +23,7 @@ from .models import (
 )
 from .store import JobStore
 from .executor import JobExecutor
+from .path_validation import validate_agent_file_path
 
 logger = logging.getLogger(__name__)
 
@@ -77,9 +78,14 @@ def create_router(store: JobStore, executor: JobExecutor) -> APIRouter:
                 )
         
         # Create new job
+        try:
+            agent_file = validate_agent_file_path(body.agent_file)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
         job = Job(
             prompt=body.prompt,
-            agent_file=body.agent_file,
+            agent_file=agent_file,
             agent_yaml=body.agent_yaml,
             framework=body.framework or "praisonai",
             config=body.config or {},

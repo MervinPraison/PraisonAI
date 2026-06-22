@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Dict, List
+from .._lockmap import LockMap
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +44,10 @@ class InboundDebouncer:
         self._buffers: Dict[str, List[str]] = {}
         self._timers: Dict[str, asyncio.TimerHandle] = {}
         self._futures: Dict[str, List[asyncio.Future]] = {}
-        self._locks: Dict[str, asyncio.Lock] = {}
+        self._locks = LockMap()
 
     def _get_lock(self, user_id: str) -> asyncio.Lock:
-        if user_id not in self._locks:
-            self._locks[user_id] = asyncio.Lock()
-        return self._locks[user_id]
+        return self._locks.get(user_id)
 
     async def debounce(self, user_id: str, text: str) -> str:
         """Buffer *text* for *user_id* and return coalesced result.

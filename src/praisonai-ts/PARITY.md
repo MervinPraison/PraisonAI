@@ -1,27 +1,28 @@
 # Feature Parity Tracker
 
-> **Version:** 1.5.87 | **Last Updated:** 2026-06-03
+> **Version:** 1.5.87 | **Last Updated:** 2026-06-22
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 336 |
-| Python Wrapper Features | 99 |
-| TypeScript Features | 1192 |
-| **Gap Count** | **44** |
-| P0 (Critical) | 1 |
+| Python Core Features | 362 |
+| Python Wrapper Features | 100 |
+| TypeScript Features | 1188 |
+| **Gap Count** | **70** |
+| P0 (Critical) | 2 |
 | P1 (High) | 0 |
 | P2 (Medium) | 0 |
-| P3 (Low) | 43 |
+| P3 (Low) | 68 |
 
 ## Gap Matrix
 
-### P0_CoreParity (52 done, 1 todo)
+### P0_CoreParity (52 done, 2 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
+| `HandoffToolPolicy` | ✅ | ❌ | high | ⏳ TODO |
 | `parallel\_handoffs` | ✅ | ❌ | low | ⏳ TODO |
 | `Agent` | ✅ | ✅ | high | ✅ DONE |
 | `AudioAgent` | ✅ | ✅ | high | ✅ DONE |
@@ -147,27 +148,37 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (179 done, 43 todo)
+### P3_Advanced (179 done, 68 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
 | `A2UI` | ✅ | ❌ | low | ⏳ TODO |
+| `AGGRESSIVE\_POLICY` | ✅ | ❌ | low | ⏳ TODO |
 | `AgentMessageEvent` | ✅ | ❌ | high | ⏳ TODO |
+| `AgentRunOutcome` | ✅ | ❌ | high | ⏳ TODO |
 | `AsyncLearnProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `AutoApproveBackend` | ✅ | ❌ | high | ⏳ TODO |
+| `BALANCED\_POLICY` | ✅ | ❌ | low | ⏳ TODO |
 | `BotOSConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `BotOSProtocol` | ✅ | ❌ | medium | ⏳ TODO |
+| `CONSERVATIVE\_POLICY` | ✅ | ❌ | low | ⏳ TODO |
 | `CliBackendConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `CliBackendDelta` | ✅ | ❌ | high | ⏳ TODO |
 | `CliBackendProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `CliBackendResult` | ✅ | ❌ | low | ⏳ TODO |
 | `CliSessionBinding` | ✅ | ❌ | high | ⏳ TODO |
+| `CompactionRoute` | ✅ | ❌ | high | ⏳ TODO |
+| `CompactionStrategy` | ✅ | ❌ | high | ⏳ TODO |
 | `ConsoleBackend` | ✅ | ❌ | high | ⏳ TODO |
+| `ContextBudgetResult` | ✅ | ❌ | low | ⏳ TODO |
+| `ContextCompactionPolicy` | ✅ | ❌ | high | ⏳ TODO |
+| `ContextCompactionPolicyProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `CustomToolUseEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `DoomLoopDetector` | ✅ | ❌ | high | ⏳ TODO |
 | `ErrorContextProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `EscalationPipeline` | ✅ | ❌ | high | ⏳ TODO |
 | `EscalationStage` | ✅ | ❌ | high | ⏳ TODO |
+| `GatewayEventType` | ✅ | ❌ | high | ⏳ TODO |
 | `Heartbeat` | ✅ | ❌ | high | ⏳ TODO |
 | `HeartbeatConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `LLMError` | ✅ | ❌ | low | ⏳ TODO |
@@ -184,6 +195,8 @@
 | `ObservabilityHooks` | ✅ | ❌ | high | ⏳ TODO |
 | `PraisonAIConfigError` | ✅ | ❌ | low | ⏳ TODO |
 | `PraisonAIError` | ✅ | ❌ | low | ⏳ TODO |
+| `RetryBackoffConfig` | ✅ | ❌ | low | ⏳ TODO |
+| `RunStatus` | ✅ | ❌ | high | ⏳ TODO |
 | `SessionErrorEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `SessionIdleEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `StopReason` | ✅ | ❌ | high | ⏳ TODO |
@@ -191,9 +204,22 @@
 | `ToolExecutionError` | ✅ | ❌ | low | ⏳ TODO |
 | `ToolSearchConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `ToolUseEvent` | ✅ | ❌ | high | ⏳ TODO |
+| `ToolsetRegistry` | ✅ | ❌ | high | ⏳ TODO |
+| `ToolsetSpec` | ✅ | ❌ | high | ⏳ TODO |
 | `ValidationError` | ✅ | ❌ | low | ⏳ TODO |
+| `\_\_version\_\_` | ✅ | ❌ | low | ⏳ TODO |
 | `configure\_structured\_logging` | ✅ | ❌ | low | ⏳ TODO |
+| `get\_default\_policy` | ✅ | ❌ | low | ⏳ TODO |
 | `get\_logger` | ✅ | ❌ | low | ⏳ TODO |
+| `get\_toolset` | ✅ | ❌ | low | ⏳ TODO |
+| `get\_toolset\_registry` | ✅ | ❌ | low | ⏳ TODO |
+| `has\_toolset` | ✅ | ❌ | low | ⏳ TODO |
+| `list\_toolsets` | ✅ | ❌ | low | ⏳ TODO |
+| `register\_toolset` | ✅ | ❌ | low | ⏳ TODO |
+| `resolve\_toolset` | ✅ | ❌ | low | ⏳ TODO |
+| `resolve\_toolsets` | ✅ | ❌ | low | ⏳ TODO |
+| `unregister\_toolset` | ✅ | ❌ | low | ⏳ TODO |
+| `validate\_decision\_string` | ✅ | ❌ | low | ⏳ TODO |
 | `A2A` | ✅ | ✅ | low | ✅ DONE |
 | `AGUI` | ✅ | ✅ | low | ✅ DONE |
 | `AUTONOMY\_PRESETS` | ✅ | ✅ | low | ✅ DONE |
@@ -379,7 +405,7 @@
 **Path:** `/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents`
 
 <details>
-<summary><strong>agent</strong> (42 exports)</summary>
+<summary><strong>agent</strong> (43 exports)</summary>
 
 ```python
 from praisonaiagents import Agent, AudioAgent, AudioConfig, CodeAgent, CodeConfig, CodeExecutionStep, ContextAgent, ContextPolicy, DeepResearchAgent, DeepResearchResponse...
@@ -469,10 +495,10 @@ from praisonaiagents import FlowDisplay, track_workflow
 </details>
 
 <details>
-<summary><strong>gateway</strong> (7 exports)</summary>
+<summary><strong>gateway</strong> (8 exports)</summary>
 
 ```python
-from praisonaiagents import GatewayClientProtocol, GatewayConfig, GatewayEvent, GatewayMessage, GatewayProtocol, GatewaySessionProtocol, SessionConfig
+from praisonaiagents import GatewayClientProtocol, GatewayConfig, GatewayEvent, GatewayEventType, GatewayMessage, GatewayProtocol, GatewaySessionProtocol, SessionConfig
 ```
 
 </details>
@@ -532,10 +558,10 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (48 exports)</summary>
+<summary><strong>other</strong> (72 exports)</summary>
 
 ```python
-from praisonaiagents import AgentMessageEvent, Agents, AsyncLearnProtocol, AutonomyConfig, BudgetExceededError, CliBackendConfig, CliBackendDelta, CliBackendProtocol, CliBackendResult, CliSessionBinding...
+from praisonaiagents import AGGRESSIVE_POLICY, AgentMessageEvent, AgentRunOutcome, Agents, AsyncLearnProtocol, AutonomyConfig, BALANCED_POLICY, BudgetExceededError, CONSERVATIVE_POLICY, CliBackendConfig...
 ```
 
 </details>
@@ -869,7 +895,7 @@ import { AgentStats, AgentTelemetry, MetricEntry, MinimalTelemetry, PerformanceM
 </details>
 
 <details>
-<summary><strong>tools</strong> (91 exports)</summary>
+<summary><strong>tools</strong> (87 exports)</summary>
 
 ```typescript
 import { BaseTool, BudgetExceededError, DelegatorConfig, FunctionTool, InstallHints, MissingDependencyError, MissingEnvVarError, PraisonTool, RedactionHooks, RegisteredTool... } from 'praisonai';

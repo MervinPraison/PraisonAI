@@ -46,13 +46,19 @@ def create_mock_telegram_update(user_id: str = "12345", chat_id: str = "-1001234
     return update
 
 
-def create_test_bot(allowed_users=None, allowed_channels=None, group_policy="mention_only") -> TelegramBot:
+def create_test_bot(
+    allowed_users=None,
+    allowed_channels=None,
+    group_policy="mention_only",
+    unknown_user_policy="deny",
+) -> TelegramBot:
     """Create a TelegramBot for testing with specified security config."""
     config = BotConfig(
         token="test_token",
         allowed_users=allowed_users or [],
         allowed_channels=allowed_channels or [],
         group_policy=group_policy,
+        unknown_user_policy=unknown_user_policy,
     )
     
     bot = TelegramBot(token="test_token", config=config)
@@ -104,7 +110,10 @@ async def test_channel_allowlist_enforcement():
     """Test that channel allowlist is enforced in the security pipeline."""
     
     # Bot with restricted channel allowlist
-    bot = create_test_bot(allowed_channels=["-100123456789"])
+    bot = create_test_bot(
+        allowed_channels=["-100123456789"],
+        unknown_user_policy="allow",
+    )
     
     # Message from allowed channel
     allowed_update = create_mock_telegram_update(chat_id="-100123456789", text="@test_bot hello", chat_type="supergroup")
@@ -123,7 +132,7 @@ async def test_group_policy_mention_enforcement():
     """Test that group mention policy is enforced in the security pipeline."""
     
     # Bot with mention_only group policy
-    bot = create_test_bot(group_policy="mention_only")
+    bot = create_test_bot(group_policy="mention_only", unknown_user_policy="allow")
     bot._bot_user.username = "Test_Bot"
     
     # Group message with bot mention - should pass
@@ -156,7 +165,7 @@ async def test_dm_messages_bypass_group_policies():
     """Test that DM messages bypass group-specific policies."""
     
     # Bot with mention_only group policy
-    bot = create_test_bot(group_policy="mention_only")
+    bot = create_test_bot(group_policy="mention_only", unknown_user_policy="allow")
     
     # DM message without mention - should pass
     dm_update = create_mock_telegram_update(
@@ -170,7 +179,7 @@ async def test_dm_messages_bypass_group_policies():
 @pytest.mark.asyncio
 async def test_group_policy_command_only_enforcement():
     """Test that command_only only allows commands in groups."""
-    bot = create_test_bot(group_policy="command_only")
+    bot = create_test_bot(group_policy="command_only", unknown_user_policy="allow")
 
     message_update = create_mock_telegram_update(chat_type="group", text="hello everyone")
     message = await process_inbound_telegram_message(message_update, bot)
@@ -204,23 +213,55 @@ async def test_pairing_system_integration(mock_unknown_handler):
 
 
 @pytest.mark.asyncio
-async def test_empty_allowlists_allow_all():
-    """Test that empty allowlists allow all users/channels (default behavior)."""
-    
-    # Bot with no restrictions
-    bot = create_test_bot(allowed_users=[], allowed_channels=[])
-    
-    # Message from any user in any channel
-    update = create_mock_telegram_update(user_id="99999", chat_id="-999999999", text="hello", chat_type="private")
+async def test_empty_allowlists_respect_unknown_user_policy():
+    """Empty allowlists must still honour unknown_user_policy (default deny)."""
+    bot = create_test_bot(
+        allowed_users=[],
+        allowed_channels=[],
+        unknown_user_policy="deny",
+    )
+
+    update = create_mock_telegram_update(
+        user_id="99999", chat_id="-999999999", text="hello", chat_type="private"
+    )
     message = await process_inbound_telegram_message(update, bot)
-    assert message is not None, "Empty allowlists should allow all users and channels"
+    assert message is None, "Default deny policy should block unknown users"
+
+
+@pytest.mark.asyncio
+async def test_empty_allowlists_allow_when_policy_is_allow():
+    """Explicit allow policy should permit unknown users without an allowlist."""
+    config = BotConfig(
+        token="test_token",
+        allowed_users=[],
+        allowed_channels=[],
+        unknown_user_policy="allow",
+    )
+    bot = TelegramBot(token="test_token", config=config)
+    bot._bot_user = BotUser(
+        user_id="123456789",
+        username="test_bot",
+        display_name="Test Bot",
+        is_bot=True,
+    )
+    bot.fire_message_received = MagicMock()
+    bot._started_at = 1234567890.0
+    bot._agent = MagicMock()
+    bot._command_handlers = {}
+    bot._session = MagicMock()
+
+    update = create_mock_telegram_update(
+        user_id="99999", chat_id="-999999999", text="hello", chat_type="private"
+    )
+    message = await process_inbound_telegram_message(update, bot)
+    assert message is not None, "Allow policy should permit unknown users"
 
 
 @pytest.mark.asyncio
 async def test_audio_message_transcription():
     """Test that audio messages are properly transcribed in the security pipeline."""
     
-    bot = create_test_bot()
+    bot = create_test_bot(unknown_user_policy="allow")
     
     # Mock the transcribe_audio method
     bot._transcribe_audio = AsyncMock(return_value="[Voice message]: transcribed text")
@@ -327,8 +368,8 @@ async def test_shared_pipeline_consistency():
     """Test that the shared pipeline provides consistent results."""
     
     # Create identical bot configs
-    bot1 = create_test_bot(allowed_users=["42"], group_policy="mention_only")
-    bot2 = create_test_bot(allowed_users=["42"], group_policy="mention_only")
+    bot1 = create_test_bot(allowed_users=["42"], group_policy="mention_only", unknown_user_policy="allow")
+    bot2 = create_test_bot(allowed_users=["42"], group_policy="mention_only", unknown_user_policy="allow")
     
     # Same message update
     update = create_mock_telegram_update(user_id="42", text="@test_bot hello")

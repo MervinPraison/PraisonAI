@@ -1,23 +1,24 @@
 {
   "version": "1.5.87",
-  "lastUpdated": "2026-06-03",
+  "lastUpdated": "2026-06-22",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 336,
-    "pythonWrapperFeatures": 99,
-    "typescriptFeatures": 1192,
-    "gapCount": 44,
-    "priorityP0": 1,
+    "pythonCoreFeatures": 362,
+    "pythonWrapperFeatures": 100,
+    "typescriptFeatures": 1188,
+    "gapCount": 70,
+    "priorityP0": 2,
     "priorityP1": 0,
     "priorityP2": 0,
-    "priorityP3": 43
+    "priorityP3": 68
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
     "exports": [
       "A2A",
       "A2UI",
+      "AGGRESSIVE_POLICY",
       "AGUI",
       "AUTONOMY_PRESETS",
       "Agent",
@@ -29,6 +30,7 @@
       "AgentOSConfig",
       "AgentOSProtocol",
       "AgentPluginProtocol",
+      "AgentRunOutcome",
       "AgentTeam",
       "Agents",
       "ApprovalCallback",
@@ -43,6 +45,7 @@
       "AutoRagConfig",
       "AutonomyConfig",
       "AutonomyLevel",
+      "BALANCED_POLICY",
       "BaseTool",
       "BotChannel",
       "BotConfig",
@@ -53,6 +56,7 @@
       "BotUser",
       "BudgetExceededError",
       "CACHING_PRESETS",
+      "CONSERVATIVE_POLICY",
       "CONTEXT_PRESETS",
       "CachingConfig",
       "Chunking",
@@ -67,10 +71,15 @@
       "CodeAgent",
       "CodeConfig",
       "CodeExecutionStep",
+      "CompactionRoute",
+      "CompactionStrategy",
       "ConditionProtocol",
       "ConfigValidationError",
       "ConsoleBackend",
       "ContextAgent",
+      "ContextBudgetResult",
+      "ContextCompactionPolicy",
+      "ContextCompactionPolicyProtocol",
       "ContextConfig",
       "ContextEvent",
       "ContextEventType",
@@ -114,6 +123,7 @@
       "GatewayClientProtocol",
       "GatewayConfig",
       "GatewayEvent",
+      "GatewayEventType",
       "GatewayMessage",
       "GatewayProtocol",
       "GatewaySessionProtocol",
@@ -128,6 +138,7 @@
       "HandoffInputData",
       "HandoffResult",
       "HandoffTimeoutError",
+      "HandoffToolPolicy",
       "Heartbeat",
       "HeartbeatConfig",
       "HookPluginProtocol",
@@ -218,10 +229,12 @@
       "ResourceLimits",
       "RetrievalConfig",
       "RetrievalPolicy",
+      "RetryBackoffConfig",
       "RewriteResult",
       "RewriteStrategy",
       "Route",
       "RoutingConditionProtocol",
+      "RunStatus",
       "SandboxConfig",
       "SandboxProtocol",
       "SandboxResult",
@@ -253,6 +266,8 @@
       "ToolUseEvent",
       "ToolValidationError",
       "Tools",
+      "ToolsetRegistry",
+      "ToolsetSpec",
       "TraceSink",
       "TraceSinkProtocol",
       "ValidationError",
@@ -266,6 +281,7 @@
       "WebSearchProvider",
       "Workflow",
       "WorkflowContext",
+      "__version__",
       "aembed",
       "aembedding",
       "aembeddings",
@@ -300,6 +316,7 @@
       "get_config_path",
       "get_default",
       "get_default_plugin_dirs",
+      "get_default_policy",
       "get_defaults_config",
       "get_dimensions",
       "get_logger",
@@ -309,10 +326,14 @@
       "get_registry",
       "get_telemetry",
       "get_tool",
+      "get_toolset",
+      "get_toolset_registry",
       "handoff",
       "handoff_filters",
+      "has_toolset",
       "is_path_like",
       "is_policy_string",
+      "list_toolsets",
       "load_plugin",
       "loop",
       "memory",
@@ -324,6 +345,7 @@
       "prompt_with_handoff_instructions",
       "register_display_callback",
       "register_tool",
+      "register_toolset",
       "repeat",
       "resolve",
       "resolve_autonomy",
@@ -340,6 +362,8 @@
       "resolve_reflection",
       "resolve_routing",
       "resolve_skills",
+      "resolve_toolset",
+      "resolve_toolsets",
       "resolve_web",
       "route",
       "suggest_similar",
@@ -348,7 +372,9 @@
       "tools",
       "trace_context",
       "track_workflow",
+      "unregister_toolset",
       "validate_config",
+      "validate_decision_string",
       "validate_tool",
       "when",
       "workflows"
@@ -374,6 +400,7 @@
         "HandoffConfig",
         "HandoffInputData",
         "HandoffResult",
+        "HandoffToolPolicy",
         "ImageAgent",
         "MCPCall",
         "OCRAgent",
@@ -538,6 +565,7 @@
         "GatewayClientProtocol",
         "GatewayConfig",
         "GatewayEvent",
+        "GatewayEventType",
         "GatewayMessage",
         "GatewayProtocol",
         "GatewaySessionProtocol",
@@ -579,16 +607,25 @@
         "Memory"
       ],
       "other": [
+        "AGGRESSIVE_POLICY",
         "AgentMessageEvent",
+        "AgentRunOutcome",
         "Agents",
         "AsyncLearnProtocol",
         "AutonomyConfig",
+        "BALANCED_POLICY",
         "BudgetExceededError",
+        "CONSERVATIVE_POLICY",
         "CliBackendConfig",
         "CliBackendDelta",
         "CliBackendProtocol",
         "CliBackendResult",
         "CliSessionBinding",
+        "CompactionRoute",
+        "CompactionStrategy",
+        "ContextBudgetResult",
+        "ContextCompactionPolicy",
+        "ContextCompactionPolicyProtocol",
         "CustomToolUseEvent",
         "DoomLoopDetector",
         "ErrorContextProtocol",
@@ -612,20 +649,35 @@
         "ObservabilityHooks",
         "PraisonAIConfigError",
         "PraisonAIError",
+        "RetryBackoffConfig",
+        "RunStatus",
         "SessionErrorEvent",
         "SessionIdleEvent",
         "StopReason",
         "StructuredFormatter",
         "ToolExecutionError",
         "ToolUseEvent",
+        "ToolsetRegistry",
+        "ToolsetSpec",
         "ValidationError",
+        "__version__",
         "config",
         "configure_structured_logging",
         "embedding",
         "embeddings",
+        "get_default_policy",
         "get_logger",
+        "get_toolset",
+        "get_toolset_registry",
+        "has_toolset",
+        "list_toolsets",
         "memory",
+        "register_toolset",
+        "resolve_toolset",
+        "resolve_toolsets",
         "tools",
+        "unregister_toolset",
+        "validate_decision_string",
         "workflows"
       ],
       "planning": [
@@ -780,6 +832,7 @@
       "context_manager",
       "cost_tracker",
       "csv_test_runner",
+      "custom_definitions",
       "debug",
       "deploy",
       "diag",
@@ -1441,11 +1494,9 @@
       "getQuickContext",
       "getRegisteredDisplayTypes",
       "getRegistry",
-      "getRegistry",
       "getRepoTree",
       "getTelemetry",
       "getTelemetrySettings",
-      "getTool",
       "getTool",
       "getToolsNeedingApproval",
       "getToolsRegistry",
@@ -1539,7 +1590,6 @@
       "registerNpmTool",
       "registerProvider",
       "registerTool",
-      "registerTool",
       "register_display_callback",
       "register_tool",
       "relevanceCriterion",
@@ -1604,7 +1654,6 @@
       "uint8ArrayToBase64",
       "unregisterDisplayCallback",
       "unregisterProvider",
-      "validateTool",
       "validateTool",
       "validateUIMessages",
       "validateWorkflowDefinition",
@@ -2801,8 +2850,6 @@
         "firecrawlCrawl",
         "firecrawlScrape",
         "getRegistry",
-        "getRegistry",
-        "getTool",
         "getTool",
         "getToolsRegistry",
         "get_registry",
@@ -2814,7 +2861,6 @@
         "registerLocalTool",
         "registerNpmTool",
         "registerTool",
-        "registerTool",
         "register_tool",
         "resetToolsRegistry",
         "superagentGuard",
@@ -2825,7 +2871,6 @@
         "tavilySearch",
         "tool",
         "tools",
-        "validateTool",
         "validateTool",
         "validate_tool",
         "valyuBioSearch",
@@ -3061,6 +3106,15 @@
         "priority": "P0",
         "effort": "low",
         "status": "DONE",
+        "category": "agent"
+      },
+      {
+        "feature": "HandoffToolPolicy",
+        "python": true,
+        "typescript": false,
+        "priority": "P0",
+        "effort": "high",
+        "status": "TODO",
         "category": "agent"
       },
       {
@@ -3925,6 +3979,15 @@
         "category": "ui"
       },
       {
+        "feature": "AGGRESSIVE_POLICY",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "AGUI",
         "python": true,
         "typescript": true,
@@ -4004,6 +4067,15 @@
         "effort": "medium",
         "status": "DONE",
         "category": "plugins"
+      },
+      {
+        "feature": "AgentRunOutcome",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "AgentTeam",
@@ -4105,6 +4177,15 @@
         "category": "config"
       },
       {
+        "feature": "BALANCED_POLICY",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "BotChannel",
         "python": true,
         "typescript": true,
@@ -4186,6 +4267,15 @@
         "category": "config"
       },
       {
+        "feature": "CONSERVATIVE_POLICY",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "CONTEXT_PRESETS",
         "python": true,
         "typescript": true,
@@ -4258,6 +4348,24 @@
         "category": "other"
       },
       {
+        "feature": "CompactionRoute",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "CompactionStrategy",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "ConditionProtocol",
         "python": true,
         "typescript": true,
@@ -4283,6 +4391,33 @@
         "effort": "high",
         "status": "TODO",
         "category": "app"
+      },
+      {
+        "feature": "ContextBudgetResult",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "ContextCompactionPolicy",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "ContextCompactionPolicyProtocol",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "medium",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "ContextEvent",
@@ -4534,6 +4669,15 @@
         "priority": "P3",
         "effort": "high",
         "status": "DONE",
+        "category": "gateway"
+      },
+      {
+        "feature": "GatewayEventType",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
         "category": "gateway"
       },
       {
@@ -5104,6 +5248,15 @@
         "category": "sandbox"
       },
       {
+        "feature": "RetryBackoffConfig",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "RoutingConditionProtocol",
         "python": true,
         "typescript": true,
@@ -5111,6 +5264,15 @@
         "effort": "medium",
         "status": "DONE",
         "category": "conditions"
+      },
+      {
+        "feature": "RunStatus",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "SandboxConfig",
@@ -5275,6 +5437,24 @@
         "category": "other"
       },
       {
+        "feature": "ToolsetRegistry",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "ToolsetSpec",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "TraceSink",
         "python": true,
         "typescript": true,
@@ -5327,6 +5507,15 @@
         "effort": "high",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "__version__",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "aembed",
@@ -5572,6 +5761,15 @@
         "category": "plugins"
       },
       {
+        "feature": "get_default_policy",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "get_defaults_config",
         "python": true,
         "typescript": true,
@@ -5626,6 +5824,33 @@
         "category": "config"
       },
       {
+        "feature": "get_toolset",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "get_toolset_registry",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "has_toolset",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "is_path_like",
         "python": true,
         "typescript": true,
@@ -5642,6 +5867,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "list_toolsets",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "load_plugin",
@@ -5696,6 +5930,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "main"
+      },
+      {
+        "feature": "register_toolset",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "resolve",
@@ -5833,6 +6076,24 @@
         "category": "config"
       },
       {
+        "feature": "resolve_toolset",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "resolve_toolsets",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "resolve_web",
         "python": true,
         "typescript": true,
@@ -5887,6 +6148,15 @@
         "category": "flow_display"
       },
       {
+        "feature": "unregister_toolset",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "validate_config",
         "python": true,
         "typescript": true,
@@ -5894,6 +6164,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "validate_decision_string",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "workflows",

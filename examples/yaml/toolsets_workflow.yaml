@@ -1,0 +1,148 @@
+# Named Toolsets YAML Example
+# This example demonstrates using toolsets in YAML configuration
+
+# Global configuration
+config:
+  llm: gpt-4o-mini
+  memory: true
+
+# Define agents with different toolsets
+agents:
+  # Research agent with research toolset (includes web tools)
+  researcher:
+    role: Senior Research Analyst
+    goal: Research topics thoroughly using web search and analysis tools
+    instructions: |
+      You are a senior research analyst with access to web search and file tools.
+      Research topics comprehensively and provide detailed findings.
+    toolsets:
+      - research  # Includes: web search, file tools, basic analysis
+    
+  # Writer agent with safe toolset for writing tasks
+  writer:
+    role: Content Writer
+    goal: Create engaging content based on research
+    instructions: |
+      You are a skilled content writer. Transform research into clear,
+      engaging content for the target audience.
+    toolsets:
+      - safe  # Safe, read-only tools for writing
+    
+  # Developer agent with development toolset
+  developer:
+    role: Software Developer
+    goal: Create and modify code based on requirements
+    instructions: |
+      You are a software developer with access to development tools.
+      Write, test, and debug code according to specifications.
+    toolsets:
+      - development  # Includes: code tools, file operations, testing
+      
+  # Data analyst with mixed tools and toolsets
+  analyst:
+    role: Data Analyst  
+    goal: Analyze data and generate insights
+    instructions: |
+      You are a data analyst. Process data files and generate
+      actionable insights and visualizations.
+    tools:
+      - read_file  # Explicit tool
+      - write_file  # Explicit tool
+    toolsets:
+      - safe  # Safe toolset for analysis
+      
+  # Security-focused agent with minimal toolset
+  security_auditor:
+    role: Security Auditor
+    goal: Review and audit for security issues
+    instructions: |
+      You are a security auditor with minimal tool access.
+      Focus on reading and analyzing without making changes.
+    toolsets:
+      - safe  # Minimal, safe tools only
+
+# Define tasks for the workflow
+tasks:
+  # Research task using research toolset
+  research_phase:
+    description: |
+      Research the latest trends in AI agent frameworks.
+      Focus on:
+      - Popular frameworks and their features
+      - Industry adoption patterns
+      - Security considerations
+      - Performance benchmarks
+    expected_output: |
+      A comprehensive research report covering AI agent frameworks,
+      including trends, adoption, security, and performance data.
+    agent: researcher
+    
+  # Content creation using safe toolset
+  content_creation:
+    description: |
+      Create a technical blog post based on the research findings.
+      The post should be:
+      - Well-structured with clear sections
+      - Accessible to technical and non-technical audiences  
+      - Include actionable insights
+      - 1000-1500 words
+    expected_output: |
+      A polished blog post about AI agent frameworks suitable
+      for publication on a technical blog.
+    agent: writer
+    
+  # Code development using development toolset
+  code_examples:
+    description: |
+      Create code examples demonstrating key concepts from the research.
+      Include:
+      - Simple "hello world" style examples
+      - Intermediate use cases
+      - Best practices examples
+      - Proper documentation
+    expected_output: |
+      A collection of well-documented code examples that illustrate
+      the concepts discussed in the research and blog post.
+    agent: developer
+    
+  # Data analysis using mixed tools/toolsets
+  trend_analysis:
+    description: |
+      Analyze the research data to identify trends and patterns.
+      Create:
+      - Summary statistics
+      - Trend analysis
+      - Recommendations based on findings
+    expected_output: |
+      A data analysis report with trends, patterns, and
+      actionable recommendations for AI framework adoption.
+    agent: analyst
+    
+  # Security review using minimal toolset
+  security_review:
+    description: |
+      Review all outputs for security considerations.
+      Check for:
+      - Potential security vulnerabilities in code examples
+      - Security best practices in recommendations
+      - Privacy considerations in data handling
+    expected_output: |
+      A security review report identifying any security concerns
+      and recommendations for secure implementation.
+    agent: security_auditor
+
+# Workflow process (sequential execution)
+process: sequential
+
+# Optional: Define workflow dependencies
+# tasks:
+#   research_phase:
+#     dependencies: []
+#   content_creation: 
+#     dependencies: [research_phase]
+#   code_examples:
+#     dependencies: [research_phase]
+#   trend_analysis:
+#     dependencies: [research_phase]
+#   security_review:
+#     dependencies: [content_creation, code_examples, trend_analysis]

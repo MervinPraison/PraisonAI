@@ -4,11 +4,14 @@ import json
 import logging
 import threading
 from praisonaiagents._logging import get_logger
-from typing import Any, Dict, Optional, List, Tuple
+from typing import Any, Dict, Optional, List, Tuple, Callable
 from ..main import display_error, TaskOutput
 from ..agent.agent import Agent
 from ..task.task import Task
 from ..process.process import Process
+from .protocols import SpawnAnnounceProtocol, SpawnedSubAgent, SubAgentCompletionEvent
+from ..bus.bus import EventBus
+from ..bus.event import EventType, Event
 import asyncio
 import uuid
 from enum import Enum
@@ -36,6 +39,21 @@ class TaskStatus(Enum):
 
 # Set up logger
 logger = get_logger(__name__)
+
+
+def _launch_auth_token() -> Optional[str]:
+    return os.environ.get("PRAISONAI_LAUNCH_AUTH_TOKEN")
+
+
+def _authorise_launch_request(request) -> bool:
+    token = _launch_auth_token()
+    if not token:
+        return True
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer ") and auth[7:] == token:
+        return True
+    return request.headers.get("X-Auth-Token") == token
+
 
 # Agent server registry for thread-safe server management
 
@@ -242,7 +260,20 @@ Expected Output: {task.expected_output}."""
     # Add memory context if available
     if task.memory:
         try:
-            memory_context = task.memory.build_context_for_task(task.description)
+            # Use cache-optimized context if available for better prompt caching
+            if hasattr(task.memory, 'build_cache_optimized_context'):
+                try:
+                    cache_result = task.memory.build_cache_optimized_context(
+                        task_descr=task.description,
+                        include_cache_boundary=False  # Don't include boundary for agent task context
+                    )
+                    memory_context = cache_result.get('stable_prefix', '')
+                except Exception as e:
+                    # Fall back to standard context building
+                    logger.debug(f"Cache-optimized context failed for task '{task.description or task.id}', falling back to standard: {e}")
+                    memory_context = task.memory.build_context_for_task(task.description)
+            else:
+                memory_context = task.memory.build_context_for_task(task.description)
             if memory_context:
                 # Log detailed memory context for debugging
                 logger.debug(f"Memory context for task '{task.description}': {memory_context}")
@@ -520,7 +551,7 @@ def process_task_context(context_item, verbose=0, user_id=None):
     else:
         return str(context_item)  # Fallback for unknown types
 
-class AgentTeam:
+class AgentTeam(SpawnAnnounceProtocol):
     """
     Multi-agent coordinator that manages and delegates work to multiple agents.
     
@@ -649,7 +680,7 @@ class AgentTeam:
             _stream = _output_config.stream
         else:
             _verbose = 0
-            _stream = True
+            _stream = False
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve EXECUTION param using canonical resolver
@@ -794,6 +825,14 @@ class AgentTeam:
         self.on_task_start = _on_task_start
         self.on_task_complete = _on_task_complete
         self.variables = variables if variables else {}
+        
+        # Spawn-announce pattern support
+        self._spawned_agents: Dict[str, SpawnedSubAgent] = {}
+        self._completion_callbacks: Dict[str, Callable[[SubAgentCompletionEvent], Any]] = {}
+        self._completion_events: List[SubAgentCompletionEvent] = []
+        self._event_bus: Optional[EventBus] = None
+        self._spawn_lock = threading.RLock()  # Thread-safe spawn operations (reentrant)
+        self._team_id = str(uuid.uuid4())  # Unique team identifier
         
         # Check for manager_llm in environment variable if not provided
         self.manager_llm = manager_llm or os.getenv('OPENAI_MODEL_NAME', 'gpt-4o-mini')
@@ -1017,6 +1056,65 @@ class AgentTeam:
         task_result = _process_task_result(self, context, agent_output)
         return task_result.task_output
 
+    def _apply_task_guardrail(self, task, task_id, task_output):
+        """Apply guardrail validation to task output.
+        
+        Returns:
+            tuple: (task_output, should_retry) where should_retry is True if task should be retried
+            
+        Raises:
+            Exception: If guardrail validation fails after max retries
+        """
+        if not task._guardrail_fn:
+            return task_output, False
+            
+        try:
+            guardrail_result = task._process_guardrail(task_output)
+            if not guardrail_result.success:
+                if task.retry_count >= task.max_retries:
+                    raise Exception(
+                        f"Task failed guardrail validation after {task.max_retries} retries. "
+                        f"Last error: {guardrail_result.error}"
+                    )
+                
+                task.retry_count += 1
+                task.status = "in progress"  # Keep task in progress for retry
+                logger.warning(f"Task {task_id}: Guardrail validation failed (retry {task.retry_count}/{task.max_retries}): {guardrail_result.error}")
+                return task_output, True  # Signal retry needed
+            
+            # If guardrail passed and returned a modified result
+            if guardrail_result.result is not None:
+                if isinstance(guardrail_result.result, str):
+                    # Update the task output with the modified result
+                    task_output.raw = guardrail_result.result
+                    # Clear structured fields to avoid stale cache
+                    if hasattr(task_output, 'json_dict'):
+                        task_output.json_dict = None
+                    if hasattr(task_output, 'pydantic'):
+                        task_output.pydantic = None
+                    task.result = task_output
+                elif hasattr(guardrail_result.result, 'raw'):
+                    # Replace with the new task output
+                    task_output = guardrail_result.result
+                    task.result = task_output
+            
+            logger.info(f"Task {task_id}: Guardrail validation passed")
+            return task_output, False  # No retry needed
+            
+        except Exception as e:
+            logger.error(f"Task {task_id}: Error in guardrail processing: {e}")
+            # Handle guardrail failure with retry logic
+            if task.retry_count >= task.max_retries:
+                raise Exception(
+                    f"Task failed due to guardrail processing error after {task.max_retries} retries. "
+                    f"Last error: {e}"
+                ) from e
+            task.retry_count += 1
+            task.status = "in progress"
+            logger.warning(f"Task {task_id}: Guardrail processing error (retry {task.retry_count}/{task.max_retries}): {e}")
+            return task_output, True  # Signal retry needed
+
+
     async def arun_task(self, task_id):
         """Async version of run_task method"""
         if task_id not in self.tasks:
@@ -1035,53 +1133,11 @@ class AgentTeam:
             if task.status in ["not started", "in progress"]:
                 task_output = await self.aexecute_task(task_id)
                 if task_output and self.completion_checker(task, task_output.raw):
-                    # Run guardrail validation BEFORE marking task complete
-                    if task._guardrail_fn:
-                        try:
-                            guardrail_result = task._process_guardrail(task_output)
-                            if not guardrail_result.success:
-                                if task.retry_count >= task.max_retries:
-                                    raise Exception(
-                                        f"Task failed guardrail validation after {task.max_retries} retries. "
-                                        f"Last error: {guardrail_result.error}"
-                                    )
-                                
-                                task.retry_count += 1
-                                task.status = "in progress"  # Keep task in progress for retry
-                                logger.warning(f"Task {task_id}: Guardrail validation failed (retry {task.retry_count}/{task.max_retries}): {guardrail_result.error}")
-                                retries += 1
-                                continue  # Actually retry the task
-                            
-                            # If guardrail passed and returned a modified result
-                            if guardrail_result.result is not None:
-                                if isinstance(guardrail_result.result, str):
-                                    # Update the task output with the modified result
-                                    task_output.raw = guardrail_result.result
-                                    # Clear structured fields to avoid stale cache
-                                    if hasattr(task_output, 'json_dict'):
-                                        task_output.json_dict = None
-                                    if hasattr(task_output, 'pydantic'):
-                                        task_output.pydantic = None
-                                    task.result = task_output
-                                elif hasattr(guardrail_result.result, 'raw'):
-                                    # Replace with the new task output
-                                    task_output = guardrail_result.result
-                                    task.result = task_output
-                            
-                            logger.info(f"Task {task_id}: Guardrail validation passed")
-                        except Exception as e:
-                            logger.error(f"Task {task_id}: Error in guardrail processing: {e}")
-                            # Handle guardrail failure with retry logic
-                            if task.retry_count >= task.max_retries:
-                                raise Exception(
-                                    f"Task failed due to guardrail processing error after {task.max_retries} retries. "
-                                    f"Last error: {e}"
-                                ) from e
-                            task.retry_count += 1
-                            task.status = "in progress"
-                            logger.warning(f"Task {task_id}: Guardrail processing error (retry {task.retry_count}/{task.max_retries}): {e}")
-                            retries += 1
-                            continue  # Retry the task
+                    # Apply guardrail validation using shared helper
+                    task_output, should_retry = self._apply_task_guardrail(task, task_id, task_output)
+                    if should_retry:
+                        retries += 1
+                        continue
                     
                     task.status = "completed"
                     # Run execute_callback for memory operations
@@ -1095,20 +1151,6 @@ class AgentTeam:
                             raise
                         if hasattr(task, 'fail_on_memory_error') and task.fail_on_memory_error:
                             raise
-                    
-                    # Run task callback if exists
-                    if task.callback:
-                        try:
-                            if asyncio.iscoroutinefunction(task.callback):
-                                if run_coroutine_safely:
-                                    run_coroutine_safely(task.callback(task_output))
-                                else:
-                                    logger.warning("run_coroutine_safely not available, skipping async callback")
-                            else:
-                                task.callback(task_output)
-                        except Exception as e:
-                            logger.error(f"Error executing task callback for task {task_id}: {e}")
-                            logger.exception(e)
                             
                     self.save_output_to_file(task, task_output)
                     if self.verbose >= 1:
@@ -1323,52 +1365,11 @@ class AgentTeam:
             if task.status in ["not started", "in progress"]:
                 task_output = self.execute_task(task_id)
                 if task_output and self.completion_checker(task, task_output.raw):
-                    # Add guardrail validation (matches arun_task logic)
-                    if task._guardrail_fn:
-                        try:
-                            guardrail_result = task._process_guardrail(task_output)
-                            if not guardrail_result.success:
-                                if task.retry_count >= task.max_retries:
-                                    raise Exception(
-                                        f"Task failed guardrail validation after {task.max_retries} retries. "
-                                        f"Last error: {guardrail_result.error}"
-                                    )
-                                task.retry_count += 1
-                                task.status = "in progress"  # Keep task in progress for retry
-                                logger.warning(f"Task {task_id}: Guardrail validation failed (retry {task.retry_count}/{task.max_retries}): {guardrail_result.error}")
-                                retries += 1
-                                continue  # Retry the task
-                            
-                            # If guardrail passed and returned a modified result
-                            if guardrail_result.result is not None:
-                                if isinstance(guardrail_result.result, str):
-                                    # Update the task output with the modified result
-                                    task_output.raw = guardrail_result.result
-                                    # Clear structured fields to avoid stale cache
-                                    if hasattr(task_output, 'json_dict'):
-                                        task_output.json_dict = None
-                                    if hasattr(task_output, 'pydantic'):
-                                        task_output.pydantic = None
-                                    task.result = task_output
-                                elif hasattr(guardrail_result.result, 'raw'):
-                                    # Replace with the new task output
-                                    task_output = guardrail_result.result
-                                    task.result = task_output
-                            
-                            logger.info(f"Task {task_id}: Guardrail validation passed")
-                        except Exception as e:
-                            logger.error(f"Task {task_id}: Error in guardrail processing: {e}")
-                            # Handle guardrail failure with retry logic
-                            if task.retry_count >= task.max_retries:
-                                raise Exception(
-                                    f"Task failed due to guardrail processing error after {task.max_retries} retries. "
-                                    f"Last error: {e}"
-                                ) from e
-                            task.retry_count += 1
-                            task.status = "in progress"
-                            logger.warning(f"Task {task_id}: Guardrail processing error (retry {task.retry_count}/{task.max_retries}): {e}")
-                            retries += 1
-                            continue  # Retry the task
+                    # Apply guardrail validation using shared helper
+                    task_output, should_retry = self._apply_task_guardrail(task, task_id, task_output)
+                    if should_retry:
+                        retries += 1
+                        continue
                     
                     task.status = "completed"
                     # Run execute_callback for memory operations
@@ -1378,20 +1379,6 @@ class AgentTeam:
                     except Exception as e:
                         logger.error(f"Error executing memory callback for task {task_id}: {e}")
                         logger.exception(e)
-                    
-                    # Run task callback if exists
-                    if task.callback:
-                        try:
-                            if asyncio.iscoroutinefunction(task.callback):
-                                if run_coroutine_safely:
-                                    run_coroutine_safely(task.callback(task_output))
-                                else:
-                                    logger.warning("run_coroutine_safely not available, skipping async callback")
-                            else:
-                                task.callback(task_output)
-                        except Exception as e:
-                            logger.error(f"Error executing task callback for task {task_id}: {e}")
-                            logger.exception(e)
                             
                     self.save_output_to_file(task, task_output)
                     
@@ -1982,6 +1969,8 @@ class AgentTeam:
             # Define the endpoint handler
             @app.post(path)
             async def handle_query(request: Request, query_data: Optional[AgentQuery] = None):
+                if not _authorise_launch_request(request):
+                    raise HTTPException(status_code=401, detail="Unauthorized")
                 # Handle both direct JSON with query field and form data
                 if query_data is None:
                     try:
@@ -2060,7 +2049,9 @@ class AgentTeam:
             
             # Add GET endpoint to list available agents
             @app.get(f"{path}/list")
-            async def list_agents():
+            async def list_agents(request: Request):
+                if not _authorise_launch_request(request):
+                    raise HTTPException(status_code=401, detail="Unauthorized")
                 return {
                     "agents": [
                         {"name": agent.display_name, "id": agent.display_name.lower().replace(' ', '_')}
@@ -2075,6 +2066,8 @@ class AgentTeam:
                 # Create a closure to capture the agent instance
                 def create_agent_handler(agent):
                     async def handle_single_agent(request: Request):
+                        if not _authorise_launch_request(request):
+                            raise HTTPException(status_code=401, detail="Unauthorized")
                         try:
                             request_data = await request.json()
                             query = request_data.get("query", "")
@@ -2735,6 +2728,418 @@ class AgentTeam:
                     logger.debug("Closed context manager resources")
             except Exception as e:
                 logger.warning(f"Context manager cleanup failed: {e}")
+
+    # Spawn-Announce Protocol Implementation
+    def spawn_sub_agent(
+        self,
+        agent: Agent,
+        task: Any,
+        completion_callback: Optional[Callable[[SubAgentCompletionEvent], Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> SpawnedSubAgent:
+        """Spawn a sub-agent for non-blocking execution (sync version).
+        
+        Implements the SpawnAnnounceProtocol for efficient parallel sub-agent workflows.
+        Integrates with existing handoff infrastructure to avoid code duplication.
+        Uses threading.Thread for background execution.
+        
+        Note: For async contexts, use aspawn_sub_agent() which uses asyncio primitives.
+        This method is safe to call from sync contexts only.
+        """
+        with self._spawn_lock:
+            # Create unique IDs
+            agent_id = f"{self._team_id}_{str(uuid.uuid4())[:8]}"
+            task_id = f"task_{str(uuid.uuid4())[:8]}"
+            
+            # Ensure event bus is initialized
+            if self._event_bus is None:
+                self._event_bus = EventBus()
+                # Subscribe to completion events for this team
+                self._event_bus.subscribe(
+                    self._handle_sub_agent_completion, 
+                    [EventType.SUBAGENT_COMPLETED.value, EventType.SUBAGENT_ERROR.value]
+                )
+            
+            # Create spawned agent record
+            spawned = SpawnedSubAgent(
+                agent_id=agent_id,
+                task_id=task_id,
+                agent=agent,
+                task=task,
+                spawn_time=time.time(),
+                parent_id=self._team_id,
+                metadata=metadata or {}
+            )
+            
+            # Store spawn record and callback
+            self._spawned_agents[agent_id] = spawned
+            if completion_callback:
+                self._completion_callbacks[agent_id] = completion_callback
+            
+            # Publish spawn event
+            self._event_bus.publish(
+                EventType.SUBAGENT_SPAWNED.value,
+                {
+                    "agent_id": agent_id,
+                    "task_id": task_id,
+                    "parent_id": self._team_id,
+                    "agent_name": getattr(agent, 'name', 'unknown'),
+                    "spawn_time": spawned.spawn_time,
+                    "metadata": spawned.metadata
+                }
+            )
+            
+            # Start the sub-agent asynchronously
+            import threading
+            def _execute_sub_agent():
+                try:
+                    # Execute the task with the sub-agent
+                    if hasattr(task, 'description'):
+                        result = agent.start(task.description)
+                    else:
+                        result = agent.start(str(task))
+                    
+                    # Announce successful completion
+                    self.announce_completion(agent_id, task_id, result, success=True)
+                except Exception as e:
+                    # Announce failure
+                    self.announce_completion(agent_id, task_id, None, success=False, error=str(e))
+            
+            spawn_thread = threading.Thread(target=_execute_sub_agent, daemon=True)
+            spawn_thread.start()
+            
+            logger.debug(f"Spawned sub-agent {agent_id} for task {task_id}")
+            return spawned
+    
+    def announce_completion(
+        self,
+        agent_id: str,
+        task_id: str,
+        result: Any,
+        success: bool = True,
+        error: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Announce sub-agent completion via event bus (sync version).
+        
+        Note: For async contexts, use aannounce_completion() to avoid blocking the event loop.
+        """
+        with self._spawn_lock:
+            # Create completion event
+            completion_event = SubAgentCompletionEvent(
+                agent_id=agent_id,
+                task_id=task_id,
+                result=result,
+                success=success,
+                error=error,
+                parent_id=self._team_id,
+                metadata=metadata or {}
+            )
+            
+            # Store the completion event
+            self._completion_events.append(completion_event)
+            
+            # Publish completion event via event bus
+            if self._event_bus:
+                event_type = EventType.SUBAGENT_COMPLETED.value if success else EventType.SUBAGENT_ERROR.value
+                self._event_bus.publish(
+                    event_type,
+                    {
+                        "agent_id": agent_id,
+                        "task_id": task_id,
+                        "parent_id": self._team_id,
+                        "result": result,
+                        "success": success,
+                        "error": error,
+                        "completion_time": completion_event.completion_time,
+                        "metadata": completion_event.metadata
+                    }
+                )
+            
+            logger.debug(f"Announced completion for sub-agent {agent_id}: {'success' if success else 'error'}")
+    
+    def get_spawned_agents(self) -> List[SpawnedSubAgent]:
+        """Get list of currently spawned sub-agents."""
+        with self._spawn_lock:
+            return list(self._spawned_agents.values())
+    
+    def wait_for_completions(
+        self,
+        timeout: Optional[float] = None,
+        agent_ids: Optional[List[str]] = None
+    ) -> List[SubAgentCompletionEvent]:
+        """Wait for sub-agent completions (optional blocking method)."""
+        import time as time_module
+        start_time = time_module.time()
+        
+        # Read target agents inside lock to avoid race condition
+        with self._spawn_lock:
+            target_agents = agent_ids or list(self._spawned_agents.keys())
+        
+        completed_agents = set()
+        
+        while True:
+            # Check for completed agents
+            with self._spawn_lock:
+                for event in self._completion_events:
+                    if event.agent_id in target_agents:
+                        completed_agents.add(event.agent_id)
+                
+                # Return if all target agents are completed
+                if completed_agents >= set(target_agents):
+                    return [e for e in self._completion_events if e.agent_id in target_agents]
+            
+            # Check timeout
+            if timeout and (time_module.time() - start_time) > timeout:
+                break
+                
+            # Brief sleep to avoid busy waiting
+            time_module.sleep(0.1)
+        
+        # Return whatever completions we have
+        with self._spawn_lock:
+            return [e for e in self._completion_events if e.agent_id in target_agents]
+    
+    def _handle_sub_agent_completion(self, event: Event) -> None:
+        """Internal handler for sub-agent completion events."""
+        if event.data.get("parent_id") != self._team_id:
+            return  # Not for this team
+        
+        agent_id = event.data.get("agent_id")
+        if not agent_id:
+            return
+        
+        # Call registered completion callback if any
+        with self._spawn_lock:
+            callback = self._completion_callbacks.get(agent_id)
+            if callback:
+                try:
+                    completion_event = SubAgentCompletionEvent(
+                        agent_id=agent_id,
+                        task_id=event.data.get("task_id", ""),
+                        result=event.data.get("result"),
+                        success=event.data.get("success", False),
+                        error=event.data.get("error"),
+                        completion_time=event.data.get("completion_time", time.time()),
+                        parent_id=event.data.get("parent_id"),
+                        metadata=event.data.get("metadata", {})
+                    )
+                    callback(completion_event)
+                except Exception as e:
+                    logger.warning(f"Completion callback failed for agent {agent_id}: {e}")
+            
+            # Clean up completed agent
+            if agent_id in self._spawned_agents:
+                del self._spawned_agents[agent_id]
+            if agent_id in self._completion_callbacks:
+                del self._completion_callbacks[agent_id]
+
+    # Async variants for asyncio-based orchestration (per AGENTS.md guidelines)
+    
+    async def aspawn_sub_agent(
+        self,
+        agent: Agent,
+        task: Any,
+        completion_callback: Optional[Callable[[SubAgentCompletionEvent], Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> SpawnedSubAgent:
+        """Async version of spawn_sub_agent using asyncio primitives."""
+        import asyncio
+        
+        # Use asyncio lock for async coordination
+        if not hasattr(self, '_async_spawn_lock'):
+            self._async_spawn_lock = asyncio.Lock()
+        
+        async with self._async_spawn_lock:
+            # Create unique IDs
+            agent_id = f"{self._team_id}_{str(uuid.uuid4())[:8]}"
+            task_id = f"task_{str(uuid.uuid4())[:8]}"
+            
+            # Ensure event bus is initialized
+            if self._event_bus is None:
+                self._event_bus = EventBus()
+                # Subscribe to completion events for this team
+                self._event_bus.subscribe(
+                    self._handle_sub_agent_completion, 
+                    [EventType.SUBAGENT_COMPLETED.value, EventType.SUBAGENT_ERROR.value]
+                )
+            
+            # Create spawned agent record
+            spawned = SpawnedSubAgent(
+                agent_id=agent_id,
+                task_id=task_id,
+                agent=agent,
+                task=task,
+                spawn_time=time.time(),
+                parent_id=self._team_id,
+                metadata=metadata or {}
+            )
+            
+            # Store spawn record and callback
+            self._spawned_agents[agent_id] = spawned
+            if completion_callback:
+                self._completion_callbacks[agent_id] = completion_callback
+            
+            # Publish spawn event
+            if self._event_bus:
+                self._event_bus.publish(
+                    EventType.SUBAGENT_SPAWNED,
+                    {
+                        "agent_id": agent_id,
+                        "task_id": task_id,
+                        "parent_id": self._team_id,
+                        "spawn_time": spawned.spawn_time,
+                        "metadata": spawned.metadata
+                    }
+                )
+        
+        # Execute sub-agent asynchronously using asyncio.create_task
+        async def _aexecute_sub_agent():
+            try:
+                # Use agent's async start method
+                result = await agent.astart(str(task))
+                await self.aannounce_completion(agent_id, task_id, result, success=True)
+            except Exception as e:
+                logger.warning(f"Sub-agent {agent_id} failed: {e}")
+                await self.aannounce_completion(agent_id, task_id, None, success=False, error=str(e))
+        
+        # Create task for background execution
+        asyncio.create_task(_aexecute_sub_agent())
+        
+        logger.debug(f"Async spawned sub-agent {agent_id} for task {task_id}")
+        return spawned
+
+    async def aannounce_completion(
+        self,
+        agent_id: str,
+        task_id: str,
+        result: Any,
+        success: bool = True,
+        error: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> None:
+        """Async version of announce_completion."""
+        import asyncio
+        
+        if not hasattr(self, '_async_spawn_lock'):
+            self._async_spawn_lock = asyncio.Lock()
+        
+        async with self._async_spawn_lock:
+            # Create completion event
+            completion_event = SubAgentCompletionEvent(
+                agent_id=agent_id,
+                task_id=task_id,
+                result=result,
+                success=success,
+                error=error,
+                parent_id=self._team_id,
+                metadata=metadata or {}
+            )
+            
+            # Store the completion event
+            self._completion_events.append(completion_event)
+            
+            # Publish completion event via event bus (use async if available)
+            if self._event_bus:
+                event_type = EventType.SUBAGENT_COMPLETED.value if success else EventType.SUBAGENT_ERROR.value
+                if hasattr(self._event_bus, 'publish_async'):
+                    await self._event_bus.publish_async(
+                        event_type,
+                        {
+                            "agent_id": agent_id,
+                            "task_id": task_id,
+                            "parent_id": self._team_id,
+                            "result": result,
+                            "success": success,
+                            "error": error,
+                            "completion_time": completion_event.completion_time,
+                            "metadata": completion_event.metadata
+                        }
+                    )
+                else:
+                    # Fallback to sync publish
+                    self._event_bus.publish(
+                        event_type,
+                        {
+                            "agent_id": agent_id,
+                            "task_id": task_id,
+                            "parent_id": self._team_id,
+                            "result": result,
+                            "success": success,
+                            "error": error,
+                            "completion_time": completion_event.completion_time,
+                            "metadata": completion_event.metadata
+                        }
+                    )
+            
+            logger.debug(f"Async announced completion for sub-agent {agent_id}: {'success' if success else 'error'}")
+
+    async def await_for_completions(
+        self,
+        timeout: Optional[float] = None,
+        agent_ids: Optional[List[str]] = None
+    ) -> List[SubAgentCompletionEvent]:
+        """Async, event-driven version of wait_for_completions."""
+        import asyncio
+        
+        # Read target agents inside lock to avoid race condition
+        if not hasattr(self, '_async_spawn_lock'):
+            self._async_spawn_lock = asyncio.Lock()
+        
+        async with self._async_spawn_lock:
+            target_agents = agent_ids or list(self._spawned_agents.keys())
+        
+        if not target_agents:
+            # Return existing completions for the requested agents
+            async with self._async_spawn_lock:
+                return [e for e in self._completion_events if not agent_ids or e.agent_id in agent_ids]
+        
+        # Use asyncio.Event for efficient waiting
+        completion_event = asyncio.Event()
+        completed_agents = set()
+        
+        def check_completions():
+            """Check if all target agents are completed - THREAD-SAFE version."""
+            for event in self._completion_events:
+                if event.agent_id in target_agents:
+                    completed_agents.add(event.agent_id)
+            
+            if completed_agents >= set(target_agents):
+                # CRITICAL FIX: Use call_soon_threadsafe() to safely set event from background thread
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.call_soon_threadsafe(completion_event.set)
+                except RuntimeError:
+                    # Fallback if no event loop running
+                    pass
+        
+        # Check initial state
+        check_completions()
+        
+        if not completion_event.is_set():
+            # Subscribe to completion events temporarily
+            def completion_handler(event):
+                if event.data.get("parent_id") == self._team_id:
+                    check_completions()
+            
+            subscriber_id = self._event_bus.subscribe(
+                completion_handler,
+                [EventType.SUBAGENT_COMPLETED.value, EventType.SUBAGENT_ERROR.value]
+            ) if self._event_bus else None
+            
+            try:
+                # Wait for completion or timeout
+                await asyncio.wait_for(completion_event.wait(), timeout=timeout)
+            except asyncio.TimeoutError:
+                pass
+            finally:
+                # Unsubscribe
+                if subscriber_id and self._event_bus:
+                    self._event_bus.unsubscribe(subscriber_id)
+        
+        # Return completed events
+        async with self._async_spawn_lock:
+            return [e for e in self._completion_events if e.agent_id in target_agents]
 
     def __enter__(self):
         """Context manager entry point for resource management."""
