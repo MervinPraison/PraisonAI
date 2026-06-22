@@ -88,6 +88,9 @@ issue_details.json
 .internal
 .praisonai
 
+# Backup files
+*.bak
+
 # Rust / Cargo
 target/
 Cargo.lock
