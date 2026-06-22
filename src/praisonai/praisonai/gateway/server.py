@@ -935,8 +935,8 @@ class WebSocketGateway:
         self._clients.clear()
         self._client_sessions.clear()
         
-        for session in list(self._sessions.values()):
-            session.close()
+        for session_id in list(self._sessions.keys()):
+            self.close_session(session_id)
         
         if self._server:
             self._server.should_exit = True
@@ -1338,11 +1338,10 @@ class WebSocketGateway:
                 # Load session metadata if stored
                 session_data = None
                 
-                # Try to extract session data from system messages with metadata
+                # Use the latest session_data snapshot (close writes after init).
                 for msg in session_data_obj.messages:
                     if msg.role == 'system' and msg.metadata and 'session_data' in msg.metadata:
                         session_data = msg.metadata['session_data']
-                        break
                 
                 # Restore session from persisted data
                 if session_data:
