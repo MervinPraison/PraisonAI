@@ -18,8 +18,10 @@ from praisonaiagents import Agent
 agent = Agent(
     name="Neon Agent",
     instructions="You are a helpful assistant.",
-    db={"database_url": os.getenv("NEON_DATABASE_URL")},
-    session_id="neon-demo-session",
+    memory={
+        "session_id": "neon-demo-session",
+        "db": {"database_url": os.getenv("NEON_DATABASE_URL")},
+    },
 )
 
 # Option 2: Direct URL

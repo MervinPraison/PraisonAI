@@ -100,6 +100,8 @@ def evaluate_project(video_path: str) -> ProjectEvaluation:
             evaluation_data = response
             
         print(f"Debug - Parsed evaluation_data: {evaluation_data}")
+        if not evaluation_data or not isinstance(evaluation_data, dict):
+            raise ValueError("No structured evaluation data returned by agent")
         
         # Create and return ProjectEvaluation instance
         return ProjectEvaluation(

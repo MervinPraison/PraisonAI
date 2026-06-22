@@ -190,7 +190,7 @@ def example_run_history_with_backend():
         
         # Use with RunHistory
         history = RunHistory(backend=backend)
-        runs = history.list()
+        runs = history.list_runs()
         
         print(f"RunHistory created with SQLite backend, {len(runs)} runs")
         print("Recipe runs will be stored in database instead of files")

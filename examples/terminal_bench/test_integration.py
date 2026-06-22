@@ -257,7 +257,7 @@ if __name__ == "__main__":
     # Check dependencies
     try:
         import praisonaiagents
-        print(f"✅ PraisonAI version: {praisonaiagents.__version__}")
+        print(f"✅ PraisonAI version: {getattr(praisonaiagents, '__version__', None)}")
     except ImportError:
         print("❌ PraisonAI not installed: pip install praisonaiagents")
         sys.exit(1)
