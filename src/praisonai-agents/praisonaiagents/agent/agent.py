@@ -259,6 +259,9 @@ if TYPE_CHECKING:
 # Import structured error from central errors module
 from ..errors import BudgetExceededError
 
+# Import retry configuration
+from .retry_utils import RetryBackoffConfig
+
 class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin, AsyncMemoryMixin):
     # Class-level counter for generating unique display names for nameless agents
     _agent_counter = 0
@@ -595,6 +598,7 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         tool_search: Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']] = False,  # Progressive tool disclosure
         message_steering: Optional[Union[bool, 'MessageSteeringProtocol']] = False,  # Real-time message steering during execution
         sandbox: Optional[Union[bool, 'SandboxConfig']] = None,  # Sandbox for safe code execution
+        retry: Optional[Union[bool, Dict[str, Any], 'RetryBackoffConfig']] = None,  # Retry configuration with exponential backoff
     ):
         """Initialize an Agent instance.
 
@@ -792,6 +796,8 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         if autonomy is None:
             # AutonomyConfig is in agent/autonomy.py - use dict for config defaults
             autonomy = apply_config_defaults("autonomy", autonomy, None)
+        if retry is None:
+            retry = apply_config_defaults("retry", retry, RetryBackoffConfig)
 
         # ============================================================
         # DEPRECATION WARNINGS for params consolidated into configs
@@ -1978,6 +1984,16 @@ Your Goal: {self.goal}
         # Store tool retry policy for tool execution with exponential backoff
         self._tool_retry_policy = _tool_config.retry_policy if _tool_config else None
         
+        # Retry configuration with jittered exponential backoff
+        if isinstance(retry, RetryBackoffConfig):
+            self._retry_config = retry
+        elif isinstance(retry, dict):
+            self._retry_config = RetryBackoffConfig(**retry)
+        elif retry is True:
+            self._retry_config = RetryBackoffConfig()  # Use defaults
+        else:
+            self._retry_config = None  # No retry configuration
+        
         # Cache for system prompts and formatted tools with eager thread-safe lock
         # Use OrderedDict for LRU behavior
         self._system_prompt_cache = OrderedDict()
@@ -2200,6 +2216,9 @@ Your Goal: {self.goal}
             
             # Tool configuration - use consolidated config when available  
             'tool_config': getattr(self, '_tool_config', None),
+            
+            # Retry configuration
+            'retry': getattr(self, '_retry_config', None),
             
             # CLI backend
             'cli_backend': getattr(self, '_cli_backend', None),
