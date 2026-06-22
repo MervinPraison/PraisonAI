@@ -4,6 +4,7 @@ Delivery routing and channel directory for proactive outbound messaging.
 Provides:
 - DeliveryRouter: Resolves symbolic targets to concrete (platform, channel_id)
 - ChannelDirectory: Manages reachable channels with friendly aliases
+- Helper functions for chat type detection
 """
 
 from __future__ import annotations
@@ -16,6 +17,55 @@ if TYPE_CHECKING:
     from .botos import BotOS
 
 logger = logging.getLogger(__name__)
+
+
+def detect_chat_type(platform: str, chat_id: str) -> str:
+    """Detect chat type based on platform and chat ID patterns.
+    
+    Args:
+        platform: Platform name (telegram, discord, slack, etc.)
+        chat_id: The chat/channel ID
+        
+    Returns:
+        Chat type: 'group', 'channel', 'direct', or 'unknown'
+    """
+    platform_lower = platform.lower()
+    
+    # Telegram patterns
+    if platform_lower == "telegram":
+        if chat_id.startswith("-100"):
+            return "channel"  # Supergroup/channel
+        elif chat_id.startswith("-"):
+            return "group"  # Regular group
+        else:
+            return "direct"  # Direct message
+    
+    # Discord patterns
+    elif platform_lower == "discord":
+        # Discord IDs are snowflakes; without API we can't distinguish well
+        # But we can use conventions if the bot tracks this
+        return "channel"  # Most discord comms are in channels
+    
+    # Slack patterns
+    elif platform_lower == "slack":
+        if chat_id.startswith("C"):
+            return "channel"  # Public channel
+        elif chat_id.startswith("G"):
+            return "group"  # Private channel/group
+        elif chat_id.startswith("D"):
+            return "direct"  # Direct message
+        elif chat_id.startswith("U"):
+            return "direct"  # User ID (for DMs)
+    
+    # WhatsApp patterns
+    elif platform_lower == "whatsapp":
+        if "@g.us" in chat_id:
+            return "group"
+        elif "@c.us" in chat_id:
+            return "direct"
+    
+    # Default fallback
+    return "unknown"
 
 
 @dataclass
@@ -97,6 +147,34 @@ class ChannelDirectory:
             return True
         
         return False
+    
+    def describe_targets(self) -> list:
+        """Describe all reachable targets for session context.
+        
+        Returns:
+            List of dicts with 'name', 'platform', 'channel_id', 'kind' keys
+        """
+        targets = []
+        
+        # Add home channels
+        for platform, channel_id in self._home_channels.items():
+            targets.append({
+                'name': f"{platform}:home",
+                'platform': platform,
+                'channel_id': channel_id,
+                'kind': 'home'
+            })
+        
+        # Add aliases
+        for alias_name, (platform, channel_id) in self._aliases.items():
+            targets.append({
+                'name': alias_name,
+                'platform': platform,
+                'channel_id': channel_id,
+                'kind': 'alias'
+            })
+        
+        return targets
 
 
 class DeliveryRouter:

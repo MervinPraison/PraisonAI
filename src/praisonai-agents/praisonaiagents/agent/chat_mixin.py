@@ -135,6 +135,50 @@ Your Goal: {self.goal}"""
                 system_prompt += f"\n\n## Available Skills\n{skills_prompt}"
                 system_prompt += "\n\nWhen a skill is relevant to the task, read its SKILL.md file to get detailed instructions. If the skill has scripts in its scripts/ directory, you can execute them using the execute_code or run_script tool."
         
+        # Add session context (platform awareness) if available
+        try:
+            from ..session.context import get_session_context
+            session_ctx = get_session_context()
+            
+            # Format session context into prompt if origin or targets are present
+            if session_ctx.origin or session_ctx.reachable_targets:
+                context_parts = []
+                
+                # Add origin information
+                if session_ctx.origin:
+                    origin = session_ctx.origin
+                    origin_str = f"You are replying on {origin.platform}"
+                    if origin.chat_type and origin.chat_type != "unknown":
+                        origin_str += f" ({origin.chat_type}"
+                        if origin.display_name:
+                            origin_str += f' "{origin.display_name}"'
+                        origin_str += ")"
+                    if origin.thread_id:
+                        origin_str += f" in thread {origin.thread_id}"
+                    context_parts.append(origin_str + ".")
+                
+                # Add reachable targets
+                if session_ctx.reachable_targets:
+                    target_descriptions = []
+                    for target in session_ctx.reachable_targets:
+                        desc = f"{target.name}"
+                        if target.kind == "home":
+                            desc += f" ({target.platform}, home channel)"
+                        elif target.kind == "alias":
+                            desc += f" ({target.platform}:{target.channel_id})"
+                        target_descriptions.append(desc)
+                    
+                    if target_descriptions:
+                        context_parts.append(
+                            f"Reachable delivery targets: {', '.join(target_descriptions)}."
+                        )
+                
+                if context_parts:
+                    system_prompt += f"\n\n## Session Context\n" + "\n".join(context_parts)
+        except (ImportError, Exception):
+            # Session context not available or error, continue without it
+            pass
+        
         # Add tool usage instructions if tools are available
         # Use provided tools or fall back to self.tools
         tools_to_use = tools if tools is not None else self.tools
