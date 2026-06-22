@@ -4168,9 +4168,9 @@ Summary:"""
             runtime_name = self._runtime_config.preferred_runtime or "native"
             
             # Determine which capability matrix to use based on runtime type
-            if runtime_name == "native":
+            if runtime_name in ["native", "praisonai"]:
                 runtime_matrix = get_native_runtime_capabilities()
-            elif runtime_name in ["plugin", "harness", "reduced"]:
+            elif runtime_name in ["plugin", "harness", "reduced", "plugin-harness", "claude-code"]:
                 # Use reduced capabilities for plugin/harness runtimes
                 from praisonaiagents.runtime.capabilities import get_reduced_harness_capabilities
                 runtime_matrix = get_reduced_harness_capabilities()
