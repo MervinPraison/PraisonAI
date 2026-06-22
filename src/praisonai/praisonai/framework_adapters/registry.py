@@ -9,6 +9,7 @@ Uses dependency injection instead of singleton pattern.
 from __future__ import annotations
 
 from typing import Dict, Type, Optional
+import inspect
 import logging
 
 from .base import FrameworkAdapter
@@ -62,6 +63,28 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
             entry_point_group="praisonai.framework_adapters",
             builtins=_BUILTIN_ADAPTERS
         )
+    
+    def _validate_adapter(self, name: str, adapter) -> None:
+        """Validate that adapter implements the required protocol signature."""
+        _REQUIRED_KW = {"tools_dict", "agent_callback", "task_callback", "cli_config"}
+        
+        sig = inspect.signature(type(adapter).run)
+        kw_only = {
+            p.name for p in sig.parameters.values()
+            if p.kind in (inspect.Parameter.KEYWORD_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        }
+        missing = _REQUIRED_KW - kw_only
+        if missing:
+            raise TypeError(
+                f"FrameworkAdapter {name!r} does not implement the protocol: "
+                f"missing keyword-only parameters {sorted(missing)}"
+            )
+    
+    def create(self, name: str, *args, **kwargs):
+        """Create an adapter instance with protocol validation."""
+        adapter = super().create(name, *args, **kwargs)
+        self._validate_adapter(name, adapter)
+        return adapter
 
     # Backward compatibility aliases - delegate to parent methods
     def list_registered(self) -> list[str]:
@@ -85,7 +108,7 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
         """
         try:
             adapter = self.create(name)
-        except ValueError:
+        except (ValueError, TypeError):
             return False
         
         try:
