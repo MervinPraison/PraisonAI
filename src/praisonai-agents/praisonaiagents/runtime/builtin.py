@@ -123,6 +123,10 @@ class PraisonAIRuntime:
     ) -> AsyncIterator[RuntimeDelta]:
         """Stream response deltas from runtime execution.
         
+        NOTE: The current Agent implementation doesn't support true async streaming.
+        The `achat(stream=True)` returns a string, not an AsyncIterator. 
+        As a workaround, this returns the full response as a single delta.
+        
         Args:
             prompt: User prompt/query
             **kwargs: Additional options (system_prompt, model_ref, etc.)
@@ -133,6 +137,7 @@ class PraisonAIRuntime:
         try:
             # Import agent here to avoid circular imports
             from ..agent.agent import Agent
+            import os
             
             # Extract parameters
             system_prompt = kwargs.get('system_prompt')
@@ -152,48 +157,27 @@ class PraisonAIRuntime:
                 
             # Create agent instance using async context manager
             async with Agent(**agent_kwargs) as agent:
-                # Prepare achat kwargs for streaming
-                chat_kwargs = {'stream': True}  # Enable streaming via achat parameter
+                # Prepare achat kwargs
+                chat_kwargs = {}
                 if 'max_tokens' in kwargs:
                     chat_kwargs['config'] = {'max_tokens': kwargs['max_tokens']}
                 if 'temperature' in kwargs:
                     chat_kwargs['temperature'] = kwargs['temperature']
                     
-                # Stream the response using achat with stream=True
-                # Agent doesn't have astream method, but achat can stream
+                # Call achat - it returns a string, not an iterator
+                # The stream=True parameter affects display but doesn't change return type
                 result = await agent.achat(prompt, **chat_kwargs)
                 
-                # If streaming is supported, result should be an async iterator
-                if hasattr(result, '__aiter__'):
-                    async for chunk in result:
-                        # Convert agent stream format to RuntimeDelta
-                        if isinstance(chunk, str):
-                            yield RuntimeDelta(
-                                type="text",
-                                content=chunk,
-                                metadata={'runtime': self.runtime_id}
-                            )
-                        elif isinstance(chunk, dict):
-                            # Handle structured chunks
-                            content_type = chunk.get('type', 'text')
-                            content = chunk.get('content', '')
-                            metadata = chunk.get('metadata', {})
-                            metadata['runtime'] = self.runtime_id
-                            
-                            yield RuntimeDelta(
-                                type=content_type,
-                                content=content,
-                                metadata=metadata
-                            )
-                        else:
-                            # Fallback for unknown chunk types
-                            yield RuntimeDelta(
-                                type="text",
-                                content=str(chunk),
-                                metadata={'runtime': self.runtime_id}
-                            )
+                # Check for API key and return appropriate error
+                if not result and not os.environ.get('OPENAI_API_KEY'):
+                    yield RuntimeDelta(
+                        type="error",
+                        content="OPENAI_API_KEY environment variable is required",
+                        metadata={'runtime': self.runtime_id}
+                    )
                 else:
-                    # If not streaming, return single result as delta
+                    # Return the full response as a single delta
+                    # This is the current limitation - no true streaming
                     yield RuntimeDelta(
                         type="text",
                         content=str(result) if result else "",

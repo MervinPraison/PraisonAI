@@ -209,6 +209,29 @@ class RuntimeRegistry:
             canonical_id = _runtime_aliases.get(runtime_id, runtime_id)
             return canonical_id in _runtimes
     
+    def list_names(self) -> List[str]:
+        """List all registered runtime names (IDs).
+        
+        Returns:
+            List of runtime IDs
+        """
+        _initialize_builtin_runtimes()
+        with _registry_lock:
+            return list(_runtimes.keys())
+    
+    def is_available(self, runtime_id: str) -> bool:
+        """Check if a runtime is available (registered).
+        
+        This is an alias for is_registered() to match the test expectations.
+        
+        Args:
+            runtime_id: Runtime identifier
+            
+        Returns:
+            True if runtime is registered or aliased, False otherwise
+        """
+        return self.is_registered(runtime_id)
+    
     def list_runtimes(self) -> List[RuntimeRegistryEntry]:
         """List all registered runtimes."""
         _initialize_builtin_runtimes()

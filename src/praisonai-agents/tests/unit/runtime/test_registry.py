@@ -1,11 +1,11 @@
 """Tests for runtime registry."""
 
 import pytest
-from ..registry import (
+from praisonaiagents.runtime.registry import (
     register_runtime, unregister_runtime, list_runtimes, resolve_runtime,
     add_runtime_alias, is_runtime_available, RuntimeRegistry
 )
-from ..protocols import AgentRuntimeProtocol, RuntimeResult, RuntimeDelta
+from praisonaiagents.runtime.protocols import AgentRuntimeProtocol, RuntimeResult, RuntimeDelta
 from typing import AsyncIterator
 
 

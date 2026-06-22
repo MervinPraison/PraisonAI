@@ -2,7 +2,7 @@
 
 import pytest
 from typing import AsyncIterator
-from ..protocols import AgentRuntimeProtocol, RuntimeConfig, RuntimeResult, RuntimeDelta
+from praisonaiagents.runtime.protocols import AgentRuntimeProtocol, RuntimeConfig, RuntimeResult, RuntimeDelta
 
 
 class MockRuntime:

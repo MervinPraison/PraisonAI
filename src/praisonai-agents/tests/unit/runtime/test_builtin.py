@@ -1,8 +1,8 @@
 """Tests for built-in PraisonAI runtime."""
 
 import pytest
-from ..builtin import PraisonAIRuntime
-from ..protocols import RuntimeResult, RuntimeDelta
+from praisonaiagents.runtime.builtin import PraisonAIRuntime
+from praisonaiagents.runtime.protocols import RuntimeResult, RuntimeDelta
 
 
 def test_praisonai_runtime_initialization():
