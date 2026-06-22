@@ -9,7 +9,7 @@ from typing import Any, Dict
 
 from praisonaiagents.runtime.doctor_protocol import DoctorContractProtocol, Finding
 from praisonaiagents.runtime.builtin_rules import CliBackendMigrationRule
-from praisonaiagents.runtime.registry import DoctorRulesRegistry
+from praisonaiagents.runtime.doctor_registry import DoctorRulesRegistry
 
 
 class TestDoctorContractProtocol(unittest.TestCase):
