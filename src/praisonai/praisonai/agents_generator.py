@@ -433,8 +433,9 @@ class AgentsGenerator:
         # Get the base adapter
         adapter = self._get_framework_adapter(framework)
         
-        # Let the adapter resolve its own variant
-        resolved_adapter = adapter.resolve_variant(config, self._adapter_registry)
+        # Let the adapter resolve its own variant using the standardized resolve() method
+        # This replaces the old resolve_variant approach and follows the Protocol
+        resolved_adapter = adapter.resolve(config=config)
         
         return resolved_adapter
     
@@ -444,11 +445,12 @@ class AgentsGenerator:
         Args:
             framework: The framework name for tagging
         """
+        # Initialize AgentOps if configured (extracted from old _select_autogen_version)
         agentops_api_key = os.getenv("AGENTOPS_API_KEY")
         if agentops_api_key:
             try:
                 import agentops
-                agentops.init(agentops_api_key, default_tags=[framework])
+                agentops.init(agentops_api_key, default_tags=[framework_name])
             except ImportError:
                 pass
     

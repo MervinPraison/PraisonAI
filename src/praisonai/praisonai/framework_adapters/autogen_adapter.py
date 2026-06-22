@@ -24,31 +24,33 @@ class AutoGenAdapter(BaseFrameworkAdapter):
         from .._framework_availability import is_available
         return is_available("autogen")
     
-    def resolve_variant(self, config: Dict[str, Any], registry: Any) -> "BaseFrameworkAdapter":
-        """Pick the concrete AutoGen adapter variant based on config and availability.
+    def resolve(self, *, config: Optional[Dict[str, Any]] = None) -> "BaseFrameworkAdapter":
+        """Pick the concrete AutoGen adapter variant based on config and environment.
         
         Args:
             config: Framework configuration that may contain 'autogen_version'
-            registry: The adapter registry for creating other adapters if needed
             
         Returns:
             The resolved AutoGen adapter (v0.2 or v0.4)
         """
-        autogen_version = str(
-            config.get('autogen_version', os.environ.get("AUTOGEN_VERSION", "auto"))
-        ).lower()
+        # Priority: config['autogen_version'] > environment > 'auto'
+        version = "auto"
+        if config and config.get("autogen_version"):
+            version = str(config["autogen_version"]).lower()
+        else:
+            version = os.environ.get("AUTOGEN_VERSION", "auto").lower()
         
-        # Get the v0.4 adapter from the registry
-        v4_adapter = registry.create("autogen_v4") if hasattr(registry, 'create') else AutoGenV4Adapter()
+        # Import the specific adapters
+        v4_adapter = AutoGenV4Adapter()
         v2_adapter = self  # Current instance is v0.2
         
-        if autogen_version == "v0.4" and v4_adapter.is_available():
+        if version == "v0.4" and v4_adapter.is_available():
             logger.info("AutoGen version resolution: Using v0.4 (explicitly requested)")
             return v4_adapter
-        elif autogen_version == "v0.2" and v2_adapter.is_available():
+        elif version == "v0.2" and v2_adapter.is_available():
             logger.info("AutoGen version resolution: Using v0.2 (explicitly requested)")
             return v2_adapter
-        elif autogen_version == "auto":
+        elif version == "auto":
             # Auto-detect: prefer v0.4 if available, fallback to v0.2
             if v4_adapter.is_available():
                 logger.info("AutoGen version resolution: Using v0.4 (auto-detected)")
