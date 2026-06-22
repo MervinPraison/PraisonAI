@@ -175,6 +175,19 @@ class GatewayEvent:
         source: Source identifier (agent_id, client_id, etc.)
         target: Target identifier (optional, for directed events)
         sequence: Monotonic sequence number for gap detection (optional)
+    
+    Wire Protocol Extensions:
+        When events are sent over the gateway, additional fields are added:
+        - seq: Top-level monotonic sequence number for gap detection
+        - cursor: Event cursor position (also stored in data['cursor'])
+        
+    Resume Protocol:
+        The 'joined' acknowledgment includes:
+        - cursor: Current head cursor position
+        - oldest_cursor: Oldest event still in buffer
+        - resync_required: True if requested 'since' is below oldest_cursor
+        
+        When resync_required=true, a 'snapshot' message follows with full state.
     """
     
     type: Union[EventType, str]
