@@ -464,7 +464,7 @@ class ToolExecutionMixin:
                     
                     if self.context_manager:
                         # Use context-aware truncation with configured budget
-                        truncated = self._truncate_tool_output(function_name, result_str)
+                        truncated = self._truncate_tool_output(function_name, result_str, tool_call_id)
                     else:
                         # Apply default limit even without context management
                         # This prevents runaway tool outputs from causing overflow
@@ -475,6 +475,21 @@ class ToolExecutionMixin:
                             head = result_str[:limit - tail_size]
                             tail = result_str[-tail_size:] if tail_size > 0 else ""
                             truncated = f"{head}\n...[{len(result_str):,} chars, showing first/last portions]...\n{tail}"
+                            
+                            # Store full output for later retrieval
+                            try:
+                                from ..runtime.tool_output_store import get_tool_output_store
+                                store = get_tool_output_store(getattr(self, '_run_id', None))
+                                metadata = store.store(function_name, result_str, call_id=tool_call_id)
+                                if metadata:
+                                    # Add reference to stored output in the truncated preview
+                                    truncated = store.format_reference(metadata, truncated)
+                                    logging.debug(f"Stored full {function_name} output ({len(result_str)} bytes) at {metadata.get('path')}")
+                            except ImportError:
+                                # Fallback if store not available
+                                pass
+                            except Exception as e:
+                                logging.debug(f"Failed to store tool output: {e}")
                         else:
                             truncated = result_str
                     
@@ -483,7 +498,7 @@ class ToolExecutionMixin:
                         # For dicts, truncate large string fields (e.g., raw_content from search)
                         if isinstance(result, dict):
                             max_field_chars = getattr(self, 'tool_output_limit', 16000) if not self.context_manager else None
-                            result = self._truncate_dict_fields(result, function_name, max_field_chars)
+                            result = self._truncate_dict_fields(result, function_name, max_field_chars, tool_call_id)
                         else:
                             result = truncated
                 except Exception as e:
@@ -692,7 +707,7 @@ class ToolExecutionMixin:
             response=response,
         )
 
-    def _truncate_dict_fields(self, data: dict, tool_name: str, max_field_chars: int = None) -> dict:
+    def _truncate_dict_fields(self, data: dict, tool_name: str, max_field_chars: int = None, tool_call_id: str = None) -> dict:
         """Truncate large string fields in a dict to prevent context overflow."""
         if max_field_chars is None:
             # Use tool budget from context manager (default 5000 tokens * 4 chars/token = 20000 chars)
@@ -707,13 +722,30 @@ class ToolExecutionMixin:
                 tail_limit = int(max_field_chars * 0.15)
                 head = value[:head_limit]
                 tail = value[-tail_limit:] if tail_limit > 0 else ""
-                result[key] = f"{head}\n...[{len(value):,} chars, showing first/last portions]...\n{tail}"
+                truncated = f"{head}\n...[{len(value):,} chars, showing first/last portions]...\n{tail}"
+                
+                # Store full field value for later retrieval
+                try:
+                    from ..runtime.tool_output_store import get_tool_output_store
+                    from uuid import uuid4
+                    store = get_tool_output_store(getattr(self, '_run_id', None))
+                    # Add unique suffix to prevent collisions with repeated keys
+                    unique_suffix = uuid4().hex[:8]
+                    field_call_id = f"{tool_call_id}_{key}_{unique_suffix}" if tool_call_id else f"{tool_name}_{key}_{unique_suffix}"
+                    metadata = store.store(f"{tool_name}.{key}", value, call_id=field_call_id)
+                    if metadata:
+                        truncated = store.format_reference(metadata, truncated)
+                        logging.debug(f"Stored full {tool_name}.{key} field ({len(value)} bytes) at {metadata.get('path')}")
+                except Exception as e:
+                    logging.debug(f"Failed to store dict field: {e}")
+                
+                result[key] = truncated
                 logging.debug(f"Smart truncated field '{key}' from {len(value)} to ~{max_field_chars} chars")
             elif isinstance(value, dict):
-                result[key] = self._truncate_dict_fields(value, tool_name, max_field_chars)
+                result[key] = self._truncate_dict_fields(value, tool_name, max_field_chars, tool_call_id)
             elif isinstance(value, list):
                 result[key] = [
-                    self._truncate_dict_fields(item, tool_name, max_field_chars) if isinstance(item, dict)
+                    self._truncate_dict_fields(item, tool_name, max_field_chars, tool_call_id) if isinstance(item, dict)
                     else (self._smart_truncate_str(item, max_field_chars) if isinstance(item, str) and len(item) > max_field_chars else item)
                     for item in value
                 ]
