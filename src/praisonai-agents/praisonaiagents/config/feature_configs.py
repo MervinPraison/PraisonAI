@@ -42,6 +42,7 @@ from ..agent.autonomy import AutonomyConfig
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..compaction.strategy import CompactionStrategy
+    from ..context.artifact_store import FileSystemArtifactStore
 
 
 class MemoryBackend(str, Enum):
@@ -935,7 +936,8 @@ class ToolConfig:
     """
     Configuration for tool execution behavior.
     
-    Configuration for tool execution behavior including timeout, retry policy, and parallel execution.
+    Configuration for tool execution behavior including timeout, retry policy, parallel execution,
+    and artifact storage for large outputs.
     
     Usage:
         # Simple enable with defaults
@@ -948,8 +950,12 @@ class ToolConfig:
             parallel=True,
         ))
         
-        # With timeout only
-        Agent(tool_config=ToolConfig(timeout=30))
+        # With artifact storage for large outputs
+        Agent(tool_config=ToolConfig(
+            output_limit=32000,
+            enable_artifacts=True,
+            artifact_retention_days=14,
+        ))
     """
     # Tool execution timeout in seconds  
     timeout: Optional[int] = None
@@ -959,6 +965,26 @@ class ToolConfig:
     
     # Enable parallel execution of batched LLM tool calls
     parallel: bool = False
+    
+    # Tool output handling and artifact storage
+    output_limit: int = 16000  # Maximum bytes before spilling to artifact store
+    output_max_lines: Optional[int] = None  # Maximum lines before spilling
+    output_direction: str = "both"  # Truncation direction: "head", "tail", or "both"
+    enable_artifacts: bool = False  # Whether to enable artifact storage (default False for backward compat)
+    artifact_retention_days: int = 7  # Days to retain artifacts before garbage collection
+    artifact_store: Optional[Any] = None  # Custom artifact store instance
+    redact_secrets: bool = True  # Whether to redact secrets from artifacts
+    
+    def __post_init__(self) -> None:
+        """Validate configuration after initialization."""
+        if self.output_limit <= 0:
+            raise ValueError("tool_config.output_limit must be > 0")
+        if self.output_max_lines is not None and self.output_max_lines <= 0:
+            raise ValueError("tool_config.output_max_lines must be > 0 when provided")
+        if self.output_direction not in {"head", "tail", "both"}:
+            raise ValueError("tool_config.output_direction must be one of: 'head', 'tail', 'both'")
+        if self.artifact_retention_days < 0:
+            raise ValueError("tool_config.artifact_retention_days must be >= 0")
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -970,6 +996,13 @@ class ToolConfig:
                 else self.retry_policy
             ),
             "parallel": self.parallel,
+            "output_limit": self.output_limit,
+            "output_max_lines": self.output_max_lines,
+            "output_direction": self.output_direction,
+            "enable_artifacts": self.enable_artifacts,
+            "artifact_retention_days": self.artifact_retention_days,
+            "artifact_store": self.artifact_store,
+            "redact_secrets": self.redact_secrets,
         }
     
     @classmethod
@@ -988,6 +1021,13 @@ class ToolConfig:
             timeout=data.get("timeout"),
             retry_policy=retry_policy,
             parallel=data.get("parallel", False),
+            output_limit=data.get("output_limit", 16000),
+            output_max_lines=data.get("output_max_lines"),
+            output_direction=data.get("output_direction", "both"),
+            enable_artifacts=data.get("enable_artifacts", False),
+            artifact_retention_days=data.get("artifact_retention_days", 7),
+            artifact_store=data.get("artifact_store"),
+            redact_secrets=data.get("redact_secrets", True),
         )
 
 
@@ -1513,6 +1553,8 @@ def resolve_tools(value: ToolParam) -> Optional[ToolConfig]:
     return value
 
 
+
+
 __all__ = [
     # Enums
     "MemoryBackend",
@@ -1562,6 +1604,7 @@ __all__ = [
     "AutonomyParam",
     "ToolSearchParam", 
     "ToolParam",
+    "ToolOutputParam",
     # Precedence ladder resolvers
     "resolve_memory",
     "resolve_knowledge",
@@ -1573,4 +1616,5 @@ __all__ = [
     "resolve_autonomy",
     "resolve_tool_search",
     "resolve_tools",
+    "resolve_tool_output",
 ]

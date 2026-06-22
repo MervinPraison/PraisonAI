@@ -1514,6 +1514,9 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
                     "a dict of ToolSearchConfig fields, or ToolSearchConfig"
                 )
         
+        # Process tool_config and artifact storage (moved from tool_output)
+        self._artifact_store = None
+        
         # ============================================================
         # END CONSOLIDATED PARAMS EXTRACTION
         # ============================================================
@@ -1561,6 +1564,14 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         _tool_config = Agent._resolve_tool_config(
             tool_config=tool_config
         )
+        
+        # Set up artifact store if enabled in tool_config
+        if _tool_config and _tool_config.enable_artifacts:
+            from ..context.artifact_store import FileSystemArtifactStore
+            self._artifact_store = _tool_config.artifact_store or FileSystemArtifactStore(
+                retention_days=_tool_config.artifact_retention_days,
+                redact_secrets=_tool_config.redact_secrets
+            )
         
         # Gap 2: Store parallel tool calls setting for ToolCallExecutor selection
         self.parallel_tool_calls = _tool_config.parallel if _tool_config else parallel_tool_calls
@@ -1785,7 +1796,8 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         self._init_message_steering(message_steering)
         self.verbose = verbose
         self._has_explicit_output_config = _has_explicit_output  # Track if user set output mode
-        self.tool_output_limit = tool_output_limit  # Configurable tool output limit
+        # Use tool_config output_limit if configured, otherwise use parameter value
+        self.tool_output_limit = _tool_config.output_limit if _tool_config else tool_output_limit
         self.allow_delegation = allow_delegation
         self.step_callback = step_callback
         # Token budget guard (zero overhead when _max_budget is None)
@@ -2213,7 +2225,6 @@ Your Goal: {self.goal}
             'approval': getattr(self, '_approval_config', None),
             'learn': getattr(self, '_learn_config', None),
             'tool_search': getattr(self, '_tool_search_config', None),
-            
             # Tool configuration - use consolidated config when available  
             'tool_config': getattr(self, '_tool_config', None),
             
@@ -5612,6 +5623,18 @@ Answer:"""
                 memory = getattr(self, "_memory_instance", None)
                 if memory and hasattr(memory, 'close_connections'):
                     memory.close_connections()
+                    
+                # Clean up old artifacts if artifact store is configured
+                artifact_store = getattr(self, "_artifact_store", None)
+                if artifact_store and hasattr(artifact_store, 'cleanup_old_artifacts'):
+                    try:
+                        artifact_store.cleanup_old_artifacts()
+                    except Exception as e:
+                        # Log the error for debugging but don't fail cleanup
+                        import logging
+                        logging.debug(
+                            f"Failed to cleanup artifacts for agent {self.name}: {e}"
+                        )
             except Exception as exc:  # noqa: BLE001 - finalizers must not raise
                 import contextlib
                 with contextlib.suppress(Exception):

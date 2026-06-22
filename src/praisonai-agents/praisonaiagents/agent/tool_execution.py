@@ -51,6 +51,35 @@ class BackoffPolicy:
 
 class ToolExecutionMixin:
     """Mixin providing toolexecution methods for the Agent class."""
+    
+    def _register_artifact_tools(self):
+        """Register artifact retrieval tools when artifacts are first created."""
+        try:
+            from ..tools import artifact_tools
+            
+            # Set the store reference for the tools
+            artifact_tools.set_artifact_store(self._artifact_store)
+            
+            # Add the retrieval tools
+            tools_to_add = [
+                artifact_tools.artifact_head,
+                artifact_tools.artifact_tail,
+                artifact_tools.artifact_grep,
+                artifact_tools.artifact_chunk,
+                artifact_tools.artifact_load,
+                artifact_tools.artifact_list,
+            ]
+            
+            # Only add if not already present
+            existing_tool_names = {getattr(t, '__name__', str(t)) for t in self.tools}
+            for tool in tools_to_add:
+                tool_name = getattr(tool, '__name__', str(tool))
+                if tool_name not in existing_tool_names:
+                    self.tools.append(tool)
+            
+            logging.debug("Registered artifact retrieval tools")
+        except Exception as e:
+            logging.warning(f"Failed to register artifact tools: {e}")
 
     def _get_existing_stream_emitter(self):
         """Return an already-initialized stream emitter without creating one."""
@@ -462,36 +491,68 @@ class ToolExecutionMixin:
                 try:
                     result_str = str(result)
                     
-                    if self.context_manager:
-                        # Use context-aware truncation with configured budget
-                        truncated = self._truncate_tool_output(function_name, result_str, tool_call_id)
-                    else:
-                        # Apply default limit even without context management
-                        # This prevents runaway tool outputs from causing overflow
-                        limit = getattr(self, 'tool_output_limit', 16000)
-                        if len(result_str) > limit:
-                            # Use smart truncation format that judge recognizes as OK
-                            tail_size = min(limit // 5, 2000)
-                            head = result_str[:limit - tail_size]
-                            tail = result_str[-tail_size:] if tail_size > 0 else ""
-                            truncated = f"{head}\n...[{len(result_str):,} chars, showing first/last portions]...\n{tail}"
-                            
-                            # Store full output for later retrieval
+                    # Get configured limit
+                    limit = getattr(self, 'tool_output_limit', 16000)
+                    
+                    # Check if we need to spill to artifact store
+                    if len(result_str) > limit:
+                        # Try to use artifact store if available
+                        artifact_ref = None
+                        if hasattr(self, '_artifact_store') and self._artifact_store is not None:
                             try:
-                                from ..runtime.tool_output_store import get_tool_output_store
-                                store = get_tool_output_store(getattr(self, '_run_id', None))
-                                metadata = store.store(function_name, result_str, call_id=tool_call_id)
-                                if metadata:
-                                    # Add reference to stored output in the truncated preview
-                                    truncated = store.format_reference(metadata, truncated)
-                                    logging.debug(f"Stored full {function_name} output ({len(result_str)} bytes) at {metadata.get('path')}")
-                            except ImportError:
-                                # Fallback if store not available
-                                pass
+                                from ..context.artifacts import ArtifactMetadata
+                                
+                                # Create metadata for this artifact
+                                metadata = ArtifactMetadata(
+                                    agent_id=self.name,
+                                    run_id=getattr(self, '_current_run_id', 'unknown'),
+                                    tool_name=function_name,
+                                    turn_id=getattr(self, '_turn_counter', 0),
+                                )
+                                
+                                # Store the full output
+                                artifact_ref = self._artifact_store.store(result_str, metadata)
+                                logging.debug(f"Stored {function_name} output ({len(result_str)} bytes) as artifact {artifact_ref.artifact_id}")
+                                
+                                # Register artifact retrieval tools if not already registered
+                                if not hasattr(self, '_artifact_tools_registered'):
+                                    self._register_artifact_tools()
+                                    self._artifact_tools_registered = True
                             except Exception as e:
-                                logging.debug(f"Failed to store tool output: {e}")
+                                logging.debug(f"Failed to store artifact: {e}")
+                        
+                        # Generate truncated preview
+                        tail_size = min(limit // 5, 2000)
+                        head = result_str[:limit - tail_size]
+                        tail = result_str[-tail_size:] if tail_size > 0 else ""
+                        
+                        # If we stored an artifact, include reference in the output
+                        if artifact_ref:
+                            truncated = (
+                                f"{head}\n"
+                                f"...[{len(result_str):,} chars total, showing first/last portions]...\n"
+                                f"{tail}\n\n"
+                                f"{artifact_ref.to_inline()}"
+                            )
                         else:
-                            truncated = result_str
+                            # Fallback to simple truncation
+                            truncated = f"{head}\n...[{len(result_str):,} chars, showing first/last portions]...\n{tail}"
+                    else:
+                        truncated = result_str
+                    
+                    if self.context_manager and hasattr(self, '_truncate_tool_output'):
+                        # Use context-aware truncation if available, but preserve artifact reference
+                        if 'artifact_ref' in locals() and artifact_ref:
+                            # Extract the artifact reference from the truncated string
+                            artifact_inline = artifact_ref.to_inline()
+                            # Remove the artifact reference before context truncation
+                            truncated_without_ref = truncated.replace(artifact_inline, "").rstrip()
+                            # Apply context truncation
+                            truncated_without_ref = self._truncate_tool_output(function_name, truncated_without_ref, tool_call_id)
+                            # Re-append the artifact reference
+                            truncated = f"{truncated_without_ref}\n\n{artifact_inline}"
+                        else:
+                            truncated = self._truncate_tool_output(function_name, truncated, tool_call_id)
                     
                     if len(truncated) < len(result_str):
                         logging.debug(f"Truncated {function_name} output from {len(result_str)} to {len(truncated)} chars")
@@ -499,6 +560,9 @@ class ToolExecutionMixin:
                         if isinstance(result, dict):
                             max_field_chars = getattr(self, 'tool_output_limit', 16000) if not self.context_manager else None
                             result = self._truncate_dict_fields(result, function_name, max_field_chars, tool_call_id)
+                            # Add artifact reference to dict result if available
+                            if 'artifact_ref' in locals() and artifact_ref:
+                                result["_artifact_ref"] = artifact_ref.to_dict()
                         else:
                             result = truncated
                 except Exception as e:
