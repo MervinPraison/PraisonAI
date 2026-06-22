@@ -28,11 +28,24 @@ from typing import (
     runtime_checkable,
 )
 
+# Gateway protocol versioning constants
+GATEWAY_PROTOCOL_VERSION = 1
+MIN_CLIENT_PROTOCOL_VERSION = 1
+
 if TYPE_CHECKING:
     from praisonai.gateway.pairing import PairedChannel
     from ..agent import Agent
     from ..bots.presentation import MessagePresentation
     from ..scheduler.models import DeliveryTarget
+
+
+class ConnectErrorCode(str, Enum):
+    """Structured error codes for connection failures."""
+    AUTH_REQUIRED = "auth_required"
+    AUTH_UNAUTHORIZED = "auth_unauthorized"
+    PROTOCOL_UNSUPPORTED = "protocol_unsupported"
+    PAIRING_REQUIRED = "pairing_required"
+    AGENT_NOT_FOUND = "agent_not_found"
 
 
 class EventType(str, Enum):
@@ -88,6 +101,65 @@ class EventType(str, Enum):
     # Polling events
     POLL_REQUEST = "poll_request"
     POLL_RESPONSE = "poll_response"
+    
+    # Handshake events
+    HELLO = "hello"
+    HELLO_OK = "hello_ok"
+    HELLO_ERROR = "hello_error"
+
+
+@dataclass
+class HelloParams:
+    """Parameters for initiating a versioned handshake.
+    
+    Attributes:
+        agent_id: The agent to connect to
+        protocol_min: Minimum protocol version the client supports
+        protocol_max: Maximum protocol version the client supports
+        capabilities: Optional list of capability tokens the client supports
+        session_id: Optional session to resume
+        since: Optional cursor for event replay
+    """
+    agent_id: str
+    protocol_min: int
+    protocol_max: int
+    capabilities: List[str] = field(default_factory=list)
+    session_id: Optional[str] = None
+    since: Optional[int] = None
+
+
+@dataclass
+class HelloResult:
+    """Result of a successful handshake negotiation.
+    
+    Attributes:
+        protocol: The negotiated protocol version
+        features: Supported methods and events
+        policy: Gateway policy limits (max_payload, heartbeat_ms, etc.)
+        session_id: The session ID for this connection
+        resumed: Whether an existing session was resumed
+        cursor: Current event cursor position
+    """
+    protocol: int
+    features: Dict[str, List[str]]  # {"methods": [...], "events": [...]}
+    policy: Dict[str, int]  # {"max_payload": ..., "heartbeat_ms": ...}
+    session_id: str
+    resumed: bool
+    cursor: int
+
+
+@dataclass
+class HelloError:
+    """Error response for failed handshake.
+    
+    Attributes:
+        code: Structured error code
+        message: Human-readable error message
+        next_action: Suggested next action (e.g., "upgrade_client", "pair_device")
+    """
+    code: ConnectErrorCode
+    message: str
+    next_action: Optional[str] = None
 
 
 @dataclass
