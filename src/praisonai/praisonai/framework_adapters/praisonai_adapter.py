@@ -44,6 +44,19 @@ class PraisonAIAdapter(FrameworkAdapter):
         from .._framework_availability import is_available
         return is_available("praisonaiagents")
     
+    def resolve(self, *, config=None):
+        """
+        Resolve the adapter variant based on the configuration.
+        For PraisonAI adapter, we return self as there are no variants.
+        
+        Args:
+            config: Configuration dictionary (optional)
+        
+        Returns:
+            Self, as PraisonAI doesn't have variants
+        """
+        return self
+    
     def _format_template(self, text: str, **kwargs) -> str:
         """Format a template string with provided values."""
         if not text:
