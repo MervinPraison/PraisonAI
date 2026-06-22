@@ -1184,6 +1184,9 @@ Methods:
 * <code title="cli">praisonai up logs <a href="./src/praisonai/praisonai/cli/commands/up.py">--help</a></code>
 * <code title="cli">praisonai up status <a href="./src/praisonai/praisonai/cli/commands/up.py">--help</a></code>
 * <code title="cli">praisonai up up-start <a href="./src/praisonai/praisonai/cli/commands/up.py">--help</a></code>
+* <code title="cli">praisonai validate check <a href="./src/praisonai/praisonai/cli/commands/validate.py">--help</a></code>
+* <code title="cli">praisonai validate schema <a href="./src/praisonai/praisonai/cli/commands/validate.py">--help</a></code>
+* <code title="cli">praisonai validate validate <a href="./src/praisonai/praisonai/cli/commands/validate.py">--help</a></code>
 * <code title="cli">praisonai version check <a href="./src/praisonai/praisonai/cli/commands/version.py">--help</a></code>
 * <code title="cli">praisonai version show <a href="./src/praisonai/praisonai/cli/commands/version.py">--help</a></code>
 * <code title="cli">praisonai version version-callback <a href="./src/praisonai/praisonai/cli/commands/version.py">--help</a></code>
