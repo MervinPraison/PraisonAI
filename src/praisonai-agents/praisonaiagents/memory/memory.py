@@ -235,6 +235,34 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
         
         # Determine embedding dimensions for legacy compatibility
         self.embedding_dimensions = self._get_embedding_dimensions(self.embedding_model)
+        
+        # Copy adapter attributes to self for backward compatibility
+        # This ensures legacy code that checks hasattr(self, 'attribute') still works
+        if self.use_mem0 and hasattr(adapter, 'mem0_client'):
+            self.mem0_client = adapter.mem0_client
+            
+        if self.use_rag and hasattr(adapter, 'collection'):
+            self.chroma_col = adapter.collection
+            self.chroma_client = adapter.client
+            
+        if self.use_mongodb:
+            if hasattr(adapter, 'client'):
+                self.mongo_client = adapter.client
+            if hasattr(adapter, 'db'):
+                self.mongo_db = adapter.db
+            if hasattr(adapter, 'short_collection'):
+                self.mongo_short_term = adapter.short_collection
+            if hasattr(adapter, 'long_collection'):
+                self.mongo_long_term = adapter.long_collection
+            # CRITICAL FIX: Copy use_vector_search from adapter to self
+            # Without this, lines 579, 758, 857 will crash with AttributeError
+            if hasattr(adapter, 'use_vector_search'):
+                self.use_vector_search = adapter.use_vector_search
+            else:
+                self.use_vector_search = False
+        else:
+            # Initialize use_vector_search to False for non-MongoDB providers
+            self.use_vector_search = False
 
     def _get_adapter_config(self) -> Dict[str, Any]:
         """Get configuration for adapter initialization."""
@@ -386,80 +414,6 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
     # -------------------------------------------------------------------------
     #                          Initialization
     # -------------------------------------------------------------------------
-    def _init_stm(self):
-        """Creates or verifies short-term memory table."""
-        os.makedirs(os.path.dirname(self.short_db) or ".", exist_ok=True)
-        conn = self._get_stm_conn()
-        c = conn.cursor()
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS short_mem (
-            id TEXT PRIMARY KEY,
-            content TEXT,
-            meta TEXT,
-            created_at REAL
-        )
-        """)
-        conn.commit()
-
-    def _init_ltm(self):
-        """Creates or verifies long-term memory table."""
-        os.makedirs(os.path.dirname(self.long_db) or ".", exist_ok=True)
-        conn = self._get_ltm_conn()
-        c = conn.cursor()
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS long_mem (
-            id TEXT PRIMARY KEY,
-            content TEXT,
-            meta TEXT,
-            created_at REAL
-        )
-        """)
-        conn.commit()
-
-    def _init_mem0(self):
-        """Initialize Mem0 client for agent or user memory with optional graph support."""
-        mem_cfg = self.cfg.get("config", {})
-        api_key = mem_cfg.get("api_key", os.getenv("MEM0_API_KEY"))
-        org_id = mem_cfg.get("org_id")
-        proj_id = mem_cfg.get("project_id")
-        
-        # Check if graph memory is enabled
-        graph_config = mem_cfg.get("graph_store")
-        use_graph = graph_config is not None
-        
-        if use_graph:
-            # Initialize with graph memory support
-            from mem0 import Memory
-            self._log_verbose("Initializing Mem0 with graph memory support")
-            
-            # Build Mem0 config with graph store
-            mem0_config = {}
-            
-            # Add graph store configuration
-            mem0_config["graph_store"] = graph_config
-            
-            # Add other configurations if provided
-            if "vector_store" in mem_cfg:
-                mem0_config["vector_store"] = mem_cfg["vector_store"]
-            if "llm" in mem_cfg:
-                mem0_config["llm"] = mem_cfg["llm"]
-            if "embedder" in mem_cfg:
-                mem0_config["embedder"] = mem_cfg["embedder"]
-            
-            # Initialize Memory with graph support
-            self.mem0_client = Memory.from_config(config_dict=mem0_config)
-            self.graph_enabled = True
-            self._log_verbose("Graph memory initialized successfully")
-        else:
-            # Use traditional MemoryClient
-            from mem0 import MemoryClient
-            self._log_verbose("Initializing Mem0 with traditional memory client")
-            
-            if org_id and proj_id:
-                self.mem0_client = MemoryClient(api_key=api_key, org_id=org_id, project_id=proj_id)
-            else:
-                self.mem0_client = MemoryClient(api_key=api_key)
-            self.graph_enabled = False
 
     def _init_chroma(self):
         """Initialize a local Chroma client for embedding-based search."""
@@ -496,105 +450,6 @@ class Memory(StorageMixin, SearchMixin, MemoryCoreMixin):
             self._log_verbose(f"Failed to initialize ChromaDB: {e}", logging.ERROR)
             self.use_rag = False
 
-    def _init_mongodb(self):
-        """Initialize MongoDB client for memory storage."""
-        try:
-            # Import MongoClient locally to handle optional dependency
-            from pymongo import MongoClient
-            
-            mongo_cfg = self.cfg.get("config", {})
-            self.connection_string = mongo_cfg.get("connection_string", "mongodb://localhost:27017/")
-            self.database_name = mongo_cfg.get("database", "praisonai")
-            self.use_vector_search = mongo_cfg.get("use_vector_search", False)
-            
-            # Initialize MongoDB client
-            self.mongo_client = MongoClient(
-                self.connection_string,
-                maxPoolSize=mongo_cfg.get("max_pool_size", 50),
-                minPoolSize=mongo_cfg.get("min_pool_size", 10),
-                maxIdleTimeMS=mongo_cfg.get("max_idle_time", 30000),
-                serverSelectionTimeoutMS=mongo_cfg.get("server_selection_timeout", 5000),
-                retryWrites=True,
-                retryReads=True
-            )
-            
-            # Test connection
-            self.mongo_client.admin.command('ping')
-            
-            # Setup database and collections
-            self.mongo_db = self.mongo_client[self.database_name]
-            self.mongo_short_term = self.mongo_db.short_term_memory
-            self.mongo_long_term = self.mongo_db.long_term_memory
-            self.mongo_entities = self.mongo_db.entity_memory
-            self.mongo_users = self.mongo_db.user_memory
-            
-            # Create indexes for better performance
-            self._create_mongodb_indexes()
-            
-            self._log_verbose("MongoDB initialized successfully")
-            
-        except Exception as e:
-            self._log_verbose(f"Failed to initialize MongoDB: {e}", logging.ERROR)
-            self.use_mongodb = False
-
-    def _create_mongodb_indexes(self):
-        """Create MongoDB indexes for better performance."""
-        try:
-            # Text search indexes
-            self.mongo_short_term.create_index([("content", "text")])
-            self.mongo_long_term.create_index([("content", "text")])
-            
-            # Compound indexes for filtering
-            self.mongo_short_term.create_index([("created_at", -1), ("metadata.quality", -1)])
-            self.mongo_long_term.create_index([("created_at", -1), ("metadata.quality", -1)])
-            
-            # User-specific indexes
-            self.mongo_users.create_index([("user_id", 1), ("created_at", -1)])
-            
-            # Entity indexes
-            self.mongo_entities.create_index([("entity_name", 1), ("entity_type", 1)])
-            
-            # Vector search indexes for Atlas (if enabled)
-            if self.use_vector_search:
-                self._create_vector_search_indexes()
-                
-        except Exception as e:
-            self._log_verbose(f"Warning: Could not create MongoDB indexes: {e}", logging.WARNING)
-
-    def _create_vector_search_indexes(self):
-        """Create vector search indexes for Atlas."""
-        try:
-            vector_index_def = {
-                "mappings": {
-                    "dynamic": True,
-                    "fields": {
-                        "embedding": {
-                            "type": "knnVector",
-                            "dimensions": self.embedding_dimensions,
-                            "similarity": "cosine"
-                        }
-                    }
-                }
-            }
-            
-            # Create vector indexes for both short and long term collections
-            try:
-                # Use SearchIndexModel for PyMongo 4.6+ compatibility
-                try:
-                    from pymongo.operations import SearchIndexModel
-                    search_index_model = SearchIndexModel(definition=vector_index_def, name="vector_index")
-                    self.mongo_short_term.create_search_index(search_index_model)
-                    self.mongo_long_term.create_search_index(search_index_model)
-                except ImportError:
-                    # Fallback for older PyMongo versions
-                    self.mongo_short_term.create_search_index(vector_index_def, "vector_index")
-                    self.mongo_long_term.create_search_index(vector_index_def, "vector_index")
-                self._log_verbose("Vector search indexes created successfully")
-            except Exception as e:
-                self._log_verbose(f"Could not create vector search indexes: {e}", logging.WARNING)
-                
-        except Exception as e:
-            self._log_verbose(f"Error creating vector search indexes: {e}", logging.WARNING)
 
     def _get_embedding(self, text: str) -> List[float]:
         """Get embedding for text using the unified embedding module."""
