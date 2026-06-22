@@ -9,6 +9,7 @@ Key Components:
 - Agent runtime registry: AgentRuntimeProtocol, RuntimeRegistry
 - Tool result middleware: RuntimeToolResultMiddleware, NormalizedToolResult
 - Registry patterns for runtime resolution and middleware management
+- Doctor migration protocol: DoctorContractProtocol for config migration
 - Capability validation: RuntimeCapability, RuntimeCapabilityMatrix, validate_capabilities
 - Runtime protocols: AgentRuntimeProtocol for capability reporting
 
@@ -57,6 +58,14 @@ __all__ = [
     'register_runtime',
     'list_runtimes', 
     'resolve_runtime',
+    # Doctor migration protocol
+    "DoctorContractProtocol",
+    "Finding",
+    "get_default_registry",
+    "register_rule",
+    "get_rules",
+    "collect_findings",
+    "apply_fixes",
     # Capability types
     "RuntimeCapability",
     "RuntimeCapabilityMatrix",
@@ -119,6 +128,17 @@ _LAZY_GROUPS = {
         'CapabilityValidationError': ('praisonaiagents.runtime.capabilities', 'CapabilityValidationError'),
         'get_native_runtime_capabilities': ('praisonaiagents.runtime.capabilities', 'get_native_runtime_capabilities'),
         'get_reduced_harness_capabilities': ('praisonaiagents.runtime.capabilities', 'get_reduced_harness_capabilities'),
+    },
+    'doctor_protocol': {
+        'DoctorContractProtocol': ('praisonaiagents.runtime.doctor_protocol', 'DoctorContractProtocol'),
+        'Finding': ('praisonaiagents.runtime.doctor_protocol', 'Finding'),
+    },
+    'doctor_registry': {
+        'get_default_registry': ('praisonaiagents.runtime.doctor_registry', 'get_default_registry'),
+        'register_rule': ('praisonaiagents.runtime.doctor_registry', 'register_rule'),
+        'get_rules': ('praisonaiagents.runtime.doctor_registry', 'get_rules'),
+        'collect_findings': ('praisonaiagents.runtime.doctor_registry', 'collect_findings'),
+        'apply_fixes': ('praisonaiagents.runtime.doctor_registry', 'apply_fixes'),
     },
 }
 

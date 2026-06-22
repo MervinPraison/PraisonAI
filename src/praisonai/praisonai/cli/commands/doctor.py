@@ -29,7 +29,7 @@ def _run_doctor(args: list) -> int:
         return 4
     except Exception as e:
         output = get_output_controller()
-        output.print_error(f"Doctor error: {e}")
+        output.print_error(f"Doctor command failed: {e}")
         return 1
 
 
@@ -37,25 +37,23 @@ def _run_doctor(args: list) -> int:
 def doctor_env(
     deep: bool = typer.Option(False, "--deep", help="Enable deeper probes"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
-    timeout: float = typer.Option(10.0, "--timeout", help="Per-check timeout"),
 ):
-    """Check environment variables and API keys."""
+    """Check environment variables."""
     args = ["env"]
     if deep:
         args.append("--deep")
     if json_output:
         args.append("--json")
-    args.extend(["--timeout", str(timeout)])
     raise typer.Exit(_run_doctor(args))
 
 
-@app.command("config")
-def doctor_config(
+@app.command("docker")
+def doctor_docker(
     deep: bool = typer.Option(False, "--deep", help="Enable deeper probes"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
 ):
-    """Check configuration files."""
-    args = ["config"]
+    """Check Docker installation and configuration."""
+    args = ["docker"]
     if deep:
         args.append("--deep")
     if json_output:
@@ -63,13 +61,13 @@ def doctor_config(
     raise typer.Exit(_run_doctor(args))
 
 
-@app.command("tools")
-def doctor_tools(
+@app.command("llm-providers")
+def doctor_llm_providers(
     deep: bool = typer.Option(False, "--deep", help="Enable deeper probes"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
 ):
-    """Check tools availability."""
-    args = ["tools"]
+    """Check LLM providers configuration."""
+    args = ["llm-providers"]
     if deep:
         args.append("--deep")
     if json_output:
@@ -77,15 +75,26 @@ def doctor_tools(
     raise typer.Exit(_run_doctor(args))
 
 
-@app.command("db")
-def doctor_db(
+@app.command("memory-store")
+def doctor_memory_store(
     deep: bool = typer.Option(False, "--deep", help="Enable deeper probes"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
 ):
-    """Check database connections."""
-    args = ["db"]
+    """Check memory store backends."""
+    args = ["memory-store"]
     if deep:
         args.append("--deep")
+    if json_output:
+        args.append("--json")
+    raise typer.Exit(_run_doctor(args))
+
+
+@app.command("metadata-store")
+def doctor_metadata_store(
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+):
+    """Check metadata store configuration."""
+    args = ["metadata-store"]
     if json_output:
         args.append("--json")
     raise typer.Exit(_run_doctor(args))
@@ -96,7 +105,7 @@ def doctor_mcp(
     deep: bool = typer.Option(False, "--deep", help="Enable deeper probes"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
 ):
-    """Check MCP servers."""
+    """Check MCP server connectivity and health."""
     args = ["mcp"]
     if deep:
         args.append("--deep")
@@ -258,19 +267,28 @@ def doctor_skills(
 def doctor_runtime(
     team: str = typer.Option(None, "--team", help="Team YAML file to validate"),
     workflow: str = typer.Option(None, "--workflow", help="Workflow YAML file to validate (future)"),
+    fix: bool = typer.Option(False, "--fix", help="Apply migration fixes automatically"),
+    dry_run: bool = typer.Option(True, "--dry-run/--execute", help="Show what would be fixed without applying changes"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
     deep: bool = typer.Option(False, "--deep", help="Enable deeper probes"),
+    file: Optional[str] = typer.Option(None, "--file", "-f", help="Config file to check (default: search for agents.yaml)"),
 ):
-    """Check runtime compatibility for multi-agent setups."""
+    """Check runtime configuration and migrate legacy cli_backend settings."""
     args = ["runtime"]
     if team:
         args.extend(["--team", team])
     if workflow:
         args.extend(["--workflow", workflow])
+    if fix:
+        args.append("--fix")
+    if not dry_run:
+        args.append("--execute")
     if json_output:
         args.append("--json")
     if deep:
         args.append("--deep")
+    if file:
+        args.extend(["--file", file])
     raise typer.Exit(_run_doctor(args))
 
 
@@ -279,124 +297,36 @@ def doctor_troubleshoot():
     """
     Show troubleshooting information for common import errors.
     
-    This command displays diagnostic information and solutions for:
+    This command provides detailed troubleshooting steps for:
     - ImportError: cannot import name 'Agent' from 'praisonaiagents'
-    - Namespace package shadowing issues
-    - Stale package artifacts
+    - ModuleNotFoundError: No module named 'praisonaiagents'
+    - Other common environment issues
     """
     output = get_output_controller()
     
-    output.console.print("\n[bold cyan]PraisonAI Import Troubleshooting[/bold cyan]\n")
+    output.console.print("[bold cyan]PraisonAI Import Troubleshooting Guide[/bold cyan]\n")
     
-    # Check current state
-    output.console.print("[bold]1. Checking praisonaiagents package state...[/bold]")
+    # Provide troubleshooting steps
+    output.console.print("[bold]If you're seeing import errors:[/bold]\n")
     
-    try:
-        import praisonaiagents
-        file_attr = praisonaiagents.__file__
-        spec_origin = praisonaiagents.__spec__.origin if praisonaiagents.__spec__ else None
-        
-        if file_attr is None:
-            output.print_error("  ✗ praisonaiagents.__file__ is None (namespace package detected)")
-            output.console.print("    [yellow]This indicates stale artifacts in site-packages.[/yellow]")
-        else:
-            output.print_success(f"  ✓ praisonaiagents.__file__: {file_attr}")
-        
-        if spec_origin is None:
-            output.print_error("  ✗ praisonaiagents.__spec__.origin is None")
-        else:
-            output.print_success(f"  ✓ praisonaiagents.__spec__.origin: {spec_origin}")
-        
-        # Try importing Agent
-        output.console.print("\n[bold]2. Testing Agent import...[/bold]")
-        try:
-            from praisonaiagents import Agent
-            output.print_success(f"  ✓ Agent imported successfully: {Agent}")
-        except ImportError as e:
-            output.print_error(f"  ✗ Agent import failed: {e}")
-            
-    except ImportError as e:
-        output.print_error(f"  ✗ Cannot import praisonaiagents: {e}")
+    output.console.print("1. [yellow]Check for stale package artifacts:[/yellow]")
+    output.console.print("   praisonai doctor cleanup --execute\n")
     
-    # Check for stale directories
-    output.console.print("\n[bold]3. Checking for stale artifacts...[/bold]")
-    import site
-    import os
+    output.console.print("2. [yellow]Reinstall praisonaiagents:[/yellow]")
+    output.console.print("   pip uninstall praisonaiagents -y")
+    output.console.print("   pip install praisonaiagents\n")
     
-    stale_found = False
-    try:
-        site_packages = site.getsitepackages()
-    except AttributeError:
-        site_packages = []
+    output.console.print("3. [yellow]Check installation location:[/yellow]")
+    output.console.print("   pip show praisonaiagents\n")
     
-    for sp in site_packages:
-        praisonai_dir = os.path.join(sp, 'praisonaiagents')
-        if os.path.isdir(praisonai_dir):
-            init_path = os.path.join(praisonai_dir, '__init__.py')
-            if not os.path.exists(init_path):
-                output.print_error(f"  ✗ Stale directory found: {praisonai_dir}")
-                stale_found = True
-            else:
-                output.print_success(f"  ✓ Valid package at: {praisonai_dir}")
+    output.console.print("4. [yellow]Verify Python path:[/yellow]")
+    output.console.print("   python -c \"import sys; print('\\n'.join(sys.path))\"\n")
     
-    if not stale_found:
-        output.print_success("  ✓ No stale artifacts found")
+    output.console.print("5. [yellow]For editable installs, reinstall from source:[/yellow]")
+    output.console.print("   git clone https://github.com/MervinPraison/PraisonAI.git")
+    output.console.print("   cd PraisonAI/src/praisonai-agents")
+    output.console.print("   pip install -e .\n")
     
-    # Show solutions
-    output.console.print("\n[bold]Solutions:[/bold]")
-    output.console.print("""
-[cyan]If you see import errors:[/cyan]
-
-1. Run cleanup to remove stale artifacts:
-   [green]praisonai doctor cleanup --execute[/green]
-
-2. Reinstall praisonaiagents:
-   [green]pip install --force-reinstall praisonaiagents[/green]
-
-3. Or manually remove stale directory:
-   [green]rm -rf $(python -c "import site; print(site.getsitepackages()[0])")/praisonaiagents/[/green]
-
-[cyan]For editable installs:[/cyan]
-   [green]pip install -e /path/to/praisonai-agents[/green]
-""")
+    output.console.print("[dim]For more help, visit: https://github.com/MervinPraison/PraisonAI[/dim]")
     
     raise typer.Exit(0)
-
-
-@app.command("fix")
-def doctor_fix(
-    dry_run: bool = typer.Option(True, "--dry-run/--execute", help="Show what would be fixed without applying changes"),
-    backup: bool = typer.Option(True, "--backup/--no-backup", help="Create backup files before modifying"),
-    config_path: Optional[str] = typer.Option(None, "--config", help="Specific config file to fix"),
-):
-    """Fix common configuration issues, including deprecated cli_backend usage."""
-    args = ["fix"]
-    if not dry_run:
-        args.append("--execute")
-    if not backup:
-        args.append("--no-backup") 
-    if config_path:
-        args.extend(["--file", config_path])
-    raise typer.Exit(_run_doctor(args))
-
-
-@app.callback(invoke_without_command=True)
-def doctor_callback(
-    ctx: typer.Context,
-    deep: bool = typer.Option(False, "--deep", help="Enable deeper probes"),
-    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
-    strict: bool = typer.Option(False, "--strict", help="Treat warnings as failures"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Minimal output"),
-):
-    """Run all fast health checks."""
-    if ctx.invoked_subcommand is None:
-        args = []
-        if deep:
-            args.append("--deep")
-        if json_output:
-            args.append("--json")
-        if strict:
-            args.append("--strict")
-        if quiet:
-            args.append("--quiet")
-        raise typer.Exit(_run_doctor(args))

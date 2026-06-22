@@ -255,12 +255,19 @@ class DoctorHandler(CommandHandler):
         parser.add_argument(
             "--execute",
             action="store_true",
-            help="Execute fixes instead of dry-run (fix subcommand)",
+            help="Execute fixes instead of dry-run (fix/runtime subcommand)",
         )
         parser.add_argument(
             "--no-backup",
             action="store_true",
             help="Skip creating backup files (fix subcommand)",
+        )
+        
+        # Runtime migration options
+        parser.add_argument(
+            "--fix",
+            action="store_true",
+            help="Apply migration fixes automatically (runtime subcommand)",
         )
         
         return parser.parse_args(args)
@@ -298,6 +305,7 @@ class DoctorHandler(CommandHandler):
             save_report=args.save_report,
             team_file=args.team,
             workflow_file=args.workflow,
+            fix=getattr(args, 'fix', False),
             execute=getattr(args, 'execute', False),
             no_backup=getattr(args, 'no_backup', False),
         )
