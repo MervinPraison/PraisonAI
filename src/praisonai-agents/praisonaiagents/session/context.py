@@ -70,13 +70,8 @@ class SessionContext:
     reachable_targets: Optional[List[ReachableTarget]] = None
 
     def to_dict(self) -> dict:
-        d = asdict(self)
-        # Convert nested dataclasses to dicts for serialization
-        if self.origin:
-            d["origin"] = asdict(self.origin)
-        if self.reachable_targets:
-            d["reachable_targets"] = [asdict(t) for t in self.reachable_targets]
-        return d
+        # asdict already recursively converts nested dataclasses
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, d: dict) -> "SessionContext":

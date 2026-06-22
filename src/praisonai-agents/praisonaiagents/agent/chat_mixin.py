@@ -135,7 +135,12 @@ Your Goal: {self.goal}"""
                 system_prompt += f"\n\n## Available Skills\n{skills_prompt}"
                 system_prompt += "\n\nWhen a skill is relevant to the task, read its SKILL.md file to get detailed instructions. If the skill has scripts in its scripts/ directory, you can execute them using the execute_code or run_script tool."
         
-        # Add session context (platform awareness) if available
+        # Cache the base system prompt BEFORE adding session context
+        # Session context is per-turn and should not be cached
+        if cache_key:
+            self._cache_put(self._system_prompt_cache, cache_key, system_prompt)
+        
+        # Add session context (platform awareness) if available - AFTER caching
         try:
             from ..session.context import get_session_context
             session_ctx = get_session_context()
@@ -174,9 +179,14 @@ Your Goal: {self.goal}"""
                         )
                 
                 if context_parts:
-                    system_prompt += f"\n\n## Session Context\n" + "\n".join(context_parts)
-        except (ImportError, Exception):
-            # Session context not available or error, continue without it
+                    system_prompt += "\n\n## Session Context\n" + "\n".join(context_parts)
+        except ImportError:
+            # Session context module not available, continue without it
+            pass
+        except Exception as e:
+            # Log unexpected errors but continue
+            import logging
+            logging.debug(f"Session context injection failed: {e}", exc_info=True)
             pass
         
         # Add tool usage instructions if tools are available
@@ -218,10 +228,7 @@ Your Goal: {self.goal}"""
         except ImportError:
             pass  # Trust module not available, skip security instructions
         
-        # Cache the generated system prompt (only if cache_key is set, i.e., memory not enabled)
-        # Use LRU eviction to prevent unbounded growth
-        if cache_key:
-            self._cache_put(self._system_prompt_cache, cache_key, system_prompt)
+        # Note: Caching is done BEFORE session context injection to avoid cross-user leakage
         return system_prompt
 
     def _build_response_format(self, schema_model):

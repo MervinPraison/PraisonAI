@@ -34,7 +34,9 @@ def detect_chat_type(platform: str, chat_id: str) -> str:
     # Telegram patterns
     if platform_lower == "telegram":
         if chat_id.startswith("-100"):
-            return "channel"  # Supergroup/channel
+            # -100 prefix is used for both supergroups and channels
+            # Without additional metadata, we can't disambiguate
+            return "unknown"
         elif chat_id.startswith("-"):
             return "group"  # Regular group
         else:

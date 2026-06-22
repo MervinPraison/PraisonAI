@@ -289,7 +289,7 @@ class BotSessionManager:
                 origin = Origin(
                     platform=self._platform,
                     chat_type=chat_type,
-                    display_name=chat_name or chat_id,
+                    display_name=chat_id,  # Use chat_id as display_name since chat_name is not available
                     thread_id=thread_id,
                 )
                 
