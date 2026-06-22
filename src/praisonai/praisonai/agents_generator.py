@@ -391,9 +391,6 @@ class AgentsGenerator:
         from .observability.hooks import init_observability
         init_observability(adapter.name)
         
-        # Also initialize AgentOps if configured (separate from general observability)
-        self._init_observability(adapter.name)
-        
         # Run adapter setup hooks
         adapter.setup(framework_tag=adapter.name)
         
@@ -437,15 +434,6 @@ class AgentsGenerator:
         resolved_adapter = adapter.resolve(config=config)
         
         return resolved_adapter
-    
-    def _init_observability(self, framework: str) -> None:
-        """Initialize observability tools if configured.
-        
-        Args:
-            framework: The framework name for tagging
-        """
-        # AgentOps initialization is handled in observability/hooks.py to avoid duplication
-        pass
     
     def _validate_cli_backend_compatibility(self, config, framework):
         """Validate that cli_backend and runtime are only used with compatible frameworks."""

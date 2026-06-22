@@ -1,65 +1,117 @@
 """
-PraisonAI agents framework adapter.
+PraisonAI native framework adapter implementation.
 
-Provides lazy-loaded integration with the PraisonAI agents framework.
+This adapter uses PraisonAI's native `praisonaiagents` library directly,
+without going through external frameworks like CrewAI, Autogen, or Swarm.
+It has full control over the agents and tasks, allowing for more flexibility
+and direct integration with PraisonAI's features.
 """
 
+from __future__ import annotations
+
 import logging
-from typing import Dict, List, Any, Optional
-from .base import BaseFrameworkAdapter
+from typing import Any, Dict, List, Optional
+
+from .base import FrameworkAdapter
 
 logger = logging.getLogger(__name__)
 
 
-class PraisonAIAdapter(BaseFrameworkAdapter):
-    """Adapter for PraisonAI agents framework."""
+class PraisonAIAdapter(FrameworkAdapter):
+    """
+    Adapter for running PraisonAI agents natively using praisonaiagents.
     
-    name = "praisonai"
-    install_hint = 'pip install praisonaiagents'
-    requires_tools_extra = False
+    This is the primary execution path for agent workflows, supporting:
+    - Direct agent-task configuration
+    - Per-agent model selection
+    - Per-agent runtime selection (autogen, swarm, etc.)
+    - Agent-centric tools (ACP/LSP)
+    - Memory and planning features
+    """
+    
+    @property
+    def name(self) -> str:
+        """Return adapter name."""
+        return "praisonai"
+    
+    @property
+    def supported_runtimes(self) -> List[str]:
+        """List of supported agent runtimes this adapter can use."""
+        return ["praisonai", "autogen", "swarm", "crewai", "langchain"]
     
     def is_available(self) -> bool:
         """Check if PraisonAI agents is available for import."""
         from .._framework_availability import is_available
         return is_available("praisonaiagents")
     
-    def _resolve_agent_model(self, details: Dict[str, Any], default_model: str) -> str:
-        """Resolve the LLM model for a specific agent, supporting per-agent configuration."""
-        llm_spec = details.get('llm')
+    def resolve(self, *, config=None):
+        """
+        Resolve the adapter variant based on the configuration.
+        For PraisonAI adapter, we return self as there are no variants.
         
-        # Handle string format: llm: "gpt-4o-mini"
+        Args:
+            config: Configuration dictionary (optional)
+        
+        Returns:
+            Self, as PraisonAI doesn't have variants
+        """
+        return self
+    
+    def _format_template(self, text: str, **kwargs) -> str:
+        """Format a template string with provided values."""
+        if not text:
+            return ""
+        
+        import re
+        formatted = text
+        for key, value in kwargs.items():
+            # Replace {key} with value
+            pattern = r'\{' + key + r'\}'
+            formatted = re.sub(pattern, str(value), formatted)
+        return formatted
+    
+    def _resolve_agent_model(self, details: Dict, default_model: str) -> str:
+        """
+        Resolve the LLM model for a specific agent.
+        
+        Priority:
+        1. Agent-specific llm/model field (string or dict with 'model' key)
+        2. Default model from llm_config
+        3. Fallback to gpt-4o-mini
+        """
+        # Check for agent-specific model (could be 'llm' or 'model' key)
+        llm_spec = details.get('llm') or details.get('model')
         if isinstance(llm_spec, str) and llm_spec.strip():
             return llm_spec.strip()
-        
-        # Handle dict format: llm: {"model": "groq/llama3-70b-8192"}
         if isinstance(llm_spec, dict) and llm_spec.get('model'):
             return llm_spec['model']
         
-        # Fall back to global default
-        return default_model
+        # Use default or fallback
+        return default_model or "gpt-4o-mini"
     
-    def _resolve_agent_runtime(self, details: Dict[str, Any], config: Dict[str, Any]) -> Any:
-        """Resolve runtime configuration for a specific agent.
-        
-        Resolution order:
-        1. Agent-level runtime parameter
-        2. Model-scoped runtime from models section
-        3. Provider-scoped runtime from providers section
-        4. Legacy cli_backend (with deprecation warning)
-        5. None (use default LLM execution)
-        
-        Args:
-            details: Agent configuration details
-            config: Full YAML configuration
-            
-        Returns:
-            Runtime configuration or None
+    def _resolve_agent_runtime(self, details: Dict, config: Dict) -> Optional[str]:
         """
-        # 1. Check agent-level runtime parameter
+        Resolve the runtime backend for a specific agent.
+        
+        Priority:
+        1. Agent-specific runtime field
+        2. Agent-specific backend field (legacy)
+        3. Model-scoped runtime from models section
+        4. Provider-scoped runtime from providers section
+        5. Global config.runtime
+        6. Global config.backend (legacy)
+        7. CLI backend override (legacy with warning)
+        8. None (uses default)
+        """
+        # 1. Check agent-specific runtime
         if 'runtime' in details:
             return details['runtime']
         
-        # 2. Check model-scoped runtime
+        # 2. Check agent-specific backend (legacy)
+        if 'backend' in details:
+            return details['backend']
+        
+        # 3. Check model-scoped runtime
         agent_model = self._resolve_agent_model(details, "")
         if agent_model and 'models' in config:
             models_config = config['models']
@@ -68,7 +120,7 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 if isinstance(model_config, dict) and 'runtime' in model_config:
                     return model_config['runtime']
         
-        # 3. Check provider-scoped runtime
+        # 4. Check provider-scoped runtime
         if agent_model and 'providers' in config:
             # Extract provider from model name
             provider = None
@@ -88,7 +140,16 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                     if isinstance(provider_config, dict) and 'runtime_default' in provider_config:
                         return provider_config['runtime_default']
         
-        # 4. Check legacy cli_backend (with deprecation warning handled by Agent.__init__)
+        # 5. Check global config
+        global_config = config.get('config', {})
+        if 'runtime' in global_config:
+            return global_config['runtime']
+        
+        # 6. Check global backend (legacy)
+        if 'backend' in global_config:
+            return global_config['backend']
+        
+        # 7. Check CLI backend override (legacy with warning)
         if 'cli_backend' in details:
             import warnings
             warnings.warn(
@@ -149,6 +210,172 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         
         return None
     
+    async def _astart_interactive_runtime(self, config: Dict[str, Any]):
+        """Start InteractiveRuntime if ACP/LSP is enabled."""
+        import os
+        global_config = config.get('config', {})
+        acp_enabled = global_config.get('acp', False)
+        lsp_enabled = global_config.get('lsp', False)
+        
+        if not (acp_enabled or lsp_enabled):
+            return None
+            
+        try:
+            from praisonai.cli.features.interactive_runtime import InteractiveRuntime, RuntimeConfig
+            
+            runtime_config = RuntimeConfig(
+                workspace=os.getcwd(),
+                acp_enabled=acp_enabled,
+                lsp_enabled=lsp_enabled,
+                approval_mode=os.environ.get("PRAISONAI_APPROVAL_MODE", "prompt")
+            )
+            rt = InteractiveRuntime(runtime_config)
+            logger.info(f"Starting InteractiveRuntime (ACP: {acp_enabled}, LSP: {lsp_enabled})")
+            await rt.start()
+            return rt
+        except ImportError as e:
+            logger.warning(f"InteractiveRuntime not available: {e}")
+            return None
+        except (RuntimeError, OSError, ConnectionError) as e:
+            logger.warning(f"InteractiveRuntime startup failed: {e}")
+            return None
+
+    def _maybe_inject_centric_tools(self, interactive_runtime, tools_dict):
+        """Inject agent-centric tools if runtime is available."""
+        if interactive_runtime is None:
+            return tools_dict or {}
+            
+        try:
+            from praisonai.cli.features.agent_tools import create_agent_centric_tools
+            centric_tools = create_agent_centric_tools(interactive_runtime)
+            logger.info(f"Loaded {len(centric_tools)} InteractiveRuntime tools")
+            return {**(tools_dict or {}), **centric_tools}
+        except Exception as e:
+            logger.warning(f"Failed to inject agent-centric tools: {e}")
+            return tools_dict or {}
+
+    def _pick_model(self, llm_config: List[Dict]) -> str:
+        """Extract model name from llm_config."""
+        if llm_config and llm_config[0].get('model'):
+            return llm_config[0]['model']
+        return "gpt-4o-mini"
+
+    def _build_agents_and_tasks(self, config, topic, tools_dict, agent_callback, task_callback, model_name):
+        """Build agents and tasks from configuration."""
+        from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask
+        
+        agents = {}
+        tasks = []
+        
+        # Process agents from config
+        for role, details in config.get('roles', {}).items():
+            role_filled = self._format_template(details.get('role', role), topic=topic)
+            goal_filled = self._format_template(details.get('goal', ''), topic=topic)
+            backstory_filled = self._format_template(details.get('backstory', ''), topic=topic)
+            
+            # Resolve tools for this agent from tools_dict
+            agent_tool_list = []
+            if tools_dict:
+                agent_tools = details.get('tools', [])
+                agent_tool_list = [tools_dict[t] for t in agent_tools if t in tools_dict]
+            
+            # Extract toolsets from YAML config
+            agent_toolsets = details.get('toolsets', [])
+            
+            # Resolve per-agent LLM model
+            agent_model = self._resolve_agent_model(details, model_name)
+            
+            # Resolve per-agent runtime configuration
+            agent_runtime = self._resolve_agent_runtime(details, config)
+            
+            # Resolve approval configuration
+            agent_approval = self._resolve_agent_approval(details, config)
+            
+            # Create basic agent (pass both tools and toolsets)
+            agent_kwargs = {
+                'name': role_filled,
+                'role': role_filled,
+                'goal': goal_filled,
+                'backstory': backstory_filled,
+                'instructions': details.get('instructions'),
+                'llm': agent_model,
+                'allow_delegation': details.get('allow_delegation', False),
+                'tools': agent_tool_list,
+                'toolsets': agent_toolsets,
+                'runtime': agent_runtime,
+            }
+            
+            # Add approval config if present
+            if agent_approval:
+                agent_kwargs['approval'] = agent_approval
+            
+            agent = PraisonAgent(**agent_kwargs)
+            
+            if agent_callback:
+                agent.step_callback = agent_callback
+                
+            agents[role] = agent
+            
+            # Create tasks for the agent
+            agent_tasks = details.get('tasks', {})
+            if not agent_tasks:
+                # Auto-generate a task
+                task_description = details.get('instructions') or backstory_filled
+                task = PraisonTask(
+                    description=task_description,
+                    expected_output="Complete the assigned task successfully.",
+                    agent=agent,
+                )
+                if task_callback:
+                    task.callback = task_callback
+                tasks.append(task)
+            else:
+                for _task_name, task_details in agent_tasks.items():
+                    description_filled = self._format_template(
+                        task_details.get('description', ''), topic=topic
+                    )
+                    expected_output_filled = self._format_template(
+                        task_details.get('expected_output', 'Task completed successfully.'), topic=topic
+                    )
+                    
+                    task = PraisonTask(
+                        description=description_filled,
+                        expected_output=expected_output_filled,
+                        agent=agent,
+                    )
+                    
+                    if task_callback:
+                        task.callback = task_callback
+                    
+                    tasks.append(task)
+        
+        return agents, tasks
+
+    def _build_team(self, config, agents, tasks, model_name):
+        """Build AgentTeam from agents and tasks."""
+        from praisonaiagents import AgentTeam
+        
+        memory = config.get('memory', False)
+        
+        if config.get('process') == 'hierarchical':
+            # Use specific manager_llm or fall back to global model
+            manager_model = config.get('manager_llm') or model_name
+            team = AgentTeam(
+                agents=list(agents.values()),
+                tasks=tasks,
+                process="hierarchical",
+                manager_llm=manager_model,
+                memory=memory
+            )
+        else:
+            team = AgentTeam(
+                agents=list(agents.values()),
+                tasks=tasks,
+                memory=memory
+            )
+        
+        return team
+
     def run(
         self,
         config: Dict[str, Any],
@@ -175,187 +402,16 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         Returns:
             Execution result as string
         """
-        # Availability already validated at CLI entry
-        
-        # Import PraisonAI components only when needed
-        from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, AgentTeam
-        from .._framework_availability import is_available
-        import os
-        
-        logger.info("Starting PraisonAI execution...")
-        
-        agents = {}
-        tasks = []
-        
-        # Get model from llm_config or environment
-        model_name = "gpt-4o-mini"
-        if llm_config and llm_config[0].get('model'):
-            model_name = llm_config[0]['model']
-        
-        # Initialize InteractiveRuntime for ACP/LSP if enabled globally
-        global_config = config.get('config', {})
-        acp_enabled = global_config.get('acp', False)
-        lsp_enabled = global_config.get('lsp', False)
-        interactive_runtime = None
-        
-        if acp_enabled or lsp_enabled:
-            try:
-                from praisonai._async_bridge import run_sync
-                from praisonai.cli.features.interactive_runtime import InteractiveRuntime, RuntimeConfig
-                from praisonai.cli.features.agent_tools import create_agent_centric_tools
-                
-                # Use scoped configuration instead of process-global mutations
-                runtime_config = RuntimeConfig(
-                    workspace=os.getcwd(),
-                    acp_enabled=acp_enabled,
-                    lsp_enabled=lsp_enabled,
-                    approval_mode=os.environ.get("PRAISONAI_APPROVAL_MODE", "prompt")
-                )
-                rt = InteractiveRuntime(runtime_config)
-                logger.info(f"Starting InteractiveRuntime (ACP: {acp_enabled}, LSP: {lsp_enabled})")
-                
-                # Start the runtime on the shared background loop where it stays alive
-                # and its asyncio primitives remain valid for the duration of this call
-                run_sync(rt.start())
-                interactive_runtime = rt  # only assign AFTER start() succeeds
-                
-            except ImportError as e:
-                logger.warning(f"InteractiveRuntime not available: {e}")
-                interactive_runtime = None
-            except (RuntimeError, OSError, ConnectionError) as e:
-                logger.warning(f"InteractiveRuntime startup failed: {e}")
-                interactive_runtime = None
-        try:
-            # All work that can throw *after* start() lives here, including
-            # create_agent_centric_tools, tools_dict.update, agent construction,
-            # team.start(), etc.
-            if interactive_runtime is not None:
-                from praisonai.cli.features.agent_tools import create_agent_centric_tools
-                centric_tools = create_agent_centric_tools(interactive_runtime)
-                logger.info(f"Loaded {len(centric_tools)} InteractiveRuntime tools")
-                tools_dict = {**(tools_dict or {}), **centric_tools}
+        # Single source of truth: sync goes through the async bridge.
+        from praisonai._async_bridge import run_sync
+        return run_sync(self.arun(
+            config, llm_config, topic,
+            tools_dict=tools_dict,
+            agent_callback=agent_callback,
+            task_callback=task_callback,
+            cli_config=cli_config,
+        ))
 
-            # Create agents from roles
-            for role, details in config.get('roles', {}).items():
-                role_filled = self._format_template(details.get('role', role), topic=topic)
-                goal_filled = self._format_template(details.get('goal', ''), topic=topic)
-                backstory_filled = self._format_template(details.get('backstory', ''), topic=topic)
-                
-                # Resolve tools for this agent from tools_dict
-                agent_tool_list = []
-                if tools_dict:
-                    agent_tools = details.get('tools', [])
-                    agent_tool_list = [tools_dict[t] for t in agent_tools if t in tools_dict]
-                
-                # Extract toolsets from YAML config
-                agent_toolsets = details.get('toolsets', [])
-                
-                # Resolve per-agent LLM model
-                agent_model = self._resolve_agent_model(details, model_name)
-                
-                # Resolve per-agent runtime configuration
-                agent_runtime = self._resolve_agent_runtime(details, config)
-                
-                # Resolve approval configuration
-                agent_approval = self._resolve_agent_approval(details, config)
-                
-                # Create basic agent (pass both tools and toolsets)
-                agent_kwargs = {
-                    'name': role_filled,
-                    'role': role_filled,
-                    'goal': goal_filled,
-                    'backstory': backstory_filled,
-                    'instructions': details.get('instructions'),
-                    'llm': agent_model,
-                    'allow_delegation': details.get('allow_delegation', False),
-                    'tools': agent_tool_list,
-                    'toolsets': agent_toolsets,
-                    'runtime': agent_runtime,
-                }
-                
-                # Add approval config if present
-                if agent_approval:
-                    agent_kwargs['approval'] = agent_approval
-                
-                agent = PraisonAgent(**agent_kwargs)
-                
-                if agent_callback:
-                    agent.step_callback = agent_callback
-                    
-                agents[role] = agent
-                
-                # Create tasks for the agent
-                agent_tasks = details.get('tasks', {})
-                if not agent_tasks:
-                    # Auto-generate a task
-                    task_description = details.get('instructions') or backstory_filled
-                    task = PraisonTask(
-                        description=task_description,
-                        expected_output="Complete the assigned task successfully.",
-                        agent=agent,
-                    )
-                    if task_callback:
-                        task.callback = task_callback
-                    tasks.append(task)
-                else:
-                    for task_name, task_details in agent_tasks.items():
-                        description_filled = self._format_template(
-                            task_details['description'], topic=topic
-                        )
-                        expected_output_filled = self._format_template(
-                            task_details['expected_output'], topic=topic
-                        )
-                        
-                        task = PraisonTask(
-                            description=description_filled,
-                            expected_output=expected_output_filled,
-                            agent=agent,
-                        )
-                        
-                        if task_callback:
-                            task.callback = task_callback
-                        
-                        tasks.append(task)
-            
-            # Create and run the team
-            memory = config.get('memory', False)
-            
-            if config.get('process') == 'hierarchical':
-                # Use specific manager_llm or fall back to global model
-                manager_model = config.get('manager_llm') or model_name
-                team = AgentTeam(
-                    agents=list(agents.values()),
-                    tasks=tasks,
-                    process="hierarchical",
-                    manager_llm=manager_model,
-                    memory=memory
-                )
-            else:
-                team = AgentTeam(
-                    agents=list(agents.values()),
-                    tasks=tasks,
-                    memory=memory
-                )
-            
-            response = team.start()
-            result = f"### PraisonAI Output ###\n{response}" if response else "### PraisonAI Output ###\nTask completed."
-            
-            # Close observability session
-            from ..observability.hooks import finalize_observability
-            finalize_observability(self.name, status="Success")
-            
-            logger.info("PraisonAI execution completed")
-            return result
-        finally:
-            # Cleanup InteractiveRuntime if it was started
-            if interactive_runtime is not None:
-                try:
-                    logger.info("Stopping InteractiveRuntime")
-                    from praisonai._async_bridge import run_sync
-                    run_sync(interactive_runtime.stop())
-                except Exception as e:
-                    logger.error(f"Error stopping InteractiveRuntime: {e}")
-    
     async def arun(
         self,
         config: Dict[str, Any],
@@ -374,162 +430,29 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         """
         # Import PraisonAI components only when needed
         from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, AgentTeam
-        from .._framework_availability import is_available
         import os
         
         logger.info("Starting PraisonAI async execution...")
         
-        agents = {}
-        tasks = []
+        # Get model from llm_config
+        model_name = self._pick_model(llm_config)
         
-        # Get model from llm_config or environment
-        model_name = "gpt-4o-mini"
-        if llm_config and llm_config[0].get('model'):
-            model_name = llm_config[0]['model']
-        
-        # Initialize InteractiveRuntime for ACP/LSP if enabled globally
-        global_config = config.get('config', {})
-        acp_enabled = global_config.get('acp', False)
-        lsp_enabled = global_config.get('lsp', False)
-        interactive_runtime = None
-        
-        if acp_enabled or lsp_enabled:
-            try:
-                from praisonai.cli.features.interactive_runtime import InteractiveRuntime, RuntimeConfig
-                from praisonai.cli.features.agent_tools import create_agent_centric_tools
-                
-                # Use scoped configuration instead of process-global mutations
-                runtime_config = RuntimeConfig(
-                    workspace=os.getcwd(),
-                    acp_enabled=acp_enabled,
-                    lsp_enabled=lsp_enabled,
-                    approval_mode=os.environ.get("PRAISONAI_APPROVAL_MODE", "prompt")
-                )
-                rt = InteractiveRuntime(runtime_config)
-                logger.info(f"Starting InteractiveRuntime (ACP: {acp_enabled}, LSP: {lsp_enabled})")
-                
-                # Start the runtime asynchronously
-                await rt.start()
-                interactive_runtime = rt  # only assign AFTER start() succeeds
-                
-            except ImportError as e:
-                logger.warning(f"InteractiveRuntime not available: {e}")
-                interactive_runtime = None
-            except (RuntimeError, OSError, ConnectionError) as e:
-                logger.warning(f"InteractiveRuntime startup failed: {e}")
-                interactive_runtime = None
+        # Initialize InteractiveRuntime for ACP/LSP if enabled
+        interactive_runtime = await self._astart_interactive_runtime(config)
         
         try:
-            # All work that can throw *after* start() lives here
-            if interactive_runtime is not None:
-                from praisonai.cli.features.agent_tools import create_agent_centric_tools
-                centric_tools = create_agent_centric_tools(interactive_runtime)
-                logger.info(f"Loaded {len(centric_tools)} InteractiveRuntime tools")
-                tools_dict = {**(tools_dict or {}), **centric_tools}
+            # Inject agent-centric tools if runtime is available
+            tools_dict = self._maybe_inject_centric_tools(interactive_runtime, tools_dict)
 
-            # Create agents from roles - same logic as sync version
-            for role, details in config.get('roles', {}).items():
-                role_filled = self._format_template(details.get('role', role), topic=topic)
-                goal_filled = self._format_template(details.get('goal', ''), topic=topic)
-                backstory_filled = self._format_template(details.get('backstory', ''), topic=topic)
-                
-                # Resolve tools for this agent from tools_dict
-                agent_tool_list = []
-                if tools_dict:
-                    agent_tools = details.get('tools', [])
-                    agent_tool_list = [tools_dict[t] for t in agent_tools if t in tools_dict]
-                
-                # Extract toolsets from YAML config
-                agent_toolsets = details.get('toolsets', [])
-                
-                # Resolve per-agent LLM model
-                agent_model = self._resolve_agent_model(details, model_name)
-                
-                # Resolve per-agent runtime configuration
-                agent_runtime = self._resolve_agent_runtime(details, config)
-                
-                # Resolve approval configuration
-                agent_approval = self._resolve_agent_approval(details, config)
-                
-                # Create basic agent (pass both tools and toolsets)
-                agent_kwargs = {
-                    'name': role_filled,
-                    'role': role_filled,
-                    'goal': goal_filled,
-                    'backstory': backstory_filled,
-                    'instructions': details.get('instructions'),
-                    'llm': agent_model,
-                    'allow_delegation': details.get('allow_delegation', False),
-                    'tools': agent_tool_list,
-                    'toolsets': agent_toolsets,
-                    'runtime': agent_runtime,
-                }
-                
-                # Add approval config if present
-                if agent_approval:
-                    agent_kwargs['approval'] = agent_approval
-                
-                agent = PraisonAgent(**agent_kwargs)
-                
-                if agent_callback:
-                    agent.step_callback = agent_callback
-                    
-                agents[role] = agent
-                
-                # Create tasks for the agent - same logic as sync version
-                agent_tasks = details.get('tasks', {})
-                if not agent_tasks:
-                    # Auto-generate a task
-                    task_description = details.get('instructions') or backstory_filled
-                    task = PraisonTask(
-                        description=task_description,
-                        expected_output="Complete the assigned task successfully.",
-                        agent=agent,
-                    )
-                    if task_callback:
-                        task.callback = task_callback
-                    tasks.append(task)
-                else:
-                    for task_name, task_details in agent_tasks.items():
-                        description_filled = self._format_template(
-                            task_details['description'], topic=topic
-                        )
-                        expected_output_filled = self._format_template(
-                            task_details['expected_output'], topic=topic
-                        )
-                        
-                        task = PraisonTask(
-                            description=description_filled,
-                            expected_output=expected_output_filled,
-                            agent=agent,
-                        )
-                        
-                        if task_callback:
-                            task.callback = task_callback
-                        
-                        tasks.append(task)
+            # Build agents and tasks from config
+            agents, tasks = self._build_agents_and_tasks(
+                config, topic, tools_dict, agent_callback, task_callback, model_name
+            )
             
-            # Create and run the team asynchronously
-            memory = config.get('memory', False)
+            # Create the team
+            team = self._build_team(config, agents, tasks, model_name)
             
-            if config.get('process') == 'hierarchical':
-                # Use specific manager_llm or fall back to global model
-                manager_model = config.get('manager_llm') or model_name
-                team = AgentTeam(
-                    agents=list(agents.values()),
-                    tasks=tasks,
-                    process="hierarchical",
-                    manager_llm=manager_model,
-                    memory=memory
-                )
-            else:
-                team = AgentTeam(
-                    agents=list(agents.values()),
-                    tasks=tasks,
-                    memory=memory
-                )
-            
-            # Use native async path instead of team.start()
+            # Use native async path
             response = await team.astart()
             result = f"### PraisonAI Output ###\n{response}" if response else "### PraisonAI Output ###\nTask completed."
             
@@ -548,3 +471,24 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 except Exception as e:
                     logger.error(f"Error stopping InteractiveRuntime: {e}")
     
+    def validate_config(self, config: Dict[str, Any]) -> bool:
+        """
+        Validate configuration for PraisonAI.
+        
+        Args:
+            config: Configuration dictionary to validate
+        
+        Returns:
+            True if configuration is valid
+        
+        Raises:
+            ValueError: If configuration is invalid with details
+        """
+        if not config:
+            raise ValueError("Configuration is empty")
+        
+        roles = config.get('roles', {})
+        if not roles:
+            raise ValueError("No agents defined in 'roles' section")
+        
+        return True

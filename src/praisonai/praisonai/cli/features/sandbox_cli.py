@@ -54,10 +54,15 @@ class SandboxHandler:
             registry = SandboxRegistry.default()
             try:
                 sandbox_class = registry.resolve(sandbox_type)
-            except ValueError:
-                # Fallback to subprocess for unknown types
-                sandbox_class = registry.resolve("subprocess")
-                sandbox_type = "subprocess"  # Update to match resolved type
+            except ValueError as e:
+                # Don't silently downgrade. Fail loud, give a fix-it hint.
+                print(
+                    f"Error: sandbox '{sandbox_type}' is unavailable: {e}\n"
+                    f"Available: {registry.list_names()}\n"
+                    f"To install the optional backend:  pip install \"praisonai[{sandbox_type}]\"\n"
+                    f"Or explicitly choose another sandbox:  --sandbox-type subprocess"
+                )
+                sys.exit(2)
             
             # Pass image parameter only for Docker sandbox
             if sandbox_type == "docker":
@@ -113,10 +118,15 @@ class SandboxHandler:
             registry = SandboxRegistry.default()
             try:
                 sandbox_class = registry.resolve(sandbox_type)
-            except ValueError:
-                # Fallback to subprocess for unknown types
-                sandbox_class = registry.resolve("subprocess")
-                sandbox_type = "subprocess"  # Update to match resolved type
+            except ValueError as e:
+                # Don't silently downgrade. Fail loud, give a fix-it hint.
+                print(
+                    f"Error: sandbox '{sandbox_type}' is unavailable: {e}\n"
+                    f"Available: {registry.list_names()}\n"
+                    f"To install the optional backend:  pip install \"praisonai[{sandbox_type}]\"\n"
+                    f"Or explicitly choose another sandbox:  --sandbox-type subprocess"
+                )
+                sys.exit(2)
             
             # Pass image parameter only for Docker sandbox
             if sandbox_type == "docker":
