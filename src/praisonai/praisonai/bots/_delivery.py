@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 from ._chunk import chunk_message, _calculate_length
 from ._streaming import DraftStreamer, StreamingConfig, StreamingMode
 from ._rate_limit import RateLimiter
-from ._resilience import BackoffPolicy, compute_backoff, is_recoverable_error, sleep_with_abort
+from ._resilience import BackoffPolicy, compute_backoff, is_recoverable_error, sleep_with_abort, deliver_with_retry
 
 logger = logging.getLogger(__name__)
 
