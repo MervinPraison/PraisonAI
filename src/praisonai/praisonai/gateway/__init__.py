@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from .pairing import PairingStore
     from .exec_approval import ExecApprovalManager, get_exec_approval_manager
     from .gateway_approval import GatewayApprovalBackend
+    from .home_channels import HomeChannelRegistry, DeliveryResolver
 
 def __getattr__(name: str):
     """Lazy loading of gateway components."""
@@ -38,6 +39,12 @@ def __getattr__(name: str):
     if name == "GatewayApprovalBackend":
         from .gateway_approval import GatewayApprovalBackend
         return GatewayApprovalBackend
+    if name == "HomeChannelRegistry":
+        from .home_channels import HomeChannelRegistry
+        return HomeChannelRegistry
+    if name == "DeliveryResolver":
+        from .home_channels import DeliveryResolver
+        return DeliveryResolver
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
@@ -48,4 +55,6 @@ __all__ = [
     "ExecApprovalManager",
     "get_exec_approval_manager",
     "GatewayApprovalBackend",
+    "HomeChannelRegistry",
+    "DeliveryResolver",
 ]

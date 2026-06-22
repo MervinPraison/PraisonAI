@@ -43,8 +43,9 @@ def schedule_add_cmd(
     schedule: str = typer.Option(..., "--schedule", "-s", help="When to run: 'hourly', 'daily', '*/30m', 'cron:0 9 * * *', 'at:2026-03-01T09:00', 'in 20 minutes'"),
     message: str = typer.Option("", "--message", "-m", help="Prompt / reminder text"),
     agent: str = typer.Option("", "--agent", "-a", help="Agent ID to execute this job (default: first registered agent)"),
-    channel: str = typer.Option("", "--channel", help="Delivery platform: telegram, discord, slack, whatsapp"),
-    channel_id: str = typer.Option("", "--channel-id", help="Target chat/channel ID on the platform"),
+    deliver: str = typer.Option("", "--deliver", "-d", help="Delivery token: 'origin', 'telegram', 'all', or 'platform:chat_id[:thread_id]'"),
+    channel: str = typer.Option("", "--channel", help="[Legacy] Delivery platform: telegram, discord, slack, whatsapp"),
+    channel_id: str = typer.Option("", "--channel-id", help="[Legacy] Target chat/channel ID on the platform"),
     session_id: str = typer.Option("", "--session-id", help="Session ID to preserve conversation context"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
 ):
@@ -52,20 +53,33 @@ def schedule_add_cmd(
 
     Examples:
         praisonai schedule add "morning-hello" -s "cron:0 9 * * *" -m "say hello"
+        praisonai schedule add "news" -s daily -m "news summary" --deliver telegram
+        praisonai schedule add "report" -s hourly -m "status report" --deliver all
         praisonai schedule add "tg-reminder" -s daily -m "check email" --agent support --channel telegram --channel-id 12345
     """
     output = get_output_controller()
     try:
         from praisonaiagents.tools.schedule_tools import schedule_add as _schedule_add
 
+        # Build delivery target based on new or legacy format
+        delivery_kwargs = {}
+        if deliver:
+            # New token-based delivery
+            delivery_kwargs["deliver"] = deliver
+        elif channel or channel_id:
+            # Legacy explicit channel/channel_id
+            delivery_kwargs["channel"] = channel
+            delivery_kwargs["channel_id"] = channel_id
+        
+        if session_id:
+            delivery_kwargs["session_id"] = session_id
+        
         result = _schedule_add(
             name=name,
             schedule=schedule,
             message=message,
             agent_id=agent,
-            channel=channel,
-            channel_id=channel_id,
-            session_id=session_id,
+            **delivery_kwargs
         )
 
         if json_output:
