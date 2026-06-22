@@ -180,6 +180,7 @@ __all__ = [
     "TerminalLoggerProtocol",
     "compute_checksum",
     "generate_summary",
+    "FileSystemArtifactStore",
     # Context Compaction Policy
     "ContextCompactionPolicy",
     "ContextCompactionPolicyProtocol",
@@ -294,6 +295,11 @@ def __getattr__(name: str):
                 "compute_checksum", "generate_summary"):
         from . import artifacts
         return getattr(artifacts, name)
+    
+    # FileSystemArtifactStore
+    if name == "FileSystemArtifactStore":
+        from .artifact_store import FileSystemArtifactStore
+        return FileSystemArtifactStore
     
     # Session Context Tracking (Agno pattern)
     if name in ("SessionContextTracker", "SessionState"):

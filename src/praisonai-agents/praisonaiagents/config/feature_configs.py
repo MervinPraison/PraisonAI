@@ -42,6 +42,7 @@ from ..agent.autonomy import AutonomyConfig
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..compaction.strategy import CompactionStrategy
+    from ..context.artifact_store import FileSystemArtifactStore
 
 
 class MemoryBackend(str, Enum):
@@ -1513,6 +1514,68 @@ def resolve_tools(value: ToolParam) -> Optional[ToolConfig]:
     return value
 
 
+@dataclass
+class ToolOutputConfig:
+    """
+    Configuration for tool output handling and artifact storage.
+    
+    Controls when and how large tool outputs are stored as artifacts
+    instead of being truncated and lost.
+    
+    Args:
+        max_bytes: Maximum bytes before spilling to artifact store (default: 16000)
+        max_lines: Maximum lines before spilling (default: None, bytes-only)
+        direction: Truncation direction - "head", "tail", or "both" (default: "both")
+        retention_days: Days to retain artifacts before garbage collection (default: 7)
+        enable_artifacts: Whether to enable artifact storage (default: True)
+        artifact_store: Custom artifact store instance (default: FileSystemArtifactStore)
+        redact_secrets: Whether to redact secrets from artifacts (default: True)
+    
+    Example:
+        agent = Agent(
+            instructions="...",
+            tool_output=ToolOutputConfig(
+                max_bytes=32000,
+                direction="tail",
+                retention_days=14,
+            )
+        )
+    """
+    max_bytes: int = 16000
+    max_lines: Optional[int] = None
+    direction: str = "both"  # "head", "tail", or "both"
+    retention_days: int = 7
+    enable_artifacts: bool = True
+    artifact_store: Optional[Any] = None  # FileSystemArtifactStore instance
+    redact_secrets: bool = True
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "max_bytes": self.max_bytes,
+            "max_lines": self.max_lines,
+            "direction": self.direction,
+            "retention_days": self.retention_days,
+            "enable_artifacts": self.enable_artifacts,
+            "redact_secrets": self.redact_secrets,
+        }
+
+
+# Type alias for tool output parameter
+ToolOutputParam = Union[bool, ToolOutputConfig, Any]
+
+
+def resolve_tool_output(value: Optional[ToolOutputParam]) -> Optional[ToolOutputParam]:
+    """Resolve tool output configuration with precedence ladder."""
+    if value is None or value is False:
+        return None
+    if value is True:
+        return ToolOutputConfig()
+    if isinstance(value, ToolOutputConfig):
+        return value
+    return value
+
+
 __all__ = [
     # Enums
     "MemoryBackend",
@@ -1540,6 +1603,7 @@ __all__ = [
     "SkillsConfig",
     "AutonomyConfig",
     "ToolSearchConfig",
+    "ToolOutputConfig",
     # Config classes (Multi-Agent)
     "MultiAgentHooksConfig",
     "MultiAgentOutputConfig",
@@ -1562,6 +1626,7 @@ __all__ = [
     "AutonomyParam",
     "ToolSearchParam", 
     "ToolParam",
+    "ToolOutputParam",
     # Precedence ladder resolvers
     "resolve_memory",
     "resolve_knowledge",
@@ -1573,4 +1638,5 @@ __all__ = [
     "resolve_autonomy",
     "resolve_tool_search",
     "resolve_tools",
+    "resolve_tool_output",
 ]

@@ -593,6 +593,7 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         runtime: Optional[Union[str, Dict[str, Any], 'AgentRuntimeConfig']] = None,  # Model-scoped runtime configuration
         interrupt_controller: Optional['InterruptController'] = None,  # G2: Cooperative cancellation
         tool_search: Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']] = False,  # Progressive tool disclosure
+        tool_output: Optional[Union[bool, Dict[str, Any], 'ToolOutputConfig']] = None,  # Tool output handling and artifact storage
         message_steering: Optional[Union[bool, 'MessageSteeringProtocol']] = False,  # Real-time message steering during execution
         sandbox: Optional[Union[bool, 'SandboxConfig']] = None,  # Sandbox for safe code execution
     ):
@@ -1506,6 +1507,51 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
                 raise TypeError(
                     "tool_search must be False/None, True, a mode string, "
                     "a dict of ToolSearchConfig fields, or ToolSearchConfig"
+                )
+        
+        # Process tool_output config (artifact storage for large outputs)
+        self._artifact_store = None
+        self.tool_output_limit = DEFAULT_TOOL_OUTPUT_LIMIT
+        
+        if tool_output is None or tool_output is False:
+            # Disabled - use default truncation only
+            pass
+        elif tool_output is True:
+            # Enabled with defaults
+            from ..config.feature_configs import ToolOutputConfig
+            from ..context.artifact_store import FileSystemArtifactStore
+            config = ToolOutputConfig()
+            self.tool_output_limit = config.max_bytes
+            if config.enable_artifacts:
+                self._artifact_store = config.artifact_store or FileSystemArtifactStore(
+                    retention_days=config.retention_days,
+                    redact_secrets=config.redact_secrets
+                )
+        elif isinstance(tool_output, dict):
+            # Dict -> config overrides
+            from ..config.feature_configs import ToolOutputConfig
+            from ..context.artifact_store import FileSystemArtifactStore
+            config = ToolOutputConfig(**tool_output)
+            self.tool_output_limit = config.max_bytes
+            if config.enable_artifacts:
+                self._artifact_store = config.artifact_store or FileSystemArtifactStore(
+                    retention_days=config.retention_days,
+                    redact_secrets=config.redact_secrets
+                )
+        else:
+            from ..config.feature_configs import ToolOutputConfig
+            if isinstance(tool_output, ToolOutputConfig):
+                config = tool_output
+                self.tool_output_limit = config.max_bytes
+                if config.enable_artifacts:
+                    from ..context.artifact_store import FileSystemArtifactStore
+                    self._artifact_store = config.artifact_store or FileSystemArtifactStore(
+                        retention_days=config.retention_days,
+                        redact_secrets=config.redact_secrets
+                    )
+            else:
+                raise TypeError(
+                    "tool_output must be False/None, True, a dict of ToolOutputConfig fields, or ToolOutputConfig"
                 )
         
         # ============================================================
@@ -5593,6 +5639,14 @@ Answer:"""
                 memory = getattr(self, "_memory_instance", None)
                 if memory and hasattr(memory, 'close_connections'):
                     memory.close_connections()
+                    
+                # Clean up old artifacts if artifact store is configured
+                artifact_store = getattr(self, "_artifact_store", None)
+                if artifact_store and hasattr(artifact_store, 'cleanup_old_artifacts'):
+                    try:
+                        artifact_store.cleanup_old_artifacts()
+                    except Exception:
+                        pass  # Best effort cleanup
             except Exception as exc:  # noqa: BLE001 - finalizers must not raise
                 import contextlib
                 with contextlib.suppress(Exception):
