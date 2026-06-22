@@ -15,9 +15,12 @@ from typing import Optional, Dict, Any
 from uuid import uuid4
 
 from ..paths import get_cache_dir, ensure_dir
+from ..bus import EventBus, get_default_bus
+from ..bus.event import EventType
+from ..storage.tool_output_protocol import ToolOutputStoreProtocol
 
 
-class ToolOutputStore:
+class ToolOutputStore(ToolOutputStoreProtocol):
     """Manages persistent storage of full tool outputs with TTL cleanup."""
     
     DEFAULT_RETENTION_HOURS = 24
@@ -66,18 +69,49 @@ class ToolOutputStore:
         safe_call_id = "".join(c if c.isalnum() or c in "_-" else "_" for c in call_id)
         output_path = self.store_dir / f"{safe_call_id}.txt"
         
+        # Get event bus for emissions
+        bus = get_default_bus()
+        
         try:
             output_path.write_text(output, encoding='utf-8')
             
-            return {
+            metadata = {
                 'path': str(output_path),
                 'size': len(output),
                 'tool': tool_name,
                 'call_id': call_id,
                 'timestamp': time.time()
             }
+            
+            # Emit success event
+            bus.publish(
+                "tool_output.stored",
+                data={
+                    "tool_name": tool_name,
+                    "call_id": call_id,
+                    "path": str(output_path),
+                    "size_bytes": len(output),
+                    "run_id": self.run_id
+                },
+                source=f"ToolOutputStore:{self.run_id}"
+            )
+            
+            return metadata
         except Exception as e:
             logging.warning(f"Failed to store tool output: {e}")
+            
+            # Emit failure event
+            bus.publish(
+                "tool_output.store_failed",
+                data={
+                    "tool_name": tool_name,
+                    "call_id": call_id,
+                    "error": str(e),
+                    "run_id": self.run_id
+                },
+                source=f"ToolOutputStore:{self.run_id}"
+            )
+            
             return {}
     
     def retrieve(self, path_or_metadata: Any) -> Optional[str]:
@@ -90,6 +124,9 @@ class ToolOutputStore:
         Returns:
             Full output text or None if not found
         """
+        # Get event bus for emissions
+        bus = get_default_bus()
+        
         try:
             if isinstance(path_or_metadata, dict):
                 path = path_or_metadata.get('path')
@@ -97,20 +134,59 @@ class ToolOutputStore:
                 path = path_or_metadata
             
             if path and Path(path).exists():
-                return Path(path).read_text(encoding='utf-8')
+                content = Path(path).read_text(encoding='utf-8')
+                
+                # Emit success event
+                bus.publish(
+                    "tool_output.retrieved",
+                    data={
+                        "path": str(path),
+                        "size_bytes": len(content),
+                        "run_id": self.run_id
+                    },
+                    source=f"ToolOutputStore:{self.run_id}"
+                )
+                
+                return content
+            else:
+                # Emit not found event
+                bus.publish(
+                    "tool_output.not_found",
+                    data={
+                        "path": str(path) if path else "None",
+                        "run_id": self.run_id
+                    },
+                    source=f"ToolOutputStore:{self.run_id}"
+                )
         except Exception as e:
             logging.debug(f"Failed to retrieve tool output: {e}")
+            
+            # Emit failure event
+            bus.publish(
+                "tool_output.retrieve_failed",
+                data={
+                    "path": str(path) if path else "None",
+                    "error": str(e),
+                    "run_id": self.run_id
+                },
+                source=f"ToolOutputStore:{self.run_id}"
+            )
         
         return None
     
     def _cleanup_old_runs(self):
         """Remove run directories older than retention period."""
+        # Get event bus for emissions
+        bus = get_default_bus()
+        
         try:
             tool_outputs_dir = get_cache_dir() / "tool_outputs"
             if not tool_outputs_dir.exists():
                 return
             
             cutoff_time = time.time() - (self.retention_hours * 3600)
+            cleaned_count = 0
+            failed_count = 0
             
             for run_dir in tool_outputs_dir.iterdir():
                 if run_dir.is_dir():
@@ -119,10 +195,35 @@ class ToolOutputStore:
                         try:
                             shutil.rmtree(run_dir)
                             logging.debug(f"Cleaned up old tool output dir: {run_dir.name}")
+                            cleaned_count += 1
                         except Exception as e:
                             logging.debug(f"Failed to clean up {run_dir}: {e}")
+                            failed_count += 1
+            
+            # Emit cleanup completed event
+            if cleaned_count > 0 or failed_count > 0:
+                bus.publish(
+                    "tool_output.cleanup_completed",
+                    data={
+                        "cleaned_runs": cleaned_count,
+                        "failed_runs": failed_count,
+                        "retention_hours": self.retention_hours,
+                        "run_id": self.run_id
+                    },
+                    source=f"ToolOutputStore:{self.run_id}"
+                )
         except Exception as e:
             logging.debug(f"Error during tool output cleanup: {e}")
+            
+            # Emit cleanup failed event
+            bus.publish(
+                "tool_output.cleanup_failed",
+                data={
+                    "error": str(e),
+                    "run_id": self.run_id
+                },
+                source=f"ToolOutputStore:{self.run_id}"
+            )
     
     def format_reference(self, metadata: Dict[str, Any], truncated_preview: str) -> str:
         """
