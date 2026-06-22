@@ -1060,7 +1060,11 @@ Your Goal: {self.goal}"""
                     stream = False  # Set for the main execution below
                 else:
                     raise  # Re-raise if it's a different ValueError
-            except Exception:
+            except Exception as e:
+                from ..errors import LLMError
+                # Don't retry if it's an LLMError that has exhausted retries
+                if isinstance(e, LLMError):
+                    raise  # Re-raise LLMErrors immediately to avoid double retry
                 # For any other exception, fall back to non-streaming
                 logging.debug(f"{self.name}: Streaming attempt failed, falling back to non-streaming")
                 stream = False  # Set for the main execution below
