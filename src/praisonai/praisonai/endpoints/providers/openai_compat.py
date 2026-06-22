@@ -373,27 +373,57 @@ class OpenAICompatProvider(BaseProvider):
             response = result.data or {}
             choices = response.get("choices", [])
             choice = choices[0] if choices else {}
-            content = choice.get("message", {}).get("content", "")
+            message = choice.get("message", {})
+            content = message.get("content", "")
+            tool_calls = message.get("tool_calls", [])
             
             # Simulate streaming by chunking the response
             chunk_id = str(uuid.uuid4())
             
-            # Send chunks
-            for i, char in enumerate(content):
-                chunk = {
-                    "id": chunk_id,
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": response.get("model", "gpt-4o-mini"),
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": {"content": char},
-                            "finish_reason": None
-                        }
-                    ]
-                }
-                yield {"event": "data", "data": chunk}
+            # If there are tool calls, send them first
+            if tool_calls:
+                for idx, tool_call in enumerate(tool_calls):
+                    tool_chunk = {
+                        "id": chunk_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": response.get("model", "gpt-4o-mini"),
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "index": idx,
+                                            "id": tool_call.get("id"),
+                                            "type": tool_call.get("type", "function"),
+                                            "function": tool_call.get("function", {})
+                                        }
+                                    ]
+                                },
+                                "finish_reason": None
+                            }
+                        ]
+                    }
+                    yield {"event": "data", "data": tool_chunk}
+            
+            # Send content chunks
+            if content:
+                for i, char in enumerate(content):
+                    chunk = {
+                        "id": chunk_id,
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": response.get("model", "gpt-4o-mini"),
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {"content": char},
+                                "finish_reason": None
+                            }
+                        ]
+                    }
+                    yield {"event": "data", "data": chunk}
             
             # Send final chunk
             final_chunk = {
@@ -405,7 +435,7 @@ class OpenAICompatProvider(BaseProvider):
                     {
                         "index": 0,
                         "delta": {},
-                        "finish_reason": "stop"
+                        "finish_reason": "stop" if not tool_calls else "tool_calls"
                     }
                 ]
             }

@@ -638,6 +638,17 @@ def serve_openai(
                             yield f"data: {json.dumps(chunk['data'])}\n\n"
                         elif chunk["event"] == "done":
                             yield "data: [DONE]\n\n"
+                        elif chunk["event"] == "error":
+                            # Send error as OpenAI-formatted SSE error chunk
+                            error_chunk = {
+                                "error": {
+                                    "message": chunk.get("data", {}).get("error", "Stream error occurred"),
+                                    "type": "stream_error"
+                                }
+                            }
+                            yield f"data: {json.dumps(error_chunk)}\n\n"
+                            yield "data: [DONE]\n\n"
+                            break
                 return StreamingResponse(generate(), media_type="text/event-stream")
             
             result = openai_provider.invoke("chat_completions", body, stream=False)
