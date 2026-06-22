@@ -320,21 +320,13 @@ class ToolResolver:
         if not name:
             return None
 
-        # Fast path: cached result
-        cached = self._resolve_cache.get(name, _SENTINEL)
-        if cached is not _SENTINEL:
-            if instantiate and self._is_class(cached):
-                return cached()
-            return cached
-
         # Load local tools outside the cache lock to prevent lock-order inversion
         local_tools = self._load_local_tools()
 
         with self._resolve_cache_lock:
-            # Double-check inside lock
+            # Check cache inside lock to prevent races
             cached = self._resolve_cache.get(name, _SENTINEL)
             if cached is not _SENTINEL:
-                # Apply instantiation to cached result if needed
                 if instantiate and self._is_class(cached):
                     return cached()
                 return cached
