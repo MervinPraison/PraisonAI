@@ -255,54 +255,6 @@ class AgentsGenerator:
         """
         return self._adapter_registry.create(framework)
 
-    def _prepare_adapter(self, framework: str, config: dict, tools_dict: dict):
-        """
-        Single source of truth for adapter resolution + setup + observability.
-        
-        Called by both sync and async entry points so they cannot drift.
-        
-        Args:
-            framework: Framework name to prepare
-            config: Configuration dictionary
-            tools_dict: Tools dictionary
-            
-        Returns:
-            Prepared and configured framework adapter
-        """
-        initial_adapter = self._get_framework_adapter(framework)
-        
-        # Handle YAML-level autogen_version override
-        autogen_version_override = config.get('autogen_version')
-        original_env_value = None
-        if framework == 'autogen' and autogen_version_override:
-            original_env_value = os.environ.get('AUTOGEN_VERSION')
-            os.environ['AUTOGEN_VERSION'] = str(autogen_version_override)
-            self.logger.debug(f"Temporarily setting AUTOGEN_VERSION={autogen_version_override}")
-        
-        try:
-            adapter = initial_adapter.resolve()  # autogen v0.2/v0.4, etc.
-        finally:
-            # Restore original environment variable
-            if autogen_version_override and original_env_value is not None:
-                os.environ['AUTOGEN_VERSION'] = original_env_value
-            elif autogen_version_override and original_env_value is None:
-                os.environ.pop('AUTOGEN_VERSION', None)
-
-        from .framework_adapters.validators import assert_framework_available
-        assert_framework_available(adapter.name)
-
-        from .observability.hooks import init_observability
-        init_observability(adapter.name)
-
-        adapter.setup(framework_tag=adapter.name)
-
-        self._validate_cli_backend_compatibility(config, adapter.name)
-
-        self.framework = adapter.name
-        self.framework_adapter = adapter
-        self.logger.info(f"Using framework: {adapter.name}")
-        return adapter
-
     def _merge_cli_config(self, config, cli_config):
         """
         Merge CLI configuration with YAML configuration.
