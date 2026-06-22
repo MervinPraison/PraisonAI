@@ -25,6 +25,17 @@ from .protocols import (
     OutboundDeliveryProtocol,
     ChannelInfo,
     PresenceInfo,
+    # Home channel and delivery protocols
+    HomeChannelRegistryProtocol,
+    DeliveryResolverProtocol,
+    # Protocol version negotiation
+    PROTOCOL_VERSION,
+    MIN_PROTOCOL_VERSION,
+    MAX_PROTOCOL_VERSION,
+    ProtocolHello,
+    ProtocolHelloOk,
+    GapInfo,
+    ResumeSnapshot,
 )
 from .config import (
     GatewayConfig,
@@ -93,6 +104,17 @@ __all__ = [
     "OutboundDeliveryProtocol",
     "ChannelInfo",
     "PresenceInfo",
+    # Home channel and delivery protocols
+    "HomeChannelRegistryProtocol",
+    "DeliveryResolverProtocol",
+    # Protocol version negotiation
+    "PROTOCOL_VERSION",
+    "MIN_PROTOCOL_VERSION",
+    "MAX_PROTOCOL_VERSION",
+    "ProtocolHello",
+    "ProtocolHelloOk",
+    "GapInfo",
+    "ResumeSnapshot",
     # Config (always available)
     "GatewayConfig",
     "SessionConfig",
