@@ -14,6 +14,7 @@ _lazy_imports = {
     "ToolsMCPProvider": ".tools_mcp",
     "A2AProvider": ".a2a",
     "A2UProvider": ".a2u",
+    "OpenAICompatProvider": ".openai_compat",
 }
 
 def __getattr__(name: str):
