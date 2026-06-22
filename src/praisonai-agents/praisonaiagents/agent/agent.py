@@ -552,6 +552,7 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         # LLM configuration
         llm: Optional[Union[str, Any]] = None,
         model: Optional[Union[str, Any]] = None,  # Alias for llm=
+        llm_config: Optional['LLMConfig'] = None,  # New: Grouped LLM configuration
         fallback_models: Optional[List[str]] = None,  # Ordered list of fallback models for resilience
         base_url: Optional[str] = None,  # Kept separate (connection/auth)
         api_key: Optional[str] = None,  # Kept separate (connection/auth)
@@ -1587,6 +1588,22 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
                 alternative="use 'model' instead. Example: Agent(model='gpt-4o-mini')",
                 stacklevel=3
             )
+        # Handle llm_config parameter (new grouped configuration)
+        if llm_config is not None:
+            from ..config import LLMConfig
+            if isinstance(llm_config, LLMConfig):
+                # Extract values from LLMConfig
+                if llm is None:  # Only override if not explicitly set
+                    llm = llm_config.model
+                if fallback_models is None:
+                    fallback_models = llm_config.fallback_models
+                if base_url is None:
+                    base_url = llm_config.base_url
+                if api_key is None:
+                    api_key = llm_config.api_key
+                if auth is None:
+                    auth = llm_config.auth
+        
         # model= is the preferred parameter (no warning)
         if model is not None:
             llm = model  # model= takes precedence
