@@ -223,7 +223,6 @@ class AgentsGenerator:
         
         # Keep tool registry for backward compatibility with autogen adapters
         self.tool_registry = ToolRegistry()
-        self.tool_registry.register_builtin_autogen_adapters(_suppress_deprecation_warning=True)
         
         # Initialize tool resolver with the registry wired in (single source of truth for tool resolution)
         from .tool_resolver import ToolResolver
