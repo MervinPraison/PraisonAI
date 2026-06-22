@@ -853,6 +853,69 @@ class ExecutionConfig:
         )
 
 
+@dataclass
+class LLMConfig:
+    """
+    Configuration for LLM model settings.
+    
+    Groups all LLM-related parameters including model selection, 
+    API settings, and fallback configuration.
+    
+    Usage:
+        # With primary model only
+        Agent(llm_config=LLMConfig(model="gpt-4o"))
+        
+        # With fallback chain
+        Agent(llm_config=LLMConfig(
+            model="gpt-4o",
+            fallback_models=["claude-3-5-sonnet", "gpt-4o-mini"],
+            base_url="https://api.example.com",
+            api_key="sk-...",
+        ))
+        
+        # With LiteLLM-style provider prefix
+        Agent(llm_config=LLMConfig(
+            model="anthropic/claude-3-5-sonnet",
+            fallback_models=["openai/gpt-4o", "openai/gpt-4o-mini"],
+        ))
+    """
+    # Primary model to use (required)
+    model: str
+    
+    # Ordered fallback models for resilience (optional)
+    fallback_models: Optional[List[str]] = None
+    
+    # API endpoint override (optional)
+    base_url: Optional[str] = None
+    
+    # API key (optional, defaults to env vars)
+    api_key: Optional[str] = None
+    
+    # Additional auth headers (optional)
+    auth: Optional[Dict[str, str]] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "model": self.model,
+            "fallback_models": list(self.fallback_models) if self.fallback_models else None,
+            "base_url": self.base_url,
+            "api_key": self.api_key,
+            "auth": dict(self.auth) if self.auth else None,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "LLMConfig":
+        """Create LLMConfig from dictionary."""
+        return cls(
+            model=data["model"],
+            fallback_models=list(data["fallback_models"]) if data.get("fallback_models") else None,
+            base_url=data.get("base_url"),
+            api_key=data.get("api_key"),
+            auth=dict(data["auth"]) if data.get("auth") else None,
+        )
+
+
 @dataclass  
 class ToolConfig:
     """

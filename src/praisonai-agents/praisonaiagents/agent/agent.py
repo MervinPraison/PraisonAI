@@ -550,7 +550,7 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         backstory: Optional[str] = None,
         instructions: Optional[str] = None,
         # LLM configuration
-        llm: Optional[Union[str, Any]] = None,
+        llm: Optional[Union[str, Any]] = None,  # Can be string, dict, or LLMConfig object
         model: Optional[Union[str, Any]] = None,  # Alias for llm=
         base_url: Optional[str] = None,  # Kept separate (connection/auth)
         api_key: Optional[str] = None,  # Kept separate (connection/auth)
@@ -603,9 +603,10 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
             goal: Primary objective the agent aims to achieve.
             backstory: Background context shaping personality and decisions.
             instructions: Direct instructions (overrides role/goal/backstory). Recommended for simple agents.
-            llm: Model name string ("gpt-4o", "anthropic/claude-3-sonnet") or LLM object.
+            llm: Model name string ("gpt-4o", "anthropic/claude-3-sonnet"), LLMConfig object, or custom LLM.
+                Can accept LLMConfig(model="gpt-4o", fallback_models=["claude-3-5-sonnet", "gpt-4o-mini"]).
                 Defaults to OPENAI_MODEL_NAME env var or "gpt-4o-mini".
-            model: Alias for llm parameter.
+            model: Alias for llm parameter. Also accepts LLMConfig objects.
             base_url: Custom LLM endpoint URL (e.g., for Ollama). Kept separate for auth.
             api_key: API key for LLM provider. Kept separate for auth.
             tools: List of tools, functions, callables, or MCP instances.
@@ -1576,7 +1577,22 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         
         # Handle llm= deprecation: model= is the preferred parameter name
         # llm= still works but shows deprecation warning
-        if llm is not None and model is None:
+        fallback_models = None  # Initialize for internal use
+        
+        # Check if llm is an LLMConfig object
+        from ..config import LLMConfig
+        if isinstance(llm, LLMConfig):
+            # Extract values from LLMConfig
+            llm_config_obj = llm
+            llm = llm_config_obj.model
+            fallback_models = llm_config_obj.fallback_models
+            if base_url is None:
+                base_url = llm_config_obj.base_url
+            if api_key is None:
+                api_key = llm_config_obj.api_key
+            if auth is None:
+                auth = llm_config_obj.auth
+        elif llm is not None and model is None:
             warn_deprecated_param(
                 "llm",
                 since="1.0.0",
@@ -1584,9 +1600,23 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
                 alternative="use 'model' instead. Example: Agent(model='gpt-4o-mini')",
                 stacklevel=3
             )
+        
         # model= is the preferred parameter (no warning)
         if model is not None:
-            llm = model  # model= takes precedence
+            # Check if model is an LLMConfig object
+            if isinstance(model, LLMConfig):
+                # Extract values from LLMConfig (same as llm handling)
+                llm = model.model
+                if fallback_models is None:
+                    fallback_models = model.fallback_models
+                if base_url is None:
+                    base_url = model.base_url
+                if api_key is None:
+                    api_key = model.api_key
+                if auth is None:
+                    auth = model.auth
+            else:
+                llm = model  # model= takes precedence
         
         # Store rate limiter (optional, zero overhead when None)
         self._rate_limiter = rate_limiter
@@ -1664,6 +1694,10 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         # Otherwise, fall back to OpenAI environment/name (cached for performance)
         else:
             self.llm = llm or Agent._get_default_model()
+        
+        # Store fallback models for resilience (defensive copy to avoid external mutations)
+        self.fallback_models = list(fallback_models) if fallback_models else []
+        
         # Handle tools parameter - ensure it's always a list
         if callable(tools):
             # If a single function/callable is passed, wrap it in a list
@@ -2122,6 +2156,7 @@ Your Goal: {self.goal}
             
             # LLM configuration 
             'llm': self.llm,
+            'fallback_models': list(self.fallback_models) if hasattr(self, 'fallback_models') and self.fallback_models else None,
             'base_url': getattr(self, 'base_url', None),
             'api_key': getattr(self, 'api_key', None),
             'auth': getattr(self, 'auth', None),

@@ -909,7 +909,22 @@ Your Goal: {self.goal}"""
         
         return CompactionRoute.TRUNCATE_TOOLS, truncated_msgs
 
-    def _chat_completion(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, _retry_depth=0):
+    def _get_next_fallback_model(self, fallback_index):
+        """Get the next fallback model from the chain, if available.
+        
+        Args:
+            fallback_index: Current index in the fallback chain (0-based)
+            
+        Returns:
+            str or None: Next model name if available, None otherwise
+        """
+        if not hasattr(self, 'fallback_models') or not self.fallback_models:
+            return None
+        if fallback_index >= len(self.fallback_models):
+            return None
+        return self.fallback_models[fallback_index]
+
+    def _chat_completion(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, _retry_depth=0, _fallback_index=0):
         start_time = time.time()
 
         # --- Proactive Context Budget Management (default-on) ---
@@ -1152,7 +1167,8 @@ Your Goal: {self.goal}"""
                         return self._chat_completion(
                             truncated_messages, temperature, tools, stream, 
                             reasoning_steps, task_name, task_description, task_id, response_format, 
-                            _retry_depth=_retry_depth + 1
+                            _retry_depth=_retry_depth + 1,
+                            _fallback_index=_fallback_index
                         )
                 except Exception as compression_error:
                     logging.error(f"[{self.name}] Context compression failed: {compression_error}")
@@ -1163,9 +1179,34 @@ Your Goal: {self.goal}"""
                 # Don't retry without actual credential rotation
                 
             elif classification.should_fallback_model:
-                # TODO: Implement model fallback when available
-                logging.warning(f"[{self.name}] {classification.user_message} (model fallback not yet implemented)")
-                # Don't retry without actual model fallback
+                # Try next model in the fallback chain
+                next_model = self._get_next_fallback_model(_fallback_index)
+                if next_model:
+                    current_model = self.llm if isinstance(self.llm, str) else str(self.llm)
+                    logging.info(f"[{self.name}] {current_model} unavailable — falling back to {next_model}")
+                    
+                    # Apply backoff if suggested
+                    if classification.backoff_seconds and classification.backoff_seconds > 0:
+                        time.sleep(classification.backoff_seconds)
+                    
+                    # Temporarily override the model and clear dispatcher cache for this call
+                    original_llm = self.llm
+                    original_dispatcher = getattr(self, '_unified_dispatcher', None)
+                    try:
+                        self.llm = next_model
+                        self._unified_dispatcher = None  # Force recreation with new model
+                        return self._chat_completion(
+                            messages, temperature, tools, stream,
+                            reasoning_steps, task_name, task_description, task_id, response_format,
+                            _retry_depth=_retry_depth + 1,
+                            _fallback_index=_fallback_index + 1
+                        )
+                    finally:
+                        self.llm = original_llm
+                        self._unified_dispatcher = original_dispatcher  # Restore original dispatcher
+                else:
+                    logging.warning(f"[{self.name}] {classification.user_message} (no more fallback models available)")
+                    # Continue to error handling without retry
                 
             elif classification.is_retryable and classification.backoff_seconds > 0:
                 if _retry_depth < 2:  # Limit retry attempts
@@ -1174,7 +1215,8 @@ Your Goal: {self.goal}"""
                     return self._chat_completion(
                         messages, temperature, tools, stream, 
                         reasoning_steps, task_name, task_description, task_id, response_format, 
-                        _retry_depth=_retry_depth + 1
+                        _retry_depth=_retry_depth + 1,
+                        _fallback_index=_fallback_index
                     )
             
             # Include remediation hints for unimplemented recovery actions
@@ -1182,7 +1224,10 @@ Your Goal: {self.goal}"""
             if classification.should_rotate_credential:
                 user_message += " Credential rotation is not yet implemented."
             if classification.should_fallback_model:
-                user_message += " Model fallback is not yet implemented."
+                if not self.fallback_models:
+                    user_message += " No fallback models configured."
+                elif _fallback_index >= len(self.fallback_models):
+                    user_message += f" All {len(self.fallback_models)} fallback models exhausted."
             
             # Create LLMError with classification context
             error = LLMError(
@@ -1220,7 +1265,8 @@ Your Goal: {self.goal}"""
         response_format=None,
         stream_callback=None,
         emit_events=True,
-        _retry_depth=0
+        _retry_depth=0,
+        _fallback_index=0
     ):
         """
         Handle LLM errors in async context using structured classification.
@@ -1285,7 +1331,7 @@ Your Goal: {self.goal}"""
                         return await self._handle_async_llm_error(
                             retry_error, truncated_messages, temperature, tools, stream,
                             reasoning_steps, task_name, task_description, task_id, response_format,
-                            stream_callback, emit_events, _retry_depth + 1
+                            stream_callback, emit_events, _retry_depth + 1, _fallback_index
                         )
             except Exception as compression_error:
                 logging.error(f"[{self.name}] Context compression failed: {compression_error}")
@@ -1296,9 +1342,39 @@ Your Goal: {self.goal}"""
             # Don't retry without actual credential rotation
             
         elif classification.should_fallback_model:
-            # TODO: Implement model fallback when available
-            logging.warning(f"[{self.name}] {classification.user_message} (model fallback not yet implemented)")
-            # Don't retry without actual model fallback
+            # Try next model in the fallback chain
+            next_model = self._get_next_fallback_model(_fallback_index)
+            if next_model:
+                current_model = self.llm if isinstance(self.llm, str) else str(self.llm)
+                logging.info(f"[{self.name}] {current_model} unavailable — falling back to {next_model}")
+                
+                # Apply backoff if suggested
+                if classification.backoff_seconds and classification.backoff_seconds > 0:
+                    await asyncio.sleep(classification.backoff_seconds)
+                
+                # Temporarily override the model and clear dispatcher cache for this call
+                original_llm = self.llm
+                original_dispatcher = getattr(self, '_unified_dispatcher', None)
+                try:
+                    self.llm = next_model
+                    self._unified_dispatcher = None  # Force recreation with new model
+                    return await self._execute_unified_achat_completion(
+                        messages, temperature, tools, stream,
+                        reasoning_steps, task_name, task_description, task_id, response_format,
+                        stream_callback, emit_events
+                    )
+                except Exception as retry_error:
+                    return await self._handle_async_llm_error(
+                        retry_error, messages, temperature, tools, stream,
+                        reasoning_steps, task_name, task_description, task_id, response_format,
+                        stream_callback, emit_events, _retry_depth + 1, _fallback_index + 1
+                    )
+                finally:
+                    self.llm = original_llm
+                    self._unified_dispatcher = original_dispatcher  # Restore original dispatcher
+            else:
+                logging.warning(f"[{self.name}] {classification.user_message} (no more fallback models available)")
+                # Continue to error handling without retry
             
         elif classification.is_retryable and classification.backoff_seconds > 0:
             if _retry_depth < 2:  # Limit retry attempts
@@ -1315,7 +1391,7 @@ Your Goal: {self.goal}"""
                     return await self._handle_async_llm_error(
                         retry_error, messages, temperature, tools, stream,
                         reasoning_steps, task_name, task_description, task_id, response_format,
-                        stream_callback, emit_events, _retry_depth + 1
+                        stream_callback, emit_events, _retry_depth + 1, _fallback_index
                     )
         
         # Include remediation hints for unimplemented recovery actions
@@ -1323,7 +1399,10 @@ Your Goal: {self.goal}"""
         if classification.should_rotate_credential:
             user_message += " Credential rotation is not yet implemented."
         if classification.should_fallback_model:
-            user_message += " Model fallback is not yet implemented."
+            if not self.fallback_models:
+                user_message += " No fallback models configured."
+            elif _fallback_index >= len(self.fallback_models):
+                user_message += f" All {len(self.fallback_models)} fallback models exhausted."
         
         # Create LLMError with classification context
         error = LLMError(
