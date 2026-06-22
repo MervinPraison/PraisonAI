@@ -615,7 +615,7 @@ Methods:
 * <code title="class ContextManager">ContextManager.<a href="./src/praisonai-agents/praisonaiagents/context/manager.py">register_snapshot_callback</a>(callback: Callable[[SnapshotHookData], None]) -> None</code>
 * <code title="class ContextManager">ContextManager.<a href="./src/praisonai-agents/praisonaiagents/context/manager.py">reset</a>() -> None</code>
 * <code title="class ContextManager">ContextManager.<a href="./src/praisonai-agents/praisonaiagents/context/manager.py">set_tool_budget</a>(tool_name: str, max_tokens: int, protected: bool = False) -> None</code>
-* <code title="class ContextManager">ContextManager.<a href="./src/praisonai-agents/praisonaiagents/context/manager.py">truncate_tool_output</a>(tool_name: str, output: str) -> str</code>
+* <code title="class ContextManager">ContextManager.<a href="./src/praisonai-agents/praisonaiagents/context/manager.py">truncate_tool_output</a>(tool_name: str, output: str, tool_call_id: str = None, run_id: str = None) -> str</code>
 
 # UI
 
