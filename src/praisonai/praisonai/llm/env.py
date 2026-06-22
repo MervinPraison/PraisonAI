@@ -61,7 +61,8 @@ def resolve_llm_endpoint(
     *, 
     default_base: str = _DEFAULT_BASE, 
     fallback_lookup: Optional[Callable[[str], Optional[dict]]] = None,
-    resolved_config: Optional['ResolvedConfig'] = None
+    resolved_config: Optional['ResolvedConfig'] = None,
+    validate_model: bool = False
 ) -> LLMEndpoint:
     """
     Resolve LLM endpoint configuration from environment variables and config.
@@ -78,6 +79,7 @@ def resolve_llm_endpoint(
         default_base: Default base URL if none found in environment variables
         fallback_lookup: Optional callable to get stored credentials (provider_name) -> dict
         resolved_config: Optional resolved configuration from the resolver
+        validate_model: Whether to validate the model ID (default: False)
         
     Returns:
         LLMEndpoint with resolved configuration
@@ -92,6 +94,23 @@ def resolve_llm_endpoint(
         model = resolved_config.agent.model
     else:
         model = _DEFAULT_MODEL
+    
+    # Validate model if requested (before provider resolution)
+    catalogue = None
+    if validate_model:
+        try:
+            from ..llm.catalogue import ModelCatalogue
+            catalogue = ModelCatalogue()
+            # This will raise ValueError with suggestions if invalid
+            validated_model = catalogue.validate_model(model)
+            # Use the normalized model ID
+            model = validated_model
+        except ImportError:
+            # Catalogue not available, skip validation
+            pass
+        except ValueError:
+            # Re-raise validation errors
+            raise
     
     key_var, provider_base = _provider_from_model(model)
 
@@ -122,6 +141,16 @@ def resolve_llm_endpoint(
                     api_key = cred["api_key"]
                     fallback_model = cred.get("model")
                     fallback_base = cred.get("base_url")
+                    # Validate fallback model if validation is enabled
+                    if validate_model and fallback_model and catalogue:
+                        try:
+                            fallback_model = catalogue.validate_model(fallback_model)
+                        except ValueError:
+                            # Skip this credential if model is invalid
+                            api_key = None
+                            fallback_model = None
+                            fallback_base = None
+                            continue
                     break
         except Exception:
             # Ignore fallback lookup errors

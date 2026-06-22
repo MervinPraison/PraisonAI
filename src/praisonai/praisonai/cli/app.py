@@ -178,6 +178,7 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "tracker": (".commands.tracker", "app", "Autonomous agent tracking with step-by-step analysis"),
     "github": (".commands.github", "app", "GitHub native context tracking and Issue triage"),
     "managed": (".commands.managed", "app", "Managed Agents (Anthropic cloud-hosted backend)"),
+    "models": (".commands.models", "app", "List and describe available models"),
     
     # Moltbot-inspired commands
     "bot": (".commands.bot", "app", "Messaging bots with full agent capabilities"),
