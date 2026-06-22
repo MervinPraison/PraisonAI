@@ -5,10 +5,10 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 361,
+    "pythonCoreFeatures": 362,
     "rustFeatures": 667,
-    "gapCount": 81,
-    "parityPercentage": 184.8
+    "gapCount": 82,
+    "parityPercentage": 184.3
   },
   "pythonCoreSDK": {
     "exports": [
@@ -225,6 +225,7 @@
       "ResourceLimits",
       "RetrievalConfig",
       "RetrievalPolicy",
+      "RetryBackoffConfig",
       "RewriteResult",
       "RewriteStrategy",
       "Route",
@@ -4132,6 +4133,15 @@
         "effort": "high",
         "status": "DONE",
         "category": "sandbox"
+      },
+      {
+        "feature": "RetryBackoffConfig",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "RoutingConditionProtocol",
