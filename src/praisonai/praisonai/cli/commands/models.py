@@ -198,9 +198,12 @@ def describe_model(
     except ImportError:
         output.print_warning("Model catalogue not available. Install litellm for detailed model info:")
         output.print("  pip install 'praisonai[litellm]'")
+    except typer.Exit:
+        # Re-raise typer.Exit without catching it
+        raise
     except Exception as e:
         output.print_error(f"Error describing model: {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 @app.command(name="validate")
@@ -249,9 +252,12 @@ def validate_model(
     except ImportError:
         output.print_warning("Model catalogue not available. Install litellm for model validation:")
         output.print("  pip install 'praisonai[litellm]'")
+    except typer.Exit:
+        # Re-raise typer.Exit without catching it
+        raise
     except Exception as e:
         output.print_error(f"Error validating model: {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
 
 if __name__ == "__main__":
