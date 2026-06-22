@@ -138,9 +138,17 @@ class PraisonAIDB:
                 return "qdrant"
             elif "weaviate" in url_lower:
                 return "weaviate"
+            # Unable to infer - must fail loudly
+            raise ValueError(
+                f"Unable to infer DB backend from URL {url!r}; "
+                "use a recognised scheme (sqlite://, postgres://, redis://, etc.)"
+            )
         
-        # Default fallback
-        return "sqlite"
+        # Unknown scheme - fail loudly
+        raise ValueError(
+            f"Unable to infer DB backend from URL {url!r}; "
+            "supported schemes: postgres://, mysql://, sqlite://, redis://, libsql://, http(s)://"
+        )
     
     def on_agent_start(
         self,

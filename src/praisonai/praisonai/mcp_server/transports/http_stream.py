@@ -17,6 +17,7 @@ import logging
 import os
 import time
 import uuid
+import hmac
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 if TYPE_CHECKING:
@@ -175,6 +176,22 @@ class HTTPStreamTransport:
         except ImportError:
             raise ImportError("starlette required. Install with: pip install starlette")
         
+        def _check_auth(request: Request) -> Optional[Response]:
+            """Check authentication for all HTTP verbs.
+            
+            Returns:
+                None if auth passes, error Response if auth fails
+            """
+            if self.api_key:
+                auth_header = request.headers.get("Authorization", "")
+                if not auth_header.startswith("Bearer "):
+                    return JSONResponse({"error": "Unauthorized"}, status_code=401)
+                # Use constant-time comparison to prevent timing attacks
+                provided_key = auth_header[7:]
+                if not hmac.compare_digest(provided_key, self.api_key):
+                    return JSONResponse({"error": "Unauthorized"}, status_code=401)
+            return None
+        
         async def mcp_post(request: Request) -> Response:
             """Handle POST requests (client→server messages)."""
             self._cleanup_sessions()
@@ -196,13 +213,9 @@ class HTTPStreamTransport:
                 )
             
             # Check authentication
-            if self.api_key:
-                auth_header = request.headers.get("Authorization", "")
-                if not auth_header.startswith("Bearer ") or auth_header[7:] != self.api_key:
-                    return JSONResponse(
-                        {"error": "Unauthorized"},
-                        status_code=401,
-                    )
+            auth_result = _check_auth(request)
+            if auth_result is not None:
+                return auth_result
             
             # Get or create session (check both header casings for compatibility)
             session_id = request.headers.get("MCP-Session-Id") or request.headers.get("Mcp-Session-Id")
@@ -283,6 +296,11 @@ class HTTPStreamTransport:
         
         async def mcp_get(request: Request) -> Response:
             """Handle GET requests (server→client SSE stream)."""
+            # Check authentication first
+            auth_result = _check_auth(request)
+            if auth_result is not None:
+                return auth_result
+            
             # Check both header casings for compatibility
             session_id = request.headers.get("MCP-Session-Id") or request.headers.get("Mcp-Session-Id")
             if not session_id or session_id not in self._sessions:
@@ -321,6 +339,11 @@ class HTTPStreamTransport:
         
         async def mcp_delete(request: Request) -> Response:
             """Handle DELETE requests (session termination)."""
+            # Check authentication first to prevent information disclosure
+            auth_result = _check_auth(request)
+            if auth_result is not None:
+                return auth_result
+            
             if not self.allow_client_termination:
                 return Response(status_code=405)
             

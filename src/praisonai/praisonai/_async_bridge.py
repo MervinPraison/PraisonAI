@@ -85,26 +85,32 @@ class AsyncBridge:
             raise
 
     def shutdown(self, timeout: float = 5.0) -> None:
+        # Snapshot loop and thread outside lock to avoid holding lock during wait
         with self._lock:
             loop, thread = self._loop, self._thread
             if loop is None:
                 return
-            # Cancel outstanding tasks, then stop the loop.
-            async def _cancel_all() -> None:
-                tasks = [t for t in asyncio.all_tasks(loop) if not t.done()]
-                for t in tasks:
-                    t.cancel()
-                await asyncio.gather(*tasks, return_exceptions=True)
-            try:
-                asyncio.run_coroutine_threadsafe(_cancel_all(), loop).result(timeout)
-            finally:
-                loop.call_soon_threadsafe(loop.stop)
-                if thread is not None:
-                    thread.join(timeout)
-                if not loop.is_closed():
-                    loop.close()
-                self._loop = None
-                self._thread = None
+            # Clear references immediately to prevent new submissions
+            self._loop = None
+            self._thread = None
+        
+        # Now do the actual shutdown without holding the lock
+        async def _cancel_all() -> None:
+            self_task = asyncio.current_task()
+            tasks = [t for t in asyncio.all_tasks(loop) 
+                     if not t.done() and t is not self_task]
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+        
+        try:
+            asyncio.run_coroutine_threadsafe(_cancel_all(), loop).result(timeout)
+        finally:
+            loop.call_soon_threadsafe(loop.stop)
+            if thread is not None:
+                thread.join(timeout)
+            if not loop.is_closed():
+                loop.close()
 
 # Backwards-compatible module-level shared default:
 _DEFAULT_BRIDGE: AsyncBridge | None = None
