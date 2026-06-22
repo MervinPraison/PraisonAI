@@ -658,8 +658,101 @@ def get_output_controller() -> OutputController:
     return state.output_controller
 
 
+# Command name to module mapping for lazy loading
+_COMMAND_GROUPS = {
+    # Core commands
+    "config": ".commands.config",
+    "traces": ".commands.traces", 
+    "env": ".commands.environment",
+    "session": ".commands.session",
+    "completion": ".commands.completion",
+    "version": ".commands.version",
+    "debug": ".commands.debug",
+    "lsp": ".commands.lsp",
+    "diag": ".commands.diag",
+    "doctor": ".commands.doctor",
+    "setup": ".commands.setup",
+    "onboard": ".commands.onboard", 
+    "obs": ".commands.obs",
+    "acp": ".commands.acp",
+    "mcp": ".commands.mcp",
+    "serve": ".commands.serve",
+    "schedule": ".commands.schedule",
+    "kanban": ".commands.kanban",
+    "run": ".commands.run",
+    "profile": ".commands.profile",
+    "benchmark": ".commands.benchmark",
+    "paths": ".commands.paths",
+    # Terminal-native commands
+    "chat": ".commands.chat",
+    "code": ".commands.code", 
+    "call": ".commands.call",
+    "realtime": ".commands.realtime",
+    "train": ".commands.train",
+    "ui": ".commands.ui",
+    "context": ".commands.context",
+    "research": ".commands.research",
+    "memory": ".commands.memory",
+    "workflow": ".commands.workflow",
+    "tools": ".commands.tools",
+    "n8n": ".commands.n8n",
+    "knowledge": ".commands.knowledge",
+    "rag": ".commands.rag",
+    "deploy": ".commands.deploy",
+    "agents": ".commands.agents",
+    "skills": ".commands.skills",
+    "eval": ".commands.eval",
+    "templates": ".commands.templates",
+    "recipe": ".commands.recipe",
+    "todo": ".commands.todo",
+    "docs": ".commands.docs",
+    "commit": ".commands.commit",
+    "publish": ".commands.publish",
+    "hooks": ".commands.hooks",
+    "rules": ".commands.rules",
+    "registry": ".commands.registry",
+    "package": ".commands.package",
+    "endpoints": ".commands.endpoints",
+    "test": ".commands.test",
+    "examples": ".commands.examples",
+    "batch": ".commands.batch",
+    "replay": ".commands.replay",
+    "loop": ".commands.loop",
+    "tracker": ".commands.tracker",
+    "github": ".commands.github",
+    # Moltbot-inspired commands
+    "bot": ".commands.bot",
+    "gateway": ".commands.gateway",
+    "pairing": ".commands.pairing",
+    "browser": ".commands.browser",
+    "plugins": ".commands.plugins",
+    "sandbox": ".commands.sandbox",
+    "claw": ".commands.claw",
+    "flow": ".commands.flow",
+    "dashboard": ".commands.dashboard",
+    "langfuse": ".commands.langfuse",
+    "langextract": ".commands.langextract",
+    "port": ".commands.port",
+    "managed": ".commands.managed",
+    "up": ".commands.up",
+    "standardise": "standardise_app_special",  # Special case
+    "standardize": "standardise_app_special",  # Special case  
+    "app": "app_special",  # Special case
+    "tui": "tui_special",  # Special case
+    "queue": "queue_special",  # Special case
+    # Retrieval commands are registered dynamically
+}
+
 # Import and register command groups
 _commands_registered = False
+
+def get_command_names():
+    """Get all available command names without importing the modules."""
+    names = set(_COMMAND_GROUPS.keys())
+    # Add dynamically registered commands that don't have modules
+    # NOTE: retrieval_module.register_commands(app) adds these commands dynamically
+    names.update({"index", "query"})  # retrieval commands
+    return names
 
 def register_commands():
     """Register all command groups (idempotent).
@@ -683,5 +776,4 @@ def register_commands():
     _commands_registered = True
 
 
-# Register commands on import
-register_commands()
+# Commands will be registered lazily when needed
