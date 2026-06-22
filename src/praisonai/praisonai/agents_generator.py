@@ -498,96 +498,45 @@ class AgentsGenerator:
 
     def _validate_agents_config(self, config):
         """
-        Validate agent configuration for typos in field names and provide suggestions.
+        Validate agent configuration with fail-fast validation and aggregated errors.
         
         Args:
             config (dict): The parsed YAML configuration
+            
+        Raises:
+            ValueError: If configuration has validation errors
         """
-        known_fields = {
-            'role', 'goal', 'instructions', 'backstory', 'tools', 'toolsets', 'tasks', 'llm',
-            'function_calling_llm', 'allow_delegation', 'max_iter', 'max_rpm',
-            'max_execution_time', 'verbose', 'cache', 'system_template',
-            'prompt_template', 'response_template', 'tool_timeout', 'tool_retry_policy',
-            'planning_tools', 'planning', 'autonomy', 'guardrails', 'streaming', 'stream',
-            'approval', 'skills', 'cli_backend', 'runtime', 'reflection', 'handoff', 'web', 'web_fetch'
-        }
+        # Use the new comprehensive validator
+        from .config.validator import ConfigValidator
         
-        # Collect YAML-local model aliases (valid even if not in global catalogue)
-        local_model_aliases = set()
-        models_cfg = config.get("models", {})
-        if isinstance(models_cfg, dict):
-            local_model_aliases = {k for k in models_cfg.keys() if isinstance(k, str)}
+        # Use existing tool resolver if available
+        validator = ConfigValidator(tool_resolver=self.tool_resolver)
         
-        # Try to load model catalogue for validation
-        model_catalogue = None
-        try:
-            from .llm.catalogue import ModelCatalogue
-            model_catalogue = ModelCatalogue()
-        except ImportError:
-            pass  # Catalogue not available
-
-        for section_name in ('agents', 'roles'):
-            section = config.get(section_name, {})
-            if not isinstance(section, dict):
-                continue
-
-            entity_name = 'agent' if section_name == 'agents' else 'role'
-            for name, section_config in section.items():
-                if not isinstance(section_config, dict):
-                    continue
-
-                for field_name in section_config:
-                    if field_name in known_fields:
-                        continue
-
-                    close_matches = difflib.get_close_matches(
-                        field_name,
-                        known_fields,
-                        n=1,
-                        cutoff=0.6
-                    )
-                    suggestion = f" Did you mean '{close_matches[0]}'?" if close_matches else ""
-                    self.logger.warning(
-                        f"Unknown field '{field_name}' in {entity_name} '{name}'.{suggestion}"
-                    )
-                
-                # Validate model/llm values if catalogue available
-                if model_catalogue:
-                    for model_field in ('llm', 'function_calling_llm'):
-                        model_value = section_config.get(model_field)
-                        if model_value and isinstance(model_value, str):
-                            # Skip validation for local model aliases defined in YAML
-                            if model_value in local_model_aliases:
-                                continue
-                            try:
-                                model_catalogue.validate_model(model_value)
-                            except ValueError as e:
-                                self.logger.warning(
-                                    f"Invalid model '{model_value}' in {entity_name} '{name}' field '{model_field}': {e}"
-                                )
-                    
-                    # Check for tools configured with non-tool-calling models
-                    if section_config.get('tools'):
-                        llm_value = section_config.get('llm')
-                        if llm_value:
-                            model_info = model_catalogue.describe_model(llm_value)
-                            if model_info and not model_info.get('supports_tools'):
-                                self.logger.warning(
-                                    f"{entity_name.capitalize()} '{name}' has tools configured but model '{llm_value}' does not support tool calling"
-                                )
+        # Check for strict mode from environment or config
+        import os
+        strict_mode = os.getenv('PRAISONAI_VALIDATE_STRICT', 'false').lower() == 'true'
         
-        # Also validate top-level llm/model config
-        if model_catalogue:
-            for model_field in ('llm', 'model'):
-                model_value = config.get(model_field)
-                if model_value and isinstance(model_value, str):
-                    # Skip validation for local model aliases defined in YAML
-                    if model_value in local_model_aliases:
-                        continue
-                    try:
-                        model_catalogue.validate_model(model_value)
-                    except ValueError as e:
-                        self.logger.warning(f"Invalid model '{model_value}' in top-level '{model_field}': {e}")
+        # Validate configuration
+        result = validator.validate_config(config, strict=strict_mode)
+        
+        # Log warnings
+        for warning in result.warnings:
+            self.logger.warning(warning)
+        
+        # If there are errors, fail fast with aggregated error message
+        if not result.valid:
+            error_msg = f"Configuration validation failed with {len(result.errors)} error(s):\n"
+            for i, error in enumerate(result.errors, 1):
+                error_msg += f"  {i}. {error}\n"
+            
+            # Include warnings if any
+            if result.warnings:
+                error_msg += f"\nAdditionally, there are {len(result.warnings)} warning(s):\n"
+                for i, warning in enumerate(result.warnings, 1):
+                    error_msg += f"  {i}. {warning}\n"
+            
+            self.logger.error(error_msg)
+            raise ValueError(error_msg)
 
 
 
