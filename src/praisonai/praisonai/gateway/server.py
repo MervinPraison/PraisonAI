@@ -128,7 +128,12 @@ class GatewaySession:
         return self._event_cursor
     
     def get_oldest_cursor(self) -> int:
-        """Get the oldest event cursor still retained in the buffer."""
+        """Get the oldest event cursor still retained in the buffer.
+        
+        When the buffer is empty, returns the current cursor position,
+        which correctly indicates that any cursor < _event_cursor would
+        require resync (since no events are retained).
+        """
         if self._events:
             return self._events[0].data.get('cursor', self._event_cursor)
         return self._event_cursor
@@ -1342,7 +1347,18 @@ class WebSocketGateway:
                 
                 # Support reconnection with existing session
                 session_id = data.get("session_id")  # Optional: existing session to resume
-                since_cursor = data.get("since")  # Optional: cursor for event replay
+                # Parse and validate the since parameter
+                since_raw = data.get("since")  # Optional: cursor for event replay
+                since_cursor = None
+                if since_raw is not None:
+                    try:
+                        since_cursor = int(since_raw)
+                    except (TypeError, ValueError):
+                        await self._send_to_client(client_id, {
+                            "type": "error",
+                            "message": "Invalid 'since' cursor. Must be an integer.",
+                        })
+                        return
                 
                 # Resume or create session
                 session, replay_events = self.resume_or_create_session(
@@ -1610,7 +1626,14 @@ class WebSocketGateway:
         if ws:
             try:
                 # Track event in session BEFORE sending if it's a response or important event
-                if data.get("type") in ["response", "message", "stream_end", "error"]:
+                if data.get("type") in [
+                    "response",
+                    "message",
+                    "stream_end",
+                    "error",
+                    "token_stream",
+                    "tool_call_stream",
+                ]:
                     session_id = self._client_sessions.get(client_id)
                     if session_id:
                         session = self._sessions.get(session_id)
@@ -1915,7 +1938,9 @@ class WebSocketGateway:
         
         Returns:
             Tuple of (session, replay_events) where replay_events are events
-            that occurred after since_cursor
+            that occurred after since_cursor. Note: Callers must check
+            session.check_resync_required(since_cursor) before using replay_events,
+            as the events may not include the full gap if buffer was trimmed.
         """
         replay_events = []
         
