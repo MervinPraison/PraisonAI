@@ -300,6 +300,47 @@ class ToolExecutionMixin:
                     with with_injection_context(state):
                         result = self._execute_tool_with_circuit_breaker(function_name, arguments)
             
+            # Apply runtime-scoped middleware normalization BEFORE hooks fire
+            # Plugin harnesses can register middleware to normalize vendor-specific results
+            runtime_id = getattr(self, '_runtime_id', 'praisonai')  # Default to native runtime
+            normalized_result = None  # Track normalized result for hooks
+            if runtime_id != 'praisonai':  # Skip for native runtime to avoid allocation
+                try:
+                    from ..runtime import get_middleware, MiddlewareContext
+                    middleware = get_middleware(runtime_id)
+                    
+                    # Only allocate context and normalize if not using default pass-through
+                    if middleware.runtime_id != 'praisonai':
+                        mw_ctx = MiddlewareContext(
+                            tool_name=function_name,
+                            runtime_id=runtime_id,
+                            agent_id=self.name,
+                            session_id=getattr(self, '_session_id', None),
+                            execution_time_ms=(_time.time() - _tool_start_time) * 1000,
+                            metadata={'original_result_type': type(result).__name__}
+                        )
+                        
+                        normalized_result = middleware.normalize(result, function_name, mw_ctx)
+                        
+                        # Handle error cases by propagating error message as result
+                        if not normalized_result.success and normalized_result.error_message:
+                            # For failed tools, include error context in the result
+                            result = f"Tool Error: {normalized_result.error_message}"
+                        else:
+                            # For successful tools, use the normalized content
+                            result = normalized_result.content
+                        
+                        # Store normalized result for hooks to access full context
+                        self._last_normalized_result = normalized_result
+                        
+                        logger.debug(f"Applied runtime middleware for {runtime_id}: {function_name}")
+                except ImportError:
+                    # Runtime middleware not available - continue without normalization
+                    logger.debug("Runtime middleware not available, skipping normalization")
+                except Exception as e:
+                    # Don't let middleware failures break tool execution
+                    logger.warning(f"Runtime middleware failed for {runtime_id}: {e}")
+            
             # Apply prompt injection protection for external tools
             # Zero-cost for trusted tools, wraps external content in security markers
             result = wrap_if_external(function_name, result)
@@ -373,6 +414,15 @@ class ToolExecutionMixin:
             
             # Trigger AFTER_TOOL hook
             from ..hooks import HookEvent, AfterToolInput
+            
+            # Extract error information from normalized result if available
+            tool_error = None
+            if hasattr(self, '_last_normalized_result') and self._last_normalized_result:
+                if not self._last_normalized_result.success and self._last_normalized_result.error_message:
+                    tool_error = self._last_normalized_result.error_message
+                # Clean up temporary attribute
+                delattr(self, '_last_normalized_result')
+            
             after_tool_input = AfterToolInput(
                 session_id=getattr(self, '_session_id', 'default'),
                 cwd=os.getcwd(),
@@ -382,6 +432,7 @@ class ToolExecutionMixin:
                 tool_name=function_name,
                 tool_input=arguments,
                 tool_output=result,
+                tool_error=tool_error,
                 execution_time_ms=(_time.time() - _tool_start_time) * 1000
             )
             self._hook_runner.execute_sync(HookEvent.AFTER_TOOL, after_tool_input, target=function_name)
