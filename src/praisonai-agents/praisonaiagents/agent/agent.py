@@ -1522,16 +1522,22 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         # ─────────────────────────────────────────────────────────────────────
         # Resolve TOOL_RETRY_CONFIG param  
         # ─────────────────────────────────────────────────────────────────────
-        # Backward-compatible default: None = no retry (preserves current behavior)
-        if tool_retry_config is None:
+        # Support bool/dict for API consistency with other params
+        if tool_retry_config is None or tool_retry_config is False:
             self.tool_retry_config = None
+        elif tool_retry_config is True:
+            from ..config import ToolRetryConfig
+            self.tool_retry_config = ToolRetryConfig()
+        elif isinstance(tool_retry_config, dict):
+            from ..config import ToolRetryConfig
+            self.tool_retry_config = ToolRetryConfig(**tool_retry_config)
         else:
             # Validate it's a ToolRetryConfig instance
             from ..config import ToolRetryConfig
             if isinstance(tool_retry_config, ToolRetryConfig):
                 self.tool_retry_config = tool_retry_config
             else:
-                raise TypeError("tool_retry_config must be None or ToolRetryConfig instance")
+                raise TypeError("tool_retry_config must be None, bool, dict, or ToolRetryConfig instance")
         
         # Process tool_config and artifact storage (moved from tool_output)
         self._artifact_store = None

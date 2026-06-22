@@ -1409,6 +1409,21 @@ class ToolRetryConfig:
     # Error categories to retry on (maps to ToolExecutionError.error_category)
     retryable_on: List[str] = field(default_factory=lambda: ["network", "timeout", "rate_limit"])
     
+    def __post_init__(self):
+        """Validate configuration parameters."""
+        if self.max_attempts < 1:
+            raise ValueError("max_attempts must be at least 1")
+        if self.initial_delay_s <= 0:
+            raise ValueError("initial_delay_s must be positive")
+        if self.max_delay_s <= 0:
+            raise ValueError("max_delay_s must be positive")
+        if self.initial_delay_s > self.max_delay_s:
+            raise ValueError("initial_delay_s cannot be greater than max_delay_s")
+        if self.factor < 1.0:
+            raise ValueError("factor must be >= 1.0 for exponential backoff")
+        if not 0 <= self.jitter <= 1.0:
+            raise ValueError("jitter must be between 0 and 1")
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
