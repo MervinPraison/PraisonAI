@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """Example of using LLMConfig with Agent for model fallback configuration."""
 
-import sys
-sys.path.insert(0, 'src/praisonai-agents')
-
 from praisonaiagents import Agent
 from praisonaiagents.config import LLMConfig
 

@@ -8,8 +8,18 @@ This verifies drop-in compatibility with existing OpenAI client code.
 
 import os
 import time
-import asyncio
+
+import pytest
 from openai import OpenAI
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.local_service,
+    pytest.mark.skipif(
+        not os.getenv("PRAISONAI_TEST_OPENAI_COMPAT"),
+        reason="Set PRAISONAI_TEST_OPENAI_COMPAT=1 and start: python -m praisonai serve openai --port 8765",
+    ),
+]
 
 def test_basic_chat_completion():
     """Test basic chat completion with OpenAI client."""
