@@ -552,8 +552,7 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         # LLM configuration
         llm: Optional[Union[str, Any]] = None,
         model: Optional[Union[str, Any]] = None,  # Alias for llm=
-        llm_config: Optional['LLMConfig'] = None,  # New: Grouped LLM configuration
-        fallback_models: Optional[List[str]] = None,  # Ordered list of fallback models for resilience
+        llm_config: Optional['LLMConfig'] = None,  # Grouped LLM configuration (use this for fallback_models)
         base_url: Optional[str] = None,  # Kept separate (connection/auth)
         api_key: Optional[str] = None,  # Kept separate (connection/auth)
         auth: Optional[str] = None,  # Subscription auth provider: "claude-code", "codex", etc.
@@ -608,8 +607,8 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
             llm: Model name string ("gpt-4o", "anthropic/claude-3-sonnet") or LLM object.
                 Defaults to OPENAI_MODEL_NAME env var or "gpt-4o-mini".
             model: Alias for llm parameter.
-            fallback_models: Ordered list of fallback models for resilience when primary model is unavailable.
-                Used when transient/overloaded errors occur. Example: ["claude-sonnet-4-6", "gpt-4o-mini"].
+            llm_config: LLMConfig instance for grouped LLM settings including fallback_models.
+                Example: LLMConfig(model="gpt-4o", fallback_models=["claude-3-5-sonnet", "gpt-4o-mini"]).
             base_url: Custom LLM endpoint URL (e.g., for Ollama). Kept separate for auth.
             api_key: API key for LLM provider. Kept separate for auth.
             tools: List of tools, functions, callables, or MCP instances.
@@ -1588,15 +1587,16 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
                 alternative="use 'model' instead. Example: Agent(model='gpt-4o-mini')",
                 stacklevel=3
             )
-        # Handle llm_config parameter (new grouped configuration)
+        # Handle llm_config parameter (grouped configuration)
+        fallback_models = None  # Initialize for internal use
         if llm_config is not None:
             from ..config import LLMConfig
             if isinstance(llm_config, LLMConfig):
                 # Extract values from LLMConfig
                 if llm is None:  # Only override if not explicitly set
                     llm = llm_config.model
-                if fallback_models is None:
-                    fallback_models = llm_config.fallback_models
+                # No backward compatibility - llm_config is the only way to set fallback_models
+                fallback_models = llm_config.fallback_models
                 if base_url is None:
                     base_url = llm_config.base_url
                 if api_key is None:

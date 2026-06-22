@@ -29,8 +29,8 @@ def test_llm_config_basic():
     
     print("✓ LLMConfig basic test passed")
 
-def test_llm_config_override():
-    """Test that explicit parameters override LLMConfig."""
+def test_llm_config_model_override():
+    """Test that explicit model parameter overrides LLMConfig model."""
     config = LLMConfig(
         model="gpt-4o",
         fallback_models=["claude-3-5-sonnet"],
@@ -39,41 +39,43 @@ def test_llm_config_override():
     agent = Agent(
         name="TestAgent",
         llm_config=config,
-        model="gpt-4o-mini",  # Should override config
-        fallback_models=["gemini-pro"]  # Should override config
+        model="gpt-4o-mini",  # Should override config model only
     )
     
-    # Verify overrides work
+    # Verify model override works but fallback_models comes from config
     assert agent.llm == "gpt-4o-mini"  # model param overrides
-    assert agent.fallback_models == ["gemini-pro"]  # explicit param overrides
+    assert agent.fallback_models == ["claude-3-5-sonnet"]  # from LLMConfig only
     
-    print("✓ LLMConfig override test passed")
+    print("✓ LLMConfig model override test passed")
 
-def test_backward_compatibility():
-    """Test that old API still works without LLMConfig."""
+def test_no_fallback_without_config():
+    """Test that fallback_models can only be set via LLMConfig."""
     agent = Agent(
         name="TestAgent",
         model="gpt-4o",
-        fallback_models=["claude-3-5-sonnet", "gpt-4o-mini"],
         base_url="https://api.example.com",
         api_key="test-key"
     )
     
-    # Verify old API still works
+    # Verify fallback_models is empty without LLMConfig
     assert agent.llm == "gpt-4o"
-    assert agent.fallback_models == ["claude-3-5-sonnet", "gpt-4o-mini"]
+    assert agent.fallback_models == []  # No fallback without LLMConfig
     assert agent.base_url == "https://api.example.com"
     assert agent.api_key == "test-key"
     
-    print("✓ Backward compatibility test passed")
+    print("✓ No fallback without config test passed")
 
 def test_fallback_models_defensive_copy():
-    """Test that fallback_models creates defensive copy."""
+    """Test that fallback_models creates defensive copy via LLMConfig."""
     original_list = ["claude-3-5-sonnet", "gpt-4o-mini"]
-    agent = Agent(
-        name="TestAgent",
+    config = LLMConfig(
         model="gpt-4o",
         fallback_models=original_list
+    )
+    
+    agent = Agent(
+        name="TestAgent",
+        llm_config=config
     )
     
     # Modify original list
@@ -112,8 +114,8 @@ def test_llm_config_serialization():
 
 if __name__ == "__main__":
     test_llm_config_basic()
-    test_llm_config_override()
-    test_backward_compatibility()
+    test_llm_config_model_override()
+    test_no_fallback_without_config()
     test_fallback_models_defensive_copy()
     test_llm_config_serialization()
     print("\n✅ All tests passed!")
