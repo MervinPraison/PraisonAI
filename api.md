@@ -1113,6 +1113,7 @@ Methods:
 * <code title="cli">praisonai serve gateway <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai serve lsp <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai serve mcp <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
+* <code title="cli">praisonai serve openai <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai serve rag <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai serve recipe <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai serve registry <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
