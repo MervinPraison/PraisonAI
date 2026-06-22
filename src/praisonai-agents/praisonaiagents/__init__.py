@@ -476,7 +476,7 @@ _LAZY_IMPORTS = {
     'GatewayClientProtocol': ('praisonaiagents.gateway.protocols', 'GatewayClientProtocol'),
     'GatewayEvent': ('praisonaiagents.gateway.protocols', 'GatewayEvent'),
     'GatewayMessage': ('praisonaiagents.gateway.protocols', 'GatewayMessage'),
-    'EventType': ('praisonaiagents.gateway.protocols', 'EventType'),
+    'GatewayEventType': ('praisonaiagents.gateway.protocols', 'EventType'),
     'GatewayConfig': ('praisonaiagents.gateway.config', 'GatewayConfig'),
     'SessionConfig': ('praisonaiagents.gateway.config', 'SessionConfig'),
     
