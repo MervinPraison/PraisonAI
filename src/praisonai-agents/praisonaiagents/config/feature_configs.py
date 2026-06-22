@@ -724,6 +724,9 @@ class ExecutionConfig:
     
     # Retry settings
     max_retry_limit: int = 2
+    retry_initial_delay: float = 1.0  # seconds
+    retry_backoff_factor: float = 2.0
+    retry_jitter: float = 0.1  # fraction of computed delay
     
     # Tool call limits (loop protection)
     max_tool_calls_per_turn: int = 10
@@ -766,7 +769,7 @@ class ExecutionConfig:
     parallel_tool_calls: bool = False
 
     def __post_init__(self) -> None:
-        """Post-initialization processing with deprecation warnings."""
+        """Post-initialization processing with deprecation warnings and validation."""
         # Handle context_compaction serialization round-trip
         if isinstance(self.context_compaction, dict):
             from ..context.policy import ContextCompactionPolicy
@@ -807,6 +810,14 @@ class ExecutionConfig:
                 ExecutionConfig._context_compaction_warned = True
             finally:
                 del frame
+        
+        # Validate retry configuration parameters
+        if self.retry_initial_delay <= 0:
+            raise ValueError("ExecutionConfig.retry_initial_delay must be positive.")
+        if self.retry_backoff_factor < 1.0:
+            raise ValueError("ExecutionConfig.retry_backoff_factor must be >= 1.0.")
+        if self.retry_jitter < 0:
+            raise ValueError("ExecutionConfig.retry_jitter must be non-negative.")
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -815,6 +826,9 @@ class ExecutionConfig:
             "max_rpm": self.max_rpm,
             "max_execution_time": self.max_execution_time,
             "max_retry_limit": self.max_retry_limit,
+            "retry_initial_delay": self.retry_initial_delay,
+            "retry_backoff_factor": self.retry_backoff_factor,
+            "retry_jitter": self.retry_jitter,
             "code_execution": self.code_execution,
             "code_mode": self.code_mode,
             "code_sandbox_mode": self.code_sandbox_mode,

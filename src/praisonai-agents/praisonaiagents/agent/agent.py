@@ -7,6 +7,7 @@ import asyncio
 import contextlib
 import threading
 import concurrent.futures
+import random
 from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Generator
 from collections import OrderedDict
 import inspect
@@ -16,7 +17,7 @@ from .chat_mixin import ChatMixin
 from .execution_mixin import ExecutionMixin
 from .memory_mixin import MemoryMixin
 from .async_memory_mixin import AsyncMemoryMixin
-from .tool_execution import ToolExecutionMixin
+from .tool_execution import ToolExecutionMixin, BackoffPolicy
 from .chat_handler import ChatHandlerMixin
 from .session_manager import SessionManagerMixin
 from .async_safety import AsyncSafeState
@@ -1025,7 +1026,7 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
             _on_budget_exceeded = 'stop'
             # Default to False when no ExecutionConfig provided
             parallel_tool_calls = False
-            # (already set from parameter, no need to override)
+            _exec_config = ExecutionConfig()  # Default config for non-execution case
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve TEMPLATES param - FAST PATH
@@ -1797,6 +1798,8 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         self.allow_code_execution = allow_code_execution
         self.max_retry_limit = max_retry_limit
         self.code_execution_mode = code_execution_mode
+        # Store execution config for guardrail retry backoff
+        self._execution_config = _exec_config
         self.embedder_config = embedder_config
         self.knowledge = knowledge
         self.use_system_prompt = use_system_prompt
@@ -5008,6 +5011,22 @@ Answer:"""
             retry_count += 1
             logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {error}")
             
+            # Add exponential backoff delay to avoid hammering the LLM
+            execution_config = getattr(self, '_execution_config', None)
+            if execution_config is not None:
+                total_delay = BackoffPolicy.delay(
+                    retry_count,
+                    execution_config.retry_initial_delay,
+                    execution_config.retry_backoff_factor,
+                    execution_config.retry_jitter
+                )
+            else:
+                # Fall back to simple backoff if no execution config
+                total_delay = 1.0 * (2.0 ** (retry_count - 1))
+            
+            logging.info(f"Agent {self.name}: Waiting {total_delay:.2f}s before guardrail retry")
+            time.sleep(total_delay)
+            
             # Regenerate response for retry
             try:
                 retry_prompt = f"{prompt}\n\nNote: Previous response failed validation due to: {error}. Please provide an improved response."
@@ -5044,6 +5063,22 @@ Answer:"""
             
             retry_count += 1
             logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {error}")
+            
+            # Add exponential backoff delay to avoid hammering the LLM
+            execution_config = getattr(self, '_execution_config', None)
+            if execution_config is not None:
+                total_delay = BackoffPolicy.delay(
+                    retry_count,
+                    execution_config.retry_initial_delay,
+                    execution_config.retry_backoff_factor,
+                    execution_config.retry_jitter
+                )
+            else:
+                # Fall back to simple backoff if no execution config
+                total_delay = 1.0 * (2.0 ** (retry_count - 1))
+            
+            logging.info(f"Agent {self.name}: Waiting {total_delay:.2f}s before guardrail retry")
+            await asyncio.sleep(total_delay)
             
             # Regenerate response for retry (async version)
             try:
