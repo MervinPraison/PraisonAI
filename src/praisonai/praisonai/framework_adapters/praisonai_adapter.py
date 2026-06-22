@@ -39,6 +39,11 @@ class PraisonAIAdapter(FrameworkAdapter):
         """List of supported agent runtimes this adapter can use."""
         return ["praisonai", "autogen", "swarm", "crewai", "langchain"]
     
+    def is_available(self) -> bool:
+        """Check if PraisonAI agents is available for import."""
+        from .._framework_availability import is_available
+        return is_available("praisonaiagents")
+    
     def _format_template(self, text: str, **kwargs) -> str:
         """Format a template string with provided values."""
         if not text:
