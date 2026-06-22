@@ -8,7 +8,7 @@ from praisonaiagents import Agent
 from praisonaiagents.config import LLMConfig
 
 def test_llm_config_basic():
-    """Test basic LLMConfig usage."""
+    """Test basic LLMConfig usage via llm parameter."""
     config = LLMConfig(
         model="gpt-4o",
         fallback_models=["claude-3-5-sonnet", "gpt-4o-mini"],
@@ -18,7 +18,7 @@ def test_llm_config_basic():
     
     agent = Agent(
         name="TestAgent",
-        llm_config=config
+        llm=config  # Pass LLMConfig via llm parameter
     )
     
     # Verify values were applied
@@ -29,24 +29,25 @@ def test_llm_config_basic():
     
     print("✓ LLMConfig basic test passed")
 
-def test_llm_config_model_override():
-    """Test that explicit model parameter overrides LLMConfig model."""
+def test_llm_config_via_model_param():
+    """Test using LLMConfig via model parameter."""
     config = LLMConfig(
         model="gpt-4o",
-        fallback_models=["claude-3-5-sonnet"],
+        fallback_models=["claude-3-5-sonnet", "gpt-4o-mini"],
+        base_url="https://api.example.com"
     )
     
     agent = Agent(
         name="TestAgent",
-        llm_config=config,
-        model="gpt-4o-mini",  # Should override config model only
+        model=config  # Pass LLMConfig via model parameter
     )
     
-    # Verify model override works but fallback_models comes from config
-    assert agent.llm == "gpt-4o-mini"  # model param overrides
-    assert agent.fallback_models == ["claude-3-5-sonnet"]  # from LLMConfig only
+    # Verify values from LLMConfig via model param
+    assert agent.llm == "gpt-4o"
+    assert agent.fallback_models == ["claude-3-5-sonnet", "gpt-4o-mini"]
+    assert agent.base_url == "https://api.example.com"
     
-    print("✓ LLMConfig model override test passed")
+    print("✓ LLMConfig via model param test passed")
 
 def test_no_fallback_without_config():
     """Test that fallback_models can only be set via LLMConfig."""
@@ -75,7 +76,7 @@ def test_fallback_models_defensive_copy():
     
     agent = Agent(
         name="TestAgent",
-        llm_config=config
+        model=config  # Use model parameter with LLMConfig
     )
     
     # Modify original list
@@ -114,7 +115,7 @@ def test_llm_config_serialization():
 
 if __name__ == "__main__":
     test_llm_config_basic()
-    test_llm_config_model_override()
+    test_llm_config_via_model_param()
     test_no_fallback_without_config()
     test_fallback_models_defensive_copy()
     test_llm_config_serialization()
