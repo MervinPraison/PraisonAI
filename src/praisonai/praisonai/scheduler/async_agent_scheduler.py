@@ -13,6 +13,7 @@ from abc import ABC, abstractmethod
 
 from .shared import ScheduleParser, backoff_delay, safe_call
 from ._base_scheduler import _BaseAgentScheduler
+from ._dispatch import adispatch_agent
 
 logger = logging.getLogger(__name__)
 
@@ -49,15 +50,7 @@ class AsyncPraisonAgentExecutor(AsyncAgentExecutorInterface):
             Agent execution result
         """
         try:
-            # Check if agent has async support
-            if hasattr(self.agent, 'astart'):
-                result = await self.agent.astart(task)
-            elif hasattr(self.agent, 'start'):
-                # Wrap sync call in executor
-                result = await asyncio.to_thread(self.agent.start, task)
-            else:
-                raise AttributeError("Agent must have either 'start' or 'astart' method")
-            return result
+            return await adispatch_agent(self.agent, task)
         except Exception as e:
             logger.error(f"Async agent execution failed: {e}")
             raise

@@ -26,6 +26,11 @@ T = TypeVar('T')
 
 from ._lazy_cache import lazy_get
 
+# Module-level cache for lazily constructed Pydantic workflow models.
+# Populated on first call to _get_workflow_models() / _get_job_workflow_models().
+_models_cache: Dict[str, Any] = {}
+_models_lock = threading.Lock()
+
 def _rich_print(*args, **kwargs):
     """Lazy-loaded rich.print wrapper."""
     from rich import print as rich_print_impl
