@@ -118,6 +118,21 @@ class GatewaySession:
     
     def to_dict(self) -> Dict[str, Any]:
         """Serialize session to dictionary for persistence."""
+        # Drain inbox queue to a list for serialization
+        pending_inbox = []
+        temp_items = []
+        while not self._inbox.empty():
+            try:
+                item = self._inbox.get_nowait()
+                temp_items.append(item)
+                pending_inbox.append(item)
+            except asyncio.QueueEmpty:
+                break
+        
+        # Put items back into the queue to preserve order
+        for item in temp_items:
+            self._inbox.put_nowait(item)
+        
         return {
             "session_id": self._session_id,
             "agent_id": self._agent_id,
@@ -136,6 +151,8 @@ class GatewaySession:
             } for msg in self._messages],
             "event_cursor": self._event_cursor,
             "events": [e.to_dict() for e in self._events[-100:]],  # Keep last 100 events
+            "pending_inbox": pending_inbox,
+            "is_executing": self._is_executing,
         }
     
     @classmethod
@@ -172,6 +189,13 @@ class GatewaySession:
         for event_data in data.get("events", []):
             event = GatewayEvent.from_dict(event_data)
             session._events.append(event)
+        
+        # Restore pending inbox messages
+        for message in data.get("pending_inbox", []):
+            session._inbox.put_nowait(message)
+        
+        # Restore execution state
+        session._is_executing = data.get("is_executing", False)
         
         return session
 
@@ -919,12 +943,86 @@ class WebSocketGateway:
             # Re-raise the original exception
             raise
     
-    async def stop(self) -> None:
-        """Stop the gateway server."""
+    async def _drain_active_sessions(self, reason: str = "shutdown", timeout: float = 10.0) -> None:
+        """Drain active sessions by waiting for in-flight executions to complete.
+        
+        Args:
+            reason: Reason for draining (e.g., "shutdown", "restart")
+            timeout: Maximum time to wait for sessions to complete
+        """
+        active_sessions = [
+            session for session in self._sessions.values()
+            if session._is_executing or not session._inbox.empty()
+        ]
+        
+        if not active_sessions:
+            return
+        
+        logger.info(f"Draining {len(active_sessions)} active sessions (reason: {reason})")
+        
+        # Give sessions time to complete
+        start_time = time.monotonic()
+        while active_sessions and (time.monotonic() - start_time) < timeout:
+            # Check which sessions are still active
+            still_active = []
+            for session in active_sessions:
+                if session._is_executing or not session._inbox.empty():
+                    still_active.append(session)
+                else:
+                    # Session completed, persist it
+                    if self._session_store:
+                        try:
+                            self._session_store.add_message(
+                                session_id=session.session_id,
+                                role="system",
+                                content=f"Session drained: {reason}",
+                                metadata={"session_data": session.to_dict()},
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to persist drained session {session.session_id}: {e}")
+            
+            active_sessions = still_active
+            if active_sessions:
+                await asyncio.sleep(0.5)  # Brief wait before checking again
+        
+        # For any remaining active sessions, persist them as-is with pending work
+        for session in active_sessions:
+            logger.warning(f"Session {session.session_id} still active after drain timeout, persisting with pending work")
+            if self._session_store:
+                try:
+                    # Add a session_end event before persisting
+                    session.add_event(GatewayEvent(
+                        type=EventType.SESSION_END,
+                        data={
+                            "session_id": session.session_id,
+                            "reason": f"Force-closed during {reason} after timeout",
+                            "had_pending_work": not session._inbox.empty(),
+                            "was_executing": session._is_executing,
+                        }
+                    ))
+                    
+                    self._session_store.add_message(
+                        session_id=session.session_id,
+                        role="system",
+                        content=f"Session force-closed during {reason} with pending work",
+                        metadata={"session_data": session.to_dict()},
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to persist timed-out session {session.session_id}: {e}")
+
+    async def stop(self, drain_timeout: float = 10.0) -> None:
+        """Stop the gateway server with graceful drain.
+        
+        Args:
+            drain_timeout: Maximum time to wait for active sessions to complete (default: 10.0)
+        """
         if not self._is_running:
             return
         
         self._is_running = False
+        
+        # Gracefully drain active sessions before closing
+        await self._drain_active_sessions(reason="shutdown", timeout=drain_timeout)
         
         for client_id, ws in list(self._clients.items()):
             try:
@@ -942,7 +1040,7 @@ class WebSocketGateway:
             self._server.should_exit = True
         
         # Release PID lock
-        if hasattr(self, '_pid_lock'):
+        if hasattr(self, '_pid_lock') and self._pid_lock:
             self._pid_lock.release_lock()
         
         logger.info("Gateway stopped")
@@ -983,6 +1081,24 @@ class WebSocketGateway:
                         "type": "replay",
                         "event": event.to_dict(),
                     })
+                
+                # If session was resumed with pending messages or was executing, restart processing
+                if session._was_resumed and (not session._inbox.empty() or session._is_executing):
+                    agent = self._agents.get(agent_id)
+                    if agent:
+                        logger.info(f"Resuming processing for session {session.session_id} with {session._inbox.qsize()} pending messages")
+                        # Notify client that we're resuming processing
+                        await self._send_to_client(client_id, {
+                            "type": "status",
+                            "source": session.agent_id,
+                            "message": f"Resuming processing ({session._inbox.qsize()} pending messages)...",
+                        })
+                        # CRITICAL FIX: Mark executing BEFORE creating the task to prevent race condition
+                        # where a new message arrives before the task starts and spawns a duplicate task
+                        if not session._is_executing:
+                            session.mark_executing(True)
+                        # Restart the queue processor
+                        asyncio.create_task(self._run_session_queue(session, agent, client_id))
             else:
                 await self._send_to_client(client_id, {
                     "type": "error",
