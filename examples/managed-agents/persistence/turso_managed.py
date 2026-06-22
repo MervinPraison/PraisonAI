@@ -18,11 +18,13 @@ from praisonaiagents import Agent
 agent = Agent(
     name="Turso Agent",
     instructions="You are a helpful assistant.",
-    db={
-        "database_url": os.getenv("TURSO_DATABASE_URL"),
-        "auth_token": os.getenv("TURSO_AUTH_TOKEN"),
+    memory={
+        "session_id": "turso-demo-session",
+        "db": {
+            "database_url": os.getenv("TURSO_DATABASE_URL"),
+            "auth_token": os.getenv("TURSO_AUTH_TOKEN"),
+        },
     },
-    session_id="turso-demo-session",
 )
 
 result = agent.start("What is edge computing? Explain in 2 sentences.")

@@ -10,8 +10,7 @@ from praisonaiagents import Agent
 agent = Agent(
     name="FlexBot",
     instructions="You are a helpful assistant.",
-    llm="gpt-4o-mini",
-    llm_config={"configurable": True}
+    llm={"model": "gpt-4o-mini", "configurable": True},
 )
 
 if __name__ == "__main__":

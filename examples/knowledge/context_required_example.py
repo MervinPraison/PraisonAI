@@ -80,7 +80,7 @@ Be precise and quote exact values when asked about codes or numbers.""",
         print(f"\nAnswer: {response}\n")
         
         # Verify the answer contains the unique code
-        if "ZEBRA-71" in response.upper():
+        if "ZEBRA-71" in str(response or "").upper():
             print("✅ VERIFIED: Agent correctly retrieved the unique code from context!\n")
         else:
             print("❌ WARNING: Agent did not find the code - check retrieval\n")
@@ -104,7 +104,7 @@ Be precise and quote exact values when asked about codes or numbers.""",
         response = agent.chat("What is the security incident code?")
         print(f"\nAnswer: {response}\n")
         
-        if "HAWK-88" in response.upper():
+        if "HAWK-88" in str(response or "").upper():
             print("✅ VERIFIED: Agent correctly retrieved the security code!\n")
         else:
             print("❌ WARNING: Agent did not find the code - check retrieval\n")

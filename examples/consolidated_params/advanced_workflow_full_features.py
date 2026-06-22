@@ -2,7 +2,7 @@
 from praisonaiagents import Agent
 from praisonaiagents import AgentFlow, Task
 from praisonaiagents.workflows.workflow_configs import (
-    WorkflowOutputConfig, WorkflowPlanningConfig, WorkflowMemoryConfig,
+    WorkflowPlanningConfig, WorkflowMemoryConfig,
 )
 
 # Full-featured workflow with all consolidated params
@@ -32,7 +32,7 @@ workflow = AgentFlow(
         ),
     ],
     # Workflow-level consolidated params
-    output=WorkflowOutputConfig(verbose=True, stream=True),
+    output="verbose",
     planning=WorkflowPlanningConfig(enabled=True, reasoning=True),
     memory=WorkflowMemoryConfig(backend="file"),
     # Agent-like params

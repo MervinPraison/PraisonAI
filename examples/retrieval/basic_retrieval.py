@@ -51,13 +51,15 @@ print("=" * 60)
 agent = Agent(
     name="Knowledge Agent",
     instructions="You are a helpful assistant that answers questions based on the provided knowledge. Be concise.",
-    knowledge=[".praison/test_docs/overview.txt"],
-    retrieval_config={
-        "policy": "always",      # Always retrieve for this demo
-        "top_k": 3,              # Get top 3 chunks
-        "citations": True,       # Include citations
-        "max_context_tokens": 2000,
-    }
+    knowledge={
+        "sources": [".praison/test_docs/overview.txt"],
+        "config": {
+            "policy": "always",
+            "top_k": 3,
+            "citations": True,
+            "max_context_tokens": 2000,
+        },
+    },
 )
 
 # Test 1: Basic chat with retrieval

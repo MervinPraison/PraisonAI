@@ -15,7 +15,7 @@ def main():
     # Create a session with persistent storage
     session = Session(
         session_id="demo_chat_001",
-        memory={"user_id": "demo_user"},
+        user_id="demo_user",
     )
     
     print(f"📝 Created session: {session}")

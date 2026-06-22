@@ -49,10 +49,20 @@ agents = AgentTeam(
     process="sequential"
 )
 
-# Run all tasks
-result = agents.start()
+if __name__ == "__main__":
+    # Run all tasks
+    result = agents.start()
 
-# Print results
-for task_id, task_result in result["task_results"].items():
-    print(f"\nTask {task_id} Result:")
-    print(task_result.raw)
+    # Print results
+    task_results = result.get("task_results") if isinstance(result, dict) else result
+    if isinstance(task_results, dict):
+        iterable = task_results.items()
+    elif isinstance(task_results, list):
+        iterable = enumerate(task_results)
+    else:
+        iterable = [("result", task_results)]
+
+    for task_id, task_result in iterable:
+        print(f"\nTask {task_id} Result:")
+        raw_value = getattr(task_result, "raw", None)
+        print(raw_value if raw_value is not None else str(task_result))

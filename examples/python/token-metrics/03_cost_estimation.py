@@ -14,7 +14,7 @@ def main():
         goal="Conduct comprehensive market research",
         backstory="You are a seasoned market researcher with 10+ years of experience.",
         llm="gpt-4o-mini",
-        metrics=True  # 🎯 Enable automatic metrics tracking
+        output={"metrics": True}
     )
     
     strategy_agent = Agent(
@@ -23,7 +23,7 @@ def main():
         goal="Develop actionable business strategies",
         backstory="You are a strategic consultant who translates research into business plans.",
         llm="gpt-4o-mini",
-        metrics=True  # 🎯 Enable automatic metrics tracking
+        output={"metrics": True}
     )
     
     # Create tasks that will generate substantial token usage

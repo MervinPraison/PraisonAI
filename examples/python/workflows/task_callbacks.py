@@ -6,6 +6,7 @@ with Agents for workflow monitoring and logging.
 """
 
 from praisonaiagents import Agent, Task, AgentTeam
+from praisonaiagents.config.feature_configs import MultiAgentHooksConfig
 
 # Create an agent
 researcher = Agent(
@@ -47,8 +48,10 @@ if __name__ == "__main__":
         agents=[researcher],
         tasks=[task1, task2],
         process="workflow",
-        on_task_start=on_start,
-        on_task_complete=on_complete,
+        hooks=MultiAgentHooksConfig(
+            on_task_start=on_start,
+            on_task_complete=on_complete,
+        ),
         variables={"global_var": "shared_value"}  # Global variables
     )
     

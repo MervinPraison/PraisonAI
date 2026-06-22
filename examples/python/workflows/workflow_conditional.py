@@ -54,13 +54,13 @@ workflow = AgentFlow(
         analyzer,  # Always runs
         Task(
             name="tech_review",
-            description="Review technical aspects of the content",
+            description="Review technical aspects when technical keywords are detected.",
             agent=tech_reviewer,
             should_run=is_technical  # Only runs for technical content
         ),
         Task(
             name="creative_enhance",
-            description="Enhance the creative aspects of the content",
+            description="Enhance narrative quality when creative keywords are detected.",
             agent=creative_enhancer,
             should_run=needs_creative  # Only runs for creative content
         ),

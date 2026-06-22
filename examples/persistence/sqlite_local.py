@@ -11,7 +11,8 @@ Expected output:
     - Data persisted to local SQLite file
 """
 
-from praisonaiagents import Agent, db
+from praisonaiagents import Agent
+from praisonaiagents.db import db
 import tempfile
 import os
 
@@ -25,8 +26,10 @@ print(f"Database: {db_path}")
 agent = Agent(
     name="LocalBot",
     instructions="You are a helpful assistant.",
-    db=my_db,
-    session_id="local-session"
+    memory={
+        "db": my_db,
+        "session_id": "local-session",
+    },
 )
 
 # Chat

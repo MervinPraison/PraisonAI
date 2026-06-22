@@ -77,25 +77,44 @@ agents = AgentTeam(
     process="sequential", output="verbose"
 )
 
+
+def _extract_pydantic_result(result_obj):
+    """Extract pydantic payload from AgentTeam.start() output shapes."""
+    if hasattr(result_obj, "pydantic"):
+        return result_obj.pydantic
+    if isinstance(result_obj, dict):
+        task_results = result_obj.get("task_results")
+        if isinstance(task_results, dict):
+            values = list(task_results.values())
+            if values and hasattr(values[-1], "pydantic"):
+                return values[-1].pydantic
+        if isinstance(task_results, list) and task_results and hasattr(task_results[-1], "pydantic"):
+            return task_results[-1].pydantic
+    return None
+
+
 # Start the analysis
 result = agents.start()
+pydantic_result = _extract_pydantic_result(result)
+if pydantic_result is None:
+    raise ValueError("Could not extract structured CVAnalysisReport from workflow result")
 
 # Access the structured results
 print("\nCV Analysis Results:")
-print(f"\nOverall Score: {result.pydantic.overall_score}/100")
+print(f"\nOverall Score: {pydantic_result.overall_score}/100")
 print("\nKey Strengths:")
-for strength in result.pydantic.key_strengths:
+for strength in pydantic_result.key_strengths:
     print(f"- {strength}")
 
 print("\nSkill Analysis:")
 print("\nTechnical Skills:")
-for skill in result.pydantic.skill_analysis.technical_skills:
+for skill in pydantic_result.skill_analysis.technical_skills:
     print(f"- {skill}")
 
 print("\nExperience Highlights:")
-for achievement in result.pydantic.experience_analysis.key_achievements:
+for achievement in pydantic_result.experience_analysis.key_achievements:
     print(f"- {achievement}")
 
 print("\nRecommendations:")
-for recommendation in result.pydantic.recommendations:
+for recommendation in pydantic_result.recommendations:
     print(f"- {recommendation}")

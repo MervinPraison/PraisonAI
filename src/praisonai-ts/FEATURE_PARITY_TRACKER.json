@@ -4,14 +4,14 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 361,
+    "pythonCoreFeatures": 362,
     "pythonWrapperFeatures": 100,
     "typescriptFeatures": 1188,
-    "gapCount": 69,
+    "gapCount": 70,
     "priorityP0": 2,
     "priorityP1": 0,
     "priorityP2": 0,
-    "priorityP3": 67
+    "priorityP3": 68
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -229,6 +229,7 @@
       "ResourceLimits",
       "RetrievalConfig",
       "RetrievalPolicy",
+      "RetryBackoffConfig",
       "RewriteResult",
       "RewriteStrategy",
       "Route",
@@ -648,6 +649,7 @@
         "ObservabilityHooks",
         "PraisonAIConfigError",
         "PraisonAIError",
+        "RetryBackoffConfig",
         "RunStatus",
         "SessionErrorEvent",
         "SessionIdleEvent",
@@ -5244,6 +5246,15 @@
         "effort": "high",
         "status": "DONE",
         "category": "sandbox"
+      },
+      {
+        "feature": "RetryBackoffConfig",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "RoutingConditionProtocol",

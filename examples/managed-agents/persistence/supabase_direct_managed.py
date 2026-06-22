@@ -20,8 +20,10 @@ from praisonaiagents import Agent
 agent = Agent(
     name="Supabase Agent",
     instructions="You are a helpful assistant.",
-    db={"database_url": os.getenv("SUPABASE_DATABASE_URL")},
-    session_id="supabase-demo-session",
+    memory={
+        "session_id": "supabase-demo-session",
+        "db": {"database_url": os.getenv("SUPABASE_DATABASE_URL")},
+    },
 )
 
 result = agent.start("What is Supabase? Explain in 2 sentences.")

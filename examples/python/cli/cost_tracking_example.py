@@ -31,4 +31,4 @@ print(f"Total cost: ${summary['total_cost']:.4f}")
 print(f"Avg cost/request: ${summary['avg_cost_per_request']:.4f}")
 
 # Display formatted (uses Rich if available)
-handler.display_summary()
+handler.print_summary()
