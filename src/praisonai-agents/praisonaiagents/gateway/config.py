@@ -18,6 +18,7 @@ class SessionConfig:
         persist: Whether to persist session state
         persist_path: Path for session persistence
         resume_window: How long (seconds) a session stays resumable after disconnect
+        max_inbox: Maximum queued messages per session (0 = unlimited, default 256)
         metadata: Additional session metadata
     """
     
@@ -26,6 +27,7 @@ class SessionConfig:
     persist: bool = False
     persist_path: Optional[str] = None
     resume_window: int = 86400  # 24 hours default
+    max_inbox: int = 256  # Default bounded queue size
     metadata: Dict[str, Any] = field(default_factory=dict)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -36,6 +38,7 @@ class SessionConfig:
             "persist": self.persist,
             "persist_path": self.persist_path,
             "resume_window": self.resume_window,
+            "max_inbox": self.max_inbox,
             "metadata": self.metadata,
         }
 
@@ -209,6 +212,7 @@ class GatewayConfig:
         reconnect_timeout: Time to wait for reconnection before closing session
         ssl_cert: Path to SSL certificate (for HTTPS/WSS)
         ssl_key: Path to SSL key
+        max_buffered_bytes: Maximum buffered bytes before slow consumer disconnect (default 1MB)
         push: Push notification service configuration
     """
     
@@ -225,6 +229,7 @@ class GatewayConfig:
     reconnect_timeout: int = 60
     ssl_cert: Optional[str] = None
     ssl_key: Optional[str] = None
+    max_buffered_bytes: int = 1024 * 1024  # 1MB default
     push: PushConfig = field(default_factory=PushConfig)
 
     def __post_init__(self) -> None:
@@ -246,6 +251,7 @@ class GatewayConfig:
             "heartbeat_interval": self.heartbeat_interval,
             "reconnect_timeout": self.reconnect_timeout,
             "ssl_enabled": bool(self.ssl_cert and self.ssl_key),
+            "max_buffered_bytes": self.max_buffered_bytes,
             "push": self.push.to_dict(),
         }
     
