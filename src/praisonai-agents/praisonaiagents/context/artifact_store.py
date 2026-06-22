@@ -82,8 +82,9 @@ class FileSystemArtifactStore:
         Returns:
             ArtifactRef pointing to the stored artifact
         """
-        # Serialize content
+        # Serialize content and prepare for redaction
         if isinstance(content, (str, bytes)):
+            content_str = content if isinstance(content, str) else None
             content_bytes = content.encode("utf-8") if isinstance(content, str) else content
             mime_type = "text/plain"
         else:
@@ -92,11 +93,11 @@ class FileSystemArtifactStore:
             content_bytes = content_str.encode("utf-8")
             mime_type = "application/json"
         
-        # Redact secrets if enabled
-        if self.redact_secrets and isinstance(content, str):
+        # Redact secrets if enabled (for text and JSON content)
+        if self.redact_secrets and content_str:
             for pattern in self._secret_patterns:
-                content = re.sub(pattern, "[REDACTED]", content)
-            content_bytes = content.encode("utf-8")
+                content_str = re.sub(pattern, "[REDACTED]", content_str)
+            content_bytes = content_str.encode("utf-8")
         
         # Compute checksum
         checksum = compute_checksum(content_bytes)
@@ -121,8 +122,9 @@ class FileSystemArtifactStore:
         meta_data["created_at"] = time.time()
         meta_path.write_text(json.dumps(meta_data, indent=2))
         
-        # Generate summary
-        summary = generate_summary(content, max_chars=200)
+        # Generate summary (use redacted content if available)
+        summary_source = content_str if content_str else str(content)
+        summary = generate_summary(summary_source, max_chars=200)
         
         # Create and return reference
         ref = ArtifactRef(
@@ -143,6 +145,23 @@ class FileSystemArtifactStore:
         
         return ref
     
+    def _validate_artifact_path(self, path: Path) -> Path:
+        """Validate that path is within the artifact store's base directory."""
+        resolved = path.expanduser().resolve()
+        base_resolved = self.base_dir.expanduser().resolve()
+        
+        # Check if path is within base directory
+        try:
+            resolved.relative_to(base_resolved)
+        except ValueError:
+            raise PermissionError(f"Artifact path is outside configured store: {path}")
+        
+        # Validate extension
+        if resolved.suffix != ".artifact":
+            raise ValueError(f"Invalid artifact file extension: {path}")
+        
+        return resolved
+    
     def load(self, ref: ArtifactRef) -> Any:
         """
         Load full content from an artifact.
@@ -153,7 +172,7 @@ class FileSystemArtifactStore:
         Returns:
             The deserialized content
         """
-        path = Path(ref.path)
+        path = self._validate_artifact_path(Path(ref.path))
         if not path.exists():
             raise FileNotFoundError(f"Artifact not found: {ref.path}")
         
@@ -182,7 +201,7 @@ class FileSystemArtifactStore:
         Returns:
             String containing the last N lines
         """
-        path = Path(ref.path)
+        path = self._validate_artifact_path(Path(ref.path))
         if not path.exists():
             raise FileNotFoundError(f"Artifact not found: {ref.path}")
         
@@ -205,7 +224,7 @@ class FileSystemArtifactStore:
         Returns:
             String containing the first N lines
         """
-        path = Path(ref.path)
+        path = self._validate_artifact_path(Path(ref.path))
         if not path.exists():
             raise FileNotFoundError(f"Artifact not found: {ref.path}")
         
@@ -236,7 +255,7 @@ class FileSystemArtifactStore:
         Returns:
             List of GrepMatch objects
         """
-        path = Path(ref.path)
+        path = self._validate_artifact_path(Path(ref.path))
         if not path.exists():
             raise FileNotFoundError(f"Artifact not found: {ref.path}")
         
@@ -282,7 +301,7 @@ class FileSystemArtifactStore:
         Returns:
             String containing the requested lines
         """
-        path = Path(ref.path)
+        path = self._validate_artifact_path(Path(ref.path))
         if not path.exists():
             raise FileNotFoundError(f"Artifact not found: {ref.path}")
         
@@ -305,7 +324,7 @@ class FileSystemArtifactStore:
         Returns:
             True if deleted successfully
         """
-        path = Path(ref.path)
+        path = self._validate_artifact_path(Path(ref.path))
         meta_path = path.with_suffix(".meta.json")
         
         deleted = False
@@ -351,13 +370,15 @@ class FileSystemArtifactStore:
             else:
                 search_paths = []
         else:
-            # Search all
+            # Search all - but respect run_id filter if provided
             search_paths = []
             for agent_dir in self.base_dir.iterdir():
                 if agent_dir.is_dir():
                     for run_dir in agent_dir.iterdir():
                         if run_dir.is_dir():
-                            search_paths.append(run_dir)
+                            # If run_id filter provided, only include matching runs
+                            if run_id is None or run_dir.name == run_id:
+                                search_paths.append(run_dir)
         
         # Search for artifacts
         for dir_path in search_paths:
@@ -407,7 +428,7 @@ class FileSystemArtifactStore:
         Returns:
             Number of artifacts deleted
         """
-        days = days or self.retention_days
+        days = self.retention_days if days is None else days
         cutoff_time = time.time() - (days * 24 * 60 * 60)
         deleted_count = 0
         

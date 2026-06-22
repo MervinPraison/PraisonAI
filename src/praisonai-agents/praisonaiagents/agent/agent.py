@@ -1511,7 +1511,9 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         
         # Process tool_output config (artifact storage for large outputs)
         self._artifact_store = None
-        self.tool_output_limit = DEFAULT_TOOL_OUTPUT_LIMIT
+        self._tool_output_config = tool_output  # Store the original config for cloning
+        # Track if tool_output_limit was customized via tool_output config
+        _custom_tool_output_limit = None
         
         if tool_output is None or tool_output is False:
             # Disabled - use default truncation only
@@ -1521,7 +1523,7 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
             from ..config.feature_configs import ToolOutputConfig
             from ..context.artifact_store import FileSystemArtifactStore
             config = ToolOutputConfig()
-            self.tool_output_limit = config.max_bytes
+            _custom_tool_output_limit = config.max_bytes
             if config.enable_artifacts:
                 self._artifact_store = config.artifact_store or FileSystemArtifactStore(
                     retention_days=config.retention_days,
@@ -1532,7 +1534,7 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
             from ..config.feature_configs import ToolOutputConfig
             from ..context.artifact_store import FileSystemArtifactStore
             config = ToolOutputConfig(**tool_output)
-            self.tool_output_limit = config.max_bytes
+            _custom_tool_output_limit = config.max_bytes
             if config.enable_artifacts:
                 self._artifact_store = config.artifact_store or FileSystemArtifactStore(
                     retention_days=config.retention_days,
@@ -1542,7 +1544,7 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
             from ..config.feature_configs import ToolOutputConfig
             if isinstance(tool_output, ToolOutputConfig):
                 config = tool_output
-                self.tool_output_limit = config.max_bytes
+                _custom_tool_output_limit = config.max_bytes
                 if config.enable_artifacts:
                     from ..context.artifact_store import FileSystemArtifactStore
                     self._artifact_store = config.artifact_store or FileSystemArtifactStore(
@@ -1825,7 +1827,8 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         self._init_message_steering(message_steering)
         self.verbose = verbose
         self._has_explicit_output_config = _has_explicit_output  # Track if user set output mode
-        self.tool_output_limit = tool_output_limit  # Configurable tool output limit
+        # Use custom tool_output_limit if set via tool_output config, otherwise use parameter value
+        self.tool_output_limit = _custom_tool_output_limit if _custom_tool_output_limit is not None else tool_output_limit
         self.allow_delegation = allow_delegation
         self.step_callback = step_callback
         # Token budget guard (zero overhead when _max_budget is None)
@@ -2243,6 +2246,7 @@ Your Goal: {self.goal}
             'approval': getattr(self, '_approval_config', None),
             'learn': getattr(self, '_learn_config', None),
             'tool_search': getattr(self, '_tool_search_config', None),
+            'tool_output': getattr(self, '_tool_output_config', None),
             
             # Tool configuration - use consolidated config when available  
             'tool_config': getattr(self, '_tool_config', None),
@@ -5645,8 +5649,12 @@ Answer:"""
                 if artifact_store and hasattr(artifact_store, 'cleanup_old_artifacts'):
                     try:
                         artifact_store.cleanup_old_artifacts()
-                    except Exception:
-                        pass  # Best effort cleanup
+                    except Exception as e:
+                        # Log the error for debugging but don't fail cleanup
+                        import logging
+                        logging.debug(
+                            f"Failed to cleanup artifacts for agent {self.name}: {e}"
+                        )
             except Exception as exc:  # noqa: BLE001 - finalizers must not raise
                 import contextlib
                 with contextlib.suppress(Exception):

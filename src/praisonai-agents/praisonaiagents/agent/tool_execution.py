@@ -66,6 +66,8 @@ class ToolExecutionMixin:
                 artifact_tools.artifact_tail,
                 artifact_tools.artifact_grep,
                 artifact_tools.artifact_chunk,
+                artifact_tools.artifact_load,
+                artifact_tools.artifact_list,
             ]
             
             # Only add if not already present
@@ -539,8 +541,18 @@ class ToolExecutionMixin:
                         truncated = result_str
                     
                     if self.context_manager and hasattr(self, '_truncate_tool_output'):
-                        # Use context-aware truncation if available
-                        truncated = self._truncate_tool_output(function_name, truncated, tool_call_id)
+                        # Use context-aware truncation if available, but preserve artifact reference
+                        if 'artifact_ref' in locals() and artifact_ref:
+                            # Extract the artifact reference from the truncated string
+                            artifact_inline = artifact_ref.to_inline()
+                            # Remove the artifact reference before context truncation
+                            truncated_without_ref = truncated.replace(artifact_inline, "").rstrip()
+                            # Apply context truncation
+                            truncated_without_ref = self._truncate_tool_output(function_name, truncated_without_ref, tool_call_id)
+                            # Re-append the artifact reference
+                            truncated = f"{truncated_without_ref}\n\n{artifact_inline}"
+                        else:
+                            truncated = self._truncate_tool_output(function_name, truncated, tool_call_id)
                     
                     if len(truncated) < len(result_str):
                         logging.debug(f"Truncated {function_name} output from {len(result_str)} to {len(truncated)} chars")
@@ -548,6 +560,9 @@ class ToolExecutionMixin:
                         if isinstance(result, dict):
                             max_field_chars = getattr(self, 'tool_output_limit', 16000) if not self.context_manager else None
                             result = self._truncate_dict_fields(result, function_name, max_field_chars, tool_call_id)
+                            # Add artifact reference to dict result if available
+                            if 'artifact_ref' in locals() and artifact_ref:
+                                result["_artifact_ref"] = artifact_ref.to_dict()
                         else:
                             result = truncated
                 except Exception as e:

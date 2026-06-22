@@ -6,20 +6,41 @@ providing agents with the ability to page through preserved outputs.
 """
 
 import logging
+import threading
 from typing import Optional, List, Dict, Any
 
 from ..context.artifacts import ArtifactRef, GrepMatch
 from .decorator import tool
 
 
-# Module-level artifact store reference
-_artifact_store = None
+# Thread-local storage for per-agent artifact stores
+_artifact_stores = threading.local()
 
 
-def set_artifact_store(store):
-    """Set the global artifact store for retrieval tools."""
-    global _artifact_store
-    _artifact_store = store
+def set_artifact_store(store, agent_id: Optional[str] = None):
+    """Set the artifact store for retrieval tools.
+    
+    Args:
+        store: The artifact store instance
+        agent_id: Optional agent identifier for multi-agent scenarios
+    """
+    if not hasattr(_artifact_stores, 'stores'):
+        _artifact_stores.stores = {}
+    
+    # Use agent_id as key, or 'default' if not provided
+    key = agent_id or 'default'
+    _artifact_stores.stores[key] = store
+
+
+def _get_artifact_store(agent_id: Optional[str] = None):
+    """Get the artifact store for the current context."""
+    if not hasattr(_artifact_stores, 'stores'):
+        return None
+    
+    # Try agent-specific store first, then fall back to default
+    key = agent_id or 'default'
+    stores = _artifact_stores.stores
+    return stores.get(key) or stores.get('default')
 
 
 @tool("artifact_head")
@@ -37,6 +58,7 @@ def artifact_head(
     Returns:
         First N lines of the artifact content
     """
+    _artifact_store = _get_artifact_store()
     if _artifact_store is None:
         return "Error: Artifact store not available"
     
@@ -63,6 +85,7 @@ def artifact_tail(
     Returns:
         Last N lines of the artifact content
     """
+    _artifact_store = _get_artifact_store()
     if _artifact_store is None:
         return "Error: Artifact store not available"
     
@@ -133,6 +156,7 @@ def artifact_chunk(
     Returns:
         Lines from start_line to end_line
     """
+    _artifact_store = _get_artifact_store()
     if _artifact_store is None:
         return "Error: Artifact store not available"
     
@@ -160,11 +184,37 @@ def artifact_load(
     Returns:
         Full artifact content (deserialized if JSON)
     """
+    _artifact_store = _get_artifact_store()
     if _artifact_store is None:
         return "Error: Artifact store not available"
     
     try:
-        ref = ArtifactRef(path=artifact_path, summary="", size_bytes=0, mime_type="text/plain")
+        # Try to load metadata to get correct mime_type and checksum
+        import json
+        from pathlib import Path
+        
+        meta_path = artifact_path.replace(".artifact", ".meta.json")
+        meta = {}
+        try:
+            p = Path(meta_path)
+            if p.exists():
+                meta = json.loads(p.read_text())
+        except Exception:
+            pass
+        
+        # Create ref with actual metadata
+        ref = ArtifactRef(
+            path=artifact_path,
+            summary=meta.get("summary", ""),
+            size_bytes=meta.get("size_bytes", 0),
+            mime_type=meta.get("mime_type", "text/plain"),
+            checksum=meta.get("checksum", ""),
+            artifact_id=meta.get("artifact_id", ""),
+            agent_id=meta.get("agent_id", ""),
+            run_id=meta.get("run_id", ""),
+            tool_name=meta.get("tool_name"),
+            turn_id=meta.get("turn_id", 0)
+        )
         return _artifact_store.load(ref)
     except Exception as e:
         logging.error(f"Failed to load artifact: {e}")

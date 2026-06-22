@@ -1549,6 +1549,17 @@ class ToolOutputConfig:
     artifact_store: Optional[Any] = None  # FileSystemArtifactStore instance
     redact_secrets: bool = True
     
+    def __post_init__(self) -> None:
+        """Validate configuration values."""
+        if self.max_bytes <= 0:
+            raise ValueError("max_bytes must be > 0. Use False/None to disable artifact spilling.")
+        if self.max_lines is not None and self.max_lines <= 0:
+            raise ValueError("max_lines must be > 0 when provided.")
+        if self.direction not in {"head", "tail", "both"}:
+            raise ValueError("direction must be one of: 'head', 'tail', 'both'.")
+        if self.retention_days < 0:
+            raise ValueError("retention_days must be >= 0.")
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         return {
