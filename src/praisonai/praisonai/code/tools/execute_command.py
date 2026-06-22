@@ -71,6 +71,7 @@ def execute_command(
     capture_output: bool = True,
     shell: bool = False,
     env: Optional[Dict[str, str]] = None,
+    allow_dangerous: bool = False,
 ) -> Dict[str, Any]:
     """
     Execute a shell command and return the result.
@@ -85,6 +86,7 @@ def execute_command(
         capture_output: Whether to capture stdout/stderr
         shell: DEPRECATED - shell=True is no longer supported for security reasons
         env: Additional environment variables
+        allow_dangerous: Allow execution of known dangerous commands
         
     Returns:
         Dictionary with:
@@ -119,6 +121,28 @@ def execute_command(
             'stdout': '',
             'stderr': '',
         }
+    
+    # Check if command is dangerous using the existing safety classifier
+    if not allow_dangerous:
+        try:
+            parts = shlex.split(command)
+            if parts:
+                base_cmd = os.path.basename(parts[0]).lower()
+                if base_cmd in DANGEROUS_COMMANDS:
+                    return {
+                        'success': False,
+                        'error': (
+                            f"Command '{base_cmd}' is in DANGEROUS_COMMANDS; "
+                            f"pass allow_dangerous=True to override."
+                        ),
+                        'command': command,
+                        'exit_code': -1,
+                        'stdout': '',
+                        'stderr': '',
+                    }
+        except ValueError:
+            # If we can't parse the command, let it proceed and let later validation catch it
+            pass
     
     # Resolve working directory
     if cwd:

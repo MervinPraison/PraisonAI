@@ -9,6 +9,7 @@ Zero overhead when not enabled — all imports are local.
 import json
 import logging
 import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -51,6 +52,9 @@ class AuditLogHook:
         self._include_output = include_output
         self._max_output_chars = max_output_chars
         self._ensure_dir()
+        self._lock = threading.Lock()
+        # Single long-lived handle; reopened lazily if it gets rotated out.
+        self._fh = None
 
     def _ensure_dir(self) -> None:
         """Create parent directory if it doesn't exist."""
@@ -59,11 +63,28 @@ class AuditLogHook:
 
     def _write(self, entry: dict) -> None:
         """Append a JSON line to the audit log."""
+        line = json.dumps(entry, default=str) + "\n"
         try:
-            with open(self._log_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, default=str) + "\n")
+            with self._lock:
+                # Lazy initialize file handle
+                if self._fh is None:
+                    self._fh = open(self._log_path, "a", encoding="utf-8")
+                self._fh.write(line)
+                self._fh.flush()
+                os.fsync(self._fh.fileno())   # optional, for crash-durability
         except OSError as e:
             logger.error("[praisonai.security.audit] Failed to write audit log: %s", e)
+
+    def close(self) -> None:
+        """Close the audit log file handle."""
+        with self._lock:
+            if self._fh is not None:
+                try:
+                    self._fh.close()
+                except OSError:
+                    pass
+                finally:
+                    self._fh = None
 
     def create_after_tool_hook(self) -> Callable:
         """

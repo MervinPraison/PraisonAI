@@ -444,14 +444,8 @@ class AgentsGenerator:
         Args:
             framework: The framework name for tagging
         """
-        # Initialize AgentOps if configured (extracted from old _select_autogen_version)
-        agentops_api_key = os.getenv("AGENTOPS_API_KEY")
-        if agentops_api_key:
-            try:
-                import agentops
-                agentops.init(agentops_api_key, default_tags=[framework_name])
-            except ImportError:
-                pass
+        # AgentOps initialization is handled in observability/hooks.py to avoid duplication
+        pass
     
     def _validate_cli_backend_compatibility(self, config, framework):
         """Validate that cli_backend and runtime are only used with compatible frameworks."""
