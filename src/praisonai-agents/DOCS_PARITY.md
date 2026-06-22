@@ -42,7 +42,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Execution | 3 | 3 | 1059 |
 | ✅ Files | 2 | 6 | 1100 |
 | ✅ Flow | 1 | 2 | 435 |
-| ✅ Gateway | 6 | 10 | 3924 |
+| ✅ Gateway | 7 | 10 | 3924 |
 | ✅ Guardrails | 4 | 4 | 2008 |
 | ✅ Handoffs | 11 | 5 | 2155 |
 | ✅ Hooks | 2 | 6 | 1916 |
