@@ -31,7 +31,7 @@ import copy
 from typing import Any, Callable, Dict, Optional, Union, get_type_hints
 
 from .base import BaseTool
-from .schema import annotation_to_json_schema, get_parameter_requirements
+from .schema import annotation_to_json_schema, get_parameter_requirements, build_parameters_schema
 
 # Lazy load injected module functions to reduce import time
 _injected_module = None
@@ -105,43 +105,22 @@ class FunctionTool(BaseTool):
         
         Injected parameters are excluded from the schema.
         """
-        schema = {
-            "type": "object",
-            "properties": {},
-            "required": []
-        }
-        
         try:
             sig = inspect.signature(func)
             hints = get_type_hints(func) if hasattr(func, '__annotations__') else {}
-            
-            for param_name, param in sig.parameters.items():
-                if param_name in ('self', 'cls'):
-                    continue
-                
-                # Skip injected parameters - they don't go in schema
-                if param_name in self._injected_params:
-                    continue
-                
-                # Get type hint
-                param_type = hints.get(param_name, Any)
-                
-                # Double-check it's not an Injected type
-                if is_injected_type(param_type):
-                    continue
-                
-                # Use new schema utility for proper type handling
-                prop_schema = annotation_to_json_schema(param_type)
-                
-                schema["properties"][param_name] = prop_schema
-                
-                # Check if required using improved logic  
-                if get_parameter_requirements(sig, param_name):
-                    schema["required"].append(param_name)
-        except Exception as e:
+        except (ValueError, NameError, Exception) as e:
+            # Handle built-ins, forward references, and other signature/type issues
             logging.debug(f"Could not generate schema for {func.__name__}: {e}")
+            return {"type": "object", "properties": {}, "required": []}
         
-        return schema
+        # Use the new shared helper with a predicate for injected parameters
+        return build_parameters_schema(
+            sig,
+            hints,
+            skip={"self", "cls"},
+            skip_predicate=lambda name, ptype: name in self._injected_params or is_injected_type(ptype),
+            func_name=func.__name__
+        )
     
     def run(self, **kwargs) -> Any:
         """Execute the wrapped function with injected state."""
@@ -328,40 +307,38 @@ def _schema_from_function(func: Callable) -> Dict[str, Any]:
     name = getattr(func, '__name__', 'unknown')
     description = func.__doc__ or f"Function: {name}"
     
-    # Build parameters schema
-    properties = {}
-    required = []
-    
     try:
         sig = inspect.signature(func)
         hints = get_type_hints(func) if hasattr(func, '__annotations__') else {}
-        
-        for param_name, param in sig.parameters.items():
-            if param_name == 'self':
-                continue
-            
-            param_type = hints.get(param_name, Any)
-            
-            # Use new schema utility for proper type handling
-            prop_schema = annotation_to_json_schema(param_type)
-            
-            properties[param_name] = prop_schema
-            
-            # Check if required using improved logic
-            if get_parameter_requirements(sig, param_name):
-                required.append(param_name)
-    except Exception as e:
+    except (ValueError, NameError, Exception) as e:
+        # Handle built-ins, forward references, and other signature/type issues
         logging.debug(f"Could not generate schema for {name}: {e}")
+        return {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": description.strip(),
+                "parameters": {"type": "object", "properties": {}, "required": []}
+            }
+        }
+    
+    # Detect and skip injected parameters (same as FunctionTool)
+    injected_params = get_injected_params(func)
+    
+    # Use the new shared helper with injected parameter filtering
+    parameters = build_parameters_schema(
+        sig,
+        hints,
+        skip={"self"},
+        skip_predicate=lambda name, ptype: name in injected_params or is_injected_type(ptype),
+        func_name=name
+    )
     
     return {
         "type": "function",
         "function": {
             "name": name,
             "description": description.strip(),
-            "parameters": {
-                "type": "object",
-                "properties": properties,
-                "required": required
-            }
+            "parameters": parameters
         }
     }
