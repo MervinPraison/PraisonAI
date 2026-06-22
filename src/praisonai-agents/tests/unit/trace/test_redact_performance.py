@@ -1,15 +1,10 @@
-#!/usr/bin/env python3
 """Test to verify redaction optimizations work correctly."""
-import sys
-import os
-sys.path.insert(0, 'src/praisonai-agents')
 
 from praisonaiagents.trace.redact import (
-    _should_redact, 
-    redact_string,
-    REDACT_KEYS,
+    _REDACT_KV_PATTERN,
     _REDACT_PATTERN,
-    _REDACT_KV_PATTERN
+    _should_redact,
+    redact_string,
 )
 
 def test_should_redact_uses_compiled_regex():
