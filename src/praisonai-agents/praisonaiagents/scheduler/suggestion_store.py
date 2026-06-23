@@ -136,7 +136,9 @@ class SuggestionStore:
 
     def _save(self) -> None:
         """Atomically persist the current state to disk."""
-        os.makedirs(os.path.dirname(self._path), exist_ok=True)
+        parent = os.path.dirname(self._path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         data = {sid: asdict(s) for sid, s in self._suggestions.items()}
         tmp = self._path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
