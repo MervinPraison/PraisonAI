@@ -29,6 +29,10 @@ from .protocols import (
     # Home channel and delivery protocols
     HomeChannelRegistryProtocol,
     DeliveryResolverProtocol,
+    # Agent-facing outbound messaging
+    OutboundMessengerProtocol,
+    DeliveryResult,
+    TargetInfo,
     # Protocol version negotiation
     PROTOCOL_VERSION,
     MIN_PROTOCOL_VERSION,
@@ -109,6 +113,10 @@ __all__ = [
     # Home channel and delivery protocols
     "HomeChannelRegistryProtocol",
     "DeliveryResolverProtocol",
+    # Agent-facing outbound messaging
+    "OutboundMessengerProtocol",
+    "DeliveryResult",
+    "TargetInfo",
     # Protocol version negotiation
     "PROTOCOL_VERSION",
     "MIN_PROTOCOL_VERSION",

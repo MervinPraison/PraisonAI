@@ -31,9 +31,13 @@ Usage in a bot handler::
 
 from __future__ import annotations
 
+import asyncio
 from contextvars import ContextVar, Token
 from dataclasses import asdict, dataclass
-from typing import Dict, List, Optional, Any
+from typing import TYPE_CHECKING, Dict, List, Optional, Any
+
+if TYPE_CHECKING:
+    from ..gateway.protocols import OutboundMessengerProtocol
 
 
 @dataclass(frozen=True)
@@ -157,6 +161,70 @@ def clear_session_context(token: Token) -> None:
         _CTX.set(SessionContext())
 
 
+# ---------------------------------------------------------------------------
+# Outbound messenger (Issue #2183)
+#
+# The running gateway/bot registers a concrete OutboundMessengerProtocol impl
+# into this task-local slot so the built-in ``send_message`` tool can reach the
+# user proactively mid-task. ``SessionContext`` is frozen, so the messenger is
+# tracked in its own ContextVar rather than as a context field.
+# ---------------------------------------------------------------------------
+
+_MESSENGER: ContextVar[Optional["OutboundMessengerProtocol"]] = ContextVar(
+    "praisonai_outbound_messenger", default=None
+)
+
+
+def register_outbound_messenger(
+    messenger: Optional["OutboundMessengerProtocol"],
+) -> Token:
+    """Register the active outbound messenger for this task. Returns a token."""
+    return _MESSENGER.set(messenger)
+
+
+def get_outbound_messenger() -> Optional["OutboundMessengerProtocol"]:
+    """Return the active outbound messenger, or ``None`` if no gateway is running."""
+    return _MESSENGER.get()
+
+
+def clear_outbound_messenger(token: Token) -> None:
+    """Restore the previous outbound messenger using the token from register."""
+    try:
+        _MESSENGER.reset(token)
+    except (LookupError, ValueError):
+        _MESSENGER.set(None)
+
+
+# ---------------------------------------------------------------------------
+# Gateway event loop registry (Issue #2183)
+#
+# Sync agent tools (e.g. ``send_message``) usually execute in an executor
+# worker thread while the bot's event loop runs in another thread. A
+# ContextVar would NOT propagate across that thread boundary, so the running
+# gateway records its loop here (process-global) to let sync tools schedule
+# loop-bound coroutines via ``run_coroutine_threadsafe`` on the correct loop.
+# ---------------------------------------------------------------------------
+
+_GATEWAY_LOOP: Optional["asyncio.AbstractEventLoop"] = None
+
+
+def register_gateway_loop(loop: "asyncio.AbstractEventLoop") -> None:
+    """Record the running gateway event loop for cross-thread coroutine scheduling."""
+    global _GATEWAY_LOOP
+    _GATEWAY_LOOP = loop
+
+
+def get_gateway_loop() -> Optional["asyncio.AbstractEventLoop"]:
+    """Return the registered gateway event loop, or ``None`` if none is set."""
+    return _GATEWAY_LOOP
+
+
+def clear_gateway_loop() -> None:
+    """Clear the registered gateway event loop (on gateway shutdown)."""
+    global _GATEWAY_LOOP
+    _GATEWAY_LOOP = None
+
+
 __all__ = [
     "SessionContext",
     "Origin",
@@ -164,4 +232,10 @@ __all__ = [
     "set_session_context",
     "get_session_context",
     "clear_session_context",
+    "register_outbound_messenger",
+    "get_outbound_messenger",
+    "clear_outbound_messenger",
+    "register_gateway_loop",
+    "get_gateway_loop",
+    "clear_gateway_loop",
 ]
