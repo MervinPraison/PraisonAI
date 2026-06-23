@@ -172,9 +172,15 @@ class BlueprintCatalogue:
         """Lazy-load the catalogue (builtins + user dirs) on first access."""
         if self._loaded:
             return
+        import threading
+        if not hasattr(self, "_load_lock"):
+            self._load_lock = threading.Lock()
+        with self._load_lock:
+            if self._loaded:
+                return
 
-        # 1. Builtins
-        self._blueprints.update(BUILTIN_BLUEPRINTS)
+            # 1. Builtins
+            self._blueprints.update(BUILTIN_BLUEPRINTS)
 
         # 2. User blueprints from ~/.praisonai/blueprints/
         try:
