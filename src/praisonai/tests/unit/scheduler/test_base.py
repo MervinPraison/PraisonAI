@@ -76,6 +76,27 @@ class TestScheduleParser:
         assert ScheduleParser.parse("*/2h") == 7200
         assert ScheduleParser.parse("*/12h") == 43200
 
+    def test_parse_cron_interval(self):
+        """Cron "*/N * * * *" -> every N minutes."""
+        assert ScheduleParser.parse("cron:*/15 * * * *") == 900
+
+    def test_parse_cron_hourly(self):
+        """Cron "M * * * *" -> hourly."""
+        assert ScheduleParser.parse("cron:30 * * * *") == 3600
+
+    def test_parse_cron_daily(self):
+        """Cron "M H * * *" -> daily."""
+        assert ScheduleParser.parse("cron:0 8 * * *") == 86400
+        assert ScheduleParser.parse("cron:0 17 * * 1-5") == 86400
+
+    def test_parse_cron_daily_case_insensitive(self):
+        """Cron prefix is case-insensitive."""
+        assert ScheduleParser.parse("CRON:0 8 * * *") == 86400
+
+    def test_parse_cron_fallback(self):
+        """Complex cron patterns (ranges/lists) fall back to 60 seconds."""
+        assert ScheduleParser.parse("cron:0 8,12 * * *") == 60
+
 
 class TestExecutorInterface:
     """Test ExecutorInterface abstract class."""
