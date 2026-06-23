@@ -693,6 +693,30 @@ class Memory(SearchMixin, MemoryCoreMixin):
                 return []
         
         else:
+            # Delegate to the active adapter when provider falls back to
+            # sqlite/in_memory. This avoids the legacy short_mem schema mismatch
+            # where the adapter creates short_term_memory but legacy queries
+            # short_mem (which is never created by the adapter).
+            if getattr(self, "provider", None) in ("sqlite", "in_memory") and getattr(self, "memory_adapter", None):
+                try:
+                    adapter_results = self.memory_adapter.search_short_term(query, limit=limit, **kwargs)
+                    if min_quality > 0:
+                        adapter_results = [
+                            r for r in adapter_results
+                            if r.get("metadata", {}).get("quality", 0.0) >= min_quality
+                        ]
+                    if relevance_cutoff > 0:
+                        adapter_results = [r for r in adapter_results if r.get("score", 1.0) >= relevance_cutoff]
+                    final_results = adapter_results[:limit]
+                    top_score = final_results[0].get("score") if final_results else None
+                    self._emit_memory_event("search", "short_term", query=query,
+                                           result_count=len(final_results), top_score=top_score)
+                    return final_results
+                except Exception as e:
+                    self._log_verbose(f"Adapter search_short_term failed, using legacy fallback: {e}", logging.WARNING)
+                    # Avoid re-triggering the legacy short_mem schema mismatch.
+                    return []
+
             # Local fallback
             conn = self._get_stm_conn()
             c = conn.cursor()
@@ -770,8 +794,25 @@ class Memory(SearchMixin, MemoryCoreMixin):
         ident = str(time.time_ns())
         created = time.time()
 
+        # Protocol-driven storage: Try adapter first only when the provider has
+        # fallen back to sqlite/in_memory. This keeps storage consistent with
+        # search (which delegates to the adapter for the same providers) and
+        # avoids the legacy long_mem schema mismatch. Other providers (chroma,
+        # mem0, mongodb) keep their existing dedicated write paths below so the
+        # embedding model and vector space stay consistent with search.
+        adapter_success = False
+        if (getattr(self, "provider", None) in ("sqlite", "in_memory")
+                and getattr(self, "memory_adapter", None)):
+            try:
+                result_id = self.memory_adapter.store_long_term(text, metadata=metadata)
+                logger.info(f"Successfully stored via memory adapter with ID: {result_id}")
+                adapter_success = True
+                ident = result_id  # Use adapter-provided ID (mirrors store_short_term)
+            except Exception as e:
+                logger.warning(f"Failed to store via memory adapter, falling back to direct storage: {e}")
+
         # Store in MongoDB if enabled (first priority)
-        if self.use_mongodb and hasattr(self, "mongo_long_term"):
+        if not adapter_success and self.use_mongodb and hasattr(self, "mongo_long_term"):
             try:
                 doc = {
                     "_id": ident,
@@ -793,24 +834,36 @@ class Memory(SearchMixin, MemoryCoreMixin):
                 logger.error(f"Failed to store in MongoDB long-term memory: {e}")
                 # Continue to SQLite fallback
         
-        # Store in SQLite (with write lock for concurrency safety)
-        try:
-            conn = self._get_ltm_conn()
-            with self._write_lock:  # Serialize write operations
-                conn.execute(
-                    "INSERT INTO long_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
-                    (ident, text, json.dumps(metadata), created)
-                )
-                conn.commit()
-            logger.info(f"Successfully stored in SQLite with ID: {ident}")
-        except Exception as e:
-            logger.error(f"Error storing in SQLite: {e}")
-            if not (self.use_mongodb and hasattr(self, "mongo_long_term")):
-                # Only raise if MongoDB is not available as fallback
-                return
+        # Store in SQLite (with write lock for concurrency safety).
+        # Skip the legacy long_mem schema for adapter-driven sqlite/in_memory
+        # providers: those use the adapter's long_term_memory table and the
+        # legacy long_mem table is never created, which would silently drop
+        # the write. Surface the adapter failure instead.
+        if not adapter_success and getattr(self, "provider", None) in ("sqlite", "in_memory") \
+                and getattr(self, "memory_adapter", None):
+            raise RuntimeError(
+                "Long-term store failed via adapter for sqlite/in_memory provider; "
+                "the legacy long_mem table is not schema-compatible."
+            )
+
+        if not adapter_success:
+            try:
+                conn = self._get_ltm_conn()
+                with self._write_lock:  # Serialize write operations
+                    conn.execute(
+                        "INSERT INTO long_mem (id, content, meta, created_at) VALUES (?,?,?,?)",
+                        (ident, text, json.dumps(metadata), created)
+                    )
+                    conn.commit()
+                logger.info(f"Successfully stored in SQLite with ID: {ident}")
+            except Exception as e:
+                logger.error(f"Error storing in SQLite: {e}")
+                if not (self.use_mongodb and hasattr(self, "mongo_long_term")):
+                    # Only raise if MongoDB is not available as fallback
+                    raise
 
         # Store in vector database if enabled
-        if self.use_rag and hasattr(self, "chroma_col"):
+        if not adapter_success and self.use_rag and hasattr(self, "chroma_col"):
             try:
                 from praisonaiagents.embedding import embedding as get_embedding
                 
@@ -841,7 +894,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
             except Exception as e:
                 logger.error(f"Error storing in ChromaDB: {e}")
         
-        elif self.use_mem0 and hasattr(self, "mem0_client"):
+        elif not adapter_success and self.use_mem0 and hasattr(self, "mem0_client"):
             try:
                 self.mem0_client.add(text, metadata=metadata)
                 logger.info("Successfully stored in Mem0")
@@ -979,6 +1032,29 @@ class Memory(SearchMixin, MemoryCoreMixin):
 
             except Exception as e:
                 self._log_verbose(f"Error searching ChromaDB: {e}", logging.ERROR)
+
+        # Delegate to the active adapter when provider falls back to
+        # sqlite/in_memory. This avoids the legacy long_mem schema mismatch
+        # where the adapter creates long_term_memory but legacy queries long_mem.
+        if not found and getattr(self, "provider", None) in ("sqlite", "in_memory") and getattr(self, "memory_adapter", None):
+            try:
+                adapter_results = self.memory_adapter.search_long_term(query, limit=limit, **kwargs)
+                if min_quality > 0:
+                    adapter_results = [
+                        r for r in adapter_results
+                        if r.get("metadata", {}).get("quality", 0.0) >= min_quality
+                    ]
+                if relevance_cutoff > 0:
+                    adapter_results = [r for r in adapter_results if r.get("score", 1.0) >= relevance_cutoff]
+                final_results = adapter_results[:limit]
+                top_score = final_results[0].get("score") if final_results else None
+                self._emit_memory_event("search", "long_term", query=query,
+                                       result_count=len(final_results), top_score=top_score)
+                return final_results
+            except Exception as e:
+                self._log_verbose(f"Adapter search_long_term failed, using legacy fallback: {e}", logging.WARNING)
+                # Avoid re-triggering the legacy long_mem schema mismatch.
+                return []
 
         # Always try SQLite as fallback or additional source
         conn = self._get_ltm_conn()
