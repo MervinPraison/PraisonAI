@@ -65,7 +65,10 @@ class LLMProviderRegistry(PluginRegistry[ProviderType]):
         
         with self._lock:
             for name, aliases in aliases_map:
-                if name in self._items:  # Only add aliases if the provider loaded
+                # Check the loader map (populated at __init__) rather than the
+                # resolved cache (_items, empty until first resolve). Aliases
+                # should attach to anything the registry can load.
+                if name.lower() in self._loaders:
                     for alias in aliases:
                         self._aliases[alias.lower()] = name.lower()
     

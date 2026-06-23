@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 
 from .base import ScheduleParser, PraisonAgentExecutor
 from .shared import backoff_delay
-from ._base_scheduler import _BaseAgentScheduler
+from ._base_scheduler import _BaseAgentScheduler, _compute_run_cost
 
 logger = logging.getLogger(__name__)
 
@@ -224,12 +224,17 @@ class AgentScheduler(_BaseAgentScheduler):
                 # Always print result to stdout (even in non-verbose mode)
                 print(f"\n✅ Agent Response:\n{result}\n")
                 
-                # Estimate cost (rough: ~$0.0001 per execution for gpt-4o-mini)
-                estimated_cost = 0.0001  # Base cost estimate
+                # Compute real cost from the agent response's token usage.
+                # Falls back to $0 (not a fake constant) when no usage metadata.
+                run_cost, in_tok, out_tok, model = _compute_run_cost(result)
                 with self._stats_lock:
-                    self._total_cost += estimated_cost
+                    self._total_cost += run_cost
                     self._success_count += 1
-                logger.debug(f"Estimated cost this run: ${estimated_cost:.4f}, Total: ${self._total_cost:.4f}")
+                logger.debug(
+                    "Run cost: $%.4f (model=%s, in=%d, out=%d). Total: $%.4f / $%s",
+                    run_cost, model or "?", in_tok, out_tok,
+                    self._total_cost, self.max_cost,
+                )
                 success = True
                 
                 if self.on_success:

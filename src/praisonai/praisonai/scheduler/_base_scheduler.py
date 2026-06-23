@@ -6,9 +6,53 @@ import os
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_usage(result: Any) -> Tuple[int, int, str]:
+    """Pull (input_tokens, output_tokens, model) off whatever the agent returned.
+
+    Looks for the common LiteLLM / SDK response shapes. Falls back to
+    (0, 0, '') so a response with no usage metadata contributes $0 — not a
+    fake constant. The budget brake should err on the side of running forever
+    rather than tripping prematurely on missing metadata.
+    """
+    usage = getattr(result, "usage", None)
+    if usage is None and isinstance(result, dict):
+        usage = result.get("usage")
+
+    model = getattr(result, "model", None)
+    if model is None and isinstance(result, dict):
+        model = result.get("model")
+    model = model or ""
+
+    if usage is None:
+        return 0, 0, model
+
+    if isinstance(usage, dict):
+        in_tok = usage.get("input_tokens", usage.get("prompt_tokens", 0)) or 0
+        out_tok = usage.get("output_tokens", usage.get("completion_tokens", 0)) or 0
+        return int(in_tok), int(out_tok), model
+
+    in_tok = getattr(usage, "input_tokens", getattr(usage, "prompt_tokens", 0)) or 0
+    out_tok = getattr(usage, "output_tokens", getattr(usage, "completion_tokens", 0)) or 0
+    return int(in_tok), int(out_tok), model
+
+
+def _compute_run_cost(result: Any) -> Tuple[float, int, int, str]:
+    """Compute the real cost of a single run from its usage metadata.
+
+    Returns (cost, input_tokens, output_tokens, model). Returns a cost of 0.0
+    when no token usage is available rather than a misleading constant.
+    """
+    in_tok, out_tok, model = _extract_usage(result)
+    if not (in_tok or out_tok):
+        return 0.0, in_tok, out_tok, model
+    from praisonai.cli.features.cost_tracker import get_pricing
+    cost = get_pricing(model).calculate_cost(in_tok, out_tok)
+    return cost, in_tok, out_tok, model
 
 
 class _BaseAgentScheduler:
