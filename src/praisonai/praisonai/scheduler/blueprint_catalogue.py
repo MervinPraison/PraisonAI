@@ -211,7 +211,10 @@ class BlueprintCatalogue:
 
         try:
             with open(path, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
+                data = yaml.safe_load(f)
+            if not isinstance(data, dict):
+                logger.warning("Blueprint YAML %s is not a dictionary", path)
+                return None
         except Exception as e:
             logger.warning("Failed to read blueprint YAML %s: %s", path, e)
             return None
