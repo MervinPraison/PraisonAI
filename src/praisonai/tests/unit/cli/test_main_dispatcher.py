@@ -405,8 +405,13 @@ class TestCommandRegistryNoDrift(unittest.TestCase):
         from praisonai.cli import app as cli_app
 
         routing = cli_app.get_command_names()
-        for name in ("agent", "auth", "command", "models", "permissions", "validate"):
-            self.assertIn(name, routing)
+        expected = {"agent", "auth", "command", "models", "permissions", "validate"}
+        missing = expected - routing
+        self.assertEqual(
+            missing,
+            set(),
+            f"Previously-drifted commands not found in routing set: {missing}",
+        )
 
 
 if __name__ == "__main__":
