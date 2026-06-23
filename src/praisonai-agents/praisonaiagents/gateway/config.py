@@ -288,10 +288,14 @@ class GatewayConfig:
 
         Scope names are returned as plain strings so callers in the wrapper
         can compare against ``OperatorScope`` values without importing them.
+        Unknown scope names (e.g. typos in ``gateway.yaml``) are dropped and a
+        warning is logged so misconfiguration surfaces early instead of
+        silently denying all access.
         """
         from .protocols import OperatorScope
 
-        all_scopes = [s.value for s in OperatorScope.all()]
+        valid_scopes = {s.value for s in OperatorScope.all()}
+        all_scopes = list(valid_scopes)
         if not self.auth_scopes:
             return all_scopes
         if token is None:
@@ -299,7 +303,22 @@ class GatewayConfig:
         granted = self.auth_scopes.get(token)
         if granted is None:
             return []
-        return [str(s) for s in granted]
+        resolved: List[str] = []
+        unknown: List[str] = []
+        for s in granted:
+            name = str(s)
+            if name in valid_scopes:
+                resolved.append(name)
+            else:
+                unknown.append(name)
+        if unknown:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Ignoring unknown operator scope(s) %s; valid scopes are %s",
+                unknown,
+                sorted(valid_scopes),
+            )
+        return resolved
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary (hides sensitive data)."""

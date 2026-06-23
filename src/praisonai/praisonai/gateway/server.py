@@ -585,6 +585,25 @@ class WebSocketGateway:
         async def health(request):
             return JSONResponse(self.health())
         
+        def _loopback_bypass_active(request) -> bool:
+            """Whether the development loopback auth bypass applies to ``request``.
+
+            Only true when ``ALLOW_LOOPBACK_BYPASS`` is explicitly enabled, the
+            request originates from localhost, and no proxy headers are present.
+            Used by both ``_check_auth`` (auth bypass) and scope resolution so
+            the two stay consistent — a loopback request that bypasses auth is
+            also granted all operator scopes.
+            """
+            allow_loopback = os.environ.get("ALLOW_LOOPBACK_BYPASS", "").lower() in ("true", "1", "yes")
+            if not allow_loopback:
+                return False
+            client_host = getattr(request.client, 'host', None) if request.client else None
+            if not client_host or client_host not in ('127.0.0.1', '::1', 'localhost'):
+                return False
+            # Reject if proxy headers are present (indicates request went through proxy)
+            proxy_headers = ["x-forwarded-for", "via", "x-real-ip", "x-forwarded-host"]
+            return not any(header in request.headers for header in proxy_headers)
+
         def _check_auth(request) -> Optional[JSONResponse]:
             """Validate auth token if configured. Returns error response or None.
 
@@ -610,16 +629,9 @@ class WebSocketGateway:
                 pass
             
             # Check loopback bypass for local requests (only if explicitly enabled)
-            allow_loopback = os.environ.get("ALLOW_LOOPBACK_BYPASS", "").lower() in ("true", "1", "yes")
-            if allow_loopback:
-                client_host = getattr(request.client, 'host', None) if request.client else None
-                if client_host and client_host in ('127.0.0.1', '::1', 'localhost'):
-                    # Reject if proxy headers are present (indicates request went through proxy)
-                    proxy_headers = ["x-forwarded-for", "via", "x-real-ip", "x-forwarded-host"]
-                    has_proxy_headers = any(header in request.headers for header in proxy_headers)
-                    if not has_proxy_headers:
-                        # Allow local requests without auth for development
-                        return None
+            if _loopback_bypass_active(request):
+                # Allow local requests without auth for development
+                return None
             
             # Fall back to token-based auth
             auth_header = request.headers.get("authorization", "")
@@ -677,9 +689,13 @@ class WebSocketGateway:
             """Resolve the operator scopes for an HTTP request.
 
             Backward compatible: when no scope policy is configured the client
-            is granted all scopes (identical to today's binary auth).
+            is granted all scopes (identical to today's binary auth). When the
+            development loopback bypass applies the client is likewise granted
+            all scopes, matching the auth-bypass intent.
             """
             if not self.config.has_scope_policy:
+                return [s.value for s in OperatorScope.all()]
+            if _loopback_bypass_active(request):
                 return [s.value for s in OperatorScope.all()]
             return self.config.resolve_scopes(_extract_request_token(request))
 
@@ -892,6 +908,19 @@ class WebSocketGateway:
             if auth_err:
                 return auth_err
 
+            if request.method == "GET":
+                return JSONResponse({
+                    "allow_list": _approval_mgr.allowlist.list(),
+                })
+
+            # Mutating the approval allow-list is security-sensitive. Check the
+            # scope *before* consuming the rate-limit budget so a read-only
+            # client cannot drain a source IP's budget (which would otherwise
+            # cause 429s on legitimate GETs from the same IP).
+            scope_err = _require_scope(request, OperatorScope.APPROVALS)
+            if scope_err:
+                return scope_err
+
             client_ip = request.client.host if request.client else "unknown"
             if not _approval_rate.allow("approval_allowlist", client_ip):
                 retry = _approval_rate.time_until_allowed("approval_allowlist", client_ip)
@@ -899,16 +928,6 @@ class WebSocketGateway:
                     {"error": "Rate limited", "retry_after_seconds": round(retry)},
                     status_code=429,
                 )
-
-            if request.method == "GET":
-                return JSONResponse({
-                    "allow_list": _approval_mgr.allowlist.list(),
-                })
-
-            # Mutating the approval allow-list is security-sensitive.
-            scope_err = _require_scope(request, OperatorScope.APPROVALS)
-            if scope_err:
-                return scope_err
 
             try:
                 body = await request.json()
