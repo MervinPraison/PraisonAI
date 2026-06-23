@@ -1131,6 +1131,9 @@ class WebSocketGateway:
         )
         self._server = uvicorn.Server(config)
         
+        # Clear shutdown state so a stopped-then-restarted instance reports
+        # ready again instead of being stuck reporting "draining".
+        self._draining = False
         self._is_running = True
         self._started_at = time.time()
         
@@ -2240,8 +2243,11 @@ class WebSocketGateway:
             for name, status in self._channel_supervisor.get_all_status().items():
                 if status.state == ChannelState.FAILED:
                     unhealthy.append((name, status))
-        except Exception:
-            pass
+        except Exception as e:
+            # Fail closed: if we cannot inspect supervision, surface it as a
+            # readiness failure rather than silently reporting healthy.
+            logger.warning("Readiness probe failed to inspect channel supervision: %s", e)
+            unhealthy.append(("supervisor-error", None))
         return unhealthy
 
     async def _event_loop_responsive(self, threshold: float = 1.0) -> bool:
@@ -2258,13 +2264,16 @@ class WebSocketGateway:
             True if the loop scheduled the callback within ``threshold``.
         """
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             start = loop.time()
             await asyncio.sleep(0)
             lag = loop.time() - start
             return lag <= threshold
-        except Exception:
-            return True
+        except Exception as e:
+            # Fail closed: an error sampling the loop means we cannot confirm
+            # responsiveness, so report not-responsive.
+            logger.warning("Liveness probe failed to sample event loop lag: %s", e)
+            return False
 
     async def _readiness_failures(self) -> List[str]:
         """Return a list of reasons the gateway is not ready ([] when ready).
@@ -2277,7 +2286,7 @@ class WebSocketGateway:
         failing: List[str] = []
         if self._draining:
             failing.append("draining")
-        if not self._is_running:
+        elif not self._is_running:
             failing.append("startup-pending")
         if not await self._event_loop_responsive():
             failing.append("event-loop")

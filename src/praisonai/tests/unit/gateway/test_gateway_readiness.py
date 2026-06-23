@@ -2,11 +2,13 @@
 """Tests for gateway readiness (/ready) and liveness (/live) probe helpers."""
 
 import asyncio
-import os
 import sys
+from pathlib import Path
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src/praisonai'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src/praisonai-agents'))
+# Resolve from the repository root so direct execution finds the packages.
+REPO_ROOT = Path(__file__).resolve().parents[5]
+sys.path.insert(0, str(REPO_ROOT / "src" / "praisonai"))
+sys.path.insert(0, str(REPO_ROOT / "src" / "praisonai-agents"))
 
 from praisonai.gateway.server import WebSocketGateway
 from praisonai.gateway.supervisor import ChannelState, ChannelStatus
@@ -80,6 +82,28 @@ def test_unhealthy_channels_lists_failed_only():
     assert names == ["a"]
 
 
+def test_draining_does_not_report_startup_pending():
+    """After shutdown, readiness reports only draining, not startup-pending."""
+    gw = _make_gateway()
+    gw._draining = True
+    gw._is_running = False
+    failing = asyncio.run(gw._readiness_failures())
+    assert "draining" in failing
+    assert "startup-pending" not in failing
+
+
+def test_draining_reset_clears_ready_after_restart():
+    """Re-running start()'s reset on a stopped instance clears the draining flag."""
+    gw = _make_gateway()
+    gw._is_running = False
+    gw._draining = True
+    # Emulate the reset performed at the top of start().
+    gw._draining = False
+    gw._is_running = True
+    failing = asyncio.run(gw._readiness_failures())
+    assert failing == []
+
+
 if __name__ == "__main__":
     test_readiness_startup_pending_before_start()
     test_readiness_ready_when_running()
@@ -88,4 +112,6 @@ if __name__ == "__main__":
     test_paused_channel_does_not_block_readiness()
     test_event_loop_responsive_true()
     test_unhealthy_channels_lists_failed_only()
+    test_draining_does_not_report_startup_pending()
+    test_draining_reset_clears_ready_after_restart()
     print("All readiness/liveness tests passed")
