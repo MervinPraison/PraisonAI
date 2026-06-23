@@ -31,7 +31,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Chunking | 2 | 2 | 288 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 13 | 3551 |
-| ✅ Conditions | 1 | 3 | 1084 |
+| ✅ Conditions | 1 | 3 | 1085 |
 | ✅ Configuration | 3 | 7 | 2069 |
 | ✅ Context Management | 16 | 33 | 10206 |
 | ✅ Database | 1 | 40 | 5373 |
@@ -46,10 +46,10 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Flow | 1 | 2 | 435 |
 | ✅ Gateway | 7 | 17 | 6089 |
 | ✅ Guardrails | 4 | 4 | 2008 |
-| ✅ Handoffs | 11 | 6 | 2471 |
+| ✅ Handoffs | 11 | 6 | 2492 |
 | ✅ Hooks | 2 | 8 | 3301 |
 | ✅ Image | 1 | 11 | 1096 |
-| ✅ Knowledge | 4 | 23 | 4199 |
+| ✅ Knowledge | 4 | 23 | 4282 |
 | ✅ LLM | 3 | 10 | 3674 |
 | ✅ Loops | 4 | 3 | 774 |
 | ✅ MCP | 1 | 51 | 10933 |
@@ -61,7 +61,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Parallel Execution | 3 | 2 | 399 |
 | ✅ Planning | 6 | 5 | 1555 |
 | ✅ Plugins | 8 | 3 | 1502 |
-| ✅ Prompts | 2 | 7 | 1570 |
+| ✅ Prompts | 2 | 7 | 1569 |
 | ✅ Providers | 1 | 52 | 6214 |
 | ✅ Query | 1 | 2 | 616 |
 | ✅ RAG | 5 | 15 | 3190 |
