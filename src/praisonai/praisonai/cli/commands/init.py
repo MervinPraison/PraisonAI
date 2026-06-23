@@ -14,7 +14,6 @@ The scaffolded files are immediately discoverable and runnable via
 """
 
 from pathlib import Path
-from typing import Optional
 
 import typer
 
@@ -65,7 +64,7 @@ def _write(path: Path, content: str, force: bool) -> bool:
     if path.exists() and not force:
         return False
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content)
+    path.write_text(content, encoding="utf-8")
     return True
 
 
@@ -104,11 +103,18 @@ def init(
 
     written = []
     skipped = []
-    for path, content in targets:
-        if _write(path, content, force):
-            written.append(path)
-        else:
-            skipped.append(path)
+    try:
+        for path, content in targets:
+            if _write(path, content, force):
+                written.append(path)
+            else:
+                skipped.append(path)
+    except OSError as exc:
+        output.print_error(
+            f"Failed to write {exc.filename or base}: {exc.strerror or exc}",
+            remediation="Check that you have write permissions and free disk space.",
+        )
+        raise typer.Exit(code=1)
 
     for path in written:
         output.print_info(f"Created {path}")
