@@ -404,6 +404,12 @@ def schedule_suggestion_accept(
             output.print_error(f"Suggestion '{suggestion_id}' not found or already handled.")
             raise typer.Exit(1)
 
+        # Reject expired suggestions (expires_at == 0 means no expiry)
+        import time as _time
+        if sug.expires_at != 0 and sug.expires_at <= _time.time():
+            output.print_error(f"Suggestion '{suggestion_id}' has expired.")
+            raise typer.Exit(1)
+
         catalogue = BlueprintCatalogue()
         bp = catalogue.get_blueprint(sug.blueprint_name)
         if bp is None:
