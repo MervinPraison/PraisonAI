@@ -22,7 +22,8 @@ rag_agent = Agent(
     
     You can use the internet_search function to search the web when needed.""",
     llm="gpt-4o",
-    markdown=True)
+    output={"markdown": True},
+)
 
 if __name__ == "__main__":
     print("🤖 Thai Recipe RAG Agent is ready!")

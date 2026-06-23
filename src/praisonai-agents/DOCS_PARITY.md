@@ -1,6 +1,6 @@
 # Documentation Parity Tracker (Python)
 
-> **Categories:** 64 | **Documented:** 61 | **Parity:** 95.3%
+> **Categories:** 65 | **Documented:** 65 | **Parity:** 100.0%
 
 This report compares **Python SDK feature categories** against **Python documentation** (docs/concepts, docs/features, etc.).
 
@@ -8,109 +8,80 @@ This report compares **Python SDK feature categories** against **Python document
 
 | Metric | Count |
 |--------|-------|
-| Feature Categories | 64 |
-| **Documented Categories** | **61** |
-| **Undocumented Categories** | **3** |
-| **Parity** | **95.3%** |
+| Feature Categories | 65 |
+| **Documented Categories** | **65** |
+| **Undocumented Categories** | **0** |
+| **Parity** | **100.0%** |
 
 ## Documented Categories
 
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 21 | 34 | 9360 |
+| ✅ Agent | 20 | 40 | 10760 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2880 |
-| ✅ Agent-to-User (A2U) | 1 | 3 | 547 |
-| ✅ Approval | 1 | 3 | 1283 |
+| ✅ Agent-to-User (A2U) | 1 | 3 | 575 |
+| ✅ Approval | 1 | 3 | 1287 |
 | ✅ Audio | 2 | 10 | 649 |
-| ✅ Auto Generation | 4 | 6 | 1724 |
+| ✅ Auto Generation | 4 | 6 | 1637 |
 | ✅ Autonomy | 3 | 5 | 1919 |
-| ✅ Bots | 7 | 14 | 5228 |
+| ✅ Bots | 7 | 20 | 6520 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 98 | 24103 |
-| ✅ Chunking | 2 | 2 | 285 |
+| ✅ CLI | 5 | 106 | 26127 |
+| ✅ Chunking | 2 | 2 | 288 |
 | ✅ Citations | 2 | 1 | 202 |
-| ✅ Code Execution | 3 | 13 | 3551 |
+| ✅ Code Execution | 2 | 13 | 3551 |
 | ✅ Conditions | 1 | 3 | 1086 |
-| ✅ Configuration | 3 | 7 | 1812 |
-| ✅ Context Management | 16 | 31 | 9294 |
-| ✅ Database | 1 | 34 | 4339 |
+| ✅ Configuration | 3 | 7 | 2060 |
+| ✅ Context Management | 16 | 33 | 10199 |
+| ✅ Database | 1 | 39 | 5300 |
+| ✅ Deep Research | 8 | 2 | 437 |
 | ✅ Display | 6 | 2 | 1175 |
 | ✅ Embeddings | 6 | 23 | 1966 |
 | ✅ Evaluation | 1 | 6 | 2539 |
 | ✅ Events | 1 | 2 | 704 |
 | ✅ Execution | 3 | 3 | 1059 |
-| ✅ Files | 2 | 6 | 1100 |
+| ✅ Failover | 2 | 1 | 372 |
+| ✅ Files | 1 | 6 | 1100 |
 | ✅ Flow | 1 | 2 | 435 |
-| ✅ Gateway | 6 | 10 | 3924 |
+| ✅ Gateway | 7 | 14 | 5513 |
 | ✅ Guardrails | 4 | 4 | 2008 |
-| ✅ Handoffs | 11 | 5 | 2155 |
-| ✅ Hooks | 2 | 6 | 1916 |
+| ✅ Handoffs | 11 | 6 | 2471 |
+| ✅ Hooks | 2 | 8 | 3301 |
 | ✅ Image | 1 | 11 | 1096 |
-| ✅ Knowledge | 3 | 12 | 3466 |
-| ✅ LLM | 3 | 5 | 2251 |
+| ✅ Knowledge | 3 | 23 | 4199 |
+| ✅ LLM | 3 | 9 | 3414 |
 | ✅ Loops | 4 | 3 | 774 |
-| ✅ MCP | 2 | 51 | 10960 |
-| ✅ Memory | 6 | 16 | 5855 |
-| ✅ Observability | 2 | 23 | 2590 |
+| ✅ MCP | 1 | 51 | 10917 |
+| ✅ Memory | 6 | 16 | 5879 |
+| ✅ OCR | 2 | 1 | 226 |
+| ✅ Observability | 2 | 23 | 2652 |
+| ✅ Optimizer | 1 | 2 | 653 |
 | ✅ Output | 3 | 4 | 903 |
 | ✅ Parallel Execution | 3 | 2 | 399 |
 | ✅ Planning | 6 | 5 | 1519 |
 | ✅ Plugins | 8 | 3 | 1502 |
 | ✅ Prompts | 2 | 7 | 1570 |
-| ✅ Providers | 2 | 51 | 5911 |
+| ✅ Providers | 1 | 52 | 6194 |
 | ✅ Query | 1 | 2 | 616 |
 | ✅ RAG | 5 | 15 | 3190 |
 | ✅ Realtime | 2 | 5 | 584 |
 | ✅ Reflection | 3 | 2 | 469 |
 | ✅ Retrieval | 2 | 5 | 944 |
 | ✅ Routing | 1 | 2 | 597 |
-| ✅ Sandbox | 5 | 6 | 2294 |
-| ✅ Security | 1 | 3 | 2518 |
-| ✅ Sessions | 4 | 9 | 3826 |
+| ✅ Sandbox | 5 | 6 | 2482 |
+| ✅ Security | 1 | 3 | 2526 |
+| ✅ Sessions | 4 | 10 | 3251 |
 | ✅ Skills | 5 | 9 | 3415 |
 | ✅ Tasks | 2 | 6 | 3064 |
 | ✅ Telemetry | 1 | 2 | 560 |
 | ✅ Templates | 1 | 7 | 1411 |
-| ✅ Tools | 12 | 113 | 23809 |
+| ✅ Tools | 12 | 115 | 25040 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Video | 2 | 6 | 510 |
 | ✅ Vision | 2 | 1 | 283 |
-| ✅ Web | 4 | 6 | 1297 |
-| ✅ Workflows | 4 | 11 | 4302 |
-
-## Stub Documentation (Need Content)
-
-These categories have documentation files but < 50 lines (stubs):
-
-| Category | Features | Docs | Lines |
-|----------|----------|------|-------|
-| ⚠️ OCR | 2 | 1 | 49 |
-
-## Undocumented Categories (Need Documentation)
-
-| Category | Features |
-|----------|----------|
-| ❌ Failover | 2 |
-| ❌ Optimizer | 1 |
-
-## Documentation Without Features
-
-These docs exist but don't match any implemented feature category:
-
-- ℹ️ AI SDK (2 docs, 527 lines)
-- ℹ️ Callbacks (1 docs, 1122 lines)
-- ℹ️ Chat (3 docs, 634 lines)
-- ℹ️ Deep Research (2 docs, 437 lines)
-- ℹ️ Deployment (29 docs, 6013 lines)
-- ℹ️ Jobs (2 docs, 961 lines)
-- ℹ️ Middleware (1 docs, 60 lines)
-- ℹ️ Process (1 docs, 545 lines)
-- ℹ️ Scheduler (2 docs, 1084 lines)
-- ℹ️ Storage (5 docs, 957 lines)
-- ℹ️ Streaming (4 docs, 1163 lines)
-- ℹ️ Token Management (4 docs, 1383 lines)
-- ℹ️ Vector Store (11 docs, 733 lines)
+| ✅ Web | 3 | 6 | 1297 |
+| ✅ Workflows | 4 | 14 | 5810 |
 
 ---
 

@@ -19,6 +19,16 @@ from praisonaiagents import Agent, AgentTeam
 # Initialize observability
 obs.init()
 
+
+def set_span_attr(span, key, value):
+    """Set span attribute safely across observability implementations."""
+    if hasattr(span, "set_attribute"):
+        span.set_attribute(key, value)
+        return
+    attrs = getattr(span, "attributes", None)
+    if attrs is not None:
+        attrs[key] = value
+
 # Create agents
 researcher = Agent(
     name="Researcher",
@@ -37,13 +47,13 @@ with obs.trace("content-creation", metadata={"workflow": "research-write"}):
     
     # Research phase
     with obs.span("research-phase", kind=SpanKind.AGENT) as research_span:
-        research_span.attributes["agent"] = "Researcher"
+        set_span_attr(research_span, "agent", "Researcher")
         research_result = researcher.chat("Research the benefits of AI in healthcare")
     
     # Writing phase  
     with obs.span("writing-phase", kind=SpanKind.AGENT) as write_span:
-        write_span.attributes["agent"] = "Writer"
-        write_span.attributes["input_length"] = len(str(research_result))
+        set_span_attr(write_span, "agent", "Writer")
+        set_span_attr(write_span, "input_length", len(str(research_result)))
         final_content = writer.chat(f"Write a blog post based on: {research_result}")
 
 print("Final Content:")

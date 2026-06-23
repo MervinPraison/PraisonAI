@@ -111,32 +111,3 @@ def _get_plugins_list() -> list:
 
 PLUGINS_ENABLED = _get_plugins_enabled()
 PLUGINS_LIST = _get_plugins_list()
-
-
-def missing_dependency_error(
-    package_name: str,
-    extra_name: Optional[str] = None,
-    feature_name: Optional[str] = None
-) -> ImportError:
-    """
-    Create a standardized ImportError for missing optional dependencies.
-    
-    Args:
-        package_name: The name of the missing package (e.g., 'litellm')
-        extra_name: The pip extra to install (e.g., 'llm' for [llm])
-        feature_name: Human-readable feature name (e.g., 'LLM support')
-    
-    Returns:
-        ImportError with helpful install instructions
-    """
-    if extra_name:
-        install_cmd = f"pip install 'praisonaiagents[{extra_name}]'"
-    else:
-        install_cmd = f"pip install {package_name}"
-    
-    feature_desc = f" for {feature_name}" if feature_name else ""
-    
-    return ImportError(
-        f"{package_name} is required{feature_desc} but not installed. "
-        f"Please install with: {install_cmd}"
-    )

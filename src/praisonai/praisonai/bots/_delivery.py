@@ -1,15 +1,15 @@
 """
-Unified message delivery for PraisonAI bots.
+Unified and durable message delivery for PraisonAI bots.
 
-Uses platform capabilities to apply features like streaming, chunking, 
-and rate limiting uniformly across all platforms.
+Provides both unified delivery with platform capabilities (streaming, chunking,
+rate limiting) and durable delivery with persistence and retry logic.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Optional, Union, Dict, Any, List
+from typing import TYPE_CHECKING, Optional, Union, Dict, Any, List, Awaitable, Callable, Protocol
 
 if TYPE_CHECKING:
     from praisonaiagents.bots import BotProtocol, PlatformCapabilities
@@ -17,8 +17,25 @@ if TYPE_CHECKING:
 from ._chunk import chunk_message, _calculate_length
 from ._streaming import DraftStreamer, StreamingConfig, StreamingMode
 from ._rate_limit import RateLimiter
+from ._resilience import BackoffPolicy, compute_backoff, is_recoverable_error, sleep_with_abort
 
 logger = logging.getLogger(__name__)
+
+# Constant for permanent error detection
+PERMANENT_ERROR_PREFIX = "Permanent error:"
+
+
+class MessageSender(Protocol):
+    """Protocol for message sending implementations."""
+    
+    async def send_message(
+        self,
+        channel_id: str,
+        content: Union[str, Dict[str, Any]],
+        **kwargs
+    ) -> Any:
+        """Send a message to a channel."""
+        ...
 
 
 class UnifiedDelivery:
@@ -38,6 +55,7 @@ class UnifiedDelivery:
         self._capabilities: Optional["PlatformCapabilities"] = None
         self._rate_limiter: Optional[RateLimiter] = None
         self._streamer: Optional[DraftStreamer] = None
+        self._background_tasks: set[asyncio.Task] = set()
     
     @property
     def capabilities(self) -> "PlatformCapabilities":
@@ -72,7 +90,9 @@ class UnifiedDelivery:
         
         # Show typing indicator if supported
         if typing and caps.supports_typing:
-            asyncio.create_task(self._show_typing(channel_id))
+            task = asyncio.create_task(self._show_typing(channel_id))
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
         
         # Check if we should stream
         if stream and caps.supports_edit and _calculate_length(text, caps.length_unit) > caps.max_message_length // 2:
@@ -92,7 +112,7 @@ class UnifiedDelivery:
         for chunk in chunks:
             # Apply rate limiting per chunk
             if caps.needs_rate_limit:
-                await self._acquire_rate_limit()
+                await self._acquire_rate_limit(channel_id)
             
             msg = await self.bot.send_message(channel_id, chunk, **kwargs)
             messages.append(msg)
@@ -138,6 +158,7 @@ class UnifiedDelivery:
         current_pos = 0
         
         # Stream partial content
+        streaming_completed = False
         while current_pos < len(text):
             # Calculate next position based on platform's length unit
             next_pos = current_pos + chunk_size
@@ -160,7 +181,7 @@ class UnifiedDelivery:
             
             # Apply rate limiting for edits
             if caps.needs_rate_limit:
-                await self._acquire_rate_limit()
+                await self._acquire_rate_limit(channel_id)
             
             # Add ellipsis if not complete
             display_text = partial if next_pos >= len(text) else partial + "..."
@@ -172,6 +193,7 @@ class UnifiedDelivery:
             )
             
             if next_pos >= len(text):
+                streaming_completed = True
                 break  # Complete text has been sent
             
             current_pos = next_pos
@@ -189,7 +211,7 @@ class UnifiedDelivery:
             # Edit first message with first chunk
             await asyncio.sleep(caps.edit_interval_ms / 1000.0)
             if caps.needs_rate_limit:
-                await self._acquire_rate_limit()
+                await self._acquire_rate_limit(channel_id)
             
             await self.bot.edit_message(
                 channel_id,
@@ -200,14 +222,14 @@ class UnifiedDelivery:
             # Send remaining chunks as new messages
             for chunk in chunks[1:]:
                 if caps.needs_rate_limit:
-                    await self._acquire_rate_limit()
+                    await self._acquire_rate_limit(channel_id)
                 msg = await self.bot.send_message(channel_id, chunk)
                 messages.append(msg)
-        else:
-            # Final edit with complete content (fits in limit)
+        elif not streaming_completed:
+            # Final edit with complete content (fits in limit and wasn't already sent)
             await asyncio.sleep(caps.edit_interval_ms / 1000.0)
             if caps.needs_rate_limit:
-                await self._acquire_rate_limit()
+                await self._acquire_rate_limit(channel_id)
             
             await self.bot.edit_message(
                 channel_id,
@@ -230,14 +252,18 @@ class UnifiedDelivery:
         except Exception as e:
             logger.debug("Could not show typing indicator: %s", e)
     
-    async def _acquire_rate_limit(self) -> None:
-        """Acquire rate limit token if platform needs it."""
+    async def _acquire_rate_limit(self, channel_id: Optional[str] = None) -> None:
+        """Acquire rate limit token if platform needs it.
+        
+        Args:
+            channel_id: Optional channel ID for per-channel limiting
+        """
         if self._rate_limiter is None:
             # Use platform-specific rate limiter
             self._rate_limiter = RateLimiter.for_platform(self.bot.platform)
         
         if self._rate_limiter:
-            await self._rate_limiter.acquire()
+            await self._rate_limiter.acquire(channel_id)
 
 
 def create_delivery(bot: "BotProtocol") -> UnifiedDelivery:
@@ -250,3 +276,301 @@ def create_delivery(bot: "BotProtocol") -> UnifiedDelivery:
         UnifiedDelivery instance configured for the bot's platform
     """
     return UnifiedDelivery(bot)
+
+
+async def deliver_with_retry(
+    adapter: MessageSender,
+    channel_id: str,
+    content: Union[str, Dict[str, Any]],
+    *,
+    backoff: Optional[BackoffPolicy] = None,
+    max_attempts: int = 3,
+    abort_signal: Optional[asyncio.Event] = None,
+    platform: str = "",
+    **send_kwargs
+) -> tuple[bool, Optional[str]]:
+    """Attempt delivery with bounded exponential backoff retry.
+    
+    Args:
+        adapter: The adapter to send through
+        channel_id: Target channel ID
+        content: Message content to send
+        backoff: Backoff policy for retries
+        max_attempts: Maximum delivery attempts
+        abort_signal: Optional event to cancel retries
+        platform: Platform name for error classification
+        **send_kwargs: Additional kwargs for send_message
+        
+    Returns:
+        Tuple of (success, error_message)
+        - (True, None) on successful delivery
+        - (False, error_msg) on permanent failure
+        - (False, error_msg) on transient failure after max attempts
+    """
+    backoff = backoff or BackoffPolicy()
+    last_error = None
+    
+    for attempt in range(1, max_attempts + 1):
+        try:
+            # Attempt delivery
+            await adapter.send_message(channel_id, content, **send_kwargs)
+            
+            # Success!
+            if attempt > 1:
+                logger.info(
+                    f"[{platform}] Delivery succeeded after {attempt} attempts "
+                    f"to channel {channel_id}"
+                )
+            
+            return True, None
+            
+        except Exception as e:
+            last_error = str(e)
+            
+            # Check if error is permanent
+            if not is_recoverable_error(e, platform):
+                logger.error(
+                    f"[{platform}] Permanent delivery failure to {channel_id}: {e}"
+                )
+                return False, f"{PERMANENT_ERROR_PREFIX} {last_error}"
+            
+            # Check if we're out of attempts
+            if attempt >= max_attempts:
+                logger.warning(
+                    f"[{platform}] Delivery failed after {attempt} attempts "
+                    f"to {channel_id}: {e}"
+                )
+                return False, f"Max attempts exceeded: {last_error}"
+            
+            # Calculate backoff delay
+            delay = compute_backoff(backoff, attempt)
+            
+            logger.warning(
+                f"[{platform}] Delivery attempt {attempt} failed to {channel_id}: "
+                f"{e}; retrying in {delay:.1f}s"
+            )
+            
+            # Sleep with abort capability
+            if not await sleep_with_abort(delay, abort_signal):
+                logger.info(f"[{platform}] Delivery retry aborted by signal")
+                return False, "Aborted by signal"
+    
+    # Should never reach here, but for safety
+    return False, last_error
+
+
+async def deliver_chunked(
+    adapter: MessageSender,
+    channel_id: str,
+    content: str,
+    *,
+    max_length: int = 4096,
+    preserve_fences: bool = True,
+    **send_kwargs
+) -> int:
+    """Deliver a long message in chunks.
+    
+    Args:
+        adapter: The adapter to send through
+        channel_id: Target channel ID  
+        content: Message content to send
+        max_length: Maximum length per chunk
+        preserve_fences: Whether to preserve code fence boundaries
+        **send_kwargs: Additional kwargs for send_message
+        
+    Returns:
+        Number of chunks sent
+    """
+    if len(content) <= max_length:
+        await adapter.send_message(channel_id, content, **send_kwargs)
+        return 1
+    
+    chunks = chunk_message(content, max_length=max_length, preserve_fences=preserve_fences)
+    
+    for i, chunk in enumerate(chunks):
+        # Only apply reply_to to first chunk
+        chunk_kwargs = send_kwargs.copy()
+        if i > 0 and 'reply_to' in chunk_kwargs:
+            chunk_kwargs.pop('reply_to')
+        
+        await adapter.send_message(channel_id, chunk, **chunk_kwargs)
+    
+    return len(chunks)
+
+
+class DurableDelivery:
+    """Helper for durable message delivery with outbound queue integration.
+    
+    Example::
+    
+        from praisonai.bots import OutboundQueue, DurableDelivery, TelegramAdapter
+        
+        outbox = OutboundQueue(path="~/.praisonai/state/outbox.sqlite")
+        adapter = TelegramAdapter(token="...")
+        delivery = DurableDelivery(outbox, adapter, platform="telegram")
+        
+        # Send with durability
+        success = await delivery.send(
+            channel_id="12345",
+            content="Hello, world!",
+            idempotency_key="msg-123"
+        )
+        
+        # On startup, drain pending
+        await delivery.drain_pending()
+    """
+    
+    def __init__(
+        self,
+        outbox: Optional[Any] = None,  # OutboundQueue
+        adapter: Optional[MessageSender] = None,
+        *,
+        platform: str = "",
+        backoff: Optional[BackoffPolicy] = None,
+        max_attempts: int = 3,
+    ):
+        self.outbox = outbox
+        self.adapter = adapter
+        self.platform = platform
+        self.backoff = backoff or BackoffPolicy()
+        self.max_attempts = max_attempts
+    
+    async def send(
+        self,
+        channel_id: str,
+        content: Union[str, Dict[str, Any]],
+        *,
+        idempotency_key: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        **send_kwargs
+    ) -> bool:
+        """Send a message with optional durability.
+        
+        If outbox is configured, the message is persisted before sending
+        and marked as sent only on success. On failure, it remains in the
+        queue for later retry via drain_pending().
+        
+        Args:
+            channel_id: Target channel ID
+            content: Message content
+            idempotency_key: Optional key for deduplication
+            metadata: Optional metadata for tracking
+            **send_kwargs: Additional kwargs for send_message
+            
+        Returns:
+            True if sent successfully, False otherwise
+        """
+        if not self.adapter:
+            raise RuntimeError("No adapter configured")
+        
+        # If no outbox, just send directly with retry
+        if not self.outbox:
+            success, _ = await deliver_with_retry(
+                self.adapter,
+                channel_id,
+                content,
+                backoff=self.backoff,
+                max_attempts=self.max_attempts,
+                platform=self.platform,
+                **send_kwargs
+            )
+            return success
+        
+        # With outbox: persist first, then deliver
+        if not idempotency_key:
+            import uuid
+            idempotency_key = str(uuid.uuid4())
+        
+        # Prepare payload
+        payload = {
+            "content": content,
+            "kwargs": send_kwargs,
+        }
+        
+        # Enqueue
+        target = f"{self.platform}:{channel_id}" if self.platform else channel_id
+        key = await self.outbox.enqueue(
+            idempotency_key=idempotency_key,
+            target=target,
+            payload=payload,
+            metadata=metadata,
+        )
+        
+        # Attempt delivery
+        success, error = await deliver_with_retry(
+            self.adapter,
+            channel_id,
+            content,
+            backoff=self.backoff,
+            max_attempts=self.max_attempts,
+            platform=self.platform,
+            **send_kwargs
+        )
+        
+        # Update status
+        if success:
+            await self.outbox.mark_sent(key)
+        else:
+            # Check if permanent error
+            permanent = error and error.startswith(PERMANENT_ERROR_PREFIX)
+            await self.outbox.mark_failed(key, error or "Unknown error", permanent=permanent)
+        
+        return success
+    
+    async def drain_pending(self, limit: Optional[int] = None) -> tuple[int, int]:
+        """Process pending messages from the outbox.
+        
+        Called on startup to retry messages that failed to send.
+        
+        Args:
+            limit: Optional max messages to process
+            
+        Returns:
+            Tuple of (succeeded, failed) counts
+        """
+        if not self.outbox:
+            return 0, 0
+        
+        if not self.adapter:
+            raise RuntimeError("No adapter configured")
+        
+        async def sender(target: str, payload: Dict[str, Any]) -> bool:
+            """Delivery function for outbox.drain()"""
+            # Extract channel_id from target
+            if ":" in target:
+                _, channel_id = target.split(":", 1)
+            else:
+                channel_id = target
+            
+            # Extract content and kwargs
+            content = payload.get("content", "")
+            send_kwargs = payload.get("kwargs", {})
+            
+            # Attempt delivery with retry
+            success, error = await deliver_with_retry(
+                self.adapter,
+                channel_id,
+                content,
+                backoff=self.backoff,
+                max_attempts=1,  # Single attempt per drain cycle
+                platform=self.platform,
+                **send_kwargs
+            )
+            
+            # Preserve permanent failure information
+            if not success and error and error.startswith(PERMANENT_ERROR_PREFIX):
+                raise RuntimeError(error)
+            
+            return success
+        
+        return await self.outbox.drain(sender, limit=limit)
+
+
+__all__ = [
+    "UnifiedDelivery",
+    "create_delivery",
+    "MessageSender",
+    "deliver_with_retry", 
+    "deliver_chunked",
+    "DurableDelivery",
+]

@@ -61,7 +61,6 @@ def example_with_wrappers():
         role="Data Analyst",
         goal="Analyze data and provide insights",
         llm="gpt-4o-mini",
-        request_id="request_2"  # Unique request ID
     )
     
     # Operations are automatically tracked

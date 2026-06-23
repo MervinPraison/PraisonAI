@@ -94,6 +94,7 @@ class CommandRegistry:
         self.register("new", {"description": "Reset conversation session", "builtin": True})
         self.register("stop", {"description": "Cancel current agent task", "builtin": True})
         self.register("whoami", {"description": "Show your user info and permissions", "builtin": True})
+        self.register("sethome", {"description": "Set this chat as the home channel for scheduled deliveries", "builtin": True})
     
     def register(
         self, 

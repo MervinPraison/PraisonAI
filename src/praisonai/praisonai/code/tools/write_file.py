@@ -183,6 +183,15 @@ def append_to_file(
     else:
         abs_path = os.path.abspath(path)
     
+    # Protected path check — never allow modification of system files
+    if is_protected(abs_path):
+        reason = get_protection_reason(abs_path) or "Protected system file"
+        return {
+            'success': False,
+            'error': f"Path '{path}' is protected: {reason}",
+            'path': path,
+        }
+    
     # Security check
     if workspace:
         if not is_path_within_directory(abs_path, workspace):

@@ -7,6 +7,7 @@ import asyncio
 import contextlib
 import threading
 import concurrent.futures
+import random
 from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable, Generator
 from collections import OrderedDict
 import inspect
@@ -16,7 +17,7 @@ from .chat_mixin import ChatMixin
 from .execution_mixin import ExecutionMixin
 from .memory_mixin import MemoryMixin
 from .async_memory_mixin import AsyncMemoryMixin
-from .tool_execution import ToolExecutionMixin
+from .tool_execution import ToolExecutionMixin, BackoffPolicy
 from .chat_handler import ChatHandlerMixin
 from .session_manager import SessionManagerMixin
 from .async_safety import AsyncSafeState
@@ -257,6 +258,9 @@ if TYPE_CHECKING:
 
 # Import structured error from central errors module
 from ..errors import BudgetExceededError
+
+# Import retry configuration
+from .retry_utils import RetryBackoffConfig
 
 class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin, AsyncMemoryMixin):
     # Class-level counter for generating unique display names for nameless agents
@@ -550,7 +554,7 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         backstory: Optional[str] = None,
         instructions: Optional[str] = None,
         # LLM configuration
-        llm: Optional[Union[str, Any]] = None,
+        llm: Optional[Union[str, Any]] = None,  # Can be string, dict, or LLMConfig object
         model: Optional[Union[str, Any]] = None,  # Alias for llm=
         base_url: Optional[str] = None,  # Kept separate (connection/auth)
         api_key: Optional[str] = None,  # Kept separate (connection/auth)
@@ -589,11 +593,12 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         learn: Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
         backend: Optional[Any] = None,  # External managed agent backend (e.g., ManagedAgentIntegration)
         cli_backend: Optional[Union[str, Any]] = None,  # CLI backend for delegating turns (e.g., "claude-code") - DEPRECATED
-        runtime: Optional[Union[str, Dict[str, Any], 'AgentRuntimeConfig']] = None,  # Model-scoped runtime configuration
+        runtime: Optional[Union[bool, str, Dict[str, Any], 'AgentRuntimeConfig', 'RuntimeConfig']] = None,  # Model-scoped runtime configuration with capability validation
         interrupt_controller: Optional['InterruptController'] = None,  # G2: Cooperative cancellation
         tool_search: Optional[Union[bool, str, Dict[str, Any], 'ToolSearchConfig']] = False,  # Progressive tool disclosure
         message_steering: Optional[Union[bool, 'MessageSteeringProtocol']] = False,  # Real-time message steering during execution
         sandbox: Optional[Union[bool, 'SandboxConfig']] = None,  # Sandbox for safe code execution
+        retry: Optional[Union[bool, Dict[str, Any], 'RetryBackoffConfig']] = None,  # Retry configuration with exponential backoff
     ):
         """Initialize an Agent instance.
 
@@ -603,9 +608,10 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
             goal: Primary objective the agent aims to achieve.
             backstory: Background context shaping personality and decisions.
             instructions: Direct instructions (overrides role/goal/backstory). Recommended for simple agents.
-            llm: Model name string ("gpt-4o", "anthropic/claude-3-sonnet") or LLM object.
+            llm: Model name string ("gpt-4o", "anthropic/claude-3-sonnet"), LLMConfig object, or custom LLM.
+                Can accept LLMConfig(model="gpt-4o", fallback_models=["claude-3-5-sonnet", "gpt-4o-mini"]).
                 Defaults to OPENAI_MODEL_NAME env var or "gpt-4o-mini".
-            model: Alias for llm parameter.
+            model: Alias for llm parameter. Also accepts LLMConfig objects.
             base_url: Custom LLM endpoint URL (e.g., for Ollama). Kept separate for auth.
             api_key: API key for LLM provider. Kept separate for auth.
             tools: List of tools, functions, callables, or MCP instances.
@@ -693,12 +699,15 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
             cli_backend: **DEPRECATED** CLI backend for delegating full turns. Use 'runtime' parameter instead.
                 This parameter is deprecated in favor of model-scoped runtime configuration.
                 Will emit deprecation warning when used.
-            runtime: Model-scoped runtime configuration for turn delegation. Accepts:
-                - str: Runtime ID ("claude-code", "praisonai") 
-                - Dict[str, Any]: Runtime config {"runtime": "claude-code", "config_overrides": {...}}
-                - AgentRuntimeConfig: Pre-configured runtime instance
+            runtime: Model-scoped runtime configuration with capability validation. Accepts:
+                - bool: False=disabled, True=basic capability validation
+                - str: Runtime ID ("claude-code", "praisonai", "native", "plugin-harness") 
+                - Dict[str, Any]: Runtime config with required_capabilities, preferred_runtime, config_overrides, etc.
+                - AgentRuntimeConfig: Pre-configured runtime instance (model-scoped)
+                - RuntimeConfig: Configuration with capability requirements and preferences
                 - None: Use model-based resolution (default)
-                Enables turn delegation with per-model runtime selection and fail-closed behavior.
+                Combines turn delegation with per-model runtime selection and fail-fast capability
+                validation at config time to catch incompatibilities early.
             tool_search: Progressive tool disclosure configuration. Accepts:
                 - bool: False=disabled (default), True=auto mode
                 - str: Mode ("auto", "on", "off")  
@@ -790,6 +799,8 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         if autonomy is None:
             # AutonomyConfig is in agent/autonomy.py - use dict for config defaults
             autonomy = apply_config_defaults("autonomy", autonomy, None)
+        if retry is None:
+            retry = apply_config_defaults("retry", retry, RetryBackoffConfig)
 
         # ============================================================
         # DEPRECATION WARNINGS for params consolidated into configs
@@ -1024,7 +1035,7 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
             _on_budget_exceeded = 'stop'
             # Default to False when no ExecutionConfig provided
             parallel_tool_calls = False
-            # (already set from parameter, no need to override)
+            _exec_config = ExecutionConfig()  # Default config for non-execution case
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve TEMPLATES param - FAST PATH
@@ -1506,6 +1517,9 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
                     "a dict of ToolSearchConfig fields, or ToolSearchConfig"
                 )
         
+        # Process tool_config and artifact storage (moved from tool_output)
+        self._artifact_store = None
+        
         # ============================================================
         # END CONSOLIDATED PARAMS EXTRACTION
         # ============================================================
@@ -1554,6 +1568,14 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
             tool_config=tool_config
         )
         
+        # Set up artifact store if enabled in tool_config
+        if _tool_config and _tool_config.enable_artifacts:
+            from ..context.artifact_store import FileSystemArtifactStore
+            self._artifact_store = _tool_config.artifact_store or FileSystemArtifactStore(
+                retention_days=_tool_config.artifact_retention_days,
+                redact_secrets=_tool_config.redact_secrets
+            )
+        
         # Gap 2: Store parallel tool calls setting for ToolCallExecutor selection
         self.parallel_tool_calls = _tool_config.parallel if _tool_config else parallel_tool_calls
         # G2: Store interrupt controller for cooperative cancellation
@@ -1576,7 +1598,22 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         
         # Handle llm= deprecation: model= is the preferred parameter name
         # llm= still works but shows deprecation warning
-        if llm is not None and model is None:
+        fallback_models = None  # Initialize for internal use
+        
+        # Check if llm is an LLMConfig object
+        from ..config import LLMConfig
+        if isinstance(llm, LLMConfig):
+            # Extract values from LLMConfig
+            llm_config_obj = llm
+            llm = llm_config_obj.model
+            fallback_models = llm_config_obj.fallback_models
+            if base_url is None:
+                base_url = llm_config_obj.base_url
+            if api_key is None:
+                api_key = llm_config_obj.api_key
+            if auth is None:
+                auth = llm_config_obj.auth
+        elif llm is not None and model is None:
             warn_deprecated_param(
                 "llm",
                 since="1.0.0",
@@ -1584,9 +1621,23 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
                 alternative="use 'model' instead. Example: Agent(model='gpt-4o-mini')",
                 stacklevel=3
             )
+        
         # model= is the preferred parameter (no warning)
         if model is not None:
-            llm = model  # model= takes precedence
+            # Check if model is an LLMConfig object
+            if isinstance(model, LLMConfig):
+                # Extract values from LLMConfig (same as llm handling)
+                llm = model.model
+                if fallback_models is None:
+                    fallback_models = model.fallback_models
+                if base_url is None:
+                    base_url = model.base_url
+                if api_key is None:
+                    api_key = model.api_key
+                if auth is None:
+                    auth = model.auth
+            else:
+                llm = model  # model= takes precedence
         
         # Store rate limiter (optional, zero overhead when None)
         self._rate_limiter = rate_limiter
@@ -1664,6 +1715,10 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         # Otherwise, fall back to OpenAI environment/name (cached for performance)
         else:
             self.llm = llm or Agent._get_default_model()
+        
+        # Store fallback models for resilience (defensive copy to avoid external mutations)
+        self.fallback_models = list(fallback_models) if fallback_models else []
+        
         # Handle tools parameter - ensure it's always a list
         if callable(tools):
             # If a single function/callable is passed, wrap it in a list
@@ -1744,7 +1799,8 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         self._init_message_steering(message_steering)
         self.verbose = verbose
         self._has_explicit_output_config = _has_explicit_output  # Track if user set output mode
-        self.tool_output_limit = tool_output_limit  # Configurable tool output limit
+        # Use tool_config output_limit if configured, otherwise use parameter value
+        self.tool_output_limit = _tool_config.output_limit if _tool_config else tool_output_limit
         self.allow_delegation = allow_delegation
         self.step_callback = step_callback
         # Token budget guard (zero overhead when _max_budget is None)
@@ -1763,6 +1819,8 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         self.allow_code_execution = allow_code_execution
         self.max_retry_limit = max_retry_limit
         self.code_execution_mode = code_execution_mode
+        # Store execution config for guardrail retry backoff
+        self._execution_config = _exec_config
         self.embedder_config = embedder_config
         self.knowledge = knowledge
         self.use_system_prompt = use_system_prompt
@@ -1858,20 +1916,24 @@ Your Goal: {self.goal}
                 self._approval_backend = None
                 self._approve_all_tools = False
                 self._approval_timeout = 0
+                self._approval_permissions = None
             else:
                 # Unknown string — treat as no approval
                 self._approval_backend = None
                 self._approve_all_tools = False
                 self._approval_timeout = 0
+                self._approval_permissions = None
         elif approval is True:
             from ..approval.backends import AutoApproveBackend
             self._approval_backend = AutoApproveBackend()
             self._approve_all_tools = False
             self._approval_timeout = 0  # 0 = use backend default
+            self._approval_permissions = None
         elif approval is False or approval is None:
             self._approval_backend = None
             self._approve_all_tools = False
             self._approval_timeout = 0
+            self._approval_permissions = None
             # No explicit approval kwarg — honour PRAISONAI_TOOL_SAFETY.
             # Default preset "default" blocks only destructive ops
             # (delete_*, execute_command, execute_code, kill_process, move/copy)
@@ -1901,17 +1963,21 @@ Your Goal: {self.goal}
             self._approval_backend = approval.backend
             self._approve_all_tools = approval.all_tools
             self._approval_timeout = approval.timeout  # None = indefinite, 0 = backend default
+            # Store permissions if provided (for CI-safe declarative policies)
+            self._approval_permissions = getattr(approval, 'permissions', None)
         elif isinstance(approval, dict):
             # Dict config: convert to ApprovalConfig
             approval_config = ApprovalConfig(**approval)
             self._approval_backend = approval_config.backend
             self._approve_all_tools = approval_config.all_tools
             self._approval_timeout = approval_config.timeout
+            self._approval_permissions = getattr(approval_config, 'permissions', None)
         else:
             # Plain backend object — dangerous tools only, backend default timeout
             self._approval_backend = approval
             self._approve_all_tools = False
             self._approval_timeout = 0
+            self._approval_permissions = None
         
         # Per-agent autonomy→approval bridge (G-BRIDGE-1 fix)
         # If autonomy level is full_auto and no explicit approval was set,
@@ -1932,6 +1998,16 @@ Your Goal: {self.goal}
         
         # Store tool retry policy for tool execution with exponential backoff
         self._tool_retry_policy = _tool_config.retry_policy if _tool_config else None
+        
+        # Retry configuration with jittered exponential backoff
+        if isinstance(retry, RetryBackoffConfig):
+            self._retry_config = retry
+        elif isinstance(retry, dict):
+            self._retry_config = RetryBackoffConfig(**retry)
+        elif retry is True:
+            self._retry_config = RetryBackoffConfig()  # Use defaults
+        else:
+            self._retry_config = None  # No retry configuration
         
         # Cache for system prompts and formatted tools with eager thread-safe lock
         # Use OrderedDict for LRU behavior
@@ -2048,10 +2124,13 @@ Your Goal: {self.goal}
             )
             self._cli_backend = self._resolve_cli_backend(cli_backend)
         
-        # Runtime Configuration - model-scoped runtime selection
+        # Runtime Configuration - model-scoped runtime selection with capability validation
         self._runtime_config = None
         if runtime is not None:
             self._runtime_config = self._resolve_runtime_config(runtime)
+            # Perform capability validation if enabled
+            if self._runtime_config and hasattr(self._runtime_config, 'validate_on_creation') and self._runtime_config.validate_on_creation:
+                self._validate_runtime_capabilities()
         
         # Runtime resolver for per-turn resolution
         self._runtime_resolver = None  # Will be initialized on first use
@@ -2122,6 +2201,7 @@ Your Goal: {self.goal}
             
             # LLM configuration 
             'llm': self.llm,
+            'fallback_models': list(self.fallback_models) if hasattr(self, 'fallback_models') and self.fallback_models else None,
             'base_url': getattr(self, 'base_url', None),
             'api_key': getattr(self, 'api_key', None),
             'auth': getattr(self, 'auth', None),
@@ -2151,9 +2231,11 @@ Your Goal: {self.goal}
             'approval': getattr(self, '_approval_config', None),
             'learn': getattr(self, '_learn_config', None),
             'tool_search': getattr(self, '_tool_search_config', None),
-            
             # Tool configuration - use consolidated config when available  
             'tool_config': getattr(self, '_tool_config', None),
+            
+            # Retry configuration
+            'retry': getattr(self, '_retry_config', None),
             
             # CLI backend
             'cli_backend': getattr(self, '_cli_backend', None),
@@ -4031,6 +4113,81 @@ Summary:"""
                 instructions=f"You are a {profile} assistant.",
             )
     
+    # -------------------------------------------------------------------------
+    #                     Runtime Capability Management
+    # -------------------------------------------------------------------------
+    
+    def _resolve_runtime_config(self, runtime):
+        """Resolve runtime configuration parameter.
+        
+        Args:
+            runtime: Runtime parameter (bool, str, dict, or RuntimeConfig)
+            
+        Returns:
+            RuntimeConfig instance or None
+        """
+        try:
+            from ..config import resolve_runtime
+            return resolve_runtime(runtime)
+        except ImportError:
+            raise ImportError(
+                "Runtime capability features requested but configuration not available. "
+                "This should not happen in a properly installed praisonaiagents package."
+            )
+    
+    def _validate_runtime_capabilities(self):
+        """Validate that current runtime supports required capabilities.
+        
+        Performs fail-fast validation of runtime capabilities against
+        agent requirements at config/creation time.
+        
+        Raises:
+            CapabilityValidationError: If validation fails
+        """
+        if not self._runtime_config or not self._runtime_config.required_capabilities:
+            return  # No requirements to validate
+        
+        try:
+            from ..runtime import RuntimeCapability, validate_capabilities, get_native_runtime_capabilities
+            
+            # Convert string capability names to enum values
+            required_set = set()
+            for cap in self._runtime_config.required_capabilities:
+                if isinstance(cap, str):
+                    # Convert string to enum value
+                    cap_upper = cap.upper()
+                    if hasattr(RuntimeCapability, cap_upper):
+                        required_set.add(getattr(RuntimeCapability, cap_upper))
+                    else:
+                        raise ValueError(f"Unknown capability: {cap}")
+                else:
+                    # Assume it's already a RuntimeCapability enum
+                    required_set.add(cap)
+            
+            # Get the actual runtime capabilities based on the selected runtime
+            runtime_name = self._runtime_config.preferred_runtime or "native"
+            
+            # Determine which capability matrix to use based on runtime type
+            if runtime_name in ["native", "praisonai"]:
+                runtime_matrix = get_native_runtime_capabilities()
+            elif runtime_name in ["plugin", "harness", "reduced", "plugin-harness", "claude-code"]:
+                # Use reduced capabilities for plugin/harness runtimes
+                from praisonaiagents.runtime.capabilities import get_reduced_harness_capabilities
+                runtime_matrix = get_reduced_harness_capabilities()
+            else:
+                # For unknown runtimes, use reduced capabilities as safe default
+                from praisonaiagents.runtime.capabilities import get_reduced_harness_capabilities
+                runtime_matrix = get_reduced_harness_capabilities()
+            
+            # Perform validation
+            validate_capabilities(runtime_matrix, required_set, runtime_name)
+            
+        except ImportError:
+            raise ImportError(
+                "Runtime capability validation requested but runtime module not available. "
+                "This should not happen in a properly installed praisonaiagents package."
+            )
+    
     def _run_verification_hooks(self) -> List[Dict[str, Any]]:
         """Run all registered verification hooks.
         
@@ -4973,6 +5130,22 @@ Answer:"""
             retry_count += 1
             logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {error}")
             
+            # Add exponential backoff delay to avoid hammering the LLM
+            execution_config = getattr(self, '_execution_config', None)
+            if execution_config is not None:
+                total_delay = BackoffPolicy.delay(
+                    retry_count,
+                    execution_config.retry_initial_delay,
+                    execution_config.retry_backoff_factor,
+                    execution_config.retry_jitter
+                )
+            else:
+                # Fall back to simple backoff if no execution config
+                total_delay = 1.0 * (2.0 ** (retry_count - 1))
+            
+            logging.info(f"Agent {self.name}: Waiting {total_delay:.2f}s before guardrail retry")
+            time.sleep(total_delay)
+            
             # Regenerate response for retry
             try:
                 retry_prompt = f"{prompt}\n\nNote: Previous response failed validation due to: {error}. Please provide an improved response."
@@ -5009,6 +5182,22 @@ Answer:"""
             
             retry_count += 1
             logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {error}")
+            
+            # Add exponential backoff delay to avoid hammering the LLM
+            execution_config = getattr(self, '_execution_config', None)
+            if execution_config is not None:
+                total_delay = BackoffPolicy.delay(
+                    retry_count,
+                    execution_config.retry_initial_delay,
+                    execution_config.retry_backoff_factor,
+                    execution_config.retry_jitter
+                )
+            else:
+                # Fall back to simple backoff if no execution config
+                total_delay = 1.0 * (2.0 ** (retry_count - 1))
+            
+            logging.info(f"Agent {self.name}: Waiting {total_delay:.2f}s before guardrail retry")
+            await asyncio.sleep(total_delay)
             
             # Regenerate response for retry (async version)
             try:
@@ -5099,39 +5288,122 @@ Answer:"""
         raise TypeError(f"Invalid cli_backend type: {type(cli_backend)}. Expected CliBackendProtocol instance or factory callable.")
     
     def _resolve_runtime_config(self, runtime):
-        """Resolve runtime parameter to AgentRuntimeConfig instance.
+        """Resolve runtime parameter to AgentRuntimeConfig or RuntimeConfig instance.
         
         Args:
             runtime: Runtime configuration parameter
             
         Returns:
-            AgentRuntimeConfig instance
+            AgentRuntimeConfig or RuntimeConfig instance
             
         Raises:
             TypeError: If runtime type is invalid
             ValueError: If runtime configuration is invalid
         """
+        # Try to import AgentRuntimeConfig (from main's turn-based runtime)
+        AgentRuntimeConfig = None
         try:
             from ..runtime import AgentRuntimeConfig
         except ImportError:
+            pass
+        
+        # Try to import RuntimeConfig (from capability validation system)
+        RuntimeConfig = None
+        try:
+            from ..config.feature_configs import RuntimeConfig, resolve_runtime
+        except ImportError:
+            pass
+        
+        if not AgentRuntimeConfig and not RuntimeConfig:
             raise ImportError(
                 "Runtime configuration features requested but not available. "
                 "This should not happen in a properly installed praisonaiagents package."
             )
         
         # If already an AgentRuntimeConfig instance, return as-is
-        if isinstance(runtime, AgentRuntimeConfig):
+        if AgentRuntimeConfig and isinstance(runtime, AgentRuntimeConfig):
             return runtime
         
-        # If string, create config with runtime ID
-        if isinstance(runtime, str):
-            return AgentRuntimeConfig.from_runtime_id(runtime)
+        # If already a RuntimeConfig instance, return as-is
+        if RuntimeConfig and hasattr(RuntimeConfig, '__name__') and isinstance(runtime, RuntimeConfig):
+            return runtime
         
-        # If dictionary, create config from dict
-        if isinstance(runtime, dict):
-            return AgentRuntimeConfig.from_dict(runtime)
+        # Handle capability validation style (bool, RuntimeConfig)
+        if RuntimeConfig and resolve_runtime:
+            try:
+                result = resolve_runtime(runtime)
+                if result is not None:
+                    return result
+            except (TypeError, ValueError):
+                pass  # Try AgentRuntimeConfig path
         
-        raise TypeError(f"Invalid runtime type: {type(runtime)}. Expected str, dict, or AgentRuntimeConfig instance.")
+        # Handle turn-based style (AgentRuntimeConfig)
+        if AgentRuntimeConfig:
+            # If string, create config with runtime ID
+            if isinstance(runtime, str):
+                if hasattr(AgentRuntimeConfig, 'from_runtime_id'):
+                    return AgentRuntimeConfig.from_runtime_id(runtime)
+            
+            # If dictionary, create config from dict
+            if isinstance(runtime, dict):
+                if hasattr(AgentRuntimeConfig, 'from_dict'):
+                    return AgentRuntimeConfig.from_dict(runtime)
+        
+        raise TypeError(f"Invalid runtime type: {type(runtime)}. Expected bool, str, dict, RuntimeConfig, or AgentRuntimeConfig instance.")
+    
+    def _validate_runtime_capabilities(self):
+        """Validate runtime capabilities against requirements.
+        
+        Raises:
+            CapabilityValidationError: If runtime lacks required capabilities
+        """
+        if not self._runtime_config:
+            return
+        
+        # Import capability validation components
+        try:
+            from ..runtime.capabilities import (
+                RuntimeCapability,
+                validate_capabilities,
+                get_native_runtime_capabilities,
+                get_reduced_harness_capabilities
+            )
+        except ImportError:
+            # Capability validation not available, skip
+            return
+        
+        # Get required capabilities from config
+        required_capabilities = getattr(self._runtime_config, 'required_capabilities', None)
+        if not required_capabilities:
+            return
+        
+        # Convert string capabilities to enum
+        required_set = set()
+        for cap in required_capabilities:
+            if isinstance(cap, str):
+                try:
+                    required_set.add(RuntimeCapability[cap.upper()])
+                except KeyError:
+                    raise ValueError(f"Unknown capability: {cap}")
+            elif isinstance(cap, RuntimeCapability):
+                required_set.add(cap)
+            else:
+                raise TypeError(f"Invalid capability type: {type(cap)}")
+        
+        # Determine runtime name
+        runtime_name = getattr(self._runtime_config, 'preferred_runtime', 'native')
+        
+        # Get runtime capabilities based on runtime type
+        if runtime_name == 'native':
+            runtime_matrix = get_native_runtime_capabilities()
+        elif runtime_name in ('plugin-harness', 'harness', 'plugin', 'reduced'):
+            runtime_matrix = get_reduced_harness_capabilities()
+        else:
+            # Unknown runtime, use reduced capabilities as safe default
+            runtime_matrix = get_reduced_harness_capabilities()
+        
+        # Validate capabilities
+        validate_capabilities(runtime_matrix, required_set, runtime_name)
     
     def _get_runtime_resolver(self):
         """Get or create runtime resolver instance (lazy initialization)."""
@@ -5515,6 +5787,18 @@ Answer:"""
                 memory = getattr(self, "_memory_instance", None)
                 if memory and hasattr(memory, 'close_connections'):
                     memory.close_connections()
+                    
+                # Clean up old artifacts if artifact store is configured
+                artifact_store = getattr(self, "_artifact_store", None)
+                if artifact_store and hasattr(artifact_store, 'cleanup_old_artifacts'):
+                    try:
+                        artifact_store.cleanup_old_artifacts()
+                    except Exception as e:
+                        # Log the error for debugging but don't fail cleanup
+                        import logging
+                        logging.debug(
+                            f"Failed to cleanup artifacts for agent {self.name}: {e}"
+                        )
             except Exception as exc:  # noqa: BLE001 - finalizers must not raise
                 import contextlib
                 with contextlib.suppress(Exception):

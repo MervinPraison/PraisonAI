@@ -17,20 +17,36 @@ from enum import Enum
 from typing import (
     TYPE_CHECKING,
     Any,
+    Awaitable,
     Callable,
     Dict,
     List,
     Literal,
     Optional,
     Protocol,
+    TypedDict,
     Union,
     runtime_checkable,
 )
+
+# Gateway protocol versioning constants
+GATEWAY_PROTOCOL_VERSION = 1
+MIN_CLIENT_PROTOCOL_VERSION = 1
 
 if TYPE_CHECKING:
     from praisonai.gateway.pairing import PairedChannel
     from ..agent import Agent
     from ..bots.presentation import MessagePresentation
+    from ..scheduler.models import DeliveryTarget
+
+
+class ConnectErrorCode(str, Enum):
+    """Structured error codes for connection failures."""
+    AUTH_REQUIRED = "auth_required"
+    AUTH_UNAUTHORIZED = "auth_unauthorized"
+    PROTOCOL_UNSUPPORTED = "protocol_unsupported"
+    PAIRING_REQUIRED = "pairing_required"
+    AGENT_NOT_FOUND = "agent_not_found"
 
 
 class EventType(str, Enum):
@@ -86,6 +102,65 @@ class EventType(str, Enum):
     # Polling events
     POLL_REQUEST = "poll_request"
     POLL_RESPONSE = "poll_response"
+    
+    # Handshake events
+    HELLO = "hello"
+    HELLO_OK = "hello_ok"
+    HELLO_ERROR = "hello_error"
+
+
+@dataclass
+class HelloParams:
+    """Parameters for initiating a versioned handshake.
+    
+    Attributes:
+        agent_id: The agent to connect to
+        protocol_min: Minimum protocol version the client supports
+        protocol_max: Maximum protocol version the client supports
+        capabilities: Optional list of capability tokens the client supports
+        session_id: Optional session to resume
+        since: Optional cursor for event replay
+    """
+    agent_id: str
+    protocol_min: int
+    protocol_max: int
+    capabilities: List[str] = field(default_factory=list)
+    session_id: Optional[str] = None
+    since: Optional[int] = None
+
+
+@dataclass
+class HelloResult:
+    """Result of a successful handshake negotiation.
+    
+    Attributes:
+        protocol: The negotiated protocol version
+        features: Supported methods and events
+        policy: Gateway policy limits (max_payload, heartbeat_ms, etc.)
+        session_id: The session ID for this connection
+        resumed: Whether an existing session was resumed
+        cursor: Current event cursor position
+    """
+    protocol: int
+    features: Dict[str, List[str]]  # {"methods": [...], "events": [...]}
+    policy: Dict[str, int]  # {"max_payload": ..., "heartbeat_ms": ...}
+    session_id: str
+    resumed: bool
+    cursor: int
+
+
+@dataclass
+class HelloError:
+    """Error response for failed handshake.
+    
+    Attributes:
+        code: Structured error code
+        message: Human-readable error message
+        next_action: Suggested next action (e.g., "upgrade_client", "pair_device")
+    """
+    code: ConnectErrorCode
+    message: str
+    next_action: Optional[str] = None
 
 
 @dataclass
@@ -99,6 +174,20 @@ class GatewayEvent:
         timestamp: Event creation time
         source: Source identifier (agent_id, client_id, etc.)
         target: Target identifier (optional, for directed events)
+        sequence: Monotonic sequence number for gap detection (optional)
+    
+    Wire Protocol Extensions:
+        When events are sent over the gateway, additional fields are added:
+        - seq: Top-level monotonic sequence number for gap detection
+        - cursor: Event cursor position (also stored in data['cursor'])
+        
+    Resume Protocol:
+        The 'joined' acknowledgment includes:
+        - cursor: Current head cursor position
+        - oldest_cursor: Oldest event still in buffer
+        - resync_required: True if requested 'since' is below oldest_cursor
+        
+        When resync_required=true, a 'snapshot' message follows with full state.
     """
     
     type: Union[EventType, str]
@@ -107,10 +196,11 @@ class GatewayEvent:
     timestamp: float = field(default_factory=time.time)
     source: Optional[str] = None
     target: Optional[str] = None
+    sequence: Optional[int] = None  # Monotonic sequence for gap detection
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
-        return {
+        result = {
             "type": self.type.value if isinstance(self.type, EventType) else self.type,
             "data": self.data,
             "event_id": self.event_id,
@@ -118,6 +208,9 @@ class GatewayEvent:
             "source": self.source,
             "target": self.target,
         }
+        if self.sequence is not None:
+            result["sequence"] = self.sequence
+        return result
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "GatewayEvent":
@@ -135,6 +228,7 @@ class GatewayEvent:
             timestamp=data.get("timestamp", time.time()),
             source=data.get("source"),
             target=data.get("target"),
+            sequence=data.get("sequence"),
         )
 
 
@@ -703,6 +797,126 @@ class DeliveryGuaranteeProtocol(Protocol):
         ...
 
 
+@runtime_checkable
+class OutboundDeliveryProtocol(Protocol):
+    """Protocol for durable outbound message delivery.
+    
+    Ensures messages sent to external channels (Telegram, Slack, Discord, etc.)
+    are persisted before sending and can be retried on failure. This provides
+    crash-safe at-least-once delivery for channel replies.
+    
+    Example usage (implementation in praisonai wrapper):
+        from praisonai.bots import OutboundQueue
+        
+        outbox = OutboundQueue(path="~/.praisonai/state/outbox.sqlite")
+        
+        # Enqueue before sending
+        key = await outbox.enqueue(
+            idempotency_key="msg-123",
+            target_channel="telegram:12345",
+            payload={"text": "Hello", "metadata": {...}}
+        )
+        
+        # Attempt delivery
+        success = await deliver_with_retry(adapter, channel_id, payload)
+        
+        # Mark as sent only if successful
+        if success:
+            await outbox.mark_sent(key)
+        
+        # On restart, drain pending messages
+        await outbox.drain(delivery_handler)
+    """
+    
+    async def enqueue(
+        self,
+        idempotency_key: str,
+        target: str,
+        payload: Dict[str, Any],
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Persist an outbound message for delivery.
+        
+        Args:
+            idempotency_key: Unique key to prevent duplicate sends
+            target: Target channel identifier (e.g., "telegram:12345")
+            payload: Message payload to deliver
+            metadata: Optional metadata for tracking/routing
+            
+        Returns:
+            Unique entry key for tracking this message
+        """
+        ...
+    
+    async def mark_sent(self, key: str) -> bool:
+        """Mark a message as successfully sent.
+        
+        Args:
+            key: The entry key returned by enqueue()
+            
+        Returns:
+            True if marked successfully, False if not found
+        """
+        ...
+    
+    async def mark_failed(
+        self,
+        key: str,
+        error: str,
+        permanent: bool = False,
+    ) -> bool:
+        """Mark a message as failed.
+        
+        Args:
+            key: The entry key returned by enqueue()
+            error: Error description
+            permanent: If True, won't retry this message
+            
+        Returns:
+            True if marked successfully, False if not found
+        """
+        ...
+    
+    async def drain(
+        self,
+        sender: Callable[[str, Dict[str, Any]], Awaitable[bool]],
+        limit: Optional[int] = None,
+    ) -> tuple[int, int]:
+        """Process pending messages.
+        
+        Called on startup to retry unsent messages. Messages are processed
+        oldest-first to maintain order.
+        
+        Args:
+            sender: Async function that attempts delivery. Should return
+                    True on success, False to retry later.
+            limit: Optional max messages to process
+            
+        Returns:
+            Tuple of (succeeded, failed) counts
+        """
+        ...
+    
+    def pending_count(self) -> int:
+        """Get count of pending messages awaiting delivery."""
+        ...
+    
+    def size(self) -> int:
+        """Get total number of messages in queue."""
+        ...
+    
+    async def purge_old(self, max_age_seconds: int = 86400 * 7) -> int:
+        """Remove old sent messages.
+        
+        Args:
+            max_age_seconds: Age threshold for removal
+            
+        Returns:
+            Number of messages purged
+        """
+        ...
+
+
 # ---------------------------------------------------------------------------
 # Auth Mode protocols and helpers (bind-aware authentication posture)
 # ---------------------------------------------------------------------------
@@ -919,3 +1133,133 @@ class SessionBindingProtocol(Protocol):
             Principal information if found, None otherwise
         """
         ...
+
+
+# Home Channel and Delivery Routing Protocols
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class HomeChannelRegistryProtocol(Protocol):
+    """Protocol for managing default delivery targets per platform.
+    
+    Home channels provide a per-platform default delivery target that can be
+    set once from inside a chat and persisted, so scheduled jobs can deliver
+    results without requiring explicit channel IDs.
+    """
+    
+    def set_home(
+        self, 
+        platform: str, 
+        chat_id: str, 
+        thread_id: Optional[str] = None
+    ) -> None:
+        """Set the home channel for a platform.
+        
+        Args:
+            platform: Platform name (e.g., "telegram", "slack", "discord")
+            chat_id: Platform-specific chat/channel ID
+            thread_id: Optional thread ID for threaded platforms
+        """
+        ...
+    
+    def get_home(self, platform: str) -> Optional[tuple[str, Optional[str]]]:
+        """Get the home channel for a platform.
+        
+        Args:
+            platform: Platform name to look up
+            
+        Returns:
+            Tuple of (chat_id, thread_id) if set, None otherwise
+        """
+        ...
+    
+    def platforms_with_home(self) -> List[str]:
+        """List all platforms that have a home channel configured.
+        
+        Returns:
+            List of platform names with home channels
+        """
+        ...
+
+
+@runtime_checkable
+class DeliveryResolverProtocol(Protocol):
+    """Protocol for resolving delivery routing tokens.
+    
+    Resolves tokens like "origin", "telegram", "all" to concrete delivery
+    targets at fire time, enabling ergonomic routing without hard-coded IDs.
+    """
+    
+    def resolve(
+        self, 
+        token: str, 
+        *, 
+        origin: Optional["DeliveryTarget"] = None
+    ) -> List["DeliveryTarget"]:
+        """Resolve a routing token to concrete delivery targets.
+        
+        Token formats:
+        - "origin": Reply to the chat where the job was created (requires origin)
+        - "<platform>": That platform's home channel
+        - "<platform>:<chat_id>[:<thread_id>]": Explicit target
+        - "all": Fan-out to every connected platform with a home channel
+        
+        Args:
+            token: Routing token to resolve
+            origin: Original delivery target (for "origin" token)
+            
+        Returns:
+            List of concrete delivery targets
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
+# Protocol Version Negotiation (Issue #2130)
+# ---------------------------------------------------------------------------
+
+# Protocol version constants
+PROTOCOL_VERSION = 1
+MIN_PROTOCOL_VERSION = 1
+MAX_PROTOCOL_VERSION = 1
+
+
+class ProtocolHello(TypedDict, total=False):
+    """Protocol version negotiation handshake request.
+    
+    Sent by client during join to negotiate protocol version.
+    """
+    min_version: int  # Minimum protocol version client supports
+    max_version: int  # Maximum protocol version client supports
+    features: List[str]  # Optional feature flags
+
+
+class ProtocolHelloOk(TypedDict):
+    """Protocol version negotiation response.
+    
+    Server's response to protocol negotiation.
+    """
+    protocol_version: int  # Negotiated protocol version
+    server_min_version: int  # Server's minimum supported version
+    server_max_version: int  # Server's maximum supported version
+    features: List[str]  # Enabled feature flags
+
+
+class GapInfo(TypedDict):
+    """Information about a gap in the event sequence."""
+    expected_seq: int  # Expected sequence number
+    received_seq: int  # Received sequence number  
+    missed_count: int  # Number of events missed
+
+
+class ResumeSnapshot(TypedDict, total=False):
+    """Complete snapshot for session resumption.
+    
+    Provides all necessary state for one-round-trip reconnection.
+    """
+    cursor: int  # Resume cursor position
+    sequence: int  # Current sequence number for gap detection
+    events: List[Dict[str, Any]]  # Replayed events since cursor
+    presence: List[Dict[str, Any]]  # Current presence information
+    health: Dict[str, Any]  # Gateway health status
+    session_state: Dict[str, Any]  # Session-specific state

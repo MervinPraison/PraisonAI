@@ -33,6 +33,25 @@ from __future__ import annotations
 
 from contextvars import ContextVar, Token
 from dataclasses import asdict, dataclass
+from typing import Dict, List, Optional, Any
+
+
+@dataclass(frozen=True)
+class Origin:
+    """Information about where a message originated."""
+    platform: str = ""
+    chat_type: str = ""  # e.g. "group", "direct", "channel"
+    display_name: str = ""  # e.g. channel name, group name, or user name
+    thread_id: str = ""
+
+
+@dataclass(frozen=True)
+class ReachableTarget:
+    """A channel/chat the agent can deliver messages to."""
+    name: str  # Friendly name or alias
+    platform: str
+    channel_id: str
+    kind: str = "alias"  # "home" or "alias"
 
 
 @dataclass(frozen=True)
@@ -46,12 +65,40 @@ class SessionContext:
     user_id: str = ""
     user_name: str = ""
     unified_user_id: str = ""
+    # New fields for platform awareness
+    origin: Optional[Origin] = None
+    reachable_targets: Optional[List[ReachableTarget]] = None
 
     def to_dict(self) -> dict:
+        # asdict already recursively converts nested dataclasses
         return asdict(self)
 
     @classmethod
     def from_dict(cls, d: dict) -> "SessionContext":
+        # Parse origin if present
+        origin = None
+        if "origin" in d and d["origin"]:
+            origin_data = d["origin"]
+            origin = Origin(
+                platform=origin_data.get("platform", ""),
+                chat_type=origin_data.get("chat_type", ""),
+                display_name=origin_data.get("display_name", ""),
+                thread_id=origin_data.get("thread_id", ""),
+            )
+        
+        # Parse reachable_targets if present
+        targets = None
+        if "reachable_targets" in d and d["reachable_targets"]:
+            targets = [
+                ReachableTarget(
+                    name=t.get("name", ""),
+                    platform=t.get("platform", ""),
+                    channel_id=t.get("channel_id", ""),
+                    kind=t.get("kind", "alias"),
+                )
+                for t in d["reachable_targets"]
+            ]
+        
         return cls(
             platform=d.get("platform", ""),
             chat_id=d.get("chat_id", ""),
@@ -60,6 +107,8 @@ class SessionContext:
             user_id=d.get("user_id", ""),
             user_name=d.get("user_name", ""),
             unified_user_id=d.get("unified_user_id", ""),
+            origin=origin,
+            reachable_targets=targets,
         )
 
 
@@ -76,6 +125,8 @@ def set_session_context(
     user_id: str = "",
     user_name: str = "",
     unified_user_id: str = "",
+    origin: Optional[Origin] = None,
+    reachable_targets: Optional[List[ReachableTarget]] = None,
 ) -> Token:
     """Set the task-local session context. Returns a token for ``clear``."""
     ctx = SessionContext(
@@ -86,6 +137,8 @@ def set_session_context(
         user_id=user_id,
         user_name=user_name,
         unified_user_id=unified_user_id,
+        origin=origin,
+        reachable_targets=reachable_targets,
     )
     return _CTX.set(ctx)
 
@@ -106,6 +159,8 @@ def clear_session_context(token: Token) -> None:
 
 __all__ = [
     "SessionContext",
+    "Origin",
+    "ReachableTarget",
     "set_session_context",
     "get_session_context",
     "clear_session_context",

@@ -49,12 +49,26 @@ class SandboxHandler:
         try:
             from praisonaiagents.sandbox import ResourceLimits
             
+            from praisonai.sandbox._registry import SandboxRegistry
+            
+            registry = SandboxRegistry.default()
+            try:
+                sandbox_class = registry.resolve(sandbox_type)
+            except ValueError as e:
+                # Don't silently downgrade. Fail loud, give a fix-it hint.
+                print(
+                    f"Error: sandbox '{sandbox_type}' is unavailable: {e}\n"
+                    f"Available: {registry.list_names()}\n"
+                    f"To install the optional backend:  pip install \"praisonai[{sandbox_type}]\"\n"
+                    f"Or explicitly choose another sandbox:  --sandbox-type subprocess"
+                )
+                sys.exit(2)
+            
+            # Pass image parameter only for Docker sandbox
             if sandbox_type == "docker":
-                from praisonai.sandbox import DockerSandbox
-                sandbox = DockerSandbox(image=image)
+                sandbox = sandbox_class(image=image)
             else:
-                from praisonai.sandbox import SubprocessSandbox
-                sandbox = SubprocessSandbox()
+                sandbox = sandbox_class()
         except ImportError as e:
             print(f"Error: {e}")
             return
@@ -99,12 +113,26 @@ class SandboxHandler:
         try:
             from praisonaiagents.sandbox import ResourceLimits
             
+            from praisonai.sandbox._registry import SandboxRegistry
+            
+            registry = SandboxRegistry.default()
+            try:
+                sandbox_class = registry.resolve(sandbox_type)
+            except ValueError as e:
+                # Don't silently downgrade. Fail loud, give a fix-it hint.
+                print(
+                    f"Error: sandbox '{sandbox_type}' is unavailable: {e}\n"
+                    f"Available: {registry.list_names()}\n"
+                    f"To install the optional backend:  pip install \"praisonai[{sandbox_type}]\"\n"
+                    f"Or explicitly choose another sandbox:  --sandbox-type subprocess"
+                )
+                sys.exit(2)
+            
+            # Pass image parameter only for Docker sandbox
             if sandbox_type == "docker":
-                from praisonai.sandbox import DockerSandbox
-                sandbox = DockerSandbox(image=image)
+                sandbox = sandbox_class(image=image)
             else:
-                from praisonai.sandbox import SubprocessSandbox
-                sandbox = SubprocessSandbox()
+                sandbox = sandbox_class()
         except ImportError as e:
             print(f"Error: {e}")
             return

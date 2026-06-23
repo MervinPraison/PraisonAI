@@ -75,9 +75,7 @@ def _end_agentops(status: str) -> None:
         logger.warning("agentops.end_session failed: %s", e)
 
 
-# Constants for checking availability
-try:
-    import agentops
-    AGENTOPS_AVAILABLE = True
-except ImportError:
-    AGENTOPS_AVAILABLE = False
+def is_agentops_available() -> bool:
+    """Lazy check — does not import agentops at module load time."""
+    from .._framework_availability import is_available
+    return is_available("agentops")

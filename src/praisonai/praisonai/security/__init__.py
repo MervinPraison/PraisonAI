@@ -100,7 +100,7 @@ def enable_injection_defense(
         trusted_sources: Source names that bypass blocking (in addition to defaults).
 
     Returns:
-        Hook ID string (can be used to remove the hook later).
+        Dictionary with hook IDs: {"before_tool": str, "before_agent": str}
 
     Example:
         >>> from praisonai.security import enable_injection_defense
@@ -119,9 +119,9 @@ def enable_injection_defense(
 
     # Register both before_tool and before_agent hooks
     tool_hook_id = add_hook("before_tool", defense.create_hook())
-    add_hook("before_agent", defense.create_agent_hook())
+    agent_hook_id = add_hook("before_agent", defense.create_agent_hook())
 
-    return tool_hook_id
+    return {"before_tool": tool_hook_id, "before_agent": agent_hook_id}
 
 
 def enable_audit_log(

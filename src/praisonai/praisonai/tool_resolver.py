@@ -34,6 +34,16 @@ from ._safe_loader import load_user_module
 
 logger = logging.getLogger(__name__)
 
+
+class _ResolveResult:
+    """Internal result wrapper to distinguish cacheable vs non-cacheable failures."""
+    __slots__ = ("tool", "cacheable")
+
+    def __init__(self, tool, cacheable=True):
+        self.tool = tool
+        self.cacheable = cacheable
+
+
 # Sentinel for cache - needed because None is a valid cached result (tool not found)
 _SENTINEL = object()
 
@@ -145,7 +155,7 @@ class ToolResolver:
             self._local_tools_loaded = True
             return self._local_tools_cache
     
-    def _resolve_from_praisonaiagents(self, name: str) -> Optional[Callable]:
+    def _resolve_from_praisonaiagents(self, name: str) -> _ResolveResult:
         """Resolve tool from praisonaiagents.tools.TOOL_MAPPINGS.
         
         Uses lazy loading via __getattr__ in praisonaiagents.tools.
@@ -154,7 +164,7 @@ class ToolResolver:
             name: Tool name to resolve
             
         Returns:
-            Callable if found, None otherwise
+            _ResolveResult with tool and cacheable flag
         """
         try:
             from praisonaiagents import tools as agent_tools
@@ -171,25 +181,29 @@ class ToolResolver:
                         logger.warning(
                             f"Tool '{name}' exists in TOOL_MAPPINGS but failed to load: {e}"
                         )
-                        return None
+                        # IMPORTANT: do NOT cache. The dep may be installed later.
+                        return _ResolveResult(None, cacheable=False)
                     if tool is not None:
                         logger.debug(f"Resolved '{name}' from praisonaiagents.tools")
-                        return tool
+                        return _ResolveResult(tool)
             
             # Also try direct attribute access (for non-TOOL_MAPPINGS items)
             tool = getattr(agent_tools, name, None)
             if tool is not None and callable(tool):
                 logger.debug(f"Resolved '{name}' from praisonaiagents.tools (direct)")
-                return tool
+                return _ResolveResult(tool)
                 
         except ImportError:
             logger.debug("praisonaiagents not available")
+            # SDK can be installed later
+            return _ResolveResult(None, cacheable=False)
         except AttributeError:
             pass
         except Exception as e:
             logger.debug(f"Error resolving '{name}' from praisonaiagents: {e}")
         
-        return None
+        # Genuinely not present
+        return _ResolveResult(None)
     
     def _resolve_from_praisonai_tools(self, name: str) -> Optional[Callable]:
         """Resolve tool from praisonai-tools package (external).
@@ -306,24 +320,19 @@ class ToolResolver:
         if not name:
             return None
 
-        # Fast path: cached result
-        cached = self._resolve_cache.get(name, _SENTINEL)
-        if cached is not _SENTINEL:
-            if instantiate and self._is_class(cached):
-                return cached()
-            return cached
-
         # Load local tools outside the cache lock to prevent lock-order inversion
         local_tools = self._load_local_tools()
 
         with self._resolve_cache_lock:
-            # Double-check inside lock
+            # Check cache inside lock to prevent races
             cached = self._resolve_cache.get(name, _SENTINEL)
             if cached is not _SENTINEL:
-                # Apply instantiation to cached result if needed
                 if instantiate and self._is_class(cached):
                     return cached()
                 return cached
+
+            # Track if any source indicated a non-cacheable failure
+            allow_none_cache = True
 
             # 1. Check local tools.py first (highest priority)
             if name in local_tools:
@@ -343,12 +352,16 @@ class ToolResolver:
                 return tool
             
             # 3. Check praisonaiagents.tools
-            tool = self._resolve_from_praisonaiagents(name)
-            if tool is not None:
-                self._resolve_cache[name] = tool
-                if instantiate and self._is_class(tool):
-                    return tool()
-                return tool
+            result = self._resolve_from_praisonaiagents(name)
+            if result.tool is not None:
+                if result.cacheable:
+                    self._resolve_cache[name] = result.tool
+                if instantiate and self._is_class(result.tool):
+                    return result.tool()
+                return result.tool
+            elif not result.cacheable:
+                # Track that a non-cacheable failure occurred
+                allow_none_cache = False
             
             # 4. Check praisonai-tools package
             tool = self._resolve_from_praisonai_tools(name)
@@ -366,9 +379,12 @@ class ToolResolver:
                     return tool()
                 return tool
             
-            # Cache the None result to avoid repeated failed lookups
-            logger.warning(f"Tool '{name}' not found in any source")
-            self._resolve_cache[name] = None
+            # Cache None only if the failure was not transient
+            if allow_none_cache:
+                logger.warning(f"Tool '{name}' not found in any source")
+                self._resolve_cache[name] = None
+            else:
+                logger.debug(f"Tool '{name}' failed transiently; not caching None")
             return None
     
     def _is_class(self, obj) -> bool:

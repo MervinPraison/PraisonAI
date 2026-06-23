@@ -20,8 +20,11 @@ class FrameworkAdapter(Protocol):
         """Check if the framework is available for import."""
         ...
     
-    def resolve(self) -> "FrameworkAdapter":
+    def resolve(self, *, config: Optional[Dict[str, Any]] = None) -> "FrameworkAdapter":
         """Pick the concrete adapter variant (e.g. autogen v0.2 vs v0.4).
+        
+        Args:
+            config: YAML configuration that may contain version preferences
         
         Returns:
             The resolved adapter instance (self or a different adapter)
@@ -115,6 +118,11 @@ class FrameworkAdapter(Protocol):
             The resolved FrameworkAdapter instance (may be self or another adapter)
         """
         return self
+    
+    def resolve_alias(self) -> str:
+        """Return the concrete adapter name to dispatch to (e.g. 'autogen_v4').
+        Default: return self.name."""
+        ...
 
 
 class BaseFrameworkAdapter:
@@ -161,7 +169,7 @@ class BaseFrameworkAdapter:
         # Only substitute simple variable names like {topic}, not JSON like {"level":2}
         return re.sub(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', _sub, template)
     
-    def resolve(self) -> "FrameworkAdapter":
+    def resolve(self, *, config: Optional[Dict[str, Any]] = None) -> "FrameworkAdapter":
         """Default implementation returns self."""
         return self
     
@@ -181,8 +189,9 @@ class BaseFrameworkAdapter:
         cli_config: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
-        Safe default for sync-only adapters (crewai, autogen v0.2):
-        run the sync implementation in a worker thread, freeing the loop.
+        Safe default: run sync implementation in a worker thread.
+        
+        Framework adapters with native async support should override this method.
         """
         import asyncio
         return await asyncio.to_thread(
@@ -196,6 +205,11 @@ class BaseFrameworkAdapter:
     def cleanup(self) -> None:
         """Clean up resources - default implementation does nothing."""
         pass
+    
+    def resolve_alias(self) -> str:
+        """Return the concrete adapter name to dispatch to.
+        Default: return self.name."""
+        return self.name
 
 
 @contextmanager

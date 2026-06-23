@@ -14,6 +14,7 @@ import asyncio
 import inspect
 import contextvars
 import concurrent.futures
+import random
 from typing import List, Optional, Any, Dict, Union, TYPE_CHECKING
 from ..errors import ToolExecutionError
 from ..tools.trust import wrap_if_external
@@ -24,8 +25,61 @@ if TYPE_CHECKING:
     pass
 
 
+class BackoffPolicy:
+    """Exponential backoff policy for tool retries."""
+    
+    @staticmethod
+    def delay(attempt: int, initial_delay: float, backoff_factor: float, jitter: float, max_delay: float = 60.0) -> float:
+        """Calculate delay for a retry attempt.
+        
+        Args:
+            attempt: Attempt number (1-based)
+            initial_delay: Initial delay in seconds
+            backoff_factor: Exponential backoff multiplier
+            jitter: Fraction of base delay to add as random jitter
+            max_delay: Maximum delay to cap exponential growth
+            
+        Returns:
+            Delay in seconds
+        """
+        base = initial_delay * (backoff_factor ** (attempt - 1))
+        # Cap the base delay to prevent excessively long waits
+        base = min(base, max_delay)
+        jitter_amount = random.uniform(0, jitter * base)
+        return base + jitter_amount
+
+
 class ToolExecutionMixin:
     """Mixin providing toolexecution methods for the Agent class."""
+    
+    def _register_artifact_tools(self):
+        """Register artifact retrieval tools when artifacts are first created."""
+        try:
+            from ..tools import artifact_tools
+            
+            # Set the store reference for the tools
+            artifact_tools.set_artifact_store(self._artifact_store)
+            
+            # Add the retrieval tools
+            tools_to_add = [
+                artifact_tools.artifact_head,
+                artifact_tools.artifact_tail,
+                artifact_tools.artifact_grep,
+                artifact_tools.artifact_chunk,
+                artifact_tools.artifact_load,
+                artifact_tools.artifact_list,
+            ]
+            
+            # Only add if not already present
+            existing_tool_names = {getattr(t, '__name__', str(t)) for t in self.tools}
+            for tool in tools_to_add:
+                tool_name = getattr(tool, '__name__', str(tool))
+                if tool_name not in existing_tool_names:
+                    self.tools.append(tool)
+            
+            logging.debug("Registered artifact retrieval tools")
+        except Exception as e:
+            logging.warning(f"Failed to register artifact tools: {e}")
 
     def _get_existing_stream_emitter(self):
         """Return an already-initialized stream emitter without creating one."""
@@ -273,32 +327,159 @@ class ToolExecutionMixin:
             if blocked_result is not None:
                 result = blocked_result
             else:
-                # P8/G11: Apply tool timeout if configured
-                tool_timeout = getattr(self, '_tool_timeout', None)
-                if tool_timeout and tool_timeout > 0:
-                    # Use copy_context to preserve injection context in executor thread
-                    ctx = contextvars.copy_context()
-                    
-                    def execute_with_context():
-                        with with_injection_context(state):
-                            return self._execute_tool_with_circuit_breaker(function_name, arguments)
-                    
-                    # Use reusable executor to prevent resource leaks
-                    if not hasattr(self, '_tool_executor'):
-                        self._tool_executor = concurrent.futures.ThreadPoolExecutor(
-                            max_workers=2, thread_name_prefix=f"tool-{self.name}"
-                        )
-                    
-                    future = self._tool_executor.submit(ctx.run, execute_with_context)
-                    try:
-                        result = future.result(timeout=tool_timeout)
-                    except concurrent.futures.TimeoutError:
-                        future.cancel()
-                        logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
-                        result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True}
+                # Apply tool retry logic with exponential backoff
+                execution_config = getattr(self, '_execution_config', None)
+                if execution_config is None:
+                    # Fall back to reading individual config attributes for backward compatibility
+                    max_retry_limit = getattr(self, 'max_retry_limit', 2)
+                    retry_initial_delay = 1.0
+                    retry_backoff_factor = 2.0
+                    retry_jitter = 0.1
                 else:
-                    with with_injection_context(state):
-                        result = self._execute_tool_with_circuit_breaker(function_name, arguments)
+                    max_retry_limit = execution_config.max_retry_limit
+                    retry_initial_delay = execution_config.retry_initial_delay
+                    retry_backoff_factor = execution_config.retry_backoff_factor
+                    retry_jitter = execution_config.retry_jitter
+                
+                result = None
+                last_exception = None
+                
+                # max_retry_limit is the number of retries (not total attempts)
+                # So total attempts = 1 (initial) + max_retry_limit (retries)
+                for attempt in range(1, max_retry_limit + 2):
+                    try:
+                        # P8/G11: Apply tool timeout if configured
+                        tool_timeout = getattr(self, '_tool_timeout', None)
+                        if tool_timeout and tool_timeout > 0:
+                            # Use copy_context to preserve injection context in executor thread
+                            ctx = contextvars.copy_context()
+                            
+                            def execute_with_context():
+                                with with_injection_context(state):
+                                    return self._execute_tool_with_circuit_breaker(function_name, arguments)
+                            
+                            # Use reusable executor to prevent resource leaks
+                            if not hasattr(self, '_tool_executor'):
+                                self._tool_executor = concurrent.futures.ThreadPoolExecutor(
+                                    max_workers=2, thread_name_prefix=f"tool-{self.name}"
+                                )
+                            
+                            future = self._tool_executor.submit(ctx.run, execute_with_context)
+                            try:
+                                result = future.result(timeout=tool_timeout)
+                            except concurrent.futures.TimeoutError:
+                                future.cancel()
+                                logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
+                                result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True}
+                        else:
+                            with with_injection_context(state):
+                                result = self._execute_tool_with_circuit_breaker(function_name, arguments)
+                        
+                        # Check if the result indicates a retryable error
+                        if isinstance(result, dict) and result.get("error"):
+                            # Check if this is a circuit breaker error (always retryable)
+                            if result.get("circuit_open"):
+                                raise ToolExecutionError(
+                                    result["error"],
+                                    tool_name=function_name,
+                                    agent_id=self.name,
+                                    is_retryable=True,
+                                )
+                            # Check if this is a timeout error (retryable)
+                            elif result.get("timeout"):
+                                raise ToolExecutionError(
+                                    result["error"],
+                                    tool_name=function_name,
+                                    agent_id=self.name,
+                                    is_retryable=True,
+                                )
+                            # For other error dicts, treat as non-retryable unless specified
+                            else:
+                                # Success path - return the result
+                                break
+                        else:
+                            # Success path - return the result
+                            break
+                            
+                    except ToolExecutionError as e:
+                        last_exception = e
+                        # Only retry if the error is marked as retryable and we have retries left
+                        # attempt starts at 1, so (attempt - 1) gives us the retry count
+                        if not e.is_retryable or (attempt - 1) >= max_retry_limit:
+                            raise e
+                        
+                        # Calculate delay for exponential backoff
+                        delay = BackoffPolicy.delay(attempt, retry_initial_delay, retry_backoff_factor, retry_jitter)
+                        logging.warning(
+                            f"Tool {function_name} failed (attempt {attempt}/{max_retry_limit + 1}): {e}. "
+                            f"Retrying in {delay:.2f}s..."
+                        )
+                        time.sleep(delay)
+                        
+                    except Exception as e:
+                        # Wrap unexpected exceptions in ToolExecutionError
+                        # Most tool errors are considered retryable unless they're programming errors
+                        is_retryable = not isinstance(e, (ValueError, TypeError, AttributeError))
+                        tool_error = ToolExecutionError(
+                            f"Tool '{function_name}' failed: {e}",
+                            tool_name=function_name,
+                            agent_id=self.name,
+                            is_retryable=is_retryable,
+                        )
+                        last_exception = tool_error
+                        
+                        # attempt starts at 1, so (attempt - 1) gives us the retry count
+                        if not is_retryable or (attempt - 1) >= max_retry_limit:
+                            raise tool_error from e
+                        
+                        # Calculate delay for exponential backoff
+                        delay = BackoffPolicy.delay(attempt, retry_initial_delay, retry_backoff_factor, retry_jitter)
+                        logging.warning(
+                            f"Tool {function_name} failed (attempt {attempt}/{max_retry_limit + 1}): {e}. "
+                            f"Retrying in {delay:.2f}s..."
+                        )
+                        time.sleep(delay)
+            
+            # Apply runtime-scoped middleware normalization BEFORE hooks fire
+            # Plugin harnesses can register middleware to normalize vendor-specific results
+            runtime_id = getattr(self, '_runtime_id', 'praisonai')  # Default to native runtime
+            normalized_result = None  # Track normalized result for hooks
+            if runtime_id != 'praisonai':  # Skip for native runtime to avoid allocation
+                try:
+                    from ..runtime import get_middleware, MiddlewareContext
+                    middleware = get_middleware(runtime_id)
+                    
+                    # Only allocate context and normalize if not using default pass-through
+                    if middleware.runtime_id != 'praisonai':
+                        mw_ctx = MiddlewareContext(
+                            tool_name=function_name,
+                            runtime_id=runtime_id,
+                            agent_id=self.name,
+                            session_id=getattr(self, '_session_id', None),
+                            execution_time_ms=(_time.time() - _tool_start_time) * 1000,
+                            metadata={'original_result_type': type(result).__name__}
+                        )
+                        
+                        normalized_result = middleware.normalize(result, function_name, mw_ctx)
+                        
+                        # Handle error cases by propagating error message as result
+                        if not normalized_result.success and normalized_result.error_message:
+                            # For failed tools, include error context in the result
+                            result = f"Tool Error: {normalized_result.error_message}"
+                        else:
+                            # For successful tools, use the normalized content
+                            result = normalized_result.content
+                        
+                        # Store normalized result for hooks to access full context
+                        self._last_normalized_result = normalized_result
+                        
+                        logger.debug(f"Applied runtime middleware for {runtime_id}: {function_name}")
+                except ImportError:
+                    # Runtime middleware not available - continue without normalization
+                    logger.debug("Runtime middleware not available, skipping normalization")
+                except Exception as e:
+                    # Don't let middleware failures break tool execution
+                    logger.warning(f"Runtime middleware failed for {runtime_id}: {e}")
             
             # Apply prompt injection protection for external tools
             # Zero-cost for trusted tools, wraps external content in security markers
@@ -310,28 +491,78 @@ class ToolExecutionMixin:
                 try:
                     result_str = str(result)
                     
-                    if self.context_manager:
-                        # Use context-aware truncation with configured budget
-                        truncated = self._truncate_tool_output(function_name, result_str)
-                    else:
-                        # Apply default limit even without context management
-                        # This prevents runaway tool outputs from causing overflow
-                        limit = getattr(self, 'tool_output_limit', 16000)
-                        if len(result_str) > limit:
-                            # Use smart truncation format that judge recognizes as OK
-                            tail_size = min(limit // 5, 2000)
-                            head = result_str[:limit - tail_size]
-                            tail = result_str[-tail_size:] if tail_size > 0 else ""
-                            truncated = f"{head}\n...[{len(result_str):,} chars, showing first/last portions]...\n{tail}"
+                    # Get configured limit
+                    limit = getattr(self, 'tool_output_limit', 16000)
+                    
+                    # Check if we need to spill to artifact store
+                    if len(result_str) > limit:
+                        # Try to use artifact store if available
+                        artifact_ref = None
+                        if hasattr(self, '_artifact_store') and self._artifact_store is not None:
+                            try:
+                                from ..context.artifacts import ArtifactMetadata
+                                
+                                # Create metadata for this artifact
+                                metadata = ArtifactMetadata(
+                                    agent_id=self.name,
+                                    run_id=getattr(self, '_current_run_id', 'unknown'),
+                                    tool_name=function_name,
+                                    turn_id=getattr(self, '_turn_counter', 0),
+                                )
+                                
+                                # Store the full output
+                                artifact_ref = self._artifact_store.store(result_str, metadata)
+                                logging.debug(f"Stored {function_name} output ({len(result_str)} bytes) as artifact {artifact_ref.artifact_id}")
+                                
+                                # Register artifact retrieval tools if not already registered
+                                if not hasattr(self, '_artifact_tools_registered'):
+                                    self._register_artifact_tools()
+                                    self._artifact_tools_registered = True
+                            except Exception as e:
+                                logging.debug(f"Failed to store artifact: {e}")
+                        
+                        # Generate truncated preview
+                        tail_size = min(limit // 5, 2000)
+                        head = result_str[:limit - tail_size]
+                        tail = result_str[-tail_size:] if tail_size > 0 else ""
+                        
+                        # If we stored an artifact, include reference in the output
+                        if artifact_ref:
+                            truncated = (
+                                f"{head}\n"
+                                f"...[{len(result_str):,} chars total, showing first/last portions]...\n"
+                                f"{tail}\n\n"
+                                f"{artifact_ref.to_inline()}"
+                            )
                         else:
-                            truncated = result_str
+                            # Fallback to simple truncation
+                            truncated = f"{head}\n...[{len(result_str):,} chars, showing first/last portions]...\n{tail}"
+                    else:
+                        truncated = result_str
+                    
+                    if self.context_manager and hasattr(self, '_truncate_tool_output'):
+                        # Use context-aware truncation if available, but preserve artifact reference
+                        if 'artifact_ref' in locals() and artifact_ref:
+                            # Extract the artifact reference from the truncated string
+                            artifact_inline = artifact_ref.to_inline()
+                            # Remove the artifact reference before context truncation
+                            truncated_without_ref = truncated.replace(artifact_inline, "").rstrip()
+                            # Apply context truncation
+                            truncated_without_ref = self._truncate_tool_output(function_name, truncated_without_ref, tool_call_id)
+                            # Re-append the artifact reference
+                            truncated = f"{truncated_without_ref}\n\n{artifact_inline}"
+                        else:
+                            truncated = self._truncate_tool_output(function_name, truncated, tool_call_id)
                     
                     if len(truncated) < len(result_str):
                         logging.debug(f"Truncated {function_name} output from {len(result_str)} to {len(truncated)} chars")
                         # For dicts, truncate large string fields (e.g., raw_content from search)
                         if isinstance(result, dict):
                             max_field_chars = getattr(self, 'tool_output_limit', 16000) if not self.context_manager else None
-                            result = self._truncate_dict_fields(result, function_name, max_field_chars)
+                            result = self._truncate_dict_fields(result, function_name, max_field_chars, tool_call_id)
+                            # Add artifact reference to dict result if available
+                            if 'artifact_ref' in locals() and artifact_ref:
+                                result["_artifact_ref"] = artifact_ref.to_dict()
                         else:
                             result = truncated
                 except Exception as e:
@@ -373,6 +604,15 @@ class ToolExecutionMixin:
             
             # Trigger AFTER_TOOL hook
             from ..hooks import HookEvent, AfterToolInput
+            
+            # Extract error information from normalized result if available
+            tool_error = None
+            if hasattr(self, '_last_normalized_result') and self._last_normalized_result:
+                if not self._last_normalized_result.success and self._last_normalized_result.error_message:
+                    tool_error = self._last_normalized_result.error_message
+                # Clean up temporary attribute
+                delattr(self, '_last_normalized_result')
+            
             after_tool_input = AfterToolInput(
                 session_id=getattr(self, '_session_id', 'default'),
                 cwd=os.getcwd(),
@@ -382,6 +622,7 @@ class ToolExecutionMixin:
                 tool_name=function_name,
                 tool_input=arguments,
                 tool_output=result,
+                tool_error=tool_error,
                 execution_time_ms=(_time.time() - _tool_start_time) * 1000
             )
             self._hook_runner.execute_sync(HookEvent.AFTER_TOOL, after_tool_input, target=function_name)
@@ -418,22 +659,20 @@ class ToolExecutionMixin:
             
             return result
         except Exception as e:
-            # Emit tool call end with error
+            # Emit tool call end with error for exceptions that escape the retry loop
             _duration_ms = (_time.time() - _tool_start_time) * 1000
             _trace_emitter.tool_call_end(self.name, function_name, None, _duration_ms, str(e))
             
-            # Preserve existing ToolExecutionError unchanged to maintain loop guard HALT behavior
-            if isinstance(e, ToolExecutionError):
-                raise
-            
-            # Gap 3a fix: Wrap exceptions in ToolExecutionError for better observability
-            is_retryable = not isinstance(e, (ValueError, TypeError, AttributeError))
-            raise ToolExecutionError(
-                f"Tool '{function_name}' failed: {e}",
-                tool_name=function_name,
-                agent_id=self.name,
-                is_retryable=is_retryable,
-            ) from e
+            # Wrap the exception if it's not already a ToolExecutionError
+            if not isinstance(e, ToolExecutionError):
+                is_retryable = not isinstance(e, (ValueError, TypeError, AttributeError))
+                raise ToolExecutionError(
+                    f"Tool '{function_name}' failed: {e}",
+                    tool_name=function_name,
+                    agent_id=self.name,
+                    is_retryable=is_retryable,
+                ) from e
+            raise  # Re-raise if already wrapped
 
     def _trigger_after_agent_hook(self, prompt, response, start_time, tools_used=None):
         """Trigger AFTER_AGENT hook and return response."""
@@ -532,7 +771,7 @@ class ToolExecutionMixin:
             response=response,
         )
 
-    def _truncate_dict_fields(self, data: dict, tool_name: str, max_field_chars: int = None) -> dict:
+    def _truncate_dict_fields(self, data: dict, tool_name: str, max_field_chars: int = None, tool_call_id: str = None) -> dict:
         """Truncate large string fields in a dict to prevent context overflow."""
         if max_field_chars is None:
             # Use tool budget from context manager (default 5000 tokens * 4 chars/token = 20000 chars)
@@ -547,13 +786,30 @@ class ToolExecutionMixin:
                 tail_limit = int(max_field_chars * 0.15)
                 head = value[:head_limit]
                 tail = value[-tail_limit:] if tail_limit > 0 else ""
-                result[key] = f"{head}\n...[{len(value):,} chars, showing first/last portions]...\n{tail}"
+                truncated = f"{head}\n...[{len(value):,} chars, showing first/last portions]...\n{tail}"
+                
+                # Store full field value for later retrieval
+                try:
+                    from ..runtime.tool_output_store import get_tool_output_store
+                    from uuid import uuid4
+                    store = get_tool_output_store(getattr(self, '_run_id', None))
+                    # Add unique suffix to prevent collisions with repeated keys
+                    unique_suffix = uuid4().hex[:8]
+                    field_call_id = f"{tool_call_id}_{key}_{unique_suffix}" if tool_call_id else f"{tool_name}_{key}_{unique_suffix}"
+                    metadata = store.store(f"{tool_name}.{key}", value, call_id=field_call_id)
+                    if metadata:
+                        truncated = store.format_reference(metadata, truncated)
+                        logging.debug(f"Stored full {tool_name}.{key} field ({len(value)} bytes) at {metadata.get('path')}")
+                except Exception as e:
+                    logging.debug(f"Failed to store dict field: {e}")
+                
+                result[key] = truncated
                 logging.debug(f"Smart truncated field '{key}' from {len(value)} to ~{max_field_chars} chars")
             elif isinstance(value, dict):
-                result[key] = self._truncate_dict_fields(value, tool_name, max_field_chars)
+                result[key] = self._truncate_dict_fields(value, tool_name, max_field_chars, tool_call_id)
             elif isinstance(value, list):
                 result[key] = [
-                    self._truncate_dict_fields(item, tool_name, max_field_chars) if isinstance(item, dict)
+                    self._truncate_dict_fields(item, tool_name, max_field_chars, tool_call_id) if isinstance(item, dict)
                     else (self._smart_truncate_str(item, max_field_chars) if isinstance(item, str) and len(item) > max_field_chars else item)
                     for item in value
                 ]

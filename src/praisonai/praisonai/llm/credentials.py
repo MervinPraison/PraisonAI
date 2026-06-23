@@ -33,7 +33,11 @@ def _credential_lookup(provider: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def resolve_llm_endpoint_with_credentials(*, default_base: str = "https://api.openai.com/v1") -> LLMEndpoint:
+def resolve_llm_endpoint_with_credentials(
+    *, 
+    default_base: str = "https://api.openai.com/v1",
+    validate_model: bool = False
+) -> LLMEndpoint:
     """
     Resolve LLM endpoint configuration with credential store fallback.
     
@@ -42,13 +46,15 @@ def resolve_llm_endpoint_with_credentials(*, default_base: str = "https://api.op
     
     Args:
         default_base: Default base URL if none found anywhere
+        validate_model: Whether to validate the model ID (default: False)
         
     Returns:
         LLMEndpoint with resolved configuration
     """
     return resolve_llm_endpoint(
         default_base=default_base,
-        fallback_lookup=_credential_lookup
+        fallback_lookup=_credential_lookup,
+        validate_model=validate_model
     )
 
 
@@ -105,3 +111,68 @@ def inject_credentials_into_env() -> bool:
     except Exception:
         # Ignore errors to avoid breaking the application
         return False
+
+
+def is_configured(model: Optional[str] = None) -> bool:
+    """
+    Check if credentials are configured for the specified or default model.
+    
+    This checks both environment variables and stored credentials to determine
+    if the user has configured any usable API keys.
+    
+    Args:
+        model: Optional model name to check for specific provider credentials.
+               If not provided, checks for any configured credentials.
+    
+    Returns:
+        True if credentials are available, False otherwise
+    """
+    import os
+    
+    # Check environment variables first
+    known_keys = (
+        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY",
+        "GEMINI_API_KEY", "GROQ_API_KEY", "COHERE_API_KEY",
+        "OLLAMA_HOST",  # Ollama doesn't need an API key
+    )
+    
+    # If any env var is set, consider it configured
+    if any(os.environ.get(k) for k in known_keys):
+        return True
+    
+    # Check stored credentials
+    try:
+        store = CredentialStore()
+        providers = store.list_providers()
+        
+        # If we have any stored credentials, we're configured
+        if providers:
+            # If model is specified, check for that specific provider
+            if model:
+                # Map model prefixes to providers
+                model_lower = model.lower()
+                if model_lower.startswith("gpt"):
+                    return "openai" in [p.lower() for p in providers]
+                elif model_lower.startswith("claude"):
+                    return "anthropic" in [p.lower() for p in providers]
+                elif model_lower.startswith("gemini"):
+                    return "google" in [p.lower() for p in providers] or "gemini" in [p.lower() for p in providers]
+                elif model_lower.startswith("llama") or model_lower.startswith("mistral"):
+                    # Could be Ollama or Groq
+                    return "ollama" in [p.lower() for p in providers] or "groq" in [p.lower() for p in providers]
+            
+            # Any stored credential means we're configured
+            return True
+            
+    except Exception:
+        # If we can't check stored credentials, fall back to env check
+        pass
+    
+    # Finally, check if we can resolve an endpoint with credentials
+    try:
+        endpoint = resolve_llm_endpoint_with_credentials()
+        return bool(endpoint.api_key)
+    except Exception:
+        pass
+    
+    return False

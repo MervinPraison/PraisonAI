@@ -33,6 +33,12 @@ def reset_global_state():
 class TestTyperApp:
     """Tests for the main Typer app."""
     
+    @pytest.fixture(autouse=True)
+    def setup_commands(self):
+        """Register commands before each test."""
+        from praisonai.cli.app import register_commands
+        register_commands()
+    
     def test_app_import(self):
         """Test that the Typer app can be imported."""
         from praisonai.cli.app import app
@@ -364,6 +370,12 @@ class TestSessionManager:
 class TestGlobalOptions:
     """Tests for global CLI options."""
     
+    @pytest.fixture(autouse=True)
+    def setup_commands(self):
+        """Register commands before each test."""
+        from praisonai.cli.app import register_commands
+        register_commands()
+    
     def test_json_output_option(self):
         """Test --json option."""
         from praisonai.cli.app import app
@@ -386,6 +398,12 @@ class TestGlobalOptions:
 
 class TestExitCodes:
     """Tests for deterministic exit codes."""
+    
+    @pytest.fixture(autouse=True)
+    def setup_commands(self):
+        """Register commands before each test."""
+        from praisonai.cli.app import register_commands
+        register_commands()
     
     def test_success_exit_code(self):
         """Test success returns 0."""

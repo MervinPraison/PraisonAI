@@ -127,6 +127,7 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "setup": (".commands.setup", "app", "Interactive onboarding / configuration wizard"),
     "onboard": (".commands.onboard", "app", "Messaging bot onboarding wizard"),
     "obs": (".commands.obs", "app", "Observability diagnostics and management"),
+    "validate": (".commands.validate", "app", "Validate YAML configuration files"),
     "acp": (".commands.acp", "app", "Agent Client Protocol server"),
     "mcp": (".commands.mcp", "app", "MCP server management"),
     "serve": (".commands.serve", "app", "API server management"),
@@ -178,6 +179,7 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "tracker": (".commands.tracker", "app", "Autonomous agent tracking with step-by-step analysis"),
     "github": (".commands.github", "app", "GitHub native context tracking and Issue triage"),
     "managed": (".commands.managed", "app", "Managed Agents (Anthropic cloud-hosted backend)"),
+    "models": (".commands.models", "app", "List and describe available models"),
     
     # Moltbot-inspired commands
     "bot": (".commands.bot", "app", "Messaging bots with full agent capabilities"),
@@ -622,7 +624,7 @@ def main_callback(
         mode = OutputMode.TEXT
     
     # Install warning filters for CLI usage only
-    from .main import install_warning_filters
+    from ._warnings import install_warning_filters
     install_warning_filters()
     
     # Create run context
@@ -639,6 +641,48 @@ def main_callback(
     
     # If no command provided, start interactive mode
     if ctx.invoked_subcommand is None:
+        # Check for credentials before starting TUI
+        from ..llm.credentials import is_configured
+        import sys
+        
+        if not is_configured():  # Check for any configured credentials
+            # In non-interactive mode, just show error
+            if not sys.stdin.isatty() or quiet:
+                typer.echo(
+                    "Error: No API key configured. Run: praisonai setup",
+                    err=True
+                )
+                raise typer.Exit(1)
+            
+            # In interactive mode, offer to run setup
+            typer.echo("No API key configured.")
+            run_setup = typer.confirm("Would you like to run the setup wizard now?")
+            
+            if run_setup:
+                # Import and run setup
+                from .commands.setup import _run_setup
+                exit_code = _run_setup(
+                    non_interactive=False,
+                    provider=None,
+                    api_key=None,
+                    model=None
+                )
+                if exit_code != 0:
+                    typer.echo("Setup failed. Exiting.", err=True)
+                    raise typer.Exit(exit_code)
+                
+                # Re-check credentials after setup
+                if not is_configured():
+                    typer.echo("Setup completed but credentials still not detected.", err=True)
+                    raise typer.Exit(1)
+                
+                # After successful setup, continue to TUI
+                typer.echo("\nSetup complete! Starting interactive mode...\n")
+            else:
+                typer.echo("\nTo configure credentials later, run: praisonai setup")
+                typer.echo("or set environment variables like OPENAI_API_KEY")
+                raise typer.Exit(0)
+        
         from praisonai.cli.interactive.async_tui import AsyncTUI, AsyncTUIConfig
         
         tui_config = AsyncTUIConfig(
@@ -658,8 +702,101 @@ def get_output_controller() -> OutputController:
     return state.output_controller
 
 
+# Command name to module mapping for lazy loading
+_COMMAND_GROUPS = {
+    # Core commands
+    "config": ".commands.config",
+    "traces": ".commands.traces", 
+    "env": ".commands.environment",
+    "session": ".commands.session",
+    "completion": ".commands.completion",
+    "version": ".commands.version",
+    "debug": ".commands.debug",
+    "lsp": ".commands.lsp",
+    "diag": ".commands.diag",
+    "doctor": ".commands.doctor",
+    "setup": ".commands.setup",
+    "onboard": ".commands.onboard", 
+    "obs": ".commands.obs",
+    "acp": ".commands.acp",
+    "mcp": ".commands.mcp",
+    "serve": ".commands.serve",
+    "schedule": ".commands.schedule",
+    "kanban": ".commands.kanban",
+    "run": ".commands.run",
+    "profile": ".commands.profile",
+    "benchmark": ".commands.benchmark",
+    "paths": ".commands.paths",
+    # Terminal-native commands
+    "chat": ".commands.chat",
+    "code": ".commands.code", 
+    "call": ".commands.call",
+    "realtime": ".commands.realtime",
+    "train": ".commands.train",
+    "ui": ".commands.ui",
+    "context": ".commands.context",
+    "research": ".commands.research",
+    "memory": ".commands.memory",
+    "workflow": ".commands.workflow",
+    "tools": ".commands.tools",
+    "n8n": ".commands.n8n",
+    "knowledge": ".commands.knowledge",
+    "rag": ".commands.rag",
+    "deploy": ".commands.deploy",
+    "agents": ".commands.agents",
+    "skills": ".commands.skills",
+    "eval": ".commands.eval",
+    "templates": ".commands.templates",
+    "recipe": ".commands.recipe",
+    "todo": ".commands.todo",
+    "docs": ".commands.docs",
+    "commit": ".commands.commit",
+    "publish": ".commands.publish",
+    "hooks": ".commands.hooks",
+    "rules": ".commands.rules",
+    "registry": ".commands.registry",
+    "package": ".commands.package",
+    "endpoints": ".commands.endpoints",
+    "test": ".commands.test",
+    "examples": ".commands.examples",
+    "batch": ".commands.batch",
+    "replay": ".commands.replay",
+    "loop": ".commands.loop",
+    "tracker": ".commands.tracker",
+    "github": ".commands.github",
+    # Moltbot-inspired commands
+    "bot": ".commands.bot",
+    "gateway": ".commands.gateway",
+    "pairing": ".commands.pairing",
+    "browser": ".commands.browser",
+    "plugins": ".commands.plugins",
+    "sandbox": ".commands.sandbox",
+    "claw": ".commands.claw",
+    "flow": ".commands.flow",
+    "dashboard": ".commands.dashboard",
+    "langfuse": ".commands.langfuse",
+    "langextract": ".commands.langextract",
+    "port": ".commands.port",
+    "managed": ".commands.managed",
+    "up": ".commands.up",
+    "standardise": "standardise_app_special",  # Special case
+    "standardize": "standardise_app_special",  # Special case  
+    "app": "app_special",  # Special case
+    "tui": "tui_special",  # Special case
+    "queue": "queue_special",  # Special case
+    # Retrieval commands are registered dynamically
+}
+
 # Import and register command groups
 _commands_registered = False
+
+def get_command_names():
+    """Get all available command names without importing the modules."""
+    names = set(_COMMAND_GROUPS.keys())
+    # Add dynamically registered commands that don't have modules
+    # NOTE: retrieval_module.register_commands(app) adds these commands dynamically
+    names.update({"index", "query"})  # retrieval commands
+    return names
 
 def register_commands():
     """Register all command groups (idempotent).
@@ -683,5 +820,4 @@ def register_commands():
     _commands_registered = True
 
 
-# Register commands on import
-register_commands()
+# Commands will be registered lazily when needed

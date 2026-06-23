@@ -132,7 +132,9 @@ agents = AgentTeam(
     agents=[qa_generator, total_questions_evaluator, cot_generator, upload_to_huggingface],
     tasks=[generate_task, evaluate_total_questions_task, generate_cot_task, upload_to_huggingface_task],
     process="workflow",
-    max_iter=30, output="minimal"
+    execution={"max_iter": 30},
+    output="minimal",
 )
 
-agents.start()
+if __name__ == "__main__":
+    agents.start()

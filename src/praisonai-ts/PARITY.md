@@ -1,20 +1,20 @@
 # Feature Parity Tracker
 
-> **Version:** 1.5.87 | **Last Updated:** 2026-06-19
+> **Version:** 1.5.87 | **Last Updated:** 2026-06-22
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 360 |
+| Python Core Features | 362 |
 | Python Wrapper Features | 100 |
 | TypeScript Features | 1188 |
-| **Gap Count** | **68** |
+| **Gap Count** | **70** |
 | P0 (Critical) | 2 |
 | P1 (High) | 0 |
 | P2 (Medium) | 0 |
-| P3 (Low) | 66 |
+| P3 (Low) | 68 |
 
 ## Gap Matrix
 
@@ -148,7 +148,7 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (179 done, 66 todo)
+### P3_Advanced (179 done, 68 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -178,6 +178,7 @@
 | `ErrorContextProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `EscalationPipeline` | ✅ | ❌ | high | ⏳ TODO |
 | `EscalationStage` | ✅ | ❌ | high | ⏳ TODO |
+| `GatewayEventType` | ✅ | ❌ | high | ⏳ TODO |
 | `Heartbeat` | ✅ | ❌ | high | ⏳ TODO |
 | `HeartbeatConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `LLMError` | ✅ | ❌ | low | ⏳ TODO |
@@ -194,6 +195,7 @@
 | `ObservabilityHooks` | ✅ | ❌ | high | ⏳ TODO |
 | `PraisonAIConfigError` | ✅ | ❌ | low | ⏳ TODO |
 | `PraisonAIError` | ✅ | ❌ | low | ⏳ TODO |
+| `RetryBackoffConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `RunStatus` | ✅ | ❌ | high | ⏳ TODO |
 | `SessionErrorEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `SessionIdleEvent` | ✅ | ❌ | high | ⏳ TODO |
@@ -493,10 +495,10 @@ from praisonaiagents import FlowDisplay, track_workflow
 </details>
 
 <details>
-<summary><strong>gateway</strong> (7 exports)</summary>
+<summary><strong>gateway</strong> (8 exports)</summary>
 
 ```python
-from praisonaiagents import GatewayClientProtocol, GatewayConfig, GatewayEvent, GatewayMessage, GatewayProtocol, GatewaySessionProtocol, SessionConfig
+from praisonaiagents import GatewayClientProtocol, GatewayConfig, GatewayEvent, GatewayEventType, GatewayMessage, GatewayProtocol, GatewaySessionProtocol, SessionConfig
 ```
 
 </details>
@@ -556,7 +558,7 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (71 exports)</summary>
+<summary><strong>other</strong> (72 exports)</summary>
 
 ```python
 from praisonaiagents import AGGRESSIVE_POLICY, AgentMessageEvent, AgentRunOutcome, Agents, AsyncLearnProtocol, AutonomyConfig, BALANCED_POLICY, BudgetExceededError, CONSERVATIVE_POLICY, CliBackendConfig...

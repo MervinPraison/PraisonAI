@@ -232,6 +232,7 @@ _LAZY_IMPORTS = {
     
     # Agent classes
     'Agent': ('praisonaiagents.agent.agent', 'Agent'),
+    'RetryBackoffConfig': ('praisonaiagents.agent.retry_utils', 'RetryBackoffConfig'),
     'BudgetExceededError': ('praisonaiagents.errors', 'BudgetExceededError'),
     
     # Error hierarchy - structured exception handling
@@ -476,7 +477,7 @@ _LAZY_IMPORTS = {
     'GatewayClientProtocol': ('praisonaiagents.gateway.protocols', 'GatewayClientProtocol'),
     'GatewayEvent': ('praisonaiagents.gateway.protocols', 'GatewayEvent'),
     'GatewayMessage': ('praisonaiagents.gateway.protocols', 'GatewayMessage'),
-    'EventType': ('praisonaiagents.gateway.protocols', 'EventType'),
+    'GatewayEventType': ('praisonaiagents.gateway.protocols', 'EventType'),
     'GatewayConfig': ('praisonaiagents.gateway.config', 'GatewayConfig'),
     'SessionConfig': ('praisonaiagents.gateway.config', 'SessionConfig'),
     
@@ -783,6 +784,7 @@ __all__ = [
     
     # Core classes - the essentials
     'Agent',
+    'RetryBackoffConfig',
     'AgentTeam',  # Primary class for multi-agent coordination (v1.0+)
     'AgentManager',  # Silent alias for AgentTeam
     'Agents',  # Deprecated alias for AgentTeam (emits warning)

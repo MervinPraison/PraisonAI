@@ -5,7 +5,8 @@ This example demonstrates self-reflection capabilities using PraisonAI's
 built-in reflection features for iterative improvement and quality optimization.
 """
 
-from praisonaiagents import Agent, Task, AgentTeam
+from praisonaiagents import Agent, Task
+from praisonaiagents.agents import AgentTeam
 from praisonaiagents.tools import internet_search
 
 print("=== Self-Reflection Optimization Patterns Example ===\n")
@@ -33,9 +34,16 @@ reflection_task = Task(
 )
 
 # Run with self-reflection optimization
-print("Starting self-reflection optimization demonstration...")
-result = reflection_agent.execute_task(reflection_task)
+if __name__ == "__main__":
+    print("Starting self-reflection optimization demonstration...")
+    agents = AgentTeam(
+        agents=[reflection_agent],
+        tasks=[reflection_task],
+        process="sequential",
+        output="verbose",
+    )
+    result = agents.start()
 
-print(f"\nSelf-Reflection Result: {result[:200]}...")
-print("\n✅ Self-reflection optimization complete!")
-print("Agent demonstrated iterative improvement through built-in self-reflection capabilities.")
+    print(f"\nSelf-Reflection Result: {str(result)[:200]}...")
+    print("\n✅ Self-reflection optimization complete!")
+    print("Agent demonstrated iterative improvement through built-in self-reflection capabilities.")

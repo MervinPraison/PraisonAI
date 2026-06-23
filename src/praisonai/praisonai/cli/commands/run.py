@@ -4,7 +4,7 @@ Run command group for PraisonAI CLI.
 Provides agent execution commands.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 import typer
 
@@ -15,48 +15,53 @@ from ..configuration.resolver import resolve_config
 app = typer.Typer(help="Run agents")
 
 
-def _check_api_key_available() -> bool:
-    """
-    Check if an API key is available from environment or stored credentials.
+def _parse_permissions(allow: Optional[List[str]], deny: Optional[List[str]], permissions_file: Optional[str], default: Optional[str]) -> Optional[dict]:
+    """Parse permission flags into a config dict.
     
-    Also injects stored credentials into environment if no env key is present.
-    
+    Args:
+        allow: Pattern to allow
+        deny: Pattern to deny
+        permissions_file: Path to permissions file (YAML or JSON)
+        default: Default action (allow/deny/ask)
+        
     Returns:
-        True if an API key is available, False otherwise
+        Dict mapping patterns to actions, or None if no permissions specified
     """
-    import os
+    if not any([allow, deny, permissions_file, default]):
+        return None
     
-    # Check all known provider env vars first
-    known_keys = (
-        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY",
-        "GEMINI_API_KEY", "GROQ_API_KEY", "COHERE_API_KEY",
-    )
-    if any(os.environ.get(k) for k in known_keys):
-        return True
+    import json
+    import yaml
     
-    # Try to inject stored credentials into env, then re-check any known provider key
-    try:
-        from ...llm.credentials import inject_credentials_into_env
-        inject_credentials_into_env()
-    except ImportError:
-        # Fallback if credential module not available
-        pass
-
-    # Check all known provider env vars after potential injection
-    if any(os.environ.get(k) for k in known_keys):
-        return True
-
-    # Final check using LLM resolution with credential fallback
-    try:
-        from ...llm.credentials import resolve_llm_endpoint_with_credentials
-        endpoint = resolve_llm_endpoint_with_credentials()
-        return bool(endpoint.api_key)
-    except ImportError:
-        # Fallback to basic env check
-        return bool(os.environ.get("OPENAI_API_KEY"))
-    except Exception:
-        return False
-
+    config = {}
+    
+    # Load from file if provided
+    if permissions_file:
+        try:
+            with open(permissions_file, 'r') as f:
+                if permissions_file.endswith('.json'):
+                    file_config = json.load(f)
+                else:
+                    file_config = yaml.safe_load(f)
+                if isinstance(file_config, dict):
+                    config.update(file_config)
+        except (IOError, json.JSONDecodeError, yaml.YAMLError) as e:
+            from ..output.console import get_output_controller
+            get_output_controller().print_warning(f"Failed to load permissions file: {e}")
+    
+    # Add CLI patterns (override file config)
+    if allow:
+        for pattern in allow:
+            config[pattern] = "allow"
+    if deny:
+        for pattern in deny:
+            config[pattern] = "deny"
+    
+    # Add default pattern if specified
+    if default and default in ("allow", "deny", "ask"):
+        config["*"] = default
+    
+    return config if config else None
 
 @app.callback(invoke_without_command=True)
 def run_main(
@@ -79,6 +84,11 @@ def run_main(
     approve_all_tools: bool = typer.Option(False, "--approve-all-tools", help="Require approval for ALL tool calls, not just dangerous tools"),
     approval_timeout: Optional[str] = typer.Option(None, "--approval-timeout", help="Seconds to wait for approval. Use 'none' for indefinite wait"),
     no_rules: bool = typer.Option(False, "--no-rules", help="Disable auto-injection of project instruction files"),
+    # Permission flags for CI-safe declarative policies
+    allow: Optional[List[str]] = typer.Option(None, "--allow", help="Permission pattern to allow (e.g., 'read:*', 'bash:git *'). Can be repeated."),
+    deny: Optional[List[str]] = typer.Option(None, "--deny", help="Permission pattern to deny (e.g., 'bash:rm *'). Can be repeated."),
+    permissions: Optional[str] = typer.Option(None, "--permissions", help="Permission file path (YAML or JSON) with allow/deny rules"),
+    permission_default: Optional[str] = typer.Option(None, "--permission-default", help="Default action for unmatched patterns: allow, deny, ask (default: ask)"),
     # Session continuity options
     continue_session: bool = typer.Option(False, "--continue", "-c", help="Continue the most recent session for this project"),
     session: Optional[str] = typer.Option(None, "--session", "-s", help="Resume a specific session ID"),
@@ -101,6 +111,50 @@ def run_main(
     """
     output = get_output_controller()
     _ = get_current_context()  # Initialize context
+    
+    # Early credential check before any processing
+    if target:  # Only check if we actually have something to run
+        from ...llm.credentials import is_configured
+        import sys
+        
+        # Check if credentials are configured (use model if provided, else check general)
+        if not is_configured(model):
+            # In non-interactive mode, show clear error
+            if not sys.stdin.isatty() or output.is_json_mode:
+                output.print_error(
+                    "No API key configured. Run: praisonai setup\n"
+                    "or set environment variables like OPENAI_API_KEY"
+                )
+                raise typer.Exit(1)
+            
+            # In interactive mode, offer to run setup
+            typer.echo(f"No API key configured{f' for model {model}' if model else ''}.")
+            run_setup = typer.confirm("Would you like to run the setup wizard now?")
+            
+            if run_setup:
+                from ..commands.setup import _run_setup
+                exit_code = _run_setup(
+                    non_interactive=False,
+                    provider=None,
+                    api_key=None,
+                    model=None
+                )
+                if exit_code != 0:
+                    output.print_error("Setup failed. Exiting.")
+                    raise typer.Exit(exit_code)
+                
+                output.print_success("Setup complete! Continuing with your run...")
+                # Re-check after setup
+                if not is_configured(model):
+                    output.print_error("Setup completed but credentials still not detected.")
+                    raise typer.Exit(1)
+            else:
+                output.print_info(
+                    "To configure credentials:\n"
+                    "  - Run: praisonai setup\n"
+                    "  - Or set environment variables like OPENAI_API_KEY"
+                )
+                raise typer.Exit(0)
     
     # Resolve configuration if model not explicitly provided
     if model is None:
@@ -160,6 +214,7 @@ def run_main(
             raise typer.Exit(1)
         
         # Run the interpolated command as a prompt
+        permissions_config = _parse_permissions(allow, deny, permissions, permission_default)
         _run_prompt(
             prompt,
             model=model,
@@ -175,6 +230,7 @@ def run_main(
             approve_all_tools=approve_all_tools,
             approval_timeout=approval_timeout,
             no_rules=no_rules,
+            permissions_config=permissions_config,
             continue_session=continue_session,
             session=session,
             fork=fork,
@@ -274,6 +330,7 @@ def run_main(
         )
     else:
         # Run as prompt
+        permissions_config = _parse_permissions(allow, deny, permissions, permission_default)
         _run_prompt(
             target,
             model=model,
@@ -289,6 +346,7 @@ def run_main(
             approve_all_tools=approve_all_tools,
             approval_timeout=approval_timeout,
             no_rules=no_rules,
+            permissions_config=permissions_config,
             continue_session=continue_session,
             session=session,
             fork=fork,
@@ -316,12 +374,7 @@ def _run_from_file(
     """Run agents from a YAML file."""
     output = get_output_controller()
     
-    # Preflight check for API key availability
-    if not _check_api_key_available():
-        output.print_error(
-            "No API key configured. Run: praisonai auth login"
-        )
-        raise typer.Exit(1)
+    # Note: Credential check already done in run_main() entry point
     
     try:
         # Use existing PraisonAI class
@@ -422,6 +475,7 @@ def _run_prompt(
     approve_all_tools: bool = False,
     approval_timeout: Optional[str] = None,
     no_rules: bool = False,
+    permissions_config: Optional[dict] = None,
     continue_session: bool = False,
     session: Optional[str] = None,
     fork: bool = False,
@@ -430,12 +484,7 @@ def _run_prompt(
     """Run a direct prompt."""
     output = get_output_controller()
     
-    # Preflight check for API key availability
-    if not _check_api_key_available():
-        output.print_error(
-            "No API key configured. Run: praisonai auth login"
-        )
-        raise typer.Exit(1)
+    # Note: Credential check already done in run_main() entry point
     
     try:
         # Handle session continuity first (before any execution mode)
@@ -486,8 +535,6 @@ def _run_prompt(
         if not no_save:
             import uuid
             auto_save_name = session_id or "session-" + str(uuid.uuid4())[:8]
-
-        # If output_mode is "actions", use direct Agent with actions preset
         if output_mode == "actions":
             from praisonaiagents import Agent
             from ..state.project_sessions import build_cli_memory_config, apply_cli_session_continuity
@@ -506,15 +553,18 @@ def _run_prompt(
                 from praisonai.cli.features.approval import resolve_approval_config
                 agent_config["approval"] = resolve_approval_config(
                     approval, all_tools=approve_all_tools, timeout=approval_timeout,
+                    permissions_config=permissions_config,
                 )
             
-            memory_cfg = build_cli_memory_config(session_id, auto_save_name)
+            # Add session support to Agent if needed
+            from ..utils.project import build_cli_memory_config, apply_cli_session_continuity
+            memory_cfg = build_cli_memory_config(session_id=session_id, auto_save=auto_save_name)
             if memory_cfg is not None:
                 agent_config["memory"] = memory_cfg
             
             agent = Agent(**agent_config)
             if session_id or auto_save_name:
-                apply_cli_session_continuity(agent, session_id or auto_save_name)
+                apply_cli_session_continuity(agent, session_id or auto_save_name, auto_save=auto_save_name)
             result = agent.start(prompt)
             
             output.emit_result(
@@ -637,6 +687,48 @@ def _run_from_file_profiled(
     )
     if model:
         praison.config_list[0]['model'] = model
+    
+    # Apply session continuity if requested
+    session_id = None
+    auto_save_name = None
+    
+    if continue_session or session or fork:
+        from ..state.project_sessions import get_project_session_store, find_last_session
+        
+        if continue_session:
+            session_id = find_last_session()
+            if not session_id:
+                typer.echo("Warning: No previous sessions found. Starting new session.", err=True)
+        elif session:
+            project_store = get_project_session_store()
+            if project_store.session_exists(session):
+                session_id = session
+                
+                if fork:
+                    from praisonaiagents.session.hierarchy import HierarchicalSessionStore
+                    from ..utils.project import get_project_sessions_dir
+                    
+                    hierarchical_store = HierarchicalSessionStore(str(get_project_sessions_dir()))
+                    forked_session_id = hierarchical_store.fork_session(session_id)
+                    session_id = forked_session_id
+            else:
+                typer.echo(f"Error: Session not found: {session}", err=True)
+                raise typer.Exit(1)
+    
+    if not no_save:
+        import uuid
+        auto_save_name = session_id or "session-" + str(uuid.uuid4())[:8]
+    if session_id or auto_save_name:
+        class Args:
+            pass
+        
+        args = Args()
+        args.auto_save = auto_save_name
+        args.resume_session = session_id
+        args.cli_project_sessions = bool(session_id or auto_save_name)
+        
+        praison.args = args
+    
     profiler.mark_init_end()
     
     # Execution phase
@@ -789,7 +881,47 @@ def _run_prompt_profiled(
     if model:
         agent_config["llm"] = model
     
+    # Apply session continuity if requested
+    session_id = None
+    auto_save_name = None
+    
+    if continue_session or session or fork:
+        from ..state.project_sessions import get_project_session_store, find_last_session
+        
+        if continue_session:
+            session_id = find_last_session()
+            if not session_id:
+                typer.echo("Warning: No previous sessions found. Starting new session.", err=True)
+        elif session:
+            project_store = get_project_session_store()
+            if project_store.session_exists(session):
+                session_id = session
+                
+                if fork:
+                    from praisonaiagents.session.hierarchy import HierarchicalSessionStore
+                    from ..utils.project import get_project_sessions_dir
+                    
+                    hierarchical_store = HierarchicalSessionStore(str(get_project_sessions_dir()))
+                    forked_session_id = hierarchical_store.fork_session(session_id)
+                    session_id = forked_session_id
+            else:
+                typer.echo(f"Error: Session not found: {session}", err=True)
+                raise typer.Exit(1)
+    
+    if not no_save:
+        import uuid
+        auto_save_name = session_id or "session-" + str(uuid.uuid4())[:8]
+    if session_id or auto_save_name:
+        from ..state.project_sessions import build_cli_memory_config, apply_cli_session_continuity
+        
+        memory_cfg = build_cli_memory_config(session_id, auto_save_name)
+        if memory_cfg is not None:
+            agent_config["memory"] = memory_cfg
+    
     agent = Agent(**agent_config)
+    if session_id or auto_save_name:
+        apply_cli_session_continuity(agent, session_id or auto_save_name, auto_save=auto_save_name)
+    
     profiler.mark_init_end()
     
     # Execution phase

@@ -11,9 +11,10 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Any
 from .shared import ScheduleParser  # Single source of truth
+from praisonai._async_bridge import run_sync
+from ._dispatch import adispatch_agent
 
 logger = logging.getLogger(__name__)
-
 
 class ExecutorInterface(ABC):
     """Abstract interface for executors."""
@@ -43,7 +44,7 @@ class PraisonAgentExecutor(ExecutorInterface):
         Initialize executor with a PraisonAI agent.
         
         Args:
-            agent: PraisonAI Agent instance (must have start() method)
+            agent: PraisonAI Agent instance (must have start() or astart() method)
         """
         self.agent = agent
         
@@ -61,8 +62,7 @@ class PraisonAgentExecutor(ExecutorInterface):
             Exception: If agent execution fails
         """
         try:
-            result = self.agent.start(task)
-            return result
+            return run_sync(adispatch_agent(self.agent, task))
         except Exception as e:
             logger.error(f"Agent execution failed: {e}")
             raise

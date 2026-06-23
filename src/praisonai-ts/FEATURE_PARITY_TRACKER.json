@@ -1,17 +1,17 @@
 {
   "version": "1.5.87",
-  "lastUpdated": "2026-06-19",
+  "lastUpdated": "2026-06-22",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 360,
+    "pythonCoreFeatures": 362,
     "pythonWrapperFeatures": 100,
     "typescriptFeatures": 1188,
-    "gapCount": 68,
+    "gapCount": 70,
     "priorityP0": 2,
     "priorityP1": 0,
     "priorityP2": 0,
-    "priorityP3": 66
+    "priorityP3": 68
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -123,6 +123,7 @@
       "GatewayClientProtocol",
       "GatewayConfig",
       "GatewayEvent",
+      "GatewayEventType",
       "GatewayMessage",
       "GatewayProtocol",
       "GatewaySessionProtocol",
@@ -228,6 +229,7 @@
       "ResourceLimits",
       "RetrievalConfig",
       "RetrievalPolicy",
+      "RetryBackoffConfig",
       "RewriteResult",
       "RewriteStrategy",
       "Route",
@@ -563,6 +565,7 @@
         "GatewayClientProtocol",
         "GatewayConfig",
         "GatewayEvent",
+        "GatewayEventType",
         "GatewayMessage",
         "GatewayProtocol",
         "GatewaySessionProtocol",
@@ -646,6 +649,7 @@
         "ObservabilityHooks",
         "PraisonAIConfigError",
         "PraisonAIError",
+        "RetryBackoffConfig",
         "RunStatus",
         "SessionErrorEvent",
         "SessionIdleEvent",
@@ -4668,6 +4672,15 @@
         "category": "gateway"
       },
       {
+        "feature": "GatewayEventType",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "gateway"
+      },
+      {
         "feature": "GatewayMessage",
         "python": true,
         "typescript": true,
@@ -5233,6 +5246,15 @@
         "effort": "high",
         "status": "DONE",
         "category": "sandbox"
+      },
+      {
+        "feature": "RetryBackoffConfig",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "RoutingConditionProtocol",

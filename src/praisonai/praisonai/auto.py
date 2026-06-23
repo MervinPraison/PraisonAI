@@ -20,11 +20,20 @@ from praisonai._logging import get_logger
 # Type variable for Pydantic models - will be bound at runtime
 T = TypeVar('T')
 
+# Module-level cache for models (for backward compatibility)
+_models_cache: Dict = {}
+_models_lock = threading.Lock()
+
 # =============================================================================
 # THREAD-SAFE LAZY LOADING INFRASTRUCTURE - All heavy imports are deferred
 # =============================================================================
 
 from ._lazy_cache import lazy_get
+
+# Module-level cache for lazily constructed Pydantic workflow models.
+# Populated on first call to _get_workflow_models() / _get_job_workflow_models().
+_models_cache: Dict[str, Any] = {}
+_models_lock = threading.Lock()
 
 def _rich_print(*args, **kwargs):
     """Lazy-loaded rich.print wrapper."""
@@ -44,6 +53,7 @@ def _yaml_safe_load(stream):
 
 
 
+# OpenAI client creation removed - create per-call instead of global cache
 
 
 # --- CrewAI lazy loading ---
@@ -586,6 +596,50 @@ class BaseAutoGenerator:
             return 'simple'
         else:
             return 'moderate'
+    
+    # Pattern keywords for shared recommend_pattern implementation
+    _PATTERN_KEYWORDS = {
+        "evaluator-optimizer": ['refine', 'improve', 'iterate', 'quality', 'review', 'feedback', 'polish', 'optimize'],
+        "orchestrator-workers": ['complex', 'comprehensive', 'multi-step', 'coordinate', 'delegate', 'break down', 'analyze and'],
+        "routing": ['classify', 'categorize', 'route', 'different types', 'depending on', 'if...then'],
+        "parallel": ['multiple', 'concurrent', 'parallel', 'simultaneously', 'different sources', 'compare', 'various'],
+    }
+    
+    def recommend_pattern(self, topic: Optional[str] = None) -> str:
+        """
+        Recommend the best workflow pattern based on task characteristics.
+        Shared implementation for AutoGenerator and WorkflowAutoGenerator.
+        
+        Args:
+            topic: The task description (uses self.topic if not provided)
+            
+        Returns:
+            str: Recommended pattern name
+        """
+        task_lower = (topic or self.topic).lower()
+        for pattern, keywords in self._PATTERN_KEYWORDS.items():
+            if any(kw in task_lower for kw in keywords):
+                return pattern
+        return "sequential"
+    
+    @staticmethod
+    def _format_role(role_details: Dict[str, Any]) -> Dict[str, Any]:
+        """Shared role formatting for YAML serialization."""
+        return {
+            "backstory": role_details['backstory'],
+            "goal": role_details['goal'],
+            "role": role_details['role'],
+            "tasks": {},
+            "tools": role_details.get('tools', []),
+        }
+    
+    @staticmethod
+    def _format_task(task_details: Dict[str, Any]) -> Dict[str, Any]:
+        """Shared task formatting for YAML serialization."""
+        return {
+            "description": task_details['description'],
+            "expected_output": task_details['expected_output'],
+        }
 
 
 # =============================================================================
@@ -708,36 +762,6 @@ class AutoGenerator(BaseAutoGenerator):
         self.pattern = pattern
         self.single_agent = single_agent
     
-    def recommend_pattern(self, topic: str = None) -> str:
-        """
-        Recommend the best workflow pattern based on task characteristics.
-        
-        Args:
-            topic: The task description (uses self.topic if not provided)
-            
-        Returns:
-            str: Recommended pattern name
-        """
-        task = topic or self.topic
-        task_lower = task.lower()
-        
-        # Keywords that suggest specific patterns
-        parallel_keywords = ['multiple', 'concurrent', 'parallel', 'simultaneously', 'different sources', 'compare', 'various']
-        routing_keywords = ['classify', 'categorize', 'route', 'different types', 'depending on', 'if...then']
-        orchestrator_keywords = ['complex', 'comprehensive', 'multi-step', 'coordinate', 'delegate', 'break down', 'analyze and']
-        evaluator_keywords = ['refine', 'improve', 'iterate', 'quality', 'review', 'feedback', 'polish', 'optimize']
-        
-        # Check for pattern indicators
-        if any(kw in task_lower for kw in evaluator_keywords):
-            return "evaluator-optimizer"
-        elif any(kw in task_lower for kw in orchestrator_keywords):
-            return "orchestrator-workers"
-        elif any(kw in task_lower for kw in routing_keywords):
-            return "routing"
-        elif any(kw in task_lower for kw in parallel_keywords):
-            return "parallel"
-        else:
-            return "sequential"
 
     def generate(self, merge=False):
         """
@@ -820,19 +844,9 @@ class AutoGenerator(BaseAutoGenerator):
             }
 
             for role_id, role_details in json_data['roles'].items():
-                yaml_data['roles'][role_id] = {
-                    "backstory": "" + role_details['backstory'],
-                    "goal": role_details['goal'],
-                    "role": role_details['role'],
-                    "tasks": {},
-                    "tools": role_details.get('tools', [])
-                }
-
+                yaml_data['roles'][role_id] = self._format_role(role_details)
                 for task_id, task_details in role_details['tasks'].items():
-                    yaml_data['roles'][role_id]['tasks'][task_id] = {
-                        "description": "" + task_details['description'],
-                        "expected_output": "" + task_details['expected_output']
-                    }
+                    yaml_data['roles'][role_id]['tasks'][task_id] = self._format_task(task_details)
 
         # Save to YAML file, maintaining the order
         with open(self.agent_file, 'w') as f:
@@ -899,20 +913,9 @@ class AutoGenerator(BaseAutoGenerator):
                 counter += 1
             
             # Add the new role
-            merged_data['roles'][final_role_id] = {
-                "backstory": "" + role_details['backstory'],
-                "goal": role_details['goal'],
-                "role": role_details['role'],
-                "tasks": {},
-                "tools": role_details.get('tools', [])
-            }
-            
-            # Add tasks for this role
+            merged_data['roles'][final_role_id] = self._format_role(role_details)
             for task_id, task_details in role_details['tasks'].items():
-                merged_data['roles'][final_role_id]['tasks'][task_id] = {
-                    "description": "" + task_details['description'],
-                    "expected_output": "" + task_details['expected_output']
-                }
+                merged_data['roles'][final_role_id]['tasks'][task_id] = self._format_task(task_details)
         
         return merged_data
 
@@ -1137,45 +1140,7 @@ class WorkflowAutoGenerator(BaseAutoGenerator):
         self.framework = framework
         self.single_agent = single_agent
     
-    def recommend_pattern(self, topic: str = None) -> str:
-        """
-        Recommend the best workflow pattern based on task characteristics.
-        
-        Args:
-            topic: The task description (uses self.topic if not provided)
-            
-        Returns:
-            str: Recommended pattern name
-            
-        Pattern recommendations based on Anthropic's best practices:
-        - sequential: Clear step-by-step dependencies
-        - parallel: Independent subtasks that can run concurrently
-        - routing: Different input types need different handling
-        - orchestrator-workers: Complex tasks needing dynamic decomposition
-        - evaluator-optimizer: Tasks requiring iterative refinement
-        """
-        task = topic or self.topic
-        task_lower = task.lower()
-        
-        # Keywords that suggest specific patterns
-        parallel_keywords = ['multiple', 'concurrent', 'parallel', 'simultaneously', 'different sources', 'compare', 'various']
-        routing_keywords = ['classify', 'categorize', 'route', 'different types', 'depending on', 'if...then']
-        orchestrator_keywords = ['complex', 'comprehensive', 'multi-step', 'coordinate', 'delegate', 'break down', 'analyze and']
-        evaluator_keywords = ['refine', 'improve', 'iterate', 'quality', 'review', 'feedback', 'polish', 'optimize']
-        
-        # Check for pattern indicators
-        if any(kw in task_lower for kw in evaluator_keywords):
-            return "evaluator-optimizer"
-        elif any(kw in task_lower for kw in orchestrator_keywords):
-            return "orchestrator-workers"
-        elif any(kw in task_lower for kw in routing_keywords):
-            return "routing"
-        elif any(kw in task_lower for kw in parallel_keywords):
-            return "parallel"
-        else:
-            return "sequential"
-    
-    def recommend_pattern_llm(self, topic: str = None):  # Returns PatternRecommendation at runtime
+    def recommend_pattern_llm(self, topic: str = None) -> PatternRecommendation:
         """
         Use LLM to recommend the best workflow pattern with reasoning.
         

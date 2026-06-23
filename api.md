@@ -615,7 +615,7 @@ Methods:
 * <code title="class ContextManager">ContextManager.<a href="./src/praisonai-agents/praisonaiagents/context/manager.py">register_snapshot_callback</a>(callback: Callable[[SnapshotHookData], None]) -> None</code>
 * <code title="class ContextManager">ContextManager.<a href="./src/praisonai-agents/praisonaiagents/context/manager.py">reset</a>() -> None</code>
 * <code title="class ContextManager">ContextManager.<a href="./src/praisonai-agents/praisonaiagents/context/manager.py">set_tool_budget</a>(tool_name: str, max_tokens: int, protected: bool = False) -> None</code>
-* <code title="class ContextManager">ContextManager.<a href="./src/praisonai-agents/praisonaiagents/context/manager.py">truncate_tool_output</a>(tool_name: str, output: str) -> str</code>
+* <code title="class ContextManager">ContextManager.<a href="./src/praisonai-agents/praisonaiagents/context/manager.py">truncate_tool_output</a>(tool_name: str, output: str, tool_call_id: str = None, run_id: str = None) -> str</code>
 
 # UI
 
@@ -704,7 +704,7 @@ Methods:
 
 Types:
 ```python
-from praisonaiagents import AgentAppConfig, AgentAppProtocol, AgentFlow, AgentManager, AgentOSConfig, AgentOSProtocol, AgentTeam, AutoApproveBackend, EmbeddingResult, __version__, aembedding, aembeddings, embedding, embeddings, get_dimensions
+from praisonaiagents import AgentAppConfig, AgentAppProtocol, AgentFlow, AgentManager, AgentOSConfig, AgentOSProtocol, AgentTeam, AutoApproveBackend, EmbeddingResult, RetryBackoffConfig, __version__, aembedding, aembeddings, embedding, embeddings, get_dimensions
 ```
 
 Methods:
@@ -893,19 +893,18 @@ Methods:
 * <code title="cli">praisonai docs serve <a href="./src/praisonai/praisonai/cli/commands/docs.py">--help</a></code>
 * <code title="cli">praisonai docs stats <a href="./src/praisonai/praisonai/cli/commands/docs.py">--help</a></code>
 * <code title="cli">praisonai doctor cleanup <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
-* <code title="cli">praisonai doctor config <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
-* <code title="cli">praisonai doctor db <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
-* <code title="cli">praisonai doctor doctor-callback <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
+* <code title="cli">praisonai doctor docker <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor env <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
-* <code title="cli">praisonai doctor fix <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
+* <code title="cli">praisonai doctor llm-providers <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor mcp <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
+* <code title="cli">praisonai doctor memory-store <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
+* <code title="cli">praisonai doctor metadata-store <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor network <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor packaging <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor performance <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor runtime <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor selftest <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor skills <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
-* <code title="cli">praisonai doctor tools <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai doctor troubleshoot <a href="./src/praisonai/praisonai/cli/commands/doctor.py">--help</a></code>
 * <code title="cli">praisonai endpoints list <a href="./src/praisonai/praisonai/cli/commands/endpoints.py">--help</a></code>
 * <code title="cli">praisonai endpoints test <a href="./src/praisonai/praisonai/cli/commands/endpoints.py">--help</a></code>
@@ -1009,6 +1008,9 @@ Methods:
 * <code title="cli">praisonai memory search <a href="./src/praisonai/praisonai/cli/commands/memory.py">--help</a></code>
 * <code title="cli">praisonai memory show <a href="./src/praisonai/praisonai/cli/commands/memory.py">--help</a></code>
 * <code title="cli">praisonai memory status <a href="./src/praisonai/praisonai/cli/commands/memory.py">--help</a></code>
+* <code title="cli">praisonai models describe <a href="./src/praisonai/praisonai/cli/commands/models.py">--help</a></code>
+* <code title="cli">praisonai models list <a href="./src/praisonai/praisonai/cli/commands/models.py">--help</a></code>
+* <code title="cli">praisonai models validate <a href="./src/praisonai/praisonai/cli/commands/models.py">--help</a></code>
 * <code title="cli">praisonai n8n export <a href="./src/praisonai/praisonai/cli/commands/n8n.py">--help</a></code>
 * <code title="cli">praisonai n8n import <a href="./src/praisonai/praisonai/cli/commands/n8n.py">--help</a></code>
 * <code title="cli">praisonai n8n list <a href="./src/praisonai/praisonai/cli/commands/n8n.py">--help</a></code>
@@ -1113,6 +1115,7 @@ Methods:
 * <code title="cli">praisonai serve gateway <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai serve lsp <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai serve mcp <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
+* <code title="cli">praisonai serve openai <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai serve rag <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai serve recipe <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai serve registry <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
@@ -1180,6 +1183,9 @@ Methods:
 * <code title="cli">praisonai up logs <a href="./src/praisonai/praisonai/cli/commands/up.py">--help</a></code>
 * <code title="cli">praisonai up status <a href="./src/praisonai/praisonai/cli/commands/up.py">--help</a></code>
 * <code title="cli">praisonai up up-start <a href="./src/praisonai/praisonai/cli/commands/up.py">--help</a></code>
+* <code title="cli">praisonai validate check <a href="./src/praisonai/praisonai/cli/commands/validate.py">--help</a></code>
+* <code title="cli">praisonai validate schema <a href="./src/praisonai/praisonai/cli/commands/validate.py">--help</a></code>
+* <code title="cli">praisonai validate validate <a href="./src/praisonai/praisonai/cli/commands/validate.py">--help</a></code>
 * <code title="cli">praisonai version check <a href="./src/praisonai/praisonai/cli/commands/version.py">--help</a></code>
 * <code title="cli">praisonai version show <a href="./src/praisonai/praisonai/cli/commands/version.py">--help</a></code>
 * <code title="cli">praisonai version version-callback <a href="./src/praisonai/praisonai/cli/commands/version.py">--help</a></code>

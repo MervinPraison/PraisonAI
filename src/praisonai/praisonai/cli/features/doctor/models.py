@@ -33,9 +33,9 @@ class CheckCategory(Enum):
     NETWORK = "network"
     PERFORMANCE = "performance"
     PACKAGING = "packaging"
+    RUNTIME = "runtime"
     SELFTEST = "selftest"
     BOTS = "bots"
-    RUNTIME = "runtime"
 
 
 class CheckSeverity(Enum):
@@ -271,5 +271,6 @@ class DoctorConfig:
     workflow_file: Optional[str] = None
     
     # Fix subcommand options
+    fix: bool = False
     execute: bool = False
     no_backup: bool = False

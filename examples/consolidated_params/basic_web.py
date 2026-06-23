@@ -10,7 +10,7 @@ from praisonaiagents import Agent, WebConfig
 # Basic: Enable web search with preset (search only — fetch needs Claude)
 agent = Agent(
     instructions="You are a research assistant with web access.",
-    web=WebConfig(search=True, fetch=False, search_provider="duckduckgo"),
+    web="search_only",  # Compatible across models without web_fetch
 )
 
 if __name__ == "__main__":

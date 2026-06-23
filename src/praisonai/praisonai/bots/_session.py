@@ -19,8 +19,10 @@ import asyncio
 import logging
 import time
 import weakref
+from datetime import datetime
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from .._lockmap import LockMap
+from ._reset_policy import SessionResetPolicy
 
 if TYPE_CHECKING:
     from praisonaiagents import Agent
@@ -74,6 +76,9 @@ class BotSessionManager:
         ingress_journal: Optional[Any] = None,
         run_control: Optional[Any] = None,
         run_timeout: float = 300.0,  # 5 minutes default timeout
+        reset_policy: Optional[SessionResetPolicy] = None,
+        channel_directory: Optional[Any] = None,
+        inject_session_context: bool = True,
     ) -> None:
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
         self._locks = LockMap()
@@ -82,6 +87,7 @@ class BotSessionManager:
         self._store = store
         self._platform = platform
         self._last_active: Dict[str, float] = {}
+        self._last_reset: Dict[str, float] = {}  # Track last reset time per user
         # N4: optional inbound DLQ — when set, failed agent.chat() calls
         # are persisted for later replay. Default ``None`` preserves
         # legacy behaviour (exception bubbles up untouched).
@@ -94,12 +100,17 @@ class BotSessionManager:
         # When set, messages are journaled before agent processing for
         # crash recovery and webhook redelivery protection.
         self._ingress_journal = ingress_journal
+        # Platform awareness: channel directory and injection flag
+        self._channel_directory = channel_directory
+        self._inject_session_context = inject_session_context
         self._last_journal_key = None  # Store key for delayed completion
         # Run control for in-flight message handling
         self._run_control = run_control
         # Run timeout and active run tracking for cancellation support
         self._run_timeout = run_timeout
         self._active_runs: Dict[str, Any] = {}  # user_id -> InterruptController
+        # Session reset policy for automatic lifecycle management
+        self._reset_policy = reset_policy or SessionResetPolicy(mode="none")
 
     def _storage_key(self, user_id: str) -> str:
         """Resolve a raw platform user id to the in-memory/store key.
@@ -144,7 +155,20 @@ class BotSessionManager:
         return lock
 
     def _load_history(self, user_id: str) -> List[Dict[str, Any]]:
-        """Load user history from store (if available) or in-memory cache."""
+        """Load user history from store (if available) or in-memory cache.
+        
+        Checks reset policy and clears history if a reset is needed.
+        """
+        storage_key = self._storage_key(user_id)
+        
+        # Check if session should be reset based on policy
+        if self._should_reset_session(storage_key):
+            logger.info("Auto-resetting session for user %s based on policy", user_id)
+            self._clear_session_data(storage_key, user_id)
+            # Mark the reset time
+            self._last_reset[storage_key] = time.monotonic()
+            return []
+        
         if self._store is not None:
             key = self._session_key(user_id)
             try:
@@ -153,7 +177,7 @@ class BotSessionManager:
                     return list(history)
             except Exception as e:
                 logger.warning("Failed to load session from store: %s", e)
-        return list(self._histories.get(self._storage_key(user_id), []))
+        return list(self._histories.get(storage_key, []))
 
     def _save_history(
         self, user_id: str, history: List[Dict[str, Any]]
@@ -238,7 +262,6 @@ class BotSessionManager:
                 # Duplicate message - return empty response
                 return ""
                 
-        self._last_active[self._storage_key(user_id)] = time.monotonic()
         user_lock = self._get_lock(user_id)
         agent_lock = self._get_agent_lock(agent)
 
@@ -251,7 +274,38 @@ class BotSessionManager:
             from praisonaiagents.session.context import (
                 set_session_context as _set_ctx,
                 clear_session_context as _clear_ctx,
+                Origin,
+                ReachableTarget,
             )
+            
+            # Build enriched context if platform awareness is enabled
+            origin = None
+            reachable_targets = None
+            
+            if self._inject_session_context:
+                # Detect chat type and build origin
+                from .delivery import detect_chat_type
+                chat_type = detect_chat_type(self._platform, chat_id)
+                origin = Origin(
+                    platform=self._platform,
+                    chat_type=chat_type,
+                    display_name=chat_id,  # Use chat_id as display_name since chat_name is not available
+                    thread_id=thread_id,
+                )
+                
+                # Get reachable targets from channel directory
+                if self._channel_directory:
+                    targets_data = self._channel_directory.describe_targets()
+                    reachable_targets = [
+                        ReachableTarget(
+                            name=t['name'],
+                            platform=t['platform'],
+                            channel_id=t['channel_id'],
+                            kind=t['kind'],
+                        )
+                        for t in targets_data
+                    ]
+            
             ctx_token = _set_ctx(
                 platform=self._platform,
                 chat_id=chat_id,
@@ -259,17 +313,21 @@ class BotSessionManager:
                 user_id=user_id,
                 user_name=user_name,
                 unified_user_id=self._storage_key(user_id),
+                origin=origin,
+                reachable_targets=reachable_targets,
             )
         except Exception:  # pragma: no cover — defensive
             _clear_ctx = None  # type: ignore[assignment]
 
+        # Initialize result variable
+        result: Optional[str] = None
+        claim_ctx = None
+        
         try:
             # Claim journal entry if we have one
             if journal_key is not None:
                 claim_ctx = self._ingress_journal.aclaim(journal_key)
                 await claim_ctx.__aenter__()
-            else:
-                claim_ctx = None
                 
             try:
                 async with user_lock:
@@ -278,6 +336,9 @@ class BotSessionManager:
                     user_history = await loop.run_in_executor(
                         None, self._load_history, user_id
                     )
+                    
+                    # Update last active timestamp AFTER history load and reset check
+                    self._last_active[self._storage_key(user_id)] = time.monotonic()
 
                     # W1 robustness: hold ``agent_lock`` across the FULL LLM call
                     # (not only the history swap) so concurrent users on a shared
@@ -398,14 +459,8 @@ class BotSessionManager:
                         None, self._save_history, user_id, updated_history
                     )
 
-                    # Mark ingress entry completed before claim context releases it
-                    if journal_key is not None:
-                        self._ingress_journal.complete(journal_key)
-                        self._last_journal_key = None
-                    else:
-                        self._last_journal_key = None
-
-                    return response
+                    # Store response to return after cleanup
+                    result = response
                     
             except Exception as e:
                 # Handle any remaining exceptions and ensure claim is released 
@@ -413,9 +468,16 @@ class BotSessionManager:
                     await claim_ctx.__aexit__(type(e), e, e.__traceback__)
                 raise
             else:
-                # Clean exit - no exception
+                # Clean exit - mark journal complete before releasing claim
+                if journal_key is not None and self._ingress_journal is not None:
+                    try:
+                        self._ingress_journal.complete(journal_key)
+                        self._last_journal_key = None
+                    except Exception as e:
+                        logger.warning("Failed to complete journal entry: %s", e)
                 if claim_ctx is not None:
                     await claim_ctx.__aexit__(None, None, None)
+                return result or ""
         finally:
             # Always clear task-local session context, even if an exception occurred.
             if ctx_token is not None and _clear_ctx is not None:
@@ -474,78 +536,76 @@ class BotSessionManager:
             }
         
         # We're running now (RUN_NOW or INTERRUPTED)
-        run_generation = None
-        interrupt_controller = None
-        
-        if decision == RunDecision.RUN_NOW:
-            # Get the interrupt controller for this run
-            interrupt_controller = self._run_control.get_interrupt_controller(user_id)
-        elif decision == RunDecision.INTERRUPTED:
-            # Previous run was cancelled, get new controller
-            interrupt_controller = self._run_control.get_interrupt_controller(user_id)
-        
-        # Get current run generation for race protection
-        status = self._run_control.get_run_status(user_id)
-        run_generation = status.get("run_generation")
-        
-        try:
-            # Attach interrupt controller to agent if available
-            original_interrupt = None
-            if interrupt_controller and hasattr(agent, 'interrupt_controller'):
-                original_interrupt = getattr(agent, 'interrupt_controller', None)
-                agent.interrupt_controller = interrupt_controller
-            
-            # Run the chat with the existing method
-            response = await self.chat(agent, user_id, prompt, chat_id, thread_id, user_name)
-            
-            # Check for pending messages to process next
-            pending = self._run_control.next_pending(user_id)
-            pending_info = {}
-            if pending:
-                pending_info = {
-                    "next_pending": pending[:100] + "..." if len(pending) > 100 else pending
-                }
-            
-            return {
-                "response": response,
-                "metadata": {
-                    "run_control": True,
-                    "decision": decision.value,
-                    "completed": True,
-                    "run_generation": run_generation,
-                    **pending_info
-                }
-            }
-            
-        except Exception as e:
-            # Handle interruption specifically
-            if interrupt_controller and interrupt_controller.is_set():
-                reason = interrupt_controller.reason or "unknown"
-                return {
-                    "response": f"⚠️ Task cancelled: {reason}",
-                    "metadata": {
-                        "run_control": True,
-                        "decision": decision.value,
-                        "interrupted": True,
-                        "reason": reason,
-                        "run_generation": run_generation
+        current_prompt = prompt
+        last_response = ""
+        last_decision = decision
+        pending_processed: List[str] = []
+
+        while True:
+            run_generation = None
+            interrupt_controller = None
+
+            if last_decision in (RunDecision.RUN_NOW, RunDecision.INTERRUPTED):
+                interrupt_controller = self._run_control.get_interrupt_controller(user_id)
+
+            status = self._run_control.get_run_status(user_id)
+            run_generation = status.get("run_generation")
+
+            try:
+                original_interrupt = None
+                if interrupt_controller and hasattr(agent, 'interrupt_controller'):
+                    original_interrupt = getattr(agent, 'interrupt_controller', None)
+                    agent.interrupt_controller = interrupt_controller
+
+                last_response = await self.chat(
+                    agent, user_id, current_prompt, chat_id, thread_id, user_name
+                )
+
+            except Exception as e:
+                if interrupt_controller and interrupt_controller.is_set():
+                    reason = interrupt_controller.reason or "unknown"
+                    return {
+                        "response": f"⚠️ Task cancelled: {reason}",
+                        "metadata": {
+                            "run_control": True,
+                            "decision": last_decision.value,
+                            "interrupted": True,
+                            "reason": reason,
+                            "run_generation": run_generation,
+                        },
                     }
-                }
-            else:
-                # Re-raise other exceptions
                 raise
-                
-        finally:
-            # Restore original interrupt controller
-            if interrupt_controller and hasattr(agent, 'interrupt_controller'):
-                if original_interrupt is not None:
-                    agent.interrupt_controller = original_interrupt
-                else:
-                    agent.interrupt_controller = None
-            
-            # Mark run as finished
-            if run_generation is not None:
-                await self._run_control.finish_run(user_id, run_generation)
+
+            finally:
+                if interrupt_controller and hasattr(agent, 'interrupt_controller'):
+                    if original_interrupt is not None:
+                        agent.interrupt_controller = original_interrupt
+                    else:
+                        agent.interrupt_controller = None
+
+                if run_generation is not None:
+                    await self._run_control.finish_run(user_id, run_generation)
+
+            pending = self._run_control.next_pending(user_id)
+            if not pending:
+                break
+
+            pending_processed.append(
+                pending[:100] + "..." if len(pending) > 100 else pending
+            )
+            current_prompt = pending
+            last_decision = await self._run_control.submit(user_id, pending)
+
+        metadata: Dict[str, Any] = {
+            "run_control": True,
+            "decision": decision.value,
+            "completed": True,
+            "run_generation": run_generation,
+        }
+        if pending_processed:
+            metadata["pending_processed"] = pending_processed
+
+        return {"response": last_response, "metadata": metadata}
 
     def reap_stale(self, max_age_seconds: int) -> int:
         """Remove sessions older than *max_age_seconds*.  Returns count reaped.
@@ -591,21 +651,64 @@ class BotSessionManager:
                 logger.warning("Failed to complete journal entry: %s", e)
         return False
 
-    def reset(self, user_id: str) -> bool:
-        """Clear a user's session history.  Returns True if it existed."""
-        storage_key = self._storage_key(user_id)
-        existed = storage_key in self._histories
+    def _should_reset_session(self, storage_key: str) -> bool:
+        """Check if a session should be reset based on the policy.
+        
+        Args:
+            storage_key: The storage key for the user
+            
+        Returns:
+            True if session should be reset
+        """
+        if self._reset_policy.mode == "none":
+            return False
+        
+        # Get timestamps
+        now = time.monotonic()
+        last_activity = self._last_active.get(storage_key, now)
+        last_reset = self._last_reset.get(storage_key, 0)
+        
+        # If this is a new session, initialize timestamps but don't reset
+        if storage_key not in self._last_reset:
+            self._last_reset[storage_key] = now
+            if storage_key not in self._last_active:
+                self._last_active[storage_key] = now
+                return False
+        
+        return self._reset_policy.should_reset(
+            last_activity=last_activity,
+            last_reset=last_reset,
+            now=now,
+            current_datetime=datetime.now()
+        )
+    
+    def _clear_session_data(self, storage_key: str, user_id: str) -> None:
+        """Clear session data for a user.
+        
+        Args:
+            storage_key: The storage key for the user
+            user_id: The raw user ID
+        """
         self._histories.pop(storage_key, None)
-        self._last_active.pop(storage_key, None)
-        self._locks.drop(storage_key)
-
+        # Don't clear last_active as we still need it for idle tracking
+        # Don't drop lock here as it may still be held by caller
+        
         if self._store is not None:
             persist_key = self._session_key(user_id)
             try:
                 self._store.clear_session(persist_key)
             except Exception as e:
                 logger.warning("Failed to clear session in store: %s", e)
-
+    
+    def reset(self, user_id: str) -> bool:
+        """Clear a user's session history.  Returns True if it existed."""
+        storage_key = self._storage_key(user_id)
+        existed = storage_key in self._histories
+        
+        self._clear_session_data(storage_key, user_id)
+        self._last_active.pop(storage_key, None)
+        self._last_reset[storage_key] = time.monotonic()
+        
         return existed
 
     def cancel_run(self, user_id: str, reason: str = "user_cancel") -> bool:
@@ -733,3 +836,57 @@ class BotSessionManager:
     def get_user_ids(self) -> List[str]:
         """List user IDs with active sessions."""
         return list(self._histories.keys())
+
+
+def build_session_manager(config, platform: str, *, run_control=None) -> BotSessionManager:
+    """Build a BotSessionManager with standard configuration from a BotConfig.
+    
+    This helper extracts the common session manager setup logic that's duplicated
+    across all bot adapters, including:
+    - Session store acquisition
+    - Reset policy extraction
+    - Backward-compatible max_history resolution
+    
+    Args:
+        config: BotConfig instance with session configuration
+        platform: Platform identifier (e.g., "telegram", "slack")
+        run_control: Optional run control for Telegram (keyword-only)
+    
+    Returns:
+        Configured BotSessionManager instance
+    """
+    # Try to get the default session store
+    try:
+        from praisonaiagents.session import get_default_session_store
+    except ImportError:
+        # Module not available, fallback to in-memory
+        store = None
+    else:
+        try:
+            store = get_default_session_store()
+        except Exception as exc:
+            logger.warning(
+                "Default session store unavailable; falling back to in-memory store: %s",
+                exc,
+            )
+            store = None
+    
+    # Extract reset policy from config
+    reset_policy = None
+    if getattr(config, "session", None) and getattr(config.session, "reset", None):
+        reset_policy = SessionResetPolicy.from_dict(config.session.reset.model_dump())
+    
+    # Support backward compatibility with max_history at channel level
+    max_history = 100
+    if getattr(config, "max_history", None) is not None:
+        max_history = config.max_history
+    elif getattr(config, "session", None) and getattr(config.session, "max_history", None) is not None:
+        max_history = config.session.max_history
+    
+    return BotSessionManager(
+        max_history=max_history,
+        store=store,
+        platform=platform,
+        reset_policy=reset_policy,
+        run_control=run_control,
+    )

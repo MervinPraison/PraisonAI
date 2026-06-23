@@ -42,6 +42,7 @@ from ..agent.autonomy import AutonomyConfig
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..compaction.strategy import CompactionStrategy
+    from ..context.artifact_store import FileSystemArtifactStore
 
 
 class MemoryBackend(str, Enum):
@@ -724,6 +725,9 @@ class ExecutionConfig:
     
     # Retry settings
     max_retry_limit: int = 2
+    retry_initial_delay: float = 1.0  # seconds
+    retry_backoff_factor: float = 2.0
+    retry_jitter: float = 0.1  # fraction of computed delay
     
     # Tool call limits (loop protection)
     max_tool_calls_per_turn: int = 10
@@ -766,7 +770,7 @@ class ExecutionConfig:
     parallel_tool_calls: bool = False
 
     def __post_init__(self) -> None:
-        """Post-initialization processing with deprecation warnings."""
+        """Post-initialization processing with deprecation warnings and validation."""
         # Handle context_compaction serialization round-trip
         if isinstance(self.context_compaction, dict):
             from ..context.policy import ContextCompactionPolicy
@@ -807,6 +811,14 @@ class ExecutionConfig:
                 ExecutionConfig._context_compaction_warned = True
             finally:
                 del frame
+        
+        # Validate retry configuration parameters
+        if self.retry_initial_delay <= 0:
+            raise ValueError("ExecutionConfig.retry_initial_delay must be positive.")
+        if self.retry_backoff_factor < 1.0:
+            raise ValueError("ExecutionConfig.retry_backoff_factor must be >= 1.0.")
+        if self.retry_jitter < 0:
+            raise ValueError("ExecutionConfig.retry_jitter must be non-negative.")
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -815,6 +827,9 @@ class ExecutionConfig:
             "max_rpm": self.max_rpm,
             "max_execution_time": self.max_execution_time,
             "max_retry_limit": self.max_retry_limit,
+            "retry_initial_delay": self.retry_initial_delay,
+            "retry_backoff_factor": self.retry_backoff_factor,
+            "retry_jitter": self.retry_jitter,
             "code_execution": self.code_execution,
             "code_mode": self.code_mode,
             "code_sandbox_mode": self.code_sandbox_mode,
@@ -853,12 +868,76 @@ class ExecutionConfig:
         )
 
 
+@dataclass
+class LLMConfig:
+    """
+    Configuration for LLM model settings.
+    
+    Groups all LLM-related parameters including model selection, 
+    API settings, and fallback configuration.
+    
+    Usage:
+        # With primary model only
+        Agent(llm_config=LLMConfig(model="gpt-4o"))
+        
+        # With fallback chain
+        Agent(llm_config=LLMConfig(
+            model="gpt-4o",
+            fallback_models=["claude-3-5-sonnet", "gpt-4o-mini"],
+            base_url="https://api.example.com",
+            api_key="sk-...",
+        ))
+        
+        # With LiteLLM-style provider prefix
+        Agent(llm_config=LLMConfig(
+            model="anthropic/claude-3-5-sonnet",
+            fallback_models=["openai/gpt-4o", "openai/gpt-4o-mini"],
+        ))
+    """
+    # Primary model to use (required)
+    model: str
+    
+    # Ordered fallback models for resilience (optional)
+    fallback_models: Optional[List[str]] = None
+    
+    # API endpoint override (optional)
+    base_url: Optional[str] = None
+    
+    # API key (optional, defaults to env vars)
+    api_key: Optional[str] = None
+    
+    # Additional auth headers (optional)
+    auth: Optional[Dict[str, str]] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "model": self.model,
+            "fallback_models": list(self.fallback_models) if self.fallback_models else None,
+            "base_url": self.base_url,
+            "api_key": self.api_key,
+            "auth": dict(self.auth) if self.auth else None,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "LLMConfig":
+        """Create LLMConfig from dictionary."""
+        return cls(
+            model=data["model"],
+            fallback_models=list(data["fallback_models"]) if data.get("fallback_models") else None,
+            base_url=data.get("base_url"),
+            api_key=data.get("api_key"),
+            auth=dict(data["auth"]) if data.get("auth") else None,
+        )
+
+
 @dataclass  
 class ToolConfig:
     """
     Configuration for tool execution behavior.
     
-    Configuration for tool execution behavior including timeout, retry policy, and parallel execution.
+    Configuration for tool execution behavior including timeout, retry policy, parallel execution,
+    and artifact storage for large outputs.
     
     Usage:
         # Simple enable with defaults
@@ -871,8 +950,12 @@ class ToolConfig:
             parallel=True,
         ))
         
-        # With timeout only
-        Agent(tool_config=ToolConfig(timeout=30))
+        # With artifact storage for large outputs
+        Agent(tool_config=ToolConfig(
+            output_limit=32000,
+            enable_artifacts=True,
+            artifact_retention_days=14,
+        ))
     """
     # Tool execution timeout in seconds  
     timeout: Optional[int] = None
@@ -882,6 +965,26 @@ class ToolConfig:
     
     # Enable parallel execution of batched LLM tool calls
     parallel: bool = False
+    
+    # Tool output handling and artifact storage
+    output_limit: int = 16000  # Maximum bytes before spilling to artifact store
+    output_max_lines: Optional[int] = None  # Maximum lines before spilling
+    output_direction: str = "both"  # Truncation direction: "head", "tail", or "both"
+    enable_artifacts: bool = False  # Whether to enable artifact storage (default False for backward compat)
+    artifact_retention_days: int = 7  # Days to retain artifacts before garbage collection
+    artifact_store: Optional[Any] = None  # Custom artifact store instance
+    redact_secrets: bool = True  # Whether to redact secrets from artifacts
+    
+    def __post_init__(self) -> None:
+        """Validate configuration after initialization."""
+        if self.output_limit <= 0:
+            raise ValueError("tool_config.output_limit must be > 0")
+        if self.output_max_lines is not None and self.output_max_lines <= 0:
+            raise ValueError("tool_config.output_max_lines must be > 0 when provided")
+        if self.output_direction not in {"head", "tail", "both"}:
+            raise ValueError("tool_config.output_direction must be one of: 'head', 'tail', 'both'")
+        if self.artifact_retention_days < 0:
+            raise ValueError("tool_config.artifact_retention_days must be >= 0")
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -893,6 +996,13 @@ class ToolConfig:
                 else self.retry_policy
             ),
             "parallel": self.parallel,
+            "output_limit": self.output_limit,
+            "output_max_lines": self.output_max_lines,
+            "output_direction": self.output_direction,
+            "enable_artifacts": self.enable_artifacts,
+            "artifact_retention_days": self.artifact_retention_days,
+            "artifact_store": self.artifact_store,
+            "redact_secrets": self.redact_secrets,
         }
     
     @classmethod
@@ -911,6 +1021,13 @@ class ToolConfig:
             timeout=data.get("timeout"),
             retry_policy=retry_policy,
             parallel=data.get("parallel", False),
+            output_limit=data.get("output_limit", 16000),
+            output_max_lines=data.get("output_max_lines"),
+            output_direction=data.get("output_direction", "both"),
+            enable_artifacts=data.get("enable_artifacts", False),
+            artifact_retention_days=data.get("artifact_retention_days", 7),
+            artifact_store=data.get("artifact_store"),
+            redact_secrets=data.get("redact_secrets", True),
         )
 
 
@@ -1275,79 +1392,49 @@ def resolve_memory(value: MemoryParam) -> Optional[MemoryConfig]:
     """
     Resolve memory= parameter following precedence ladder.
     
-    Precedence: Instance > Config > Dict > String > Bool > Default
+    Delegates to the canonical resolver in param_resolver.py with
+    special handling for backward compatibility.
     
     Args:
         value: Memory parameter in any supported form
         
     Returns:
         MemoryConfig if enabled, None if disabled
-        
-    Examples:
-        >>> resolve_memory(None)  # Default: disabled
-        None
-        >>> resolve_memory(False)  # Explicit disable
-        None
-        >>> resolve_memory(True)  # Enable with defaults
-        MemoryConfig(backend='file')
-        >>> resolve_memory("redis")  # String shorthand
-        MemoryConfig(backend='redis')
-        >>> resolve_memory({"backend": "sqlite", "user_id": "alice"})  # Dict
-        MemoryConfig(backend='sqlite', user_id='alice')
-        >>> resolve_memory(MemoryConfig(backend="postgres"))  # Config passthrough
-        MemoryConfig(backend='postgres')
     """
-    # Default: disabled
-    if value is None:
-        return None
+    from .param_resolver import resolve_memory as _resolve
     
-    # Bool: False = disabled, True = defaults
-    if value is False:
-        return None
-    if value is True:
-        return MemoryConfig()
-    
-    # String: backend shorthand
+    # Special case: handle string backends not in MEMORY_PRESETS
     if isinstance(value, str):
         try:
-            backend = MemoryBackend(value.lower())
+            # Try to resolve with canonical resolver first
+            return _resolve(value, MemoryConfig)
         except ValueError:
-            backend = value  # Allow custom backend strings
-        return MemoryConfig(backend=backend)
-    
-    # Dict: expand to config
-    if isinstance(value, dict):
-        # Handle backend enum conversion
-        backend = value.get("backend", MemoryBackend.FILE)
-        if isinstance(backend, str):
+            # Fall back to old behavior for custom/unknown backends
             try:
-                backend = MemoryBackend(backend.lower())
+                backend = MemoryBackend(value.lower())
             except ValueError:
-                pass  # Keep as string for custom backends
-        return MemoryConfig(
-            backend=backend,
-            user_id=value.get("user_id"),
-            session_id=value.get("session_id"),
-            auto_memory=value.get("auto_memory", False),
-            claude_memory=value.get("claude_memory", False),
-            db=value.get("db"),
-            config=value.get("config"),
-        )
+                backend = value  # Allow custom backend strings
+            return MemoryConfig(backend=backend)
     
-    # Config: passthrough
-    if isinstance(value, MemoryConfig):
-        return value
+    # Special case: handle arbitrary instances with passthrough
+    if not isinstance(value, (type(None), bool, dict, list, tuple, MemoryConfig)):
+        # Try canonical resolver first
+        result = _resolve(value, MemoryConfig)
+        # If canonical resolver returns None for an instance, pass it through
+        if result is None and hasattr(value, '__class__'):
+            return value
+        return result
     
-    # Instance (MemoryManager): return as-is (caller handles)
-    # This is the highest precedence - user provided a pre-configured instance
-    return value
+    # Default: use canonical resolver
+    return _resolve(value, MemoryConfig)
 
 
 def resolve_knowledge(value: KnowledgeParam) -> Optional[KnowledgeConfig]:
     """
     Resolve knowledge= parameter following precedence ladder.
     
-    Precedence: Instance > Config > Array > Dict > String > Bool > Default
+    Delegates to the canonical resolver in param_resolver.py.
+    Kept for backward compatibility with tests.
     
     Args:
         value: Knowledge parameter in any supported form
@@ -1355,131 +1442,91 @@ def resolve_knowledge(value: KnowledgeParam) -> Optional[KnowledgeConfig]:
     Returns:
         KnowledgeConfig if enabled, None if disabled
     """
-    # Default: disabled
-    if value is None:
-        return None
-    
-    # Bool: False = disabled, True = defaults
-    if value is False:
-        return None
-    if value is True:
-        return KnowledgeConfig()
-    
-    # String: single source
-    if isinstance(value, str):
-        return KnowledgeConfig(sources=[value])
-    
-    # Array: list of sources
-    if isinstance(value, list):
-        return KnowledgeConfig(sources=value)
-    
-    # Dict: expand to config
-    if isinstance(value, dict):
-        return KnowledgeConfig(
-            sources=value.get("sources", []),
-            embedder=value.get("embedder", "openai"),
-            embedder_config=value.get("embedder_config"),
-            chunking_strategy=value.get("chunking_strategy", ChunkingStrategy.SEMANTIC),
-            chunk_size=value.get("chunk_size", 1000),
-            chunk_overlap=value.get("chunk_overlap", 200),
-            retrieval_k=value.get("retrieval_k", 5),
-            retrieval_threshold=value.get("retrieval_threshold", 0.0),
-            rerank=value.get("rerank", False),
-            rerank_model=value.get("rerank_model"),
-            auto_retrieve=value.get("auto_retrieve", True),
-        )
-    
-    # Config: passthrough
-    if isinstance(value, KnowledgeConfig):
-        return value
-    
-    # Instance: return as-is
-    return value
+    from .param_resolver import resolve_knowledge as _resolve
+    return _resolve(value, KnowledgeConfig)
 
 
 def resolve_planning(value: PlanningParam) -> Optional[PlanningConfig]:
-    """Resolve planning= parameter following precedence ladder."""
-    if value is None or value is False:
-        return None
-    if value is True:
-        return PlanningConfig()
-    if isinstance(value, dict):
-        return PlanningConfig(**value)
-    if isinstance(value, PlanningConfig):
-        return value
-    return value
+    """
+    Resolve planning= parameter following precedence ladder.
+    
+    Delegates to the canonical resolver in param_resolver.py.
+    Kept for backward compatibility with tests.
+    """
+    from .param_resolver import resolve_planning as _resolve
+    return _resolve(value, PlanningConfig)
 
 
 def resolve_reflection(value: ReflectionParam) -> Optional[ReflectionConfig]:
-    """Resolve reflection= parameter following precedence ladder."""
-    if value is None or value is False:
-        return None
-    if value is True:
-        return ReflectionConfig()
-    if isinstance(value, dict):
-        return ReflectionConfig(**value)
-    if isinstance(value, ReflectionConfig):
-        return value
-    return value
+    """
+    Resolve reflection= parameter following precedence ladder.
+    
+    Delegates to the canonical resolver in param_resolver.py.
+    Kept for backward compatibility with tests.
+    """
+    from .param_resolver import resolve_reflection as _resolve
+    return _resolve(value, ReflectionConfig)
 
 
 def resolve_guardrails(value: GuardrailParam) -> Optional[GuardrailConfig]:
-    """Resolve guardrails= parameter following precedence ladder."""
-    if value is None or value is False:
-        return None
-    if value is True:
-        return GuardrailConfig()
-    if callable(value):
+    """
+    Resolve guardrails= parameter following precedence ladder.
+    
+    Delegates to the canonical resolver in param_resolver.py with
+    special handling for callable validators.
+    """
+    from .param_resolver import resolve_guardrails as _resolve
+    
+    # Special case: wrap callable in GuardrailConfig for backward compatibility
+    if callable(value) and not isinstance(value, type):
         return GuardrailConfig(validator=value)
-    if isinstance(value, dict):
-        return GuardrailConfig(**value)
-    if isinstance(value, GuardrailConfig):
-        return value
-    return value
+    
+    # Default: use canonical resolver
+    return _resolve(value, GuardrailConfig)
 
 
 def resolve_web(value: WebParam) -> Optional[WebConfig]:
-    """Resolve web= parameter following precedence ladder."""
-    if value is None or value is False:
-        return None
-    if value is True:
-        return WebConfig()
-    if isinstance(value, dict):
-        return WebConfig(**value)
-    if isinstance(value, WebConfig):
-        return value
-    return value
+    """
+    Resolve web= parameter following precedence ladder.
+    
+    Delegates to the canonical resolver in param_resolver.py.
+    Kept for backward compatibility with tests.
+    """
+    from .param_resolver import resolve_web as _resolve
+    return _resolve(value, WebConfig)
 
 
 
 def resolve_caching(value: CachingParam) -> Optional[CachingConfig]:
-    """Resolve caching= parameter following precedence ladder."""
-    if value is None or value is False:
-        return None
-    if value is True:
-        return CachingConfig()
-    if isinstance(value, dict):
-        return CachingConfig(**value)
-    if isinstance(value, CachingConfig):
-        return value
-    return value
+    """
+    Resolve caching= parameter following precedence ladder.
+    
+    Delegates to the canonical resolver in param_resolver.py.
+    Kept for backward compatibility with tests.
+    """
+    from .param_resolver import resolve_caching as _resolve
+    return _resolve(value, CachingConfig)
 
 
 def resolve_autonomy(value: AutonomyParam) -> Optional[AutonomyConfig]:
-    """Resolve autonomy= parameter following precedence ladder."""
-    if value is None or value is False:
-        return None
-    if value is True:
-        return AutonomyConfig()
-    if isinstance(value, dict):
-        return AutonomyConfig(**value)
-    if isinstance(value, AutonomyConfig):
-        return value
-    return value
+    """
+    Resolve autonomy= parameter following precedence ladder.
+    
+    Delegates to the canonical resolver in param_resolver.py.
+    Kept for backward compatibility with tests.
+    """
+    from .param_resolver import resolve_autonomy as _resolve
+    return _resolve(value, AutonomyConfig)
 
 
 def resolve_tool_search(value: ToolSearchParam) -> Optional[ToolSearchConfig]:
-    """Resolve tool_search= parameter following precedence ladder."""
+    """
+    Resolve tool_search= parameter following precedence ladder.
+    
+    NOTE: This resolver has zero references in the codebase but is kept
+    for backward compatibility. Consider removing in a future version.
+    """
+    # Simple implementation since it's unused
     if value is None or value is False:
         return None
     if value is True:
@@ -1504,6 +1551,99 @@ def resolve_tools(value: ToolParam) -> Optional[ToolConfig]:
     if isinstance(value, ToolConfig):
         return value
     return value
+
+
+@dataclass
+class RuntimeConfig:
+    """
+    Configuration for agent runtime capabilities and requirements.
+    
+    Used to declare what capabilities an agent requires and validate
+    against runtime implementations at config/selection time.
+    
+    Usage:
+        # Agent that requires native hooks and streaming
+        Agent(
+            instructions="...",
+            runtime=RuntimeConfig(
+                required_capabilities={"native_hooks", "streaming_deltas"}
+            )
+        )
+        
+        # Agent with runtime preference  
+        Agent(
+            runtime=RuntimeConfig(
+                preferred_runtime="native",
+                required_capabilities={"tool_loop", "mcp_tools"},
+                fallback_allowed=True
+            )
+        )
+    """
+    # Required capabilities for this agent (capability names or enum values)
+    required_capabilities: Optional[Union[List[str], FrozenSet[str], List[Any], FrozenSet[Any]]] = None
+    
+    # Preferred runtime implementation name
+    preferred_runtime: Optional[str] = None
+    
+    # Whether to allow fallback to other runtimes if preferred is unavailable
+    fallback_allowed: bool = True
+    
+    # Fail fast validation (validate at agent creation vs first execution) 
+    validate_on_creation: bool = True
+    
+    # Additional runtime metadata/hints
+    metadata: Optional[Dict[str, Any]] = field(default_factory=dict)
+    
+    def __post_init__(self) -> None:
+        """Normalize required_capabilities to a list."""
+        if self.required_capabilities is not None:
+            if isinstance(self.required_capabilities, str):
+                self.required_capabilities = [self.required_capabilities]
+            else:
+                try:
+                    self.required_capabilities = list(self.required_capabilities)
+                except TypeError:
+                    self.required_capabilities = [self.required_capabilities]
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        req_caps = None
+        if self.required_capabilities:
+            req_caps = [
+                cap.name.lower() if hasattr(cap, "name") else str(cap)
+                for cap in self.required_capabilities
+            ]
+        return {
+            "required_capabilities": req_caps,
+            "preferred_runtime": self.preferred_runtime,
+            "fallback_allowed": self.fallback_allowed,
+            "validate_on_creation": self.validate_on_creation,
+            "metadata": self.metadata,
+        }
+
+
+# Type aliases for runtime parameters
+RuntimeParam = Union[bool, str, Dict[str, Any], RuntimeConfig, None]
+
+
+def resolve_runtime(value: RuntimeParam) -> Optional[RuntimeConfig]:
+    """Resolve runtime= parameter following precedence ladder."""
+    if value is None or value is False:
+        return None
+    if value is True:
+        return RuntimeConfig()
+    if isinstance(value, str):
+        return RuntimeConfig(preferred_runtime=value)
+    if isinstance(value, (list, set, tuple, frozenset)):
+        return RuntimeConfig(required_capabilities=list(value))
+    if isinstance(value, dict):
+        return RuntimeConfig(**value)
+    if isinstance(value, RuntimeConfig):
+        return value
+    raise TypeError(
+        f"Invalid runtime parameter type: {type(value).__name__}. "
+        "Expected None/False, True, str, list, set, dict, or RuntimeConfig."
+    )
 
 
 __all__ = [
@@ -1533,6 +1673,7 @@ __all__ = [
     "SkillsConfig",
     "AutonomyConfig",
     "ToolSearchConfig",
+    "RuntimeConfig",
     # Config classes (Multi-Agent)
     "MultiAgentHooksConfig",
     "MultiAgentOutputConfig",
@@ -1555,6 +1696,7 @@ __all__ = [
     "AutonomyParam",
     "ToolSearchParam", 
     "ToolParam",
+    "RuntimeParam",
     # Precedence ladder resolvers
     "resolve_memory",
     "resolve_knowledge",
@@ -1566,4 +1708,5 @@ __all__ = [
     "resolve_autonomy",
     "resolve_tool_search",
     "resolve_tools",
+    "resolve_runtime",
 ]

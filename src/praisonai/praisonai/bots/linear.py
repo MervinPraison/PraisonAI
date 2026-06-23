@@ -33,7 +33,6 @@ from praisonaiagents.bots import (
 )
 
 from ._commands import format_status, format_help
-from ._session import BotSessionManager
 from ._rate_limit import RateLimiter
 from ._ack import AckReactor
 
@@ -91,15 +90,11 @@ class LinearBot(ChatCommandMixin, MessageHookMixin):
         self._started_at: Optional[float] = None
         self._bot_user: Optional[BotUser] = None
         
-        try:
-            from praisonaiagents.session import get_default_session_store
-            _store = get_default_session_store()
-        except Exception:
-            _store = None
-            
-        self._session_mgr = BotSessionManager(
-            store=_store,
-            platform="linear",
+        # Use helper to build session manager
+        from ._session import build_session_manager
+        self._session_mgr = build_session_manager(
+            self.config,
+            platform="linear"
         )
         self._message_handlers: List[Callable] = []
         self._runner: Any = None

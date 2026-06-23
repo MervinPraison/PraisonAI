@@ -5136,6 +5136,7 @@ dependencies = [
     { name = "markdown" },
     { name = "mcp" },
     { name = "praisonaiagents" },
+    { name = "pydantic" },
     { name = "pyparsing" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
@@ -5423,6 +5424,7 @@ requires-dist = [
     { name = "psycopg2-binary", marker = "extra == 'postgresql'", specifier = ">=2.9.0" },
     { name = "psycopg2-binary", marker = "extra == 'xata'", specifier = ">=2.9.0" },
     { name = "pyautogen", marker = "extra == 'autogen'", specifier = "==0.2.29" },
+    { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pyjwt", marker = "extra == 'os'", specifier = ">=2.8.0" },
     { name = "pymongo", marker = "extra == 'all'", specifier = ">=4.6.0" },
     { name = "pymongo", marker = "extra == 'claw'", specifier = ">=4.6.0" },
@@ -5491,7 +5493,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.6.64"
+version = "1.6.71"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },

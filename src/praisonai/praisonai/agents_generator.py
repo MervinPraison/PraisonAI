@@ -223,7 +223,6 @@ class AgentsGenerator:
         
         # Keep tool registry for backward compatibility with autogen adapters
         self.tool_registry = ToolRegistry()
-        self.tool_registry.register_builtin_autogen_adapters(_suppress_deprecation_warning=True)
         
         # Initialize tool resolver with the registry wired in (single source of truth for tool resolution)
         from .tool_resolver import ToolResolver
@@ -239,6 +238,11 @@ class AgentsGenerator:
         # Defer framework adapter creation until YAML is loaded
         # This fixes the issue where empty framework string fails before YAML framework is read
         self.framework_adapter = None
+        
+        # Only autogen-family adapters need the autogen tool shim
+        # Note: autogen_v2 is also part of the autogen family
+        if framework and framework in {"autogen", "autogen_v2", "autogen_v4", "ag2"}:
+            self.tool_registry.register_builtin_autogen_adapters()
 
     def _get_framework_adapter(self, framework: str) -> FrameworkAdapter:
         """
@@ -392,9 +396,6 @@ class AgentsGenerator:
         from .observability.hooks import init_observability
         init_observability(adapter.name)
         
-        # Also initialize AgentOps if configured (separate from general observability)
-        self._init_observability(adapter.name)
-        
         # Run adapter setup hooks
         adapter.setup(framework_tag=adapter.name)
         
@@ -433,24 +434,11 @@ class AgentsGenerator:
         # Get the base adapter
         adapter = self._get_framework_adapter(framework)
         
-        # Let the adapter resolve its own variant
-        resolved_adapter = adapter.resolve_variant(config, self._adapter_registry)
+        # Let the adapter resolve its own variant using the standardized resolve() method
+        # This replaces the old resolve_variant approach and follows the Protocol
+        resolved_adapter = adapter.resolve(config=config)
         
         return resolved_adapter
-    
-    def _init_observability(self, framework: str) -> None:
-        """Initialize observability tools if configured.
-        
-        Args:
-            framework: The framework name for tagging
-        """
-        agentops_api_key = os.getenv("AGENTOPS_API_KEY")
-        if agentops_api_key:
-            try:
-                import agentops
-                agentops.init(agentops_api_key, default_tags=[framework])
-            except ImportError:
-                pass
     
     def _validate_cli_backend_compatibility(self, config, framework):
         """Validate that cli_backend and runtime are only used with compatible frameworks."""
@@ -510,44 +498,45 @@ class AgentsGenerator:
 
     def _validate_agents_config(self, config):
         """
-        Validate agent configuration for typos in field names and provide suggestions.
+        Validate agent configuration with fail-fast validation and aggregated errors.
         
         Args:
             config (dict): The parsed YAML configuration
+            
+        Raises:
+            ValueError: If configuration has validation errors
         """
-        known_fields = {
-            'role', 'goal', 'instructions', 'backstory', 'tools', 'toolsets', 'tasks', 'llm',
-            'function_calling_llm', 'allow_delegation', 'max_iter', 'max_rpm',
-            'max_execution_time', 'verbose', 'cache', 'system_template',
-            'prompt_template', 'response_template', 'tool_timeout', 'tool_retry_policy',
-            'planning_tools', 'planning', 'autonomy', 'guardrails', 'streaming', 'stream',
-            'approval', 'skills', 'cli_backend', 'runtime', 'reflection', 'handoff', 'web', 'web_fetch'
-        }
-
-        for section_name in ('agents', 'roles'):
-            section = config.get(section_name, {})
-            if not isinstance(section, dict):
-                continue
-
-            entity_name = 'agent' if section_name == 'agents' else 'role'
-            for name, section_config in section.items():
-                if not isinstance(section_config, dict):
-                    continue
-
-                for field_name in section_config:
-                    if field_name in known_fields:
-                        continue
-
-                    close_matches = difflib.get_close_matches(
-                        field_name,
-                        known_fields,
-                        n=1,
-                        cutoff=0.6
-                    )
-                    suggestion = f" Did you mean '{close_matches[0]}'?" if close_matches else ""
-                    self.logger.warning(
-                        f"Unknown field '{field_name}' in {entity_name} '{name}'.{suggestion}"
-                    )
+        # Use the new comprehensive validator
+        from .config.validator import ConfigValidator
+        
+        # Use existing tool resolver if available
+        validator = ConfigValidator(tool_resolver=self.tool_resolver)
+        
+        # Check for strict mode from environment or config
+        import os
+        strict_mode = os.getenv('PRAISONAI_VALIDATE_STRICT', 'false').lower() == 'true'
+        
+        # Validate configuration
+        result = validator.validate_config(config, strict=strict_mode)
+        
+        # Log warnings
+        for warning in result.warnings:
+            self.logger.warning(warning)
+        
+        # If there are errors, fail fast with aggregated error message
+        if not result.valid:
+            error_msg = f"Configuration validation failed with {len(result.errors)} error(s):\n"
+            for i, error in enumerate(result.errors, 1):
+                error_msg += f"  {i}. {error}\n"
+            
+            # Include warnings if any
+            if result.warnings:
+                error_msg += f"\nAdditionally, there are {len(result.warnings)} warning(s):\n"
+                for i, warning in enumerate(result.warnings, 1):
+                    error_msg += f"  {i}. {warning}\n"
+            
+            self.logger.error(error_msg)
+            raise ValueError(error_msg)
 
 
 

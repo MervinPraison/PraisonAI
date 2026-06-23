@@ -15,47 +15,8 @@ import uuid as uuid_module
 
 logger = logging.getLogger(__name__)
 
-# Lazy import flags
-_CHROMA_AVAILABLE = None
-_PINECONE_AVAILABLE = None
-_QDRANT_AVAILABLE = None
-_WEAVIATE_AVAILABLE = None
-
-
-def _check_chroma():
-    """Check if chromadb is available."""
-    global _CHROMA_AVAILABLE
-    if _CHROMA_AVAILABLE is None:
-        import importlib.util
-        _CHROMA_AVAILABLE = importlib.util.find_spec("chromadb") is not None
-    return _CHROMA_AVAILABLE
-
-
-def _check_pinecone():
-    """Check if pinecone is available."""
-    global _PINECONE_AVAILABLE
-    if _PINECONE_AVAILABLE is None:
-        import importlib.util
-        _PINECONE_AVAILABLE = importlib.util.find_spec("pinecone") is not None
-    return _PINECONE_AVAILABLE
-
-
-def _check_qdrant():
-    """Check if qdrant_client is available."""
-    global _QDRANT_AVAILABLE
-    if _QDRANT_AVAILABLE is None:
-        import importlib.util
-        _QDRANT_AVAILABLE = importlib.util.find_spec("qdrant_client") is not None
-    return _QDRANT_AVAILABLE
-
-
-def _check_weaviate():
-    """Check if weaviate is available."""
-    global _WEAVIATE_AVAILABLE
-    if _WEAVIATE_AVAILABLE is None:
-        import importlib.util
-        _WEAVIATE_AVAILABLE = importlib.util.find_spec("weaviate") is not None
-    return _WEAVIATE_AVAILABLE
+# Import centralized availability checking
+from .._framework_availability import is_available
 
 
 class ChromaVectorStore:
@@ -69,7 +30,7 @@ class ChromaVectorStore:
         namespace: Optional[str] = None,
         persist_directory: Optional[str] = None
     ):
-        if not _check_chroma():
+        if not is_available("chromadb"):
             raise ImportError(
                 "chromadb is required for ChromaVectorStore. "
                 "Install with: pip install chromadb"
@@ -82,8 +43,8 @@ class ChromaVectorStore:
         self.namespace = namespace or "default"
         self.persist_directory = persist_directory or self.config.get("path", ".praison/chroma")
         
-        # Disable telemetry
-        os.environ['ANONYMIZED_TELEMETRY'] = 'False'
+        # REMOVED: os.environ['ANONYMIZED_TELEMETRY'] = 'False'
+        # Per-instance Settings(anonymized_telemetry=False) already covers this safely.
         
         # Create client
         self._client = chromadb.PersistentClient(
@@ -252,7 +213,7 @@ class PineconeVectorStore:
         api_key: Optional[str] = None,
         index_name: Optional[str] = None
     ):
-        if not _check_pinecone():
+        if not is_available("pinecone"):
             raise ImportError(
                 "pinecone is required for PineconeVectorStore. "
                 "Install with: pip install pinecone"
@@ -395,11 +356,11 @@ def register_default_vector_stores():
     registry = get_vector_store_registry()
     
     # Register ChromaDB
-    if _check_chroma():
+    if is_available("chromadb"):
         registry.register("chroma", ChromaVectorStore)
     
     # Register Pinecone
-    if _check_pinecone():
+    if is_available("pinecone"):
         registry.register("pinecone", PineconeVectorStore)
     
     logger.debug("Registered default vector stores")

@@ -34,6 +34,7 @@ class InteractiveCLIApprovalBackend:
         project_dir: Optional[str] = None,
         permission_mode: PermissionMode = PermissionMode.DEFAULT,
         non_interactive: bool = False,
+        permissions_config: Optional[Dict[str, Any]] = None,
     ):
         """
         Initialize the interactive CLI approval backend.
@@ -42,6 +43,7 @@ class InteractiveCLIApprovalBackend:
             project_dir: Project directory for scoped permissions
             permission_mode: Permission mode (default, accept_edits, dont_ask, bypass, plan)
             non_interactive: Whether to auto-approve/deny without prompting
+            permissions_config: Declarative permission rules from YAML/CLI/Python
         """
         self.project_dir = project_dir or os.getcwd()
         self.permission_mode = permission_mode
@@ -50,6 +52,22 @@ class InteractiveCLIApprovalBackend:
         # Initialize permission manager with project-scoped storage
         permissions_dir = os.path.join(self.project_dir, ".praisonai", "permissions")
         self.permission_manager = PermissionManager(storage_dir=permissions_dir)
+        
+        # Load declarative permissions if provided
+        if permissions_config:
+            self.permission_manager.load_rules_from_config(permissions_config, priority_base=75)
+    
+    def _build_target_string(self, request: ApprovalRequest) -> str:
+        """Build target string for permission check."""
+        if "command" in request.arguments:
+            return f"{request.tool_name}:{request.arguments['command']}"
+        elif request.arguments:
+            # Include first arg value for more specific matching
+            first_arg = next(iter(request.arguments.values()), "")
+            if isinstance(first_arg, str) and len(first_arg) < 100:
+                return f"{request.tool_name}:{first_arg}"
+        # Use wildcard for consistency with permission patterns
+        return f"{request.tool_name}:*"
     
     def _format_tool_call(self, request: ApprovalRequest) -> str:
         """Format a tool call for display."""
@@ -77,7 +95,8 @@ class InteractiveCLIApprovalBackend:
             Tuple of (approved, persist_as_always)
         """
         if self.non_interactive:
-            # In non-interactive mode, default to deny
+            # In non-interactive mode, we're only here if the check returned ASK
+            # (ALLOW/DENY are handled in request_approval), so default to deny
             return (False, False)
         
         # Interactive prompt
@@ -195,18 +214,8 @@ class InteractiveCLIApprovalBackend:
         if mode_decision is not None:
             return mode_decision
         
-        # Build target string for permission check (always include colon for consistency)
-        if "command" in request.arguments:
-            target = f"{request.tool_name}:{request.arguments['command']}"
-        elif request.arguments:
-            # Include first arg value for more specific matching
-            first_arg = next(iter(request.arguments.values()), "") if request.arguments else ""
-            if isinstance(first_arg, str) and len(first_arg) < 100:
-                target = f"{request.tool_name}:{first_arg}"
-            else:
-                target = f"{request.tool_name}:"
-        else:
-            target = f"{request.tool_name}:"
+        # Build target string for permission check
+        target = self._build_target_string(request)
         
         # Check existing permissions
         result = self.permission_manager.check(target, agent_name=request.agent_name)

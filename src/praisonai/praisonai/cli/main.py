@@ -6,55 +6,9 @@ import warnings
 import os
 import json
 
-# Warning filter support - now opt-in only (no global mutation at import)
-import atexit
-
-_SUPPRESSED_PATTERNS = (
-    "Pydantic serializer warnings",
-    "PydanticSerializationUnexpectedValue",
-    "Expected ",  # Narrowed from just "Expected" to avoid false positives
-    "StreamingChoices",
-    "serialized value may not be as expected",
-    "duckduckgo_search",
-)
-
-_installed = False
-_original_showwarning = None
-_original_filters = None
-
-def install_warning_filters() -> None:
-    """Install PraisonAI's noise filters. Idempotent. CLI-only."""
-    global _installed, _original_showwarning, _original_filters
-    if _installed:
-        return
-    _original_showwarning = warnings.showwarning
-    _original_filters = list(warnings.filters)
-
-    # Install filterwarnings for common patterns
-    for pattern in _SUPPRESSED_PATTERNS:
-        warnings.filterwarnings("ignore", message=f".*{pattern}.*")
-    warnings.filterwarnings("ignore", category=UserWarning, module="pydantic.*")
-
-    def _filtered_showwarning(message, category, filename, lineno, file=None, line=None):
-        msg_str = str(message)
-        if any(pattern in msg_str for pattern in _SUPPRESSED_PATTERNS):
-            return
-        if category is UserWarning and "pydantic" in filename.lower():
-            return
-        _original_showwarning(message, category, filename, lineno, file, line)
-
-    warnings.showwarning = _filtered_showwarning
-    atexit.register(_uninstall_warning_filters)
-    _installed = True
-
-def _uninstall_warning_filters() -> None:
-    """Restore original warnings behavior on exit."""
-    global _installed, _original_filters, _original_showwarning
-    if _installed and _original_showwarning is not None:
-        warnings.showwarning = _original_showwarning
-        if _original_filters is not None:
-            warnings.filters[:] = _original_filters
-        _installed = False
+# Re-export warning filter functions from the lightweight module
+# This maintains backward compatibility for any external importers
+from ._warnings import install_warning_filters, _uninstall_warning_filters, _SUPPRESSED_PATTERNS
 
 # Suppress crewai RuntimeWarning about module loading order (only in non-debug mode)
 # This warning is harmless and occurs when running as `python -m praisonai.cli.main`
@@ -1545,7 +1499,8 @@ class PraisonAI:
             elif args.command == 'profile':
                 # Profile command - delegate to Typer CLI for new profiler
                 # This routes to commands/profile.py which has query, imports, startup subcommands
-                from .app import app as typer_app
+                from .app import app as typer_app, register_commands
+                register_commands()
                 import sys as _sys
                 _sys.argv = ['praisonai', 'profile'] + unknown_args
                 typer_app()
@@ -4538,15 +4493,12 @@ Do NOT add any explanations or formatting."""
                     getattr(self.args, 'resume_session', None) or getattr(self.args, 'auto_save', None)
                 ):
                     from .state.project_sessions import build_cli_memory_config
-                    project_session_id = (
-                        getattr(self.args, 'resume_session', None)
-                        or getattr(self.args, 'auto_save', None)
-                    )
                     agent_config["memory"] = build_cli_memory_config(
                         getattr(self.args, 'resume_session', None),
                         getattr(self.args, 'auto_save', None),
                     )
-                    print(f"[bold cyan]Project session enabled - session '{project_session_id}'[/bold cyan]")
+                    session_label = agent_config['memory'].auto_save or agent_config['memory'].session_id
+                    print(f"[bold cyan]Project session enabled - session '{session_label}'[/bold cyan]")
                 elif getattr(self.args, 'auto_save', None):
                     from praisonaiagents import MemoryConfig
                     agent_config["memory"] = MemoryConfig(auto_save=self.args.auto_save)
@@ -4557,6 +4509,23 @@ Do NOT add any explanations or formatting."""
                         agent_config["memory"] = True  # History requires memory
                     # Note: history_in_context param removed - history loading now via context= param
                     print(f"[bold cyan]History enabled - loading context from last {self.args.history} session(s)[/bold cyan]")
+
+                # CLI session continuity from `praison run --continue/--session`
+                # Only apply for resume sessions, not plain --auto-save
+                _resume_id = getattr(self.args, 'resume_session', None)
+                if _resume_id:
+                    _auto_save_id = getattr(self.args, 'auto_save', None)
+                    from praisonai.cli.utils.project import build_cli_memory_config
+                    _session_cfg = build_cli_memory_config(
+                        session_id=_resume_id,
+                        auto_save=_auto_save_id,
+                    )
+                    if _session_cfg:
+                        agent_config["memory"] = _session_cfg
+                        print(
+                            f"[bold cyan]Session continuity enabled - "
+                            f"session '{_session_cfg.session_id}'[/bold cyan]"
+                        )
                 
                 # Claude Memory Tool (Anthropic only)
                 if getattr(self.args, 'claude_memory', False):
@@ -4831,11 +4800,12 @@ Do NOT add any explanations or formatting."""
             
             agent = PraisonAgent(**agent_config)
 
-            if getattr(self.args, 'cli_project_sessions', False):
+            if hasattr(self, 'args') and getattr(self.args, 'cli_project_sessions', False):
                 session_id = getattr(self.args, 'resume_session', None) or getattr(self.args, 'auto_save', None)
+                auto_save = getattr(self.args, 'auto_save', None)
                 if session_id:
                     from .state.project_sessions import apply_cli_session_continuity
-                    apply_cli_session_continuity(agent, session_id)
+                    apply_cli_session_continuity(agent, session_id, auto_save=auto_save)
             
             # AutoRag - Automatic RAG retrieval decision
             if hasattr(self, 'args') and getattr(self.args, 'auto_rag', False):

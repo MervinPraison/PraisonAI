@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "praisonaiagents"
-version = "1.6.64"
+version = "1.6.71"
 description = "Praison AI agents for completing complex tasks with Self Reflection Agents"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -139,3 +139,6 @@ all = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["praisonaiagents*"]
+
+[project.entry-points."praisonai.runtimes"]
+praisonai = "praisonaiagents.runtime.builtin:PraisonAIRuntime"

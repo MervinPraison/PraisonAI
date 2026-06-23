@@ -135,6 +135,60 @@ Your Goal: {self.goal}"""
                 system_prompt += f"\n\n## Available Skills\n{skills_prompt}"
                 system_prompt += "\n\nWhen a skill is relevant to the task, read its SKILL.md file to get detailed instructions. If the skill has scripts in its scripts/ directory, you can execute them using the execute_code or run_script tool."
         
+        # Cache the base system prompt BEFORE adding session context
+        # Session context is per-turn and should not be cached
+        if cache_key:
+            self._cache_put(self._system_prompt_cache, cache_key, system_prompt)
+        
+        # Add session context (platform awareness) if available - AFTER caching
+        try:
+            from ..session.context import get_session_context
+            session_ctx = get_session_context()
+            
+            # Format session context into prompt if origin or targets are present
+            if session_ctx.origin or session_ctx.reachable_targets:
+                context_parts = []
+                
+                # Add origin information
+                if session_ctx.origin:
+                    origin = session_ctx.origin
+                    origin_str = f"You are replying on {origin.platform}"
+                    if origin.chat_type and origin.chat_type != "unknown":
+                        origin_str += f" ({origin.chat_type}"
+                        if origin.display_name:
+                            origin_str += f' "{origin.display_name}"'
+                        origin_str += ")"
+                    if origin.thread_id:
+                        origin_str += f" in thread {origin.thread_id}"
+                    context_parts.append(origin_str + ".")
+                
+                # Add reachable targets
+                if session_ctx.reachable_targets:
+                    target_descriptions = []
+                    for target in session_ctx.reachable_targets:
+                        desc = f"{target.name}"
+                        if target.kind == "home":
+                            desc += f" ({target.platform}, home channel)"
+                        elif target.kind == "alias":
+                            desc += f" ({target.platform}:{target.channel_id})"
+                        target_descriptions.append(desc)
+                    
+                    if target_descriptions:
+                        context_parts.append(
+                            f"Reachable delivery targets: {', '.join(target_descriptions)}."
+                        )
+                
+                if context_parts:
+                    system_prompt += "\n\n## Session Context\n" + "\n".join(context_parts)
+        except ImportError:
+            # Session context module not available, continue without it
+            pass
+        except Exception as e:
+            # Log unexpected errors but continue
+            import logging
+            logging.debug(f"Session context injection failed: {e}", exc_info=True)
+            pass
+        
         # Add tool usage instructions if tools are available
         # Use provided tools or fall back to self.tools
         tools_to_use = tools if tools is not None else self.tools
@@ -174,10 +228,7 @@ Your Goal: {self.goal}"""
         except ImportError:
             pass  # Trust module not available, skip security instructions
         
-        # Cache the generated system prompt (only if cache_key is set, i.e., memory not enabled)
-        # Use LRU eviction to prevent unbounded growth
-        if cache_key:
-            self._cache_put(self._system_prompt_cache, cache_key, system_prompt)
+        # Note: Caching is done BEFORE session context injection to avoid cross-user leakage
         return system_prompt
 
     def _build_response_format(self, schema_model):
@@ -909,7 +960,22 @@ Your Goal: {self.goal}"""
         
         return CompactionRoute.TRUNCATE_TOOLS, truncated_msgs
 
-    def _chat_completion(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, _retry_depth=0):
+    def _get_next_fallback_model(self, fallback_index):
+        """Get the next fallback model from the chain, if available.
+        
+        Args:
+            fallback_index: Current index in the fallback chain (0-based)
+            
+        Returns:
+            str or None: Next model name if available, None otherwise
+        """
+        if not hasattr(self, 'fallback_models') or not self.fallback_models:
+            return None
+        if fallback_index >= len(self.fallback_models):
+            return None
+        return self.fallback_models[fallback_index]
+
+    def _chat_completion(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, _retry_depth=0, _fallback_index=0):
         start_time = time.time()
 
         # --- Proactive Context Budget Management (default-on) ---
@@ -973,7 +1039,7 @@ Your Goal: {self.goal}"""
             try:
                 # First attempt: try with streaming enabled for better user experience
                 stream_callback = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
-                final_response = self._execute_unified_chat_completion(
+                final_response = self._chat_completion_with_retry(
                     messages=messages,
                     temperature=temperature,
                     tools=formatted_tools,
@@ -994,7 +1060,11 @@ Your Goal: {self.goal}"""
                     stream = False  # Set for the main execution below
                 else:
                     raise  # Re-raise if it's a different ValueError
-            except Exception:
+            except Exception as e:
+                from ..errors import LLMError
+                # Don't retry if it's an LLMError that has exhausted retries
+                if isinstance(e, LLMError):
+                    raise  # Re-raise LLMErrors immediately to avoid double retry
                 # For any other exception, fall back to non-streaming
                 logging.debug(f"{self.name}: Streaming attempt failed, falling back to non-streaming")
                 stream = False  # Set for the main execution below
@@ -1005,7 +1075,7 @@ Your Goal: {self.goal}"""
             # UNIFIED: Single protocol-driven dispatch path (fixes DRY violation)
             # All LLM providers now go through unified dispatcher for consistency and maintainability
             stream_callback = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
-            final_response = self._execute_unified_chat_completion(
+            final_response = self._chat_completion_with_retry(
                 messages=messages,
                 temperature=temperature,
                 tools=formatted_tools,
@@ -1152,7 +1222,8 @@ Your Goal: {self.goal}"""
                         return self._chat_completion(
                             truncated_messages, temperature, tools, stream, 
                             reasoning_steps, task_name, task_description, task_id, response_format, 
-                            _retry_depth=_retry_depth + 1
+                            _retry_depth=_retry_depth + 1,
+                            _fallback_index=_fallback_index
                         )
                 except Exception as compression_error:
                     logging.error(f"[{self.name}] Context compression failed: {compression_error}")
@@ -1163,9 +1234,34 @@ Your Goal: {self.goal}"""
                 # Don't retry without actual credential rotation
                 
             elif classification.should_fallback_model:
-                # TODO: Implement model fallback when available
-                logging.warning(f"[{self.name}] {classification.user_message} (model fallback not yet implemented)")
-                # Don't retry without actual model fallback
+                # Try next model in the fallback chain
+                next_model = self._get_next_fallback_model(_fallback_index)
+                if next_model:
+                    current_model = self.llm if isinstance(self.llm, str) else str(self.llm)
+                    logging.info(f"[{self.name}] {current_model} unavailable — falling back to {next_model}")
+                    
+                    # Apply backoff if suggested
+                    if classification.backoff_seconds and classification.backoff_seconds > 0:
+                        time.sleep(classification.backoff_seconds)
+                    
+                    # Temporarily override the model and clear dispatcher cache for this call
+                    original_llm = self.llm
+                    original_dispatcher = getattr(self, '_unified_dispatcher', None)
+                    try:
+                        self.llm = next_model
+                        self._unified_dispatcher = None  # Force recreation with new model
+                        return self._chat_completion(
+                            messages, temperature, tools, stream,
+                            reasoning_steps, task_name, task_description, task_id, response_format,
+                            _retry_depth=_retry_depth + 1,
+                            _fallback_index=_fallback_index + 1
+                        )
+                    finally:
+                        self.llm = original_llm
+                        self._unified_dispatcher = original_dispatcher  # Restore original dispatcher
+                else:
+                    logging.warning(f"[{self.name}] {classification.user_message} (no more fallback models available)")
+                    # Continue to error handling without retry
                 
             elif classification.is_retryable and classification.backoff_seconds > 0:
                 if _retry_depth < 2:  # Limit retry attempts
@@ -1174,7 +1270,8 @@ Your Goal: {self.goal}"""
                     return self._chat_completion(
                         messages, temperature, tools, stream, 
                         reasoning_steps, task_name, task_description, task_id, response_format, 
-                        _retry_depth=_retry_depth + 1
+                        _retry_depth=_retry_depth + 1,
+                        _fallback_index=_fallback_index
                     )
             
             # Include remediation hints for unimplemented recovery actions
@@ -1182,7 +1279,10 @@ Your Goal: {self.goal}"""
             if classification.should_rotate_credential:
                 user_message += " Credential rotation is not yet implemented."
             if classification.should_fallback_model:
-                user_message += " Model fallback is not yet implemented."
+                if not self.fallback_models:
+                    user_message += " No fallback models configured."
+                elif _fallback_index >= len(self.fallback_models):
+                    user_message += f" All {len(self.fallback_models)} fallback models exhausted."
             
             # Create LLMError with classification context
             error = LLMError(
@@ -1220,7 +1320,8 @@ Your Goal: {self.goal}"""
         response_format=None,
         stream_callback=None,
         emit_events=True,
-        _retry_depth=0
+        _retry_depth=0,
+        _fallback_index=0
     ):
         """
         Handle LLM errors in async context using structured classification.
@@ -1285,7 +1386,7 @@ Your Goal: {self.goal}"""
                         return await self._handle_async_llm_error(
                             retry_error, truncated_messages, temperature, tools, stream,
                             reasoning_steps, task_name, task_description, task_id, response_format,
-                            stream_callback, emit_events, _retry_depth + 1
+                            stream_callback, emit_events, _retry_depth + 1, _fallback_index
                         )
             except Exception as compression_error:
                 logging.error(f"[{self.name}] Context compression failed: {compression_error}")
@@ -1296,9 +1397,39 @@ Your Goal: {self.goal}"""
             # Don't retry without actual credential rotation
             
         elif classification.should_fallback_model:
-            # TODO: Implement model fallback when available
-            logging.warning(f"[{self.name}] {classification.user_message} (model fallback not yet implemented)")
-            # Don't retry without actual model fallback
+            # Try next model in the fallback chain
+            next_model = self._get_next_fallback_model(_fallback_index)
+            if next_model:
+                current_model = self.llm if isinstance(self.llm, str) else str(self.llm)
+                logging.info(f"[{self.name}] {current_model} unavailable — falling back to {next_model}")
+                
+                # Apply backoff if suggested
+                if classification.backoff_seconds and classification.backoff_seconds > 0:
+                    await asyncio.sleep(classification.backoff_seconds)
+                
+                # Temporarily override the model and clear dispatcher cache for this call
+                original_llm = self.llm
+                original_dispatcher = getattr(self, '_unified_dispatcher', None)
+                try:
+                    self.llm = next_model
+                    self._unified_dispatcher = None  # Force recreation with new model
+                    return await self._execute_unified_achat_completion(
+                        messages, temperature, tools, stream,
+                        reasoning_steps, task_name, task_description, task_id, response_format,
+                        stream_callback, emit_events
+                    )
+                except Exception as retry_error:
+                    return await self._handle_async_llm_error(
+                        retry_error, messages, temperature, tools, stream,
+                        reasoning_steps, task_name, task_description, task_id, response_format,
+                        stream_callback, emit_events, _retry_depth + 1, _fallback_index + 1
+                    )
+                finally:
+                    self.llm = original_llm
+                    self._unified_dispatcher = original_dispatcher  # Restore original dispatcher
+            else:
+                logging.warning(f"[{self.name}] {classification.user_message} (no more fallback models available)")
+                # Continue to error handling without retry
             
         elif classification.is_retryable and classification.backoff_seconds > 0:
             if _retry_depth < 2:  # Limit retry attempts
@@ -1315,7 +1446,7 @@ Your Goal: {self.goal}"""
                     return await self._handle_async_llm_error(
                         retry_error, messages, temperature, tools, stream,
                         reasoning_steps, task_name, task_description, task_id, response_format,
-                        stream_callback, emit_events, _retry_depth + 1
+                        stream_callback, emit_events, _retry_depth + 1, _fallback_index
                     )
         
         # Include remediation hints for unimplemented recovery actions
@@ -1323,7 +1454,10 @@ Your Goal: {self.goal}"""
         if classification.should_rotate_credential:
             user_message += " Credential rotation is not yet implemented."
         if classification.should_fallback_model:
-            user_message += " Model fallback is not yet implemented."
+            if not self.fallback_models:
+                user_message += " No fallback models configured."
+            elif _fallback_index >= len(self.fallback_models):
+                user_message += f" All {len(self.fallback_models)} fallback models exhausted."
         
         # Create LLMError with classification context
         error = LLMError(
@@ -1876,7 +2010,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             logging.warning(f"Context management error (continuing without): {e}")
             return messages, None
 
-    def _truncate_tool_output(self, tool_name: str, output: str) -> str:
+    def _truncate_tool_output(self, tool_name: str, output: str, tool_call_id: str | None = None) -> str:
         """
         Truncate tool output according to configured budget.
         
@@ -1885,6 +2019,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         Args:
             tool_name: Name of the tool
             output: Raw tool output
+            tool_call_id: Optional ID for the tool call
             
         Returns:
             Truncated output if over budget, otherwise original
@@ -1893,7 +2028,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             return output
         
         try:
-            return self.context_manager.truncate_tool_output(tool_name, output)
+            run_id = getattr(self, '_run_id', None)
+            return self.context_manager.truncate_tool_output(tool_name, output, tool_call_id, run_id)
         except Exception as e:
             logging.warning(f"Tool output truncation error: {e}")
             return output
@@ -2536,8 +2672,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # If not satisfactory and not at max reflections, continue with regeneration
                             logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
                             messages.append({"role": "user", "content": "Now regenerate your response using the reflection you made"})
-                            # For custom LLMs during reflection, always use non-streaming to ensure complete responses
-                            use_stream = self.stream if not self._using_custom_llm else False
+                            # For reflection, always use non-streaming to ensure compatibility with sync adapters
+                            # and to avoid streaming complexity during regeneration process
+                            use_stream = False
                             response = self._chat_completion(messages, temperature=temperature, tools=None, stream=use_stream, task_name=task_name, task_description=task_description, task_id=task_id)
                             content = response.choices[0].message.content
                             response_text = content.strip() if content else ""
@@ -2870,7 +3007,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             response_format = self._build_response_format(schema_model)
                         
                         # Use composition instead of runtime class mutation for safety
-                        response = await self._execute_unified_achat_completion(
+                        response = await self._achat_completion_with_retry(
                             messages=messages,
                             temperature=temperature,
                             tools=formatted_tools,
@@ -3042,7 +3179,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         {"role": "user", "content": "Now regenerate your response using the reflection you made"}
                                     ]
                                     
-                                    new_response = await self._execute_unified_achat_completion(
+                                    new_response = await self._achat_completion_with_retry(
                                         messages=regenerate_messages,
                                         temperature=temperature,
                                         tools=formatted_tools,
@@ -3925,3 +4062,156 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 raise
             logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
             return False
+
+    def _chat_completion_with_retry(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
+        """
+        Wrapper for _execute_unified_chat_completion that adds jittered exponential backoff retry logic.
+        
+        This method wraps the unified chat completion call and adds retry capability for 
+        transient failures like rate limits, network errors, and service outages.
+        """
+        retry_config = getattr(self, '_retry_config', None)
+        if not retry_config:
+            return self._execute_unified_chat_completion(messages, temperature, tools, stream, reasoning_steps, 
+                                       task_name, task_description, task_id, response_format,
+                                       stream_callback=stream_callback, emit_events=emit_events)
+        
+        from .retry_utils import jittered_backoff
+        from ..hooks import HookEvent, OnRetryInput
+        import time
+        
+        max_attempts = retry_config.max_retries + 1
+        
+        for attempt in range(max_attempts):
+            try:
+                # Call the underlying unified chat completion directly to avoid infinite recursion
+                return self._execute_unified_chat_completion(messages, temperature, tools, stream, reasoning_steps, 
+                                           task_name, task_description, task_id, response_format,
+                                           stream_callback=stream_callback, emit_events=emit_events)
+            
+            except Exception as e:
+                from ..errors import LLMError
+                
+                # Only retry LLMErrors that are marked as retryable
+                if not isinstance(e, LLMError) or not e.is_retryable:
+                    raise  # Re-raise non-retryable errors immediately
+                
+                # If this is the last attempt, re-raise the error
+                if attempt >= max_attempts - 1:
+                    raise
+                
+                # Calculate delay for this retry attempt
+                delay = jittered_backoff(
+                    attempt,
+                    base_delay=retry_config.base_delay,
+                    max_delay=retry_config.max_delay,
+                    jitter_ratio=retry_config.jitter_ratio,
+                )
+                
+                # Fire OnRetry hook with delay information
+                retry_input = OnRetryInput(
+                    session_id=getattr(self, '_session_id', 'default'),
+                    cwd=os.getcwd(),
+                    event_name=HookEvent.ON_RETRY,
+                    timestamp=str(time.time()),
+                    agent_name=self.name,
+                    retry_count=attempt + 1,
+                    max_retries=retry_config.max_retries,
+                    error_message=str(e),
+                    operation="llm_request",
+                    delay_seconds=delay,
+                    attempt=attempt
+                )
+                self._hook_runner.execute_sync(HookEvent.ON_RETRY, retry_input)
+                
+                # Log retry attempt (buffered to avoid spam during transient failures)
+                logger.debug(f"[{self.name}] Retry {attempt + 1}/{max_attempts} after {delay:.1f}s: {str(e)[:100]}")
+                
+                # Sleep with interrupt awareness - make interruption terminal
+                interrupt_fn = getattr(self, '_is_interrupted', lambda: False)
+                sleep_start = time.time()
+                while time.time() - sleep_start < delay:
+                    if interrupt_fn():
+                        # Interruption is terminal - stop retrying
+                        raise RuntimeError("Agent interrupted during retry backoff")
+                    time.sleep(min(0.2, delay - (time.time() - sleep_start)))
+        
+        # This should never be reached, but just in case
+        raise RuntimeError("Retry loop completed without returning or raising an exception")
+
+    async def _achat_completion_with_retry(self, messages, temperature=1.0, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
+        """
+        Async wrapper for _execute_unified_achat_completion that adds jittered exponential backoff retry logic.
+        
+        This method wraps the async chat completion call and adds retry capability for 
+        transient failures like rate limits, network errors, and service outages.
+        """
+        retry_config = getattr(self, '_retry_config', None)
+        if not retry_config:
+            return await self._execute_unified_achat_completion(
+                messages, temperature, tools, stream, reasoning_steps, 
+                task_name, task_description, task_id, response_format,
+                stream_callback=stream_callback, emit_events=emit_events
+            )
+        
+        from .retry_utils import jittered_backoff, interruptible_sleep
+        from ..hooks import HookEvent, OnRetryInput
+        import time
+        import asyncio
+        
+        max_attempts = retry_config.max_retries + 1
+        
+        for attempt in range(max_attempts):
+            try:
+                # Call the underlying unified chat completion directly to avoid infinite recursion
+                return await self._execute_unified_achat_completion(
+                    messages, temperature, tools, stream, reasoning_steps,
+                    task_name, task_description, task_id, response_format,
+                    stream_callback=stream_callback, emit_events=emit_events
+                )
+            
+            except Exception as e:
+                from ..errors import LLMError
+                
+                # Only retry LLMErrors that are marked as retryable
+                if not isinstance(e, LLMError) or not e.is_retryable:
+                    raise  # Re-raise non-retryable errors immediately
+                
+                # If this is the last attempt, re-raise the error
+                if attempt >= max_attempts - 1:
+                    raise
+                
+                # Calculate delay for this retry attempt
+                delay = jittered_backoff(
+                    attempt,
+                    base_delay=retry_config.base_delay,
+                    max_delay=retry_config.max_delay,
+                    jitter_ratio=retry_config.jitter_ratio,
+                )
+                
+                # Fire OnRetry hook with delay information
+                retry_input = OnRetryInput(
+                    session_id=getattr(self, '_session_id', 'default'),
+                    cwd=os.getcwd(),
+                    event_name=HookEvent.ON_RETRY,
+                    timestamp=str(time.time()),
+                    agent_name=self.name,
+                    retry_count=attempt + 1,
+                    max_retries=retry_config.max_retries,
+                    error_message=str(e),
+                    operation="async_llm_request",
+                    delay_seconds=delay,
+                    attempt=attempt
+                )
+                await self._hook_runner.execute_async(HookEvent.ON_RETRY, retry_input)
+                
+                # Log retry attempt
+                logger.debug(f"[{self.name}] Async retry {attempt + 1}/{max_attempts} after {delay:.1f}s: {str(e)[:100]}")
+                
+                # Async sleep with interrupt awareness using the helper
+                interrupt_fn = getattr(self, '_is_interrupted', lambda: False)
+                if not await interruptible_sleep(delay, interrupt_fn=interrupt_fn):
+                    raise RuntimeError("Agent interrupted during retry backoff")
+        
+        # This should never be reached, but just in case
+        raise RuntimeError("Async retry loop completed without returning or raising an exception")
