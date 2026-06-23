@@ -4,12 +4,19 @@
 # Usage: curl -fsSL https://praison.ai/install.sh | bash
 #
 # Environment variables:
-#   PRAISONAI_VERSION     - Specific version to install (default: latest)
-#   PRAISONAI_EXTRAS      - Comma-separated extras (e.g., "ui,chat,code")
-#   PRAISONAI_NO_PROMPT   - Skip interactive prompts (1 to enable)
-#   PRAISONAI_DRY_RUN     - Print what would happen without making changes
-#   PRAISONAI_PYTHON      - Path to Python executable
-#   PRAISONAI_SKIP_VENV   - Skip virtual environment creation (1 to enable)
+#   PRAISONAI_VERSION       - Specific version to install (default: latest)
+#   PRAISONAI_EXTRAS        - Comma-separated extras (e.g., "ui,chat,code")
+#   PRAISONAI_NO_PROMPT     - Skip interactive prompts (1 to enable)
+#   PRAISONAI_DRY_RUN       - Print what would happen without making changes
+#   PRAISONAI_PYTHON        - Path to Python executable
+#   PRAISONAI_SKIP_VENV     - Skip virtual environment creation (1 to enable)
+#   PRAISONAI_INSTALL_DIR   - Base dir for the fallback venv (default: ~/.praisonai)
+#   PRAISONAI_BACKEND       - Force isolation backend: uv | pipx | venv (default: auto)
+#   PRAISONAI_NO_MODIFY_PATH - Do not append a PATH block to the shell rc (1 to enable)
+#
+# Isolation backend preference order (auto): uv tool -> pipx -> venv fallback.
+# All paths keep the CLI isolated from the user's active/global Python env and
+# expose a `praisonai` shim on PATH via ~/.local/bin.
 
 set -euo pipefail
 
@@ -30,7 +37,15 @@ DRY_RUN="${PRAISONAI_DRY_RUN:-0}"
 PYTHON_CMD="${PRAISONAI_PYTHON:-}"
 SKIP_VENV="${PRAISONAI_SKIP_VENV:-0}"
 NO_ONBOARD="${PRAISONAI_NO_ONBOARD:-0}"
+INSTALL_DIR="${PRAISONAI_INSTALL_DIR:-$HOME/.praisonai}"
+BACKEND="${PRAISONAI_BACKEND:-auto}"
+NO_MODIFY_PATH="${PRAISONAI_NO_MODIFY_PATH:-0}"
+SHIM_DIR="$HOME/.local/bin"
 MIN_PYTHON_VERSION="3.10"
+
+# Set by the isolation backends so onboarding/verification can find the
+# isolated `praisonai` executable without relying on PATH being refreshed.
+PRAISONAI_BIN=""
 
 # Set to 1 inside maybe_offer_bot_onboarding() when the bot wizard
 # succeeds. The wizard already prints a complete "✅ Done" panel with
@@ -322,10 +337,120 @@ ensure_pip() {
     log_success "pip installed via get-pip.py"
 }
 
+# Build the pip/uv/pipx package spec (e.g. "praisonai[all]==1.2.3").
+build_package_spec() {
+    local pkg="praisonai"
+
+    if [[ -n "$EXTRAS" ]]; then
+        pkg="praisonai[$EXTRAS]"
+    else
+        # Default to the full experience for curl|bash installs.
+        pkg="praisonai[all]"
+    fi
+
+    if [[ "$VERSION" != "latest" ]]; then
+        pkg="${pkg}==${VERSION}"
+    fi
+
+    echo "$pkg"
+}
+
+# Decide which isolation backend to use. Honour PRAISONAI_BACKEND when set,
+# otherwise prefer `uv tool` -> `pipx` -> venv fallback.
+detect_backend() {
+    if [[ "$SKIP_VENV" == "1" ]]; then
+        echo "system"
+        return 0
+    fi
+
+    case "$BACKEND" in
+        uv|pipx|venv|system)
+            echo "$BACKEND"
+            return 0
+            ;;
+    esac
+
+    if command_exists uv; then
+        echo "uv"
+    elif command_exists pipx; then
+        echo "pipx"
+    else
+        echo "venv"
+    fi
+}
+
+# Install via `uv tool install` (fully isolated, fast). uv manages its own
+# bin dir and PATH; we still surface the resolved shim for verification.
+install_with_uv() {
+    local pkg="$1"
+
+    log_info "Installing PraisonAI with uv (isolated tool)..."
+
+    if [[ "$DRY_RUN" == "1" ]]; then
+        log_info "[DRY RUN] Would run: uv tool install --force $pkg"
+        return 0
+    fi
+
+    uv tool install --force "$pkg"
+    uv tool update-shell 2>/dev/null || true
+
+    local bin=""
+    bin="$(command -v praisonai 2>/dev/null || true)"
+    if [[ -z "$bin" && -x "$HOME/.local/bin/praisonai" ]]; then
+        bin="$HOME/.local/bin/praisonai"
+    fi
+    PRAISONAI_BIN="$bin"
+    log_success "PraisonAI installed via uv"
+}
+
+# Install via `pipx install` (isolated persistent venv managed by pipx).
+install_with_pipx() {
+    local pkg="$1"
+
+    log_info "Installing PraisonAI with pipx (isolated)..."
+
+    if [[ "$DRY_RUN" == "1" ]]; then
+        log_info "[DRY RUN] Would run: pipx install --force $pkg"
+        return 0
+    fi
+
+    pipx install --force "$pkg"
+    pipx ensurepath 2>/dev/null || true
+
+    local bin=""
+    bin="$(command -v praisonai 2>/dev/null || true)"
+    if [[ -z "$bin" && -x "$HOME/.local/bin/praisonai" ]]; then
+        bin="$HOME/.local/bin/praisonai"
+    fi
+    PRAISONAI_BIN="$bin"
+    log_success "PraisonAI installed via pipx"
+}
+
+# Create a non-destructive shim in ~/.local/bin pointing at an isolated
+# `praisonai` executable (used by the venv fallback). uv/pipx manage their
+# own shims, so this only runs for the venv backend.
+create_shim() {
+    local target="$1"
+
+    if [[ -z "$target" ]]; then
+        return 0
+    fi
+
+    if [[ "$DRY_RUN" == "1" ]]; then
+        log_info "[DRY RUN] Would link shim: $SHIM_DIR/praisonai -> $target"
+        return 0
+    fi
+
+    mkdir -p "$SHIM_DIR"
+    ln -sf "$target" "$SHIM_DIR/praisonai"
+    PRAISONAI_BIN="$SHIM_DIR/praisonai"
+    log_success "Linked praisonai shim into $SHIM_DIR"
+}
+
 # Create virtual environment
 create_venv() {
     local python_cmd="$1"
-    local venv_dir="${2:-$HOME/.praisonai/venv}"
+    local venv_dir="${2:-$INSTALL_DIR/venv}"
     
     if [[ "$SKIP_VENV" == "1" ]]; then
         log_info "Skipping virtual environment (PRAISONAI_SKIP_VENV=1)"
@@ -404,63 +529,183 @@ install_praisonai() {
     log_success "PraisonAI installed successfully!"
 }
 
-# Setup shell PATH
-setup_shell_path() {
-    local venv_dir="$1"
-    
-    if [[ "$SKIP_VENV" == "1" ]] || [[ -z "$venv_dir" ]]; then
-        return 0
-    fi
-    
-    log_info "Setting up shell PATH..."
-    
-    local bin_dir="$venv_dir/bin"
-    if [[ ! -d "$bin_dir" ]]; then
-        bin_dir="$venv_dir/Scripts"
-    fi
-    
-    local shell_rc=""
+# Detect the shell rc file to modify for PATH.
+detect_shell_rc() {
     case "$SHELL" in
         */zsh)
-            shell_rc="$HOME/.zshrc"
+            echo "$HOME/.zshrc"
             ;;
         */bash)
             if [[ -f "$HOME/.bash_profile" ]]; then
-                shell_rc="$HOME/.bash_profile"
+                echo "$HOME/.bash_profile"
             else
-                shell_rc="$HOME/.bashrc"
+                echo "$HOME/.bashrc"
             fi
             ;;
         */fish)
-            shell_rc="$HOME/.config/fish/config.fish"
+            echo "$HOME/.config/fish/config.fish"
             ;;
         *)
-            shell_rc="$HOME/.profile"
+            echo "$HOME/.profile"
             ;;
     esac
-    
+}
+
+# Ensure a directory is on PATH for the current session and, unless
+# --no-modify-path is set, appended non-destructively to the shell rc
+# inside a clearly-marked PraisonAI block.
+ensure_path_dir() {
+    local bin_dir="$1"
+
+    if [[ -z "$bin_dir" ]]; then
+        return 0
+    fi
+
+    # Export for current session regardless of rc modification.
+    export PATH="$bin_dir:$PATH"
+
+    if [[ "$NO_MODIFY_PATH" == "1" ]]; then
+        log_info "Skipping PATH modification (--no-modify-path). Add to PATH: $bin_dir"
+        return 0
+    fi
+
+    local shell_rc
+    shell_rc="$(detect_shell_rc)"
+
     local path_line="export PATH=\"$bin_dir:\$PATH\""
     if [[ "$SHELL" == */fish ]]; then
         path_line="set -gx PATH $bin_dir \$PATH"
     fi
-    
+
     if [[ "$DRY_RUN" == "1" ]]; then
         log_info "[DRY RUN] Would add to $shell_rc: $path_line"
         return 0
     fi
-    
-    # Check if already in rc file
+
     if grep -q "$bin_dir" "$shell_rc" 2>/dev/null; then
         log_step "PATH already configured in $shell_rc"
     else
-        echo "" >> "$shell_rc"
-        echo "# PraisonAI" >> "$shell_rc"
-        echo "$path_line" >> "$shell_rc"
+        mkdir -p "$(dirname "$shell_rc")"
+        {
+            echo ""
+            echo "# >>> PraisonAI PATH >>>"
+            echo "$path_line"
+            echo "# <<< PraisonAI PATH <<<"
+        } >> "$shell_rc"
         log_success "Added PraisonAI to PATH in $shell_rc"
     fi
-    
-    # Export for current session
-    export PATH="$bin_dir:$PATH"
+}
+
+# Setup shell PATH (venv backend). uv/pipx already place their shims under
+# ~/.local/bin, which we also ensure is on PATH for all backends in main().
+setup_shell_path() {
+    local venv_dir="$1"
+
+    if [[ "$SKIP_VENV" == "1" ]] || [[ -z "$venv_dir" ]]; then
+        return 0
+    fi
+
+    log_info "Setting up shell PATH..."
+
+    local bin_dir="$venv_dir/bin"
+    if [[ ! -d "$bin_dir" ]]; then
+        bin_dir="$venv_dir/Scripts"
+    fi
+
+    ensure_path_dir "$bin_dir"
+}
+
+# Resolve a usable `praisonai` invocation: prefer the backend-recorded bin,
+# then PATH, then the venv python module fallback.
+resolve_praisonai_cmd() {
+    local venv_dir="$1"
+
+    if [[ -n "$PRAISONAI_BIN" && -x "$PRAISONAI_BIN" ]]; then
+        echo "$PRAISONAI_BIN"
+        return 0
+    fi
+
+    if command_exists praisonai; then
+        command -v praisonai
+        return 0
+    fi
+
+    if [[ -n "$venv_dir" && -x "$venv_dir/bin/praisonai" ]]; then
+        echo "$venv_dir/bin/praisonai"
+        return 0
+    fi
+
+    return 1
+}
+
+# Offer to install shell completions using `praisonai completion <shell>`.
+maybe_install_completions() {
+    local venv_dir="$1"
+
+    if [[ "$NO_ONBOARD" == "1" || "$NO_PROMPT" == "1" || "$DRY_RUN" == "1" ]]; then
+        return 0
+    fi
+
+    local praisonai_cmd
+    if ! praisonai_cmd="$(resolve_praisonai_cmd "$venv_dir")"; then
+        return 0
+    fi
+
+    local shell_name="${SHELL##*/}"
+    case "$shell_name" in
+        bash|zsh|fish) ;;
+        *)
+            return 0
+            ;;
+    esac
+
+    local target=""
+    case "$shell_name" in
+        bash)
+            target="$HOME/.bashrc"
+            ;;
+        zsh)
+            target="$HOME/.zshrc"
+            ;;
+        fish)
+            target="$HOME/.config/fish/completions/praisonai.fish"
+            ;;
+    esac
+
+    if [ -e /dev/tty ] && [ -t 1 ]; then
+        echo ""
+        echo -ne "${CYAN}Install ${shell_name} shell completions for praisonai? [Y/n] ${NC}"
+        local yn=""
+        read -r yn < /dev/tty || yn=""
+        case "$yn" in
+            [nN]*)
+                log_info "Skipped — run 'praisonai completion ${shell_name}' anytime."
+                return 0
+                ;;
+        esac
+    else
+        # Non-interactive but prompts allowed: skip silently.
+        return 0
+    fi
+
+    if [[ "$shell_name" == "fish" ]]; then
+        mkdir -p "$(dirname "$target")"
+        if "$praisonai_cmd" completion fish > "$target" 2>/dev/null; then
+            log_success "Installed fish completions to $target"
+        else
+            log_warn "Could not install fish completions — run 'praisonai completion fish' manually."
+        fi
+    else
+        if grep -q "_praisonai_completion\|#compdef praisonai" "$target" 2>/dev/null; then
+            log_step "Completions already present in $target"
+            return 0
+        fi
+        if "$praisonai_cmd" completion "$shell_name" >> "$target" 2>/dev/null; then
+            log_success "Installed ${shell_name} completions to $target"
+        else
+            log_warn "Could not install completions — run 'praisonai completion ${shell_name}' manually."
+        fi
+    fi
 }
 
 # Verify installation
@@ -546,7 +791,10 @@ print_help() {
     echo "Options:"
     echo "  --version VERSION    Install specific version (default: latest)"
     echo "  --extras EXTRAS      Install with extras (e.g., ui,chat,code)"
-    echo "  --no-venv            Skip virtual environment creation"
+    echo "  --backend BACKEND    Force isolation backend: uv, pipx, or venv (default: auto)"
+    echo "  --install-dir DIR    Base dir for the venv fallback (default: ~/.praisonai)"
+    echo "  --no-modify-path     Do not append a PATH block to your shell rc"
+    echo "  --no-venv            Skip isolation; install into the active environment"
     echo "  --no-onboard         Skip interactive onboarding after install"
     echo "  --python PATH        Use specific Python executable"
     echo "  --dry-run            Print what would happen without making changes"
@@ -561,19 +809,27 @@ print_help() {
     echo "  PRAISONAI_DRY_RUN    Print what would happen (1 to enable)"
     echo "  PRAISONAI_PYTHON     Path to Python executable"
     echo "  PRAISONAI_SKIP_VENV  Skip virtual environment (1 to enable)"
+    echo "  PRAISONAI_INSTALL_DIR    Base dir for the venv fallback"
+    echo "  PRAISONAI_BACKEND        Force backend: uv, pipx, venv"
+    echo "  PRAISONAI_NO_MODIFY_PATH Skip shell rc PATH modification (1 to enable)"
     echo ""
     echo "Examples:"
-    echo "  # Basic install"
+    echo "  # Basic install (isolated: uv tool -> pipx -> venv)"
     echo "  curl -fsSL https://praison.ai/install.sh | bash"
     echo ""
     echo "  # Install with UI extras"
     echo "  curl -fsSL https://praison.ai/install.sh | bash -s -- --extras ui,chat"
     echo ""
-    echo "  # Install specific version"
-    echo "  curl -fsSL https://praison.ai/install.sh | bash -s -- --version 0.14.0"
+    echo "  # Force pipx and don't touch PATH"
+    echo "  curl -fsSL https://praison.ai/install.sh | bash -s -- --backend pipx --no-modify-path"
     echo ""
     echo "  # Dry run"
     echo "  curl -fsSL https://praison.ai/install.sh | bash -s -- --dry-run"
+    echo ""
+    echo "Power-user alternatives (no installer needed):"
+    echo "  uvx praisonai \"2+2\"        # zero-install one-shot via uv"
+    echo "  pipx install praisonai      # isolated persistent install"
+    echo "  pip install praisonai       # install into the active environment"
 }
 
 # Parse arguments
@@ -590,6 +846,18 @@ parse_args() {
                 ;;
             --no-venv)
                 SKIP_VENV="1"
+                shift
+                ;;
+            --backend)
+                BACKEND="$2"
+                shift 2
+                ;;
+            --install-dir)
+                INSTALL_DIR="$2"
+                shift 2
+                ;;
+            --no-modify-path)
+                NO_MODIFY_PATH="1"
                 shift
                 ;;
             --no-onboard)
@@ -743,28 +1011,50 @@ main() {
     if [[ "$DRY_RUN" == "1" ]]; then
         log_warn "Running in DRY RUN mode - no changes will be made"
     fi
-    
-    # Ensure Python
-    local python_cmd
-    python_cmd=$(ensure_python)
-    
-    # Ensure pip
-    ensure_pip "$python_cmd"
-    
-    # Create virtual environment
+
+    # Choose an isolation backend: uv tool -> pipx -> venv fallback.
+    local backend
+    backend=$(detect_backend)
+    log_info "Isolation backend: $backend"
+
     local venv_dir=""
-    if [[ "$SKIP_VENV" != "1" ]]; then
-        venv_dir=$(create_venv "$python_cmd")
-    fi
-    
-    # Install PraisonAI
-    install_praisonai "$python_cmd" "$venv_dir"
-    
-    # Setup PATH
-    setup_shell_path "$venv_dir"
-    
+
+    case "$backend" in
+        uv)
+            install_with_uv "$(build_package_spec)"
+            ensure_path_dir "$SHIM_DIR"
+            ;;
+        pipx)
+            install_with_pipx "$(build_package_spec)"
+            ensure_path_dir "$SHIM_DIR"
+            ;;
+        system)
+            # No isolation requested (--no-venv): install into active env.
+            local python_cmd
+            python_cmd=$(ensure_python)
+            ensure_pip "$python_cmd"
+            install_praisonai "$python_cmd" ""
+            ;;
+        venv|*)
+            # Fallback: isolated venv under $INSTALL_DIR, shimmed to ~/.local/bin.
+            local python_cmd
+            python_cmd=$(ensure_python)
+            ensure_pip "$python_cmd"
+            venv_dir=$(create_venv "$python_cmd")
+            install_praisonai "$python_cmd" "$venv_dir"
+            setup_shell_path "$venv_dir"
+            if [[ "$DRY_RUN" != "1" && -n "$venv_dir" && -x "$venv_dir/bin/praisonai" ]]; then
+                create_shim "$venv_dir/bin/praisonai"
+            fi
+            ensure_path_dir "$SHIM_DIR"
+            ;;
+    esac
+
     # Verify installation
     verify_installation "$venv_dir"
+
+    # Offer to install shell completions
+    maybe_install_completions "$venv_dir"
     
     # Run interactive onboarding
     run_onboarding "$venv_dir"
