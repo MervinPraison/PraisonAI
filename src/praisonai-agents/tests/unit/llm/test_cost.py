@@ -17,10 +17,10 @@ class TestCostModule:
     
     def setup_method(self):
         """Reset module state before each test."""
-        # Clear any cached litellm module
-        import praisonaiagents.llm._cost as cost_module
-        cost_module._litellm_module = None
-        cost_module._litellm_import_attempted = False
+        # Clear any cached litellm module (shared loader state)
+        import praisonaiagents.llm._litellm_loader as loader_module
+        loader_module._litellm_module = None
+        loader_module._litellm_import_attempted = False
         
         # Clear environment variables
         os.environ.pop('PRAISONAI_TRACK_COST', None)
@@ -178,6 +178,36 @@ class TestCostModule:
         
         assert result1 is result2
         assert loader_module._litellm_import_attempted is True
+
+    def test_on_missing_fires_regardless_of_call_order(self):
+        """on_missing must fire even if another caller attempted the import first.
+
+        Regression for the shared-cache bug: when litellm is unavailable and a
+        caller without on_missing (e.g. model_capabilities) loads first, a later
+        caller passing on_missing (e.g. _cost) must still get its callback.
+        """
+        import builtins
+        import praisonaiagents.llm._litellm_loader as loader_module
+
+        # Reset shared loader state
+        loader_module._litellm_module = None
+        loader_module._litellm_import_attempted = False
+
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == 'litellm':
+                raise ImportError("simulated missing litellm")
+            return real_import(name, *args, **kwargs)
+
+        with patch('builtins.__import__', side_effect=fake_import):
+            # First caller, no on_missing (model_capabilities-style)
+            assert loader_module.get_litellm() is None
+
+            # Second caller passes on_missing; it must still fire on cached miss
+            calls = []
+            assert loader_module.get_litellm(on_missing=lambda: calls.append(1)) is None
+            assert calls == [1]
 
 
 class TestCostModuleIntegration:

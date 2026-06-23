@@ -21,24 +21,25 @@ def get_litellm(on_missing=None):
     Caches the result to avoid repeated import attempts.
 
     Args:
-        on_missing: Optional callable invoked (with no arguments) the first
-            time litellm cannot be imported. Useful for logging.
+        on_missing: Optional callable invoked (with no arguments) when litellm
+            cannot be imported. Useful for logging. It is invoked on every call
+            that finds litellm unavailable (including cached failures), so each
+            caller's diagnostics are honoured regardless of call ordering.
 
     Returns:
         The litellm module if importable, otherwise None.
     """
     global _litellm_module, _litellm_import_attempted
 
-    if _litellm_import_attempted:
-        return _litellm_module
+    if not _litellm_import_attempted:
+        _litellm_import_attempted = True
+        try:
+            import litellm
+            _litellm_module = litellm
+        except ImportError:
+            _litellm_module = None
 
-    _litellm_import_attempted = True
-
-    try:
-        import litellm
-        _litellm_module = litellm
-    except ImportError:
-        if on_missing is not None:
-            on_missing()
+    if _litellm_module is None and on_missing is not None:
+        on_missing()
 
     return _litellm_module
