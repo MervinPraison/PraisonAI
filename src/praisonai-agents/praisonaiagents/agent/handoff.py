@@ -405,92 +405,58 @@ class Handoff:
             # In intersect mode, empty list means no tools allowed - this is the security boundary
             return effective_tools
     
+    @staticmethod
+    def _extract_model_ref(agent: 'Agent') -> str:
+        """Extract a model reference string from an agent configuration."""
+        llm = getattr(agent, 'llm', None) or getattr(agent, 'model', None)
+        if isinstance(llm, str):
+            return llm
+        if llm is not None:
+            for attr in ('model', 'model_name', 'model_ref'):
+                value = getattr(llm, attr, None)
+                if isinstance(value, str) and value:
+                    return value
+        return 'gpt-4o-mini'
+
     def _execute_with_runtime_resolution(
         self, 
         source_agent: 'Agent', 
         prompt: str, 
-        effective_tools: List[Any], 
+        effective_tools: Optional[List[Any]], 
         context: Dict[str, Any]
     ) -> str:
-        """Execute handoff with turn-time runtime resolution."""
-        try:
-            # Try to use runtime resolution if available
-            from ..runtime.resolve import resolve_runtime, SessionContext
-            import time
-            
-            # Create session context for runtime resolution
-            session_ctx = SessionContext(
-                session_id=getattr(source_agent, '_session_id', 'default'),
-                timestamp=time.time(),
-                parent_agent_id=source_agent.name if hasattr(source_agent, 'name') else None,
-                handoff_depth=_get_handoff_depth()
-            )
-            
-            # Resolve target agent's model reference
-            target_model_ref = getattr(self.agent, 'llm', None) or getattr(self.agent, 'model', None) or 'gpt-4o-mini'
-            target_agent_id = getattr(self.agent, 'agent_id', getattr(self.agent, 'name', 'unknown'))
-            
-            logger.debug(f"Resolving runtime for handoff: agent_id={target_agent_id}, model={target_model_ref}")
-            
-            # Resolve runtime for target agent
-            runtime = resolve_runtime(target_agent_id, target_model_ref, session_ctx)
-            
-            # Execute using resolved runtime
-            response = runtime.execute(prompt, tools=effective_tools)
-            logger.info(f"Handoff executed with turn-time resolved runtime: {runtime.provider}/{runtime.model_ref}")
-            
-            return response
-            
-        except Exception as e:
-            logger.warning(f"Runtime resolution failed, falling back to agent.chat(): {e}")
-            # Fallback to traditional agent execution
-            return self.agent.chat(prompt, tools=effective_tools)
+        """Execute handoff through the target agent's full chat pipeline."""
+        target_model_ref = self._extract_model_ref(self.agent)
+        logger.debug(
+            "Handoff to %s via agent.chat (model=%s, depth=%s)",
+            getattr(self.agent, 'name', 'unknown'),
+            target_model_ref,
+            _get_handoff_depth(),
+        )
+        return self.agent.chat(prompt, tools=effective_tools)
     
     async def _execute_with_runtime_resolution_async(
         self, 
         source_agent: 'Agent', 
         prompt: str, 
-        effective_tools: List[Any], 
+        effective_tools: Optional[List[Any]], 
         context: Dict[str, Any]
     ) -> str:
-        """Execute handoff with turn-time runtime resolution (async)."""
-        try:
-            # Try to use runtime resolution if available
-            from ..runtime.resolve import resolve_runtime, SessionContext
-            import time
-            
-            # Create session context for runtime resolution
-            session_ctx = SessionContext(
-                session_id=getattr(source_agent, '_session_id', 'default'),
-                timestamp=time.time(),
-                parent_agent_id=source_agent.name if hasattr(source_agent, 'name') else None,
-                handoff_depth=_get_handoff_depth()
-            )
-            
-            # Resolve target agent's model reference
-            target_model_ref = getattr(self.agent, 'llm', None) or getattr(self.agent, 'model', None) or 'gpt-4o-mini'
-            target_agent_id = getattr(self.agent, 'agent_id', getattr(self.agent, 'name', 'unknown'))
-            
-            logger.debug(f"Resolving async runtime for handoff: agent_id={target_agent_id}, model={target_model_ref}")
-            
-            # Resolve runtime for target agent
-            runtime = resolve_runtime(target_agent_id, target_model_ref, session_ctx)
-            
-            # Execute using resolved runtime
-            response = await runtime.aexecute(prompt, tools=effective_tools)
-            logger.info(f"Async handoff executed with turn-time resolved runtime: {runtime.provider}/{runtime.model_ref}")
-            
-            return response
-            
-        except Exception as e:
-            logger.warning(f"Async runtime resolution failed, falling back to agent execution: {e}")
-            # Fallback to traditional agent execution
-            if hasattr(self.agent, 'achat'):
-                return await self.agent.achat(prompt, tools=effective_tools)
-            else:
-                # Run sync chat in executor with tool constraint
-                loop = asyncio.get_running_loop()
-                return await loop.run_in_executor(None, lambda: self.agent.chat(prompt, tools=effective_tools))
+        """Execute handoff through the target agent's full async chat pipeline."""
+        target_model_ref = self._extract_model_ref(self.agent)
+        logger.debug(
+            "Async handoff to %s via agent chat (model=%s, depth=%s)",
+            getattr(self.agent, 'name', 'unknown'),
+            target_model_ref,
+            _get_handoff_depth(),
+        )
+        async_chat = getattr(self.agent, 'achat', None)
+        if callable(async_chat) and inspect.iscoroutinefunction(async_chat):
+            return await async_chat(prompt, tools=effective_tools)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, lambda: self.agent.chat(prompt, tools=effective_tools)
+        )
     
     def _check_safety(self, source_agent: 'Agent') -> None:
         """
