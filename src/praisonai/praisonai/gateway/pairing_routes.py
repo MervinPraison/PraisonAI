@@ -20,17 +20,28 @@ from .pairing import PairingStore
 logger = logging.getLogger(__name__)
 
 
-def create_pairing_routes(pairing_store: PairingStore, auth_checker: callable, rate_limiter: Any = None):
+def create_pairing_routes(
+    pairing_store: PairingStore,
+    auth_checker: callable,
+    rate_limiter: Any = None,
+    scope_checker: Any = None,
+):
     """Create pairing management route handlers.
     
     Args:
         pairing_store: PairingStore instance
         auth_checker: Function that checks authentication and returns error response or None
         rate_limiter: Optional rate limiter instance
+        scope_checker: Optional callable ``(request) -> error response or None`` that
+            enforces the operator ``pairing`` scope on mutating routes. When None
+            (default), no scope gating is applied (backward compatible).
     
     Returns:
         Dictionary of route handlers
     """
+
+    def _check_scope(request):
+        return scope_checker(request) if scope_checker is not None else None
     
     async def pending(request):
         """GET /api/pairing/pending — list pending pairing requests."""
@@ -58,6 +69,10 @@ def create_pairing_routes(pairing_store: PairingStore, auth_checker: callable, r
         auth_err = auth_checker(request)
         if auth_err:
             return auth_err
+
+        scope_err = _check_scope(request)
+        if scope_err:
+            return scope_err
 
         if rate_limiter:
             client_ip = request.client.host if request.client else "unknown"
@@ -109,6 +124,10 @@ def create_pairing_routes(pairing_store: PairingStore, auth_checker: callable, r
         auth_err = auth_checker(request)
         if auth_err:
             return auth_err
+
+        scope_err = _check_scope(request)
+        if scope_err:
+            return scope_err
 
         if rate_limiter:
             client_ip = request.client.host if request.client else "unknown"

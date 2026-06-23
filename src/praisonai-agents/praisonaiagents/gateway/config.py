@@ -230,6 +230,11 @@ class GatewayConfig:
         ssl_key: Path to SSL key
         max_buffered_bytes: Maximum buffered bytes before slow consumer disconnect (default 1MB)
         push: Push notification service configuration
+        auth_scopes: Optional operator scope policy mapping token -> list of
+            scope names (see OperatorScope). When None/empty (default), any
+            successfully authenticated client is granted all scopes — identical
+            to the previous binary behaviour. Single-operator setups are
+            unaffected.
     """
     
     host: str = "127.0.0.1"
@@ -247,6 +252,7 @@ class GatewayConfig:
     ssl_key: Optional[str] = None
     max_buffered_bytes: int = 1024 * 1024  # 1MB default
     push: PushConfig = field(default_factory=PushConfig)
+    auth_scopes: Optional[Dict[str, List[str]]] = None
 
     def __post_init__(self) -> None:
         """Post-initialization to set bind_host from host if not specified and validate values."""
@@ -262,7 +268,58 @@ class GatewayConfig:
             raise ValueError("heartbeat_interval must be >= 0")
         if self.reconnect_timeout < 0:
             raise ValueError("reconnect_timeout must be >= 0")
-    
+
+    @property
+    def has_scope_policy(self) -> bool:
+        """Whether an operator scope policy is configured.
+
+        When False (the default), every authenticated client is granted all
+        scopes — preserving the original binary auth behaviour.
+        """
+        return bool(self.auth_scopes)
+
+    def resolve_scopes(self, token: Optional[str]) -> List[str]:
+        """Resolve the operator scopes granted to ``token``.
+
+        Backward-compatible contract:
+          * No scope policy configured  -> all scopes (today's behaviour).
+          * Policy configured + token listed -> that token's scopes.
+          * Policy configured + token absent/None -> no scopes (deny).
+
+        Scope names are returned as plain strings so callers in the wrapper
+        can compare against ``OperatorScope`` values without importing them.
+        Unknown scope names (e.g. typos in ``gateway.yaml``) are dropped and a
+        warning is logged so misconfiguration surfaces early instead of
+        silently denying all access.
+        """
+        from .protocols import OperatorScope
+
+        valid_scopes = {s.value for s in OperatorScope.all()}
+        all_scopes = list(valid_scopes)
+        if not self.auth_scopes:
+            return all_scopes
+        if token is None:
+            return []
+        granted = self.auth_scopes.get(token)
+        if granted is None:
+            return []
+        resolved: List[str] = []
+        unknown: List[str] = []
+        for s in granted:
+            name = str(s)
+            if name in valid_scopes:
+                resolved.append(name)
+            else:
+                unknown.append(name)
+        if unknown:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Ignoring unknown operator scope(s) %s; valid scopes are %s",
+                unknown,
+                sorted(valid_scopes),
+            )
+        return resolved
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary (hides sensitive data)."""
         return {
@@ -279,6 +336,7 @@ class GatewayConfig:
             "ssl_enabled": bool(self.ssl_cert and self.ssl_key),
             "max_buffered_bytes": self.max_buffered_bytes,
             "push": self.push.to_dict(),
+            "scope_policy_enabled": self.has_scope_policy,
         }
     
     @property
@@ -416,6 +474,29 @@ class MultiChannelGatewayConfig:
                     metadata=sc_data.get("metadata", {}),
                 )
         
+        # Parse optional operator scope policy. Two supported shapes:
+        #   gateway:
+        #     auth:
+        #       tokens:
+        #         - token: "${VIEWER_TOKEN}"
+        #           scopes: [read]
+        # or a flat mapping:
+        #   gateway:
+        #     auth_scopes:
+        #       "${VIEWER_TOKEN}": [read]
+        auth_scopes: Optional[Dict[str, List[str]]] = None
+        auth_section = gw_data.get("auth")
+        if isinstance(auth_section, dict) and isinstance(auth_section.get("tokens"), list):
+            auth_scopes = {}
+            for entry in auth_section["tokens"]:
+                if isinstance(entry, dict) and entry.get("token"):
+                    auth_scopes[str(entry["token"])] = list(entry.get("scopes", []))
+        elif isinstance(gw_data.get("auth_scopes"), dict):
+            auth_scopes = {
+                str(tok): list(scopes)
+                for tok, scopes in gw_data["auth_scopes"].items()
+            }
+
         gateway_config = GatewayConfig(
             host=gw_data.get("host", "127.0.0.1"),
             port=gw_data.get("port", 8765),
@@ -430,6 +511,7 @@ class MultiChannelGatewayConfig:
             ssl_cert=gw_data.get("ssl_cert"),
             ssl_key=gw_data.get("ssl_key"),
             max_buffered_bytes=gw_data.get("max_buffered_bytes", 1024 * 1024),
+            auth_scopes=auth_scopes,
         )
         
         # Parse agents section (pass through as dicts)

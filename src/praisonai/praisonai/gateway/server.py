@@ -26,6 +26,7 @@ from praisonaiagents.gateway import (
     GatewayEvent,
     GatewayMessage,
     EventType,
+    OperatorScope,
     PROTOCOL_VERSION,
     MIN_PROTOCOL_VERSION,
     MAX_PROTOCOL_VERSION,
@@ -463,6 +464,7 @@ class WebSocketGateway:
         self._sessions: Dict[str, GatewaySession] = {}
         self._clients: Dict[str, Any] = {}  # WebSocket connections
         self._client_sessions: Dict[str, str] = {}  # client_id -> session_id
+        self._client_scopes: Dict[str, List[str]] = {}  # client_id -> operator scopes
         
         # Initialize session store based on configuration
         if session_store:
@@ -583,6 +585,25 @@ class WebSocketGateway:
         async def health(request):
             return JSONResponse(self.health())
         
+        def _loopback_bypass_active(request) -> bool:
+            """Whether the development loopback auth bypass applies to ``request``.
+
+            Only true when ``ALLOW_LOOPBACK_BYPASS`` is explicitly enabled, the
+            request originates from localhost, and no proxy headers are present.
+            Used by both ``_check_auth`` (auth bypass) and scope resolution so
+            the two stay consistent — a loopback request that bypasses auth is
+            also granted all operator scopes.
+            """
+            allow_loopback = os.environ.get("ALLOW_LOOPBACK_BYPASS", "").lower() in ("true", "1", "yes")
+            if not allow_loopback:
+                return False
+            client_host = getattr(request.client, 'host', None) if request.client else None
+            if not client_host or client_host not in ('127.0.0.1', '::1', 'localhost'):
+                return False
+            # Reject if proxy headers are present (indicates request went through proxy)
+            proxy_headers = ["x-forwarded-for", "via", "x-real-ip", "x-forwarded-host"]
+            return not any(header in request.headers for header in proxy_headers)
+
         def _check_auth(request) -> Optional[JSONResponse]:
             """Validate auth token if configured. Returns error response or None.
 
@@ -608,16 +629,9 @@ class WebSocketGateway:
                 pass
             
             # Check loopback bypass for local requests (only if explicitly enabled)
-            allow_loopback = os.environ.get("ALLOW_LOOPBACK_BYPASS", "").lower() in ("true", "1", "yes")
-            if allow_loopback:
-                client_host = getattr(request.client, 'host', None) if request.client else None
-                if client_host and client_host in ('127.0.0.1', '::1', 'localhost'):
-                    # Reject if proxy headers are present (indicates request went through proxy)
-                    proxy_headers = ["x-forwarded-for", "via", "x-real-ip", "x-forwarded-host"]
-                    has_proxy_headers = any(header in request.headers for header in proxy_headers)
-                    if not has_proxy_headers:
-                        # Allow local requests without auth for development
-                        return None
+            if _loopback_bypass_active(request):
+                # Allow local requests without auth for development
+                return None
             
             # Fall back to token-based auth
             auth_header = request.headers.get("authorization", "")
@@ -646,7 +660,55 @@ class WebSocketGateway:
                     status_code=403,
                 )
             return None
-        
+
+        def _extract_request_token(request) -> Optional[str]:
+            """Best-effort extraction of the operator token from a request.
+
+            Used only to resolve operator *scopes* when a scope policy is
+            configured — authentication itself is handled by ``_check_auth``.
+            Prefers the cookie session token, then bearer header, then the
+            legacy ``?token=`` query parameter.
+            """
+            try:
+                from .cookie_auth import create_auth_manager_from_env
+                auth_manager = create_auth_manager_from_env()
+                if auth_manager:
+                    cookie_header = request.headers.get("cookie", "")
+                    tok = auth_manager.extract_token_from_cookies(cookie_header)
+                    if tok and auth_manager.is_token_valid(tok):
+                        return tok
+            except ImportError:
+                pass
+
+            auth_header = request.headers.get("authorization", "")
+            if auth_header.startswith("Bearer "):
+                return auth_header[7:]
+            return request.query_params.get("token") or None
+
+        def _resolve_operator_scopes(request) -> List[str]:
+            """Resolve the operator scopes for an HTTP request.
+
+            Backward compatible: when no scope policy is configured the client
+            is granted all scopes (identical to today's binary auth). When the
+            development loopback bypass applies the client is likewise granted
+            all scopes, matching the auth-bypass intent.
+            """
+            if not self.config.has_scope_policy:
+                return [s.value for s in OperatorScope.all()]
+            if _loopback_bypass_active(request):
+                return [s.value for s in OperatorScope.all()]
+            return self.config.resolve_scopes(_extract_request_token(request))
+
+        def _require_scope(request, scope: OperatorScope) -> Optional[JSONResponse]:
+            """Return a 403 response if the request lacks ``scope``, else None."""
+            scopes = _resolve_operator_scopes(request)
+            if OperatorScope.ADMIN.value in scopes or scope.value in scopes:
+                return None
+            return JSONResponse(
+                {"error": "insufficient scope", "required_scope": scope.value},
+                status_code=403,
+            )
+
         async def info(request):
             auth_err = _check_auth(request)
             if auth_err:
@@ -684,6 +746,7 @@ class WebSocketGateway:
                 return
 
             # Authenticate WebSocket via session cookie or query param
+            operator_token: Optional[str] = None
             if self.config.auth_token:
                 authenticated = False
                 
@@ -695,6 +758,7 @@ class WebSocketGateway:
                     token_from_cookie = auth_manager.extract_token_from_cookies(cookie_header)
                     if token_from_cookie and auth_manager.is_token_valid(token_from_cookie):
                         authenticated = True
+                        operator_token = token_from_cookie
                 except ImportError:
                     pass
                 
@@ -703,6 +767,7 @@ class WebSocketGateway:
                     ws_token = websocket.query_params.get("token", "")
                     if ws_token and secrets.compare_digest(ws_token, self.config.auth_token):
                         authenticated = True
+                        operator_token = ws_token
                 
                 if not authenticated:
                     await websocket.close(code=4003, reason="Authentication required")
@@ -711,6 +776,8 @@ class WebSocketGateway:
             await websocket.accept()
             client_id = str(uuid.uuid4())
             self._clients[client_id] = websocket
+            # Resolve operator scopes for this connection (all scopes if no policy).
+            self._client_scopes[client_id] = self.config.resolve_scopes(operator_token)
             
             logger.info(f"Client connected: {client_id}")
             
@@ -730,6 +797,7 @@ class WebSocketGateway:
                 logger.error(f"WebSocket error: {e}")
             finally:
                 self._clients.pop(client_id, None)
+                self._client_scopes.pop(client_id, None)
                 session_id = self._client_sessions.pop(client_id, None)
                 if session_id:
                     self.close_session(session_id)
@@ -752,7 +820,12 @@ class WebSocketGateway:
         _ws_upgrade_rate = AuthRateLimiter(max_attempts=10, window_seconds=60)
 
         # Create pairing routes
-        _pairing_routes = create_pairing_routes(self.pairing_store, _check_auth, _approval_rate)
+        _pairing_routes = create_pairing_routes(
+            self.pairing_store,
+            _check_auth,
+            _approval_rate,
+            scope_checker=lambda request: _require_scope(request, OperatorScope.PAIRING),
+        )
 
         async def approval_pending(request):
             """GET /api/approval/pending — list pending approval requests."""
@@ -782,6 +855,9 @@ class WebSocketGateway:
             auth_err = _check_auth(request)
             if auth_err:
                 return auth_err
+            scope_err = _require_scope(request, OperatorScope.APPROVALS)
+            if scope_err:
+                return scope_err
 
             client_ip = request.client.host if request.client else "unknown"
             if not _approval_rate.allow("approval_resolve", client_ip):
@@ -832,6 +908,19 @@ class WebSocketGateway:
             if auth_err:
                 return auth_err
 
+            if request.method == "GET":
+                return JSONResponse({
+                    "allow_list": _approval_mgr.allowlist.list(),
+                })
+
+            # Mutating the approval allow-list is security-sensitive. Check the
+            # scope *before* consuming the rate-limit budget so a read-only
+            # client cannot drain a source IP's budget (which would otherwise
+            # cause 429s on legitimate GETs from the same IP).
+            scope_err = _require_scope(request, OperatorScope.APPROVALS)
+            if scope_err:
+                return scope_err
+
             client_ip = request.client.host if request.client else "unknown"
             if not _approval_rate.allow("approval_allowlist", client_ip):
                 retry = _approval_rate.time_until_allowed("approval_allowlist", client_ip)
@@ -839,11 +928,6 @@ class WebSocketGateway:
                     {"error": "Rate limited", "retry_after_seconds": round(retry)},
                     status_code=429,
                 )
-
-            if request.method == "GET":
-                return JSONResponse({
-                    "allow_list": _approval_mgr.allowlist.list(),
-                })
 
             try:
                 body = await request.json()
@@ -952,6 +1036,9 @@ class WebSocketGateway:
             auth_err = _check_auth(request)
             if auth_err:
                 return auth_err
+            scope_err = _require_scope(request, OperatorScope.ADMIN)
+            if scope_err:
+                return scope_err
             channel_name = request.path_params["name"]
             success = self.pause_channel(channel_name)
             return JSONResponse({
@@ -964,6 +1051,9 @@ class WebSocketGateway:
             auth_err = _check_auth(request)
             if auth_err:
                 return auth_err
+            scope_err = _require_scope(request, OperatorScope.ADMIN)
+            if scope_err:
+                return scope_err
             channel_name = request.path_params["name"]
             success = self.resume_channel(channel_name)
             return JSONResponse({
@@ -976,6 +1066,9 @@ class WebSocketGateway:
             auth_err = _check_auth(request)
             if auth_err:
                 return auth_err
+            scope_err = _require_scope(request, OperatorScope.ADMIN)
+            if scope_err:
+                return scope_err
             channel_name = request.path_params["name"]
             success = self.reconnect_channel(channel_name)
             return JSONResponse({
@@ -1117,6 +1210,7 @@ class WebSocketGateway:
         
         self._clients.clear()
         self._client_sessions.clear()
+        self._client_scopes.clear()
         
         for session_id in list(self._sessions.keys()):
             self.close_session(session_id)
@@ -1450,6 +1544,15 @@ class WebSocketGateway:
                 })
         
         elif msg_type == "message":
+            # Sending a message as the agent requires the WRITE scope.
+            if not self._client_has_scope(client_id, OperatorScope.WRITE):
+                await self._send_to_client(client_id, {
+                    "type": "error",
+                    "code": "insufficient_scope",
+                    "message": "insufficient scope",
+                    "required_scope": OperatorScope.WRITE.value,
+                })
+                return
             session_id = self._client_sessions.get(client_id)
             if session_id:
                 session = self._sessions.get(session_id)
@@ -1971,6 +2074,33 @@ class WebSocketGateway:
             return func
         return decorator
     
+    def _client_has_scope(self, client_id: str, scope: OperatorScope) -> bool:
+        """Whether a connected client holds ``scope`` (ADMIN implies all).
+
+        Clients connected before scopes were tracked, or when no scope policy
+        is configured, hold all scopes — preserving prior behaviour.
+        """
+        scopes = self._client_scopes.get(client_id)
+        if scopes is None:
+            return True
+        return OperatorScope.ADMIN.value in scopes or scope.value in scopes
+
+    @staticmethod
+    def _event_required_scope(event: GatewayEvent) -> OperatorScope:
+        """Map an outbound event class to the scope required to receive it.
+
+        Approval-class events are only delivered to clients holding the
+        ``approvals`` scope; everything else is visible with ``read``.
+        """
+        event_type = event.type.value if hasattr(event.type, "value") else str(event.type)
+        if "approval" in event_type:
+            return OperatorScope.APPROVALS
+        return OperatorScope.READ
+
+    def _event_visible_to(self, event: GatewayEvent, client_id: str) -> bool:
+        """Whether ``event`` should be delivered to ``client_id`` given its scopes."""
+        return self._client_has_scope(client_id, self._event_required_scope(event))
+
     async def emit(self, event: GatewayEvent) -> None:
         """Emit an event to registered handlers."""
         event_type = event.type.value if hasattr(event.type, "value") else str(event.type)
@@ -1989,12 +2119,18 @@ class WebSocketGateway:
         event: GatewayEvent,
         exclude: Optional[List[str]] = None,
     ) -> None:
-        """Broadcast an event to all connected clients."""
+        """Broadcast an event to all connected clients.
+
+        Outbound events are filtered by each subscriber's operator scopes so a
+        low-privilege (``read``-only) client never receives, for example,
+        approval-request events it cannot act on. When no scope policy is
+        configured every client holds all scopes, so behaviour is unchanged.
+        """
         exclude_set = set(exclude or [])
         data = event.to_dict()
         
         for client_id, ws in list(self._clients.items()):
-            if client_id not in exclude_set:
+            if client_id not in exclude_set and self._event_visible_to(event, client_id):
                 try:
                     await ws.send_json(data)
                 except Exception as e:

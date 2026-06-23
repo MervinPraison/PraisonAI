@@ -109,6 +109,34 @@ class EventType(str, Enum):
     HELLO_ERROR = "hello_error"
 
 
+class OperatorScope(str, Enum):
+    """Operator authorisation scopes for multi-operator Gateway access control.
+
+    These describe *what an authenticated operator is allowed to do*, layered on
+    top of (and orthogonal to) authentication. The vocabulary lives in the core
+    SDK so that protocol clients and the wrapper Gateway share the same names;
+    enforcement happens in the wrapper where requests are dispatched.
+
+    Scopes:
+        READ:      View dashboard / receive session transcripts and status.
+        WRITE:     Send messages as the agent.
+        APPROVALS: Resolve tool-execution approvals (security-sensitive).
+        PAIRING:   Approve / revoke device pairing.
+        ADMIN:     Channel control (pause / resume / reconnect) and management.
+    """
+
+    READ = "read"
+    WRITE = "write"
+    APPROVALS = "approvals"
+    PAIRING = "pairing"
+    ADMIN = "admin"
+
+    @classmethod
+    def all(cls) -> "List[OperatorScope]":
+        """Return every scope (granted by default when no policy is configured)."""
+        return list(cls)
+
+
 @dataclass
 class HelloParams:
     """Parameters for initiating a versioned handshake.
