@@ -221,6 +221,294 @@ def schedule_stats(
     raise typer.Exit(_run_schedule(args))
 
 
+# ── Blueprint commands ─────────────────────────────────────────────────
+
+
+@app.command("blueprint")
+def schedule_blueprint(
+    blueprint_name: str = typer.Argument(..., help="Blueprint name (morning-brief, important-mail, weekly-review)"),
+    hour: Optional[int] = typer.Option(None, "--hour", help="Delivery hour (0-23)"),
+    minute: Optional[int] = typer.Option(None, "--minute", help="Delivery minute (0-59)"),
+    weekdays: Optional[str] = typer.Option(None, "--weekdays", help="Days: mon-fri, daily, weekends, or a single day"),
+    focus: Optional[str] = typer.Option(None, "--focus", help="Focus area"),
+    interval: Optional[int] = typer.Option(None, "--interval", help="Interval in minutes (for interval-based blueprints)"),
+    keywords: Optional[str] = typer.Option(None, "--keywords", help="Priority keywords (for important-mail)"),
+    deliver: str = typer.Option("", "--deliver", "-d", help="Delivery target"),
+    agent: str = typer.Option("", "--agent", "-a", help="Agent ID"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+):
+    """Create a schedule from a blueprint template.
+
+    Examples:
+        praisonai schedule blueprint morning-brief --hour 8 --weekdays mon-fri --deliver telegram
+        praisonai schedule blueprint important-mail --interval 30 --keywords urgent,deadline --deliver telegram
+        praisonai schedule blueprint weekly-review --hour 17 --weekdays fri --focus tech
+    """
+    output = get_output_controller()
+    try:
+        from praisonai.scheduler.blueprint_catalogue import BlueprintCatalogue
+        from praisonaiagents.tools.schedule_tools import schedule_add as _schedule_add
+
+        catalogue = BlueprintCatalogue()
+        bp = catalogue.get_blueprint(blueprint_name)
+        if bp is None:
+            available = [b.name for b in catalogue.list_blueprints()]
+            output.print_error(
+                f"Blueprint '{blueprint_name}' not found. "
+                f"Available: {', '.join(available)}"
+            )
+            raise typer.Exit(1)
+
+        # Build slots dict from CLI args
+        cli_slot_map: dict = {
+            "hour": hour, "minute": minute, "weekdays": weekdays,
+            "focus": focus, "interval_minutes": interval, "keywords": keywords,
+        }
+        slots = {}
+        for slot in bp.slots:
+            cli_val = cli_slot_map.get(slot.name)
+            if cli_val is not None:
+                slots[slot.name] = cli_val
+
+        resolved = catalogue.resolve_slots(bp, slots)
+        prompt = catalogue.materialize_prompt(bp, resolved)
+        schedule_expr = catalogue.materialize_schedule(bp, resolved)
+        final_deliver = deliver or bp.default_deliver
+
+        result = _schedule_add(
+            name=blueprint_name,
+            schedule=schedule_expr,
+            message=prompt,
+            deliver=final_deliver,
+            agent_id=agent or bp.default_agent,
+        )
+
+        if json_output:
+            import json as _json
+            print(_json.dumps({"result": result, "blueprint": blueprint_name,
+                               "schedule": schedule_expr}))
+        else:
+            output.print_success(result)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        output.print_error(str(e))
+        raise typer.Exit(1)
+
+
+@app.command("blueprint-list")
+def schedule_blueprint_list(
+    category: Optional[str] = typer.Option(None, "--category", "-c", help="Filter by category"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+):
+    """List available blueprints."""
+    output = get_output_controller()
+    try:
+        from praisonai.scheduler.blueprint_catalogue import BlueprintCatalogue
+
+        catalogue = BlueprintCatalogue()
+        blueprints = catalogue.list_blueprints(category=category)
+
+        if json_output:
+            import json as _json
+            print(_json.dumps([{
+                "name": bp.name,
+                "description": bp.description,
+                "category": bp.category,
+                "tags": bp.tags,
+                "slots": [
+                    {"name": s.name, "type": s.type, "label": s.label,
+                     "default": s.default, "choices": s.choices}
+                    for s in bp.slots
+                ],
+                "default_deliver": bp.default_deliver,
+                "builtin": bp.builtin,
+            } for bp in blueprints]))
+        else:
+            if not blueprints:
+                output.print_info("No blueprints found.")
+            else:
+                output.print_header(f"Available blueprints ({len(blueprints)}):")
+                for bp in blueprints:
+                    slot_desc = ", ".join(
+                        f"{s.name}={s.default}" if s.default is not None else s.name
+                        for s in bp.slots
+                    )
+                    tag = " [builtin]" if bp.builtin else " [custom]"
+                    output.print_info(f"  {bp.name} [{bp.category}]{tag} — {bp.description}")
+                    output.print_info(f"    Slots: {slot_desc}")
+                    if bp.default_deliver:
+                        output.print_info(f"    Default delivery: {bp.default_deliver}")
+    except Exception as e:
+        output.print_error(str(e))
+        raise typer.Exit(1)
+
+
+# ── Suggestion commands ─────────────────────────────────────────────────
+
+
+@app.command("suggestions")
+def schedule_suggestions(
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+):
+    """List pending automation suggestions."""
+    output = get_output_controller()
+    try:
+        from praisonai.scheduler.suggestion_engine import SuggestionEngine
+
+        engine = SuggestionEngine()
+        pending = engine.pending()
+
+        if json_output:
+            import json as _json
+            print(_json.dumps([{
+                "id": s.id,
+                "blueprint_name": s.blueprint_name,
+                "slots": s.slots,
+                "reason": s.reason,
+                "created_at": s.created_at,
+                "expires_at": s.expires_at,
+            } for s in pending]))
+        else:
+            if not pending:
+                output.print_info("No pending suggestions.")
+            else:
+                output.print_header(f"Suggestions ({len(pending)}):")
+                for s in pending:
+                    slot_str = ", ".join(f"{k}={v}" for k, v in s.slots.items())
+                    output.print_info(f"  [{s.id}] Blueprint: {s.blueprint_name}")
+                    output.print_info(f"    Reason: {s.reason or 'N/A'}")
+                    output.print_info(f"    Slots: {slot_str or '(defaults)'}")
+                    output.print_info(f"    Accept: praisonai schedule suggestion-accept {s.id}")
+                    output.print_info(f"    Dismiss: praisonai schedule suggestion-dismiss {s.id}")
+    except Exception as e:
+        output.print_error(str(e))
+        raise typer.Exit(1)
+
+
+@app.command("suggestion-accept")
+def schedule_suggestion_accept(
+    suggestion_id: str = typer.Argument(..., help="Suggestion ID to accept"),
+    deliver: str = typer.Option("", "--deliver", "-d", help="Override delivery target"),
+):
+    """Accept a suggestion and create the schedule job."""
+    output = get_output_controller()
+    try:
+        from praisonai.scheduler.suggestion_engine import SuggestionEngine
+        from praisonai.scheduler.blueprint_catalogue import BlueprintCatalogue
+        from praisonaiagents.tools.schedule_tools import schedule_add as _schedule_add
+
+        engine = SuggestionEngine()
+        sug = engine.get_suggestion(suggestion_id)
+        if sug is None or sug.dismissed or sug.accepted:
+            output.print_error(f"Suggestion '{suggestion_id}' not found or already handled.")
+            raise typer.Exit(1)
+
+        catalogue = BlueprintCatalogue()
+        bp = catalogue.get_blueprint(sug.blueprint_name)
+        if bp is None:
+            output.print_error(f"Blueprint '{sug.blueprint_name}' for suggestion not found.")
+            raise typer.Exit(1)
+
+        resolved = catalogue.resolve_slots(bp, sug.slots)
+        prompt = catalogue.materialize_prompt(bp, resolved)
+        schedule_expr = catalogue.materialize_schedule(bp, resolved)
+        final_deliver = deliver or sug.deliver or bp.default_deliver
+
+        result = _schedule_add(
+            name=sug.blueprint_name,
+            schedule=schedule_expr,
+            message=prompt,
+            deliver=final_deliver,
+            accept_suggestion=suggestion_id,
+        )
+
+        output.print_success(f"Suggestion accepted. {result}")
+    except typer.Exit:
+        raise
+    except Exception as e:
+        output.print_error(str(e))
+        raise typer.Exit(1)
+
+
+@app.command("suggestion-dismiss")
+def schedule_suggestion_dismiss(
+    suggestion_id: str = typer.Argument(..., help="Suggestion ID to dismiss"),
+):
+    """Dismiss a suggestion without creating a job."""
+    output = get_output_controller()
+    try:
+        from praisonai.scheduler.suggestion_engine import SuggestionEngine
+        engine = SuggestionEngine()
+        ok = engine.dismiss(suggestion_id)
+        if ok:
+            output.print_info(f"Suggestion '{suggestion_id}' dismissed.")
+        else:
+            output.print_error(f"Suggestion '{suggestion_id}' not found.")
+            raise typer.Exit(1)
+    except typer.Exit:
+        raise
+    except Exception as e:
+        output.print_error(str(e))
+        raise typer.Exit(1)
+
+
+@app.command("suggestion-propose")
+def schedule_suggestion_propose(
+    blueprint_name: str = typer.Argument(..., help="Blueprint to suggest"),
+    reason: str = typer.Option("", "--reason", "-r", help="Why this is being suggested"),
+    hour: Optional[int] = typer.Option(None, "--hour"),
+    minute: Optional[int] = typer.Option(None, "--minute"),
+    weekdays: Optional[str] = typer.Option(None, "--weekdays"),
+    focus: Optional[str] = typer.Option(None, "--focus"),
+    interval: Optional[int] = typer.Option(None, "--interval"),
+):
+    """Propose a blueprint as a suggestion (manual/CLI trigger)."""
+    output = get_output_controller()
+    try:
+        from praisonai.scheduler.blueprint_catalogue import BlueprintCatalogue
+        from praisonai.scheduler.suggestion_engine import SuggestionEngine
+
+        catalogue = BlueprintCatalogue()
+        bp = catalogue.get_blueprint(blueprint_name)
+        if bp is None:
+            available = [b.name for b in catalogue.list_blueprints()]
+            output.print_error(
+                f"Blueprint '{blueprint_name}' not found. "
+                f"Available: {', '.join(available)}"
+            )
+            raise typer.Exit(1)
+
+        cli_slot_map: dict = {
+            "hour": hour, "minute": minute, "weekdays": weekdays,
+            "focus": focus, "interval_minutes": interval,
+        }
+        slots = {}
+        for slot in bp.slots:
+            val = cli_slot_map.get(slot.name)
+            if val is not None:
+                slots[slot.name] = val
+
+        engine = SuggestionEngine()
+        sug_id = engine.propose(
+            blueprint_name=blueprint_name,
+            slots=slots,
+            reason=reason or f"Suggestion from CLI for {blueprint_name}",
+        )
+
+        if sug_id:
+            output.print_success(f"Suggestion created (id: {sug_id}).")
+            output.print_info(f"  Accept: praisonai schedule suggestion-accept {sug_id}")
+            output.print_info(f"  Dismiss: praisonai schedule suggestion-dismiss {sug_id}")
+        else:
+            output.print_warning("Suggestion not created (cap reached or duplicate).")
+    except typer.Exit:
+        raise
+    except Exception as e:
+        output.print_error(str(e))
+        raise typer.Exit(1)
+
+
 @app.callback(invoke_without_command=True)
 def schedule_callback(ctx: typer.Context):
     """Show schedule help or list jobs."""

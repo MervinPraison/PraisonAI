@@ -63,6 +63,7 @@ def schedule_add(
     channel_id: str = "",
     agent_id: str = "",
     session_id: str = "",
+    accept_suggestion: str = "",
 ) -> str:
     """Add a new scheduled job.
 
@@ -85,6 +86,8 @@ def schedule_add(
                   executor uses its default agent.
         session_id: Optional session ID to preserve conversation context.
                     If set, the agent will have access to prior chat history.
+        accept_suggestion: If set, accept the suggestion with this ID
+            after the job is successfully added.
 
     Note:
         The ``pre_run`` shell gate is intentionally NOT exposed through this
@@ -163,7 +166,23 @@ def schedule_add(
         else:
             delivery_note = ""
         agent_note = f" agent={agent_id}" if agent_id else ""
-        return f"Schedule '{name}' added (id: {job.id}, {schedule}{agent_note}{delivery_note})."
+        confirmation = f"Schedule '{name}' added (id: {job.id}, {schedule}{agent_note}{delivery_note})."
+
+        # ── Suggestion acceptance integration ─────────────────────
+        if accept_suggestion:
+            try:
+                from ..scheduler.suggestion_store import SuggestionStore
+                store_obj = SuggestionStore()
+                sug = store_obj.get(accept_suggestion)
+                if sug is not None and not sug.accepted and not sug.dismissed:
+                    store_obj.accept(accept_suggestion)
+            except Exception as e:
+                logger.warning(
+                    "Failed to accept suggestion %s: %s",
+                    accept_suggestion, e,
+                )
+
+        return confirmation
     except ValueError as e:
         return f"Error adding schedule: {e}"
     except Exception as e:
