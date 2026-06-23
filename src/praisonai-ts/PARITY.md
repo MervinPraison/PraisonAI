@@ -1,20 +1,20 @@
 # Feature Parity Tracker
 
-> **Version:** 1.5.87 | **Last Updated:** 2026-06-22
+> **Version:** 1.5.87 | **Last Updated:** 2026-06-23
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 362 |
+| Python Core Features | 388 |
 | Python Wrapper Features | 100 |
 | TypeScript Features | 1188 |
-| **Gap Count** | **70** |
+| **Gap Count** | **95** |
 | P0 (Critical) | 2 |
-| P1 (High) | 0 |
-| P2 (Medium) | 0 |
-| P3 (Low) | 68 |
+| P1 (High) | 5 |
+| P2 (Medium) | 6 |
+| P3 (Low) | 82 |
 
 ## Gap Matrix
 
@@ -77,10 +77,15 @@
 | `tool` | ✅ | ✅ | low | ✅ DONE |
 | `validate\_tool` | ✅ | ✅ | low | ✅ DONE |
 
-### P1_Persistence (20 done, 0 todo)
+### P1_Persistence (20 done, 5 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
+| `Include` | ✅ | ❌ | high | ⏳ TODO |
+| `MAX\_NESTING\_DEPTH` | ✅ | ❌ | low | ⏳ TODO |
+| `YAMLWorkflowParser` | ✅ | ❌ | high | ⏳ TODO |
+| `if\_` | ✅ | ❌ | low | ⏳ TODO |
+| `include` | ✅ | ❌ | low | ⏳ TODO |
 | `AgentFlow` | ✅ | ✅ | high | ✅ DONE |
 | `Chunking` | ✅ | ✅ | high | ✅ DONE |
 | `If` | ✅ | ✅ | high | ✅ DONE |
@@ -102,10 +107,16 @@
 | `route` | ✅ | ✅ | low | ✅ DONE |
 | `when` | ✅ | ✅ | low | ✅ DONE |
 
-### P2_CLI (41 done, 0 todo)
+### P2_CLI (41 done, 6 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
+| `EnforcementLevel` | ✅ | ❌ | high | ⏳ TODO |
+| `SkillState` | ✅ | ❌ | high | ⏳ TODO |
+| `discover\_skills` | ✅ | ❌ | low | ⏳ TODO |
+| `load\_skill` | ✅ | ❌ | low | ⏳ TODO |
+| `validate` | ✅ | ❌ | low | ⏳ TODO |
+| `validate\_metadata` | ✅ | ❌ | low | ⏳ TODO |
 | `ApprovalCallback` | ✅ | ✅ | high | ✅ DONE |
 | `Citation` | ✅ | ✅ | high | ✅ DONE |
 | `CitationsMode` | ✅ | ✅ | high | ✅ DONE |
@@ -148,7 +159,7 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (179 done, 68 todo)
+### P3_Advanced (180 done, 82 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -159,9 +170,11 @@
 | `AsyncLearnProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `AutoApproveBackend` | ✅ | ❌ | high | ⏳ TODO |
 | `BALANCED\_POLICY` | ✅ | ❌ | low | ⏳ TODO |
+| `BackendNotAvailableError` | ✅ | ❌ | low | ⏳ TODO |
 | `BotOSConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `BotOSProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `CONSERVATIVE\_POLICY` | ✅ | ❌ | low | ⏳ TODO |
+| `ChromaMemory` | ✅ | ❌ | high | ⏳ TODO |
 | `CliBackendConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `CliBackendDelta` | ✅ | ❌ | high | ⏳ TODO |
 | `CliBackendProtocol` | ✅ | ❌ | medium | ⏳ TODO |
@@ -173,14 +186,18 @@
 | `ContextBudgetResult` | ✅ | ❌ | low | ⏳ TODO |
 | `ContextCompactionPolicy` | ✅ | ❌ | high | ⏳ TODO |
 | `ContextCompactionPolicyProtocol` | ✅ | ❌ | medium | ⏳ TODO |
+| `CorpusStats` | ✅ | ❌ | high | ⏳ TODO |
 | `CustomToolUseEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `DoomLoopDetector` | ✅ | ❌ | high | ⏳ TODO |
 | `ErrorContextProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `EscalationPipeline` | ✅ | ❌ | high | ⏳ TODO |
 | `EscalationStage` | ✅ | ❌ | high | ⏳ TODO |
+| `FileTracker` | ✅ | ❌ | high | ⏳ TODO |
 | `GatewayEventType` | ✅ | ❌ | high | ⏳ TODO |
 | `Heartbeat` | ✅ | ❌ | high | ⏳ TODO |
 | `HeartbeatConfig` | ✅ | ❌ | low | ⏳ TODO |
+| `IndexResult` | ✅ | ❌ | low | ⏳ TODO |
+| `KnowledgeStoreProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `LLMError` | ✅ | ❌ | low | ⏳ TODO |
 | `LearnBackend` | ✅ | ❌ | high | ⏳ TODO |
 | `LearnManager` | ✅ | ❌ | high | ⏳ TODO |
@@ -197,6 +214,7 @@
 | `PraisonAIError` | ✅ | ❌ | low | ⏳ TODO |
 | `RetryBackoffConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `RunStatus` | ✅ | ❌ | high | ⏳ TODO |
+| `ScopeRequiredError` | ✅ | ❌ | low | ⏳ TODO |
 | `SessionErrorEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `SessionIdleEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `StopReason` | ✅ | ❌ | high | ⏳ TODO |
@@ -208,13 +226,20 @@
 | `ToolsetSpec` | ✅ | ❌ | high | ⏳ TODO |
 | `ValidationError` | ✅ | ❌ | low | ⏳ TODO |
 | `\_\_version\_\_` | ✅ | ❌ | low | ⏳ TODO |
+| `add\_memory\_adapter` | ✅ | ❌ | low | ⏳ TODO |
+| `add\_memory\_factory` | ✅ | ❌ | low | ⏳ TODO |
 | `configure\_structured\_logging` | ✅ | ❌ | low | ⏳ TODO |
 | `get\_default\_policy` | ✅ | ❌ | low | ⏳ TODO |
 | `get\_logger` | ✅ | ❌ | low | ⏳ TODO |
+| `get\_memory\_adapter` | ✅ | ❌ | low | ⏳ TODO |
 | `get\_toolset` | ✅ | ❌ | low | ⏳ TODO |
 | `get\_toolset\_registry` | ✅ | ❌ | low | ⏳ TODO |
+| `has\_memory\_adapter` | ✅ | ❌ | low | ⏳ TODO |
 | `has\_toolset` | ✅ | ❌ | low | ⏳ TODO |
+| `list\_memory\_adapters` | ✅ | ❌ | low | ⏳ TODO |
 | `list\_toolsets` | ✅ | ❌ | low | ⏳ TODO |
+| `register\_memory\_adapter` | ✅ | ❌ | low | ⏳ TODO |
+| `register\_memory\_factory` | ✅ | ❌ | low | ⏳ TODO |
 | `register\_toolset` | ✅ | ❌ | low | ⏳ TODO |
 | `resolve\_toolset` | ✅ | ❌ | low | ⏳ TODO |
 | `resolve\_toolsets` | ✅ | ❌ | low | ⏳ TODO |
@@ -234,6 +259,7 @@
 | `ArrayMode` | ✅ | ✅ | high | ✅ DONE |
 | `AuthProfile` | ✅ | ✅ | high | ✅ DONE |
 | `AutoAgents` | ✅ | ✅ | high | ✅ DONE |
+| `AutoMemory` | ✅ | ✅ | high | ✅ DONE |
 | `AutoRagAgent` | ✅ | ✅ | high | ✅ DONE |
 | `AutoRagConfig` | ✅ | ✅ | low | ✅ DONE |
 | `AutonomyConfig` | ✅ | ✅ | low | ✅ DONE |
@@ -558,10 +584,10 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (72 exports)</summary>
+<summary><strong>other</strong> (87 exports)</summary>
 
 ```python
-from praisonaiagents import AGGRESSIVE_POLICY, AgentMessageEvent, AgentRunOutcome, Agents, AsyncLearnProtocol, AutonomyConfig, BALANCED_POLICY, BudgetExceededError, CONSERVATIVE_POLICY, CliBackendConfig...
+from praisonaiagents import AGGRESSIVE_POLICY, AgentMessageEvent, AgentRunOutcome, Agents, AsyncLearnProtocol, AutoMemory, AutonomyConfig, BALANCED_POLICY, BackendNotAvailableError, BudgetExceededError...
 ```
 
 </details>
@@ -612,10 +638,10 @@ from praisonaiagents import Session
 </details>
 
 <details>
-<summary><strong>skills</strong> (4 exports)</summary>
+<summary><strong>skills</strong> (10 exports)</summary>
 
 ```python
-from praisonaiagents import SkillLoader, SkillManager, SkillMetadata, SkillProperties
+from praisonaiagents import EnforcementLevel, SkillLoader, SkillManager, SkillMetadata, SkillProperties, SkillState, discover_skills, load_skill, validate, validate_metadata
 ```
 
 </details>
@@ -666,10 +692,10 @@ from praisonaiagents import A2A, A2UI, AGUI
 </details>
 
 <details>
-<summary><strong>workflows</strong> (15 exports)</summary>
+<summary><strong>workflows</strong> (20 exports)</summary>
 
 ```python
-from praisonaiagents import AgentFlow, If, Loop, Parallel, Pipeline, Repeat, Route, StepResult, Workflow, WorkflowContext...
+from praisonaiagents import AgentFlow, If, Include, Loop, MAX_NESTING_DEPTH, Parallel, Pipeline, Repeat, Route, StepResult...
 ```
 
 </details>

@@ -1,17 +1,17 @@
 {
   "version": "1.5.87",
-  "lastUpdated": "2026-06-22",
+  "lastUpdated": "2026-06-23",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 362,
+    "pythonCoreFeatures": 388,
     "pythonWrapperFeatures": 100,
     "typescriptFeatures": 1188,
-    "gapCount": 70,
+    "gapCount": 95,
     "priorityP0": 2,
-    "priorityP1": 0,
-    "priorityP2": 0,
-    "priorityP3": 68
+    "priorityP1": 5,
+    "priorityP2": 6,
+    "priorityP3": 82
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -41,11 +41,13 @@
       "AuthProfile",
       "AutoAgents",
       "AutoApproveBackend",
+      "AutoMemory",
       "AutoRagAgent",
       "AutoRagConfig",
       "AutonomyConfig",
       "AutonomyLevel",
       "BALANCED_POLICY",
+      "BackendNotAvailableError",
       "BaseTool",
       "BotChannel",
       "BotConfig",
@@ -59,6 +61,7 @@
       "CONSERVATIVE_POLICY",
       "CONTEXT_PRESETS",
       "CachingConfig",
+      "ChromaMemory",
       "Chunking",
       "ChunkingStrategy",
       "Citation",
@@ -91,6 +94,7 @@
       "ContextTraceEmitter",
       "ContextTraceSink",
       "ContextTraceSinkProtocol",
+      "CorpusStats",
       "CustomToolUseEvent",
       "DeepResearchAgent",
       "DeepResearchResponse",
@@ -101,6 +105,7 @@
       "EmbeddingAgent",
       "EmbeddingConfig",
       "EmbeddingResult",
+      "EnforcementLevel",
       "ErrorContextProtocol",
       "EscalationPipeline",
       "EscalationStage",
@@ -116,6 +121,7 @@
       "FastContextResult",
       "FileMatch",
       "FileSearchCall",
+      "FileTracker",
       "FlowDisplay",
       "FunctionPlugin",
       "FunctionTool",
@@ -145,9 +151,12 @@
       "HooksConfig",
       "If",
       "ImageAgent",
+      "Include",
+      "IndexResult",
       "KNOWLEDGE_PRESETS",
       "Knowledge",
       "KnowledgeConfig",
+      "KnowledgeStoreProtocol",
       "LLMError",
       "LLMGuardrail",
       "LLMPluginProtocol",
@@ -160,6 +169,7 @@
       "LearnScope",
       "LineRange",
       "Loop",
+      "MAX_NESTING_DEPTH",
       "MCP",
       "MCPCall",
       "MEMORY_PRESETS",
@@ -239,6 +249,7 @@
       "SandboxProtocol",
       "SandboxResult",
       "SandboxStatus",
+      "ScopeRequiredError",
       "SecurityPolicy",
       "Session",
       "SessionConfig",
@@ -248,6 +259,7 @@
       "SkillManager",
       "SkillMetadata",
       "SkillProperties",
+      "SkillState",
       "SkillsConfig",
       "StepResult",
       "StopReason",
@@ -281,7 +293,10 @@
       "WebSearchProvider",
       "Workflow",
       "WorkflowContext",
+      "YAMLWorkflowParser",
       "__version__",
+      "add_memory_adapter",
+      "add_memory_factory",
       "aembed",
       "aembedding",
       "aembeddings",
@@ -298,6 +313,7 @@
       "disable_telemetry",
       "discover_and_load_plugins",
       "discover_plugins",
+      "discover_skills",
       "display_error",
       "display_generating",
       "display_instruction",
@@ -320,6 +336,7 @@
       "get_defaults_config",
       "get_dimensions",
       "get_logger",
+      "get_memory_adapter",
       "get_plugin_manager",
       "get_plugin_template",
       "get_plugins_config",
@@ -330,11 +347,16 @@
       "get_toolset_registry",
       "handoff",
       "handoff_filters",
+      "has_memory_adapter",
       "has_toolset",
+      "if_",
+      "include",
       "is_path_like",
       "is_policy_string",
+      "list_memory_adapters",
       "list_toolsets",
       "load_plugin",
+      "load_skill",
       "loop",
       "memory",
       "parallel",
@@ -344,6 +366,8 @@
       "parse_policy_string",
       "prompt_with_handoff_instructions",
       "register_display_callback",
+      "register_memory_adapter",
+      "register_memory_factory",
       "register_tool",
       "register_toolset",
       "repeat",
@@ -373,8 +397,10 @@
       "trace_context",
       "track_workflow",
       "unregister_toolset",
+      "validate",
       "validate_config",
       "validate_decision_string",
+      "validate_metadata",
       "validate_tool",
       "when",
       "workflows"
@@ -612,10 +638,13 @@
         "AgentRunOutcome",
         "Agents",
         "AsyncLearnProtocol",
+        "AutoMemory",
         "AutonomyConfig",
         "BALANCED_POLICY",
+        "BackendNotAvailableError",
         "BudgetExceededError",
         "CONSERVATIVE_POLICY",
+        "ChromaMemory",
         "CliBackendConfig",
         "CliBackendDelta",
         "CliBackendProtocol",
@@ -626,18 +655,22 @@
         "ContextBudgetResult",
         "ContextCompactionPolicy",
         "ContextCompactionPolicyProtocol",
+        "CorpusStats",
         "CustomToolUseEvent",
         "DoomLoopDetector",
         "ErrorContextProtocol",
         "EscalationPipeline",
         "EscalationStage",
         "EventType",
+        "FileTracker",
         "HandoffCycleError",
         "HandoffDepthError",
         "HandoffError",
         "HandoffTimeoutError",
         "Heartbeat",
         "HeartbeatConfig",
+        "IndexResult",
+        "KnowledgeStoreProtocol",
         "LLMError",
         "LearnManager",
         "LearnManagerProtocol",
@@ -651,6 +684,7 @@
         "PraisonAIError",
         "RetryBackoffConfig",
         "RunStatus",
+        "ScopeRequiredError",
         "SessionErrorEvent",
         "SessionIdleEvent",
         "StopReason",
@@ -661,17 +695,24 @@
         "ToolsetSpec",
         "ValidationError",
         "__version__",
+        "add_memory_adapter",
+        "add_memory_factory",
         "config",
         "configure_structured_logging",
         "embedding",
         "embeddings",
         "get_default_policy",
         "get_logger",
+        "get_memory_adapter",
         "get_toolset",
         "get_toolset_registry",
+        "has_memory_adapter",
         "has_toolset",
+        "list_memory_adapters",
         "list_toolsets",
         "memory",
+        "register_memory_adapter",
+        "register_memory_factory",
         "register_toolset",
         "resolve_toolset",
         "resolve_toolsets",
@@ -737,10 +778,16 @@
         "Session"
       ],
       "skills": [
+        "EnforcementLevel",
         "SkillLoader",
         "SkillManager",
         "SkillMetadata",
-        "SkillProperties"
+        "SkillProperties",
+        "SkillState",
+        "discover_skills",
+        "load_skill",
+        "validate",
+        "validate_metadata"
       ],
       "task": [
         "Task"
@@ -788,7 +835,9 @@
       "workflows": [
         "AgentFlow",
         "If",
+        "Include",
         "Loop",
+        "MAX_NESTING_DEPTH",
         "Parallel",
         "Pipeline",
         "Repeat",
@@ -796,6 +845,9 @@
         "StepResult",
         "Workflow",
         "WorkflowContext",
+        "YAMLWorkflowParser",
+        "if_",
+        "include",
         "loop",
         "parallel",
         "repeat",
@@ -3435,6 +3487,15 @@
         "category": "workflows"
       },
       {
+        "feature": "Include",
+        "python": true,
+        "typescript": false,
+        "priority": "P1",
+        "effort": "high",
+        "status": "TODO",
+        "category": "workflows"
+      },
+      {
         "feature": "Knowledge",
         "python": true,
         "typescript": true,
@@ -3450,6 +3511,15 @@
         "priority": "P1",
         "effort": "high",
         "status": "DONE",
+        "category": "workflows"
+      },
+      {
+        "feature": "MAX_NESTING_DEPTH",
+        "python": true,
+        "typescript": false,
+        "priority": "P1",
+        "effort": "low",
+        "status": "TODO",
         "category": "workflows"
       },
       {
@@ -3534,6 +3604,15 @@
         "category": "workflows"
       },
       {
+        "feature": "YAMLWorkflowParser",
+        "python": true,
+        "typescript": false,
+        "priority": "P1",
+        "effort": "high",
+        "status": "TODO",
+        "category": "workflows"
+      },
+      {
         "feature": "db",
         "python": true,
         "typescript": true,
@@ -3541,6 +3620,24 @@
         "effort": "low",
         "status": "DONE",
         "category": "db"
+      },
+      {
+        "feature": "if_",
+        "python": true,
+        "typescript": false,
+        "priority": "P1",
+        "effort": "low",
+        "status": "TODO",
+        "category": "workflows"
+      },
+      {
+        "feature": "include",
+        "python": true,
+        "typescript": false,
+        "priority": "P1",
+        "effort": "low",
+        "status": "TODO",
+        "category": "workflows"
       },
       {
         "feature": "loop",
@@ -3642,6 +3739,15 @@
         "effort": "high",
         "status": "DONE",
         "category": "rag"
+      },
+      {
+        "feature": "EnforcementLevel",
+        "python": true,
+        "typescript": false,
+        "priority": "P2",
+        "effort": "high",
+        "status": "TODO",
+        "category": "skills"
       },
       {
         "feature": "FastContext",
@@ -3878,6 +3984,15 @@
         "category": "skills"
       },
       {
+        "feature": "SkillState",
+        "python": true,
+        "typescript": false,
+        "priority": "P2",
+        "effort": "high",
+        "status": "TODO",
+        "category": "skills"
+      },
+      {
         "feature": "TelemetryCollector",
         "python": true,
         "typescript": true,
@@ -3932,6 +4047,15 @@
         "category": "telemetry"
       },
       {
+        "feature": "discover_skills",
+        "python": true,
+        "typescript": false,
+        "priority": "P2",
+        "effort": "low",
+        "status": "TODO",
+        "category": "skills"
+      },
+      {
         "feature": "enable_performance_mode",
         "python": true,
         "typescript": true,
@@ -3957,6 +4081,33 @@
         "effort": "low",
         "status": "DONE",
         "category": "telemetry"
+      },
+      {
+        "feature": "load_skill",
+        "python": true,
+        "typescript": false,
+        "priority": "P2",
+        "effort": "low",
+        "status": "TODO",
+        "category": "skills"
+      },
+      {
+        "feature": "validate",
+        "python": true,
+        "typescript": false,
+        "priority": "P2",
+        "effort": "low",
+        "status": "TODO",
+        "category": "skills"
+      },
+      {
+        "feature": "validate_metadata",
+        "python": true,
+        "typescript": false,
+        "priority": "P2",
+        "effort": "low",
+        "status": "TODO",
+        "category": "skills"
       }
     ],
     "P3_Advanced": [
@@ -4141,6 +4292,15 @@
         "category": "app"
       },
       {
+        "feature": "AutoMemory",
+        "python": true,
+        "typescript": true,
+        "priority": "P3",
+        "effort": "high",
+        "status": "DONE",
+        "category": "other"
+      },
+      {
         "feature": "AutoRagAgent",
         "python": true,
         "typescript": true,
@@ -4178,6 +4338,15 @@
       },
       {
         "feature": "BALANCED_POLICY",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "BackendNotAvailableError",
         "python": true,
         "typescript": false,
         "priority": "P3",
@@ -4292,6 +4461,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "ChromaMemory",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "ChunkingStrategy",
@@ -4483,6 +4661,15 @@
         "category": "trace"
       },
       {
+        "feature": "CorpusStats",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "CustomToolUseEvent",
         "python": true,
         "typescript": false,
@@ -4616,6 +4803,15 @@
         "effort": "high",
         "status": "DONE",
         "category": "llm"
+      },
+      {
+        "feature": "FileTracker",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "FlowDisplay",
@@ -4798,6 +4994,15 @@
         "category": "config"
       },
       {
+        "feature": "IndexResult",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "KNOWLEDGE_PRESETS",
         "python": true,
         "typescript": true,
@@ -4814,6 +5019,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "KnowledgeStoreProtocol",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "medium",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "LLMError",
@@ -5311,6 +5525,15 @@
         "category": "sandbox"
       },
       {
+        "feature": "ScopeRequiredError",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "SecurityPolicy",
         "python": true,
         "typescript": true,
@@ -5510,6 +5733,24 @@
       },
       {
         "feature": "__version__",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "add_memory_adapter",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "add_memory_factory",
         "python": true,
         "typescript": false,
         "priority": "P3",
@@ -5797,6 +6038,15 @@
         "category": "other"
       },
       {
+        "feature": "get_memory_adapter",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "get_plugin_manager",
         "python": true,
         "typescript": true,
@@ -5842,6 +6092,15 @@
         "category": "other"
       },
       {
+        "feature": "has_memory_adapter",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "has_toolset",
         "python": true,
         "typescript": false,
@@ -5867,6 +6126,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "list_memory_adapters",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "list_toolsets",
@@ -5930,6 +6198,24 @@
         "effort": "low",
         "status": "DONE",
         "category": "main"
+      },
+      {
+        "feature": "register_memory_adapter",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "register_memory_factory",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "register_toolset",

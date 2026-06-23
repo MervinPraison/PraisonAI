@@ -34,6 +34,22 @@ class UnifiedExecutionMixin:
     This replaces the duplicated logic between chat/achat and execute_tool/execute_tool_async
     with a single async-first implementation plus sync bridge.
     """
+    
+    def _resolve_cli_backend_at_turn_time(self):
+        """
+        Resolve CLI backend at turn-time instead of construction time.
+        
+        This allows for runtime-specific backend selection based on model changes
+        or other runtime conditions.
+        
+        Returns:
+            The resolved CLI backend instance, or current backend if no override needed.
+        """
+        # For now, this is a placeholder for future backend override logic
+        # The runtime resolution infrastructure is in place, but the policy
+        # decisions about when to switch backends are not yet implemented
+        # Always return the current backend until override logic is implemented
+        return getattr(self, '_cli_backend', None)
 
     async def _unified_chat_impl(
         self,
@@ -108,7 +124,8 @@ class UnifiedExecutionMixin:
                     tool_choice=tool_choice
                 )
             elif hasattr(self, '_cli_backend') and self._cli_backend is not None:
-                # Legacy CLI backend with deprecation warning (emitted in Agent.__init__)
+                # CLI Backend routing - delegate entire turn if configured
+                # Note: Turn-time resolution placeholder is in place for future backend switching
                 return await self._chat_via_cli_backend(
                     prompt=prompt,
                     temperature=temperature,
