@@ -15,8 +15,7 @@ def test_observed_channels_persist_across_restart(tmp_path):
     persist, aliases = _paths(tmp_path)
 
     d1 = ChannelDirectory(persist_path=persist, aliases_path=aliases)
-    d1.observe_channel("discord", "123")
-    d1._save()
+    d1.observe_channel("discord", "123")  # auto-persists
 
     d2 = ChannelDirectory(persist_path=persist, aliases_path=aliases)
     assert d2.has_channel("discord", "123")
@@ -140,6 +139,35 @@ def test_refresh_reapplies_alias_overlay(tmp_path):
     aliases.write_text(json.dumps({"eng": "discord:42"}))
     d.refresh_from_adapters({})
 
+    assert d.resolve_alias("eng") == ("discord", "42")
+
+
+def test_deleted_alias_pruned_on_refresh(tmp_path):
+    persist, aliases = _paths(tmp_path)
+    aliases.write_text(json.dumps({"eng": "discord:42", "ops": "slack:C1"}))
+
+    d = ChannelDirectory(persist_path=persist, aliases_path=aliases)
+    assert d.resolve_alias("eng") == ("discord", "42")
+    assert d.resolve_alias("ops") == ("slack", "C1")
+
+    # User removes an alias from the overlay; a refresh should honour it.
+    aliases.write_text(json.dumps({"eng": "discord:42"}))
+    d.refresh_from_adapters({})
+
+    assert d.resolve_alias("eng") == ("discord", "42")
+    assert d.resolve_alias("ops") is None
+
+
+def test_manual_alias_not_pruned_by_overlay(tmp_path):
+    persist, aliases = _paths(tmp_path)
+    d = ChannelDirectory(persist_path=persist, aliases_path=aliases)
+
+    # Alias added programmatically (not from the overlay file).
+    d.add_alias("manual", "discord", "9")
+    aliases.write_text(json.dumps({"eng": "discord:42"}))
+    d.refresh_from_adapters({})
+
+    assert d.resolve_alias("manual") == ("discord", "9")
     assert d.resolve_alias("eng") == ("discord", "42")
 
 

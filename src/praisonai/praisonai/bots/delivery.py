@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, TYPE_CHECKING
@@ -125,6 +126,10 @@ class ChannelDirectory:
         # Friendly aliases to (platform, channel_id)
         self._aliases: Dict[str, Tuple[str, str]] = {}
         
+        # Alias names sourced from the durable overlay file, tracked so stale
+        # entries can be pruned when the file is edited between refreshes.
+        self._overlay_aliases: set = set()
+        
         # Recently observed channels per platform
         self._observed: Dict[str, set] = {}
         
@@ -161,7 +166,13 @@ class ChannelDirectory:
             logger.warning("ChannelDirectory: failed to load directory: %s", e)
     
     def _save(self) -> None:
-        """Persist home + observed channels to disk (best-effort)."""
+        """Persist home + observed channels to disk (best-effort, atomic).
+
+        Writes to a sibling temp file then atomically replaces the target via
+        ``os.replace`` so an interrupted write (disk full, crash, power loss)
+        can never leave a truncated/corrupt file that ``_load`` would silently
+        discard.
+        """
         try:
             data = {
                 "home_channels": dict(self._home_channels),
@@ -171,8 +182,12 @@ class ChannelDirectory:
                 },
             }
             self._persist_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self._persist_path, "w") as f:
+            tmp_path = self._persist_path.with_suffix(
+                self._persist_path.suffix + ".tmp"
+            )
+            with open(tmp_path, "w") as f:
                 json.dump(data, f, indent=2)
+            os.replace(tmp_path, self._persist_path)
             logger.debug("ChannelDirectory: saved directory to %s", self._persist_path)
         except Exception as e:
             logger.error("ChannelDirectory: failed to save directory: %s", e)
@@ -198,6 +213,16 @@ class ChannelDirectory:
         if not isinstance(data, dict):
             return
         
+        # The overlay file is the source of truth for the aliases it defines:
+        # drop any previously-applied alias whose name is no longer present so
+        # a deletion in the file is honoured on the next load/refresh instead
+        # of lingering in memory until the process restarts.
+        overlay_names = set(data.keys())
+        for name in list(self._aliases.keys()):
+            if name in self._overlay_aliases and name not in overlay_names:
+                self._aliases.pop(name, None)
+        self._overlay_aliases = set()
+        
         for name, value in data.items():
             platform: Optional[str] = None
             channel_id: Optional[str] = None
@@ -215,6 +240,7 @@ class ChannelDirectory:
             
             platform_key = str(platform).lower()
             self._aliases[name] = (platform_key, str(channel_id))
+            self._overlay_aliases.add(name)
             # An aliased channel is reachable, so record it as observed too.
             self._observed.setdefault(platform_key, set()).add(str(channel_id))
     
@@ -269,11 +295,19 @@ class ChannelDirectory:
         logger.debug(f"ChannelDirectory: added alias '{name}' -> {platform_key}:{channel_id}")
     
     def observe_channel(self, platform: str, channel_id: str) -> None:
-        """Record an observed channel from an active session."""
+        """Record an observed channel from an active session.
+
+        New observations are persisted immediately (best-effort) so channels
+        seen from live traffic survive a restart even before the next refresh
+        cycle runs, consistent with ``set_home_channel``.
+        """
         platform_key = platform.lower()
         if platform_key not in self._observed:
             self._observed[platform_key] = set()
+        if channel_id in self._observed[platform_key]:
+            return
         self._observed[platform_key].add(channel_id)
+        self._save()
     
     def get_home_channel(self, platform: str) -> Optional[str]:
         """Get the home channel for a platform."""
