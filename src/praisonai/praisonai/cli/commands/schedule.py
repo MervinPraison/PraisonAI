@@ -481,7 +481,8 @@ def schedule_suggestion_propose(
 
         cli_slot_map: dict = {
             "hour": hour, "minute": minute, "weekdays": weekdays,
-            "focus": focus, "interval_minutes": interval,
+            "focus": focus, "interval_minutes": interval, "interval": interval,
+            "keywords": keywords,
         }
         slots = {}
         for slot in bp.slots:
