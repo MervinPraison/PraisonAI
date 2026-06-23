@@ -11,7 +11,7 @@ from praisonaiagents.approval import (
     set_yaml_approved_tools,
     reset_yaml_approved_tools,
 )
-from praisonaiagents.tools.edit_tools import EditTools, _BLOCK_ANCHOR_THRESHOLD
+from praisonaiagents.tools.edit_tools import EditTools
 
 
 @pytest.fixture(autouse=True)
@@ -116,6 +116,20 @@ class TestFuzzyMatching:
         assert b"return 2" in data
         assert b"\r\n" in data
 
+    def test_fuzzy_midfile_does_not_merge_next_line(self, tools, tmp_path):
+        # Regression: fuzzy span must exclude the matched line's trailing
+        # newline so the replacement does not merge with the following line.
+        # (line_trimmed matches the whole "    return 1" line; the newline and
+        # the following "foo" line must remain intact.)
+        p = tmp_path / "a.py"
+        _write(p, "    return 1\nfoo\n")
+        result = tools.edit_file(str(p), "return 1", "return 2")
+        assert "Success" in result
+        out = _read(p)
+        assert out.endswith("\nfoo\n")
+        assert "return 2foo" not in out
+        assert "return 2" in out
+
 
 class TestFindSpanInternals:
     def test_exact_spans(self, tools):
@@ -131,6 +145,26 @@ class TestFindSpanInternals:
         spans = tools._block_anchor(content, old)
         # last anchor differs ("finish" vs "end") so no match
         assert spans == []
+
+    def test_block_anchor_scans_all_candidates(self, tools):
+        # Two blocks share the same first/last anchors; the second is an exact
+        # structural match. The scanner must not break after the first anchor
+        # pairing (regression for the premature-break bug).
+        content = (
+            "begin\n    wrong = 0\nend\n"
+            "begin\n    a = 1\n    b = 2\nend\n"
+        )
+        old = "begin\n    a = 1\n    b = 2\nend"
+        spans = tools._block_anchor(content, old)
+        assert spans  # a confident span was found despite the earlier pair
+
+    def test_fuzzy_ambiguous_reports_error(self, tools, tmp_path):
+        # Identical fuzzy-matchable lines at two locations -> ambiguity error.
+        p = tmp_path / "a.py"
+        _write(p, "x   =   1\nother\nx   =   1\n")
+        # ws-normalised matches both "x = 1" lines.
+        result = tools.edit_file(str(p), "x = 1", "x = 2")
+        assert "Ambiguous" in result
 
 
 class TestApplyPatch:
@@ -226,3 +260,74 @@ class TestApplyPatch:
         result = tools.apply_patch(patch)
         assert "Success" in result
         assert "return 2" in _read(target)
+
+    def test_begin_end_patch_sentinels_not_in_body(self, tools, tmp_path):
+        # Regression: *** Begin/End Patch must not leak into file content.
+        target = tmp_path / "wrapped.py"
+        patch = (
+            "*** Begin Patch\n"
+            f"*** Add File: {target}\n"
+            "print('hi')\n"
+            "*** End Patch\n"
+        )
+        result = tools.apply_patch(patch)
+        assert "Success" in result
+        content = _read(target)
+        assert "End Patch" not in content
+        assert "Begin Patch" not in content
+        assert content == "print('hi')"
+
+    def test_update_preserves_crlf_and_bom(self, tools, tmp_path):
+        target = tmp_path / "crlf.py"
+        with open(target, "wb") as f:
+            f.write(b"\xef\xbb\xbfdef foo():\r\n    return 1\r\n")
+        patch = (
+            f"*** Update File: {target}\n"
+            "@@\n"
+            "    return 1\n"
+            "===\n"
+            "    return 2\n"
+        )
+        result = tools.apply_patch(patch)
+        assert "Success" in result
+        with open(target, "rb") as f:
+            data = f.read()
+        assert data.startswith(b"\xef\xbb\xbf")  # BOM preserved
+        assert b"\r\n" in data  # CRLF preserved
+        assert b"return 2" in data
+
+    def test_rollback_mid_phase2(self, tools, tmp_path, monkeypatch):
+        # Force a failure on the SECOND commit and confirm the first is undone.
+        a = tmp_path / "a.py"
+        b = tmp_path / "b.py"
+        _write(b, "original b\n")
+        patch = (
+            f"*** Add File: {a}\n"
+            "new a\n"
+            f"*** Update File: {b}\n"
+            "@@\n"
+            "original b\n"
+            "===\n"
+            "updated b\n"
+        )
+
+        real_replace = os.replace
+        calls = {"n": 0}
+
+        def flaky_replace(src, dst, *args, **kwargs):
+            calls["n"] += 1
+            # First os.replace is the Add commit; let it through. The Update
+            # commit issues further os.replace calls -> fail one of them.
+            if calls["n"] == 2:
+                raise OSError("simulated disk failure")
+            return real_replace(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(os, "replace", flaky_replace)
+        result = tools.apply_patch(patch)
+        monkeypatch.undo()
+
+        assert "Error" in result
+        # Add must have been rolled back.
+        assert not os.path.exists(a)
+        # Update target must retain its original content.
+        assert _read(b) == "original b\n"
