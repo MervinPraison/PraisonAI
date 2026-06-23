@@ -1,16 +1,16 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 381 | **Rust Features:** 667 | **Parity:** 75.6%
+> **Python Features:** 388 | **Rust Features:** 667 | **Parity:** 74.2%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 381 |
+| Python Core Features | 388 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **93** |
+| **Actual Gap Count** | **100** |
 | Language Limitations (N/A) | 5 |
-| **Parity** | **75.6%** |
+| **Parity** | **74.2%** |
 
 ## Implemented Features
 
@@ -764,20 +764,27 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `ToolsetSpec`
 - ❌ `YAMLWorkflowParser`
 - ❌ `__version__`
+- ❌ `add_memory_adapter`
+- ❌ `add_memory_factory`
 - ❌ `configure_structured_logging`
 - ❌ `discover_skills`
 - ❌ `get_default_policy`
 - ❌ `get_logger`
+- ❌ `get_memory_adapter`
 - ❌ `get_registry`
 - ❌ `get_tool`
 - ❌ `get_toolset`
 - ❌ `get_toolset_registry`
+- ❌ `has_memory_adapter`
 - ❌ `has_toolset`
 - ❌ `if_`
 - ❌ `include`
+- ❌ `list_memory_adapters`
 - ❌ `list_toolsets`
 - ❌ `load_skill`
 - ❌ `parallel_handoffs`
+- ❌ `register_memory_adapter`
+- ❌ `register_memory_factory`
 - ❌ `register_tool`
 - ❌ `register_toolset`
 - ❌ `resolve_toolset`

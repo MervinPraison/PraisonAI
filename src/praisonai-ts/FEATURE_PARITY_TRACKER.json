@@ -4,14 +4,14 @@
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 381,
+    "pythonCoreFeatures": 388,
     "pythonWrapperFeatures": 100,
     "typescriptFeatures": 1188,
-    "gapCount": 88,
+    "gapCount": 95,
     "priorityP0": 2,
     "priorityP1": 5,
     "priorityP2": 6,
-    "priorityP3": 75
+    "priorityP3": 82
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -295,6 +295,8 @@
       "WorkflowContext",
       "YAMLWorkflowParser",
       "__version__",
+      "add_memory_adapter",
+      "add_memory_factory",
       "aembed",
       "aembedding",
       "aembeddings",
@@ -334,6 +336,7 @@
       "get_defaults_config",
       "get_dimensions",
       "get_logger",
+      "get_memory_adapter",
       "get_plugin_manager",
       "get_plugin_template",
       "get_plugins_config",
@@ -344,11 +347,13 @@
       "get_toolset_registry",
       "handoff",
       "handoff_filters",
+      "has_memory_adapter",
       "has_toolset",
       "if_",
       "include",
       "is_path_like",
       "is_policy_string",
+      "list_memory_adapters",
       "list_toolsets",
       "load_plugin",
       "load_skill",
@@ -361,6 +366,8 @@
       "parse_policy_string",
       "prompt_with_handoff_instructions",
       "register_display_callback",
+      "register_memory_adapter",
+      "register_memory_factory",
       "register_tool",
       "register_toolset",
       "repeat",
@@ -688,17 +695,24 @@
         "ToolsetSpec",
         "ValidationError",
         "__version__",
+        "add_memory_adapter",
+        "add_memory_factory",
         "config",
         "configure_structured_logging",
         "embedding",
         "embeddings",
         "get_default_policy",
         "get_logger",
+        "get_memory_adapter",
         "get_toolset",
         "get_toolset_registry",
+        "has_memory_adapter",
         "has_toolset",
+        "list_memory_adapters",
         "list_toolsets",
         "memory",
+        "register_memory_adapter",
+        "register_memory_factory",
         "register_toolset",
         "resolve_toolset",
         "resolve_toolsets",
@@ -5727,6 +5741,24 @@
         "category": "other"
       },
       {
+        "feature": "add_memory_adapter",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "add_memory_factory",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "aembed",
         "python": true,
         "typescript": true,
@@ -6006,6 +6038,15 @@
         "category": "other"
       },
       {
+        "feature": "get_memory_adapter",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "get_plugin_manager",
         "python": true,
         "typescript": true,
@@ -6051,6 +6092,15 @@
         "category": "other"
       },
       {
+        "feature": "has_memory_adapter",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "has_toolset",
         "python": true,
         "typescript": false,
@@ -6076,6 +6126,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "list_memory_adapters",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "list_toolsets",
@@ -6139,6 +6198,24 @@
         "effort": "low",
         "status": "DONE",
         "category": "main"
+      },
+      {
+        "feature": "register_memory_adapter",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "register_memory_factory",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "register_toolset",

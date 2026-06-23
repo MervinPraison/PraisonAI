@@ -5,10 +5,10 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 381,
+    "pythonCoreFeatures": 388,
     "rustFeatures": 667,
-    "gapCount": 99,
-    "parityPercentage": 175.1
+    "gapCount": 106,
+    "parityPercentage": 171.9
   },
   "pythonCoreSDK": {
     "exports": [
@@ -291,6 +291,8 @@
       "WorkflowContext",
       "YAMLWorkflowParser",
       "__version__",
+      "add_memory_adapter",
+      "add_memory_factory",
       "aembed",
       "aembedding",
       "aembeddings",
@@ -330,6 +332,7 @@
       "get_defaults_config",
       "get_dimensions",
       "get_logger",
+      "get_memory_adapter",
       "get_plugin_manager",
       "get_plugin_template",
       "get_plugins_config",
@@ -340,11 +343,13 @@
       "get_toolset_registry",
       "handoff",
       "handoff_filters",
+      "has_memory_adapter",
       "has_toolset",
       "if_",
       "include",
       "is_path_like",
       "is_policy_string",
+      "list_memory_adapters",
       "list_toolsets",
       "load_plugin",
       "load_skill",
@@ -357,6 +362,8 @@
       "parse_policy_string",
       "prompt_with_handoff_instructions",
       "register_display_callback",
+      "register_memory_adapter",
+      "register_memory_factory",
       "register_tool",
       "register_toolset",
       "repeat",
@@ -4595,6 +4602,24 @@
         "category": "other"
       },
       {
+        "feature": "add_memory_adapter",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "add_memory_factory",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "aembed",
         "python": true,
         "rust": true,
@@ -4874,6 +4899,15 @@
         "category": "other"
       },
       {
+        "feature": "get_memory_adapter",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "get_plugin_manager",
         "python": true,
         "rust": true,
@@ -4919,6 +4953,15 @@
         "category": "other"
       },
       {
+        "feature": "has_memory_adapter",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "has_toolset",
         "python": true,
         "rust": false,
@@ -4944,6 +4987,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "list_memory_adapters",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "list_toolsets",
@@ -5007,6 +5059,24 @@
         "effort": "low",
         "status": "DONE",
         "category": "main"
+      },
+      {
+        "feature": "register_memory_adapter",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "register_memory_factory",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "register_toolset",
