@@ -336,8 +336,6 @@ _LAZY_IMPORTS = {
     'SkillProperties': ('praisonaiagents.skills', 'SkillProperties'),
     'SkillMetadata': ('praisonaiagents.skills', 'SkillMetadata'),
     'SkillLoader': ('praisonaiagents.skills', 'SkillLoader'),
-    'validate': ('praisonaiagents.skills', 'validate'),
-    'validate_metadata': ('praisonaiagents.skills', 'validate_metadata'),
     'discover_skills': ('praisonaiagents.skills', 'discover_skills'),
     'load_skill': ('praisonaiagents.skills', 'load_skill'),
     'EnforcementLevel': ('praisonaiagents.skills', 'EnforcementLevel'),
@@ -346,7 +344,7 @@ _LAZY_IMPORTS = {
     # Memory
     'Memory': ('praisonaiagents.memory.memory', 'Memory'),
     'AutoMemory': ('praisonaiagents.memory', 'AutoMemory'),
-    'ChromaMemory': ('praisonaiagents.memory.adapters.factories', 'create_chroma_memory_adapter'),
+    'ChromaMemory': ('praisonaiagents.memory.adapters.factories', 'ChromaMemoryAdapter'),
     
     # Planning
     'Plan': ('praisonaiagents.planning', 'Plan'),
