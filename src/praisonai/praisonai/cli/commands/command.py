@@ -30,7 +30,8 @@ def list_commands(
         
         if not commands:
             output.print_info("No custom commands found.")
-            output.print_info("Create commands in .praisonai/commands/*.md or ~/.praisonai/commands/*.md")
+            output.print_info("Run 'praisonai init' to scaffold a starter .praisonai/ project,")
+            output.print_info("or create commands in .praisonai/commands/*.md or ~/.praisonai/commands/*.md")
             return
         
         from rich.table import Table

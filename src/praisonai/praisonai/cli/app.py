@@ -113,6 +113,7 @@ class OutputFormat(str, Enum):
 # Command registry for lazy loading
 _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     # Core commands
+    "init": (".commands.init", "app", "Initialise the .praisonai/ project convention"),
     "config": (".commands.config", "app", "Configuration management"),
     "traces": (".commands.traces", "app", "Trace collection management"),
     "env": (".commands.environment", "app", "Environment and diagnostics"),
@@ -705,6 +706,7 @@ def get_output_controller() -> OutputController:
 # Command name to module mapping for lazy loading
 _COMMAND_GROUPS = {
     # Core commands
+    "init": ".commands.init",
     "config": ".commands.config",
     "traces": ".commands.traces", 
     "env": ".commands.environment",

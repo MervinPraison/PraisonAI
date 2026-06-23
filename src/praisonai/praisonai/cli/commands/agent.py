@@ -30,7 +30,8 @@ def list(
         
         if not agents:
             output.print_info("No custom agents found.")
-            output.print_info("Create agents in .praisonai/agents/*.md or ~/.praisonai/agents/*.md")
+            output.print_info("Run 'praisonai init' to scaffold a starter .praisonai/ project,")
+            output.print_info("or create agents in .praisonai/agents/*.md or ~/.praisonai/agents/*.md")
             return
         
         from rich.table import Table
