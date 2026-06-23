@@ -19,32 +19,7 @@ Sources:
 - https://docs.litellm.ai/docs/completion/prompt_caching
 """
 
-
-# Module-level cache for litellm (lazy loaded)
-_litellm_module = None
-_litellm_import_attempted = False
-
-
-def _get_litellm():
-    """
-    Lazy import litellm module.
-    
-    Returns litellm module if available, None otherwise.
-    Caches the result to avoid repeated import attempts.
-    """
-    global _litellm_module, _litellm_import_attempted
-    
-    if _litellm_import_attempted:
-        return _litellm_module
-    
-    _litellm_import_attempted = True
-    
-    try:
-        import litellm
-        _litellm_module = litellm
-        return litellm
-    except ImportError:
-        return None
+from ._litellm_loader import get_litellm as _get_litellm
 
 
 def supports_structured_outputs(model_name: str) -> bool:

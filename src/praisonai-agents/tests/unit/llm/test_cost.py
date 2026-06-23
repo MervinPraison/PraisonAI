@@ -164,10 +164,11 @@ class TestCostModule:
     def test_lazy_litellm_import(self):
         """_get_litellm should cache the import result."""
         import praisonaiagents.llm._cost as cost_module
+        import praisonaiagents.llm._litellm_loader as loader_module
         
-        # Reset state
-        cost_module._litellm_module = None
-        cost_module._litellm_import_attempted = False
+        # Reset shared loader state
+        loader_module._litellm_module = None
+        loader_module._litellm_import_attempted = False
         
         # First call
         result1 = cost_module._get_litellm()
@@ -176,7 +177,7 @@ class TestCostModule:
         result2 = cost_module._get_litellm()
         
         assert result1 is result2
-        assert cost_module._litellm_import_attempted is True
+        assert loader_module._litellm_import_attempted is True
 
 
 class TestCostModuleIntegration:

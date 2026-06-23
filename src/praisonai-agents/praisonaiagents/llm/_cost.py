@@ -15,32 +15,21 @@ import os
 import logging
 from typing import Any, Dict, Optional
 
-# Module-level cache for litellm (lazy loaded)
-_litellm_module = None
-_litellm_import_attempted = False
+from ._litellm_loader import get_litellm
 
 
 def _get_litellm():
     """
     Lazy import litellm module.
-    
+
     Returns litellm module if available, None otherwise.
     Caches the result to avoid repeated import attempts.
     """
-    global _litellm_module, _litellm_import_attempted
-    
-    if _litellm_import_attempted:
-        return _litellm_module
-    
-    _litellm_import_attempted = True
-    
-    try:
-        import litellm
-        _litellm_module = litellm
-        return litellm
-    except ImportError:
-        logging.debug("litellm not available for cost calculation")
-        return None
+    return get_litellm(
+        on_missing=lambda: logging.debug(
+            "litellm not available for cost calculation"
+        )
+    )
 
 
 def is_cost_tracking_enabled() -> bool:
