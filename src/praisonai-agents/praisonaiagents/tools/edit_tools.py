@@ -6,13 +6,17 @@ used in skill management.
 """
 
 import os
+import re
 import logging
 import hashlib
 import difflib
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 from ..approval import require_approval
 
 logger = logging.getLogger(__name__)
+
+# Minimum similarity ratio for an accepted block-anchor (fuzzy) match.
+_BLOCK_ANCHOR_THRESHOLD = 0.7
 
 
 class EditTools:
@@ -55,6 +59,28 @@ class EditTools:
     def _compute_content_hash(self, content: str) -> str:
         """Compute a SHA256 hash of the content for staleness checking."""
         return hashlib.sha256(content.encode('utf-8')).hexdigest()
+
+    @staticmethod
+    def _decode_with_bom(raw_bytes: bytes) -> Tuple[str, bytes]:
+        """Decode UTF-8 bytes, returning (content, bom_prefix).
+
+        Raises ValueError for unsupported UTF-16 BOMs so callers can surface a
+        friendly error.  Mirrors the BOM handling in ``edit_file`` so both
+        entry points behave identically.
+        """
+        bom = b''
+        if raw_bytes.startswith(b'\xef\xbb\xbf'):  # UTF-8 BOM
+            bom = b'\xef\xbb\xbf'
+            raw_bytes = raw_bytes[3:]
+        elif raw_bytes.startswith(b'\xff\xfe') or raw_bytes.startswith(b'\xfe\xff'):
+            raise ValueError("UTF-16 encoding is not supported. Please convert the file to UTF-8.")
+        return raw_bytes.decode('utf-8'), bom
+
+    def _encode_preserving(self, content: str, line_ending: str, bom: bytes) -> bytes:
+        """Encode ``content`` back to bytes, re-applying line ending and BOM."""
+        if line_ending == '\r\n':
+            content = content.replace('\r\n', '\n').replace('\n', '\r\n')
+        return bom + content.encode('utf-8')
     
     def _render_diff(self, old_content: str, new_content: str, filepath: str, max_lines: int = 10) -> str:
         """Generate a bounded unified diff between old and new content.
@@ -91,6 +117,161 @@ class EditTools:
         
         return ''.join(diff_lines) if diff_lines else "No changes detected"
     
+    # ------------------------------------------------------------------
+    # Fuzzy matching ladder
+    #
+    # Each strategy receives the full file ``content`` and the target
+    # ``old`` string and returns a list of ``(start, end)`` character spans
+    # that the target maps onto.  ``_find_span`` walks the ladder in order
+    # and stops at the first strategy yielding exactly one confident span.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _exact(content: str, old: str) -> List[Tuple[int, int]]:
+        """Strategy 1: byte-for-byte substring matches."""
+        spans = []
+        start = content.find(old)
+        while start != -1:
+            spans.append((start, start + len(old)))
+            start = content.find(old, start + 1)
+        return spans
+
+    @staticmethod
+    def _line_offsets(content: str) -> List[Tuple[int, int]]:
+        """Return (start, end) char offsets for each line (keeping newline)."""
+        offsets = []
+        pos = 0
+        for line in content.splitlines(keepends=True):
+            offsets.append((pos, pos + len(line)))
+            pos += len(line)
+        return offsets
+
+    def _line_block_match(self, content: str, old: str, transform) -> List[Tuple[int, int]]:
+        """Generic line-block matcher.
+
+        Compares ``old`` against the file line-by-line after applying
+        ``transform`` to each line.  Returns char spans covering the whole
+        matched block (from the start of the first line to the end of the
+        last line).
+        """
+        old_lines = old.splitlines()
+        if not old_lines:
+            return []
+
+        content_lines = content.splitlines(keepends=True)
+        offsets = self._line_offsets(content)
+        norm_old = [transform(line) for line in old_lines]
+        norm_content = [transform(line.rstrip('\n').rstrip('\r')) for line in content_lines]
+
+        n = len(norm_old)
+        spans = []
+        for i in range(len(norm_content) - n + 1):
+            if norm_content[i:i + n] == norm_old:
+                start = offsets[i][0]
+                # Exclude the last matched line's terminator from the span so
+                # the replacement (which carries no trailing newline) does not
+                # consume it and merge with the following line.
+                last = content_lines[i + n - 1]
+                term = len(last) - len(last.rstrip('\r\n'))
+                end = offsets[i + n - 1][1] - term
+                spans.append((start, end))
+        return spans
+
+    def _line_trimmed(self, content: str, old: str) -> List[Tuple[int, int]]:
+        """Strategy 2: match ignoring leading/trailing whitespace per line."""
+        return self._line_block_match(content, old, lambda line: line.strip())
+
+    def _ws_normalised(self, content: str, old: str) -> List[Tuple[int, int]]:
+        """Strategy 3: match collapsing all internal whitespace runs."""
+        def norm(line):
+            return re.sub(r'\s+', ' ', line).strip()
+        return self._line_block_match(content, old, norm)
+
+    def _indent_flexible(self, content: str, old: str) -> List[Tuple[int, int]]:
+        """Strategy 4: match ignoring indentation but preserving inner text.
+
+        Normalises tabs/spaces indentation and the relative structure so a
+        block indented differently than ``old_string`` still matches.
+        """
+        def norm(line):
+            return line.replace('\t', '    ').strip()
+        return self._line_block_match(content, old, norm)
+
+    def _block_anchor(self, content: str, old: str) -> List[Tuple[int, int]]:
+        """Strategy 5: similarity-scored block anchoring.
+
+        Uses the first and last lines of ``old`` as anchors, then scores the
+        enclosed candidate block with difflib.  Only returns a span when the
+        single best candidate exceeds the similarity threshold and has a
+        proportionate length, guarding against silent corruption.
+        """
+        old_lines = old.splitlines()
+        if len(old_lines) < 2:
+            return []
+
+        content_lines = content.splitlines(keepends=True)
+        offsets = self._line_offsets(content)
+        stripped = [line.rstrip('\n').rstrip('\r').strip() for line in content_lines]
+        first_anchor = old_lines[0].strip()
+        last_anchor = old_lines[-1].strip()
+        if not first_anchor or not last_anchor:
+            return []
+
+        n = len(old_lines)
+        target = '\n'.join(line.strip() for line in old_lines)
+        candidates = []
+        for i, line in enumerate(stripped):
+            if line != first_anchor:
+                continue
+            for j in range(i + 1, len(stripped)):
+                if stripped[j] != last_anchor:
+                    continue
+                block_len = j - i + 1
+                # Disproportionate-length guard.
+                if block_len > n * 2 or block_len < max(2, n // 2):
+                    continue
+                candidate = '\n'.join(stripped[i:j + 1])
+                ratio = difflib.SequenceMatcher(None, candidate, target).ratio()
+                if ratio >= _BLOCK_ANCHOR_THRESHOLD:
+                    # Exclude the closing line's terminator from the span so
+                    # the replacement does not swallow the following newline.
+                    last = content_lines[j]
+                    term = len(last) - len(last.rstrip('\r\n'))
+                    candidates.append((ratio, offsets[i][0], offsets[j][1] - term))
+                # Continue scanning: a later matching last_anchor may yield a
+                # higher-similarity block, and breaking here would skip it.
+
+        if not candidates:
+            return []
+        candidates.sort(reverse=True)
+        # If the top two candidates tie, treat as ambiguous (caller handles).
+        if len(candidates) > 1 and abs(candidates[0][0] - candidates[1][0]) < 1e-9:
+            return [(candidates[0][1], candidates[0][2]),
+                    (candidates[1][1], candidates[1][2])]
+        return [(candidates[0][1], candidates[0][2])]
+
+    def _find_spans(self, content: str, old: str):
+        """Walk the fuzzy ladder and return matching spans for ``old``.
+
+        Returns:
+            - list of (start, end) spans from the first strategy that
+              produces at least one match; callers inspect the span count to
+              decide ambiguity (more than one span = ambiguous).
+            - empty list when no strategy matches.
+        """
+        strategies = (
+            self._exact,
+            self._line_trimmed,
+            self._ws_normalised,
+            self._indent_flexible,
+            self._block_anchor,
+        )
+        for strategy in strategies:
+            spans = strategy(content, old)
+            if spans:
+                return spans
+        return []
+
     @require_approval(risk_level="high")
     def edit_file(self, filepath: str, old_string: str, new_string: str, 
                   replace_all: bool = False, expected_hash: Optional[str] = None) -> str:
@@ -147,12 +328,16 @@ class EditTools:
             if old_string == "":
                 return "Error: old_string must be non-empty"
             
-            if old_string not in content:
+            # Locate the target using the fuzzy matching ladder.  Exact
+            # substring matches are preferred and behave exactly as before;
+            # fuzzy strategies only engage when an exact match is not found.
+            spans = self._find_spans(content, old_string)
+            
+            if not spans:
                 preview = old_string[:50] + ("..." if len(old_string) > 50 else "")
                 return f"Error: String not found in file: '{preview}'"
             
-            # Count occurrences
-            occurrences = self._count_occurrences(content, old_string)
+            occurrences = len(spans)
             
             # Check for ambiguous match
             if occurrences > 1 and not replace_all:
@@ -161,12 +346,16 @@ class EditTools:
                        f"Please provide more surrounding context to make the match unique, "
                        f"or use replace_all=True to replace all occurrences.")
             
-            # Perform replacement
+            # Perform replacement using located spans (apply right-to-left so
+            # earlier offsets remain valid as we splice in new_string).
             if replace_all:
-                new_content = content.replace(old_string, new_string)
+                new_content = content
+                for start, end in sorted(spans, reverse=True):
+                    new_content = new_content[:start] + new_string + new_content[end:]
                 replacements = occurrences
             else:
-                new_content = content.replace(old_string, new_string, 1)
+                start, end = spans[0]
+                new_content = content[:start] + new_string + content[end:]
                 replacements = 1
             
             # Generate diff
@@ -191,7 +380,238 @@ class EditTools:
             error_msg = f"Error editing file {filepath}: {str(e)}"
             logger.error(error_msg)
             return error_msg
-    
+
+    # ------------------------------------------------------------------
+    # Multi-file structured patch
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_patch(patch: str):
+        """Parse a structured multi-file patch into operations.
+
+        Supported section headers (one operation each):
+
+            *** Add File: path/to/file
+            <full file content lines>
+
+            *** Update File: path/to/file
+            @@
+            <old block>
+            ===
+            <new block>
+
+            *** Delete File: path/to/file
+
+        ``Update File`` may contain multiple ``@@`` hunks.  Returns a list of
+        dicts: ``{"op", "path", ...}``.  Raises ``ValueError`` on malformed
+        input.
+        """
+        lines = patch.splitlines()
+        ops = []
+        i = 0
+        n = len(lines)
+
+        _SENTINELS = ("*** Begin Patch", "*** End Patch")
+
+        def _header(line):
+            for op, prefix in (("add", "*** Add File:"),
+                               ("update", "*** Update File:"),
+                               ("delete", "*** Delete File:")):
+                if line.strip().startswith(prefix):
+                    return op, line.split(":", 1)[1].strip()
+            return None, None
+
+        def _is_boundary(line):
+            """A line that terminates a body/hunk: a header or a sentinel."""
+            return _header(line)[0] is not None or line.strip() in _SENTINELS
+
+        while i < n:
+            line = lines[i]
+            if not line.strip() or line.strip() in _SENTINELS:
+                i += 1
+                continue
+            op, path = _header(line)
+            if op is None:
+                raise ValueError(f"Unexpected line in patch (expected a section header): {line!r}")
+            i += 1
+            if op == "delete":
+                ops.append({"op": "delete", "path": path})
+            elif op == "add":
+                body = []
+                while i < n and not _is_boundary(lines[i]):
+                    body.append(lines[i])
+                    i += 1
+                ops.append({"op": "add", "path": path, "content": "\n".join(body)})
+            elif op == "update":
+                hunks = []
+                while i < n and not _is_boundary(lines[i]):
+                    if lines[i].strip().startswith("@@"):
+                        i += 1
+                        old_block, new_block = [], []
+                        in_new = False
+                        while i < n and not lines[i].strip().startswith("@@") and not _is_boundary(lines[i]):
+                            if lines[i].strip() == "===":
+                                in_new = True
+                                i += 1
+                                continue
+                            (new_block if in_new else old_block).append(lines[i])
+                            i += 1
+                        hunks.append(("\n".join(old_block), "\n".join(new_block)))
+                    else:
+                        i += 1
+                ops.append({"op": "update", "path": path, "hunks": hunks})
+        return ops
+
+    @require_approval(risk_level="high")
+    def apply_patch(self, patch: str) -> str:
+        """Apply a structured multi-file patch atomically.
+
+        The patch may Add, Update, and Delete multiple files in a single
+        call.  All operations are validated first; only if every operation
+        is valid are the changes committed to disk.  The commit phase stages
+        writes/deletes and rolls them back if any step fails, so on any error
+        the filesystem is left in its original state.  BOM and CRLF line
+        endings are preserved on Update, matching ``edit_file``.
+
+        Args:
+            patch: Structured patch text (see ``_parse_patch`` for format).
+
+        Returns:
+            Combined success message with diffs, or an error description.
+        """
+        try:
+            try:
+                ops = self._parse_patch(patch)
+            except ValueError as e:
+                return f"Error: Invalid patch: {e}"
+
+            if not ops:
+                return "Error: Patch contains no operations"
+
+            # Phase 1: validate every operation and compute new content.
+            # Each planned entry: (kind, safe_path, display, encoded_bytes,
+            # diff, content_hash). encoded_bytes is None for deletes.
+            planned = []
+            for op in ops:
+                safe_path = self._validate_path(op["path"])
+
+                if op["op"] == "add":
+                    if os.path.exists(safe_path):
+                        return f"Error: Cannot add '{op['path']}': file already exists"
+                    encoded = op["content"].encode('utf-8')
+                    planned.append(("add", safe_path, op["path"], encoded,
+                                    self._render_diff("", op["content"], op["path"]),
+                                    self._compute_content_hash(op["content"])))
+
+                elif op["op"] == "delete":
+                    if not os.path.exists(safe_path):
+                        return f"Error: Cannot delete '{op['path']}': file not found"
+                    planned.append(("delete", safe_path, op["path"], None, "", None))
+
+                elif op["op"] == "update":
+                    if not os.path.exists(safe_path):
+                        return f"Error: Cannot update '{op['path']}': file not found"
+                    # Read in binary to preserve BOM/CRLF like edit_file does.
+                    with open(safe_path, 'rb') as f:
+                        raw_bytes = f.read()
+                    try:
+                        original, bom = self._decode_with_bom(raw_bytes)
+                    except ValueError as e:
+                        return f"Error: Cannot update '{op['path']}': {e}"
+                    line_ending = self._detect_line_ending(original)
+                    updated = original
+                    for old_block, new_block in op["hunks"]:
+                        if not old_block:
+                            return f"Error: Empty hunk in update for '{op['path']}'"
+                        spans = self._find_spans(updated, old_block)
+                        if not spans:
+                            preview = old_block[:50] + ("..." if len(old_block) > 50 else "")
+                            return (f"Error: Hunk not found in '{op['path']}': '{preview}'")
+                        if len(spans) > 1:
+                            preview = old_block[:30] + ("..." if len(old_block) > 30 else "")
+                            return (f"Error: Ambiguous hunk in '{op['path']}': '{preview}' "
+                                   f"matches {len(spans)} locations")
+                        start, end = spans[0]
+                        updated = updated[:start] + new_block + updated[end:]
+                    encoded = self._encode_preserving(updated, line_ending, bom)
+                    planned.append(("update", safe_path, op["path"], encoded,
+                                    self._render_diff(original, updated, op["path"]),
+                                    self._compute_content_hash(updated)))
+
+            # Phase 2: commit all operations atomically.  Writes are staged to
+            # temp files in the same directory and swapped in with os.replace;
+            # deletes are staged by renaming the original aside.  If any step
+            # fails, all already-applied operations are rolled back so the
+            # filesystem is left untouched.
+            messages = []
+            applied = []  # rollback log: (action, *paths)
+            tmp_suffix = ".praison_patch_tmp"
+            try:
+                for kind, safe_path, display, encoded, diff, content_hash in planned:
+                    if kind == "delete":
+                        backup = safe_path + tmp_suffix
+                        os.replace(safe_path, backup)
+                        applied.append(("delete", safe_path, backup))
+                        self._file_cache.pop(safe_path, None)
+                        messages.append(f"Deleted {display}")
+                    else:
+                        os.makedirs(os.path.dirname(safe_path) or ".", exist_ok=True)
+                        tmp_path = safe_path + tmp_suffix
+                        existed = os.path.exists(safe_path)
+                        backup = safe_path + ".praison_patch_bak" if existed else None
+                        try:
+                            with open(tmp_path, 'wb') as f:
+                                f.write(encoded)
+                            if existed:
+                                os.replace(safe_path, backup)
+                            os.replace(tmp_path, safe_path)
+                        except Exception:
+                            # Clean up any partially-staged temp file before
+                            # propagating to the rollback handler.
+                            if os.path.exists(tmp_path):
+                                try:
+                                    os.remove(tmp_path)
+                                except OSError:
+                                    pass
+                            raise
+                        applied.append(("write", safe_path, backup))
+                        self._file_cache[safe_path] = content_hash
+                        verb = "Added" if kind == "add" else "Updated"
+                        messages.append(f"{verb} {display}\n{diff}")
+            except Exception:
+                # Roll back in reverse order to restore the original state.
+                for entry in reversed(applied):
+                    action, target = entry[0], entry[1]
+                    backup = entry[2]
+                    try:
+                        if action == "delete":
+                            os.replace(backup, target)
+                        elif action == "write":
+                            if backup is not None:
+                                os.replace(backup, target)
+                            elif os.path.exists(target):
+                                os.remove(target)
+                    except OSError:
+                        logger.error("Rollback failed for %s", target)
+                raise
+
+            # Success: discard delete backups and write backups.
+            for entry in applied:
+                action, backup = entry[0], entry[2]
+                if backup is not None and os.path.exists(backup):
+                    try:
+                        os.remove(backup)
+                    except OSError:
+                        pass
+
+            return "Success: Applied patch to {} file(s)\n\n{}".format(
+                len(planned), "\n\n".join(messages))
+
+        except Exception as e:
+            error_msg = f"Error applying patch: {str(e)}"
+            logger.error(error_msg)
+            return error_msg
+
     def read_file(self, filepath: str) -> Tuple[str, str]:
         """Read a file and cache its content hash for staleness checking.
         
@@ -312,6 +732,20 @@ def edit_file(filepath: str, old_string: str, new_string: str,
         Success message with diff or error description
     """
     return _edit_tools.edit_file(filepath, old_string, new_string, replace_all, expected_hash)
+
+
+@require_approval(risk_level="high")
+def apply_patch(patch: str) -> str:
+    """Apply a structured multi-file patch atomically (Add/Update/Delete).
+
+    Args:
+        patch: Structured patch text with ``*** Add File:``,
+            ``*** Update File:`` and ``*** Delete File:`` sections.
+
+    Returns:
+        Combined success message with diffs or an error description.
+    """
+    return _edit_tools.apply_patch(patch)
 
 
 def read_file(filepath: str) -> Tuple[str, str]:
