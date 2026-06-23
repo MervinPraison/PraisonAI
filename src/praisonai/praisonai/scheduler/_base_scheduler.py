@@ -11,6 +11,19 @@ from typing import Any, Dict, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 
+def _to_non_negative_int(value: Any) -> int:
+    """Coerce a token count to a non-negative int, defaulting to 0 on bad input.
+
+    Guards against negative or malformed usage values that could otherwise
+    produce a negative run cost (a budget-brake bypass) or raise during cost
+    calculation.
+    """
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _extract_usage(result: Any) -> Tuple[int, int, str]:
     """Pull (input_tokens, output_tokens, model) off whatever the agent returned.
 
@@ -34,11 +47,11 @@ def _extract_usage(result: Any) -> Tuple[int, int, str]:
     if isinstance(usage, dict):
         in_tok = usage.get("input_tokens", usage.get("prompt_tokens", 0)) or 0
         out_tok = usage.get("output_tokens", usage.get("completion_tokens", 0)) or 0
-        return int(in_tok), int(out_tok), model
+        return _to_non_negative_int(in_tok), _to_non_negative_int(out_tok), model
 
     in_tok = getattr(usage, "input_tokens", getattr(usage, "prompt_tokens", 0)) or 0
     out_tok = getattr(usage, "output_tokens", getattr(usage, "completion_tokens", 0)) or 0
-    return int(in_tok), int(out_tok), model
+    return _to_non_negative_int(in_tok), _to_non_negative_int(out_tok), model
 
 
 def _compute_run_cost(result: Any) -> Tuple[float, int, int, str]:
@@ -51,7 +64,13 @@ def _compute_run_cost(result: Any) -> Tuple[float, int, int, str]:
     if not (in_tok or out_tok):
         return 0.0, in_tok, out_tok, model
     from praisonai.cli.features.cost_tracker import get_pricing
-    cost = get_pricing(model).calculate_cost(in_tok, out_tok)
+    try:
+        cost = get_pricing(model or "default").calculate_cost(in_tok, out_tok)
+    except Exception:
+        logger.debug(
+            "Cost computation failed for model=%r; treating run cost as 0.0", model
+        )
+        return 0.0, in_tok, out_tok, model
     return cost, in_tok, out_tok, model
 
 
