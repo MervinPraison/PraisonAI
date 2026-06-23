@@ -205,6 +205,7 @@ class TestHandoffRuntimeResolution:
                 context={}
             )
             
+            mock_resolve.assert_not_called()
             assert "Response from TargetAgent using claude-3-haiku" in response
     
     def test_extract_model_ref_from_llm_object(self):
@@ -264,13 +265,13 @@ class TestConstructionVsTurnTimeRegression:
         sub_agent.llm = "claude-3-opus"
         sub_agent.model = "claude-3-opus"
         
-        with patch.object(handoff, '_execute_with_runtime_resolution') as mock_execute:
-            mock_execute.return_value = "Sub-agent response"
-            
+        with patch.object(sub_agent, 'chat', wraps=sub_agent.chat) as mock_chat:
             tool_func = handoff.to_tool_function(parent_agent)
-            tool_func(task="Complete subtask")
+            result = tool_func(task="Complete subtask")
             
-            mock_execute.assert_called_once()
+            mock_chat.assert_called_once()
+            assert "claude-3-opus" in result
+            assert handoff._extract_model_ref(sub_agent) == "claude-3-opus"
             
     def test_multiple_handoffs_different_models(self):
         """Test multiple handoffs with different models work correctly."""

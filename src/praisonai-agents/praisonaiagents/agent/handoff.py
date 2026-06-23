@@ -422,7 +422,7 @@ class Handoff:
         self, 
         source_agent: 'Agent', 
         prompt: str, 
-        effective_tools: List[Any], 
+        effective_tools: Optional[List[Any]], 
         context: Dict[str, Any]
     ) -> str:
         """Execute handoff through the target agent's full chat pipeline."""
@@ -439,7 +439,7 @@ class Handoff:
         self, 
         source_agent: 'Agent', 
         prompt: str, 
-        effective_tools: List[Any], 
+        effective_tools: Optional[List[Any]], 
         context: Dict[str, Any]
     ) -> str:
         """Execute handoff through the target agent's full async chat pipeline."""
@@ -450,8 +450,9 @@ class Handoff:
             target_model_ref,
             _get_handoff_depth(),
         )
-        if hasattr(self.agent, 'achat'):
-            return await self.agent.achat(prompt, tools=effective_tools)
+        async_chat = getattr(self.agent, 'achat', None)
+        if callable(async_chat) and inspect.iscoroutinefunction(async_chat):
+            return await async_chat(prompt, tools=effective_tools)
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
             None, lambda: self.agent.chat(prompt, tools=effective_tools)
