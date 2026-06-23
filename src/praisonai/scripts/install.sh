@@ -368,6 +368,12 @@ detect_backend() {
             echo "$BACKEND"
             return 0
             ;;
+        auto)
+            ;;
+        *)
+            log_error "Unknown backend '$BACKEND'. Valid values: uv, pipx, venv, system, auto."
+            exit 1
+            ;;
     esac
 
     if command_exists uv; then
@@ -719,23 +725,44 @@ verify_installation() {
         return 0
     fi
     
-    local python_cmd="python3"
+    # Resolve the interpreter that owns the installed package. For the venv
+    # fallback this is the venv python; for uv/pipx the package lives in an
+    # isolated environment, NOT the system python3, so importing with the
+    # system interpreter would always fail. In that case verify via the
+    # resolved `praisonai` CLI instead.
+    local python_cmd=""
     if [[ -n "$venv_dir" && -f "$venv_dir/bin/python" ]]; then
         python_cmd="$venv_dir/bin/python"
     elif [[ -n "$venv_dir" && -f "$venv_dir/Scripts/python.exe" ]]; then
         python_cmd="$venv_dir/Scripts/python.exe"
     fi
-    
-    # Check import
-    if $python_cmd -c "from praisonaiagents import Agent; print('Import successful')" 2>/dev/null; then
-        log_success "PraisonAI agents package verified"
+
+    # Resolve a usable CLI for both verification fallback and version output.
+    local praisonai_cmd=""
+    praisonai_cmd="$(resolve_praisonai_cmd "$venv_dir" 2>/dev/null || true)"
+
+    if [[ -n "$python_cmd" ]]; then
+        # venv backend: check the import directly against the venv python.
+        if $python_cmd -c "from praisonaiagents import Agent; print('Import successful')" 2>/dev/null; then
+            log_success "PraisonAI agents package verified"
+        else
+            log_error "Failed to import praisonaiagents"
+            return 1
+        fi
+    elif [[ -n "$praisonai_cmd" && -x "$praisonai_cmd" ]]; then
+        # uv/pipx backend (isolated env): a working CLI is sufficient proof.
+        log_success "PraisonAI CLI verified ($praisonai_cmd)"
     else
-        log_error "Failed to import praisonaiagents"
+        log_error "Could not verify installation: praisonai CLI not found"
         return 1
     fi
-    
-    # Check CLI if wrapper installed
-    if command_exists praisonai; then
+
+    # Check CLI version if available.
+    if [[ -n "$praisonai_cmd" && -x "$praisonai_cmd" ]]; then
+        local cli_version
+        cli_version=$("$praisonai_cmd" --version 2>/dev/null | head -n1 || echo "unknown")
+        log_success "CLI available: praisonai $cli_version"
+    elif command_exists praisonai; then
         local cli_version
         cli_version=$(praisonai --version 2>/dev/null | head -n1 || echo "unknown")
         log_success "CLI available: praisonai $cli_version"
@@ -1042,11 +1069,15 @@ main() {
             ensure_pip "$python_cmd"
             venv_dir=$(create_venv "$python_cmd")
             install_praisonai "$python_cmd" "$venv_dir"
-            setup_shell_path "$venv_dir"
             if [[ "$DRY_RUN" != "1" && -n "$venv_dir" && -x "$venv_dir/bin/praisonai" ]]; then
+                # Shim into ~/.local/bin covers PATH; no need to also add venv/bin.
                 create_shim "$venv_dir/bin/praisonai"
+                ensure_path_dir "$SHIM_DIR"
+            else
+                # No shim (dry-run or missing binary): fall back to venv bin on PATH.
+                setup_shell_path "$venv_dir"
+                ensure_path_dir "$SHIM_DIR"
             fi
-            ensure_path_dir "$SHIM_DIR"
             ;;
     esac
 
