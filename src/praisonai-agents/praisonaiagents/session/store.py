@@ -794,6 +794,177 @@ class DefaultSessionStore:
         
         return session_ids[:limit]
     
+    # ── Cross-Session Recall (Issue #2184) ────────────────────────────
+    #
+    # Lets an agent search its *own* past conversation transcripts:
+    #   - search(query)  → discovery: top matching sessions with context
+    #   - window(...)     → scroll: ±N messages around an anchor message
+    #   - recent()        → browse: most recent sessions ("what was I doing?")
+    #
+    # Dependency-free substring/keyword scan over stored sessions. A wrapper
+    # may provide a real FTS5/SQLite index for scale.
+
+    @staticmethod
+    def _session_title(data: Dict[str, Any]) -> str:
+        """Derive a short human-friendly title for a session."""
+        agent_name = data.get("agent_name")
+        if agent_name:
+            return str(agent_name)
+        for msg in data.get("messages", []):
+            if msg.get("role") == "user" and msg.get("content"):
+                text = " ".join(str(msg["content"]).split())
+                return text[:60]
+        return str(data.get("session_id", ""))
+
+    @staticmethod
+    def _make_snippet(content: str, query: str, width: int = 120) -> str:
+        """Build a short snippet centred on the first query match."""
+        text = " ".join(str(content).split())
+        pos = text.lower().find(query.lower())
+        if pos < 0:
+            return text[:width]
+        start = max(0, pos - width // 2)
+        end = min(len(text), start + width)
+        snippet = text[start:end]
+        if start > 0:
+            snippet = "…" + snippet
+        if end < len(text):
+            snippet = snippet + "…"
+        return snippet
+
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+        window: int = 5,
+    ) -> List["SessionHit"]:
+        """Full-text search across stored session transcripts.
+
+        Returns the best-matching sessions, each with a short window of
+        messages around the first hit so the match is returned *in context*.
+        """
+        from .protocols import SessionHit
+
+        query = (query or "").strip()
+        if not query:
+            return []
+
+        needle = query.lower()
+        terms = [t for t in needle.split() if t]
+        hits: List[SessionHit] = []
+
+        try:
+            filenames = os.listdir(self.session_dir)
+        except (IOError, OSError):
+            return []
+
+        for filename in filenames:
+            if not filename.endswith(".json"):
+                continue
+            filepath = os.path.join(self.session_dir, filename)
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                continue
+
+            messages = data.get("messages", [])
+            best_index = -1
+            best_score = 0.0
+            for idx, msg in enumerate(messages):
+                content = str(msg.get("content", ""))
+                if not content:
+                    continue
+                lowered = content.lower()
+                score = 0.0
+                if needle in lowered:
+                    score += 2.0
+                score += sum(1.0 for term in terms if term in lowered)
+                if score > best_score:
+                    best_score = score
+                    best_index = idx
+
+            if best_index < 0:
+                continue
+
+            start = max(0, best_index - window)
+            end = min(len(messages), best_index + window + 1)
+            context = [
+                {
+                    "index": i,
+                    "role": messages[i].get("role", ""),
+                    "content": messages[i].get("content", ""),
+                    "timestamp": messages[i].get("timestamp"),
+                }
+                for i in range(start, end)
+            ]
+
+            hits.append(
+                SessionHit(
+                    session_id=data.get("session_id", filename[:-5]),
+                    title=self._session_title(data),
+                    when=data.get("updated_at") or data.get("created_at"),
+                    snippet=self._make_snippet(
+                        messages[best_index].get("content", ""), query
+                    ),
+                    score=best_score,
+                    anchor_index=best_index,
+                    messages=context,
+                )
+            )
+
+        hits.sort(key=lambda h: (h.score, h.when or ""), reverse=True)
+        return hits[:limit]
+
+    def window(
+        self,
+        session_id: str,
+        around_message_id: Optional[str] = None,
+        *,
+        window: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """Return ±``window`` messages around an anchor message in a session."""
+        session = self._read_session_fresh(session_id)
+        messages = session.messages
+        if not messages:
+            return []
+
+        anchor = len(messages) - 1
+        if around_message_id is not None and str(around_message_id) != "":
+            try:
+                anchor = int(around_message_id)
+            except (TypeError, ValueError):
+                anchor = len(messages) - 1
+        anchor = max(0, min(anchor, len(messages) - 1))
+
+        start = max(0, anchor - window)
+        end = min(len(messages), anchor + window + 1)
+        return [
+            {
+                "index": i,
+                "role": messages[i].role,
+                "content": messages[i].content,
+                "timestamp": messages[i].timestamp,
+            }
+            for i in range(start, end)
+        ]
+
+    def recent(self, *, limit: int = 10) -> List["SessionSummary"]:
+        """Return the most recently updated sessions (browse mode)."""
+        from .protocols import SessionSummary
+
+        summaries = [
+            SessionSummary(
+                session_id=s.get("session_id", ""),
+                title=s.get("agent_name") or s.get("session_id", ""),
+                when=s.get("updated_at") or s.get("created_at"),
+                message_count=s.get("message_count", 0),
+            )
+            for s in self.list_sessions(limit=limit)
+        ]
+        return summaries
+
     def session_exists(self, session_id: str) -> bool:
         """Check if a session exists."""
         filepath = self._get_session_path(session_id)

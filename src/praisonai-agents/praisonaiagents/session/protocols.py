@@ -28,7 +28,56 @@ Usage:
     assert isinstance(store, SessionStoreProtocol)
 """
 
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+
+
+@dataclass
+class SessionHit:
+    """A single cross-session search match with surrounding context.
+
+    Returned by :meth:`SearchableSessionStoreProtocol.search` so the agent
+    gets the match *in context* (a short window of messages around the hit).
+    """
+
+    session_id: str
+    title: str = ""
+    when: Optional[str] = None
+    snippet: str = ""
+    score: float = 0.0
+    anchor_index: int = -1
+    messages: List[Dict[str, Any]] = field(default_factory=list)
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to a JSON-serialisable dict."""
+        return {
+            "session_id": self.session_id,
+            "title": self.title,
+            "when": self.when,
+            "snippet": self.snippet,
+            "score": self.score,
+            "anchor_index": self.anchor_index,
+            "messages": self.messages,
+        }
+
+
+@dataclass
+class SessionSummary:
+    """A lightweight summary of a session for "browse" / recent listings."""
+
+    session_id: str
+    title: str = ""
+    when: Optional[str] = None
+    message_count: int = 0
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to a JSON-serialisable dict."""
+        return {
+            "session_id": self.session_id,
+            "title": self.title,
+            "when": self.when,
+            "message_count": self.message_count,
+        }
 
 
 @runtime_checkable
@@ -127,6 +176,76 @@ class SessionStoreProtocol(Protocol):
             
         Returns:
             True if the session exists.
+        """
+        ...
+
+
+@runtime_checkable
+class SearchableSessionStoreProtocol(Protocol):
+    """Protocol for cross-session conversation recall.
+
+    Extends the storage contract with the ability for an agent to search its
+    own past conversations: full-text *discovery* over transcripts, *scroll*
+    around an anchor message, and *browse* of recent sessions.
+
+    The default JSON store implements this with a dependency-free substring
+    scan. A wrapper may provide an FTS5/SQLite-backed implementation for scale.
+
+    Example::
+
+        store: SearchableSessionStoreProtocol = DefaultSessionStore()
+        hits = store.search("billing migration", limit=5, window=5)
+        more = store.window("session-123", around_message_id="42", window=10)
+        recent = store.recent(limit=10)
+    """
+
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+        window: int = 5,
+    ) -> List[SessionHit]:
+        """Full-text search across stored sessions.
+
+        Args:
+            query: Free-text query to match against message content.
+            limit: Maximum number of matching sessions to return.
+            window: Number of messages to include around each hit for context.
+
+        Returns:
+            List of :class:`SessionHit`, best matches first.
+        """
+        ...
+
+    def window(
+        self,
+        session_id: str,
+        around_message_id: Optional[str] = None,
+        *,
+        window: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """Return ±``window`` messages around an anchor message in a session.
+
+        Args:
+            session_id: The session to read from.
+            around_message_id: Index (as string) of the anchor message. If
+                omitted or invalid, the most recent messages are returned.
+            window: Number of messages to include on each side of the anchor.
+
+        Returns:
+            List of message dicts with their index for further scrolling.
+        """
+        ...
+
+    def recent(self, *, limit: int = 10) -> List[SessionSummary]:
+        """Return the most recently updated sessions.
+
+        Args:
+            limit: Maximum number of sessions to return.
+
+        Returns:
+            List of :class:`SessionSummary`, most recent first.
         """
         ...
 

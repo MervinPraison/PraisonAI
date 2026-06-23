@@ -70,6 +70,21 @@ def __getattr__(name: str):
         from .protocols import SessionStoreProtocol
         _module_cache[name] = SessionStoreProtocol
         return SessionStoreProtocol
+
+    if name == "SearchableSessionStoreProtocol":
+        from .protocols import SearchableSessionStoreProtocol
+        _module_cache[name] = SearchableSessionStoreProtocol
+        return SearchableSessionStoreProtocol
+
+    if name == "SessionHit":
+        from .protocols import SessionHit
+        _module_cache[name] = SessionHit
+        return SessionHit
+
+    if name == "SessionSummary":
+        from .protocols import SessionSummary
+        _module_cache[name] = SessionSummary
+        return SessionSummary
     
     if name == "HierarchicalSessionStore":
         from .hierarchy import HierarchicalSessionStore
@@ -137,6 +152,9 @@ __all__ = [
     "SessionData",
     "get_default_session_store",
     "SessionStoreProtocol",
+    "SearchableSessionStoreProtocol",
+    "SessionHit",
+    "SessionSummary",
     "HierarchicalSessionStore",
     "get_hierarchical_session_store",
     "SessionSnapshot",
