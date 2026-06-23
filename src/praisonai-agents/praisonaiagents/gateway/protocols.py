@@ -1215,6 +1215,106 @@ class DeliveryResolverProtocol(Protocol):
 
 
 # ---------------------------------------------------------------------------
+# Agent-facing outbound messaging (Issue #2183)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class DeliveryResult:
+    """Outcome of an agent-initiated proactive send.
+
+    Attributes:
+        ok: Whether the send was accepted for delivery.
+        target: The resolved target the message was routed to.
+        summary: Human-readable summary suitable for returning to the model.
+        detail: Optional extra information (error text, message id, etc.).
+    """
+
+    ok: bool
+    target: str = ""
+    summary: str = ""
+    detail: Optional[str] = None
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to a serializable dictionary."""
+        return {
+            "ok": self.ok,
+            "target": self.target,
+            "summary": self.summary,
+            "detail": self.detail,
+        }
+
+
+@dataclass
+class TargetInfo:
+    """A reachable delivery target the agent can address.
+
+    Attributes:
+        target: The token to pass to ``send`` (e.g. "origin", "slack:#ops").
+        platform: Platform name (e.g. "telegram", "slack").
+        kind: Target kind ("origin", "home", or "alias").
+        label: Friendly label for display to the model/user.
+    """
+
+    target: str
+    platform: str = ""
+    kind: str = "alias"
+    label: str = ""
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to a serializable dictionary."""
+        return {
+            "target": self.target,
+            "platform": self.platform,
+            "kind": self.kind,
+            "label": self.label,
+        }
+
+
+@runtime_checkable
+class OutboundMessengerProtocol(Protocol):
+    """Protocol for agent-facing proactive message delivery.
+
+    A concrete implementation is provided by the running gateway/bot (in the
+    praisonai wrapper) and registered into the per-turn context so the
+    built-in ``send_message`` tool can resolve it. It bridges to the existing
+    delivery stack (DeliveryRouter, HomeChannelRegistry, outbox, mirroring).
+
+    Example usage (implementation in praisonai wrapper)::
+
+        messenger = BotOutboundMessenger(bot, resolver, router)
+        token = register_outbound_messenger(messenger)
+        try:
+            ...  # agent runs; send_message tool resolves the messenger
+        finally:
+            clear_outbound_messenger(token)
+    """
+
+    async def send(
+        self,
+        target: str,
+        text: str,
+        *,
+        media: Optional[List[str]] = None,
+    ) -> "DeliveryResult":
+        """Deliver a message to a symbolic target.
+
+        Args:
+            target: Symbolic target token ("origin", "<platform>",
+                "<platform>:<chat_id>[:<thread_id>]", or a friendly alias).
+            text: The message text to send.
+            media: Optional list of local file paths to attach.
+
+        Returns:
+            A :class:`DeliveryResult` describing the outcome.
+        """
+        ...
+
+    def list_targets(self) -> List["TargetInfo"]:
+        """List the targets currently reachable from this runtime."""
+        ...
+
+
+# ---------------------------------------------------------------------------
 # Protocol Version Negotiation (Issue #2130)
 # ---------------------------------------------------------------------------
 

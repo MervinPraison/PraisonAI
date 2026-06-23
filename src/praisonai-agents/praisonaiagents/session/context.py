@@ -33,7 +33,10 @@ from __future__ import annotations
 
 from contextvars import ContextVar, Token
 from dataclasses import asdict, dataclass
-from typing import Dict, List, Optional, Any
+from typing import TYPE_CHECKING, Dict, List, Optional, Any
+
+if TYPE_CHECKING:
+    from ..gateway.protocols import OutboundMessengerProtocol
 
 
 @dataclass(frozen=True)
@@ -157,6 +160,40 @@ def clear_session_context(token: Token) -> None:
         _CTX.set(SessionContext())
 
 
+# ---------------------------------------------------------------------------
+# Outbound messenger (Issue #2183)
+#
+# The running gateway/bot registers a concrete OutboundMessengerProtocol impl
+# into this task-local slot so the built-in ``send_message`` tool can reach the
+# user proactively mid-task. ``SessionContext`` is frozen, so the messenger is
+# tracked in its own ContextVar rather than as a context field.
+# ---------------------------------------------------------------------------
+
+_MESSENGER: ContextVar[Optional["OutboundMessengerProtocol"]] = ContextVar(
+    "praisonai_outbound_messenger", default=None
+)
+
+
+def register_outbound_messenger(
+    messenger: Optional["OutboundMessengerProtocol"],
+) -> Token:
+    """Register the active outbound messenger for this task. Returns a token."""
+    return _MESSENGER.set(messenger)
+
+
+def get_outbound_messenger() -> Optional["OutboundMessengerProtocol"]:
+    """Return the active outbound messenger, or ``None`` if no gateway is running."""
+    return _MESSENGER.get()
+
+
+def clear_outbound_messenger(token: Token) -> None:
+    """Restore the previous outbound messenger using the token from register."""
+    try:
+        _MESSENGER.reset(token)
+    except (LookupError, ValueError):
+        _MESSENGER.set(None)
+
+
 __all__ = [
     "SessionContext",
     "Origin",
@@ -164,4 +201,7 @@ __all__ = [
     "set_session_context",
     "get_session_context",
     "clear_session_context",
+    "register_outbound_messenger",
+    "get_outbound_messenger",
+    "clear_outbound_messenger",
 ]

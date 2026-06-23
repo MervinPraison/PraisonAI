@@ -180,6 +180,10 @@ TOOL_MAPPINGS = {
     'schedule_list': ('.schedule_tools', None),
     'schedule_remove': ('.schedule_tools', None),
     'schedule_tools': ('.schedule_tools', None),
+
+    # Proactive messaging (agent-facing gateway delivery)
+    'send_message': ('.messaging_tools', None),
+    'messaging_tools': ('.messaging_tools', None),
     
     # AST-Grep Tools (structural code search/rewrite)
     'ast_grep_search': ('.ast_grep_tool', None),
@@ -344,6 +348,7 @@ def __getattr__(name: str) -> Any:
             'github_create_branch', 'github_commit_and_push', 'github_create_pull_request',
             'jira_watch_issue', 'jira_watch_project', 'jira_get_issue_info', 'jira_search_issues',
             'schedule_add', 'schedule_list', 'schedule_remove',
+            'send_message',
             'ast_grep_search', 'ast_grep_rewrite', 'ast_grep_scan', 'is_ast_grep_available', 'get_ast_grep_tools',
             'store_memory', 'search_memory',
             'store_learning', 'search_learning',
@@ -353,7 +358,7 @@ def __getattr__(name: str) -> Any:
             'clarify'
         ]:
             return getattr(module, name)
-        if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools', 'github_tools', 'jira_tools', 'schedule_tools', 'ast_grep_tools', 'email_tools']:
+        if name in ['file_tools', 'spider_tools', 'python_tools', 'shell_tools', 'cot_tools', 'tavily_tools', 'youdotcom_tools', 'exa_tools', 'crawl4ai_tools', 'skill_tools', 'github_tools', 'jira_tools', 'schedule_tools', 'messaging_tools', 'ast_grep_tools', 'email_tools']:
             return module  # Returns the callable module
         return getattr(module, name)
     else:
