@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from typing import List, Optional
 
 from praisonaiagents._logging import get_logger
@@ -40,18 +41,51 @@ _NO_GATEWAY_MSG = (
     "CLI/one-shot runs."
 )
 
+_MEDIA_RE = re.compile(r"MEDIA:(\S+)")
+
 
 def _run_async(coro):
-    """Run an async coroutine from sync code, even inside a running loop."""
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        # No running loop — safe to drive directly.
-        return asyncio.run(coro)
+    """Run an async coroutine from sync code from any threading posture.
 
-    # A loop is already running in this thread; offload to a worker thread.
+    Three cases, each correct for a real gateway/bot:
+
+    1. No running loop in *this* thread, but a gateway loop is running in
+       another thread (the common case: agent tools execute in an executor
+       worker thread while the bot's event loop runs elsewhere). The
+       messenger's async resources are bound to that loop, so we schedule the
+       coroutine on it via ``run_coroutine_threadsafe`` and block on the
+       result. This avoids the "Task got Future attached to a different loop"
+       error a fresh loop would cause.
+
+    2. No running loop anywhere we can see (CLI / one-shot). Drive the
+       coroutine directly with ``asyncio.run``.
+
+    3. Called *on* a running loop's own thread. We cannot block that thread on
+       the loop (it would deadlock), so we run the coroutine on a fresh loop in
+       a worker thread. This path is unusual for real bots (whose tools run in
+       executor threads) and is primarily exercised by tests.
+    """
     import concurrent.futures
 
+    # Is there a loop running in THIS thread?
+    try:
+        asyncio.get_running_loop()
+        on_loop_thread = True
+    except RuntimeError:
+        on_loop_thread = False
+
+    if not on_loop_thread:
+        # Prefer an existing gateway loop running in another thread so the
+        # coroutine executes where its async resources are bound.
+        loop = _get_gateway_loop()
+        if loop is not None and loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(coro, loop)
+            return future.result()
+        # Nothing running anywhere — safe to drive directly.
+        return asyncio.run(coro)
+
+    # We are ON a running loop's thread; blocking it would deadlock. Run on a
+    # fresh loop in a worker thread instead.
     def _runner():
         new_loop = asyncio.new_event_loop()
         try:
@@ -65,25 +99,44 @@ def _run_async(coro):
         return pool.submit(_runner).result()
 
 
-def _parse_media(message: str) -> tuple[str, Optional[List[str]]]:
-    """Split trailing ``MEDIA:<path>`` directives from the message text.
+def _get_gateway_loop():
+    """Return the running gateway event loop if one was registered, else None.
 
-    Supports one or more ``MEDIA:<path>`` tokens. Returns the cleaned text and
-    a list of media paths (or ``None`` when there are none).
+    The gateway/bot may register its loop in the session context so sync tools
+    invoked from executor threads can reach loop-bound async resources. Falls
+    back to ``None`` when unavailable.
+    """
+    try:
+        from ..session.context import get_gateway_loop
+    except Exception:
+        return None
+    try:
+        return get_gateway_loop()
+    except Exception:
+        return None
+
+
+def _parse_media(message: str) -> tuple[str, Optional[List[str]]]:
+    """Split ``MEDIA:<path>`` directives from the message text.
+
+    Supports one or more ``MEDIA:<path>`` tokens anywhere in the message.
+    Paths may contain spaces because only the ``MEDIA:`` directive itself is
+    removed (not split on whitespace). Returns the cleaned text and a list of
+    media paths (or ``None`` when there are none).
     """
     if "MEDIA:" not in message:
         return message, None
 
-    text_parts: List[str] = []
     media: List[str] = []
-    for token in message.split():
-        if token.startswith("MEDIA:"):
-            path = token[len("MEDIA:"):].strip()
-            if path:
-                media.append(path)
-        else:
-            text_parts.append(token)
-    return " ".join(text_parts).strip(), (media or None)
+    remaining = message
+    for m in _MEDIA_RE.finditer(message):
+        path = m.group(1).strip()
+        if path:
+            media.append(path)
+        remaining = remaining.replace(m.group(0), "", 1)
+
+    text = " ".join(remaining.split()).strip()
+    return text, (media or None)
 
 
 def send_message(
