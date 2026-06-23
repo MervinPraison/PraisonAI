@@ -810,10 +810,14 @@ class DefaultSessionStore:
         agent_name = data.get("agent_name")
         if agent_name:
             return str(agent_name)
-        for msg in data.get("messages", []):
-            if msg.get("role") == "user" and msg.get("content"):
-                text = " ".join(str(msg["content"]).split())
-                return text[:60]
+        messages = data.get("messages", [])
+        if isinstance(messages, list):
+            for msg in messages:
+                if not isinstance(msg, dict):
+                    continue
+                if msg.get("role") == "user" and msg.get("content"):
+                    text = " ".join(str(msg["content"]).split())
+                    return text[:60]
         return str(data.get("session_id", ""))
 
     @staticmethod
@@ -870,9 +874,14 @@ class DefaultSessionStore:
                 continue
 
             messages = data.get("messages", [])
+            if not isinstance(messages, list):
+                continue
             best_index = -1
             best_score = 0.0
+            total_score = 0.0
             for idx, msg in enumerate(messages):
+                if not isinstance(msg, dict):
+                    continue
                 content = str(msg.get("content", ""))
                 if not content:
                     continue
@@ -881,6 +890,7 @@ class DefaultSessionStore:
                 if needle in lowered:
                     score += 2.0
                 score += sum(1.0 for term in terms if term in lowered)
+                total_score += score
                 if score > best_score:
                     best_score = score
                     best_index = idx
@@ -890,15 +900,19 @@ class DefaultSessionStore:
 
             start = max(0, best_index - window)
             end = min(len(messages), best_index + window + 1)
-            context = [
-                {
-                    "index": i,
-                    "role": messages[i].get("role", ""),
-                    "content": messages[i].get("content", ""),
-                    "timestamp": messages[i].get("timestamp"),
-                }
-                for i in range(start, end)
-            ]
+            context = []
+            for i in range(start, end):
+                msg_i = messages[i]
+                if not isinstance(msg_i, dict):
+                    continue
+                context.append(
+                    {
+                        "index": i,
+                        "role": msg_i.get("role", ""),
+                        "content": msg_i.get("content", ""),
+                        "timestamp": msg_i.get("timestamp"),
+                    }
+                )
 
             hits.append(
                 SessionHit(
@@ -908,7 +922,7 @@ class DefaultSessionStore:
                     snippet=self._make_snippet(
                         messages[best_index].get("content", ""), query
                     ),
-                    score=best_score,
+                    score=total_score,
                     anchor_index=best_index,
                     messages=context,
                 )

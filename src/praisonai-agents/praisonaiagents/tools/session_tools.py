@@ -17,6 +17,7 @@ The ``session_search`` tool has three shapes:
 
 import json
 import logging
+import threading
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -46,11 +47,14 @@ class SessionTools:
         """
         self._workspace = workspace
         self._store = store
+        self._store_lock = threading.Lock()
 
     @property
     def store(self):
         if self._store is None:
-            self._store = get_active_session_store()
+            with self._store_lock:
+                if self._store is None:
+                    self._store = get_active_session_store()
         return self._store
 
     def session_search(
@@ -120,8 +124,17 @@ class SessionTools:
                 ensure_ascii=False,
             )
         except Exception as e:
+            mode = "discovery" if query else ("scroll" if session_id else "browse")
             return json.dumps(
-                {"success": False, "error": f"Error searching sessions: {e!s}"}
+                {
+                    "success": False,
+                    "tool": "session_search",
+                    "mode": mode,
+                    "session_id": session_id or None,
+                    "error": f"{type(e).__name__}: {e!s}",
+                    "hint": "Verify store availability and parameters (query/session_id/window/limit).",
+                },
+                ensure_ascii=False,
             )
 
 
