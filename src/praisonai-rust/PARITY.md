@@ -1,16 +1,16 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 362 | **Rust Features:** 667 | **Parity:** 79.0%
+> **Python Features:** 381 | **Rust Features:** 667 | **Parity:** 75.6%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 362 |
+| Python Core Features | 381 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **76** |
+| **Actual Gap Count** | **93** |
 | Language Limitations (N/A) | 5 |
-| **Parity** | **79.0%** |
+| **Parity** | **75.6%** |
 
 ## Implemented Features
 
@@ -700,12 +700,15 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `AgentRunOutcome`
 - ❌ `AsyncLearnProtocol`
 - ❌ `AutoApproveBackend`
+- ❌ `AutoMemory`
 - ❌ `BALANCED_POLICY`
+- ❌ `BackendNotAvailableError`
 - ❌ `BaseTool`
 - ❌ `BotOSConfig`
 - ❌ `BotOSProtocol`
 - ❌ `BudgetExceededError`
 - ❌ `CONSERVATIVE_POLICY`
+- ❌ `ChromaMemory`
 - ❌ `CliBackendConfig`
 - ❌ `CliBackendDelta`
 - ❌ `CliBackendProtocol`
@@ -717,14 +720,19 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `ContextBudgetResult`
 - ❌ `ContextCompactionPolicy`
 - ❌ `ContextCompactionPolicyProtocol`
+- ❌ `CorpusStats`
 - ❌ `CustomToolUseEvent`
 - ❌ `DoomLoopDetector`
+- ❌ `EnforcementLevel`
 - ❌ `ErrorContextProtocol`
 - ❌ `EscalationPipeline`
 - ❌ `EscalationStage`
+- ❌ `FileTracker`
 - ❌ `HandoffToolPolicy`
 - ❌ `Heartbeat`
 - ❌ `HeartbeatConfig`
+- ❌ `Include`
+- ❌ `IndexResult`
 - ❌ `LLMError`
 - ❌ `LearnBackend`
 - ❌ `LearnConfig`
@@ -733,6 +741,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `LearnMode`
 - ❌ `LearnProtocol`
 - ❌ `LearnScope`
+- ❌ `MAX_NESTING_DEPTH`
 - ❌ `ManagedBackendProtocol`
 - ❌ `ManagedEvent`
 - ❌ `NetworkError`
@@ -744,6 +753,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `RunStatus`
 - ❌ `SessionErrorEvent`
 - ❌ `SessionIdleEvent`
+- ❌ `SkillState`
 - ❌ `StopReason`
 - ❌ `StructuredFormatter`
 - ❌ `ToolExecutionError`
@@ -752,8 +762,10 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `ToolValidationError`
 - ❌ `ToolsetRegistry`
 - ❌ `ToolsetSpec`
+- ❌ `YAMLWorkflowParser`
 - ❌ `__version__`
 - ❌ `configure_structured_logging`
+- ❌ `discover_skills`
 - ❌ `get_default_policy`
 - ❌ `get_logger`
 - ❌ `get_registry`
@@ -761,14 +773,19 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `get_toolset`
 - ❌ `get_toolset_registry`
 - ❌ `has_toolset`
+- ❌ `if_`
+- ❌ `include`
 - ❌ `list_toolsets`
+- ❌ `load_skill`
 - ❌ `parallel_handoffs`
 - ❌ `register_tool`
 - ❌ `register_toolset`
 - ❌ `resolve_toolset`
 - ❌ `resolve_toolsets`
 - ❌ `unregister_toolset`
+- ❌ `validate`
 - ❌ `validate_decision_string`
+- ❌ `validate_metadata`
 - ❌ `validate_tool`
 
 ---
