@@ -16,7 +16,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from praisonaiagents import Agent
@@ -457,6 +457,7 @@ class WebSocketGateway:
         self._port = self.config.port
         
         self._is_running = False
+        self._draining = False
         self._started_at: Optional[float] = None
         self._server = None
         
@@ -604,6 +605,32 @@ class WebSocketGateway:
             proxy_headers = ["x-forwarded-for", "via", "x-real-ip", "x-forwarded-host"]
             return not any(header in request.headers for header in proxy_headers)
 
+        async def ready(request):
+            """GET /ready — readiness probe for load balancers / orchestrators.
+
+            Returns HTTP 200 only when the gateway is fully started and not
+            draining. Returns 503 during startup and graceful shutdown so a
+            load balancer stops routing new connections before drain begins.
+            """
+            failing = await self._readiness_failures()
+            uptime = time.time() - self._started_at if self._started_at else 0
+            return JSONResponse(
+                {"ready": not failing, "failing": failing, "uptime": uptime},
+                status_code=200 if not failing else 503,
+            )
+        
+        async def live(request):
+            """GET /live — liveness probe.
+
+            Returns HTTP 200 as long as the process and its event loop are
+            responsive, independent of transient channel health, so
+            orchestrators don't needlessly restart on a recoverable blip.
+            """
+            ok = await self._event_loop_responsive()
+            return JSONResponse(
+                {"alive": ok}, status_code=200 if ok else 503,
+            )
+        
         def _check_auth(request) -> Optional[JSONResponse]:
             """Validate auth token if configured. Returns error response or None.
 
@@ -1079,6 +1106,8 @@ class WebSocketGateway:
         routes = [
             Route("/", magic_link_handler, methods=["GET"]),
             Route("/health", health, methods=["GET"]),
+            Route("/ready", ready, methods=["GET"]),
+            Route("/live", live, methods=["GET"]),
             Route("/info", info, methods=["GET"]),
             Route("/api/approval/pending", approval_pending, methods=["GET"]),
             Route("/api/approval/resolve", approval_resolve, methods=["POST"]),
@@ -1102,6 +1131,9 @@ class WebSocketGateway:
         )
         self._server = uvicorn.Server(config)
         
+        # Clear shutdown state so a stopped-then-restarted instance reports
+        # ready again instead of being stuck reporting "draining".
+        self._draining = False
         self._is_running = True
         self._started_at = time.time()
         
@@ -1197,10 +1229,15 @@ class WebSocketGateway:
         if not self._is_running:
             return
         
-        self._is_running = False
+        # Flip readiness to draining BEFORE draining so load balancers stop
+        # routing new traffic while in-flight sessions finish. Keep _is_running
+        # True so liveness (/live) still reports the process as alive during drain.
+        self._draining = True
         
         # Gracefully drain active sessions before closing
         await self._drain_active_sessions(reason="shutdown", timeout=drain_timeout)
+        
+        self._is_running = False
         
         for client_id, ws in list(self._clients.items()):
             try:
@@ -2191,6 +2228,70 @@ class WebSocketGateway:
             result["push"] = push_status
         
         return result
+
+    # ── Readiness / liveness probes ───────────────────────────────────
+
+    def _unhealthy_channels(self) -> List[Tuple[str, Any]]:
+        """Return [(name, status)] for channels in a FAILED supervision state.
+
+        A channel that is paused/stopped is treated as not-blocking readiness;
+        only FAILED channels (unrecoverable or actively erroring) are reported.
+        """
+        unhealthy: List[Tuple[str, Any]] = []
+        try:
+            from .supervisor import ChannelState
+            for name, status in self._channel_supervisor.get_all_status().items():
+                if status.state == ChannelState.FAILED:
+                    unhealthy.append((name, status))
+        except Exception as e:
+            # Fail closed: if we cannot inspect supervision, surface it as a
+            # readiness failure rather than silently reporting healthy.
+            logger.warning("Readiness probe failed to inspect channel supervision: %s", e)
+            unhealthy.append(("supervisor-error", None))
+        return unhealthy
+
+    async def _event_loop_responsive(self, threshold: float = 1.0) -> bool:
+        """Measure event-loop responsiveness by timing a zero-delay sleep.
+
+        If the loop is saturated/blocked, ``asyncio.sleep(0)`` takes much
+        longer to be scheduled than wall-clock zero. A lag above ``threshold``
+        seconds indicates the loop is not responsive.
+
+        Args:
+            threshold: Maximum acceptable scheduling lag in seconds.
+
+        Returns:
+            True if the loop scheduled the callback within ``threshold``.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+            start = loop.time()
+            await asyncio.sleep(0)
+            lag = loop.time() - start
+            return lag <= threshold
+        except Exception as e:
+            # Fail closed: an error sampling the loop means we cannot confirm
+            # responsiveness, so report not-responsive.
+            logger.warning("Liveness probe failed to sample event loop lag: %s", e)
+            return False
+
+    async def _readiness_failures(self) -> List[str]:
+        """Return a list of reasons the gateway is not ready ([] when ready).
+
+        - ``startup-pending`` while the gateway has not finished starting.
+        - ``draining`` during graceful shutdown so LBs stop routing first.
+        - ``event-loop`` when the asyncio loop is saturated/blocked.
+        - ``channel:<name>`` for each channel in a FAILED supervision state.
+        """
+        failing: List[str] = []
+        if self._draining:
+            failing.append("draining")
+        elif not self._is_running:
+            failing.append("startup-pending")
+        if not await self._event_loop_responsive():
+            failing.append("event-loop")
+        failing += [f"channel:{name}" for name, _ in self._unhealthy_channels()]
+        return failing
 
     # ── Scheduled delivery ────────────────────────────────────────────
 
