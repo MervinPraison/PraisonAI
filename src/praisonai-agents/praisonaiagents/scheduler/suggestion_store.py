@@ -117,19 +117,22 @@ class SuggestionStore:
     def _load(self) -> None:
         """Load existing suggestions from disk (best-effort)."""
         if not os.path.exists(self._path):
+            self._suggestions = {}
             return
         try:
             with open(self._path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict):
+                new_suggestions = {}
                 for sid, d in data.items():
                     if isinstance(d, dict):
                         try:
-                            self._suggestions[sid] = Suggestion(**d)
+                            new_suggestions[sid] = Suggestion(**d)
                         except TypeError:
                             pass  # skip malformed entries
+                self._suggestions = new_suggestions
         except (json.JSONDecodeError, OSError):
-            pass  # corrupt file → start fresh
+            self._suggestions = {}  # corrupt file → start fresh
 
     def _save(self) -> None:
         """Atomically persist the current state to disk."""
