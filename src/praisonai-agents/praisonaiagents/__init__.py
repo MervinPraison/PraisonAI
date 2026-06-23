@@ -347,6 +347,13 @@ _LAZY_IMPORTS = {
     'Memory': ('praisonaiagents.memory.memory', 'Memory'),
     'AutoMemory': ('praisonaiagents.memory', 'AutoMemory'),
     'ChromaMemory': ('praisonaiagents.memory.adapters.factories', 'create_chroma_memory_adapter'),
+    'register_memory_adapter': ('praisonaiagents.memory.adapters', 'register_memory_adapter'),
+    'register_memory_factory': ('praisonaiagents.memory.adapters', 'register_memory_factory'),
+    'get_memory_adapter': ('praisonaiagents.memory.adapters', 'get_memory_adapter'),
+    'list_memory_adapters': ('praisonaiagents.memory.adapters', 'list_memory_adapters'),
+    'add_memory_adapter': ('praisonaiagents.memory.adapters.registry', 'add_memory_adapter'),
+    'add_memory_factory': ('praisonaiagents.memory.adapters.registry', 'add_memory_factory'),
+    'has_memory_adapter': ('praisonaiagents.memory.adapters', 'has_memory_adapter'),
     
     # Planning
     'Plan': ('praisonaiagents.planning', 'Plan'),
