@@ -180,7 +180,7 @@ class BlueprintCatalogue:
         try:
             from praisonaiagents.paths import get_data_dir
             user_dir = get_data_dir() / self.BLUEPRINTS_DIR_NAME
-            self._load_from_directory(user_dir, custom=False)
+            self._load_from_directory(user_dir, custom=True)
         except Exception as e:
             logger.debug("Skipping user blueprint dir: %s", e)
 
