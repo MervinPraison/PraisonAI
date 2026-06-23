@@ -148,10 +148,11 @@ Powered by 100+ LLMs (OpenAI, Anthropic, Gemini & local models).
 <img src="https://img.shields.io/badge/Databricks-FF3621?style=flat&logo=databricks&logoColor=white" alt="Databricks" />
 <img src="https://img.shields.io/badge/Replicate-262626?style=flat" alt="Replicate" />
 <img src="https://img.shields.io/badge/Cloudflare-F38020?style=flat&logo=cloudflare&logoColor=white" alt="Cloudflare" />
+<img src="https://img.shields.io/badge/Atlas_Cloud-4F46E5?style=flat" alt="Atlas Cloud" />
 </p>
 
 <details>
-<summary><strong>View all 24 providers with examples</strong></summary>
+<summary><strong>View all 25 providers with examples</strong></summary>
 
 | Provider | Example |
 |----------|:-------:|
@@ -179,6 +180,7 @@ Powered by 100+ LLMs (OpenAI, Anthropic, Gemini & local models).
 | SageMaker | [Example](examples/python/providers/sagemaker/sagemaker_example.py) |
 | Moonshot | [Example](examples/python/providers/moonshot/moonshot_example.py) |
 | vLLM | [Example](examples/python/providers/vllm/vllm_example.py) |
+| Atlas Cloud | [Example](examples/python/providers/atlascloud/atlascloud_example.py) |
 
 </details>
 
