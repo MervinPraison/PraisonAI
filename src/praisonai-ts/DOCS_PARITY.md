@@ -1,6 +1,6 @@
 # Documentation Parity Tracker (TypeScript/JavaScript)
 
-> **Categories:** 75 | **Documented:** 74 | **Parity:** 98.7%
+> **Categories:** 75 | **Documented:** 67 | **Parity:** 89.3%
 
 This report compares **TypeScript/JavaScript SDK feature categories** against **TypeScript/JavaScript documentation** (docs/js/).
 
@@ -9,16 +9,15 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | Metric | Count |
 |--------|-------|
 | Feature Categories | 75 |
-| **Documented Categories** | **74** |
-| **Undocumented Categories** | **1** |
-| **Parity** | **98.7%** |
+| **Documented Categories** | **67** |
+| **Undocumented Categories** | **8** |
+| **Parity** | **89.3%** |
 
 ## Documented Categories
 
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 1 | 193 |
-| ✅ AI SDK | 38 | 8 | 980 |
 | ✅ Agent | 66 | 7 | 1926 |
 | ✅ Agent-to-Agent (A2A) | 15 | 1 | 340 |
 | ✅ Approval | 9 | 1 | 162 |
@@ -33,7 +32,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Code Execution | 6 | 4 | 376 |
 | ✅ Conditions | 1 | 1 | 370 |
 | ✅ Configuration | 3 | 1 | 270 |
-| ✅ Context Management | 17 | 2 | 255 |
+| ✅ Context Management | 17 | 3 | 406 |
 | ✅ Criteria | 1 | 1 | 158 |
 | ✅ Database | 14 | 2 | 367 |
 | ✅ Display | 20 | 1 | 340 |
@@ -47,15 +46,13 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Gateway | 6 | 1 | 399 |
 | ✅ Guardrails | 6 | 3 | 632 |
 | ✅ Handoffs | 12 | 1 | 179 |
-| ✅ Hooks | 8 | 1 | 172 |
+| ✅ Hooks | 8 | 3 | 499 |
 | ✅ Image | 4 | 2 | 203 |
-| ✅ Jobs | 8 | 1 | 155 |
-| ✅ Knowledge | 3 | 2 | 227 |
-| ✅ LLM | 6 | 2 | 203 |
+| ✅ Knowledge | 3 | 3 | 458 |
+| ✅ LLM | 6 | 4 | 559 |
 | ✅ Loops | 11 | 1 | 182 |
 | ✅ MCP | 17 | 4 | 564 |
 | ✅ Memory | 17 | 4 | 620 |
-| ✅ Middleware | 2 | 1 | 164 |
 | ✅ OCR | 2 | 1 | 164 |
 | ✅ Observability | 6 | 28 | 1658 |
 | ✅ Optimizer | 1 | 1 | 164 |
@@ -73,36 +70,38 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Retrieval | 5 | 1 | 154 |
 | ✅ Routing | 1 | 1 | 157 |
 | ✅ Sandbox | 8 | 2 | 56 |
-| ✅ Scheduler | 2 | 2 | 323 |
 | ✅ Security | 2 | 1 | 160 |
 | ✅ Sessions | 3 | 2 | 355 |
 | ✅ Skills | 7 | 2 | 307 |
-| ✅ Streaming | 2 | 2 | 356 |
 | ✅ Tasks | 4 | 1 | 158 |
 | ✅ Teams | 1 | 1 | 163 |
 | ✅ Telemetry | 6 | 2 | 184 |
 | ✅ Templates | 1 | 2 | 516 |
-| ✅ Token Management | 1 | 1 | 151 |
-| ✅ Tools | 34 | 15 | 2821 |
+| ✅ Tools | 34 | 17 | 3144 |
 | ✅ Tracing | 8 | 3 | 434 |
-| ✅ Vector Store | 6 | 1 | 231 |
 | ✅ Video | 2 | 1 | 152 |
 | ✅ Vision | 2 | 1 | 157 |
 | ✅ Voice | 1 | 2 | 398 |
 | ✅ Web | 4 | 1 | 152 |
-| ✅ Workflows | 7 | 3 | 543 |
+| ✅ Workflows | 7 | 4 | 698 |
 
 ## Undocumented Categories (Need Documentation)
 
 | Category | Features |
 |----------|----------|
+| ❌ AI SDK | 38 |
 | ❌ Budget | 1 |
+| ❌ Jobs | 8 |
+| ❌ Middleware | 2 |
+| ❌ Scheduler | 2 |
+| ❌ Streaming | 2 |
+| ❌ Token Management | 1 |
+| ❌ Vector Store | 6 |
 
 ## Documentation Without Features
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ Callbacks (1 docs, 163 lines)
 - ℹ️ Deep Research (2 docs, 191 lines)
 
 ---
