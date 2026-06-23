@@ -49,6 +49,25 @@ class TestLLMProviderRegistry:
         assert "anthropic" in providers
         assert "google" in providers
     
+    def test_builtin_aliases_are_registered(self):
+        """Built-in aliases must be wired up at init (regression for #2170)."""
+        from praisonai.llm.registry import LLMProviderRegistry
+        
+        registry = LLMProviderRegistry()
+        aliases = registry.list_aliases()
+        assert aliases["oai"] == "openai"
+        assert aliases["claude"] == "anthropic"
+        assert aliases["gemini"] == "google"
+        assert aliases["google_genai"] == "google"
+    
+    def test_builtin_alias_resolves_to_provider(self):
+        """Resolving via a built-in alias should succeed (regression for #2170)."""
+        from praisonai.llm.registry import create_llm_provider, LLMProviderRegistry
+        
+        registry = LLMProviderRegistry()
+        provider = create_llm_provider("oai/gpt-4o", registry=registry)
+        assert provider.model_id == "gpt-4o"
+    
     def test_register_provider_class(self):
         """Should register a provider class."""
         from praisonai.llm.registry import LLMProviderRegistry

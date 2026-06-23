@@ -1,24 +1,40 @@
 # praisonai/agents_generator.py
 
 import sys
-from typing import Dict, Any, Optional, List
-from .version import __version__
-import yaml, os
-from rich import print
-import inspect
-from pathlib import Path
-import importlib
-import importlib.util
 import os
+import inspect
 import logging
 import re
 import keyword
 import difflib
+import importlib
+import importlib.util
+from pathlib import Path
+from typing import Dict, Any, Optional, List
+
+from .version import __version__
 
 # Import new architecture components
 from .framework_adapters.base import FrameworkAdapter
-from .framework_adapters.registry import FrameworkAdapterRegistry, get_default_registry
 from .tool_registry import ToolRegistry
+
+
+def _rich_print(*args, **kwargs):
+    """Lazy alias for rich.print — pays the import cost only on first use."""
+    from rich import print as _rp
+    return _rp(*args, **kwargs)
+
+
+def _yaml_safe_load(stream):
+    """Lazy alias for yaml.safe_load."""
+    import yaml
+    return yaml.safe_load(stream)
+
+
+def _get_default_adapter_registry():
+    """Lazy import for the adapter registry — defers entry-point discovery."""
+    from .framework_adapters.registry import get_default_registry
+    return get_default_registry()
 
 # Import availability flags
 # Compatibility imports - now handled by centralized detection
@@ -233,7 +249,7 @@ class AgentsGenerator:
         
         # DI-friendly: tests/multi-tenant runtimes pass their own registry;
         # CLI users get the process default.
-        self._adapter_registry = adapter_registry or get_default_registry()
+        self._adapter_registry = adapter_registry or _get_default_adapter_registry()
         
         # Defer framework adapter creation until YAML is loaded
         # This fixes the issue where empty framework string fails before YAML framework is read
@@ -543,15 +559,15 @@ class AgentsGenerator:
     def _load_config(self):
         """Load configuration from agent file or agent_yaml."""
         if self.agent_yaml:
-            config = yaml.safe_load(self.agent_yaml)
+            config = _yaml_safe_load(self.agent_yaml)
         else:
             if self.agent_file in ('/app/api:app', 'api:app'):
                 self.agent_file = 'agents.yaml'
             try:
                 with open(self.agent_file, 'r') as f:
-                    config = yaml.safe_load(f)
+                    config = _yaml_safe_load(f)
             except FileNotFoundError:
-                print(f"File not found: {self.agent_file}")
+                _rich_print(f"File not found: {self.agent_file}")
                 return None
         
         # Apply CLI config overrides to both paths (agent_yaml and agent_file)

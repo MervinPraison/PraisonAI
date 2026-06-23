@@ -10,6 +10,11 @@ Tests for:
 import pytest
 from unittest.mock import Mock
 from praisonai.scheduler.base import ScheduleParser, ExecutorInterface, PraisonAgentExecutor
+from praisonai.scheduler._base_scheduler import (
+    _compute_run_cost,
+    _extract_usage,
+    _to_non_negative_int,
+)
 
 
 class TestScheduleParser:
@@ -141,3 +146,83 @@ class TestPraisonAgentExecutor:
         assert result1 == "Result for: Task 1"
         assert result2 == "Result for: Task 2"
         assert mock_agent.start.call_count == 2
+
+
+class TestComputeRunCost:
+    """Regression tests for token-usage-based run cost computation."""
+
+    def test_to_non_negative_int_clamps_and_coerces(self):
+        """Negative or malformed token values clamp to 0; valid values pass through."""
+        assert _to_non_negative_int(-5) == 0
+        assert _to_non_negative_int("bad") == 0
+        assert _to_non_negative_int(None) == 0
+        assert _to_non_negative_int("7") == 7
+        assert _to_non_negative_int(12) == 12
+
+    def test_no_usage_returns_zero_cost(self):
+        """A response with no usage metadata contributes $0, not a fake constant."""
+        cost, in_tok, out_tok, model = _compute_run_cost({})
+        assert cost == 0.0
+        assert in_tok == 0
+        assert out_tok == 0
+
+    def test_dict_usage_computes_cost(self):
+        """Dict-style usage with a known model produces a positive cost."""
+        result = {
+            "usage": {"input_tokens": 1_000_000, "output_tokens": 0},
+            "model": "gpt-4o-mini",
+        }
+        cost, in_tok, out_tok, model = _compute_run_cost(result)
+        assert in_tok == 1_000_000
+        assert out_tok == 0
+        assert model == "gpt-4o-mini"
+        assert cost == pytest.approx(0.15)
+
+    def test_attr_usage_computes_cost(self):
+        """Attribute-style usage objects are supported."""
+        usage = Mock(spec=["input_tokens", "output_tokens"])
+        usage.input_tokens = 0
+        usage.output_tokens = 1_000_000
+        result = Mock(spec=["usage", "model"])
+        result.usage = usage
+        result.model = "gpt-4o-mini"
+        cost, in_tok, out_tok, model = _compute_run_cost(result)
+        assert out_tok == 1_000_000
+        assert cost == pytest.approx(0.60)
+
+    def test_missing_model_uses_default_pricing_not_first_entry(self):
+        """Usage present but no model must use the 'default' tier, not gpt-4o.
+
+        Regression: get_pricing("") substring-matched the first DEFAULT_PRICING
+        entry (gpt-4o, $2.50/$10) instead of the intended default ($1/$3).
+        """
+        result = {"usage": {"input_tokens": 1_000_000, "output_tokens": 1_000_000}}
+        cost, _, _, model = _compute_run_cost(result)
+        assert model == ""
+        # default tier: 1.00 + 3.00 == 4.00, NOT gpt-4o's 2.50 + 10.00 == 12.50
+        assert cost == pytest.approx(4.0)
+
+    def test_negative_tokens_do_not_produce_negative_cost(self):
+        """Negative usage values are clamped, preventing a budget-brake bypass."""
+        result = {
+            "usage": {"input_tokens": -100, "output_tokens": -50},
+            "model": "gpt-4o",
+        }
+        cost, in_tok, out_tok, _ = _compute_run_cost(result)
+        assert cost == 0.0
+        assert in_tok == 0
+        assert out_tok == 0
+
+    def test_pricing_failure_is_isolated_to_zero_cost(self, monkeypatch):
+        """A failure inside cost computation must not raise into the run path."""
+        import praisonai.cli.features.cost_tracker as cost_tracker
+
+        def _boom(_model):
+            raise RuntimeError("pricing backend down")
+
+        monkeypatch.setattr(cost_tracker, "get_pricing", _boom)
+        result = {"usage": {"input_tokens": 100, "output_tokens": 100}, "model": "gpt-4o"}
+        cost, in_tok, out_tok, _ = _compute_run_cost(result)
+        assert cost == 0.0
+        assert in_tok == 100
+        assert out_tok == 100

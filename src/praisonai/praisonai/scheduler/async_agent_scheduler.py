@@ -12,7 +12,7 @@ from typing import Optional, Dict, Any, Callable, Union
 from abc import ABC, abstractmethod
 
 from .shared import ScheduleParser, backoff_delay, safe_call
-from ._base_scheduler import _BaseAgentScheduler
+from ._base_scheduler import _BaseAgentScheduler, _compute_run_cost
 from ._dispatch import adispatch_agent
 
 logger = logging.getLogger(__name__)
@@ -372,12 +372,17 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
                 logger.info(f"Async agent execution successful on attempt {attempt + 1}")
                 logger.info(f"Result: {result}")
                 
-                # Estimate cost (rough: ~$0.0001 per execution for gpt-4o-mini)
-                estimated_cost = 0.0001  # Base cost estimate
+                # Compute real cost from the agent response's token usage.
+                # Falls back to $0 (not a fake constant) when no usage metadata.
+                run_cost, in_tok, out_tok, model = _compute_run_cost(result)
                 async with self._stats_lock:
                     self._success_count += 1
-                    self._total_cost += estimated_cost
-                logger.info(f"Estimated cost this run: ${estimated_cost:.4f}, Total: ${self._total_cost:.4f}")
+                    self._total_cost += run_cost
+                logger.info(
+                    "Run cost: $%.4f (model=%s, in=%d, out=%d). Total: $%.4f / $%s",
+                    run_cost, model or "?", in_tok, out_tok,
+                    self._total_cost, self.max_cost,
+                )
                 
                 safe_call(self.on_success, result)
                 await asyncio.to_thread(self._update_state_if_daemon)
