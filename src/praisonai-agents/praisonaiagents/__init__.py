@@ -178,6 +178,11 @@ _LAZY_IMPORTS = {
     'loop': ('praisonaiagents.workflows', 'loop'),
     'repeat': ('praisonaiagents.workflows', 'repeat'),
     'when': ('praisonaiagents.workflows', 'when'),
+    'if_': ('praisonaiagents.workflows', 'if_'),
+    'include': ('praisonaiagents.workflows', 'include'),
+    'Include': ('praisonaiagents.workflows', 'Include'),
+    'MAX_NESTING_DEPTH': ('praisonaiagents.workflows', 'MAX_NESTING_DEPTH'),
+    'YAMLWorkflowParser': ('praisonaiagents.workflows', 'YAMLWorkflowParser'),
     
     # Conditions (Protocol-driven condition evaluation)
     'ConditionProtocol': ('praisonaiagents.conditions.protocols', 'ConditionProtocol'),
@@ -302,6 +307,12 @@ _LAZY_IMPORTS = {
     # Knowledge
     'Knowledge': ('praisonaiagents.knowledge.knowledge', 'Knowledge'),
     'Chunking': ('praisonaiagents.knowledge.chunking', 'Chunking'),
+    'KnowledgeStoreProtocol': ('praisonaiagents.knowledge.protocols', 'KnowledgeStoreProtocol'),
+    'ScopeRequiredError': ('praisonaiagents.knowledge.protocols', 'ScopeRequiredError'),
+    'BackendNotAvailableError': ('praisonaiagents.knowledge.protocols', 'BackendNotAvailableError'),
+    'FileTracker': ('praisonaiagents.knowledge.indexing', 'FileTracker'),
+    'IndexResult': ('praisonaiagents.knowledge.indexing', 'IndexResult'),
+    'CorpusStats': ('praisonaiagents.knowledge.indexing', 'CorpusStats'),
     
     # FastContext
     'FastContext': ('praisonaiagents.context.fast', 'FastContext'),
@@ -325,9 +336,17 @@ _LAZY_IMPORTS = {
     'SkillProperties': ('praisonaiagents.skills', 'SkillProperties'),
     'SkillMetadata': ('praisonaiagents.skills', 'SkillMetadata'),
     'SkillLoader': ('praisonaiagents.skills', 'SkillLoader'),
+    'validate': ('praisonaiagents.skills', 'validate'),
+    'validate_metadata': ('praisonaiagents.skills', 'validate_metadata'),
+    'discover_skills': ('praisonaiagents.skills', 'discover_skills'),
+    'load_skill': ('praisonaiagents.skills', 'load_skill'),
+    'EnforcementLevel': ('praisonaiagents.skills', 'EnforcementLevel'),
+    'SkillState': ('praisonaiagents.skills', 'SkillState'),
     
     # Memory
     'Memory': ('praisonaiagents.memory.memory', 'Memory'),
+    'AutoMemory': ('praisonaiagents.memory', 'AutoMemory'),
+    'ChromaMemory': ('praisonaiagents.memory.adapters.factories', 'create_chroma_memory_adapter'),
     
     # Planning
     'Plan': ('praisonaiagents.planning', 'Plan'),
