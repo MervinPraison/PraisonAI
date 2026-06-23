@@ -200,7 +200,7 @@ class TestMaterializePrompt:
             name="test",
             prompt_template="Hi {name}.",
         )
-        with pytest.raises(KeyError):
+        with pytest.raises(ValueError, match="Failed to materialize prompt.*'name'"):
             catalogue.materialize_prompt(bp, {})
 
 

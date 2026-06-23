@@ -165,6 +165,8 @@ class BlueprintCatalogue:
         self._blueprints: Dict[str, Blueprint] = {}
         self._custom_dirs = custom_dirs or []
         self._loaded = False
+        import threading
+        self._load_lock = threading.Lock()
 
     # -- discovery -----------------------------------------------------------
 
@@ -172,9 +174,7 @@ class BlueprintCatalogue:
         """Lazy-load the catalogue (builtins + user dirs) on first access."""
         if self._loaded:
             return
-        import threading
-        if not hasattr(self, "_load_lock"):
-            self._load_lock = threading.Lock()
+
         with self._load_lock:
             if self._loaded:
                 return
@@ -182,19 +182,19 @@ class BlueprintCatalogue:
             # 1. Builtins
             self._blueprints.update(BUILTIN_BLUEPRINTS)
 
-        # 2. User blueprints from ~/.praisonai/blueprints/
-        try:
-            from praisonaiagents.paths import get_data_dir
-            user_dir = get_data_dir() / self.BLUEPRINTS_DIR_NAME
-            self._load_from_directory(user_dir, custom=True)
-        except Exception as e:
-            logger.debug("Skipping user blueprint dir: %s", e)
+            # 2. User blueprints from ~/.praisonai/blueprints/
+            try:
+                from praisonaiagents.paths import get_data_dir
+                user_dir = get_data_dir() / self.BLUEPRINTS_DIR_NAME
+                self._load_from_directory(user_dir, custom=False)
+            except Exception as e:
+                logger.debug("Skipping user blueprint dir: %s", e)
 
-        # 3. Custom directories
-        for d in self._custom_dirs:
-            self._load_from_directory(Path(d), custom=True)
+            # 3. Custom directories
+            for d in self._custom_dirs:
+                self._load_from_directory(Path(d), custom=True)
 
-        self._loaded = True
+            self._loaded = True
 
     def _load_from_directory(self, directory: Path, *, custom: bool) -> None:
         """Scan *directory* for ``<name>/blueprint.yaml`` subdirectories."""
@@ -314,7 +314,13 @@ class BlueprintCatalogue:
         Uses Python's ``str.format()`` — *resolved* must contain every
         key referenced in ``bp.prompt_template``.
         """
-        return bp.prompt_template.format(**resolved)
+        try:
+            return bp.prompt_template.format(**resolved)
+        except (KeyError, ValueError) as e:
+            raise ValueError(
+                f"Failed to materialize prompt for blueprint "
+                f"'{bp.name}': {e}. Template: {bp.prompt_template!r}",
+            ) from e
 
     def materialize_schedule(
         self, bp: Blueprint, resolved: Dict[str, Any]
@@ -331,7 +337,13 @@ class BlueprintCatalogue:
                 str(resolved.get("weekdays", "mon-fri"))
             )
             materialized["weekdays_expression"] = raw
-        return bp.schedule_template.format(**materialized)
+        try:
+            return bp.schedule_template.format(**materialized)
+        except (KeyError, ValueError) as e:
+            raise ValueError(
+                f"Failed to materialize schedule for blueprint "
+                f"'{bp.name}': {e}. Template: {bp.schedule_template!r}",
+            ) from e
 
     @staticmethod
     def _weekdays_to_cron(weekdays: str) -> str:

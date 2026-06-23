@@ -423,6 +423,9 @@ def schedule_suggestion_accept(
             accept_suggestion=suggestion_id,
         )
 
+        if result.startswith("Error") or "already exists" in result:
+            output.print_error(result)
+            raise typer.Exit(1)
         output.print_success(f"Suggestion accepted. {result}")
     except typer.Exit:
         raise
@@ -462,6 +465,8 @@ def schedule_suggestion_propose(
     weekdays: Optional[str] = typer.Option(None, "--weekdays"),
     focus: Optional[str] = typer.Option(None, "--focus"),
     interval: Optional[int] = typer.Option(None, "--interval"),
+    keywords: Optional[str] = typer.Option(None, "--keywords", help="Priority keywords (for important-mail)"),
+    deliver: str = typer.Option("", "--deliver", "-d", help="Suggested delivery target"),
 ):
     """Propose a blueprint as a suggestion (manual/CLI trigger)."""
     output = get_output_controller()
@@ -481,7 +486,7 @@ def schedule_suggestion_propose(
 
         cli_slot_map: dict = {
             "hour": hour, "minute": minute, "weekdays": weekdays,
-            "focus": focus, "interval_minutes": interval, "interval": interval,
+            "focus": focus, "interval_minutes": interval,
             "keywords": keywords,
         }
         slots = {}
@@ -494,6 +499,7 @@ def schedule_suggestion_propose(
         sug_id = engine.propose(
             blueprint_name=blueprint_name,
             slots=slots,
+            deliver=deliver,
             reason=reason or f"Suggestion from CLI for {blueprint_name}",
         )
 
