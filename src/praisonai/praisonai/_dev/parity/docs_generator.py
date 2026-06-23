@@ -184,6 +184,40 @@ FEATURE_CATEGORIES = {
     'resource': 'Sandbox',  # ResourceLimits is part of sandbox execution
 }
 
+# Doc categories excluded from Python "Documentation Without Features" orphan reporting.
+# These pages document infra, other SDKs, or user-facing tooling outside praisonaiagents exports.
+PYTHON_DOC_ORPHAN_EXCLUSIONS = frozenset({
+    'Deployment',  # docs/deploy — CI/infra guidance, not Python SDK feature exports
+    'AI SDK',      # TypeScript SDK pages; tracked in docs/js/ parity separately
+})
+
+# Map doc-only category display names to SDK feature display names for parity matching.
+DOC_FEATURE_CATEGORY_ALIASES = {
+    'Callbacks': 'Hooks',
+    'Middleware': 'Hooks',
+    'Vector Store': 'Knowledge',
+    'Token Management': 'Context Management',
+    'Jobs': 'Workflows',
+    'Chat': 'Agent',
+    'Streaming': 'LLM',
+    'Scheduler': 'Tools',
+    'Storage': 'Database',
+    'Process': 'Workflows',
+}
+
+# Module-path hints when export names do not match FEATURE_CATEGORIES prefixes.
+MODULE_PATH_CATEGORY = (
+    ('deep_research_agent', 'deep-research'),
+    ('hooks', 'hook'),
+    ('streaming', 'stream'),
+    ('scheduler', 'scheduler'),
+    ('storage', 'storage'),
+    ('process', 'process'),
+    ('context.tokens', 'token'),
+    ('chat_handler', 'chat'),
+    ('chat_mixin', 'chat'),
+)
+
 
 # Minimum lines for a doc to be considered "real" (not a stub)
 MIN_DOC_LINES = 50
@@ -257,8 +291,14 @@ class DocsParityGenerator:
             current = current.parent
         return Path("/Users/praison/praisonai-package")
     
-    def _categorize_feature(self, feature_name: str) -> str:
-        """Map a feature name to its category."""
+    def _categorize_feature(self, feature_name: str, module_path: str = '') -> str:
+        """Map a feature name (and optional module path) to its category."""
+        if module_path:
+            path = module_path.replace('praisonaiagents.', '')
+            for hint, prefix in MODULE_PATH_CATEGORY:
+                if hint in path:
+                    return prefix
+
         normalized = normalize_topic(feature_name)
         
         # Try to find a matching prefix
@@ -305,7 +345,8 @@ class DocsParityGenerator:
         
         for export in exports:
             name = export.name if hasattr(export, 'name') else str(export)
-            category = self._categorize_feature(name)
+            module_path = export.module_path if hasattr(export, 'module_path') else ''
+            category = self._categorize_feature(name, module_path)
             if category not in groups:
                 groups[category] = []
             groups[category].append(name)
@@ -357,6 +398,9 @@ class DocsParityGenerator:
                 if prefix == 'other':
                     continue
                 display_name = FEATURE_CATEGORIES.get(prefix, prefix.title())
+                if display_name in PYTHON_DOC_ORPHAN_EXCLUSIONS:
+                    continue
+                display_name = DOC_FEATURE_CATEGORY_ALIASES.get(display_name, display_name)
                 if display_name not in result:
                     result[display_name] = ([], 0)
                 existing_names, existing_lines = result[display_name]
