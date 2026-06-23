@@ -9,9 +9,11 @@ Provides:
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple, TYPE_CHECKING
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .botos import BotOS
@@ -87,9 +89,36 @@ class ChannelDirectory:
     - Platform home channels
     - Named aliases to specific channels
     - Observed channels from active sessions
+    
+    Durability:
+    - Home channels + observed channels are persisted to ``persist_path`` so
+      reachable targets survive restarts.
+    - Friendly aliases are kept in a separate, hand-editable overlay file
+      (``aliases_path``) re-applied on every load/refresh, so a channel can be
+      pre-named before it produces any traffic.
+    
+    Both paths default under ``~/.praisonai/state/`` alongside the existing
+    ``HomeChannelRegistry``. Persistence is best-effort: failures are logged
+    and never raised, keeping the in-memory directory fully usable.
     """
     
-    def __init__(self):
+    def __init__(
+        self,
+        persist_path: Optional[Path] = None,
+        aliases_path: Optional[Path] = None,
+    ):
+        """Initialize the channel directory.
+        
+        Args:
+            persist_path: Path to persist home + observed channels. Defaults to
+                          ~/.praisonai/state/channel_directory.json
+            aliases_path: Path to the durable friendly-alias overlay. Defaults to
+                          ~/.praisonai/state/channel_aliases.json
+        """
+        state_dir = Path.home() / ".praisonai" / "state"
+        self._persist_path = persist_path or (state_dir / "channel_directory.json")
+        self._aliases_path = aliases_path or (state_dir / "channel_aliases.json")
+        
         # Home channel per platform (default delivery target)
         self._home_channels: Dict[str, str] = {}
         
@@ -98,12 +127,135 @@ class ChannelDirectory:
         
         # Recently observed channels per platform
         self._observed: Dict[str, set] = {}
+        
+        # Restore observed + home across restarts, then apply durable aliases.
+        self._load()
+        self._apply_alias_overlay()
+    
+    def _load(self) -> None:
+        """Restore home + observed channels from persistent storage."""
+        if not self._persist_path.exists():
+            return
+        try:
+            with open(self._persist_path, "r") as f:
+                data = json.load(f)
+            home = data.get("home_channels", {})
+            if isinstance(home, dict):
+                self._home_channels.update(
+                    {str(k).lower(): str(v) for k, v in home.items()}
+                )
+            observed = data.get("observed", {})
+            if isinstance(observed, dict):
+                for platform, channels in observed.items():
+                    if isinstance(channels, (list, set, tuple)):
+                        self._observed.setdefault(str(platform).lower(), set()).update(
+                            str(c) for c in channels
+                        )
+            logger.info(
+                "ChannelDirectory: loaded %d home + %d observed platforms from %s",
+                len(self._home_channels),
+                len(self._observed),
+                self._persist_path,
+            )
+        except Exception as e:
+            logger.warning("ChannelDirectory: failed to load directory: %s", e)
+    
+    def _save(self) -> None:
+        """Persist home + observed channels to disk (best-effort)."""
+        try:
+            data = {
+                "home_channels": dict(self._home_channels),
+                "observed": {
+                    platform: sorted(channels)
+                    for platform, channels in self._observed.items()
+                },
+            }
+            self._persist_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._persist_path, "w") as f:
+                json.dump(data, f, indent=2)
+            logger.debug("ChannelDirectory: saved directory to %s", self._persist_path)
+        except Exception as e:
+            logger.error("ChannelDirectory: failed to save directory: %s", e)
+    
+    def _apply_alias_overlay(self) -> None:
+        """Re-apply the durable, hand-editable friendly-alias overlay.
+        
+        The overlay maps ``alias -> {"platform": ..., "channel_id": ...}`` (or
+        the shorthand ``alias -> "platform:channel_id"``). It is read on every
+        load/refresh so aliases survive restarts and can pre-name channels
+        before they produce traffic. Conflicting/invalid entries are skipped
+        with a warning rather than raising.
+        """
+        if not self._aliases_path.exists():
+            return
+        try:
+            with open(self._aliases_path, "r") as f:
+                data = json.load(f)
+        except Exception as e:
+            logger.warning("ChannelDirectory: failed to load alias overlay: %s", e)
+            return
+        
+        if not isinstance(data, dict):
+            return
+        
+        for name, value in data.items():
+            platform: Optional[str] = None
+            channel_id: Optional[str] = None
+            if isinstance(value, dict):
+                platform = value.get("platform")
+                channel_id = value.get("channel_id")
+            elif isinstance(value, str) and ":" in value:
+                platform, channel_id = value.split(":", 1)
+            
+            if not platform or not channel_id:
+                logger.warning(
+                    "ChannelDirectory: skipping invalid alias overlay entry '%s'", name
+                )
+                continue
+            
+            platform_key = str(platform).lower()
+            self._aliases[name] = (platform_key, str(channel_id))
+            # An aliased channel is reachable, so record it as observed too.
+            self._observed.setdefault(platform_key, set()).add(str(channel_id))
+    
+    def refresh_from_adapters(self, adapters: Dict[str, Any]) -> None:
+        """Refresh the directory by enumerating connected adapters.
+        
+        Adapters exposing a ``list_channels()`` method (e.g. Discord/Slack) are
+        enumerated and merged into the observed set, so channels the user has
+        but has not messaged the bot from become addressable. The durable alias
+        overlay is re-applied and the directory persisted afterwards.
+        
+        Args:
+            adapters: Mapping of platform name -> adapter object. Adapters
+                      without ``list_channels`` are skipped.
+        """
+        for platform, adapter in (adapters or {}).items():
+            list_channels = getattr(adapter, "list_channels", None)
+            if not callable(list_channels):
+                continue
+            try:
+                channels = list_channels()
+            except Exception as e:
+                logger.warning(
+                    "ChannelDirectory: list_channels failed for '%s': %s", platform, e
+                )
+                continue
+            for ch in channels or []:
+                channel_id = getattr(ch, "id", ch)
+                if channel_id is None:
+                    continue
+                self.observe_channel(platform, str(channel_id))
+        
+        self._apply_alias_overlay()
+        self._save()
     
     def set_home_channel(self, platform: str, channel_id: str) -> None:
         """Set the default/home channel for a platform."""
         platform_key = platform.lower()
         self._home_channels[platform_key] = channel_id
         logger.debug(f"ChannelDirectory: set home channel for {platform_key}: {channel_id}")
+        self._save()
     
     def add_alias(self, name: str, platform: str, channel_id: str) -> None:
         """Add a friendly alias for a channel."""
@@ -176,6 +328,23 @@ class ChannelDirectory:
                 'kind': 'alias'
             })
         
+        # Add observed channels (from passive traffic + adapter refresh) that
+        # are not already represented by a home channel or an alias, so the
+        # agent-facing `list` action can surface reachable-but-unnamed targets.
+        named = {
+            (t['platform'], t['channel_id']) for t in targets
+        }
+        for platform, channels in self._observed.items():
+            for channel_id in sorted(channels):
+                if (platform, channel_id) in named:
+                    continue
+                targets.append({
+                    'name': f"{platform}:{channel_id}",
+                    'platform': platform,
+                    'channel_id': channel_id,
+                    'kind': 'observed'
+                })
+        
         return targets
 
 
@@ -193,6 +362,21 @@ class DeliveryRouter:
     def __init__(self, botos: BotOS):
         self._botos = botos
         self.directory = ChannelDirectory()
+    
+    def refresh_directory(self) -> None:
+        """Refresh the channel directory from the registered bots.
+        
+        Enumerates each registered bot/adapter that can list its channels and
+        merges them into the durable directory. Intended to be called
+        periodically by the gateway's background loop so reachable targets stay
+        fresh without requiring inbound traffic.
+        """
+        adapters: Dict[str, Any] = {}
+        for platform in self._botos.list_bots():
+            bot = self._botos.get_bot(platform)
+            if bot is not None:
+                adapters[platform] = bot
+        self.directory.refresh_from_adapters(adapters)
     
     def resolve(self, target: str, origin: Optional[SessionSource] = None) -> Tuple[str, str]:
         """
