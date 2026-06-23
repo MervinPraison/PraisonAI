@@ -12,6 +12,7 @@ Key Components:
 - Doctor migration protocol: DoctorContractProtocol for config migration
 - Capability validation: RuntimeCapability, RuntimeCapabilityMatrix, validate_capabilities
 - Runtime protocols: AgentRuntimeProtocol for capability reporting
+- Turn-time runtime resolution for handoffs and sub-agents
 
 Features:
 - Turn-based runtime execution with PreparedTurnContext
@@ -19,6 +20,7 @@ Features:
 - RuntimeCapabilityMatrix for runtime capability sets
 - Capability validation at runtime selection time
 - Support for native, plugin harness, and managed runtimes
+- Dynamic runtime resolution at handoff boundaries
 """
 
 from .._lazy import create_lazy_getattr_with_groups
@@ -57,7 +59,13 @@ __all__ = [
     'RuntimeRegistry',
     'register_runtime',
     'list_runtimes', 
+    # Turn-time runtime resolution for handoffs
     'resolve_runtime',
+    'RuntimeProtocol',
+    'SessionContext',
+    'get_runtime_cache',
+    'clear_runtime_cache',
+    'set_global_resolver',
     # Doctor migration protocol
     "DoctorContractProtocol",
     "Finding",
@@ -119,7 +127,14 @@ _LAZY_GROUPS = {
         'RuntimeRegistry': ('praisonaiagents.runtime.registry', 'RuntimeRegistry'),
         'register_runtime': ('praisonaiagents.runtime.registry', 'register_runtime'),
         'list_runtimes': ('praisonaiagents.runtime.registry', 'list_runtimes'),
-        'resolve_runtime': ('praisonaiagents.runtime.registry', 'resolve_runtime'),
+    },
+    'resolve': {
+        'resolve_runtime': ('praisonaiagents.runtime.resolve', 'resolve_runtime'),
+        'RuntimeProtocol': ('praisonaiagents.runtime.resolve', 'RuntimeProtocol'),
+        'SessionContext': ('praisonaiagents.runtime.resolve', 'SessionContext'),
+        'get_runtime_cache': ('praisonaiagents.runtime.resolve', 'get_runtime_cache'),
+        'clear_runtime_cache': ('praisonaiagents.runtime.resolve', 'clear_runtime_cache'),
+        'set_global_resolver': ('praisonaiagents.runtime.resolve', 'set_global_resolver'),
     },
     'capabilities': {
         'RuntimeCapability': ('praisonaiagents.runtime.capabilities', 'RuntimeCapability'),
