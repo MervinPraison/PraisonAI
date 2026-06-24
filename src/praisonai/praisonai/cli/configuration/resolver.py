@@ -13,6 +13,8 @@ Supports deep-merge semantics and backward compatibility with legacy paths.
 
 import os
 import json
+import difflib
+import warnings
 import toml
 import yaml
 from dataclasses import dataclass, field, asdict
@@ -20,6 +22,101 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from ..utils.project import get_git_root
+
+
+# Known top-level sections the resolver consumes.
+KNOWN_TOP_LEVEL_KEYS = {
+    "agent", "rag", "output", "telemetry", "sources",
+    # Reserved editor-tooling pointer written by `praisonai init`.
+    "$schema",
+    # Tolerated extension sections (validated leniently, not dropped).
+    "traces", "mcp", "permissions", "model", "llm", "session", "rules",
+}
+
+# Known keys for the nested output section.
+KNOWN_OUTPUT_KEYS = {"format", "color", "verbose", "quiet"}
+
+
+def _strict_mode_enabled() -> bool:
+    """Whether strict config validation is enabled via environment."""
+    return os.environ.get("PRAISONAI_STRICT_CONFIG", "").lower() in ("1", "true", "yes")
+
+
+def _suggest(key: str, valid_keys: set) -> Optional[str]:
+    """Return the closest valid key for a typo, if any."""
+    matches = difflib.get_close_matches(key, valid_keys, n=1, cutoff=0.6)
+    return matches[0] if matches else None
+
+
+def _format_unknown_key_message(
+    key: str, valid_keys: set, section: str, source: Optional[str]
+) -> str:
+    """Build an actionable message for an unknown config key."""
+    location = f" in {source}" if source else ""
+    suggestion = _suggest(key, valid_keys)
+    hint = f" Did you mean '{suggestion}'?" if suggestion else ""
+    return f"Unknown config key '{key}'{location} (section: {section}).{hint}"
+
+
+def validate_config_data(
+    data: Dict[str, Any],
+    source: Optional[str] = None,
+    strict: Optional[bool] = None,
+) -> List[str]:
+    """
+    Validate a raw config dict against the known schema.
+
+    Emits actionable messages for unknown/typo keys. In warn mode (default) the
+    messages are returned and surfaced as warnings; in strict mode the first
+    problem raises ``ValueError``.
+
+    Args:
+        data: Raw config dict loaded from a file.
+        source: Path of the originating file (for messages).
+        strict: Force strict mode. Defaults to the env-driven setting.
+
+    Returns:
+        List of warning messages (empty when the config is clean).
+    """
+    if strict is None:
+        strict = _strict_mode_enabled()
+
+    messages: List[str] = []
+
+    def _record(message: str) -> None:
+        if strict:
+            raise ValueError(message)
+        messages.append(message)
+
+    if not isinstance(data, dict):
+        _record(f"Configuration must be a mapping{f' in {source}' if source else ''}.")
+        return messages
+
+    agent_fields = {f.name for f in AgentDefaults.__dataclass_fields__.values()}
+    rag_fields = {f.name for f in RAGConfig.__dataclass_fields__.values()}
+
+    for key, value in data.items():
+        if key == "_source":
+            continue
+        if key not in KNOWN_TOP_LEVEL_KEYS:
+            _record(_format_unknown_key_message(key, KNOWN_TOP_LEVEL_KEYS, "top-level", source))
+            continue
+
+        section_fields = {
+            "agent": agent_fields,
+            "rag": rag_fields,
+            "output": KNOWN_OUTPUT_KEYS,
+        }.get(key)
+        if section_fields is not None:
+            if not isinstance(value, dict):
+                location = f" in {source}" if source else ""
+                _record(f"Configuration section '{key}'{location} must be a mapping.")
+                continue
+            for sub in value:
+                if sub not in section_fields:
+                    _record(_format_unknown_key_message(sub, section_fields, key, source))
+
+    return messages
 
 
 @dataclass
@@ -147,7 +244,7 @@ class ResolvedConfig:
         output_data = data.get("output", {})
         
         # Extract known top-level fields
-        known_keys = {"agent", "rag", "output", "telemetry", "mcp", "permissions", "sources"}
+        known_keys = {"agent", "rag", "output", "telemetry", "mcp", "permissions", "sources", "$schema", "_source"}
         extra = {k: v for k, v in data.items() if k not in known_keys}
         
         return cls(
@@ -181,15 +278,24 @@ class ConfigResolver:
         ".praison/config.toml",  # Legacy, backward compat
     ]
     
-    def __init__(self, cwd: Optional[Path] = None):
+    def __init__(self, cwd: Optional[Path] = None, strict: Optional[bool] = None):
         """
         Initialize the resolver.
         
         Args:
             cwd: Current working directory to start discovery from
+            strict: Force strict validation (unknown keys raise). Defaults to
+                the ``PRAISONAI_STRICT_CONFIG`` environment setting.
         """
         self.cwd = Path(cwd) if cwd else Path.cwd()
+        self.strict = strict
         self._cache: Optional[ResolvedConfig] = None
+
+    def _validate(self, data: Dict[str, Any], source: Optional[str] = None) -> None:
+        """Validate a loaded config dict; warn (or raise in strict mode)."""
+        messages = validate_config_data(data, source=source, strict=self.strict)
+        for message in messages:
+            warnings.warn(message, UserWarning, stacklevel=2)
     
     def resolve(
         self,
@@ -255,6 +361,7 @@ class ConfigResolver:
                 data = self._read_config_file(config_path)
                 if data:
                     data["_source"] = str(config_path)
+                    self._validate(data, str(config_path))
                     configs.append(data)
                     break
         
@@ -306,13 +413,33 @@ class ConfigResolver:
                     data = self._read_config_file(config_path)
                     if data:
                         data["_source"] = str(config_path)
-                        # Migrate legacy format if needed
-                        if config_name.endswith(".toml"):
+                        # Validate before any migration (TOML legacy is skipped).
+                        if not config_name.endswith(".toml"):
+                            self._validate(data, str(config_path))
+                        else:
                             data = self._migrate_legacy_config(data)
                         return data
         
         return None
     
+    def discover_raw_configs(self) -> List[Dict[str, Any]]:
+        """
+        Return the raw discovered config dicts (global then project), without
+        normalisation through ``ResolvedConfig``.
+
+        Unlike ``resolve()``, this preserves unknown/typo keys so that
+        ``validate_config_data`` can surface nested mistakes (e.g.
+        ``agent.temprature``) that the resolver would otherwise drop.
+        """
+        raw: List[Dict[str, Any]] = []
+        global_config = self._load_global_config()
+        if global_config:
+            raw.append(global_config)
+        project_config = self._load_project_config()
+        if project_config:
+            raw.append(project_config)
+        return raw
+
     def _load_env_config(self) -> Dict[str, Any]:
         """Load configuration from environment variables."""
         config = {}

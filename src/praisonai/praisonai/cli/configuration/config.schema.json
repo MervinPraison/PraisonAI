@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/MervinPraison/PraisonAI/main/src/praisonai/praisonai/cli/configuration/config.schema.json",
+  "title": "PraisonAI Project Configuration",
+  "description": "Schema for .praisonai/config.yaml consumed by the PraisonAI CLI config resolver.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "$schema": { "type": "string" },
+    "agent": {
+      "type": "object",
+      "description": "Agent configuration defaults.",
+      "additionalProperties": false,
+      "properties": {
+        "model": { "type": "string" },
+        "provider": { "type": "string" },
+        "base_url": { "type": "string" },
+        "api_key": { "type": "string" },
+        "tools": { "type": "array", "items": { "type": "string" } },
+        "toolset": { "type": "string" },
+        "default_agent": { "type": "string" },
+        "memory": { "type": ["boolean", "object"] },
+        "stream": { "type": "boolean" },
+        "temperature": { "type": "number" },
+        "max_tokens": { "type": "integer" }
+      }
+    },
+    "rag": {
+      "type": "object",
+      "description": "RAG / knowledge configuration.",
+      "additionalProperties": false,
+      "properties": {
+        "collection": { "type": "string" },
+        "top_k": { "type": "integer" },
+        "hybrid": { "type": "boolean" },
+        "rerank": { "type": "boolean" },
+        "min_score": { "type": "number" },
+        "include_citations": { "type": "boolean" },
+        "max_context_tokens": { "type": "integer" },
+        "vector_store": { "type": "string" },
+        "vector_store_path": { "type": "string" }
+      }
+    },
+    "output": {
+      "type": "object",
+      "description": "Output / presentation settings.",
+      "additionalProperties": false,
+      "properties": {
+        "format": { "type": "string", "enum": ["text", "json", "stream-json"] },
+        "color": { "type": "boolean" },
+        "verbose": { "type": "boolean" },
+        "quiet": { "type": "boolean" }
+      }
+    },
+    "telemetry": { "type": "boolean" }
+  }
+}
