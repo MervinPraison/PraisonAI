@@ -196,6 +196,10 @@ class PermissionManager:
                 if r.agent_name is None or r.agent_name == agent_name
             ]
     
+    # Prefixes that should be decomposed into command-structure-aware
+    # sub-targets before matching (command-aware permission matching).
+    _SHELL_PREFIXES = ("bash:", "shell:")
+
     def check(self, target: str, agent_name: Optional[str] = None) -> PermissionResult:
         """
         Check permission for a target.
@@ -208,7 +212,23 @@ class PermissionManager:
             PermissionResult with the decision
         """
         agent = agent_name or self.agent_name
-        
+
+        # Command-aware matching: shell targets are decomposed into their
+        # constituent operations so deny rules fire regardless of where the
+        # operation appears in a compound command (&&, ;, |, $(), redirects).
+        prefix = next(
+            (p for p in self._SHELL_PREFIXES if target.startswith(p)), None
+        )
+        if prefix is not None:
+            command = target[len(prefix):]
+            structured = self._check_shell_command(prefix, command, agent)
+            if structured is not None:
+                return structured
+
+        return self._check_flat(target, agent)
+
+    def _check_flat(self, target: str, agent: Optional[str]) -> PermissionResult:
+        """Legacy flat matching against approvals and rules for a target."""
         with self._lock:
             # Check persistent approvals first
             for approval in self._approvals:
@@ -239,7 +259,67 @@ class PermissionManager:
             target=target,
             reason="No matching rule, requires approval",
         )
-    
+
+    def _check_shell_command(
+        self, prefix: str, command: str, agent: Optional[str]
+    ) -> Optional[PermissionResult]:
+        """Command-structure-aware check for a shell command target.
+
+        Decomposes the command into its constituent operations and evaluates
+        each as its own sub-target. Aggregates with deny-wins, then ask,
+        then allow semantics. Returns ``None`` to defer to flat matching when
+        decomposition yields a single operation identical to the original
+        target (no compound structure), preserving legacy behaviour exactly.
+        """
+        original_target = prefix + command
+        try:
+            from .command_parser import parse_command
+            ops = parse_command(command)
+        except Exception:
+            return None
+
+        # Build the list of sub-targets to evaluate.
+        sub_targets: List[str] = []
+        for op in ops:
+            cmd_str = op.command_string
+            if cmd_str:
+                sub_targets.append(prefix + cmd_str)
+            for path in op.write_targets:
+                sub_targets.append(f"write:{path}")
+
+        # No structured decomposition possible, or it collapses to exactly the
+        # original target — defer to the existing flat matcher.
+        if not sub_targets or sub_targets == [original_target]:
+            return None
+
+        results = [(t, self._check_flat(t, agent)) for t in sub_targets]
+
+        # Deny wins.
+        for sub_target, res in results:
+            if res.action == PermissionAction.DENY:
+                res.reason = (
+                    f"Denied sub-operation '{sub_target}' ({res.reason})"
+                )
+                res.target = original_target
+                return res
+
+        # Then ask: if any sub-operation requires approval.
+        for sub_target, res in results:
+            if res.action == PermissionAction.ASK:
+                res.reason = (
+                    f"Sub-operation '{sub_target}' requires approval "
+                    f"({res.reason})"
+                )
+                res.target = original_target
+                return res
+
+        # All allowed.
+        return PermissionResult(
+            action=PermissionAction.ALLOW,
+            target=original_target,
+            reason="All shell sub-operations allowed",
+        )
+
     def approve(
         self,
         target: str,
