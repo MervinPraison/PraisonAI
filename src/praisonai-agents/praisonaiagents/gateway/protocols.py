@@ -47,6 +47,29 @@ class ConnectErrorCode(str, Enum):
     PROTOCOL_UNSUPPORTED = "protocol_unsupported"
     PAIRING_REQUIRED = "pairing_required"
     AGENT_NOT_FOUND = "agent_not_found"
+    RATE_LIMITED = "rate_limited"
+    ORIGIN_NOT_ALLOWED = "origin_not_allowed"
+    CONFIGURATION_ERROR = "configuration_error"
+
+
+class ConnectRecoveryStep(str, Enum):
+    """Machine-readable recovery hint for a connection rejection.
+
+    Clients branch on ``(code, next_step)`` to implement deterministic,
+    uniform reconnect behaviour without parsing free-text reasons:
+
+        REAUTHENTICATE: Obtain fresh credentials, then reconnect.
+        REPAIR:         Re-run the device pairing flow, then reconnect.
+        UPGRADE_CLIENT: The client protocol is unsupported; update the client.
+        WAIT_THEN_RETRY: Back off (see ``retry_after_seconds``) then reconnect.
+        DO_NOT_RETRY:   The rejection is terminal; reconnecting will not help.
+    """
+
+    REAUTHENTICATE = "reauthenticate"
+    REPAIR = "repair"
+    UPGRADE_CLIENT = "upgrade_client"
+    WAIT_THEN_RETRY = "wait_then_retry"
+    DO_NOT_RETRY = "do_not_retry"
 
 
 class EventType(str, Enum):
@@ -179,16 +202,51 @@ class HelloResult:
 
 @dataclass
 class HelloError:
-    """Error response for failed handshake.
-    
+    """Structured connect-rejection envelope.
+
+    Emitted from *every* connection rejection path — both pre-handshake
+    transport checks (auth/origin/rate-limit) and handshake negotiation —
+    so clients can implement deterministic reconnect logic by branching on
+    ``(code, next_step)`` instead of string-matching close reasons.
+
     Attributes:
-        code: Structured error code
-        message: Human-readable error message
-        next_action: Suggested next action (e.g., "upgrade_client", "pair_device")
+        code: Structured, machine-readable error code.
+        message: Human-readable error message (display only).
+        next_step: Machine-readable recovery hint telling the client what to
+            do next (re-authenticate, re-pair, upgrade, wait then retry, ...).
+        retry_after_seconds: Optional backoff hint (rate limiting / transient
+            unavailability). Only meaningful with ``WAIT_THEN_RETRY``.
+        next_action: Deprecated free-text hint, retained for backward
+            compatibility. Prefer ``next_step``.
     """
     code: ConnectErrorCode
     message: str
+    next_step: Optional[ConnectRecoveryStep] = None
+    retry_after_seconds: Optional[int] = None
     next_action: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize to a ``hello_error`` wire frame.
+
+        The ``next`` key is preserved for backward compatibility with existing
+        clients; ``next_step`` and ``retry_after_seconds`` are the structured
+        recovery fields new clients should branch on.
+        """
+        frame: Dict[str, Any] = {
+            "type": "hello_error",
+            "code": self.code.value,
+            "message": self.message,
+        }
+        if self.next_step is not None:
+            frame["next_step"] = self.next_step.value
+        if self.retry_after_seconds is not None:
+            frame["retry_after_seconds"] = self.retry_after_seconds
+        # Backward-compatible legacy field: fall back to next_step's value.
+        legacy_next = self.next_action
+        if legacy_next is None and self.next_step is not None:
+            legacy_next = self.next_step.value
+        frame["next"] = legacy_next
+        return frame
 
 
 @dataclass
