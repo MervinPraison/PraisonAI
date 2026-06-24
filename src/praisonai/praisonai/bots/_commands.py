@@ -100,6 +100,8 @@ class CommandRegistry:
         self.register("usage", {"description": "Show token usage and estimated cost", "builtin": True})
         self.register("compress", {"description": "Compress conversation to free context window", "builtin": True})
         self.register("queue", {"description": "Queue a follow-up message", "builtin": True})
+        # Learn a grounded skill from sources (codebase, docs, PDFs, or this chat)
+        self.register("learn", {"description": "Learn a reusable skill from sources you describe (e.g. /learn deploy steps from this repo)", "builtin": True})
     
     def register(
         self, 
@@ -673,3 +675,39 @@ def handle_queue_command(
     if decision == RunDecision.STEERED:
         return "🧭 Injected into the running task as live guidance."
     return "⏳ Follow-up queued — it will run after the current task completes."
+
+
+def handle_learn_command(
+    agent: Optional["Agent"],
+    request: Optional[str] = None,
+) -> str:
+    """Handle /learn command to author a grounded skill from sources.
+
+    Drives :meth:`Agent.learn`, which gathers the named sources with the agent's
+    existing tools and authors one grounded SKILL.md via ``skill_manage``.
+
+    Args:
+        agent: The bot's agent (must support ``learn``).
+        request: Description of the sources to learn from and the skill to
+            produce, e.g. "deploy steps from this repo and the runbook PDF".
+
+    Returns:
+        Response message with the authored skill summary, or guidance.
+    """
+    if agent is None:
+        return "❌ Learn is not available (no agent configured)."
+
+    if not request or not request.strip():
+        return (
+            "ℹ️ Usage: /learn <sources and skill to make>\n"
+            "Example: /learn deploy steps from this repo and the runbook PDF"
+        )
+
+    if not hasattr(agent, "learn"):
+        return "❌ This agent does not support learning skills from sources."
+
+    try:
+        result = agent.learn(request.strip())
+        return str(result) if result else "✅ Skill authored."
+    except Exception as e:  # noqa: BLE001 - surface a friendly message
+        return f"❌ Could not learn skill: {e}"

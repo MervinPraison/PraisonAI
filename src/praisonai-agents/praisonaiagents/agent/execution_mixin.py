@@ -918,6 +918,75 @@ Write the complete compiled report:"""
             self.verbose = original_verbose
             self.markdown = original_markdown
 
+    def learn(self, request: str, **kwargs: Any) -> Union[str, Generator[str, None, None], None]:
+        """Learn a grounded, reusable skill from sources you describe.
+
+        Point the agent at real source material — a directory of code, API docs,
+        PDFs/manuals, configs, pasted notes, or "what we just did in this chat" —
+        and it gathers them with the tools it already has (file read, fetch, PDF
+        read) and authors **one grounded SKILL.md** via the ``skill_manage`` tool.
+
+        House-style rules keep self-written skills trustworthy: only flags, paths,
+        and APIs that appear verbatim in the source are used (never invented), the
+        SKILL.md is kept tight (~100-200 lines), and long material is moved to
+        supporting files referenced by relative path. The result is a permanent,
+        reusable skill, immediately invocable like any other skill.
+
+        This is a prompt + entry point on top of existing tools, not a new
+        distillation engine. It ensures ``skill_manage`` is available, then runs a
+        single turn with :meth:`start`.
+
+        Args:
+            request: Natural-language description of the sources to learn from and
+                the skill to produce, e.g.
+                ``"Read ./my-repo and the docs in ./docs/*.pdf and make a
+                'deploy-flow' skill"``.
+            **kwargs: Additional arguments forwarded to :meth:`start`.
+
+        Returns:
+            The agent's response (the authored skill summary), as returned by
+            :meth:`start`.
+
+        Example::
+
+            agent = Agent()
+            agent.learn("Read ./my-repo and make a 'deploy-flow' skill")
+        """
+        from praisonaiagents.skills import build_learn_prompt
+
+        self._ensure_skill_management_tools()
+        return self.start(build_learn_prompt(request), **kwargs)
+
+    def _ensure_skill_management_tools(self) -> None:
+        """Ensure the agent has the ``skill_manage`` tool for authoring skills.
+
+        Adds the skill-management tool (and lightweight file readers) to
+        ``self.tools`` if they are not already present, so :meth:`learn` can
+        author a skill without the caller wiring tools manually. Idempotent.
+        """
+        if not hasattr(self, 'tools') or self.tools is None:
+            self.tools = []
+
+        existing_names = set()
+        for tool in self.tools:
+            name = getattr(tool, '__name__', None)
+            if name:
+                existing_names.add(name)
+
+        try:
+            from praisonaiagents.tools.skill_tools import (
+                skill_manage,
+                read_skill_file,
+                list_skill_scripts,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug(f"Could not import skill tools for learn(): {exc}")
+            return
+
+        for tool in (skill_manage, read_skill_file, list_skill_scripts):
+            if getattr(tool, '__name__', None) not in existing_names:
+                self.tools.append(tool)
+
     def execute(self, task: Any, context: Optional[Any] = None) -> Optional[str]:
         """Execute a task synchronously - backward compatibility method"""
         if hasattr(task, 'description'):
