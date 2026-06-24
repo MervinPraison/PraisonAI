@@ -38,6 +38,7 @@ from .presentation import (
     ActionType,
     ButtonStyle,
     BlockType,
+    adapt_presentation,
 )
 from .interactive import (
     InteractiveContext,
@@ -80,6 +81,7 @@ __all__ = [
     "ActionType",
     "ButtonStyle",
     "BlockType",
+    "adapt_presentation",
     "PlatformCapabilities",
     "InteractiveContext",
     "InteractiveRegistry",

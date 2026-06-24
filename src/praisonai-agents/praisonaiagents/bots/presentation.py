@@ -454,3 +454,168 @@ class PresentationLimits:
         )
 
 
+def _adapt_button(button: PresentationButton, limits: PresentationLimits) -> PresentationButton:
+    """Return a copy of a button adapted to the given limits.
+
+    Truncates the label and, when the channel does not support web apps,
+    degrades a ``web_app`` action to a plain URL so the button still works.
+    """
+    label = button.label or ""
+    if limits.max_button_label and len(label) > limits.max_button_label:
+        label = label[: limits.max_button_label]
+
+    action = button.action
+    url = button.url
+    if action is not None and not limits.supports_web_apps:
+        action_type = action.type.value if isinstance(action.type, ActionType) else action.type
+        if action_type == ActionType.WEB_APP.value and action.web_app_url:
+            # Degrade web_app -> url when unsupported
+            if url is None:
+                url = action.web_app_url
+            action = PresentationAction(type=ActionType.URL, url=action.web_app_url)
+
+    return PresentationButton(
+        label=label,
+        action=action,
+        url=url,
+        priority=button.priority,
+        style=button.style,
+        disabled=button.disabled,
+    )
+
+
+def _select_to_buttons(block: PresentationBlock) -> PresentationBlock:
+    """Convert a SELECT block into an equivalent BUTTONS block.
+
+    Used when a channel does not support native select menus. Each option
+    becomes a callback button carrying ``select:<action_id>:<value>``.
+    """
+    buttons: List[PresentationButton] = []
+    for option in (block.options or []):
+        label = option.label
+        if option.emoji:
+            label = f"{option.emoji} {label}"
+        buttons.append(
+            PresentationButton(
+                label=label,
+                action=PresentationAction(
+                    type=ActionType.CALLBACK,
+                    value=f"select:{block.action_id or ''}:{option.value}",
+                ),
+            )
+        )
+    return PresentationBlock(type=BlockType.BUTTONS, buttons=buttons)
+
+
+def adapt_presentation(
+    presentation: MessagePresentation,
+    limits: PresentationLimits,
+) -> MessagePresentation:
+    """Return a copy of ``presentation`` guaranteed to satisfy ``limits``.
+
+    This is the single, channel-agnostic adaptation pass that channel
+    renderers should run before mapping a presentation to native widgets.
+    It performs:
+
+    1. Priority-aware button truncation: when a buttons block exceeds
+       ``max_buttons`` (or the implied ``max_buttons * max_button_rows``
+       cap), the lowest-``priority`` buttons are dropped first (highest
+       survives), preserving original order among kept buttons.
+    2. Label truncation to ``max_button_label`` / ``max_option_label``.
+    3. Option truncation to ``max_options``.
+    4. Capability degradation: ``select`` blocks become button rows when
+       ``supports_select`` is False; ``web_app`` actions become URLs when
+       ``supports_web_apps`` is False.
+
+    The input presentation is never mutated.
+
+    Args:
+        presentation: The portable presentation to adapt.
+        limits: The target channel's capability limits.
+
+    Returns:
+        A new ``MessagePresentation`` that is safe to render natively.
+    """
+    adapted_blocks: List[PresentationBlock] = []
+
+    for block in presentation.blocks:
+        block_type = block.type.value if isinstance(block.type, BlockType) else block.type
+
+        if block_type == BlockType.SELECT.value and not limits.supports_select:
+            # Degrade select -> buttons, then adapt the resulting buttons block
+            block = _select_to_buttons(block)
+            block_type = BlockType.BUTTONS.value
+
+        if block_type == BlockType.BUTTONS.value and block.buttons:
+            # Cap total buttons by max_buttons * max_button_rows (interpreting
+            # max_buttons as per-row capacity), falling back to max_buttons.
+            rows = limits.max_button_rows if limits.max_button_rows else 1
+            total_cap = limits.max_buttons * rows if limits.max_buttons else len(block.buttons)
+            if total_cap <= 0:
+                total_cap = len(block.buttons)
+
+            buttons = list(block.buttons)
+            if len(buttons) > total_cap:
+                # Keep highest-priority buttons; preserve original order among kept.
+                indexed = list(enumerate(buttons))
+                kept = sorted(
+                    indexed,
+                    key=lambda iv: (iv[1].priority, -iv[0]),
+                    reverse=True,
+                )[:total_cap]
+                kept.sort(key=lambda iv: iv[0])
+                buttons = [b for _, b in kept]
+
+            adapted_buttons = [_adapt_button(b, limits) for b in buttons]
+            adapted_blocks.append(
+                PresentationBlock(type=BlockType.BUTTONS, buttons=adapted_buttons)
+            )
+            continue
+
+        if block_type == BlockType.SELECT.value and block.options:
+            options = block.options
+            if limits.max_options and len(options) > limits.max_options:
+                options = options[: limits.max_options]
+            new_options: List[SelectOption] = []
+            for option in options:
+                label = option.label
+                if limits.max_option_label and len(label) > limits.max_option_label:
+                    label = label[: limits.max_option_label]
+                new_options.append(
+                    SelectOption(
+                        label=label,
+                        value=option.value,
+                        description=option.description,
+                        emoji=option.emoji,
+                        default=option.default,
+                    )
+                )
+            adapted_blocks.append(
+                PresentationBlock(
+                    type=BlockType.SELECT,
+                    options=new_options,
+                    placeholder=block.placeholder,
+                    action_id=block.action_id,
+                )
+            )
+            continue
+
+        if block_type == BlockType.TEXT.value or block_type == BlockType.CONTEXT.value:
+            text = block.text
+            if text is not None and limits.max_text_length and len(text) > limits.max_text_length:
+                text = text[: limits.max_text_length]
+            adapted_blocks.append(
+                PresentationBlock(type=block.type, text=text)
+            )
+            continue
+
+        adapted_blocks.append(block)
+
+    return MessagePresentation(
+        blocks=adapted_blocks,
+        tone=presentation.tone,
+        ephemeral=presentation.ephemeral,
+        replace_message_id=presentation.replace_message_id,
+    )
+
+

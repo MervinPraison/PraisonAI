@@ -43,7 +43,13 @@ class TelegramPresentationRenderer:
         Returns:
             Dict with 'text' and optional 'reply_markup'
         """
-        from praisonaiagents.bots.presentation import BlockType
+        from praisonaiagents.bots.presentation import (
+            BlockType,
+            PresentationLimits,
+            adapt_presentation,
+        )
+        
+        presentation = adapt_presentation(presentation, PresentationLimits.telegram())
         
         text_parts = []
         inline_keyboard = []
@@ -70,8 +76,8 @@ class TelegramPresentationRenderer:
                             inline_keyboard.append(current_row)
                             current_row = []
                         
-                        # Truncate label if needed
-                        label = button.label[:64] if len(button.label) > 64 else button.label
+                        # Label is pre-truncated by adapt_presentation()
+                        label = button.label
                         
                         # Create button data based on action type
                         button_data = {"text": label}
@@ -139,7 +145,13 @@ class SlackPresentationRenderer:
         Returns:
             Dict with 'blocks' for Slack Block Kit
         """
-        from praisonaiagents.bots.presentation import BlockType
+        from praisonaiagents.bots.presentation import (
+            BlockType,
+            PresentationLimits,
+            adapt_presentation,
+        )
+        
+        presentation = adapt_presentation(presentation, PresentationLimits.slack())
         
         blocks = []
         
@@ -169,14 +181,14 @@ class SlackPresentationRenderer:
             
             elif block.type == BlockType.BUTTONS or block.type == "buttons":
                 if block.buttons:
-                    # Slack allows max 5 buttons per actions block
+                    # Presentation is pre-adapted to Slack limits (priority-aware)
                     elements = []
-                    for button in block.buttons[:5]:
+                    for button in block.buttons:
                         button_element = {
                             "type": "button",
                             "text": {
                                 "type": "plain_text",
-                                "text": button.label[:75]
+                                "text": button.label
                             }
                         }
                         
@@ -265,7 +277,13 @@ class DiscordPresentationRenderer:
         Returns:
             Dict with 'content' and optional 'components'
         """
-        from praisonaiagents.bots.presentation import BlockType
+        from praisonaiagents.bots.presentation import (
+            BlockType,
+            PresentationLimits,
+            adapt_presentation,
+        )
+        
+        presentation = adapt_presentation(presentation, PresentationLimits.discord())
         
         text_parts = []
         components = []
@@ -288,7 +306,7 @@ class DiscordPresentationRenderer:
                     action_rows = []
                     current_row = []
                     
-                    for button in block.buttons[:25]:  # Max 25 buttons total
+                    for button in block.buttons:  # Pre-capped by adapt_presentation()
                         if len(current_row) >= 5:
                             action_rows.append({
                                 "type": 1,  # ACTION_ROW
