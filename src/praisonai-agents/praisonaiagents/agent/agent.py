@@ -34,34 +34,14 @@ logger = get_logger(__name__)
 # This reduces import time from ~420ms to ~20ms for silent mode
 # ============================================================================
 
+# Shared, cached, thread-safe display lazy-loaders (single source of truth)
+from ._lazy_display import _get_console, _get_live, _get_display_functions
+
 # Lazy-loaded modules (populated on first use, protected by _lazy_import_lock)
 _lazy_import_lock = threading.Lock()
-_rich_console = None
-_rich_live = None
 _llm_module = None
-_main_module = None
 _hooks_module = None
 _stream_emitter_class = None
-
-def _get_console():
-    """Lazy load rich.console.Console (thread-safe)."""
-    global _rich_console
-    if _rich_console is None:
-        with _lazy_import_lock:
-            if _rich_console is None:
-                from rich.console import Console
-                _rich_console = Console
-    return _rich_console
-
-def _get_live():
-    """Lazy load rich.live.Live (thread-safe)."""
-    global _rich_live
-    if _rich_live is None:
-        with _lazy_import_lock:
-            if _rich_live is None:
-                from rich.live import Live
-                _rich_live = Live
-    return _rich_live
 
 def _get_llm_functions():
     """Lazy load LLM functions (thread-safe)."""
@@ -75,34 +55,6 @@ def _get_llm_functions():
                     'process_stream_chunks': process_stream_chunks,
                 }
     return _llm_module
-
-def _get_display_functions():
-    """Lazy load display functions from main module (thread-safe)."""
-    global _main_module
-    if _main_module is None:
-        with _lazy_import_lock:
-            if _main_module is None:
-                from ..main import (
-                    display_error,
-                    display_instruction,
-                    display_interaction,
-                    display_generating,
-                    display_self_reflection,
-                    ReflectionOutput,
-                    adisplay_instruction,
-                    execute_sync_callback
-                )
-                _main_module = {
-                    'display_error': display_error,
-                    'display_instruction': display_instruction,
-                    'display_interaction': display_interaction,
-                    'display_generating': display_generating,
-                    'display_self_reflection': display_self_reflection,
-                    'ReflectionOutput': ReflectionOutput,
-                    'adisplay_instruction': adisplay_instruction,
-                    'execute_sync_callback': execute_sync_callback,
-                }
-    return _main_module
 
 def _get_hooks_module():
     """Lazy load hooks module for HookRunner and HookRegistry (thread-safe)."""

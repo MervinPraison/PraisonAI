@@ -10,31 +10,8 @@ import os
 import logging
 from typing import Optional
 
-# Fallback helpers to avoid circular imports
-def _get_console():
-    from rich.console import Console
-    return Console
-
-def _get_live():
-    from rich.live import Live
-    return Live
-
-def _get_display_functions():
-    from ..main import (
-        display_error, display_instruction, display_interaction,
-        display_generating, display_self_reflection, ReflectionOutput,
-        adisplay_instruction, execute_sync_callback
-    )
-    return {
-        'display_error': display_error,
-        'display_instruction': display_instruction,
-        'display_interaction': display_interaction,
-        'display_generating': display_generating,
-        'display_self_reflection': display_self_reflection,
-        'ReflectionOutput': ReflectionOutput,
-        'adisplay_instruction': adisplay_instruction,
-        'execute_sync_callback': execute_sync_callback,
-    }
+# Shared lazy display helpers (cached, thread-safe; avoid circular imports)
+from ._lazy_display import _get_console, _get_live, _get_display_functions
 
 logger = logging.getLogger(__name__)
 
