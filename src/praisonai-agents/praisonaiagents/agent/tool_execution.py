@@ -399,11 +399,21 @@ class ToolExecutionMixin:
                             elif result.get("approval_denied") or result.get("permission_denied") or result.get("approval_error"):
                                 break
                             else:
+                                # Avoid compounding with the inner retry loop in
+                                # _execute_tool_with_circuit_breaker: error types it already
+                                # retries (e.g. timeout/rate_limit/connection_error) are
+                                # exhausted by the time they reach here, so escalating them as
+                                # retryable would re-run the entire inner loop from scratch on
+                                # every outer attempt. Only escalate error types the inner loop
+                                # does NOT retry (e.g. "unknown") so they get one outer pass.
+                                error_type = self._classify_error_type(result, None)
+                                inner_policy = self._get_tool_retry_policy(function_name)
+                                is_retryable = error_type not in inner_policy.retry_on
                                 raise ToolExecutionError(
                                     result.get("error", f"Tool '{function_name}' failed"),
                                     tool_name=function_name,
                                     agent_id=self.name,
-                                    is_retryable=True,
+                                    is_retryable=is_retryable,
                                 )
                         else:
                             # Success path - return the result
