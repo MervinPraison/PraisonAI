@@ -174,7 +174,14 @@ def schedule_add(
                 from ..scheduler.suggestion_store import SuggestionStore
                 store_obj = SuggestionStore()
                 sug = store_obj.get(accept_suggestion)
-                if sug is not None and not sug.accepted and not sug.dismissed:
+                # Only accept if the suggestion matches the created schedule,
+                # to keep consent state synchronized with job creation.
+                if (
+                    sug is not None
+                    and not sug.accepted
+                    and not sug.dismissed
+                    and sug.blueprint_name == name
+                ):
                     store_obj.accept(accept_suggestion)
             except Exception as e:
                 logger.warning(

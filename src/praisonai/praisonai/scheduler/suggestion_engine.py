@@ -82,11 +82,21 @@ class SuggestionEngine:
         Returns:
             The suggestion ID if the proposal was accepted by the store,
             ``None`` if rejected (cap full or duplicate).
+
+        Raises:
+            ValueError: If ``ttl_seconds`` is negative (use ``0`` for no
+                expiry).
         """
+        if ttl_seconds < 0:
+            raise ValueError(
+                "ttl_seconds must be >= 0; use 0 for no expiry"
+            )
         sug = Suggestion(
             id=f"sug_{uuid.uuid4().hex[:12]}",
             blueprint_name=blueprint_name,
-            slots=slots or {},
+            # Copy caller-provided slots to avoid external mutation
+            # side effects on the stored suggestion.
+            slots=dict(slots) if slots is not None else {},
             deliver=deliver,
             reason=reason,
             created_at=time.time(),

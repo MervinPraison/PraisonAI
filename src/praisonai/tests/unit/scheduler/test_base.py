@@ -97,6 +97,14 @@ class TestScheduleParser:
         """Complex cron patterns (ranges/lists) fall back to 60 seconds."""
         assert ScheduleParser.parse("cron:0 8,12 * * *") == 60
 
+    def test_parse_cron_invalid_step_zero(self):
+        """Cron "*/0" must not yield a non-positive interval (tight-loop guard)."""
+        assert ScheduleParser.parse("cron:*/0 * * * *") == 60
+
+    def test_parse_cron_invalid_step_negative(self):
+        """Cron with a negative step falls back to 60 seconds."""
+        assert ScheduleParser.parse("cron:*/-5 * * * *") == 60
+
 
 class TestExecutorInterface:
     """Test ExecutorInterface abstract class."""

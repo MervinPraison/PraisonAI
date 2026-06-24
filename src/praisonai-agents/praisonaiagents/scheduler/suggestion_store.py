@@ -152,10 +152,16 @@ class SuggestionStore:
 
         Returns:
             ``True`` if the suggestion was added, ``False`` if it was
-            rejected due to the pending cap or dedup window.
+            rejected due to a duplicate ID, the pending cap, or the
+            dedup window.
         """
         with self._lock:
             now = time.time()
+
+            # Reject duplicate IDs — overwriting would clobber the
+            # existing suggestion's lifecycle state (accepted/dismissed).
+            if suggestion.id in self._suggestions:
+                return False
 
             # Only count active (non-dismissed, non-accepted, non-expired)
             # suggestions toward the cap and dedup window.
@@ -199,11 +205,12 @@ class SuggestionStore:
         """Mark a suggestion as accepted.
 
         Returns:
-            ``False`` if the suggestion was not found.
+            ``False`` if the suggestion was not found or was already
+            dismissed (terminal states are mutually exclusive).
         """
         with self._lock:
             s = self._suggestions.get(suggestion_id)
-            if s is None:
+            if s is None or s.dismissed:
                 return False
             s.accepted = True
             self._save()
@@ -213,11 +220,12 @@ class SuggestionStore:
         """Mark a suggestion as dismissed (user declined).
 
         Returns:
-            ``False`` if the suggestion was not found.
+            ``False`` if the suggestion was not found or was already
+            accepted (terminal states are mutually exclusive).
         """
         with self._lock:
             s = self._suggestions.get(suggestion_id)
-            if s is None:
+            if s is None or s.accepted:
                 return False
             s.dismissed = True
             self._save()

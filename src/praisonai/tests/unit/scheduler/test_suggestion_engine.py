@@ -66,6 +66,25 @@ class TestPropose:
         extra = engine.propose("weekly-review", slots={"hour": 17})
         assert extra is None
 
+    def test_propose_negative_ttl_rejected(self, engine):
+        """Negative ttl_seconds must raise (0 means no expiry)."""
+        with pytest.raises(ValueError):
+            engine.propose("morning-brief", slots={"hour": 8}, ttl_seconds=-1)
+
+    def test_propose_zero_ttl_no_expiry(self, engine):
+        """ttl_seconds=0 means no expiry (expires_at == 0)."""
+        sug_id = engine.propose("morning-brief", slots={"hour": 8}, ttl_seconds=0)
+        sug = engine.get_suggestion(sug_id)
+        assert sug.expires_at == 0.0
+
+    def test_propose_copies_slots(self, engine):
+        """Mutating the caller's slots dict must not affect the stored suggestion."""
+        slots = {"hour": 8}
+        sug_id = engine.propose("morning-brief", slots=slots)
+        slots["hour"] = 99
+        sug = engine.get_suggestion(sug_id)
+        assert sug.slots["hour"] == 8
+
 
 class TestAcceptDismiss:
     """Tests for accept() and dismiss()."""

@@ -426,6 +426,7 @@ def schedule_suggestion_accept(
             schedule=schedule_expr,
             message=prompt,
             deliver=final_deliver,
+            agent_id=bp.default_agent,
             accept_suggestion=suggestion_id,
         )
 

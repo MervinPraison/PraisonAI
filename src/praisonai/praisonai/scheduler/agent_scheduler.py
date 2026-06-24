@@ -588,7 +588,30 @@ class AgentScheduler(_BaseAgentScheduler):
                 from praisonai._async_bridge import run_sync
                 from praisonai.scheduler._dispatch import adispatch_agent
                 agent = Agent(instructions=self.prompt_text)
-                return run_sync(adispatch_agent(agent, self.prompt_text))
+                result = run_sync(adispatch_agent(agent, self.prompt_text))
+                # Route the result to the configured delivery target so the
+                # Python API path honours `deliver`/`agent_id` (parity with
+                # the CLI path through schedule_add).
+                _deliver = config.get("deliver", "")
+                if _deliver and _deliver != "origin":
+                    try:
+                        from praisonaiagents.tools.schedule_tools import (
+                            schedule_add as _sa,
+                        )
+                        _sa(
+                            name=f"_blueprint_run_{blueprint_name}",
+                            schedule="in 1 second",
+                            message=str(result),
+                            deliver=_deliver,
+                            agent_id=config.get("agent_id", ""),
+                        )
+                    except Exception as _e:  # best-effort delivery
+                        import logging
+                        logging.getLogger(__name__).warning(
+                            "Blueprint delivery failed for %s: %s",
+                            blueprint_name, _e,
+                        )
+                return result
 
         agent = BlueprintAgent(prompt)
 

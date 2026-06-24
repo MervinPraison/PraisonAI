@@ -100,6 +100,42 @@ class TestAcceptDismiss:
         ok = tmp_store.dismiss("nonexistent")
         assert ok is False
 
+    def test_accept_after_dismiss_rejected(self, tmp_store, sample):
+        """Terminal states are mutually exclusive: dismissed cannot be accepted."""
+        tmp_store.add(sample)
+        assert tmp_store.dismiss("sug_test001") is True
+        assert tmp_store.accept("sug_test001") is False
+        s = tmp_store.get("sug_test001")
+        assert s.accepted is False
+        assert s.dismissed is True
+
+    def test_dismiss_after_accept_rejected(self, tmp_store, sample):
+        """Terminal states are mutually exclusive: accepted cannot be dismissed."""
+        tmp_store.add(sample)
+        assert tmp_store.accept("sug_test001") is True
+        assert tmp_store.dismiss("sug_test001") is False
+        s = tmp_store.get("sug_test001")
+        assert s.dismissed is False
+        assert s.accepted is True
+
+
+class TestDuplicateId:
+    """Adding a suggestion with an existing ID must not clobber state."""
+
+    def test_add_duplicate_id_rejected(self, tmp_store, sample):
+        assert tmp_store.add(sample) is True
+        tmp_store.accept("sug_test001")
+        dup = Suggestion(
+            id="sug_test001",
+            blueprint_name="weekly-review",
+            slots={"day": "fri"},
+        )
+        assert tmp_store.add(dup) is False
+        s = tmp_store.get("sug_test001")
+        # Original lifecycle state preserved (not overwritten).
+        assert s.accepted is True
+        assert s.blueprint_name == "morning-brief"
+
 
 class TestCap:
     """Tests for the MAX_PENDING_CAP enforcement."""

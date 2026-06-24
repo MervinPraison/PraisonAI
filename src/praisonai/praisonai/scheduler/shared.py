@@ -65,7 +65,10 @@ class ScheduleParser:
         # Interval-based: "*/15 * * * *" → every 15 minutes
         if minute.startswith("*/") and hour == "*":
             try:
-                return int(minute[2:]) * 60
+                step = int(minute[2:])
+                # Guard against "*/0" or negative steps which would yield a
+                # non-positive interval and tight-loop the scheduler.
+                return step * 60 if step > 0 else 60
             except ValueError:
                 pass
 
