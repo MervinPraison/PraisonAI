@@ -175,6 +175,61 @@ class SkillsCatalogProtocol(Protocol):
         ...
 
 
+@runtime_checkable
+class SkillReviewProtocol(Protocol):
+    """Policy for the autonomous skill self-improvement loop.
+
+    After a task finishes, an opt-in guarded review pass asks the agent
+    whether the session revealed a reusable technique worth capturing as a
+    skill. ``should_review`` decides *whether* to run the pass and
+    ``review_prompt`` produces the directive given to the agent. Both take a
+    lightweight trajectory dict so wrappers/plugins can swap the policy
+    without depending on core internals.
+    """
+
+    def should_review(self, trajectory: Dict[str, Any]) -> bool:
+        """Return True if the finished session warrants a skill review."""
+        ...
+
+    def review_prompt(self, trajectory: Dict[str, Any]) -> str:
+        """Return the directive prompt for the guarded review turn."""
+        ...
+
+
+class DefaultSkillReviewPolicy:
+    """Default, conservative skill-review policy.
+
+    Triggers only when the session did real work (at least ``min_tool_calls``
+    tool invocations, default 1) and asks the agent to create or patch a
+    single skill if — and only if — a durable, reusable technique emerged.
+    """
+
+    def __init__(self, min_tool_calls: int = 1):
+        self.min_tool_calls = max(0, int(min_tool_calls))
+
+    def should_review(self, trajectory: Dict[str, Any]) -> bool:
+        tools_used = trajectory.get("tools_used") or []
+        return len(tools_used) >= self.min_tool_calls
+
+    def review_prompt(self, trajectory: Dict[str, Any]) -> str:
+        prompt = str(trajectory.get("prompt", "")).strip()
+        tools_used = trajectory.get("tools_used") or []
+        tools_str = ", ".join(str(t) for t in tools_used) if tools_used else "none"
+        return (
+            "You have just finished a task. Reflect ONLY on whether this "
+            "session revealed a durable, reusable technique, or exposed a "
+            "loaded skill that was wrong or incomplete.\n\n"
+            f"Original task: {prompt}\n"
+            f"Tools used: {tools_str}\n\n"
+            "If — and only if — there is a genuinely reusable capability worth "
+            "saving, call the `skill_manage` tool to create a new skill or "
+            "patch an existing one. Use a clear, hyphenated skill name and a "
+            "concise SKILL.md body capturing the reusable steps. "
+            "If nothing durable was learned, reply with exactly 'NO_SKILL' "
+            "and do not call any tool."
+        )
+
+
 def list_skills_for_api() -> List[Dict[str, Any]]:
     """Default catalog adapter using SkillManager when available."""
     try:

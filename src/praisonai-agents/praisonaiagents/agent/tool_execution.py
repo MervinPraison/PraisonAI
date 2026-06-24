@@ -711,6 +711,16 @@ class ToolExecutionMixin:
             # Log learning nudge failures for debugging
             logger.warning("Learning nudge generation failed: %s", e, exc_info=True)
 
+        # Autonomous skill self-improvement loop (opt-in via self_improve=True).
+        # Runs a guarded review pass restricted to skill_manage. No-op when
+        # disabled or already inside a review (re-entrancy guarded).
+        try:
+            run_review = getattr(self, "_run_skill_review", None)
+            if run_review is not None:
+                run_review(prompt, response, tools_used)
+        except Exception as e:
+            logger.warning("Skill self-improvement review failed: %s", e, exc_info=True)
+
         return response
 
     async def _atrigger_after_agent_hook(self, prompt, response, start_time, tools_used=None):
@@ -746,6 +756,14 @@ class ToolExecutionMixin:
         except Exception as e:
             # Log learning nudge failures for debugging
             logger.warning("Learning nudge generation failed: %s", e, exc_info=True)
+
+        # Autonomous skill self-improvement loop (opt-in via self_improve=True).
+        try:
+            arun_review = getattr(self, "_arun_skill_review", None)
+            if arun_review is not None:
+                await arun_review(prompt, response, tools_used)
+        except Exception as e:
+            logger.warning("Skill self-improvement review failed: %s", e, exc_info=True)
 
         return response
 
