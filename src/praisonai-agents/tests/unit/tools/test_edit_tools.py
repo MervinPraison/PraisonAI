@@ -408,3 +408,174 @@ class TestPostEditDiagnostics:
         result = editor.apply_patch(patch)
         assert "Success" in result
         assert "Diagnostics" in result
+
+
+class TestAutomaticStaleness:
+    def test_edit_aborts_when_changed_after_read(self, tools, tmp_path):
+        p = tmp_path / "a.py"
+        _write(p, "x = 1\n")
+        # Read via the tool records the content hash automatically.
+        content, _ = tools.read_file(str(p))
+        assert content == "x = 1\n"
+        # An external process changes the file after the read.
+        _write(p, "x = 999\n")
+        # The edit must abort by default without any expected_hash being passed.
+        result = tools.edit_file(str(p), "x = 999", "x = 2")
+        assert "changed since it was read" in result
+        # File is untouched.
+        assert _read(p) == "x = 999\n"
+
+    def test_force_bypasses_staleness(self, tools, tmp_path):
+        p = tmp_path / "a.py"
+        _write(p, "x = 1\n")
+        tools.read_file(str(p))
+        _write(p, "x = 999\n")
+        result = tools.edit_file(str(p), "x = 999", "x = 2", force=True)
+        assert "Success" in result
+        assert _read(p) == "x = 2\n"
+
+    def test_no_recorded_read_allows_edit(self, tools, tmp_path):
+        # Without a prior read, the default path behaves exactly as before.
+        p = tmp_path / "a.py"
+        _write(p, "x = 1\n")
+        result = tools.edit_file(str(p), "x = 1", "x = 2")
+        assert "Success" in result
+        assert _read(p) == "x = 2\n"
+
+    def test_consecutive_edits_not_flagged_stale(self, tools, tmp_path):
+        # An edit updates the recorded hash so a follow-up edit is not stale.
+        p = tmp_path / "a.py"
+        _write(p, "a = 1\nb = 2\n")
+        tools.read_file(str(p))
+        assert "Success" in tools.edit_file(str(p), "a = 1", "a = 10")
+        assert "Success" in tools.edit_file(str(p), "b = 2", "b = 20")
+        assert _read(p) == "a = 10\nb = 20\n"
+
+    def test_explicit_hash_still_honoured(self, tools, tmp_path):
+        p = tmp_path / "a.py"
+        _write(p, "x = 1\n")
+        result = tools.edit_file(str(p), "x = 1", "x = 2",
+                                 expected_hash="deadbeef")
+        assert "modified since last read" in result
+
+    def test_apply_patch_update_aborts_when_stale(self, tools, tmp_path):
+        target = tmp_path / "u.py"
+        _write(target, "def foo():\n    return 1\n")
+        tools.read_file(str(target))
+        _write(target, "def foo():\n    return 1\n# changed\n")
+        patch = (
+            f"*** Update File: {target}\n"
+            "@@\n"
+            "    return 1\n"
+            "===\n"
+            "    return 2\n"
+        )
+        result = tools.apply_patch(patch)
+        assert "changed" in result
+        assert "return 2" not in _read(target)
+
+    def test_apply_patch_force_bypasses_staleness(self, tools, tmp_path):
+        target = tmp_path / "u.py"
+        _write(target, "def foo():\n    return 1\n")
+        tools.read_file(str(target))
+        _write(target, "def foo():\n    return 1\n# changed\n")
+        patch = (
+            f"*** Update File: {target}\n"
+            "@@\n"
+            "    return 1\n"
+            "===\n"
+            "    return 2\n"
+        )
+        result = tools.apply_patch(patch, force=True)
+        assert "Success" in result
+        assert "return 2" in _read(target)
+
+    def test_apply_patch_crlf_consecutive_edits_not_stale(self, tools, tmp_path):
+        # Regression: apply_patch on a CRLF file must record the on-disk
+        # (CRLF-preserved) hash so a follow-up edit is not falsely flagged stale.
+        p = tmp_path / "crlf.py"
+        p.write_bytes(b"a = 1\r\nb = 2\r\n")
+        tools.read_file(str(p))
+        patch = (
+            f"*** Update File: {p}\n"
+            "@@\n"
+            "a = 1\n"
+            "===\n"
+            "a = 10\n"
+        )
+        assert "Success" in tools.apply_patch(patch)
+        # CRLF preserved on disk.
+        assert p.read_bytes() == b"a = 10\r\nb = 2\r\n"
+        # Follow-up edit must not be flagged stale despite the CRLF endings.
+        result = tools.edit_file(str(p), "b = 2", "b = 20")
+        assert "Success" in result
+        assert p.read_bytes() == b"a = 10\r\nb = 20\r\n"
+
+    def test_apply_patch_delete_aborts_when_stale(self, tools, tmp_path):
+        # Regression: a destructive delete must not silently remove a file that
+        # changed on disk since it was last read.
+        p = tmp_path / "d.py"
+        _write(p, "keep = 1\n")
+        tools.read_file(str(p))
+        _write(p, "keep = 1\n# changed externally\n")
+        patch = f"*** Delete File: {p}\n"
+        result = tools.apply_patch(patch)
+        assert "changed" in result
+        assert os.path.exists(str(p))
+        # force=True overrides and deletes.
+        assert "Success" in tools.apply_patch(patch, force=True)
+        assert not os.path.exists(str(p))
+
+
+class TestConcurrency:
+    def test_concurrent_edits_serialise_same_file(self, tools, tmp_path):
+        import threading
+        import contextvars
+
+        p = tmp_path / "counter.txt"
+        # Start with N distinct tokens; each thread replaces one token. Under a
+        # correct per-file lock every replacement lands without corruption.
+        # Zero-pad so no token is a substring of another (avoids ambiguity).
+        n = 25
+        _write(p, "".join(f"T{i:03d}\n" for i in range(n)))
+
+        errors = []
+
+        def worker(i):
+            try:
+                res = tools.edit_file(str(p), f"T{i:03d}", f"D{i:03d}", force=True)
+                if "Success" not in res:
+                    errors.append(res)
+            except Exception as e:  # pragma: no cover - defensive
+                errors.append(str(e))
+
+        # Copy the current context (carrying the auto-approval) into each
+        # worker thread so the high-risk edit_file runs non-interactively.
+        threads = [
+            threading.Thread(target=contextvars.copy_context().run, args=(worker, i))
+            for i in range(n)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, errors
+        out = _read(p)
+        # Every token must have been replaced exactly once; no line lost/merged.
+        for i in range(n):
+            assert f"D{i:03d}\n" in out
+            assert f"T{i:03d}\n" not in out
+
+    def test_different_files_use_different_locks(self, tools, tmp_path):
+        from praisonaiagents.tools import _file_locks
+
+        a = tmp_path / "a.txt"
+        b = tmp_path / "b.txt"
+        _write(a, "a\n")
+        _write(b, "b\n")
+        lock_a = _file_locks.get_lock(tools._validate_path(str(a)))
+        lock_b = _file_locks.get_lock(tools._validate_path(str(b)))
+        assert lock_a is not lock_b
+        # Same path returns the same lock object (shared across callers).
+        assert lock_a is _file_locks.get_lock(tools._validate_path(str(a)))
