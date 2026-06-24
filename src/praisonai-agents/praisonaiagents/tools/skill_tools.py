@@ -294,7 +294,7 @@ class SkillTools:
                 result = self.skill_manager.delete_skill(name, propose=propose)
                 
             elif action == "write_file":
-                if not file_path or not file_content:
+                if not file_path or file_content is None:
                     return json.dumps({"success": False, "error": "file_path and file_content required for write_file action"})
                 result = self.skill_manager.write_skill_file(name, file_path, file_content, propose=propose)
                 
@@ -437,14 +437,15 @@ def list_skill_scripts(skill_path: str) -> str:
 
 
 @require_approval(risk_level="low")
-def skill_manage(action: str, name: str, **kwargs) -> str:
+def skill_manage(action: str, name: str = "", **kwargs) -> str:
     """Skill management tool (hermes-compatible API).
     
-    Actions: create, edit, patch, delete, write_file, remove_file
+    Actions: create, edit, patch, delete, write_file, remove_file,
+             pending, approve, reject
     
     Args:
         action: Action to perform
-        name: Skill name
+        name: Skill name (or pending id for approve/reject; omit for pending)
         **kwargs: Additional parameters for the action
         
     Returns:

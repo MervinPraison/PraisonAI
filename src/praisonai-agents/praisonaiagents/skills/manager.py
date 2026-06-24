@@ -61,6 +61,14 @@ class SkillManager:
             write_approval = self._get_default_write_approval()
         self._write_approval = write_approval
 
+        # Cap the pending-mutation store to bound resource use (configurable
+        # via SKILL_MAX_PENDING; defaults to 100).
+        import os
+        try:
+            self._max_pending = max(1, int(os.getenv('SKILL_MAX_PENDING', '100')))
+        except (TypeError, ValueError):
+            self._max_pending = 100
+
     @property
     def skills(self) -> List[LoadedSkill]:
         """Get all loaded skills."""
@@ -1028,17 +1036,14 @@ version: 1.0.0
     def _skills_base_dir(self):
         """Return the base skills directory where mutations are written.
 
-        Mirrors ``create_skill`` target resolution: prefer the first existing
-        default skill dir, otherwise the user skills dir (honours
-        ``PRAISONAI_HOME``).
+        Always targets the user-owned skills directory (honours
+        ``PRAISONAI_HOME``). ``get_default_skill_dirs()`` is intentionally not
+        used here because its first entry can be a project-scoped or
+        admin-managed (e.g. ``/etc/praison/skills``) location that mutations
+        must never write into.
         """
-        from pathlib import Path
-        skill_dirs = get_default_skill_dirs()
-        if skill_dirs:
-            base = Path(skill_dirs[0])
-        else:
-            from ..paths import get_skills_dir
-            base = get_skills_dir()
+        from ..paths import get_skills_dir
+        base = get_skills_dir()
         base.mkdir(parents=True, exist_ok=True)
         return base
 
@@ -1097,10 +1102,27 @@ version: 1.0.0
         import secrets
         import time
 
-        if action == "create" and not self._validate_skill_name(name):
-            return {"success": False, "error": f"Invalid skill name: {name}"}
+        # Validate the staged payload up front using the same checks as the
+        # direct-write path, so invalid/oversized proposals never reach the
+        # pending store or audit log.
+        if action in ("create", "edit", "patch", "delete",
+                      "write_file", "remove_file"):
+            if not self._validate_skill_name(name):
+                return {"success": False, "error": f"Invalid skill name: {name}"}
+        if action in ("create", "edit") and len(payload.get("content") or "") > 100_000:
+            return {"success": False, "error": "Skill content exceeds maximum size (100KB)"}
+        if action == "write_file" and len(payload.get("file_content") or "") > 100_000:
+            return {"success": False, "error": "File content exceeds maximum size (100KB)"}
 
         pending = self._load_pending()
+        if len(pending) >= self._max_pending:
+            return {
+                "success": False,
+                "error": (
+                    f"Pending skill store is full ({self._max_pending} entries); "
+                    "approve or reject existing proposals first."
+                ),
+            }
         request_id = f"skl-{secrets.token_hex(4)}"
         record = {
             "id": request_id,
@@ -1170,12 +1192,18 @@ version: 1.0.0
         if request_id is None:
             return {"success": False, "error": f"No pending mutation: {identifier}"}
 
-        record = pending.pop(request_id)
-        self._save_pending(pending)
-        self._audit("approved", record)
-
+        # Apply first; only remove + audit "approved" once the mutation
+        # actually succeeds, so a failure neither loses the proposal nor
+        # records a false approval.
+        record = pending[request_id]
         result = self._apply_pending(record)
         result.setdefault("id", request_id)
+        if result.get("success"):
+            pending.pop(request_id, None)
+            self._save_pending(pending)
+            self._audit("approved", record)
+        else:
+            self._audit("approval_failed", record)
         return result
 
     def reject(self, identifier: str) -> dict:

@@ -411,6 +411,80 @@ class TestSkillApprovalGate:
             result = manager.approve("skl-nonexistent")
             assert result["success"] is False
 
+    def test_stage_rejects_oversized_content(self, monkeypatch):
+        """Oversized proposals are rejected before reaching the pending store."""
+        from praisonaiagents.skills.manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            monkeypatch.chdir(tmpdir)
+            monkeypatch.setenv("PRAISONAI_HOME", str(Path(tmpdir) / "home"))
+            from praisonaiagents import paths
+            paths._clear_cache()
+
+            manager = SkillManager()
+            result = manager.create_skill("too-big", "x" * 100_001)
+
+            assert result["success"] is False
+            assert manager.list_pending() == []
+
+    def test_stage_rejects_invalid_name(self, monkeypatch):
+        """Invalid skill names are rejected at staging time for all actions."""
+        from praisonaiagents.skills.manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            monkeypatch.chdir(tmpdir)
+            monkeypatch.setenv("PRAISONAI_HOME", str(Path(tmpdir) / "home"))
+            from praisonaiagents import paths
+            paths._clear_cache()
+
+            manager = SkillManager()
+            result = manager.edit_skill("../escape", "# body")
+
+            assert result["success"] is False
+            assert manager.list_pending() == []
+
+    def test_pending_store_size_cap(self, monkeypatch):
+        """The pending store refuses new proposals past SKILL_MAX_PENDING."""
+        from praisonaiagents.skills.manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            monkeypatch.chdir(tmpdir)
+            monkeypatch.setenv("PRAISONAI_HOME", str(Path(tmpdir) / "home"))
+            monkeypatch.setenv("SKILL_MAX_PENDING", "2")
+            from praisonaiagents import paths
+            paths._clear_cache()
+
+            manager = SkillManager()
+            assert manager.create_skill("one", "# a")["status"] == "pending"
+            assert manager.create_skill("two", "# b")["status"] == "pending"
+            full = manager.create_skill("three", "# c")
+            assert full["success"] is False
+            assert len(manager.list_pending()) == 2
+
+    def test_approve_failure_keeps_record(self, monkeypatch):
+        """A failed apply preserves the pending record and does not lie in audit."""
+        from praisonaiagents.skills.manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            monkeypatch.chdir(tmpdir)
+            monkeypatch.setenv("PRAISONAI_HOME", str(Path(tmpdir) / "home"))
+            from praisonaiagents import paths
+            paths._clear_cache()
+
+            manager = SkillManager()
+            staged = manager.create_skill("flaky", "# body")
+            request_id = staged["id"]
+
+            def _boom(_record):
+                return {"success": False, "error": "boom"}
+
+            monkeypatch.setattr(manager, "_apply_pending", _boom)
+            result = manager.approve(request_id)
+
+            assert result["success"] is False
+            # Record retained for retry.
+            assert any(p["id"] == request_id for p in manager.list_pending())
+
     def test_protocol_conformance(self):
         """SkillManager conforms to SkillMutatorProtocol."""
         from praisonaiagents.skills.manager import SkillManager
