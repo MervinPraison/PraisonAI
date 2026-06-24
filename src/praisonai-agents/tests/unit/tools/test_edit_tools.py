@@ -373,6 +373,27 @@ class TestPostEditDiagnostics:
         editor = EditTools(post_edit_diagnostics="bogus")
         assert editor._post_edit_diagnostics == "auto"
 
+    def test_invalid_mode_behaves_like_auto(self, tmp_path):
+        # Behaviour-based check: an invalid mode must act exactly like ``auto``
+        # (surface diagnostics on a broken edit) rather than only matching an
+        # internal field.
+        editor = EditTools(post_edit_diagnostics="bogus")
+        p = tmp_path / "broken.py"
+        _write(p, "x = 1\n")
+        result = editor.edit_file(str(p), "x = 1", "def (:")
+        assert "Success" in result
+        assert "Diagnostics" in result
+
+    def test_on_mode_clean_edit_reports_no_problems(self, tmp_path):
+        # ``on`` mode appends a diagnostics section even for a clean edit.
+        editor = EditTools(post_edit_diagnostics="on")
+        p = tmp_path / "ok.py"
+        _write(p, "x = 1\n")
+        result = editor.edit_file(str(p), "x = 1", "x = 2")
+        assert "Success" in result
+        assert "Diagnostics" in result
+        assert "no problems found" in result
+
     def test_apply_patch_surfaces_diagnostics(self, tmp_path):
         editor = EditTools(post_edit_diagnostics="auto")
         p = tmp_path / "mod.py"

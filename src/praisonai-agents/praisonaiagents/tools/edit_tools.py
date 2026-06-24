@@ -165,16 +165,38 @@ class EditTools:
         candidates: List[Tuple[str, List[str]]] = []
         if ext in (".py", ".pyi"):
             if shutil.which("ruff"):
-                candidates.append(("ruff", ["ruff", "check", "--quiet", safe_path]))
+                # Restrict to error-class rules (pyflakes/syntax) so that
+                # stylistically-imperfect-but-valid edits do not flood output;
+                # this keeps behaviour close to a syntax gate. ``--no-cache``
+                # avoids polluting the workspace.
+                candidates.append((
+                    "ruff",
+                    ["ruff", "check", "--quiet", "--no-cache",
+                     "--select", "E9,F63,F7,F82", safe_path],
+                ))
             # py_compile is always available via the running interpreter and
             # catches syntax errors with zero third-party dependencies.
             import sys
             candidates.append(("py_compile", [sys.executable, "-m", "py_compile", safe_path]))
         elif ext in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"):
             if shutil.which("eslint"):
-                candidates.append(("eslint", ["eslint", safe_path]))
+                # ``--no-config-lookup`` prevents ESLint from discovering and
+                # executing repository-controlled config/plugins (arbitrary code
+                # execution risk in untrusted workspaces).
+                candidates.append((
+                    "eslint",
+                    ["eslint", "--no-config-lookup", safe_path],
+                ))
             if shutil.which("tsc") and ext in (".ts", ".tsx"):
-                candidates.append(("tsc", ["tsc", "--noEmit", safe_path]))
+                # Per-file invocation without a project ``tsconfig.json``: relax
+                # project-config coupling so a single valid file does not report
+                # spurious "no inputs"/missing-lib errors.
+                candidates.append((
+                    "tsc",
+                    ["tsc", "--noEmit", "--skipLibCheck", "--allowJs",
+                     "--target", "ESNext", "--moduleResolution", "node",
+                     safe_path],
+                ))
         elif ext == ".json":
             # Validate JSON with the stdlib; emitted via a tiny inline check.
             import sys
