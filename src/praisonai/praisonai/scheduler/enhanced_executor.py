@@ -26,6 +26,7 @@ from .executor import ScheduledAgentExecutor, JobResult
 
 if TYPE_CHECKING:
     from praisonaiagents.scheduler import ScheduleRunner, ScheduleJob
+    from .run_policy import RunPolicy
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,7 @@ class EnhancedScheduledAgentExecutor(ScheduledAgentExecutor):
         standalone_sender: Optional[Callable[[str], Any]] = None,
         on_success: Optional[Callable[..., None]] = None,
         on_failure: Optional[Callable[..., None]] = None,
+        run_policy: Optional["RunPolicy"] = None,
     ) -> None:
         super().__init__(
             runner=runner,
@@ -67,6 +69,7 @@ class EnhancedScheduledAgentExecutor(ScheduledAgentExecutor):
             delivery_handler=delivery_handler,
             on_success=on_success,
             on_failure=on_failure,
+            run_policy=run_policy,
         )
         self._home_registry = home_registry
         self._delivery_resolver = delivery_resolver
