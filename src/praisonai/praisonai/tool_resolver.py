@@ -320,72 +320,67 @@ class ToolResolver:
         if not name:
             return None
 
-        # Load local tools outside the cache lock to prevent lock-order inversion
-        local_tools = self._load_local_tools()
-
+        # Fast path: hold the lock only long enough to read the cache.
         with self._resolve_cache_lock:
-            # Check cache inside lock to prevent races
             cached = self._resolve_cache.get(name, _SENTINEL)
-            if cached is not _SENTINEL:
-                if instantiate and self._is_class(cached):
-                    return cached()
-                return cached
+        if cached is not _SENTINEL:
+            if instantiate and self._is_class(cached):
+                return cached()
+            return cached
 
-            # Track if any source indicated a non-cacheable failure
-            allow_none_cache = True
+        # Slow path: do ALL source lookups OUTSIDE the cache lock so that
+        # cold-start imports (praisonaiagents / praisonai_tools) and nested
+        # ToolRegistry locks never serialize other resolver threads or invert
+        # lock order against ToolRegistry._notify_invalidate.
+        tool: Optional[Callable] = None
+        cacheable = True       # whether a positive result may be cached
+        allow_none_cache = True  # whether a negative (None) result may be cached
 
-            # 1. Check local tools.py first (highest priority)
-            if name in local_tools:
-                logger.debug(f"Resolved '{name}' from local tools.py")
-                tool = local_tools[name]
-                self._resolve_cache[name] = tool
-                if instantiate and self._is_class(tool):
-                    return tool()
-                return tool
-            
-            # 2. Check wrapper ToolRegistry (NEW - ahead of SDK paths)
+        # 1. Check local tools.py first (highest priority)
+        local_tools = self._load_local_tools()
+        if name in local_tools:
+            logger.debug(f"Resolved '{name}' from local tools.py")
+            tool = local_tools[name]
+        else:
+            # 2. Check wrapper ToolRegistry (ahead of SDK paths)
             tool = self._resolve_from_wrapper_registry(name)
-            if tool is not None:
-                self._resolve_cache[name] = tool
-                if instantiate and self._is_class(tool):
-                    return tool()
-                return tool
-            
+
             # 3. Check praisonaiagents.tools
-            result = self._resolve_from_praisonaiagents(name)
-            if result.tool is not None:
-                if result.cacheable:
-                    self._resolve_cache[name] = result.tool
-                if instantiate and self._is_class(result.tool):
-                    return result.tool()
-                return result.tool
-            elif not result.cacheable:
-                # Track that a non-cacheable failure occurred
-                allow_none_cache = False
-            
+            if tool is None:
+                result = self._resolve_from_praisonaiagents(name)
+                if result.tool is not None:
+                    tool = result.tool
+                    cacheable = result.cacheable
+                elif not result.cacheable:
+                    # Track that a non-cacheable failure occurred
+                    allow_none_cache = False
+
             # 4. Check praisonai-tools package
-            tool = self._resolve_from_praisonai_tools(name)
-            if tool is not None:
-                self._resolve_cache[name] = tool
-                if instantiate and self._is_class(tool):
-                    return tool()
-                return tool
-            
+            if tool is None:
+                tool = self._resolve_from_praisonai_tools(name)
+
             # 5. Check core SDK tool registry
-            tool = self._resolve_from_registry(name)
-            if tool is not None:
-                self._resolve_cache[name] = tool
-                if instantiate and self._is_class(tool):
-                    return tool()
-                return tool
-            
-            # Cache None only if the failure was not transient
-            if allow_none_cache:
+            if tool is None:
+                tool = self._resolve_from_registry(name)
+
+        # Insert: re-check under the lock, then write (positive or negative cache).
+        with self._resolve_cache_lock:
+            existing = self._resolve_cache.get(name, _SENTINEL)
+            if existing is not _SENTINEL:
+                # Another thread won the race; prefer the already-cached value.
+                tool = existing
+            elif tool is not None:
+                if cacheable:
+                    self._resolve_cache[name] = tool
+            elif allow_none_cache:
                 logger.warning(f"Tool '{name}' not found in any source")
                 self._resolve_cache[name] = None
             else:
                 logger.debug(f"Tool '{name}' failed transiently; not caching None")
-            return None
+
+        if tool is not None and instantiate and self._is_class(tool):
+            return tool()
+        return tool
     
     def _is_class(self, obj) -> bool:
         """Check if object is a class (not an instance)."""

@@ -5,6 +5,7 @@ re-implementing the dict-of-Lock pattern.
 """
 from __future__ import annotations
 import asyncio
+import threading
 import time
 import weakref
 from collections import OrderedDict
@@ -17,9 +18,11 @@ class LockMap:
     Provides a lock per key with LRU eviction and TTL-based cleanup to prevent
     unbounded memory growth in long-running applications.
     
-    Note: Safe for use within a single asyncio event loop (cooperative
-    multitasking means no interleaving between non-awaited calls), but NOT
-    safe for concurrent access from multiple OS threads.
+    Buckets are keyed by event loop (one loop per OS thread). Structural
+    mutations of the bucket/loop maps are guarded by a ``threading.Lock`` so
+    the same instance can be safely shared across multiple OS threads, each
+    running its own event loop. Per-loop buckets are only ever touched from
+    their owning loop, so intra-loop access remains lock-free.
     """
 
     def __init__(self, *, max_entries: int = 10_000, ttl_seconds: float = 3600.0):
@@ -32,6 +35,8 @@ class LockMap:
         # Bucket locks by event loop to avoid cross-loop issues
         self._buckets: Dict[int, "OrderedDict[Hashable, tuple[asyncio.Lock, float]]"] = {}
         self._loop_refs: Dict[int, weakref.ref] = {}
+        # Guards structural mutations of _buckets / _loop_refs across OS threads.
+        self._struct_lock = threading.Lock()
         self._max = max_entries
         self._ttl = ttl_seconds
 
@@ -47,16 +52,20 @@ class LockMap:
         # Get the current running loop
         loop = asyncio.get_running_loop()
         loop_id = id(loop)
-        
-        # Clean up dead loops
-        self._cleanup_dead_loops()
-        
-        # Get or create bucket for this loop
-        if loop_id not in self._buckets:
-            self._buckets[loop_id] = OrderedDict()
-            self._loop_refs[loop_id] = weakref.ref(loop)
-        
-        bucket = self._buckets[loop_id]
+
+        # Structural access to the bucket/loop maps is shared across threads.
+        with self._struct_lock:
+            # Clean up dead loops
+            self._cleanup_dead_loops_locked()
+
+            # Get or create bucket for this loop
+            bucket = self._buckets.get(loop_id)
+            if bucket is None:
+                bucket = OrderedDict()
+                self._buckets[loop_id] = bucket
+                self._loop_refs[loop_id] = weakref.ref(loop)
+
+        # From here on only this loop's owning thread touches the bucket.
         now = time.monotonic()
         
         entry = bucket.get(key)
@@ -99,27 +108,31 @@ class LockMap:
             bucket.popitem(last=False)
             break
     
-    def _cleanup_dead_loops(self) -> None:
-        """Remove buckets for event loops that no longer exist."""
-        dead_loops = []
-        for loop_id, ref in self._loop_refs.items():
-            loop = ref()
-            if loop is None or loop.is_closed():
-                dead_loops.append(loop_id)
-        
+    def _cleanup_dead_loops_locked(self) -> None:
+        """Remove buckets for event loops that no longer exist.
+
+        Caller must hold ``self._struct_lock``.
+        """
+        dead_loops = [
+            loop_id
+            for loop_id, ref in self._loop_refs.items()
+            if (loop := ref()) is None or loop.is_closed()
+        ]
         for loop_id in dead_loops:
-            del self._loop_refs[loop_id]
-            if loop_id in self._buckets:
-                del self._buckets[loop_id]
+            self._loop_refs.pop(loop_id, None)
+            self._buckets.pop(loop_id, None)
 
     def drop(self, key: Hashable) -> None:
         """Manually remove a lock for the given key."""
         # Get the current running loop
         loop = asyncio.get_running_loop()
         loop_id = id(loop)
-        if loop_id in self._buckets:
-            self._buckets[loop_id].pop(key, None)
+        with self._struct_lock:
+            bucket = self._buckets.get(loop_id)
+        if bucket is not None:
+            bucket.pop(key, None)
 
     def size(self) -> int:
         """Return current number of cached locks across all buckets."""
-        return sum(len(bucket) for bucket in self._buckets.values())
+        with self._struct_lock:
+            return sum(len(bucket) for bucket in self._buckets.values())

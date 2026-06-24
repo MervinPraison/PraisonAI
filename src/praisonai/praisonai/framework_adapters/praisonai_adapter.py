@@ -440,6 +440,11 @@ class PraisonAIAdapter(FrameworkAdapter):
         # Initialize InteractiveRuntime for ACP/LSP if enabled
         interactive_runtime = await self._astart_interactive_runtime(config)
         
+        # Observability is initialized upstream (agents_generator._prepare_for_run);
+        # finalize here on EVERY exit path with the correct status so sessions are
+        # never orphaned "in progress" on errors / cancellation.
+        import sys as _sys
+        from ..observability.hooks import finalize_observability
         try:
             # Inject agent-centric tools if runtime is available
             tools_dict = self._maybe_inject_centric_tools(interactive_runtime, tools_dict)
@@ -456,13 +461,16 @@ class PraisonAIAdapter(FrameworkAdapter):
             response = await team.astart()
             result = f"### PraisonAI Output ###\n{response}" if response else "### PraisonAI Output ###\nTask completed."
             
-            # Close observability session
-            from ..observability.hooks import finalize_observability
-            finalize_observability(self.name, status="Success")
-            
             logger.info("PraisonAI async execution completed")
             return result
         finally:
+            # Close observability session with status derived from exc state
+            status = "Failure" if _sys.exc_info()[0] is not None else "Success"
+            try:
+                finalize_observability(self.name, status=status)
+            except Exception as e:  # noqa: BLE001 -- telemetry must not crash the run
+                logger.error(f"Error finalizing observability: {e}")
+
             # Cleanup InteractiveRuntime if it was started
             if interactive_runtime is not None:
                 try:

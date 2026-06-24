@@ -58,8 +58,15 @@ class CrewAIAdapter(BaseFrameworkAdapter):
         # Suppress crewai.cli.config logger (scoped to when CrewAI is actually used)
         logging.getLogger('crewai.cli.config').setLevel(logging.ERROR)
         
+        # Observability is initialized upstream (agents_generator._prepare_for_run);
+        # finalize on EVERY exit path with the correct status so sessions are
+        # never orphaned "in progress" on errors / cancellation.
+        import sys as _sys
+        from ..observability.hooks import finalize_observability
+
         # Use scoped telemetry disabling instead of global patching
         with scoped_telemetry_disable(Telemetry):
+          try:
             agents = {}
             tasks = []
             tasks_dict = {}
@@ -163,10 +170,13 @@ class CrewAIAdapter(BaseFrameworkAdapter):
 
             response = crew.kickoff()
             result = f"### Task Output ###\n{response}"
-            
-            # Close observability session
-            from ..observability.hooks import finalize_observability
-            finalize_observability(self.name, status="Success")
-                
+
             return result
+          finally:
+            # Close observability session with status derived from exc state
+            status = "Failure" if _sys.exc_info()[0] is not None else "Success"
+            try:
+                finalize_observability(self.name, status=status)
+            except Exception as e:  # noqa: BLE001 -- telemetry must not crash the run
+                logger.error(f"Error finalizing observability: {e}")
     
