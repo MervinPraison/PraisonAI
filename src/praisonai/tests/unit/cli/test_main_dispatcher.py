@@ -379,5 +379,40 @@ class TestTyperRegistrationFailureFailsLoud(unittest.TestCase):
         self.assertIn("registration broke", str(cm.exception))
 
 
+class TestCommandRegistryNoDrift(unittest.TestCase):
+    """``get_command_names()`` must stay in sync with ``_LAZY_COMMANDS``.
+
+    Regression guard for the duplicate-registry drift that misrouted six
+    Typer commands (agent, auth, command, models, permissions, validate)
+    to the legacy dispatcher. ``_LAZY_COMMANDS`` is the single source of
+    truth (it also drives ``--help``); every command advertised there must
+    be recognised by the routing decision in ``main()``.
+    """
+
+    def test_lazy_commands_subset_of_routing_names(self):
+        from praisonai.cli import app as cli_app
+
+        routing = cli_app.get_command_names()
+        advertised = set(cli_app._LAZY_COMMANDS.keys())
+        missing = advertised - routing
+        self.assertEqual(
+            missing,
+            set(),
+            f"Commands advertised in _LAZY_COMMANDS but not routed to Typer: {missing}",
+        )
+
+    def test_previously_drifted_commands_are_routed(self):
+        from praisonai.cli import app as cli_app
+
+        routing = cli_app.get_command_names()
+        expected = {"agent", "auth", "command", "models", "permissions", "validate"}
+        missing = expected - routing
+        self.assertEqual(
+            missing,
+            set(),
+            f"Previously-drifted commands not found in routing set: {missing}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
