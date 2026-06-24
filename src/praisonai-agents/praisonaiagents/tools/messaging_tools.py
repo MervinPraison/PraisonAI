@@ -139,6 +139,66 @@ def _parse_media(message: str) -> tuple[str, Optional[List[str]]]:
     return text, (media or None)
 
 
+def _check_send_policy(target: str) -> Optional[str]:
+    """Evaluate the active send-policy for ``target`` (Issue #2226).
+
+    Returns a model-readable denial string when the send is *not* permitted, or
+    ``None`` when allowed (no policy registered, or policy allows). The policy
+    is consulted from the task-local context and is enriched with the current
+    session's agent/session/origin so back-ends can scope decisions.
+    """
+    try:
+        from ..session.context import get_send_policy, get_session_context
+        from ..gateway.protocols import SendDecision
+    except Exception:
+        # The session-context module is unavailable, so the send-policy feature
+        # cannot have been configured. Preserve today's allow-all behaviour.
+        return None
+
+    policy = get_send_policy()
+    if policy is None:
+        return None
+
+    agent_id = session_id = ""
+    origin = None
+    try:
+        ctx = get_session_context()
+        agent_id = getattr(ctx, "user_id", "") or ""
+        session_id = getattr(ctx, "chat_id", "") or ""
+        ctx_origin = getattr(ctx, "origin", None)
+        if ctx_origin is not None and ctx_origin.platform:
+            origin = ctx_origin.platform
+    except Exception:
+        # Context enrichment is best-effort; the policy still evaluates the
+        # target with empty scope identifiers.
+        logger.debug("send_policy context enrichment failed", exc_info=True)
+
+    try:
+        decision = policy.evaluate(
+            target,
+            agent_id=agent_id,
+            session_id=session_id,
+            origin=origin,
+        )
+    except Exception as e:
+        logger.error("send_policy evaluation failed: %s", e, exc_info=True)
+        return f"Failed to send to {target}: send_policy evaluation error"
+
+    # Fail closed: a policy that returns anything other than a SendDecision is
+    # treated as a denial (consistent with how evaluation exceptions are
+    # handled), so a non-conforming back-end can never implicitly allow a send.
+    if not isinstance(decision, SendDecision):
+        logger.error(
+            "send_policy.evaluate() returned unexpected type %r; blocking send",
+            type(decision),
+        )
+        return f"Failed to send to {target}: send_policy evaluation error"
+    if not decision.allow:
+        reason = decision.reason or "target not permitted by send_policy"
+        return f"Failed to send to {target}: {reason}"
+    return None
+
+
 def send_message(
     target: str = "origin",
     message: str = "",
@@ -178,6 +238,15 @@ def send_message(
 
         if action != "send":
             return f"Unknown action '{action}'. Use 'send' or 'list'."
+
+        # Outbound send-policy guard (Issue #2226): the target is
+        # model-controlled, so a steered/prompt-injected agent could misdeliver
+        # to any reachable channel. Enforce the operator's allow/deny policy
+        # *before* dispatch so every messenger implementation is constrained.
+        # Absent a policy, today's behaviour is preserved (allow-all).
+        denied = _check_send_policy(target)
+        if denied is not None:
+            return denied
 
         text, media = _parse_media(message)
         result = _run_async(messenger.send(target, text, media=media))

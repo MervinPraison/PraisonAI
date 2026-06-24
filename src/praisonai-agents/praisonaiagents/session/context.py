@@ -37,7 +37,7 @@ from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Dict, List, Optional, Any
 
 if TYPE_CHECKING:
-    from ..gateway.protocols import OutboundMessengerProtocol
+    from ..gateway.protocols import OutboundMessengerProtocol, SendPolicyProtocol
 
 
 @dataclass(frozen=True)
@@ -196,6 +196,40 @@ def clear_outbound_messenger(token: Token) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Outbound send-policy guard (Issue #2226)
+#
+# An optional task-local policy authorising where an agent may proactively
+# send. The running gateway/bot (or a Python ``Bot(send_policy=...)`` caller)
+# registers it; the built-in ``send_message`` tool consults it *before*
+# dispatch. Absent a policy, today's behaviour is preserved (allow-all).
+# ---------------------------------------------------------------------------
+
+_SEND_POLICY: ContextVar[Optional["SendPolicyProtocol"]] = ContextVar(
+    "praisonai_send_policy", default=None
+)
+
+
+def register_send_policy(
+    policy: Optional["SendPolicyProtocol"],
+) -> Token:
+    """Register the active outbound send-policy for this task. Returns a token."""
+    return _SEND_POLICY.set(policy)
+
+
+def get_send_policy() -> Optional["SendPolicyProtocol"]:
+    """Return the active send-policy, or ``None`` if no policy is configured."""
+    return _SEND_POLICY.get()
+
+
+def clear_send_policy(token: Token) -> None:
+    """Restore the previous send-policy using the token from register."""
+    try:
+        _SEND_POLICY.reset(token)
+    except (LookupError, ValueError):
+        _SEND_POLICY.set(None)
+
+
+# ---------------------------------------------------------------------------
 # Gateway event loop registry (Issue #2183)
 #
 # Sync agent tools (e.g. ``send_message``) usually execute in an executor
@@ -235,6 +269,9 @@ __all__ = [
     "register_outbound_messenger",
     "get_outbound_messenger",
     "clear_outbound_messenger",
+    "register_send_policy",
+    "get_send_policy",
+    "clear_send_policy",
     "register_gateway_loop",
     "get_gateway_loop",
     "clear_gateway_loop",
