@@ -38,6 +38,10 @@ from .protocols import (
     RouteFacts,
     RouteMatch,
     resolve_route,
+    # Outbound send-policy guard (Issue #2226)
+    SendDecision,
+    SendPolicyProtocol,
+    SendPolicy,
     # Protocol version negotiation
     PROTOCOL_VERSION,
     MIN_PROTOCOL_VERSION,
@@ -127,6 +131,10 @@ __all__ = [
     "RouteFacts",
     "RouteMatch",
     "resolve_route",
+    # Outbound send-policy guard (Issue #2226)
+    "SendDecision",
+    "SendPolicyProtocol",
+    "SendPolicy",
     # Protocol version negotiation
     "PROTOCOL_VERSION",
     "MIN_PROTOCOL_VERSION",

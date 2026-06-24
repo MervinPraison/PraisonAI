@@ -139,6 +139,54 @@ def _parse_media(message: str) -> tuple[str, Optional[List[str]]]:
     return text, (media or None)
 
 
+def _check_send_policy(target: str) -> Optional[str]:
+    """Evaluate the active send-policy for ``target`` (Issue #2226).
+
+    Returns a model-readable denial string when the send is *not* permitted, or
+    ``None`` when allowed (no policy registered, or policy allows). The policy
+    is consulted from the task-local context and is enriched with the current
+    session's agent/session/origin so back-ends can scope decisions.
+    """
+    try:
+        from ..session.context import get_send_policy, get_session_context
+    except Exception:
+        return None
+
+    try:
+        policy = get_send_policy()
+    except Exception:
+        policy = None
+    if policy is None:
+        return None
+
+    agent_id = session_id = ""
+    origin = None
+    try:
+        ctx = get_session_context()
+        agent_id = getattr(ctx, "user_id", "") or ""
+        session_id = getattr(ctx, "chat_id", "") or ""
+        if getattr(ctx, "origin", None) is not None and ctx.origin.platform:
+            origin = "origin"
+    except Exception:
+        pass
+
+    try:
+        decision = policy.evaluate(
+            target,
+            agent_id=agent_id,
+            session_id=session_id,
+            origin=origin,
+        )
+    except Exception as e:
+        logger.error("send_policy evaluation failed: %s", e, exc_info=True)
+        return f"Failed to send to {target}: send_policy evaluation error"
+
+    if decision is not None and not decision.allow:
+        reason = decision.reason or "target not permitted by send_policy"
+        return f"Failed to send to {target}: {reason}"
+    return None
+
+
 def send_message(
     target: str = "origin",
     message: str = "",
@@ -178,6 +226,15 @@ def send_message(
 
         if action != "send":
             return f"Unknown action '{action}'. Use 'send' or 'list'."
+
+        # Outbound send-policy guard (Issue #2226): the target is
+        # model-controlled, so a steered/prompt-injected agent could misdeliver
+        # to any reachable channel. Enforce the operator's allow/deny policy
+        # *before* dispatch so every messenger implementation is constrained.
+        # Absent a policy, today's behaviour is preserved (allow-all).
+        denied = _check_send_policy(target)
+        if denied is not None:
+            return denied
 
         text, media = _parse_media(message)
         result = _run_async(messenger.send(target, text, media=media))

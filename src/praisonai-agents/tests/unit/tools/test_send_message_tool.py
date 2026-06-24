@@ -16,11 +16,17 @@ from praisonaiagents.gateway import (
     OutboundMessengerProtocol,
     DeliveryResult,
     TargetInfo,
+    SendDecision,
+    SendPolicyProtocol,
+    SendPolicy,
 )
 from praisonaiagents.session.context import (
     register_outbound_messenger,
     get_outbound_messenger,
     clear_outbound_messenger,
+    register_send_policy,
+    get_send_policy,
+    clear_send_policy,
 )
 
 
@@ -203,3 +209,132 @@ def test_send_routes_to_gateway_loop_from_worker_thread():
 
 async def _make_loop_bound_messenger():
     return LoopBoundMessenger()
+
+
+# ---------------------------------------------------------------------------
+# Outbound send-policy guard (Issue #2226)
+# ---------------------------------------------------------------------------
+
+
+def test_send_policy_satisfies_protocol():
+    assert isinstance(SendPolicy(), SendPolicyProtocol)
+
+
+def test_send_policy_default_allow_permits_everything():
+    policy = SendPolicy()  # default="allow"
+    assert policy.evaluate("slack:#exec").allow is True
+    assert policy.evaluate("origin").allow is True
+
+
+def test_send_policy_default_deny_blocks_unlisted():
+    policy = SendPolicy(default="deny", allow=["origin", "ops-alerts"])
+    assert policy.evaluate("origin").allow is True
+    assert policy.evaluate("ops-alerts").allow is True
+    decision = policy.evaluate("slack:#exec")
+    assert decision.allow is False
+    assert "not permitted" in decision.reason
+
+
+def test_send_policy_deny_list_takes_precedence():
+    policy = SendPolicy(default="allow", deny=["slack:#exec"])
+    assert policy.evaluate("slack:#ops").allow is True
+    decision = policy.evaluate("slack:#exec")
+    assert decision.allow is False
+    assert "denied" in decision.reason
+
+
+def test_send_policy_invalid_default_raises():
+    with pytest.raises(ValueError):
+        SendPolicy(default="maybe")
+
+
+def test_no_policy_preserves_default_behaviour():
+    # Absent a policy, any reachable target is delivered (backward compatible).
+    messenger = FakeMessenger()
+    token = register_outbound_messenger(messenger)
+    try:
+        assert get_send_policy() is None
+        out = send_message("slack:#exec", "hi")
+        assert out == "Delivered to slack:#exec"
+        assert messenger.sent == [("slack:#exec", "hi", None)]
+    finally:
+        clear_outbound_messenger(token)
+
+
+def test_denied_send_is_not_delivered():
+    messenger = FakeMessenger()
+    mtoken = register_outbound_messenger(messenger)
+    ptoken = register_send_policy(
+        SendPolicy(default="deny", allow=["origin"])
+    )
+    try:
+        out = send_message("slack:#exec", "<leaked context>")
+        assert "Failed to send" in out
+        assert "not permitted" in out
+        # Crucially, the messenger was never invoked.
+        assert messenger.sent == []
+    finally:
+        clear_send_policy(ptoken)
+        clear_outbound_messenger(mtoken)
+
+
+def test_allowed_send_passes_through_policy():
+    messenger = FakeMessenger()
+    mtoken = register_outbound_messenger(messenger)
+    ptoken = register_send_policy(
+        SendPolicy(default="deny", allow=["origin"])
+    )
+    try:
+        out = send_message("origin", "all done")
+        assert out == "Delivered to origin"
+        assert messenger.sent == [("origin", "all done", None)]
+    finally:
+        clear_send_policy(ptoken)
+        clear_outbound_messenger(mtoken)
+
+
+def test_custom_policy_protocol_is_honoured():
+    class DenyAll:
+        def evaluate(self, target, *, agent_id="", session_id="", origin=None):
+            return SendDecision(allow=False, reason="custom deny")
+
+    messenger = FakeMessenger()
+    mtoken = register_outbound_messenger(messenger)
+    ptoken = register_send_policy(DenyAll())
+    try:
+        out = send_message("origin", "hi")
+        assert "custom deny" in out
+        assert messenger.sent == []
+    finally:
+        clear_send_policy(ptoken)
+        clear_outbound_messenger(mtoken)
+
+
+def test_policy_evaluation_error_blocks_send():
+    class Broken:
+        def evaluate(self, target, *, agent_id="", session_id="", origin=None):
+            raise RuntimeError("boom")
+
+    messenger = FakeMessenger()
+    mtoken = register_outbound_messenger(messenger)
+    ptoken = register_send_policy(Broken())
+    try:
+        out = send_message("origin", "hi")
+        assert "Failed to send" in out
+        assert messenger.sent == []
+    finally:
+        clear_send_policy(ptoken)
+        clear_outbound_messenger(mtoken)
+
+
+def test_policy_does_not_affect_list_action():
+    messenger = FakeMessenger()
+    mtoken = register_outbound_messenger(messenger)
+    ptoken = register_send_policy(SendPolicy(default="deny"))
+    try:
+        out = send_message(action="list")
+        parsed = json.loads(out)
+        assert parsed[0]["target"] == "telegram:home"
+    finally:
+        clear_send_policy(ptoken)
+        clear_outbound_messenger(mtoken)

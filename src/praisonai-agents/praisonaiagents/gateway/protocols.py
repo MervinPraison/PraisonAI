@@ -1583,6 +1583,116 @@ class OutboundMessengerProtocol(Protocol):
 
 
 # ---------------------------------------------------------------------------
+# Outbound send-policy guard (Issue #2226)
+#
+# ``send_message`` lets the model choose where to deliver. Because the target
+# is model-controlled, poisoned inbound content (prompt injection) can steer an
+# agent into delivering to a channel the operator never intended. The router
+# only fails on *unresolvable* targets — a reachability check, not an
+# authorisation one. This policy seam sits in core, *before* dispatch, so every
+# messenger implementation is constrained, not just one adapter. Absent a
+# policy, today's behaviour is preserved (allow-all).
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SendDecision:
+    """Closed decision shape for an outbound send-policy evaluation.
+
+    Attributes:
+        allow: Whether the send to the requested target is permitted.
+        reason: Optional model-readable explanation (used in the
+            :class:`DeliveryResult` detail when denied).
+    """
+
+    allow: bool
+    reason: str = ""
+
+
+@runtime_checkable
+class SendPolicyProtocol(Protocol):
+    """Protocol for authorising agent-initiated proactive sends.
+
+    Implementations decide whether an agent may deliver to a model-chosen
+    ``target``. The hook is evaluated inside the ``send_message`` path before
+    the messenger dispatches, so a denied send returns a clean, model-readable
+    :class:`DeliveryResult` (``ok=False``) rather than delivering.
+
+    A concrete, config-driven implementation (:class:`SendPolicy`) is provided
+    for the common allow/deny case; richer back-ends may live in plugins.
+    """
+
+    def evaluate(
+        self,
+        target: str,
+        *,
+        agent_id: str = "",
+        session_id: str = "",
+        origin: Optional[str] = None,
+    ) -> SendDecision:
+        """Return a :class:`SendDecision` for the requested ``target``."""
+        ...
+
+
+class SendPolicy:
+    """A lightweight allow/deny send-policy with an optional default-deny posture.
+
+    This is the config-driven default referenced by ``send_policy`` blocks in
+    ``gateway.yaml`` and the ``Bot(..., send_policy=...)`` Python surface. It is
+    intentionally minimal (no heavy dependencies) and lives in core so the
+    built-in ``send_message`` path is always interceptable.
+
+    Matching is exact against the symbolic target token (e.g. ``"origin"``,
+    ``"slack:#ops"``, or a friendly alias). With ``default="deny"`` only listed
+    targets are permitted; with ``default="allow"`` all targets are permitted
+    except those in ``deny``.
+
+    Example::
+
+        # default-deny: only the conversation origin and an ops alias allowed
+        SendPolicy(default="deny", allow=["origin", "ops-alerts"])
+        # default-allow: everything permitted except an exec channel
+        SendPolicy(default="allow", deny=["slack:#exec"])
+    """
+
+    def __init__(
+        self,
+        default: str = "allow",
+        allow: Optional[List[str]] = None,
+        deny: Optional[List[str]] = None,
+    ):
+        default = (default or "allow").lower()
+        if default not in ("allow", "deny"):
+            raise ValueError(
+                f"send_policy default must be 'allow' or 'deny', got {default!r}"
+            )
+        self.default = default
+        self.allow = list(allow or [])
+        self.deny = list(deny or [])
+
+    def evaluate(
+        self,
+        target: str,
+        *,
+        agent_id: str = "",
+        session_id: str = "",
+        origin: Optional[str] = None,
+    ) -> SendDecision:
+        if target in self.deny:
+            return SendDecision(
+                allow=False,
+                reason=f"target '{target}' is denied by send_policy",
+            )
+        if self.default == "deny":
+            if target in self.allow:
+                return SendDecision(allow=True)
+            return SendDecision(
+                allow=False,
+                reason=f"target '{target}' is not permitted by send_policy",
+            )
+        return SendDecision(allow=True)
+
+
+# ---------------------------------------------------------------------------
 # Protocol Version Negotiation (Issue #2130)
 # ---------------------------------------------------------------------------
 
