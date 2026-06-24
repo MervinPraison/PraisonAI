@@ -180,6 +180,57 @@ def test_positional_args_visible_to_approval(registry):
         remove_approval_requirement("fetch")
 
 
+def test_init_reinitialization_bypass_blocked(registry):
+    # Sandboxed code must not be able to call tools.__init__([...]) to re-bind
+    # the proxy's allow-list/registry and reach a disallowed tool.
+    code = (
+        "tools.__init__(['double'])\n"
+        "tools.double(x=2)\n"
+    )
+    result = execute_code_with_tools(
+        code, allowed_tools=["fetch"], registry=registry
+    )
+    assert result["success"] is False
+
+
+def test_init_not_exposed_on_proxy(registry):
+    proxy = ToolProxy(["fetch"], registry=registry)
+    # __init__ access is treated as a tool-name lookup and rejected, not the
+    # bound initializer.
+    with pytest.raises((AttributeError, PermissionError, NameError)):
+        proxy.__init__(["double"])
+
+
+def test_approval_gate_required_for_every_call(registry):
+    # In code mode a first approval must NOT silently unlock later calls to the
+    # same tool. The approval callback must fire for every invocation.
+    from praisonaiagents.approval import (
+        add_approval_requirement,
+        remove_approval_requirement,
+        set_approval_callback,
+        clear_approval_context,
+        ApprovalDecision,
+    )
+
+    calls = {"count": 0}
+
+    def _cb(function_name, arguments, risk_level):
+        calls["count"] += 1
+        return ApprovalDecision(approved=True, reason="ok")
+
+    add_approval_requirement("fetch", "high")
+    set_approval_callback(_cb)
+    try:
+        proxy = ToolProxy(["fetch"], registry=registry)
+        proxy.fetch(url="a")
+        proxy.fetch(url="b")
+        assert calls["count"] == 2
+    finally:
+        set_approval_callback(None)
+        remove_approval_requirement("fetch")
+        clear_approval_context()
+
+
 def test_execution_config_flags():
     from praisonaiagents.config.feature_configs import ExecutionConfig
 

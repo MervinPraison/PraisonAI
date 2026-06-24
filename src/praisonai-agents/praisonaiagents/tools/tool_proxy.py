@@ -54,18 +54,21 @@ def _invoke_with_approval(
     """
     from ..approval import (
         is_approval_required,
-        is_already_approved,
         is_yaml_approved,
         is_env_auto_approve,
-        mark_approved,
         request_approval,
     )
 
     callable_tool = _resolve_callable(tool)
 
+    # Note: unlike the regular agent path we deliberately do NOT honour the
+    # per-session ``is_already_approved`` sticky flag, nor do we call
+    # ``mark_approved`` after approval. In code mode the model controls the whole
+    # script, so a single approved call must not silently unlock every later call
+    # to the same tool with attacker-chosen arguments. Each code-mode call is
+    # gated independently (YAML / env auto-approve still apply as configured).
     needs_gate = is_approval_required(name) and not (
-        is_already_approved(name)
-        or is_yaml_approved(name)
+        is_yaml_approved(name)
         or is_env_auto_approve()
     )
 
@@ -103,7 +106,6 @@ def _invoke_with_approval(
             raise PermissionError(
                 f"Execution of {name} denied: {decision.reason}"
             )
-        mark_approved(name)
         if decision.modified_args:
             approval_args.update(decision.modified_args)
             if bound is not None:
@@ -176,7 +178,11 @@ class ToolProxy:
     def __getattribute__(self, name: str) -> Any:
         # Allow a tiny set of dunder methods needed for normal object use;
         # everything else is treated as a tool-name lookup.
-        if name in ("__class__", "__dict__", "__repr__", "__dir__", "__init__"):
+        # NB: ``__init__`` is deliberately excluded — exposing it would let
+        # sandboxed code call ``tools.__init__([...])`` to re-bind the proxy's
+        # closure to the global registry with an attacker-chosen allow-list,
+        # bypassing the per-run allow-list entirely.
+        if name in ("__class__", "__dict__", "__repr__", "__dir__"):
             return object.__getattribute__(self, name)
         if name.startswith("_"):
             raise AttributeError(name)
