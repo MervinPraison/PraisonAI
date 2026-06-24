@@ -9,7 +9,6 @@ from pydantic import ValidationError
 
 from .schema import YAMLConfig, ValidationResult
 from ..tool_resolver import ToolResolver
-from ..tool_registry import ToolRegistry
 
 
 class ConfigValidator:
@@ -24,9 +23,7 @@ class ConfigValidator:
         self.tool_resolver = tool_resolver
         if not self.tool_resolver:
             # Create a default tool resolver
-            registry = ToolRegistry()
-            registry.register_builtin_autogen_adapters(_suppress_deprecation_warning=True)
-            self.tool_resolver = ToolResolver(registry=registry)
+            self.tool_resolver = ToolResolver()
     
     def validate_yaml_string(self, yaml_content: str, strict: bool = False) -> ValidationResult:
         """Validate YAML configuration from string.

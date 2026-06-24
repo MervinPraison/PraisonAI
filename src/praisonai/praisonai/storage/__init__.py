@@ -8,7 +8,10 @@ Heavy implementations that follow StorageBackendProtocol for:
 - DynamoDB (praisonai[dynamodb])
 - Valkey (praisonai[valkey])
 
-These implementations are kept in the wrapper to avoid bloating the core SDK.
+NOTE: ``praisonai.storage`` is a legacy parallel stack. The active persistence
+layer is ``praisonai.persistence``. New code should use ``create_state_store``,
+``create_conversation_store``, or ``create_knowledge_store`` from
+``praisonai.persistence.factory``.
 """
 
 # Lazy imports - only import when needed
@@ -21,6 +24,12 @@ __all__ = [
     "ValkeySearchBackend",
     "ValkeyBackend",
 ]
+
+# NOTE: To maintain backward compatibility with existing code that uses
+# ``from praisonai.storage import XxxStorageAdapter``, the lazy loader below
+# keeps the original file-based class definitions accessible. These are NOT
+# thin shims — the originals remain the canonical definition until eliminated.
+
 
 def __getattr__(name: str):
     """Lazy import storage adapters."""
