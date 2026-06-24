@@ -102,8 +102,19 @@ class RunPolicy:
 
     @staticmethod
     def _tool_name(tool: Any) -> str:
-        """Best-effort name for a tool (matches Agent's own resolution)."""
-        return str(getattr(tool, "name", getattr(tool, "__name__", str(tool))))
+        """Best-effort name for a tool (matches Agent's own resolution).
+
+        Resolves ``name``/``__name__`` first and only falls back to
+        ``str(tool)`` as a last resort, so a tool with a failing custom
+        ``__str__`` cannot break scheduling when a usable name exists.
+        """
+        name = getattr(tool, "name", None)
+        if isinstance(name, str) and name:
+            return name
+        dunder = getattr(tool, "__name__", None)
+        if isinstance(dunder, str) and dunder:
+            return dunder
+        return str(tool)
 
     def is_tool_allowed(self, tool: Any) -> bool:
         """Return ``True`` if ``tool`` may be used in an unattended run."""
@@ -151,12 +162,22 @@ class RunPolicy:
             try:
                 result = self.scanner(prompt)
             except Exception as e:  # pragma: no cover - defensive
-                logger.warning("RunPolicy scanner raised %s; failing closed", e)
-                return PromptScanResult(ok=False, reason=f"scanner error: {e}")
+                # Log the exception *type* only — the message could embed the
+                # assembled prompt, so it stays out of the surfaced reason.
+                logger.warning(
+                    "RunPolicy scanner raised %s; failing closed",
+                    e.__class__.__name__,
+                )
+                return PromptScanResult(ok=False, reason="scanner error")
             if isinstance(result, PromptScanResult):
                 return result
-            # Truthy => safe, falsy => blocked (lenient adapter)
-            return PromptScanResult(ok=bool(result))
+            # Truthy => safe, falsy => blocked (lenient adapter).  Always carry
+            # a reason on a block so downstream summaries are not "... None".
+            ok = bool(result)
+            return PromptScanResult(
+                ok=ok,
+                reason=None if ok else "scanner returned a blocking result",
+            )
 
         for pattern in _INJECTION_PATTERNS:
             if pattern.search(prompt):

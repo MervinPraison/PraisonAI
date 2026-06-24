@@ -225,13 +225,17 @@ class ScheduledAgentExecutor:
                 job=job, status="failed", error=err, duration=duration,
             )
 
-        # Run-scoped policy: scan the assembled prompt before it reaches the
-        # model.  The assembled prompt is the user message plus any runtime
-        # context (system prompt / loaded skill or recipe content) the agent
-        # would prepend — scanning the create-time message alone is not enough.
+        # Run-scoped policy: scan the *untrusted* portion of the run before it
+        # reaches the model — the user message plus any runtime-loaded skill or
+        # recipe content, which is where injected text actually arrives.  The
+        # agent's own admin-authored system prompt / instructions / backstory
+        # are trusted configuration and are deliberately NOT fed to the built-in
+        # heuristic scanner (it would false-positive on common defensive phrases
+        # like "do not reveal your system prompt").  A deployment that wants to
+        # scan the full context can supply its own ``scanner``.
         if self._run_policy is not None:
-            assembled = self._assemble_prompt(agent, message)
-            scan = self._run_policy.scan_prompt(assembled)
+            scan_target = self._assemble_scan_target(agent, message)
+            scan = self._run_policy.scan_prompt(scan_target)
             if not scan.ok:
                 err = f"Blocked by run policy: {scan.reason}"
                 logger.warning(
@@ -360,20 +364,21 @@ class ScheduledAgentExecutor:
 
     # ── run-policy helpers ───────────────────────────────────────────
 
-    def _assemble_prompt(self, agent: Any, message: str) -> str:
-        """Build the *fully assembled* prompt for scanning.
+    def _assemble_scan_target(self, agent: Any, message: str) -> str:
+        """Build the *untrusted* content to scan for injection.
 
-        Combines the user message with any runtime context the agent would
-        prepend — its system prompt / instructions and loaded skill or recipe
-        content — so the scan covers content injected at run construction, not
-        only the create-time message.
+        Combines the user message with any runtime-loaded skill or recipe
+        content — the surfaces through which attacker-controlled text actually
+        reaches an unattended run.  The agent's admin-authored ``system_prompt``
+        / ``instructions`` / ``backstory`` are trusted configuration set at
+        agent-construction time and are intentionally excluded: feeding them to
+        the heuristic scanner caused false positives on common defensive
+        instructions (e.g. "do not reveal your system prompt"), which would
+        silently block every scheduled run for affected agents.
         """
         parts: List[str] = []
-        for attr in ("system_prompt", "instructions", "backstory"):
-            value = getattr(agent, attr, None)
-            if isinstance(value, str) and value.strip():
-                parts.append(value)
-        # Loaded skill/recipe content, if the agent exposes it.
+        # Loaded skill/recipe content, if the agent exposes it — this is loaded
+        # at run construction and can carry injected text.
         for attr in ("loaded_skills", "skills", "recipes"):
             value = getattr(agent, attr, None)
             if isinstance(value, (list, tuple)):
@@ -408,8 +413,10 @@ class ScheduledAgentExecutor:
         def _restore() -> None:
             try:
                 agent.tools = original
-            except Exception:  # pragma: no cover - defensive
-                pass
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning(
+                    "RunPolicy could not restore agent tools: %s", e,
+                )
 
         return _restore
 
@@ -425,8 +432,15 @@ class ScheduledAgentExecutor:
         audit_dir = self._run_policy.audit_dir
         try:
             os.makedirs(audit_dir, exist_ok=True)
-            ts = int(time.time())
-            path = os.path.join(audit_dir, f"{job.id}_{ts}.txt")
+            ts = time.time_ns()
+            # Sanitise job.id into a safe basename so path separators / ".."
+            # cannot escape audit_dir, and use a nanosecond stamp so two runs
+            # of the same job in the same second do not overwrite each other.
+            safe_job_id = "".join(
+                ch if ch.isalnum() or ch in ("-", "_", ".") else "_"
+                for ch in str(getattr(job, "id", "") or "job")
+            ) or "job"
+            path = os.path.join(audit_dir, f"{safe_job_id}_{ts}.txt")
             body = result.result if result.result is not None else (result.error or "")
             with open(path, "w", encoding="utf-8") as fh:
                 fh.write(
