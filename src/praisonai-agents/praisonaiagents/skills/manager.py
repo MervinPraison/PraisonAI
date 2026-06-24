@@ -226,6 +226,7 @@ class SkillManager:
         body = render_shell_blocks(
             body, enabled=shell_exec, shell=shell, cwd=skill_dir,
         )
+        self._record_use(skill)
         return body
 
     def to_prompt(self) -> str:
@@ -253,6 +254,7 @@ class SkillManager:
         if not skill.is_activated:
             self.activate(skill)
 
+        self._record_use(skill)
         return skill.instructions
 
     def load_resources(self, name: str) -> bool:
@@ -271,13 +273,18 @@ class SkillManager:
         self._loader.load_all_resources(skill)
         return True
 
-    def create_skill(self, name: str, content: str, category: str = None) -> dict:
+    def create_skill(self, name: str, content: str, category: str = None,
+                     agent_created: bool = True) -> dict:
         """Create a new skill with the given content.
         
         Args:
             name: Skill name (must be valid identifier)
             content: Skill instructions/content for SKILL.md
             category: Optional skill category
+            agent_created: Provenance flag marking the skill as agent-authored.
+                Defaults to True since skills created via this API originate
+                from the agent's self-improvement loop. Lifecycle curator
+                plugins only ever touch agent-created skills.
             
         Returns:
             Dict with success status and skill info
@@ -299,7 +306,6 @@ class SkillManager:
             skill_dirs = get_default_skill_dirs()
             base_dir = skill_dirs[0] if skill_dirs else "~/.praisonai/skills"
             
-            import os
             from pathlib import Path
             base_path = Path(base_dir).expanduser()
             base_path.mkdir(parents=True, exist_ok=True)
@@ -307,16 +313,21 @@ class SkillManager:
             skill_path = base_path / name
             skill_path.mkdir(exist_ok=True)
             
-            # Write SKILL.md with frontmatter
+            # Write SKILL.md with frontmatter (incl. provenance + usage telemetry)
+            created_at = self._now_iso()
             skill_content = f"""---
 name: {name}
 version: 1.0.0
 """
             if category:
                 skill_content += f"category: {category}\n"
-            skill_content += f"""description: Generated skill
-author: agent
----
+            skill_content += "description: Generated skill\n"
+            skill_content += "author: agent\n"
+            skill_content += f"agent-created: {str(bool(agent_created)).lower()}\n"
+            skill_content += f'created-at: "{created_at}"\n'
+            skill_content += "use-count: 0\n"
+            skill_content += "patch-count: 0\n"
+            skill_content += f"""---
 
 {content}
 """
@@ -364,6 +375,9 @@ author: agent
             with open(skill_file, 'r', encoding='utf-8') as f:
                 existing_content = f.read()
             
+            # Snapshot prior content so a broken mutation can be rolled back.
+            self._save_backup(skill.properties.path, existing_content)
+            
             # Extract frontmatter (preserve verbatim, only strip leading fence)
             frontmatter = ""
             if existing_content.startswith('---\n'):
@@ -379,6 +393,7 @@ author: agent
             # Reload the skill
             skill.instructions = None  # Clear cached content
             self.activate(skill)
+            self._record_patch(skill)
             
             return {"success": True, "skill": name}
             
@@ -436,12 +451,18 @@ author: agent
                     # Replace only first occurrence
                     new_content = content.replace(old_string, new_string, 1)
                 
+                is_skill_md = file_path is None or file_path == "SKILL.md"
+                # Snapshot the SKILL.md before mutating so it can be rolled back.
+                if is_skill_md:
+                    self._save_backup(skill.properties.path, content)
+                
                 self._write_skill_atomically(target_file, new_content)
                 
                 # Clear cached content if SKILL.md was modified
-                if file_path is None or file_path == "SKILL.md":
+                if is_skill_md:
                     skill.instructions = None
                     self.activate(skill)
+                    self._record_patch(skill)
                 
                 return {"success": True, "skill": name, "replacements": 1}
             else:
@@ -450,15 +471,23 @@ author: agent
         except Exception as e:
             return {"success": False, "error": f"Error patching skill: {str(e)}"}
     
-    def delete_skill(self, name: str) -> dict:
-        """Delete a skill and its directory.
+    def delete_skill(self, name: str, hard: bool = False) -> dict:
+        """Remove a skill.
+
+        By default this is a *recoverable* archive: the skill directory is
+        moved aside into the archive store and can be restored later. This
+        keeps the self-improvement loop safe — a skill is never lost. Pass
+        ``hard=True`` to permanently delete the directory (legacy behaviour).
         
         Args:
             name: Skill name to delete
+            hard: If True, permanently remove the directory (unrecoverable)
             
         Returns:
             Dict with success status
         """
+        if not hard:
+            return self.archive_skill(name)
         try:
             skill = self.get_skill(name)
             if not skill:
@@ -476,6 +505,139 @@ author: agent
             
         except Exception as e:
             return {"success": False, "error": f"Error deleting skill: {str(e)}"}
+
+    def archive_skill(self, name: str) -> dict:
+        """Archive a skill (recoverable, never hard-deleted).
+
+        Moves the skill directory into the archive store and drops it from
+        the active in-memory index. Use :meth:`restore_skill` to recover it.
+        Lifecycle curator plugins call this for agent-created skills that have
+        gone stale.
+
+        Args:
+            name: Skill name to archive
+
+        Returns:
+            Dict with success status and archive path
+        """
+        try:
+            skill = self.get_skill(name)
+            if not skill:
+                return {"success": False, "error": f"Skill '{name}' not found"}
+
+            if not skill.properties.path:
+                return {"success": False, "error": f"Cannot archive skill '{name}' - no path available"}
+
+            import shutil
+            from pathlib import Path
+
+            archive_dir = self._archive_dir()
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            dest = archive_dir / name
+            # Avoid clobbering a previous archive of the same name.
+            if dest.exists():
+                from datetime import datetime, timezone
+                stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+                dest = archive_dir / f"{name}.{stamp}"
+
+            shutil.move(str(skill.properties.path), str(dest))
+            self._skills.pop(name, None)
+
+            return {"success": True, "skill": name, "archive_path": str(dest)}
+
+        except Exception as e:
+            return {"success": False, "error": f"Error archiving skill: {str(e)}"}
+
+    def restore_skill(self, name: str, skill_dir: Optional[str] = None) -> dict:
+        """Restore a previously archived skill back to active use.
+
+        Args:
+            name: Archived skill name
+            skill_dir: Optional destination directory (defaults to the first
+                default skill dir)
+
+        Returns:
+            Dict with success status
+        """
+        try:
+            import shutil
+            from pathlib import Path
+
+            archive_dir = self._archive_dir()
+            src = archive_dir / name
+            if not src.exists() or not src.is_dir():
+                return {"success": False, "error": f"Archived skill '{name}' not found"}
+
+            if skill_dir:
+                base_path = Path(skill_dir).expanduser()
+            else:
+                skill_dirs = get_default_skill_dirs()
+                base_dir = skill_dirs[0] if skill_dirs else "~/.praisonai/skills"
+                base_path = Path(base_dir).expanduser()
+            base_path.mkdir(parents=True, exist_ok=True)
+
+            dest = base_path / name
+            if dest.exists():
+                return {"success": False, "error": f"Skill '{name}' already exists at destination"}
+
+            shutil.move(str(src), str(dest))
+            loaded = self.add_skill(str(dest))
+            if loaded:
+                return {"success": True, "skill": name, "path": str(dest)}
+            return {"success": False, "error": "Failed to load restored skill"}
+
+        except Exception as e:
+            return {"success": False, "error": f"Error restoring skill: {str(e)}"}
+
+    def list_archived_skills(self) -> List[str]:
+        """List the names of skills currently in the archive store."""
+        archive_dir = self._archive_dir()
+        if not archive_dir.exists():
+            return []
+        try:
+            return sorted(
+                p.name for p in archive_dir.iterdir() if p.is_dir()
+            )
+        except OSError:
+            return []
+
+    def rollback_skill(self, name: str) -> dict:
+        """Roll a skill's SKILL.md back to its content before the last mutation.
+
+        Restores the snapshot saved by the most recent ``edit_skill`` or
+        ``patch_skill`` call, undoing a mutation that broke a previously
+        working skill.
+
+        Args:
+            name: Skill name to roll back
+
+        Returns:
+            Dict with success status
+        """
+        try:
+            skill = self.get_skill(name)
+            if not skill:
+                return {"success": False, "error": f"Skill '{name}' not found"}
+
+            if not skill.properties.path:
+                return {"success": False, "error": f"Cannot roll back skill '{name}' - no path available"}
+
+            backup_file = self._backup_path(skill.properties.path)
+            if not backup_file.exists():
+                return {"success": False, "error": f"No rollback snapshot for skill '{name}'"}
+
+            previous = backup_file.read_text(encoding="utf-8")
+            skill_file = skill.properties.path / "SKILL.md"
+            self._write_skill_atomically(skill_file, previous)
+
+            # Reload from the restored content.
+            skill.instructions = None
+            self.activate(skill)
+
+            return {"success": True, "skill": name}
+
+        except Exception as e:
+            return {"success": False, "error": f"Error rolling back skill: {str(e)}"}
     
     def write_skill_file(self, name: str, file_path: str, file_content: str) -> dict:
         """Write a file within a skill's directory.
@@ -560,6 +722,112 @@ author: agent
         except Exception as e:
             return {"success": False, "error": f"Error removing skill file: {str(e)}"}
     
+    @staticmethod
+    def _now_iso() -> str:
+        """Return the current UTC time as an ISO 8601 string."""
+        from datetime import datetime, timezone
+        return datetime.now(timezone.utc).isoformat()
+
+    def _archive_dir(self):
+        """Directory where archived skills are stored (recoverable)."""
+        from pathlib import Path
+        skill_dirs = get_default_skill_dirs()
+        base_dir = skill_dirs[0] if skill_dirs else "~/.praisonai/skills"
+        return Path(base_dir).expanduser().parent / "skills_archive"
+
+    @staticmethod
+    def _backup_path(skill_path):
+        """Path to the rollback snapshot for a skill's SKILL.md."""
+        return skill_path / ".skill.bak"
+
+    def _save_backup(self, skill_path, content: str) -> None:
+        """Persist a rollback snapshot of the current SKILL.md content."""
+        try:
+            self._write_skill_atomically(self._backup_path(skill_path), content)
+        except Exception:
+            logger.debug("Failed to save rollback snapshot for %s", skill_path, exc_info=True)
+
+    def _record_use(self, skill) -> None:
+        """Increment in-memory usage telemetry and persist to frontmatter."""
+        try:
+            props = skill.properties
+            props.use_count = (props.use_count or 0) + 1
+            props.last_used = self._now_iso()
+            self._update_frontmatter_fields(
+                props.path,
+                {"use-count": props.use_count, "last-used": props.last_used},
+            )
+        except Exception:
+            logger.debug("Failed to record skill use telemetry", exc_info=True)
+
+    def _record_patch(self, skill) -> None:
+        """Increment in-memory patch telemetry and persist to frontmatter."""
+        try:
+            props = skill.properties
+            props.patch_count = (props.patch_count or 0) + 1
+            self._update_frontmatter_fields(
+                props.path, {"patch-count": props.patch_count}
+            )
+        except Exception:
+            logger.debug("Failed to record skill patch telemetry", exc_info=True)
+
+    def _update_frontmatter_fields(self, skill_path, fields: dict) -> None:
+        """Update or insert simple scalar keys in a SKILL.md frontmatter block.
+
+        Operates line-wise so existing (possibly hand-authored) frontmatter is
+        preserved verbatim. No-op if there is no path or no frontmatter.
+        """
+        if skill_path is None or not fields:
+            return
+        from .parser import find_skill_md
+        skill_md = find_skill_md(skill_path)
+        if skill_md is None:
+            return
+        try:
+            content = skill_md.read_text(encoding="utf-8")
+        except OSError:
+            return
+        if not content.startswith("---"):
+            return
+        parts = content.split("---", 2)
+        if len(parts) < 3:
+            return
+
+        def _fmt(value):
+            # Quote timestamp-like strings so YAML preserves them as strings
+            # (e.g. the 'T' separator) rather than coercing to a datetime.
+            if isinstance(value, str) and (":" in value or "-" in value):
+                return f'"{value}"'
+            return value
+
+        fm_lines = parts[1].split("\n")
+        remaining = dict(fields)
+        new_lines = []
+        for line in fm_lines:
+            stripped = line.strip()
+            replaced = False
+            if stripped and ":" in stripped and not stripped.startswith("#"):
+                key = stripped.split(":", 1)[0].strip()
+                if key in remaining:
+                    new_lines.append(f"{key}: {_fmt(remaining.pop(key))}")
+                    replaced = True
+            if not replaced:
+                new_lines.append(line)
+
+        # Insert any keys that were not already present, before the trailing
+        # blank line that precedes the closing fence.
+        for key, value in remaining.items():
+            insert_at = len(new_lines)
+            while insert_at > 0 and new_lines[insert_at - 1].strip() == "":
+                insert_at -= 1
+            new_lines.insert(insert_at, f"{key}: {_fmt(value)}")
+
+        new_content = "---" + "\n".join(new_lines) + "---" + parts[2]
+        try:
+            self._write_skill_atomically(skill_md, new_content)
+        except Exception:
+            logger.debug("Failed to persist frontmatter telemetry for %s", skill_path, exc_info=True)
+
     def _validate_skill_name(self, name: str) -> bool:
         """Validate skill name according to security constraints."""
         import re

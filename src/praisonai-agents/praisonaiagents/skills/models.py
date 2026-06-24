@@ -151,6 +151,13 @@ class SkillProperties:
     shell: Optional[str] = None  # "bash" | "powershell"
     # Capability requirements (new)
     requirements: Optional[SkillRequirements] = None
+    # Provenance + usage telemetry (read by lifecycle/curator plugins).
+    # These are protocol-only data fields; retention policy lives in plugins.
+    agent_created: bool = False
+    created_at: Optional[str] = None  # ISO 8601 timestamp
+    use_count: int = 0
+    last_used: Optional[str] = None  # ISO 8601 timestamp
+    patch_count: int = 0
 
     def to_dict(self) -> dict:
         """Convert to dictionary, excluding None values and empty metadata."""
@@ -185,7 +192,38 @@ class SkillProperties:
             result["paths"] = self.paths
         if self.shell is not None:
             result["shell"] = self.shell
+        if self.agent_created:
+            result["agent-created"] = True
+        if self.created_at is not None:
+            result["created-at"] = self.created_at
+        if self.use_count:
+            result["use-count"] = self.use_count
+        if self.last_used is not None:
+            result["last-used"] = self.last_used
+        if self.patch_count:
+            result["patch-count"] = self.patch_count
         return result
+
+    @property
+    def idle_days(self) -> Optional[float]:
+        """Days since the skill was last used (or created if never used).
+
+        Returns None when no timestamp is available. Used by lifecycle
+        curator plugins to decide active -> stale -> archived transitions.
+        """
+        from datetime import datetime, timezone
+
+        ref = self.last_used or self.created_at
+        if not ref:
+            return None
+        try:
+            ts = datetime.fromisoformat(ref)
+        except ValueError:
+            return None
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        delta = datetime.now(timezone.utc) - ts
+        return delta.total_seconds() / 86400.0
 
 
 @dataclass
