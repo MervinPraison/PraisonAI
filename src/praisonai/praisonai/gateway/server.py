@@ -765,12 +765,16 @@ class WebSocketGateway:
             try:
                 await websocket.accept()
                 await websocket.send_json(error.to_dict())
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(
+                    f"Could not deliver hello_error envelope ({error.code.value}): {exc}"
+                )
             try:
                 await websocket.close(code=close_code, reason=error.message)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(
+                    f"Could not close rejected websocket ({error.code.value}): {exc}"
+                )
 
         async def websocket_endpoint(websocket: WebSocket):
             # Get client IP for rate limiting
@@ -808,7 +812,10 @@ class WebSocketGateway:
                     )
                     logger.warning(f"WebSocket connection rejected: origin '{origin}' not in allowed list")
                     return
-            except GatewayStartupError as e:
+            except (GatewayStartupError, ValueError) as e:
+                # check_origin() raises ValueError when an external bind has no
+                # allowed_origins configured; route both through the structured
+                # configuration_error envelope rather than the generic error path.
                 await _reject_connection(
                     websocket,
                     close_code=4003,
@@ -1369,7 +1376,7 @@ class WebSocketGateway:
                 error = HelloError(
                     code=ConnectErrorCode.PROTOCOL_UNSUPPORTED,
                     message=f"Protocol version {client_min} is too new, server supports up to {GATEWAY_PROTOCOL_VERSION}",
-                    next_step=ConnectRecoveryStep.UPGRADE_CLIENT,
+                    next_step=ConnectRecoveryStep.DOWNGRADE_CLIENT,
                     next_action="use_older_client",
                 )
                 await self._send_to_client(client_id, error.to_dict())

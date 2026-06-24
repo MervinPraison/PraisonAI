@@ -209,6 +209,7 @@ class TestConnectErrorEnvelope:
         assert ConnectRecoveryStep.REAUTHENTICATE.value == "reauthenticate"
         assert ConnectRecoveryStep.REPAIR.value == "repair"
         assert ConnectRecoveryStep.UPGRADE_CLIENT.value == "upgrade_client"
+        assert ConnectRecoveryStep.DOWNGRADE_CLIENT.value == "downgrade_client"
         assert ConnectRecoveryStep.WAIT_THEN_RETRY.value == "wait_then_retry"
         assert ConnectRecoveryStep.DO_NOT_RETRY.value == "do_not_retry"
 
@@ -266,3 +267,34 @@ class TestConnectErrorEnvelope:
 
         assert frame["next_step"] == "upgrade_client"
         assert frame["next"] == "upgrade_client"
+
+    def test_to_dict_omits_next_when_no_hint(self):
+        """Legacy 'next' key is omitted (not null) when no recovery hint set."""
+        from praisonaiagents.gateway.protocols import ConnectErrorCode, HelloError
+
+        frame = HelloError(
+            code=ConnectErrorCode.CONFIGURATION_ERROR,
+            message="bad config",
+        ).to_dict()
+
+        assert "next" not in frame
+        assert "next_step" not in frame
+        assert "retry_after_seconds" not in frame
+
+    def test_downgrade_client_for_protocol_too_new(self):
+        """A client newer than the server is told to downgrade, not upgrade."""
+        from praisonaiagents.gateway.protocols import (
+            ConnectErrorCode,
+            ConnectRecoveryStep,
+            HelloError,
+        )
+
+        frame = HelloError(
+            code=ConnectErrorCode.PROTOCOL_UNSUPPORTED,
+            message="Protocol version 2 is too new, server supports up to 1",
+            next_step=ConnectRecoveryStep.DOWNGRADE_CLIENT,
+            next_action="use_older_client",
+        ).to_dict()
+
+        assert frame["next_step"] == "downgrade_client"
+        assert frame["next"] == "use_older_client"

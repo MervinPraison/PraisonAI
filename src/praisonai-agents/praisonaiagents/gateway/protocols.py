@@ -60,7 +60,9 @@ class ConnectRecoveryStep(str, Enum):
 
         REAUTHENTICATE: Obtain fresh credentials, then reconnect.
         REPAIR:         Re-run the device pairing flow, then reconnect.
-        UPGRADE_CLIENT: The client protocol is unsupported; update the client.
+        UPGRADE_CLIENT: The client protocol is too old; update the client.
+        DOWNGRADE_CLIENT: The client protocol is newer than the server
+            supports; use an older client or wait for a server upgrade.
         WAIT_THEN_RETRY: Back off (see ``retry_after_seconds``) then reconnect.
         DO_NOT_RETRY:   The rejection is terminal; reconnecting will not help.
     """
@@ -68,6 +70,7 @@ class ConnectRecoveryStep(str, Enum):
     REAUTHENTICATE = "reauthenticate"
     REPAIR = "repair"
     UPGRADE_CLIENT = "upgrade_client"
+    DOWNGRADE_CLIENT = "downgrade_client"
     WAIT_THEN_RETRY = "wait_then_retry"
     DO_NOT_RETRY = "do_not_retry"
 
@@ -242,10 +245,14 @@ class HelloError:
         if self.retry_after_seconds is not None:
             frame["retry_after_seconds"] = self.retry_after_seconds
         # Backward-compatible legacy field: fall back to next_step's value.
+        # Omitted entirely when there is no recovery hint so clients using
+        # strict schema validation or ``if frame["next"]`` are not tripped by
+        # an explicit ``null``.
         legacy_next = self.next_action
         if legacy_next is None and self.next_step is not None:
             legacy_next = self.next_step.value
-        frame["next"] = legacy_next
+        if legacy_next is not None:
+            frame["next"] = legacy_next
         return frame
 
 
