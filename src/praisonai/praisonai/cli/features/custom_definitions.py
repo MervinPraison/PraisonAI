@@ -33,7 +33,141 @@ class CustomAgent:
     goal: Optional[str] = None
     instructions: Optional[str] = None
     system_prompt: Optional[str] = None
-    source: str = "unknown"  # 'user' or 'project'
+    permission: Optional[Dict[str, Any]] = None
+    mode: Optional[str] = None
+    source: str = "unknown"  # 'user' or 'project' or 'builtin'
+
+
+# Coarse permission modes mapped to a flat {pattern: action} rule set.
+# These are convenience shorthands that the per-rule ``permission`` block
+# can further override (the ``permission`` block always wins on conflicts).
+MODE_RULES: Dict[str, Dict[str, str]] = {
+    # Full toolset, no restrictions.
+    "build": {},
+    "full": {},
+    # Read-only exploration: deny any mutating tool, allow reads.
+    "read-only": {
+        "read:*": "allow",
+        "edit:*": "deny",
+        "write:*": "deny",
+        "bash:*": "deny",
+        "execute:*": "deny",
+    },
+    # Plan mode is an alias of read-only.
+    "plan": {
+        "read:*": "allow",
+        "edit:*": "deny",
+        "write:*": "deny",
+        "bash:*": "deny",
+        "execute:*": "deny",
+    },
+    # Review: read everything, never mutate, but ask before shell.
+    "review": {
+        "read:*": "allow",
+        "edit:*": "deny",
+        "write:*": "deny",
+        "bash:*": "ask",
+        "execute:*": "deny",
+    },
+}
+
+
+# Allowed permission actions. Anything else is rejected to fail closed.
+VALID_PERMISSION_ACTIONS = {"allow", "deny", "ask"}
+
+
+# Built-in, zero-config agent presets shipped with the wrapper.
+# Resolved before user/project definitions so they can be overridden by name.
+# Each entry maps a preset name to its CustomAgent field kwargs.
+BUILTIN_PRESETS: Dict[str, Dict[str, Any]] = {
+    "build": {
+        "mode": "build",
+        "role": "Builder",
+        "goal": "Implement and modify code with the full toolset",
+        "instructions": "You are a capable engineering assistant with full tool access.",
+    },
+    "plan": {
+        "mode": "plan",
+        "role": "Planner",
+        "goal": "Explore and plan without making any changes",
+        "instructions": (
+            "You are a read-only planning assistant. Explore the repository, "
+            "answer questions, and propose plans. Never modify files or run "
+            "mutating commands."
+        ),
+    },
+    "review": {
+        "mode": "review",
+        "role": "Reviewer",
+        "goal": "Audit code and diffs without making changes",
+        "instructions": (
+            "You are a meticulous code reviewer. Read code and diffs and "
+            "provide thorough review feedback. Do not modify files."
+        ),
+    },
+}
+
+
+def resolve_permission_config(
+    permission: Optional[Dict[str, Any]] = None,
+    mode: Optional[str] = None,
+) -> Optional[Dict[str, str]]:
+    """Translate an agent ``mode`` shorthand and ``permission`` block into a
+    flat ``{pattern: action}`` permission config.
+
+    The ``permission`` block may use either a flat mapping
+    (``{"read": "allow"}``) or a nested per-capability mapping
+    (``{"shell": {"git *": "ask", "*": "deny"}}``). Bare capability keys
+    (e.g. ``read``) are normalised to glob patterns (``read:*``).
+
+    Precedence: explicit ``permission`` rules override ``mode`` defaults.
+
+    Returns:
+        A flat dict suitable for ``ApprovalConfig(permissions=...)``, or
+        None if neither mode nor permission produced any rules.
+
+    Raises:
+        ValueError: If ``mode`` is not a known mode, or if any permission
+            action is not one of ``allow``/``deny``/``ask``. Failing closed
+            prevents a typo (e.g. ``mode: readonly``) from silently producing
+            an unrestricted agent.
+    """
+    config: Dict[str, str] = {}
+
+    if mode:
+        mode_key = str(mode).strip().lower()
+        if mode_key not in MODE_RULES:
+            raise ValueError(
+                f"Unknown agent permission mode: {mode!r}. "
+                f"Valid modes: {sorted(MODE_RULES)}"
+            )
+        config.update(MODE_RULES[mode_key])
+
+    if permission:
+        for capability, value in permission.items():
+            if isinstance(value, dict):
+                # Nested per-capability patterns, e.g. bash: {"git *": ask}
+                for sub_pattern, action in value.items():
+                    action = str(action).strip().lower()
+                    if action not in VALID_PERMISSION_ACTIONS:
+                        raise ValueError(
+                            f"Invalid permission action: {action!r}. "
+                            f"Valid actions: {sorted(VALID_PERMISSION_ACTIONS)}"
+                        )
+                    pattern = f"{capability}:{sub_pattern}"
+                    config[pattern] = action
+            else:
+                action = str(value).strip().lower()
+                if action not in VALID_PERMISSION_ACTIONS:
+                    raise ValueError(
+                        f"Invalid permission action: {action!r}. "
+                        f"Valid actions: {sorted(VALID_PERMISSION_ACTIONS)}"
+                    )
+                # Flat capability → action. Normalise bare capability to glob.
+                pattern = capability if ":" in capability else f"{capability}:*"
+                config[pattern] = action
+
+    return config if config else None
 
 
 @dataclass
@@ -67,6 +201,9 @@ class CustomDefinitionsDiscovery:
         self._agents.clear()
         self._commands.clear()
         
+        # Register built-in presets first (lowest precedence)
+        self._register_builtin_presets()
+        
         # Discover from user-global directory first
         user_dir = self._get_user_dir()
         if user_dir.exists():
@@ -80,6 +217,16 @@ class CustomDefinitionsDiscovery:
         
         self._discovered = True
     
+    def _register_builtin_presets(self) -> None:
+        """Register the shipped, zero-config agent presets."""
+        for name, kwargs in BUILTIN_PRESETS.items():
+            self._agents[name] = CustomAgent(
+                name=name,
+                path=Path(f"<builtin:{name}>"),
+                source="builtin",
+                **kwargs,
+            )
+
     def _get_user_dir(self) -> Path:
         """Get user-global definitions directory."""
         return Path.home() / ".praisonai"
@@ -143,6 +290,8 @@ class CustomDefinitionsDiscovery:
                     goal=data.get("goal"),
                     instructions=data.get("instructions") or data.get("system_prompt"),
                     system_prompt=data.get("system_prompt") or data.get("instructions"),
+                    permission=data.get("permission"),
+                    mode=data.get("mode"),
                     source=source
                 )
             
@@ -159,6 +308,8 @@ class CustomDefinitionsDiscovery:
                     goal=frontmatter.get("goal"),
                     instructions=frontmatter.get("instructions") or body,
                     system_prompt=body or frontmatter.get("instructions"),
+                    permission=frontmatter.get("permission"),
+                    mode=frontmatter.get("mode"),
                     source=source
                 )
         
@@ -341,7 +492,13 @@ def load_agent_from_name(name: str) -> Optional[Dict[str, Any]]:
     if agent.tools:
         # Tools will need to be resolved from the tools registry
         config["tools"] = agent.tools
-    
+
+    # Translate declarative permission/mode block into a flat permission
+    # config that maps onto the Agent's existing approval/permission engine.
+    permission_config = resolve_permission_config(agent.permission, agent.mode)
+    if permission_config:
+        config["permissions"] = permission_config
+
     return config
 
 

@@ -186,6 +186,9 @@ def run_main(
             output.print_error(f"Agent '{agent}' not found")
             raise typer.Exit(1)
         
+        # Invocation-level permission flags override per-agent definition.
+        invocation_permissions = _parse_permissions(allow, deny, permissions, permission_default)
+
         # Run with custom agent
         _run_custom_agent(
             agent_config,
@@ -199,6 +202,10 @@ def run_main(
             toolset=toolset,
             max_tokens=max_tokens,
             output_mode=output_mode,
+            approval=approval,
+            approve_all_tools=approve_all_tools,
+            approval_timeout=approval_timeout,
+            invocation_permissions=invocation_permissions,
             continue_session=continue_session,
             session=session,
             fork=fork,
@@ -777,6 +784,10 @@ def _run_custom_agent(
     toolset: Optional[str] = None,
     max_tokens: int = 16000,
     output_mode: Optional[str] = None,
+    approval: Optional[str] = None,
+    approve_all_tools: bool = False,
+    approval_timeout: Optional[str] = None,
+    invocation_permissions: Optional[dict] = None,
     continue_session: bool = False,
     session: Optional[str] = None,
     fork: bool = False,
@@ -795,6 +806,40 @@ def _run_custom_agent(
         # Add verbose flag
         if verbose:
             agent_config["verbose"] = verbose
+        
+        # Resolve per-agent permissions (from definition) layered with
+        # invocation flags. Precedence: invocation flags > agent definition.
+        agent_permissions = agent_config.pop("permissions", None) or {}
+        merged_permissions = dict(agent_permissions)
+        if invocation_permissions:
+            merged_permissions.update(invocation_permissions)
+        
+        if merged_permissions:
+            from praisonai.cli.features.approval import resolve_approval_config
+            # Preserve promptable `ask` rules: only fall back to non-interactive
+            # when there is no interactive approval path. An explicit --approval
+            # flag or any `ask` rule keeps the backend interactive so the user
+            # can be prompted (e.g. the `review` preset's "ask before shell").
+            has_ask_rules = any(
+                str(action).strip().lower() == "ask"
+                for action in merged_permissions.values()
+            )
+            # Default to a console backend so deny/ask rules are enforced even
+            # when no explicit --approval flag is passed.
+            agent_config["approval"] = resolve_approval_config(
+                approval or "console",
+                all_tools=approve_all_tools,
+                timeout=approval_timeout,
+                non_interactive=approval is None and not has_ask_rules,
+                permissions_config=merged_permissions,
+            )
+        elif approval:
+            from praisonai.cli.features.approval import resolve_approval_config
+            agent_config["approval"] = resolve_approval_config(
+                approval,
+                all_tools=approve_all_tools,
+                timeout=approval_timeout,
+            )
         
         # Handle session continuity
         session_id = None
