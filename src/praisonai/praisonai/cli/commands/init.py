@@ -24,10 +24,14 @@ app = typer.Typer(help="Initialise the .praisonai/ project convention")
 
 
 STARTER_CONFIG = """\
+# yaml-language-server: $schema=https://raw.githubusercontent.com/MervinPraison/PraisonAI/main/src/praisonai/praisonai/cli/configuration/config.schema.json
 # PraisonAI project configuration
 # Defaults applied to scaffolded agents and commands.
-model: gpt-4o-mini
-output: text
+# Sections are nested exactly as the resolver consumes them.
+agent:
+  model: gpt-4o-mini
+output:
+  format: text
 """
 
 STARTER_AGENT_MD = """\
