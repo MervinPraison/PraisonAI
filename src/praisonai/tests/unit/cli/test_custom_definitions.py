@@ -267,12 +267,36 @@ class TestPermissionResolution:
     """Test per-agent permission/mode resolution."""
 
     def test_mode_read_only_denies_mutations(self):
-        """read-only mode denies edit/write/shell, allows read."""
+        """read-only mode denies edit/write/bash, allows read."""
         config = resolve_permission_config(mode="read-only")
         assert config["read:*"] == "allow"
         assert config["edit:*"] == "deny"
         assert config["write:*"] == "deny"
-        assert config["shell:*"] == "deny"
+        assert config["bash:*"] == "deny"
+
+    def test_review_mode_asks_before_bash(self):
+        """review mode prompts (ask) before bash, never mutates files."""
+        config = resolve_permission_config(mode="review")
+        assert config["bash:*"] == "ask"
+        assert config["edit:*"] == "deny"
+        assert config["write:*"] == "deny"
+
+    def test_unknown_mode_raises(self):
+        """A typo'd mode fails closed instead of silently allowing everything."""
+        with pytest.raises(ValueError):
+            resolve_permission_config(mode="readonly")
+
+    def test_invalid_action_raises(self):
+        """An unknown permission action fails closed."""
+        with pytest.raises(ValueError):
+            resolve_permission_config(permission={"read": "maybe"})
+        with pytest.raises(ValueError):
+            resolve_permission_config(permission={"bash": {"git *": "sometimes"}})
+
+    def test_action_normalised_case_insensitive(self):
+        """Actions are normalised to lowercase."""
+        config = resolve_permission_config(permission={"read": "ALLOW"})
+        assert config["read:*"] == "allow"
 
     def test_mode_build_is_unrestricted(self):
         """build mode produces no restrictions."""
@@ -287,18 +311,18 @@ class TestPermissionResolution:
     def test_nested_permission_block(self):
         """Nested per-capability patterns are expanded."""
         config = resolve_permission_config(
-            permission={"shell": {"git *": "ask", "*": "deny"}}
+            permission={"bash": {"git *": "ask", "*": "deny"}}
         )
-        assert config["shell:git *"] == "ask"
-        assert config["shell:*"] == "deny"
+        assert config["bash:git *"] == "ask"
+        assert config["bash:*"] == "deny"
 
     def test_permission_overrides_mode(self):
         """Explicit permission rules override mode defaults."""
         config = resolve_permission_config(
-            permission={"shell": "allow"}, mode="read-only"
+            permission={"bash": "allow"}, mode="read-only"
         )
-        # mode denies shell, but permission re-allows it
-        assert config["shell:*"] == "allow"
+        # mode denies bash, but permission re-allows it
+        assert config["bash:*"] == "allow"
 
     def test_empty_returns_none(self):
         """No mode and no permission yields None."""
@@ -361,7 +385,7 @@ You are a reviewer.
                 assert config is not None
                 assert "permissions" in config
                 assert config["permissions"]["edit:*"] == "deny"
-                assert config["permissions"]["shell:*"] == "deny"
+                assert config["permissions"]["bash:*"] == "deny"
 
 
 class TestBuiltinPresets:
@@ -382,7 +406,7 @@ class TestBuiltinPresets:
         """The plan preset is deny-by-default for mutating tools."""
         perms = resolve_permission_config(mode=BUILTIN_PRESETS["plan"]["mode"])
         assert perms["edit:*"] == "deny"
-        assert perms["shell:*"] == "deny"
+        assert perms["bash:*"] == "deny"
 
     def test_user_definition_overrides_builtin(self):
         """A user/project agent named 'plan' overrides the builtin preset."""
@@ -397,3 +421,68 @@ class TestBuiltinPresets:
                 agent = discovery.get_agent("plan")
                 assert agent.source == "project"
                 assert agent.model == "custom-model"
+
+
+class TestRunCustomAgentPermissionMerge:
+    """Test the runtime permission merge path in _run_custom_agent."""
+
+    def _invoke(self, agent_permissions, invocation_permissions, approval=None):
+        from praisonai.cli.commands import run as run_module
+
+        captured = {}
+
+        def fake_resolve_approval_config(backend_name, **kwargs):
+            captured["backend_name"] = backend_name
+            captured.update(kwargs)
+            return object()
+
+        class FakeAgent:
+            def __init__(self, *args, **kwargs):
+                captured["agent_kwargs"] = kwargs
+
+            def start(self, *args, **kwargs):
+                return "ok"
+
+        agent_config = {"instructions": "hi"}
+        if agent_permissions is not None:
+            agent_config["permissions"] = dict(agent_permissions)
+
+        with patch(
+            "praisonai.cli.features.approval.resolve_approval_config",
+            side_effect=fake_resolve_approval_config,
+        ), patch("praisonaiagents.Agent", FakeAgent):
+            run_module._run_custom_agent(
+                agent_config,
+                "do something",
+                model=None,
+                verbose=False,
+                approval=approval,
+                invocation_permissions=invocation_permissions,
+            )
+        return captured
+
+    def test_invocation_overrides_agent_permissions(self):
+        """CLI --allow/--deny flags win over agent-definition permissions."""
+        captured = self._invoke(
+            agent_permissions={"bash:*": "deny", "read:*": "allow"},
+            invocation_permissions={"bash:*": "allow"},
+        )
+        merged = captured["permissions_config"]
+        assert merged["bash:*"] == "allow"  # invocation wins
+        assert merged["read:*"] == "allow"  # agent default preserved
+
+    def test_ask_rule_stays_interactive(self):
+        """An ask rule keeps the backend interactive (non_interactive=False)."""
+        captured = self._invoke(
+            agent_permissions={"bash:*": "ask"},
+            invocation_permissions=None,
+        )
+        assert captured["non_interactive"] is False
+
+    def test_deny_only_is_non_interactive(self):
+        """Deny-only configs default to non-interactive enforcement."""
+        captured = self._invoke(
+            agent_permissions={"bash:*": "deny"},
+            invocation_permissions=None,
+        )
+        assert captured["non_interactive"] is True

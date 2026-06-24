@@ -50,7 +50,7 @@ MODE_RULES: Dict[str, Dict[str, str]] = {
         "read:*": "allow",
         "edit:*": "deny",
         "write:*": "deny",
-        "shell:*": "deny",
+        "bash:*": "deny",
         "execute:*": "deny",
     },
     # Plan mode is an alias of read-only.
@@ -58,7 +58,7 @@ MODE_RULES: Dict[str, Dict[str, str]] = {
         "read:*": "allow",
         "edit:*": "deny",
         "write:*": "deny",
-        "shell:*": "deny",
+        "bash:*": "deny",
         "execute:*": "deny",
     },
     # Review: read everything, never mutate, but ask before shell.
@@ -66,10 +66,14 @@ MODE_RULES: Dict[str, Dict[str, str]] = {
         "read:*": "allow",
         "edit:*": "deny",
         "write:*": "deny",
-        "shell:*": "ask",
+        "bash:*": "ask",
         "execute:*": "deny",
     },
 }
+
+
+# Allowed permission actions. Anything else is rejected to fail closed.
+VALID_PERMISSION_ACTIONS = {"allow", "deny", "ask"}
 
 
 # Built-in, zero-config agent presets shipped with the wrapper.
@@ -121,23 +125,47 @@ def resolve_permission_config(
     Returns:
         A flat dict suitable for ``ApprovalConfig(permissions=...)``, or
         None if neither mode nor permission produced any rules.
+
+    Raises:
+        ValueError: If ``mode`` is not a known mode, or if any permission
+            action is not one of ``allow``/``deny``/``ask``. Failing closed
+            prevents a typo (e.g. ``mode: readonly``) from silently producing
+            an unrestricted agent.
     """
     config: Dict[str, str] = {}
 
     if mode:
-        config.update(MODE_RULES.get(mode, {}))
+        mode_key = str(mode).strip().lower()
+        if mode_key not in MODE_RULES:
+            raise ValueError(
+                f"Unknown agent permission mode: {mode!r}. "
+                f"Valid modes: {sorted(MODE_RULES)}"
+            )
+        config.update(MODE_RULES[mode_key])
 
     if permission:
         for capability, value in permission.items():
             if isinstance(value, dict):
-                # Nested per-capability patterns, e.g. shell: {"git *": ask}
+                # Nested per-capability patterns, e.g. bash: {"git *": ask}
                 for sub_pattern, action in value.items():
+                    action = str(action).strip().lower()
+                    if action not in VALID_PERMISSION_ACTIONS:
+                        raise ValueError(
+                            f"Invalid permission action: {action!r}. "
+                            f"Valid actions: {sorted(VALID_PERMISSION_ACTIONS)}"
+                        )
                     pattern = f"{capability}:{sub_pattern}"
-                    config[pattern] = str(action)
+                    config[pattern] = action
             else:
+                action = str(value).strip().lower()
+                if action not in VALID_PERMISSION_ACTIONS:
+                    raise ValueError(
+                        f"Invalid permission action: {action!r}. "
+                        f"Valid actions: {sorted(VALID_PERMISSION_ACTIONS)}"
+                    )
                 # Flat capability → action. Normalise bare capability to glob.
                 pattern = capability if ":" in capability else f"{capability}:*"
-                config[pattern] = str(value)
+                config[pattern] = action
 
     return config if config else None
 

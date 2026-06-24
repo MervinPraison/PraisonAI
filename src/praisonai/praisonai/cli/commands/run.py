@@ -797,13 +797,21 @@ def _run_custom_agent(
         
         if merged_permissions:
             from praisonai.cli.features.approval import resolve_approval_config
-            # Default to a non-interactive console backend so deny/ask rules
-            # are enforced even when no explicit --approval flag is passed.
+            # Preserve promptable `ask` rules: only fall back to non-interactive
+            # when there is no interactive approval path. An explicit --approval
+            # flag or any `ask` rule keeps the backend interactive so the user
+            # can be prompted (e.g. the `review` preset's "ask before shell").
+            has_ask_rules = any(
+                str(action).strip().lower() == "ask"
+                for action in merged_permissions.values()
+            )
+            # Default to a console backend so deny/ask rules are enforced even
+            # when no explicit --approval flag is passed.
             agent_config["approval"] = resolve_approval_config(
                 approval or "console",
                 all_tools=approve_all_tools,
                 timeout=approval_timeout,
-                non_interactive=True,
+                non_interactive=approval is None and not has_ask_rules,
                 permissions_config=merged_permissions,
             )
         elif approval:
