@@ -108,6 +108,10 @@ class ToolResolver:
         # Cache for resolved tools to avoid repeated resolution
         self._resolve_cache: Dict[str, Optional[Callable]] = {}
         self._resolve_cache_lock = threading.Lock()
+        # Monotonic version bumped on every invalidate/clear so an in-flight
+        # resolve() (which runs source lookups OUTSIDE the lock) can detect a
+        # concurrent invalidation and skip writing a now-stale result.
+        self._resolve_cache_epoch = 0
     
     def _load_local_tools(self) -> Mapping[str, Callable]:
         """Load tools from local tools.py file.
@@ -288,6 +292,7 @@ class ToolResolver:
             name: If specified, invalidate only this tool. Otherwise clear all.
         """
         with self._resolve_cache_lock:
+            self._resolve_cache_epoch += 1
             if name is None:
                 self._resolve_cache.clear()
                 logger.debug("Cleared entire tool resolution cache")
@@ -323,6 +328,7 @@ class ToolResolver:
         # Fast path: hold the lock only long enough to read the cache.
         with self._resolve_cache_lock:
             cached = self._resolve_cache.get(name, _SENTINEL)
+            cache_epoch = self._resolve_cache_epoch
         if cached is not _SENTINEL:
             if instantiate and self._is_class(cached):
                 return cached()
@@ -369,6 +375,12 @@ class ToolResolver:
             if existing is not _SENTINEL:
                 # Another thread won the race; prefer the already-cached value.
                 tool = existing
+            elif cache_epoch != self._resolve_cache_epoch:
+                # An invalidate()/clear_cache() ran while we resolved outside the
+                # lock; the result may be stale, so return it without caching.
+                logger.debug(
+                    f"Tool '{name}' resolution invalidated during lookup; not caching"
+                )
             elif tool is not None:
                 if cacheable:
                     self._resolve_cache[name] = tool
@@ -520,6 +532,7 @@ class ToolResolver:
             self._local_tools_loaded = False
         with self._resolve_cache_lock:
             self._resolve_cache.clear()
+            self._resolve_cache_epoch += 1
     
     def get_local_callables(self) -> List[Callable]:
         """Get functions exposed by tools.py (path A semantics).

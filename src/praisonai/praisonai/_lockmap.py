@@ -53,17 +53,22 @@ class LockMap:
         loop = asyncio.get_running_loop()
         loop_id = id(loop)
 
-        # Structural access to the bucket/loop maps is shared across threads.
-        with self._struct_lock:
-            # Clean up dead loops
-            self._cleanup_dead_loops_locked()
+        # Fast path: a bucket for this loop already exists. The bucket is only
+        # ever mutated by its owning loop's thread, so a single dict read is
+        # safe under CPython's GIL without taking the cross-thread struct lock.
+        bucket = self._buckets.get(loop_id)
+        if bucket is None:
+            # Slow path: structural mutation shared across threads needs the lock.
+            with self._struct_lock:
+                # Clean up dead loops (only on first-touch to avoid per-call cost)
+                self._cleanup_dead_loops_locked()
 
-            # Get or create bucket for this loop
-            bucket = self._buckets.get(loop_id)
-            if bucket is None:
-                bucket = OrderedDict()
-                self._buckets[loop_id] = bucket
-                self._loop_refs[loop_id] = weakref.ref(loop)
+                # Re-check after acquiring the lock (another thread may have raced).
+                bucket = self._buckets.get(loop_id)
+                if bucket is None:
+                    bucket = OrderedDict()
+                    self._buckets[loop_id] = bucket
+                    self._loop_refs[loop_id] = weakref.ref(loop)
 
         # From here on only this loop's owning thread touches the bucket.
         now = time.monotonic()

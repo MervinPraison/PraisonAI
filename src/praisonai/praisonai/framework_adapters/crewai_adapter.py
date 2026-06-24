@@ -49,130 +49,131 @@ class CrewAIAdapter(BaseFrameworkAdapter):
         Returns:
             Execution result as string
         """
-        # Import CrewAI only when needed (availability already validated at CLI entry)
-        import os
-        from crewai import Agent, Task, Crew
-        from crewai.telemetry import Telemetry
-        from .._framework_availability import is_available
-        
-        # Suppress crewai.cli.config logger (scoped to when CrewAI is actually used)
-        logging.getLogger('crewai.cli.config').setLevel(logging.ERROR)
-        
         # Observability is initialized upstream (agents_generator._prepare_for_run);
         # finalize on EVERY exit path with the correct status so sessions are
-        # never orphaned "in progress" on errors / cancellation.
+        # never orphaned "in progress" on errors / cancellation. The guard starts
+        # before the lazy imports so an import failure still finalizes the session.
         import sys as _sys
         from ..observability.hooks import finalize_observability
 
-        # Use scoped telemetry disabling instead of global patching
-        with scoped_telemetry_disable(Telemetry):
-          try:
-            agents = {}
-            tasks = []
-            tasks_dict = {}
+        try:
+            # Import CrewAI only when needed (availability already validated at CLI entry)
+            import os
+            from crewai import Agent, Task, Crew
+            from crewai.telemetry import Telemetry
+            from .._framework_availability import is_available
 
-            # Create agents from config
-            for role, details in config['roles'].items():
-                role_filled = self._format_template(details['role'], topic=topic)
-                goal_filled = self._format_template(details['goal'], topic=topic)
-                backstory_filled = self._format_template(details['backstory'], topic=topic)
-                
-                # Get agent tools
-                agent_tools = [tools_dict[tool] for tool in details.get('tools', []) 
-                             if tools_dict and tool in tools_dict]
-                
-                # Configure LLM using shared resolver
-                llm = self._resolve_llm(details.get('llm'), llm_config)
+            # Suppress crewai.cli.config logger (scoped to when CrewAI is actually used)
+            logging.getLogger('crewai.cli.config').setLevel(logging.ERROR)
 
-                # Configure function calling LLM using shared resolver
-                function_calling_llm = self._resolve_llm(details.get('function_calling_llm'), llm_config)
+            # Use scoped telemetry disabling instead of global patching
+            with scoped_telemetry_disable(Telemetry):
+                agents = {}
+                tasks = []
+                tasks_dict = {}
 
-                # Create CrewAI agent with full feature set
-                agent = Agent(
-                    role=role_filled,
-                    goal=goal_filled,
-                    backstory=backstory_filled,
-                    tools=agent_tools,
-                    allow_delegation=details.get('allow_delegation', False),
-                    llm=llm,
-                    function_calling_llm=function_calling_llm,
-                    max_iter=details.get('max_iter') or 15,
-                    max_rpm=details.get('max_rpm') or None,
-                    max_execution_time=details.get('max_execution_time') or None,
-                    verbose=details.get('verbose', True),
-                    cache=details.get('cache', True),
-                    system_template=details.get('system_template') or None,
-                    prompt_template=details.get('prompt_template') or None,
-                    response_template=details.get('response_template') or None,
-                )
-                
-                # Set agent callback if provided
-                if agent_callback:
-                    agent.step_callback = agent_callback
+                # Create agents from config
+                for role, details in config['roles'].items():
+                    role_filled = self._format_template(details['role'], topic=topic)
+                    goal_filled = self._format_template(details['goal'], topic=topic)
+                    backstory_filled = self._format_template(details['backstory'], topic=topic)
 
-                agents[role] = agent
+                    # Get agent tools
+                    agent_tools = [tools_dict[tool] for tool in details.get('tools', [])
+                                 if tools_dict and tool in tools_dict]
 
-                # Create tasks for the agent
-                for task_name, task_details in details.get('tasks', {}).items():
-                    description_filled = self._format_template(task_details['description'], topic=topic)
-                    expected_output_filled = self._format_template(task_details['expected_output'], topic=topic)
+                    # Configure LLM using shared resolver
+                    llm = self._resolve_llm(details.get('llm'), llm_config)
 
-                    # Resolve task tools from tools_dict
-                    task_tools = []
-                    for tool_name in task_details.get('tools', []):
-                        if isinstance(tool_name, str) and tools_dict and tool_name in tools_dict:
-                            task_tools.append(tools_dict[tool_name])
-                        elif callable(tool_name):
-                            # Already a callable tool object
-                            task_tools.append(tool_name)
+                    # Configure function calling LLM using shared resolver
+                    function_calling_llm = self._resolve_llm(details.get('function_calling_llm'), llm_config)
 
-                    task = Task(
-                        description=description_filled,
-                        expected_output=expected_output_filled,
-                        agent=agent,
-                        tools=task_tools,
-                        async_execution=task_details.get('async_execution', False),
-                        context=[],
-                        config=task_details.get('config', {}),
-                        output_json=task_details.get('output_json'),
-                        output_pydantic=task_details.get('output_pydantic'),
-                        output_file=task_details.get('output_file', ""),
-                        callback=task_details.get('callback'),
-                        human_input=task_details.get('human_input', False),
-                        create_directory=task_details.get('create_directory', False)
+                    # Create CrewAI agent with full feature set
+                    agent = Agent(
+                        role=role_filled,
+                        goal=goal_filled,
+                        backstory=backstory_filled,
+                        tools=agent_tools,
+                        allow_delegation=details.get('allow_delegation', False),
+                        llm=llm,
+                        function_calling_llm=function_calling_llm,
+                        max_iter=details.get('max_iter') or 15,
+                        max_rpm=details.get('max_rpm') or None,
+                        max_execution_time=details.get('max_execution_time') or None,
+                        verbose=details.get('verbose', True),
+                        cache=details.get('cache', True),
+                        system_template=details.get('system_template') or None,
+                        prompt_template=details.get('prompt_template') or None,
+                        response_template=details.get('response_template') or None,
                     )
-                    
-                    # Set task callback if provided
-                    if task_callback:
-                        task.callback = task_callback
 
-                    tasks.append(task)
-                    tasks_dict[task_name] = task
+                    # Set agent callback if provided
+                    if agent_callback:
+                        agent.step_callback = agent_callback
 
-            # Set up task contexts
-            for details in config['roles'].values():
-                for task_name, task_details in details.get('tasks', {}).items():
-                    task = tasks_dict[task_name]
-                    context_tasks = [tasks_dict[ctx] for ctx in task_details.get('context', []) 
-                                   if ctx in tasks_dict]
-                    task.context = context_tasks
+                    agents[role] = agent
 
-            # Create and run the crew
-            crew = Crew(
-                agents=list(agents.values()),
-                tasks=tasks,
-                verbose=True
-            )
-            
-            logger.debug("Final Crew Configuration:")
-            logger.debug(f"Agents: {crew.agents}")
-            logger.debug(f"Tasks: {crew.tasks}")
+                    # Create tasks for the agent
+                    for task_name, task_details in details.get('tasks', {}).items():
+                        description_filled = self._format_template(task_details['description'], topic=topic)
+                        expected_output_filled = self._format_template(task_details['expected_output'], topic=topic)
 
-            response = crew.kickoff()
-            result = f"### Task Output ###\n{response}"
+                        # Resolve task tools from tools_dict
+                        task_tools = []
+                        for tool_name in task_details.get('tools', []):
+                            if isinstance(tool_name, str) and tools_dict and tool_name in tools_dict:
+                                task_tools.append(tools_dict[tool_name])
+                            elif callable(tool_name):
+                                # Already a callable tool object
+                                task_tools.append(tool_name)
 
-            return result
-          finally:
+                        task = Task(
+                            description=description_filled,
+                            expected_output=expected_output_filled,
+                            agent=agent,
+                            tools=task_tools,
+                            async_execution=task_details.get('async_execution', False),
+                            context=[],
+                            config=task_details.get('config', {}),
+                            output_json=task_details.get('output_json'),
+                            output_pydantic=task_details.get('output_pydantic'),
+                            output_file=task_details.get('output_file', ""),
+                            callback=task_details.get('callback'),
+                            human_input=task_details.get('human_input', False),
+                            create_directory=task_details.get('create_directory', False)
+                        )
+
+                        # Set task callback if provided
+                        if task_callback:
+                            task.callback = task_callback
+
+                        tasks.append(task)
+                        tasks_dict[task_name] = task
+
+                # Set up task contexts
+                for details in config['roles'].values():
+                    for task_name, task_details in details.get('tasks', {}).items():
+                        task = tasks_dict[task_name]
+                        context_tasks = [tasks_dict[ctx] for ctx in task_details.get('context', [])
+                                       if ctx in tasks_dict]
+                        task.context = context_tasks
+
+                # Create and run the crew
+                crew = Crew(
+                    agents=list(agents.values()),
+                    tasks=tasks,
+                    verbose=True
+                )
+
+                logger.debug("Final Crew Configuration:")
+                logger.debug(f"Agents: {crew.agents}")
+                logger.debug(f"Tasks: {crew.tasks}")
+
+                response = crew.kickoff()
+                result = f"### Task Output ###\n{response}"
+
+                return result
+        finally:
             # Close observability session with status derived from exc state
             status = "Failure" if _sys.exc_info()[0] is not None else "Success"
             try:

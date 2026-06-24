@@ -138,7 +138,11 @@ def discover_observability_sinks() -> List[Callable]:
 
         for ep in eps:
             try:
-                factories.append(ep.load())
+                factory = ep.load()
+                if callable(factory):
+                    factories.append(factory)
+                else:
+                    logger.debug("observability sink %r is not callable; skipping", ep)
             except Exception:  # noqa: BLE001
                 logger.debug("failed to load observability sink %r", ep, exc_info=True)
     except Exception:  # noqa: BLE001
