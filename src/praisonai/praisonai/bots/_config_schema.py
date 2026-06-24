@@ -196,6 +196,7 @@ class ChannelConfigSchema(BaseModel):
     user_allowed_commands: Optional[str] = None  # Comma-separated list of allowed commands
     routes: Dict[str, str] = Field(default_factory=dict)  # Context -> agent_id mapping
     routing: Optional[Dict[str, str]] = None  # Alias for routes
+    bindings: List[Dict[str, Any]] = Field(default_factory=list)  # Priority-ordered route bindings (Issue #2225)
     webhook_url: Optional[str] = None
     webhook_port: int = 8080
     streaming: Optional[StreamingConfigSchema] = None

@@ -113,6 +113,74 @@ class TestResolveAgentForMessage:
         assert result is None
 
 
+class TestBindingBasedRouting:
+    """Test priority-ordered bindings resolution (Issue #2225)."""
+
+    def _get_gateway(self):
+        from praisonai.gateway.server import WebSocketGateway
+        return WebSocketGateway()
+
+    def test_peer_binding_routes_to_vip(self):
+        gw = self._get_gateway()
+        vip = MockAgent("vip")
+        general = MockAgent("general")
+        gw._agents["vip"] = vip
+        gw._agents["general"] = general
+        gw._routing_rules["telegram"] = {"default": "general"}
+        gw._routing_bindings["telegram"] = gw._parse_bindings(
+            [{"peer": "12345", "agent": "vip"}]
+        )
+        facts = gw._build_route_facts("dm", peer="12345")
+        result = gw._resolve_agent_for_message("telegram", "dm", facts=facts)
+        assert result is vip
+
+    def test_unmatched_binding_falls_back_to_routes(self):
+        gw = self._get_gateway()
+        vip = MockAgent("vip")
+        general = MockAgent("general")
+        gw._agents["vip"] = vip
+        gw._agents["general"] = general
+        gw._routing_rules["telegram"] = {"default": "general"}
+        gw._routing_bindings["telegram"] = gw._parse_bindings(
+            [{"peer": "12345", "agent": "vip"}]
+        )
+        facts = gw._build_route_facts("dm", peer="99999")
+        result = gw._resolve_agent_for_message("telegram", "dm", facts=facts)
+        assert result is general
+
+    def test_no_facts_uses_flat_routes(self):
+        gw = self._get_gateway()
+        support = MockAgent("support")
+        gw._agents["support"] = support
+        gw._routing_rules["telegram"] = {"dm": "support", "default": "support"}
+        gw._routing_bindings["telegram"] = gw._parse_bindings(
+            [{"peer": "12345", "agent": "vip"}]
+        )
+        # Without facts, bindings are skipped and chat-type routing applies.
+        result = gw._resolve_agent_for_message("telegram", "dm")
+        assert result is support
+
+    def test_role_binding(self):
+        gw = self._get_gateway()
+        support = MockAgent("support")
+        general = MockAgent("general")
+        gw._agents["support"] = support
+        gw._agents["general"] = general
+        gw._routing_rules["discord"] = {"default": "general"}
+        gw._routing_bindings["discord"] = gw._parse_bindings(
+            [{"role": "support", "agent": "support"}]
+        )
+        facts = gw._build_route_facts("group", roles=["support"])
+        result = gw._resolve_agent_for_message("discord", "group", facts=facts)
+        assert result is support
+
+    def test_parse_bindings_invalid_returns_empty(self):
+        gw = self._get_gateway()
+        assert gw._parse_bindings(None) == []
+        assert gw._parse_bindings("nope") == []
+        assert gw._parse_bindings([{"no_agent": "x"}]) == []
+
+
 class TestInjectRoutingHandler:
     """Test _inject_routing_handler injects on_message handler."""
 

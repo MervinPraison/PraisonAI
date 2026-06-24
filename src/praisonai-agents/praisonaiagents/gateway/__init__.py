@@ -33,6 +33,11 @@ from .protocols import (
     OutboundMessengerProtocol,
     DeliveryResult,
     TargetInfo,
+    # Inbound route binding (Issue #2225)
+    RouteBinding,
+    RouteFacts,
+    RouteMatch,
+    resolve_route,
     # Protocol version negotiation
     PROTOCOL_VERSION,
     MIN_PROTOCOL_VERSION,
@@ -117,6 +122,11 @@ __all__ = [
     "OutboundMessengerProtocol",
     "DeliveryResult",
     "TargetInfo",
+    # Inbound route binding (Issue #2225)
+    "RouteBinding",
+    "RouteFacts",
+    "RouteMatch",
+    "resolve_route",
     # Protocol version negotiation
     "PROTOCOL_VERSION",
     "MIN_PROTOCOL_VERSION",
