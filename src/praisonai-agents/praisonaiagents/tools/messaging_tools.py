@@ -149,13 +149,13 @@ def _check_send_policy(target: str) -> Optional[str]:
     """
     try:
         from ..session.context import get_send_policy, get_session_context
+        from ..gateway.protocols import SendDecision
     except Exception:
+        # The session-context module is unavailable, so the send-policy feature
+        # cannot have been configured. Preserve today's allow-all behaviour.
         return None
 
-    try:
-        policy = get_send_policy()
-    except Exception:
-        policy = None
+    policy = get_send_policy()
     if policy is None:
         return None
 
@@ -165,10 +165,13 @@ def _check_send_policy(target: str) -> Optional[str]:
         ctx = get_session_context()
         agent_id = getattr(ctx, "user_id", "") or ""
         session_id = getattr(ctx, "chat_id", "") or ""
-        if getattr(ctx, "origin", None) is not None and ctx.origin.platform:
-            origin = "origin"
+        ctx_origin = getattr(ctx, "origin", None)
+        if ctx_origin is not None and ctx_origin.platform:
+            origin = ctx_origin.platform
     except Exception:
-        pass
+        # Context enrichment is best-effort; the policy still evaluates the
+        # target with empty scope identifiers.
+        logger.debug("send_policy context enrichment failed", exc_info=True)
 
     try:
         decision = policy.evaluate(
@@ -181,7 +184,16 @@ def _check_send_policy(target: str) -> Optional[str]:
         logger.error("send_policy evaluation failed: %s", e, exc_info=True)
         return f"Failed to send to {target}: send_policy evaluation error"
 
-    if decision is not None and not decision.allow:
+    # Fail closed: a policy that returns anything other than a SendDecision is
+    # treated as a denial (consistent with how evaluation exceptions are
+    # handled), so a non-conforming back-end can never implicitly allow a send.
+    if not isinstance(decision, SendDecision):
+        logger.error(
+            "send_policy.evaluate() returned unexpected type %r; blocking send",
+            type(decision),
+        )
+        return f"Failed to send to {target}: send_policy evaluation error"
+    if not decision.allow:
         reason = decision.reason or "target not permitted by send_policy"
         return f"Failed to send to {target}: {reason}"
     return None

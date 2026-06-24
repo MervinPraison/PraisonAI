@@ -327,6 +327,25 @@ def test_policy_evaluation_error_blocks_send():
         clear_outbound_messenger(mtoken)
 
 
+def test_policy_returning_non_decision_blocks_send():
+    # A non-conforming policy that returns None (instead of a SendDecision)
+    # must fail closed, not implicitly allow the send.
+    class ReturnsNone:
+        def evaluate(self, target, *, agent_id="", session_id="", origin=None):
+            return None
+
+    messenger = FakeMessenger()
+    mtoken = register_outbound_messenger(messenger)
+    ptoken = register_send_policy(ReturnsNone())
+    try:
+        out = send_message("origin", "hi")
+        assert "Failed to send" in out
+        assert messenger.sent == []
+    finally:
+        clear_send_policy(ptoken)
+        clear_outbound_messenger(mtoken)
+
+
 def test_policy_does_not_affect_list_action():
     messenger = FakeMessenger()
     mtoken = register_outbound_messenger(messenger)

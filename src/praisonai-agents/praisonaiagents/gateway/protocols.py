@@ -1594,7 +1594,7 @@ class OutboundMessengerProtocol(Protocol):
 # policy, today's behaviour is preserved (allow-all).
 # ---------------------------------------------------------------------------
 
-@dataclass
+@dataclass(frozen=True)
 class SendDecision:
     """Closed decision shape for an outbound send-policy evaluation.
 
