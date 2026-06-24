@@ -123,6 +123,17 @@ def read_properties(skill_dir: Path) -> SkillProperties:
             return v.strip().lower() in ("true", "yes", "1", "on")
         return default
 
+    def _coerce_int(v, default=0):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return default
+
+    def _coerce_str(v):
+        if v is None:
+            return None
+        return str(v)
+
     return SkillProperties(
         name=name.strip(),
         description=description.strip(),
@@ -145,4 +156,14 @@ def read_properties(skill_dir: Path) -> SkillProperties:
         shell=metadata.get("shell"),
         # Parse capability requirements
         requirements=SkillRequirements.from_frontmatter(metadata),
+        # Provenance + usage telemetry (accept hyphen or underscore forms)
+        agent_created=_coerce_bool(
+            metadata.get("agent-created", metadata.get("agent_created")), False
+        ),
+        created_at=_coerce_str(metadata.get("created-at", metadata.get("created_at"))),
+        use_count=_coerce_int(metadata.get("use-count", metadata.get("use_count")), 0),
+        last_used=_coerce_str(metadata.get("last-used", metadata.get("last_used"))),
+        patch_count=_coerce_int(
+            metadata.get("patch-count", metadata.get("patch_count")), 0
+        ),
     )
