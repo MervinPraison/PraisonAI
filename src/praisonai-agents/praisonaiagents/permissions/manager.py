@@ -294,6 +294,14 @@ class PermissionManager:
 
         results = [(t, self._check_flat(t, agent)) for t in sub_targets]
 
+        # Also fold in an explicit match on the *original* compound target so a
+        # legacy flat rule/approval (e.g. ``deny: bash:cd /tmp && rm *``) still
+        # participates. The default "No matching rule" ASK is intentionally
+        # excluded so it does not override allowed sub-operations.
+        original_res = self._check_flat(original_target, agent)
+        if (original_res.rule is not None) or original_res.approved is not None:
+            results.append((original_target, original_res))
+
         # Deny wins.
         for sub_target, res in results:
             if res.action == PermissionAction.DENY:

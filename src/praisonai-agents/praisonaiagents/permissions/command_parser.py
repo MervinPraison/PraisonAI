@@ -45,7 +45,7 @@ class ShellOp:
     @property
     def command_string(self) -> str:
         """Reconstruct an ``<exe> <args>`` string for glob matching."""
-        parts = [self.executable] + self.args
+        parts = [self.executable, *self.args]
         return " ".join(p for p in parts if p)
 
 
@@ -58,16 +58,30 @@ def _extract_substitutions(token: str) -> List[str]:
     """
     inner: List[str] = []
 
+    # Mask single-quoted spans so substitutions inside them are treated as the
+    # literals the shell would see (e.g. ``echo '$(rm -rf x)'`` is harmless).
+    # Double quotes do *not* suppress substitution in the shell, so we leave
+    # those spans intact.
+    masked_chars = []
+    in_single = False
+    for ch in token:
+        if ch == "'":
+            in_single = not in_single
+            masked_chars.append("\x00")
+            continue
+        masked_chars.append("\x00" if in_single else ch)
+    masked = "".join(masked_chars)
+
     # $(...) substitutions
     start = 0
     while True:
-        idx = token.find("$(", start)
+        idx = masked.find("$(", start)
         if idx == -1:
             break
         depth = 0
         end = -1
-        for i in range(idx + 1, len(token)):
-            ch = token[i]
+        for i in range(idx + 1, len(masked)):
+            ch = masked[i]
             if ch == "(":
                 depth += 1
             elif ch == ")":
@@ -81,12 +95,17 @@ def _extract_substitutions(token: str) -> List[str]:
         start = end + 1
 
     # `...` backtick substitutions
-    parts = token.split("`")
+    parts = masked.split("`")
     if len(parts) >= 3:
-        # Odd-indexed segments are inside backticks.
-        for i in range(1, len(parts), 2):
-            if parts[i].strip():
-                inner.append(parts[i])
+        # Odd-indexed segments are inside backticks. Use original-text offsets
+        # so the extracted command retains its real characters.
+        offset = 0
+        for i, part in enumerate(parts):
+            seg_start = offset
+            seg_end = offset + len(part)
+            if i % 2 == 1 and part.strip():
+                inner.append(token[seg_start:seg_end])
+            offset = seg_end + 1  # account for the backtick delimiter
 
     return inner
 
@@ -171,11 +190,16 @@ def _parse_segment(segment: str) -> List[ShellOp]:
     op = ShellOp()
     args: List[str] = []
     skip_next = False
+    skip_input_target = False
 
-    for idx, tok in enumerate(tokens):
+    for tok in tokens:
         if skip_next:
             op.write_targets.append(tok)
             skip_next = False
+            continue
+
+        if skip_input_target:
+            skip_input_target = False
             continue
 
         # Skip leading environment-variable assignments (FOO=bar cmd).
@@ -200,15 +224,29 @@ def _parse_segment(segment: str) -> List[ShellOp]:
                     matched_redirect = True
                     break
                 if stripped.startswith(redir) and len(stripped) > len(redir) and stripped != tok:
-                    op.write_targets.append(stripped[len(redir):])
+                    dest = stripped[len(redir):]
+                    # Skip fd-to-fd redirections like ``2>&1`` (dest is ``&N``),
+                    # which alias a file descriptor rather than writing a path.
+                    if not dest.startswith("&"):
+                        op.write_targets.append(dest)
                     matched_redirect = True
                     break
         if matched_redirect:
             continue
 
-        # Ignore input redirects and their target.
-        if tok == "<":
-            skip_next = False
+        # Ignore input redirects and their target (consume the next token so a
+        # filename like ``< /dev/null`` is never mistaken for the executable).
+        if tok in ("<", "<<", "<<<"):
+            skip_input_target = True
+            continue
+        stripped_input = tok.lstrip("0123456789")
+        if stripped_input in ("<", "<<", "<<<") and stripped_input != tok:
+            skip_input_target = True
+            continue
+        if tok.startswith("<") or (
+            stripped_input.startswith("<") and stripped_input != tok
+        ):
+            # Inline form like ``<file`` or ``<<<word`` — target is attached.
             continue
 
         if op.executable == "":
@@ -247,7 +285,7 @@ def parse_command(cmd: str) -> List[ShellOp]:
             # Nothing extracted — fall back to whole command.
             return [_fallback_op(cmd)]
         return ops
-    except Exception:
+    except Exception:  # noqa: BLE001 - conservative: never weaken a rule on parse failure
         # Any unexpected failure must not weaken the rule: fall back.
         return [_fallback_op(cmd)]
 

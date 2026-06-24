@@ -94,6 +94,34 @@ class TestCommandParser:
         assert parse_command("") == []
         assert parse_command("   ") == []
 
+    def test_input_redirect_not_executable(self):
+        # ``< /dev/null`` must not be mistaken for the executable.
+        ops = parse_command("rm -rf x < /dev/null")
+        assert any(op.executable == "rm" for op in ops)
+        assert all(op.executable != "/dev/null" for op in ops)
+
+    def test_leading_input_redirect(self):
+        ops = parse_command("< /dev/null cat foo")
+        assert any(op.executable == "cat" for op in ops)
+        assert all(op.executable != "/dev/null" for op in ops)
+
+    def test_fd_to_fd_redirect_not_write_target(self):
+        # ``2>&1`` aliases a file descriptor; it must not become a write target.
+        ops = parse_command("ls foo 2>&1")
+        targets = [t for op in ops for t in op.write_targets]
+        assert "&1" not in targets
+        assert all(not t.startswith("&") for t in targets)
+
+    def test_single_quoted_substitution_is_literal(self):
+        # ``echo '$(rm -rf x)'`` is a literal string, not an rm operation.
+        ops = parse_command("echo '$(rm -rf x)'")
+        assert all(op.executable != "rm" for op in ops)
+
+    def test_double_quoted_substitution_still_extracted(self):
+        # Double quotes do not suppress command substitution.
+        ops = parse_command('echo "$(rm -rf x)"')
+        assert any(op.executable == "rm" for op in ops)
+
 
 class TestCommandAwareDeny:
     def test_plain_rm_denied(self, manager):
@@ -144,6 +172,23 @@ class TestRedirectDeny:
         )
         assert manager.check("bash:cat foo > /etc/hosts").is_denied
 
+    def test_fd_to_fd_redirect_not_denied_by_broad_write_rule(self, manager):
+        # A broad write deny must not block harmless ``2>&1`` redirections.
+        manager.add_rule(
+            PermissionRule(
+                pattern="bash:*", action=PermissionAction.ALLOW, priority=10
+            )
+        )
+        manager.add_rule(
+            PermissionRule(
+                pattern="write:*",
+                action=PermissionAction.DENY,
+                description="Block all writes",
+                priority=100,
+            )
+        )
+        assert not manager.check("bash:ls foo 2>&1").is_denied
+
 
 class TestBackwardCompatibility:
     def test_flat_glob_still_matches(self, manager):
@@ -180,3 +225,34 @@ class TestBackwardCompatibility:
             PermissionRule(pattern="read:*", action=PermissionAction.ALLOW, priority=10)
         )
         assert manager.check("read:file.txt").is_allowed
+
+    def test_compound_with_one_ask_requires_approval(self, manager):
+        manager.add_rule(
+            PermissionRule(pattern="bash:*", action=PermissionAction.ALLOW, priority=10)
+        )
+        manager.add_rule(
+            PermissionRule(
+                pattern="bash:cat *",
+                action=PermissionAction.ASK,
+                description="Require approval for cat",
+                priority=50,
+            )
+        )
+        # deny -> ask -> allow precedence: ask sub-op wins over allow.
+        assert manager.check("bash:ls && cat foo").needs_approval
+
+    def test_legacy_flat_deny_on_compound_target_still_fires(self, manager):
+        # A flat deny rule written against the full compound string must still
+        # participate even when individual sub-operations would be allowed.
+        manager.add_rule(
+            PermissionRule(pattern="bash:*", action=PermissionAction.ALLOW, priority=10)
+        )
+        manager.add_rule(
+            PermissionRule(
+                pattern="bash:cd /tmp && rm *",
+                action=PermissionAction.DENY,
+                description="Legacy exact compound deny",
+                priority=100,
+            )
+        )
+        assert manager.check("bash:cd /tmp && rm x").is_denied
