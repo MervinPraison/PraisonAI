@@ -71,7 +71,13 @@ def list_cmd(
     try:
         resolver = _resolver(path, store_dir)
         if not canonical:
-            typer.echo("Provide a canonical identity to inspect its links.")
+            all_links = resolver.all_links()
+            if not all_links:
+                typer.echo("No identity links found.")
+                return
+            typer.echo("All identity links:")
+            for platform, user_id, cid in sorted(all_links):
+                typer.echo(f"  {platform}:{user_id} -> {cid}")
             return
         links = resolver.links_for(canonical)
         if not links:

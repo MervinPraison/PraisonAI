@@ -156,16 +156,33 @@ class StoreBackedIdentityResolver(FileIdentityResolver):
             channel_type = getattr(ch, "channel_type", "")
             channel_id = getattr(ch, "channel_id", "")
             if label and channel_type and channel_id:
-                self.link(channel_type, channel_id, label)
+                # Write in-memory only; flush once after the loop to avoid
+                # N atomic disk writes when materialising many pairings.
+                with self._lock:
+                    self._links[(channel_type, channel_id)] = label
                 count += 1
+        if count:
+            self._flush()
         return count
+
+    def all_links(self) -> list[tuple[str, str, str]]:
+        """Return every explicit link as ``(platform, user_id, canonical)``."""
+        with self._lock:
+            return [
+                (platform, user_id, canonical)
+                for (platform, user_id), canonical in self._links.items()
+            ]
 
     def _canonical_from_pairing(
         self, platform: str, platform_user_id: str
     ) -> Optional[str]:
         """Return the pairing label (canonical id) for a paired channel."""
         store = self._pairing_store
-        # Fast path: stores exposing the (channel_id, channel_type) -> label
+        # Fast path: most messages come from unpaired users. ``is_paired`` is
+        # an O(1) dict lookup, so short-circuit before the O(n) scan below.
+        is_paired = getattr(store, "is_paired", None)
+        if callable(is_paired) and not is_paired(platform_user_id, platform):
+            return None
         list_paired = getattr(store, "list_paired", None)
         if not callable(list_paired):
             return None

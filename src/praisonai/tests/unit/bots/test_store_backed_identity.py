@@ -53,8 +53,19 @@ def test_links_for_lists_all_channels(resolver):
     resolver.link("telegram", "12345", "alice")
     resolver.link("whatsapp", "+44123", "alice")
     links = resolver.links_for("alice")
-    pairs = {(l.platform, l.platform_user_id) for l in links}
+    pairs = {(link.platform, link.platform_user_id) for link in links}
     assert pairs == {("telegram", "12345"), ("whatsapp", "+44123")}
+
+
+def test_all_links_returns_every_mapping(resolver):
+    resolver.link("telegram", "12345", "alice")
+    resolver.link("whatsapp", "+44123", "alice")
+    resolver.link("discord", "d1", "bob")
+    assert set(resolver.all_links()) == {
+        ("telegram", "12345", "alice"),
+        ("whatsapp", "+44123", "alice"),
+        ("discord", "d1", "bob"),
+    }
 
 
 def test_persists_across_instances(tmp_path):
@@ -123,11 +134,19 @@ def test_link_paired_materialises_links(tmp_path):
 
 
 def test_from_env_degrades_without_pairing(tmp_path, monkeypatch):
+    import sys
+
     from praisonai.bots import StoreBackedIdentityResolver
 
-    monkeypatch.setenv("PRAISONAI_IDENTITY_PATH", str(tmp_path / "identity.json"))
-    resolver = StoreBackedIdentityResolver.from_env(store_dir=str(tmp_path / "gw"))
-    # Works as a plain resolver regardless of pairing availability.
+    # Force the optional pairing import to fail so the ``except`` degraded
+    # branch in from_env() is actually exercised. Pass an explicit ``path``
+    # (the default is captured at import time, so setenv would not apply).
+    monkeypatch.setitem(sys.modules, "praisonai.gateway.pairing", None)
+    resolver = StoreBackedIdentityResolver.from_env(
+        path=str(tmp_path / "identity.json"), store_dir=str(tmp_path / "gw")
+    )
+    assert resolver._pairing_store is None
+    # Works as a plain resolver when pairing is unavailable.
     assert resolver.resolve("telegram", "x") == "telegram:x"
     resolver.link("telegram", "x", "alice")
     assert resolver.resolve("telegram", "x") == "alice"
