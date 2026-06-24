@@ -118,6 +118,37 @@ class MessageHookMixin:
             return None
         return getattr(agent, '_hook_runner', None)
 
+    async def _default_health(self) -> Any:
+        """Build a :class:`HealthResult` shared by all bot adapters (DRY).
+
+        Combines ``self.probe()`` liveness with ``self._is_running``,
+        ``self._started_at`` and ``self._session``. The only per-adapter
+        difference is ``self.platform``, which each adapter already exposes.
+        Adapters delegate via ``health()`` but may override for bespoke needs.
+        """
+        from praisonaiagents.bots import HealthResult
+
+        probe_result = await self.probe()  # type: ignore[attr-defined]
+        started_at = getattr(self, '_started_at', None)
+        uptime = (time.time() - started_at) if started_at else None
+        session = getattr(self, '_session', None)
+        if session is not None and hasattr(session, '_histories'):
+            session_count = len(session._histories)
+        elif session is not None and hasattr(session, 'active_count'):
+            session_count = session.active_count()
+        else:
+            session_count = 0
+        is_running = getattr(self, '_is_running', False)
+        return HealthResult(
+            ok=is_running and probe_result.ok,
+            platform=self.platform,  # type: ignore[attr-defined]
+            is_running=is_running,
+            uptime_seconds=uptime,
+            probe=probe_result,
+            sessions=session_count,
+            error=probe_result.error if not probe_result.ok else None,
+        )
+
     def fire_message_received(self, message: Any) -> None:
         """Fire MESSAGE_RECEIVED hook when an incoming message arrives.
 

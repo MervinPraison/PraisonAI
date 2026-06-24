@@ -636,17 +636,4 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
     
     async def health(self) -> HealthResult:
         """Get health status of the email bot."""
-        probe_result = await self.probe()
-        
-        uptime = 0.0
-        if self._started_at:
-            uptime = time.time() - self._started_at
-        
-        return HealthResult(
-            ok=self._is_running and probe_result.ok,
-            platform="email",
-            is_running=self._is_running,
-            uptime_seconds=uptime,
-            probe=probe_result,
-            sessions=self._session.active_count() if hasattr(self._session, 'active_count') else 0,
-        )
+        return await self._default_health()
