@@ -183,3 +183,47 @@ async def test_session_registers_agent_and_returns_steered():
 
     agent.steer.assert_called_once_with("focus on X", priority=30)
     assert result["response"] == "response:first"
+
+
+@pytest.mark.asyncio
+async def test_session_reregisters_agent_for_pending_runs():
+    """STEER must keep working for queued follow-up runs, not just the first.
+
+    finish_run() clears the live agent handle after every turn, so the
+    session loop must re-register the agent at the start of each pending run.
+    """
+    from praisonai.bots._run_control import SessionRunControl, RunDecision
+    from praisonai.bots._session import BotSessionManager
+
+    run_control = SessionRunControl(busy_mode="steer")
+    session_mgr = BotSessionManager(run_control=run_control)
+
+    agent = MagicMock()
+    agent.interrupt_controller = None
+    agent.message_steering_enabled = True
+    agent.steer = MagicMock(return_value="steer_1")
+
+    prompts_seen: list[str] = []
+    steer_decisions: list = []
+
+    async def fake_chat(agent_, user_id, prompt, *args, **kwargs):
+        prompts_seen.append(prompt)
+        if len(prompts_seen) == 1:
+            # Mid first run: queue a follow-up (steering disabled path is the
+            # default queue since this message must drain via the pending slot).
+            with patch.object(agent, "message_steering_enabled", False):
+                await run_control.submit(user_id, "pending follow-up")
+        elif len(prompts_seen) == 2:
+            # Mid the *pending* run: a STEER message must reach the live agent,
+            # proving the agent was re-registered for this second run.
+            steer_decisions.append(
+                await run_control.submit(user_id, "steer the pending run")
+            )
+        return f"response:{prompt}"
+
+    with patch.object(session_mgr, "chat", new=AsyncMock(side_effect=fake_chat)):
+        await session_mgr.chat_with_run_control(agent, "user1", "first")
+
+    assert prompts_seen == ["first", "pending follow-up"]
+    assert steer_decisions == [RunDecision.STEERED]
+    agent.steer.assert_called_once_with("steer the pending run", priority=30)

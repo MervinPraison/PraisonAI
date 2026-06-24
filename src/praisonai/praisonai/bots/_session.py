@@ -727,14 +727,6 @@ class BotSessionManager:
                 }
             }
 
-        # We're running now (RUN_NOW or INTERRUPTED): register the live agent so
-        # subsequent mid-run STEER messages can be injected into it.
-        if hasattr(self._run_control, "register_agent"):
-            try:
-                self._run_control.register_agent(user_id, agent)
-            except Exception:  # noqa: BLE001 - registration is best-effort
-                logger.debug("Failed to register agent for steering", exc_info=True)
-        
         # We're running now (RUN_NOW or INTERRUPTED)
         current_prompt = prompt
         last_response = ""
@@ -746,6 +738,17 @@ class BotSessionManager:
             interrupt_controller = None
 
             if last_decision in (RunDecision.RUN_NOW, RunDecision.INTERRUPTED):
+                # Register the live agent for each fresh run so that mid-run
+                # STEER messages can be injected into it. finish_run() clears the
+                # handle after every turn, so re-register on each pending iteration
+                # too (otherwise STEER silently falls back to QUEUE after the
+                # first run).
+                if hasattr(self._run_control, "register_agent"):
+                    try:
+                        self._run_control.register_agent(user_id, agent)
+                    except Exception:  # noqa: BLE001 - registration is best-effort
+                        logger.debug("Failed to register agent for steering", exc_info=True)
+
                 interrupt_controller = self._run_control.get_interrupt_controller(user_id)
 
             status = self._run_control.get_run_status(user_id)
