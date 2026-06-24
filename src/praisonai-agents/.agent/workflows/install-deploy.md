@@ -755,6 +755,20 @@ Developer Push ─────────────────────�
 
 **Result**: `https://praison.ai/install.sh` is automatically updated **only when the source files change**!
 
+### Auto-deploy when install scripts change (PraisonAI → praison.ai)
+
+Pushing `install.sh` or `install.ps1` to PraisonAI **`main`** triggers [`.github/workflows/deploy-install-scripts.yml`](/Users/praison/praisonai-package/.github/workflows/deploy-install-scripts.yml), which dispatches the existing praison.ai **`CI`** workflow (`workflow_dispatch` on `master`). No manual website push or `make upgrade` is required.
+
+```mermaid
+flowchart LR
+  pushMain["PraisonAI push main\ninstall.sh|install.ps1"] --> deployWF["deploy-install-scripts.yml"]
+  deployWF --> dispatch["gh workflow run CI"]
+  dispatch --> siteCI["praison.ai azure-pipeline.yaml"]
+  siteCI --> live["https://praison.ai/install.sh"]
+```
+
+Manual re-deploy: `gh workflow run "Deploy install scripts to praison.ai" --repo MervinPraison/PraisonAI`
+
 ### How install.sh is Served
 
 The `web/install.sh` file is copied into the Docker image at `/var/www/html/web/install.sh` and served by nginx:
@@ -797,20 +811,20 @@ git push origin master
 
 **Task 2: Update install.sh and deploy**
 ```bash
-# 1. Update install.sh
+# 1. Update install.sh / install.ps1
 vim /Users/praison/praisonai-package/src/praisonai/scripts/install.sh
 
 # 2. Test install.sh
-bash /Users/praison/praisonai-package/src/praisonai/scripts/install.sh --dry-run
+bash /Users/praison/praisonai-package/src/praisonai/scripts/test-install-smoke.sh
 
-# 3. Commit and push
-git add /Users/praison/praisonai-package/src/praisonai/scripts/install.sh
+# 3. Commit and push to PraisonAI main — auto-triggers praison.ai deploy
+git add src/praisonai/scripts/install.sh src/praisonai/scripts/install.ps1
 git commit -m "fix: update install script"
 git push origin main
+# deploy-install-scripts.yml → praison.ai CI → https://praison.ai/install.sh
 
-# 4. Deploy website (if needed)
-cd /Users/praison/Sites/localhost/praisonai
-make upgrade
+# Manual re-deploy (optional):
+gh workflow run "Deploy install scripts to praison.ai" --repo MervinPraison/PraisonAI
 ```
 
 **Task 3: Rollback deployment**

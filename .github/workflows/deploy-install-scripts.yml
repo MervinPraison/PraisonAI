@@ -1,0 +1,52 @@
+name: Deploy install scripts to praison.ai
+
+# When install.sh or install.ps1 change on main, trigger praison.ai CI which
+# syncs scripts at build time and deploys to Azure AKS (existing azure-pipeline.yaml).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/praisonai/scripts/install.sh'
+      - 'src/praisonai/scripts/install.ps1'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-install-scripts
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  trigger-website-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger praison.ai CI
+        env:
+          GH_TOKEN: ${{ secrets.SECRETS_ADMIN_PAT }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "SECRETS_ADMIN_PAT is not configured in this repository"
+            exit 1
+          fi
+
+          gh workflow run CI \
+            --repo MervinPraison/praison.ai \
+            --ref master
+
+          echo "Triggered praison.ai CI for PraisonAI commit ${SOURCE_SHA}"
+          echo "Monitor: https://github.com/MervinPraison/praison.ai/actions/workflows/azure-pipeline.yaml"
+
+          sleep 10
+          RUN_URL=$(gh run list \
+            --repo MervinPraison/praison.ai \
+            --workflow CI \
+            --limit 1 \
+            --json url,status,createdAt \
+            --jq '.[0].url' 2>/dev/null || true)
+          if [ -n "${RUN_URL}" ]; then
+            echo "Latest praison.ai CI run: ${RUN_URL}"
+          fi
