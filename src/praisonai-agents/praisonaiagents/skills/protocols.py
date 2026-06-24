@@ -204,8 +204,15 @@ class DefaultSkillReviewPolicy:
     single skill if — and only if — a durable, reusable technique emerged.
     """
 
+    #: Hard cap on how much of the original prompt is echoed into the review
+    #: directive. Bounds token cost and shrinks the prompt-injection surface.
+    MAX_PROMPT_CHARS = 500
+
     def __init__(self, min_tool_calls: int = 1):
-        self.min_tool_calls = max(0, int(min_tool_calls))
+        # Clamp to >= 1: a value of 0 would trigger a review LLM call after
+        # every single chat() (even no-op turns that used no tools), silently
+        # doubling API cost. The minimum unit of "real work" is one tool call.
+        self.min_tool_calls = max(1, int(min_tool_calls))
 
     def should_review(self, trajectory: Dict[str, Any]) -> bool:
         tools_used = trajectory.get("tools_used") or []
@@ -213,6 +220,8 @@ class DefaultSkillReviewPolicy:
 
     def review_prompt(self, trajectory: Dict[str, Any]) -> str:
         prompt = str(trajectory.get("prompt", "")).strip()
+        if len(prompt) > self.MAX_PROMPT_CHARS:
+            prompt = prompt[: self.MAX_PROMPT_CHARS] + "…"
         tools_used = trajectory.get("tools_used") or []
         tools_str = ", ".join(str(t) for t in tools_used) if tools_used else "none"
         return (

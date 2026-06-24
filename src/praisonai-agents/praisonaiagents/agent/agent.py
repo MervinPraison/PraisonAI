@@ -2205,6 +2205,12 @@ Your Goal: {self.goal}
             'skills': getattr(self, '_skills_config', None),
             'approval': getattr(self, '_approval_config', None),
             'learn': getattr(self, '_learn_config', None),
+            # Autonomous skill self-improvement: forward the custom policy when
+            # set, else the opt-in boolean, so clones keep the same behavior.
+            'self_improve': (
+                getattr(self, '_self_improve_policy', None)
+                or getattr(self, '_self_improve', False)
+            ),
             'tool_search': getattr(self, '_tool_search_config', None),
             # Tool configuration - use consolidated config when available  
             'tool_config': getattr(self, '_tool_config', None),

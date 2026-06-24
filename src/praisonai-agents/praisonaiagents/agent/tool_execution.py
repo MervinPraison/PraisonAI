@@ -676,6 +676,12 @@ class ToolExecutionMixin:
 
     def _trigger_after_agent_hook(self, prompt, response, start_time, tools_used=None):
         """Trigger AFTER_AGENT hook and return response."""
+        # During a guarded skill-review turn, skip the entire after-agent
+        # side-effect pipeline (hooks, auto-memory, auto-learning, nudge,
+        # skill-review). The review turn is internal and must not re-fire
+        # these effects or recurse into another review.
+        if getattr(self, "_in_skill_review", False):
+            return response
         from ..hooks import HookEvent, AfterAgentInput
         after_agent_input = AfterAgentInput(
             session_id=getattr(self, '_session_id', 'default'),
@@ -719,12 +725,23 @@ class ToolExecutionMixin:
             if run_review is not None:
                 run_review(prompt, response, tools_used)
         except Exception as e:
-            logger.warning("Skill self-improvement review failed: %s", e, exc_info=True)
+            logger.warning(
+                "Skill self-improvement review failed for agent=%s session_id=%s; "
+                "set self_improve=False to disable this best-effort pass. error=%s",
+                getattr(self, "name", None),
+                getattr(self, "_session_id", None),
+                e,
+                exc_info=True,
+            )
 
         return response
 
     async def _atrigger_after_agent_hook(self, prompt, response, start_time, tools_used=None):
         """Async version: Trigger AFTER_AGENT hook and return response."""
+        # During a guarded skill-review turn, skip the entire after-agent
+        # side-effect pipeline (see sync variant for rationale).
+        if getattr(self, "_in_skill_review", False):
+            return response
         from ..hooks import HookEvent, AfterAgentInput
         after_agent_input = AfterAgentInput(
             session_id=getattr(self, '_session_id', 'default'),
@@ -763,7 +780,14 @@ class ToolExecutionMixin:
             if arun_review is not None:
                 await arun_review(prompt, response, tools_used)
         except Exception as e:
-            logger.warning("Skill self-improvement review failed: %s", e, exc_info=True)
+            logger.warning(
+                "Skill self-improvement review failed for agent=%s session_id=%s; "
+                "set self_improve=False to disable this best-effort pass. error=%s",
+                getattr(self, "name", None),
+                getattr(self, "_session_id", None),
+                e,
+                exc_info=True,
+            )
 
         return response
 

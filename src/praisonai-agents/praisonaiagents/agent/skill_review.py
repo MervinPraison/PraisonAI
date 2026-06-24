@@ -43,6 +43,71 @@ class SkillReviewMixin:
             logger.debug("Could not build skill review tool: %s", e, exc_info=True)
             return []
 
+    def _skill_review_log_context(self):
+        """Return (agent_name, session_id) for swallowed-failure warnings."""
+        return (
+            getattr(self, "name", None),
+            getattr(self, "_session_id", None),
+        )
+
+    def _prepare_skill_review(self, prompt, response, tools_used=None):
+        """Gate + build the review turn. Returns (review_prompt, review_tools) or None.
+
+        Shared by the sync and async paths so they stay in lock-step. Applies
+        the opt-in switch, the re-entrancy guard, the policy decision, and the
+        restricted-toolset build.
+        """
+        # Opt-in only.
+        if not getattr(self, "_self_improve", False):
+            return None
+        # Re-entrancy guard: never review a review.
+        if getattr(self, "_in_skill_review", False):
+            return None
+
+        trajectory = {
+            "prompt": prompt if isinstance(prompt, str) else str(prompt),
+            "response": response or "",
+            "tools_used": list(tools_used or []),
+        }
+
+        try:
+            policy = self._skill_review_policy()
+            if not policy.should_review(trajectory):
+                return None
+            review_prompt = policy.review_prompt(trajectory)
+        except Exception as e:
+            name, session_id = self._skill_review_log_context()
+            logger.warning(
+                "Skill review policy failed for agent=%s session_id=%s: %s",
+                name, session_id, e, exc_info=True,
+            )
+            return None
+
+        review_tools = self._build_skill_review_tool()
+        if not review_tools:
+            logger.debug("Skill review skipped: skill_manage tool unavailable")
+            return None
+
+        return review_prompt, review_tools
+
+    def _snapshot_chat_history_len(self):
+        """Return the current chat_history length, or None if unavailable."""
+        history = getattr(self, "chat_history", None)
+        return len(history) if isinstance(history, list) else None
+
+    def _restore_chat_history(self, snapshot_len):
+        """Trim chat_history back to ``snapshot_len`` so the review turn is isolated.
+
+        The review turn is internal: any user/assistant messages it appended to
+        the shared, persistent chat_history must not leak into subsequent turns
+        of a reused agent (chatbot, REPL, agentic loop).
+        """
+        if snapshot_len is None:
+            return
+        history = getattr(self, "chat_history", None)
+        if isinstance(history, list) and len(history) > snapshot_len:
+            del history[snapshot_len:]
+
     def _run_skill_review(self, prompt, response, tools_used=None):
         """Run the guarded skill-review pass.
 
@@ -51,77 +116,47 @@ class SkillReviewMixin:
             response: The final response produced for the task.
             tools_used: Names of tools used during the task (if known).
         """
-        # Opt-in only.
-        if not getattr(self, "_self_improve", False):
+        prepared = self._prepare_skill_review(prompt, response, tools_used)
+        if prepared is None:
             return
-        # Re-entrancy guard: never review a review.
-        if getattr(self, "_in_skill_review", False):
-            return
-
-        trajectory = {
-            "prompt": prompt if isinstance(prompt, str) else str(prompt),
-            "response": response or "",
-            "tools_used": list(tools_used or []),
-        }
-
-        try:
-            policy = self._skill_review_policy()
-            if not policy.should_review(trajectory):
-                return
-            review_prompt = policy.review_prompt(trajectory)
-        except Exception as e:
-            logger.warning("Skill review policy failed: %s", e, exc_info=True)
-            return
-
-        review_tools = self._build_skill_review_tool()
-        if not review_tools:
-            logger.debug("Skill review skipped: skill_manage tool unavailable")
-            return
+        review_prompt, review_tools = prepared
 
         self._in_skill_review = True
+        history_len = self._snapshot_chat_history_len()
         try:
             if getattr(self, "verbose", False):
                 logger.info("Agent %s running guarded skill-review pass", self.name)
             # Restricted turn: only skill_manage is exposed via the tools= arg.
             self.chat(review_prompt, tools=review_tools)
         except Exception as e:
-            logger.warning("Skill review pass failed: %s", e, exc_info=True)
+            name, session_id = self._skill_review_log_context()
+            logger.warning(
+                "Skill review pass failed for agent=%s session_id=%s: %s",
+                name, session_id, e, exc_info=True,
+            )
         finally:
+            self._restore_chat_history(history_len)
             self._in_skill_review = False
 
     async def _arun_skill_review(self, prompt, response, tools_used=None):
         """Async variant of :meth:`_run_skill_review`."""
-        if not getattr(self, "_self_improve", False):
+        prepared = self._prepare_skill_review(prompt, response, tools_used)
+        if prepared is None:
             return
-        if getattr(self, "_in_skill_review", False):
-            return
-
-        trajectory = {
-            "prompt": prompt if isinstance(prompt, str) else str(prompt),
-            "response": response or "",
-            "tools_used": list(tools_used or []),
-        }
-
-        try:
-            policy = self._skill_review_policy()
-            if not policy.should_review(trajectory):
-                return
-            review_prompt = policy.review_prompt(trajectory)
-        except Exception as e:
-            logger.warning("Skill review policy failed: %s", e, exc_info=True)
-            return
-
-        review_tools = self._build_skill_review_tool()
-        if not review_tools:
-            logger.debug("Skill review skipped: skill_manage tool unavailable")
-            return
+        review_prompt, review_tools = prepared
 
         self._in_skill_review = True
+        history_len = self._snapshot_chat_history_len()
         try:
             if getattr(self, "verbose", False):
                 logger.info("Agent %s running guarded skill-review pass", self.name)
             await self.achat(review_prompt, tools=review_tools)
         except Exception as e:
-            logger.warning("Skill review pass failed: %s", e, exc_info=True)
+            name, session_id = self._skill_review_log_context()
+            logger.warning(
+                "Skill review pass failed for agent=%s session_id=%s: %s",
+                name, session_id, e, exc_info=True,
+            )
         finally:
+            self._restore_chat_history(history_len)
             self._in_skill_review = False
