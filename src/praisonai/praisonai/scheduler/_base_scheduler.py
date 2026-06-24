@@ -6,7 +6,7 @@ import os
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, Type
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +72,135 @@ def _compute_run_cost(result: Any) -> Tuple[float, int, int, str]:
         )
         return 0.0, in_tok, out_tok, model
     return cost, in_tok, out_tok, model
+
+
+def build_from_yaml(
+    scheduler_cls: Type,
+    yaml_path: str = "agents.yaml",
+    interval_override: Optional[str] = None,
+    max_retries_override: Optional[int] = None,
+    timeout_override: Optional[int] = None,
+    max_cost_override: Optional[float] = None,
+    on_success: Optional[Callable] = None,
+    on_failure: Optional[Callable] = None,
+):
+    """Construct a scheduler from an agents.yaml file.
+
+    Shared by both the sync ``AgentScheduler`` and async ``AsyncAgentScheduler``;
+    the only difference between the two is ``scheduler_cls``. The agent created
+    here is framework-agnostic, so no executor-agent wrapper parameter is needed.
+    """
+    from .yaml_loader import load_agent_yaml_with_schedule, create_agent_from_config
+
+    # Load configuration from YAML
+    agent_config, schedule_config = load_agent_yaml_with_schedule(yaml_path)
+
+    # Create agent from config
+    agent = create_agent_from_config(agent_config)
+
+    # Get task
+    task = agent_config.get('task', '')
+    if not task:
+        raise ValueError("No task specified in YAML file")
+
+    # Apply overrides to schedule config
+    if interval_override:
+        schedule_config['interval'] = interval_override
+    if max_retries_override is not None:
+        schedule_config['max_retries'] = max_retries_override
+    if timeout_override is not None:
+        schedule_config['timeout'] = timeout_override
+    if max_cost_override is not None:
+        schedule_config['max_cost'] = max_cost_override
+
+    # Create scheduler instance with timeout and cost limits
+    scheduler = scheduler_cls(
+        agent=agent,
+        task=task,
+        config=agent_config,
+        timeout=schedule_config.get('timeout'),
+        max_cost=schedule_config.get('max_cost'),
+        on_success=on_success,
+        on_failure=on_failure,
+    )
+
+    # Store schedule config for later use
+    scheduler._yaml_schedule_config = schedule_config
+
+    return scheduler
+
+
+def build_from_recipe(
+    scheduler_cls: Type,
+    agent_cls: Type,
+    recipe_name: str,
+    *,
+    input_data: Any = None,
+    config: Optional[Dict[str, Any]] = None,
+    interval_override: Optional[str] = None,
+    max_retries_override: Optional[int] = None,
+    timeout_override: Optional[int] = None,
+    max_cost_override: Optional[float] = None,
+    on_success: Optional[Callable] = None,
+    on_failure: Optional[Callable] = None,
+):
+    """Construct a scheduler from a recipe name.
+
+    Shared by both sync and async schedulers. ``scheduler_cls`` selects the
+    scheduler type and ``agent_cls`` selects the executor-agent wrapper
+    (``RecipeExecutorAgent`` vs ``AsyncRecipeExecutorAgent``) — the only two
+    pieces that differed between the previously-duplicated copies.
+    """
+    from praisonai.recipe.bridge import resolve, get_recipe_task_description
+
+    # Resolve the recipe
+    resolved = resolve(
+        recipe_name,
+        input_data=input_data,
+        config=config or {},
+        options={'timeout_sec': timeout_override or 300},
+    )
+
+    # Get runtime config defaults from recipe
+    interval = interval_override or "hourly"
+    max_retries = max_retries_override if max_retries_override is not None else 3
+    timeout = timeout_override or 300
+    max_cost = max_cost_override if max_cost_override is not None else 1.00
+
+    runtime = resolved.runtime_config
+    if runtime and hasattr(runtime, 'schedule'):
+        sched_config = runtime.schedule
+        interval = interval_override or sched_config.interval
+        max_retries = max_retries_override if max_retries_override is not None else sched_config.max_retries
+        timeout = timeout_override or sched_config.timeout_sec
+        max_cost = max_cost_override if max_cost_override is not None else sched_config.max_cost_usd
+
+    # Create the executor-agent wrapper (sync or async variant)
+    agent = agent_cls(resolved)
+    task = get_recipe_task_description(resolved)
+
+    # Create scheduler instance
+    scheduler = scheduler_cls(
+        agent=agent,
+        task=task,
+        timeout=timeout,
+        max_cost=max_cost,
+        on_success=on_success,
+        on_failure=on_failure,
+    )
+
+    # Store recipe metadata and schedule config
+    scheduler._recipe_name = recipe_name
+    scheduler._recipe_resolved = resolved
+    scheduler._yaml_schedule_config = {
+        'interval': interval,
+        'max_retries': max_retries,
+        'run_immediately': False,
+        'timeout': timeout,
+        'max_cost': max_cost,
+    }
+
+    return scheduler
 
 
 class _BaseAgentScheduler:
