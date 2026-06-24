@@ -4,6 +4,8 @@ These tests use a lightweight fake MCP object so they do not require a live
 MCP server or the optional ``mcp`` package to be installed.
 """
 
+import asyncio
+
 import pytest
 
 from praisonaiagents import Agent
@@ -106,3 +108,45 @@ def test_add_remove_cycle_allows_reattach():
     # Should be able to attach again under the same name
     agent.add_mcp_server("notion", FakeMCP("notion"))
     assert "notion" in agent.list_mcp_servers()
+
+
+def test_close_shuts_down_runtime_mcp_servers():
+    agent = _make_agent()
+    mcp = FakeMCP("notion")
+    agent.add_mcp_server("notion", mcp)
+
+    agent.close()
+
+    assert mcp.shutdown_called is True
+    assert agent.list_mcp_servers() == []
+
+
+def test_aclose_shuts_down_runtime_mcp_servers():
+    agent = _make_agent()
+    mcp = FakeMCP("notion")
+    agent.add_mcp_server("notion", mcp)
+
+    asyncio.run(agent.aclose())
+
+    assert mcp.shutdown_called is True
+    assert agent.list_mcp_servers() == []
+
+
+def test_close_continues_after_one_shutdown_failure():
+    agent = _make_agent()
+    failing = FakeMCP("bad")
+
+    def _boom():
+        raise RuntimeError("shutdown failed")
+
+    failing.shutdown = _boom
+    good = FakeMCP("good")
+
+    agent.add_mcp_server("bad", failing)
+    agent.add_mcp_server("good", good)
+
+    # One failure must not abort the rest, and the registry is cleared.
+    agent.close()
+
+    assert good.shutdown_called is True
+    assert agent.list_mcp_servers() == []

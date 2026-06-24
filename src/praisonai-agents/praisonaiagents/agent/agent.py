@@ -4329,6 +4329,24 @@ Summary:"""
         """Return the names of MCP servers currently attached at runtime."""
         return list(getattr(self, "_mcp_servers", {}).keys())
 
+    def _shutdown_runtime_mcp_servers(self) -> None:
+        """Shut down all runtime-attached MCP servers, guarding each individually.
+
+        Used by both ``close()`` and ``aclose()`` so a single failing
+        ``shutdown()`` never aborts cleanup of the remaining servers. The
+        registry is always cleared afterwards.
+        """
+        servers = getattr(self, "_mcp_servers", None)
+        if not servers:
+            return
+        for name, server in list(servers.items()):
+            try:
+                if hasattr(server, "shutdown"):
+                    server.shutdown()
+            except Exception as e:
+                logger.warning(f"Runtime MCP server '{name}' cleanup failed: {e}")
+        servers.clear()
+
     def _model_supports_web_search(self) -> bool:
         """
         Check if the agent's model supports native web search via LiteLLM.
@@ -5749,15 +5767,8 @@ Answer:"""
         except Exception as e:
             logger.warning(f"MCP cleanup failed: {e}")
 
-        # Runtime-attached MCP servers cleanup
-        try:
-            if hasattr(self, '_mcp_servers') and self._mcp_servers:
-                for server in self._mcp_servers.values():
-                    if hasattr(server, 'shutdown'):
-                        server.shutdown()
-                self._mcp_servers.clear()
-        except Exception as e:
-            logger.warning(f"Runtime MCP server cleanup failed: {e}")
+        # Runtime-attached MCP servers cleanup (each guarded individually)
+        self._shutdown_runtime_mcp_servers()
 
         # Server registry cleanup
         try:
@@ -5807,7 +5818,10 @@ Answer:"""
                     elif hasattr(client, 'close'):
                         client.close()
                 self._mcp_clients.clear()
-            
+
+            # Runtime-attached MCP servers cleanup (each guarded individually)
+            self._shutdown_runtime_mcp_servers()
+
             # Clean up server registrations and tasks
             self._cleanup_server_registrations()
             
