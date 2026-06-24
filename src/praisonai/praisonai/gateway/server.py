@@ -2776,8 +2776,23 @@ class WebSocketGateway:
             return []
         bindings: List[Any] = []
         for item in raw:
-            if isinstance(item, dict) and item.get("agent"):
+            if not isinstance(item, dict):
+                logger.warning("Ignoring non-mapping route binding: %r", item)
+                continue
+            if not item.get("agent"):
+                logger.warning(
+                    "Ignoring route binding without an 'agent' key: %r", item
+                )
+                continue
+            try:
                 bindings.append(RouteBinding.from_dict(item))
+            except (TypeError, ValueError) as exc:
+                logger.warning(
+                    "Ignoring invalid route binding %r: %s. "
+                    "Fix the binding shape or priority value and retry.",
+                    item,
+                    exc,
+                )
         return bindings
 
     async def start_channels(self, channels_cfg: Dict[str, Dict[str, Any]]) -> None:

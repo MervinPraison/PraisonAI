@@ -180,6 +180,32 @@ class TestBindingBasedRouting:
         assert gw._parse_bindings("nope") == []
         assert gw._parse_bindings([{"no_agent": "x"}]) == []
 
+    def test_parse_bindings_skips_malformed_priority(self):
+        gw = self._get_gateway()
+        # A bad priority must not abort parsing of the good binding.
+        bindings = gw._parse_bindings(
+            [
+                {"peer": "1", "agent": "vip", "priority": "high"},
+                {"peer": "2", "agent": "ops"},
+            ]
+        )
+        assert len(bindings) == 1
+        assert bindings[0].agent == "ops"
+
+    def test_numeric_role_binding_matches_stringified_roles(self):
+        gw = self._get_gateway()
+        ops = MockAgent("ops")
+        general = MockAgent("general")
+        gw._agents["ops"] = ops
+        gw._agents["general"] = general
+        gw._routing_rules["discord"] = {"default": "general"}
+        gw._routing_bindings["discord"] = gw._parse_bindings(
+            [{"role": 12345, "agent": "ops"}]
+        )
+        facts = gw._build_route_facts("group", roles=["12345"])
+        result = gw._resolve_agent_for_message("discord", "group", facts=facts)
+        assert result is ops
+
 
 class TestInjectRoutingHandler:
     """Test _inject_routing_handler injects on_message handler."""

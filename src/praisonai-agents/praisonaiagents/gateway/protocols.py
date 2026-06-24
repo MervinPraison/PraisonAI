@@ -1009,7 +1009,8 @@ class RouteBinding:
         if self.chat_type is not None and self.chat_type != facts.chat_type:
             return False
         if self.role is not None:
-            if self.role not in (facts.roles or []):
+            expected_role = str(self.role)
+            if expected_role not in [str(role) for role in (facts.roles or [])]:
                 return False
         return True
 

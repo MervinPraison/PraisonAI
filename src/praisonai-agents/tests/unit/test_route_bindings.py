@@ -46,6 +46,11 @@ class TestRouteBindingMatches:
         assert b.matches(RouteFacts(roles=["support", "vip"]))
         assert not b.matches(RouteFacts(roles=["general"]))
 
+    def test_role_match_is_string_coerced(self):
+        b = RouteBinding(agent="ops", role=12345)
+        assert b.matches(RouteFacts(roles=["12345"]))
+        assert not b.matches(RouteFacts(roles=["99999"]))
+
     def test_combined_conditions_require_all(self):
         b = RouteBinding(agent="x", peer="1", chat_type="dm")
         assert b.matches(RouteFacts(peer="1", chat_type="dm"))
