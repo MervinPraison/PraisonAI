@@ -104,7 +104,7 @@ def _parse_json_output(output: Any, step_name: str = "step") -> Any:
     logger.debug(f"Could not parse JSON from step '{step_name}' output")
     return output
 
-def _substitute_action_variables(action: str, all_variables: dict, previous_output: Any, input: str) -> str:
+def _substitute_action_variables(action: str, all_variables: dict, previous_output: Any, task_input: str) -> str:
     """
     Substitute templating placeholders in a prompt/action string.
 
@@ -125,7 +125,7 @@ def _substitute_action_variables(action: str, all_variables: dict, previous_outp
         else:
             # Auto-append context if not explicitly referenced
             action = f"{action}\n\nContext from previous step:\n{previous_output}"
-    return action.replace("{{input}}", input)
+    return action.replace("{{input}}", task_input)
 
 def _extract_from_schema_echo(data: dict) -> Any:
     """

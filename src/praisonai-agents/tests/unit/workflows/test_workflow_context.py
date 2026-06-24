@@ -336,5 +336,79 @@ class TestWorkflowHandoffCycleState:
         assert second["output"] == "ok"
 
 
+class TestSubstituteActionVariables:
+    """Test the _substitute_action_variables helper covering all branches."""
+
+    def test_substitutes_all_variables_keys(self):
+        from praisonaiagents.workflows.workflows import _substitute_action_variables
+
+        result = _substitute_action_variables(
+            "Hello {{name}} from {{place}}",
+            {"name": "Ada", "place": "London"},
+            previous_output=None,
+            task_input="",
+        )
+        assert result == "Hello Ada from London"
+
+    def test_substitutes_input_placeholder(self):
+        from praisonaiagents.workflows.workflows import _substitute_action_variables
+
+        result = _substitute_action_variables(
+            "Process {{input}}",
+            {},
+            previous_output=None,
+            task_input="the data",
+        )
+        assert result == "Process the data"
+
+    def test_explicit_previous_output_placeholder(self):
+        from praisonaiagents.workflows.workflows import _substitute_action_variables
+
+        result = _substitute_action_variables(
+            "Summarise: {{previous_output}}",
+            {},
+            previous_output="step one result",
+            task_input="",
+        )
+        assert result == "Summarise: step one result"
+        assert "Context from previous step:" not in result
+
+    def test_implicit_previous_output_append(self):
+        """When previous_output exists but {{previous_output}} is absent, append context."""
+        from praisonaiagents.workflows.workflows import _substitute_action_variables
+
+        result = _substitute_action_variables(
+            "Do the task",
+            {},
+            previous_output="prior result",
+            task_input="",
+        )
+        assert result == "Do the task\n\nContext from previous step:\nprior result"
+
+    def test_implicit_append_runs_before_input_substitution(self):
+        """The appended context block precedes the final {{input}} replacement."""
+        from praisonaiagents.workflows.workflows import _substitute_action_variables
+
+        result = _substitute_action_variables(
+            "Handle {{input}}",
+            {},
+            previous_output="prior",
+            task_input="X",
+        )
+        assert result == "Handle X\n\nContext from previous step:\nprior"
+
+    def test_no_previous_output_leaves_action_unchanged_aside_from_input(self):
+        from praisonaiagents.workflows.workflows import _substitute_action_variables
+
+        result = _substitute_action_variables(
+            "Just {{input}}",
+            {},
+            previous_output=None,
+            task_input="text",
+        )
+        assert result == "Just text"
+        assert "Context from previous step:" not in result
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
