@@ -16,56 +16,26 @@ from typing import Any, Dict, Optional
 def fix_array_schemas(schema: Any) -> Any:
     """
     Fix array schemas by adding missing 'items' attribute required by OpenAI.
-    
-    This ensures compatibility with OpenAI's function calling format which
-    requires array types to specify the type of items they contain.
-    
+
+    Thin wrapper around the single canonical ``fix_array_schemas`` helper in
+    ``praisonaiagents.llm.schema_utils``. Kept here for backward compatibility
+    with the MCP transports (``mcp_sse``, ``mcp_http_stream``, ``mcp_websocket``)
+    that import this symbol directly.
+
     Args:
         schema: The schema dictionary to fix
-        
+
     Returns:
         dict: The fixed schema with 'items' added to array types
-        
+
     Example:
         >>> schema = {"type": "array"}
         >>> fixed = fix_array_schemas(schema)
         >>> fixed
         {'type': 'array', 'items': {'type': 'string'}}
     """
-    if not isinstance(schema, dict):
-        return schema
-        
-    # Create a copy to avoid modifying the original
-    fixed_schema = schema.copy()
-    
-    # Fix array types at the current level
-    if fixed_schema.get("type") == "array" and "items" not in fixed_schema:
-        # Add a default items schema for arrays without it
-        fixed_schema["items"] = {"type": "string"}
-        
-    # Recursively fix nested schemas
-    if "properties" in fixed_schema:
-        fixed_properties = {}
-        for prop_name, prop_schema in fixed_schema["properties"].items():
-            fixed_properties[prop_name] = fix_array_schemas(prop_schema)
-        fixed_schema["properties"] = fixed_properties
-        
-    # Fix items schema if it exists
-    if "items" in fixed_schema:
-        fixed_schema["items"] = fix_array_schemas(fixed_schema["items"])
-        
-    # Fix additionalProperties if it's a schema
-    if isinstance(fixed_schema.get("additionalProperties"), dict):
-        fixed_schema["additionalProperties"] = fix_array_schemas(
-            fixed_schema["additionalProperties"]
-        )
-    
-    # Fix anyOf/oneOf/allOf schemas
-    for key in ("anyOf", "oneOf", "allOf"):
-        if key in fixed_schema and isinstance(fixed_schema[key], list):
-            fixed_schema[key] = [fix_array_schemas(s) for s in fixed_schema[key]]
-        
-    return fixed_schema
+    from ..llm.schema_utils import fix_array_schemas as _fix_array_schemas
+    return _fix_array_schemas(schema)
 
 
 class ThreadLocalEventLoop:

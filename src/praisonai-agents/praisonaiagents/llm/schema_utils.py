@@ -12,8 +12,11 @@ def fix_array_schemas(schema: Dict[str, Any]) -> Dict[str, Any]:
     """
     Recursively fix array schemas by adding missing 'items' attribute.
 
-    This ensures compatibility with OpenAI's function calling format which
-    requires array types to specify the type of items they contain.
+    This is the single canonical implementation shared by the LLM, OpenAI client
+    and MCP code paths. It ensures compatibility with OpenAI's function calling
+    format which requires array types to specify the type of items they contain,
+    and normalises nested ``properties``, ``items``, ``additionalProperties`` and
+    ``anyOf``/``oneOf``/``allOf`` schema constructs.
 
     Args:
         schema: The schema dictionary to fix
@@ -45,5 +48,16 @@ def fix_array_schemas(schema: Dict[str, Any]) -> Dict[str, Any]:
     # Fix items schema if it exists
     if "items" in fixed_schema and isinstance(fixed_schema["items"], dict):
         fixed_schema["items"] = fix_array_schemas(fixed_schema["items"])
+
+    # Fix additionalProperties if it's a schema
+    if isinstance(fixed_schema.get("additionalProperties"), dict):
+        fixed_schema["additionalProperties"] = fix_array_schemas(
+            fixed_schema["additionalProperties"]
+        )
+
+    # Fix anyOf/oneOf/allOf schemas
+    for key in ("anyOf", "oneOf", "allOf"):
+        if key in fixed_schema and isinstance(fixed_schema[key], list):
+            fixed_schema[key] = [fix_array_schemas(s) for s in fixed_schema[key]]
 
     return fixed_schema
