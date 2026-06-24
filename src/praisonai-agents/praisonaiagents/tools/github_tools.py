@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 @tool
 def github_create_branch(branch_name: str) -> str:
     """Create and checkout a new git branch.
+
     
     Args:
         branch_name: The name of the branch to create and checkout.
@@ -14,7 +15,16 @@ def github_create_branch(branch_name: str) -> str:
     try:
         # Check if we are in a git repository
         subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], check=True, capture_output=True)
+        # Validate branch name to prevent misinterpretation as git options or invalid refs
+        try:
+            subprocess.run(
+                ["git", "check-ref-format", "--branch", branch_name],
+                check=True, capture_output=True, text=True
+            )
+        except subprocess.CalledProcessError as e:
+            return f"Error: invalid branch name '{branch_name}': {e.stderr.strip() if e.stderr else 'branch name is not a valid git ref'}"
         subprocess.run(["git", "checkout", "-B", branch_name], check=True, capture_output=True, text=True)
+        logger.debug(f"Branch '{branch_name}' checked out successfully.")
         logger.debug(f"Successfully checked out branch '{branch_name}'")
         return f"Successfully created and checked out branch '{branch_name}'"
     except subprocess.CalledProcessError as e:
