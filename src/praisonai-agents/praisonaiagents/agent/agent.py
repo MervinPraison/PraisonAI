@@ -4224,6 +4224,111 @@ Summary:"""
                 
         return filtered_tools
     
+    def add_mcp_server(self, name: str, mcp: Any) -> Any:
+        """
+        Attach an MCP server to a live agent at runtime.
+
+        Connects the MCP server (discovering its tools), tracks it by name, and
+        appends it to ``self.tools`` so its tools become available on the next
+        turn of the same run — no agent rebuild required. New MCP tools flow
+        through the existing tool-execution and approval paths automatically.
+
+        Args:
+            name: Unique name for this MCP server (used by ``remove_mcp_server``).
+            mcp: An ``MCP`` instance (e.g. ``MCP("npx -y @notionhq/notion-mcp-server")``).
+
+        Returns:
+            The attached ``MCP`` instance.
+
+        Example:
+            ```python
+            from praisonaiagents.mcp import MCP
+            agent.add_mcp_server("notion", MCP("npx -y @notionhq/notion-mcp-server"))
+            # tools live on the next turn
+            ```
+        """
+        if not name:
+            raise ValueError("add_mcp_server requires a non-empty name")
+
+        if not hasattr(self, "_mcp_servers"):
+            self._mcp_servers = {}
+
+        if name in self._mcp_servers:
+            raise ValueError(
+                f"MCP server '{name}' is already attached. "
+                "Call remove_mcp_server() first to replace it."
+            )
+
+        # Ensure self.tools is a mutable list we can append to
+        if not isinstance(self.tools, list):
+            self.tools = list(self.tools) if self.tools else []
+
+        self._mcp_servers[name] = mcp
+        self.tools.append(mcp)
+        self.refresh_tools()
+        logging.debug(f"Attached MCP server '{name}' with runtime tools")
+        return mcp
+
+    def remove_mcp_server(self, name: str) -> bool:
+        """
+        Disconnect and deregister a previously attached MCP server.
+
+        Removes the server's tools from ``self.tools`` and shuts the connection
+        down cleanly (no leaked background loops). Tools disappear on the next
+        turn.
+
+        Args:
+            name: The name used in ``add_mcp_server``.
+
+        Returns:
+            True if a server was removed, False if no server by that name existed.
+        """
+        servers = getattr(self, "_mcp_servers", None)
+        if not servers or name not in servers:
+            return False
+
+        mcp = servers.pop(name)
+
+        if isinstance(self.tools, list):
+            self.tools = [t for t in self.tools if t is not mcp]
+
+        # Best-effort clean shutdown of the MCP connection
+        try:
+            if hasattr(mcp, "shutdown"):
+                mcp.shutdown()
+        except Exception as e:
+            logging.warning(f"MCP server '{name}' shutdown failed: {e}")
+
+        self.refresh_tools()
+        logging.debug(f"Removed MCP server '{name}'")
+        return True
+
+    def refresh_tools(self) -> List[Any]:
+        """
+        Re-derive the live toolset from ``self.tools``.
+
+        Per-turn tool assembly already reads from ``self.tools`` directly, so
+        tools added/removed via ``add_mcp_server``/``remove_mcp_server`` are
+        picked up automatically on the next turn. This method clears any cached
+        tool definitions so callers (or an MCP ``tools/list_changed`` event) can
+        force an immediate refresh, and returns the current toolset.
+
+        Returns:
+            The current list of tools/MCP instances on the agent.
+        """
+        # Invalidate any cached tool definitions if such a cache exists
+        for cache_attr in ("_cached_tool_definitions", "_tool_definitions_cache"):
+            if hasattr(self, cache_attr):
+                try:
+                    setattr(self, cache_attr, None)
+                except Exception:
+                    pass
+        return self.tools
+
+    def list_mcp_servers(self) -> List[str]:
+        """Return the names of MCP servers currently attached at runtime."""
+        return list(getattr(self, "_mcp_servers", {}).keys())
+
     def _model_supports_web_search(self) -> bool:
         """
         Check if the agent's model supports native web search via LiteLLM.
@@ -5643,6 +5748,16 @@ Answer:"""
                 self._mcp_clients.clear()
         except Exception as e:
             logger.warning(f"MCP cleanup failed: {e}")
+
+        # Runtime-attached MCP servers cleanup
+        try:
+            if hasattr(self, '_mcp_servers') and self._mcp_servers:
+                for server in self._mcp_servers.values():
+                    if hasattr(server, 'shutdown'):
+                        server.shutdown()
+                self._mcp_servers.clear()
+        except Exception as e:
+            logger.warning(f"Runtime MCP server cleanup failed: {e}")
 
         # Server registry cleanup
         try:
