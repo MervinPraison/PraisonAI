@@ -104,6 +104,29 @@ def _parse_json_output(output: Any, step_name: str = "step") -> Any:
     logger.debug(f"Could not parse JSON from step '{step_name}' output")
     return output
 
+def _substitute_action_variables(action: str, all_variables: dict, previous_output: Any, task_input: str) -> str:
+    """
+    Substitute templating placeholders in a prompt/action string.
+
+    Performs, in order:
+    - ``{{key}}`` substitution for each key/value in ``all_variables``
+    - ``{{previous_output}}`` in-place replacement when present, otherwise
+      appending a "Context from previous step" section (only if there is a
+      previous output)
+    - ``{{input}}`` substitution
+
+    Returns the rendered action string.
+    """
+    for key, value in all_variables.items():
+        action = action.replace(f"{{{{{key}}}}}", str(value))
+    if previous_output:
+        if "{{previous_output}}" in action:
+            action = action.replace("{{previous_output}}", str(previous_output))
+        else:
+            # Auto-append context if not explicitly referenced
+            action = f"{action}\n\nContext from previous step:\n{previous_output}"
+    return action.replace("{{input}}", task_input)
+
 def _extract_from_schema_echo(data: dict) -> Any:
     """
     Extract actual data when LLM echoes the JSON schema structure.
@@ -1209,15 +1232,7 @@ class AgentFlow:
                         
                         # Substitute variables in action
                         action = step.action or input
-                        for key, value in all_variables.items():
-                            action = action.replace(f"{{{{{key}}}}}", str(value))
-                        if previous_output:
-                            if "{{previous_output}}" in action:
-                                action = action.replace("{{previous_output}}", str(previous_output))
-                            else:
-                                # Auto-append context if not explicitly referenced
-                                action = f"{action}\n\nContext from previous step:\n{previous_output}"
-                        action = action.replace("{{input}}", input)
+                        action = _substitute_action_variables(action, all_variables, previous_output, input)
                         
                         # Add reasoning prompt if enabled
                         if self.reasoning:
@@ -1317,15 +1332,7 @@ class AgentFlow:
                         )
                         # Substitute variables in action
                         action = step.action
-                        for key, value in all_variables.items():
-                            action = action.replace(f"{{{{{key}}}}}", str(value))
-                        if previous_output:
-                            if "{{previous_output}}" in action:
-                                action = action.replace("{{previous_output}}", str(previous_output))
-                            else:
-                                # Auto-append context if not explicitly referenced
-                                action = f"{action}\n\nContext from previous step:\n{previous_output}"
-                        action = action.replace("{{input}}", input)
+                        action = _substitute_action_variables(action, all_variables, previous_output, input)
                         
                         # Add reasoning prompt if enabled
                         if self.reasoning:
@@ -2170,15 +2177,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 
                 action = normalized.action or input
                 # Substitute variables
-                for key, value in all_variables.items():
-                    action = action.replace(f"{{{{{key}}}}}", str(value))
-                if previous_output:
-                    if "{{previous_output}}" in action:
-                        action = action.replace("{{previous_output}}", str(previous_output))
-                    else:
-                        # Auto-append context if not explicitly referenced
-                        action = f"{action}\n\nContext from previous step:\n{previous_output}"
-                action = action.replace("{{input}}", input)
+                action = _substitute_action_variables(action, all_variables, previous_output, input)
                 
                 # Check if this is a specialized agent (AudioAgent, VideoAgent, ImageAgent, OCRAgent)
                 agent_class_name = normalized.agent.__class__.__name__
@@ -2213,14 +2212,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                     hooks=self.hooks,  # Propagate hooks/callbacks
                 )
                 action = normalized.action
-                for key, value in all_variables.items():
-                    action = action.replace(f"{{{{{key}}}}}", str(value))
-                if previous_output:
-                    if "{{previous_output}}" in action:
-                        action = action.replace("{{previous_output}}", str(previous_output))
-                    else:
-                        # Auto-append context if not explicitly referenced
-                        action = f"{action}\n\nContext from previous step:\n{previous_output}"
+                action = _substitute_action_variables(action, all_variables, previous_output, input)
                 
                 output = temp_agent.chat(action, stream=stream)
                 
