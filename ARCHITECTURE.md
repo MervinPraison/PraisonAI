@@ -50,7 +50,7 @@ Orchestration + Observability** core to unlock adoption and trust:
 
 ## 2. System Overview
 
-```
+```text
 User/SDK/CLI
   → Workflow Compiler (graph + policy + schemas)
     → Execution Orchestrator (state machine, retries, fallbacks)
@@ -73,31 +73,59 @@ User/SDK/CLI
 | Observability Bus | Streams structured events + metrics | `RunEvent` schema |
 | Replay Engine | Restarts from checkpoint with deterministic inputs | `ReplayRequest` |
 
-### Existing Architecture (Python SDK)
+### Existing Architecture (Python Core SDK)
 
-The Python SDK is the primary runtime and is organised as follows:
+The Python core SDK (`praisonaiagents`) is the primary runtime and lives at
+`src/praisonai-agents/praisonaiagents/`. Following the protocol-driven design,
+core protocols and base classes live here; heavy/optional implementations live
+in the `praisonai` wrapper. Key modules:
 
-- `src/praisonai/` — Core runtime and agent abstractions
-  - `agents/` — Agent types (chat, code, realtime, audio, vision, etc.)
-  - `llm/` — Model runtime with provider routing, rate limiting, failover
-  - `tools/` — Tool runtime with sandbox, approval, retry
-  - `memory/` — Memory runtime (in-memory, SQLite, MongoDB, Mem0 adapters)
-  - `knowledge/` — Knowledge management (indexing, retrieval, chunking)
-  - `workflow/` — Workflow engine (YAML/SDK-based orchestration)
-  - `telemetry/` — Observability, monitoring, token tracking
-  - `reliability/` — Error classification, circuit breaker, failover
-  - `skill/` — Plugin/skill system
-  - `loop_detection/` — Doom loop detection and prevention
-  - `mcp/` — MCP protocol support
-  - `a2a/`, `a2ui/` — Agent-to-agent and agent-to-UI protocols
+- `agent/` — Agent base class and mixins (chat, code, realtime, audio, vision,
+  handoff, loop detection, etc.)
+- `agents/` — Multi-agent orchestration (`agents.py`, autoagents, delegator)
+- `llm/` — Model runtime with provider routing, rate limiting, failover,
+  error classification (`error_classifier.py`, `failover.py`, `rate_limiter.py`)
+- `tools/` — Tool runtime with circuit breaker, approval, retry, health monitor
+- `memory/` — Memory runtime (in-memory, SQLite, Mem0/MongoDB adapters)
+- `knowledge/` — Knowledge management (indexing, retrieval, chunking, rerank)
+- `workflows/` — Workflow engine (YAML/SDK-based orchestration)
+- `telemetry/` — Observability, performance monitoring, token tracking
+- `escalation/` — Doom-loop detection, loop guard, escalation pipeline
+- `skills/` — Skill/capability system
+- `mcp/` — MCP protocol support
+- `checkpoints/`, `replay/`, `snapshot/` — Checkpointing and replay primitives
+- `bus/`, `trace/`, `streaming/` — Event bus, trace context, streaming events
+- `policy/`, `sandbox/`, `approval/`, `guardrails/` — Execution-boundary controls
+- `ui/a2a/`, `ui/a2ui/`, `ui/agui/` — Agent-to-agent and agent-to-UI protocols
 
 ### Multi-SDK Layout
 
-- **Python SDK** — Primary runtime (`src/praisonai/`)
-- **TypeScript SDK** — JS/TS runtime (`ts-sdk/`)
-- **Rust SDK** — High-performance Rust runtime (`rust-sdk/`)
-- **CLI** — Command-line interface (`cli/`)
-- **UI** — Web UI (`ui/`)
+All packages live under `src/`:
+
+- **Python core SDK** — Primary runtime, `praisonaiagents`
+  (`src/praisonai-agents/praisonaiagents/`)
+- **Python wrapper** — CLI, UI, heavy/optional implementations, `praisonai`
+  (`src/praisonai/praisonai/`), including `cli/`, `ui/`, `replay/`,
+  `sandbox/`, `observability/`, `gateway/`, `persistence/`
+- **TypeScript SDK** — JS/TS runtime (`src/praisonai-ts/`)
+- **Rust SDK** — High-performance Rust runtime (`src/praisonai-rust/`)
+- **Platform** — Multi-tenant platform services (`src/praisonai-platform/`)
+
+> **CLI** and **UI** are not top-level packages — they live inside the Python
+> wrapper at `src/praisonai/praisonai/cli/` and `src/praisonai/praisonai/ui/`.
+
+### Per-Package Architecture
+
+This document is the single source of truth for the **cross-cutting** system
+roadmap (reliability, orchestration, observability) which spans all SDKs.
+Package-specific details are maintained alongside each package:
+
+| Package | Path | Local reference |
+|---------|------|-----------------|
+| Python core SDK | `src/praisonai-agents/` | `AGENTS.md`, `README.md` |
+| Python wrapper | `src/praisonai/` | `praisonai/README.md` |
+| TypeScript SDK | `src/praisonai-ts/` | `AGENTS.md`, `PARITY.md` |
+| Rust SDK | `src/praisonai-rust/` | `AGENTS.md`, `PARITY.md` |
 
 ---
 
@@ -226,7 +254,7 @@ RunEvent {
 }
 ```
 
-### Checkpoint
+### Checkpoint (Target vNext Schema)
 
 ```text
 Checkpoint {
@@ -237,6 +265,14 @@ Checkpoint {
   artifact_refs: string[]
 }
 ```
+
+> **Note:** This is a *target* run-based schema. The current Python
+> implementation (`praisonaiagents.checkpoints.types.Checkpoint`) is
+> git-commit-based: `id` (commit hash), `short_id`, `message`, `timestamp`, and
+> change stats (`files_changed`, `insertions`, `deletions`). A migration/mapping
+> layer is required before this vNext schema becomes the runtime source of
+> truth — `id`/`short_id` map to `run_id`+`step_id`, and `files_changed` stats
+> map to `artifact_refs`/`state_hash`.
 
 ### Execution Sequence
 
@@ -297,6 +333,7 @@ flowchart TD
 ```python
 # Integration test pattern — always use unique, traceable IDs
 import uuid
+from praisonai import Agent
 
 def test_agent_workflow():
     tenant_id = f"test-{uuid.uuid4().hex[:8]}"
