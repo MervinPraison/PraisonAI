@@ -85,8 +85,8 @@ class SessionCompactionConfigSchema(BaseModel):
     and restarts. Disabled by default to preserve legacy behaviour.
     """
     enabled: bool = False
-    strategy: str = "summarize"  # truncate | sliding | summarize | smart | prune
-    max_messages: int = 100  # Compact once history exceeds this many messages
+    strategy: str = "summarize"  # truncate | sliding | summarize | smart | prune | llm_summarize
+    max_messages: int = 100  # Approx. compaction threshold (converted to a token budget; max_history remains a hard cap)
     max_tokens: Optional[int] = None  # Optional token-based budget (overrides messages)
     keep_recent: int = 10  # Number of most-recent messages kept verbatim
 

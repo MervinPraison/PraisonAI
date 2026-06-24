@@ -123,10 +123,15 @@ class BotSessionManager:
         # summarised (instead of hard-truncated) once history exceeds the
         # configured budget, so long-lived conversations retain context.
         # Default ``None`` preserves the legacy tail-slice truncation.
-        # Store config only and build a fresh compactor per ``_save_history``
-        # so per-conversation state never leaks across users (and there is no
-        # data race on the executor pool). Probe once for availability.
+        #
+        # We store only the *config* and build a fresh ``ContextCompactor``
+        # per ``_save_history`` call. The core compactor carries mutable
+        # per-conversation state (iterative summary, anti-thrashing streaks),
+        # so a single shared instance would leak context across users and
+        # race under concurrent saves on the executor thread pool.
         self._compaction_config = compaction
+        # Probe availability once so behaviour/tests can detect whether
+        # compaction is active without sharing the stateful instance.
         self._compaction_enabled = self._build_compactor(compaction) is not None
 
     @staticmethod
@@ -175,7 +180,10 @@ class BotSessionManager:
         # Message-count budgets are translated to a rough token budget so the
         # core token-based compactor triggers at the intended history length.
         # ~4 chars/token and an estimated ~80 tokens/message keeps this simple
-        # and avoids touching the core engine.
+        # and avoids touching the core engine. NOTE: this is only an estimate —
+        # actual compaction depth varies with message size. The caller keeps
+        # ``max_history`` as a hard upper bound so short-message bots never grow
+        # in-memory history unbounded before the token threshold is reached.
         if max_tokens is None:
             max_tokens = max(1, int(max_messages) * 80)
 
@@ -188,7 +196,6 @@ class BotSessionManager:
         except Exception as e:  # pragma: no cover — defensive
             logger.warning("Failed to build ContextCompactor: %s", e)
             return None
->>>>>>> b75e98f4 (fix: compact long-lived bot/gateway sessions instead of hard-truncating (fixes #2197))
 
     def _storage_key(self, user_id: str) -> str:
         """Resolve a raw platform user id to the in-memory/store key.
@@ -317,10 +324,13 @@ class BotSessionManager:
         recent verbatim tail) instead of being permanently discarded, so
         long-lived conversations retain context across restarts. Without a
         compactor, the legacy tail-slice truncation is applied.
+
+        A fresh ``ContextCompactor`` is built per call (not shared on the
+        instance) so per-conversation state never leaks across users and
+        concurrent saves on the executor pool don't race.
         """
-        # Build a fresh compactor per call so per-conversation state
-        # (iterative summaries, anti-thrashing counters) never leaks across
-        # users and there is no data race on the shared executor pool.
+        # Build a per-call compactor so its mutable per-conversation state
+        # (iterative summary, anti-thrashing streaks) stays isolated per user.
         compactor = (
             self._build_compactor(self._compaction_config)
             if self._compaction_enabled
@@ -331,20 +341,21 @@ class BotSessionManager:
                 if compactor.needs_compaction(history):
                     compacted, _result = compactor.compact(history)
                     history = compacted
-                # Hard cap: a message-count budget is only a rough token
-                # estimate, so short-message bots could otherwise grow history
-                # unbounded. Bound it at ``max_history * 4`` (headroom for the
-                # summary + recent tail) so it can never grow without limit.
-                if self._max_history > 0:
-                    hard_cap = self._max_history * 4
-                    if len(history) > hard_cap:
-                        history = history[-hard_cap:]
             except Exception as e:  # pragma: no cover — defensive
                 logger.warning(
                     "History compaction failed; falling back to truncation: %s", e
                 )
                 if self._max_history > 0 and len(history) > self._max_history:
                     history = history[-self._max_history:]
+            else:
+                # Hard cap safety valve: even when the token-based compactor
+                # hasn't triggered (e.g. short messages under-shoot the token
+                # estimate), never let history grow unbounded. Allow headroom
+                # so the cap doesn't fight compaction's recent-tail + summary.
+                if self._max_history > 0:
+                    hard_cap = self._max_history * 4
+                    if len(history) > hard_cap:
+                        history = history[-hard_cap:]
         elif self._max_history > 0 and len(history) > self._max_history:
             history = history[-self._max_history:]
 
