@@ -158,8 +158,8 @@ class ResolvedConfig:
             verbose=output_data.get("verbose", False),
             quiet=output_data.get("quiet", False),
             telemetry=data.get("telemetry", True),
-            mcp=data.get("mcp") or {},
-            permissions=data.get("permissions") or {},
+            mcp=mcp_data if isinstance(mcp_data := data.get("mcp"), dict) else {},
+            permissions=perm_data if isinstance(perm_data := data.get("permissions"), dict) else {},
             sources=data.get("sources", []),
             extra=extra,
         )

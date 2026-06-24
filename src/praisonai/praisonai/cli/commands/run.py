@@ -87,10 +87,11 @@ def _mcp_server_to_command(server: dict) -> Optional[tuple]:
     command = server.get("command")
     args = server.get("args") or []
 
+    import shlex
+
     if isinstance(command, list):
         parts = [str(p) for p in command]
     elif isinstance(command, str) and command:
-        import shlex
         parts = shlex.split(command)
     else:
         return None
@@ -100,12 +101,30 @@ def _mcp_server_to_command(server: dict) -> Optional[tuple]:
     if not parts:
         return None
 
-    command_str = " ".join(parts)
+    # Quote each token so values with spaces/metacharacters survive the
+    # downstream ``shlex.split`` in the MCP handler.
+    command_str = " ".join(shlex.quote(part) for part in parts)
 
     env = server.get("env") or {}
     env_str = None
     if isinstance(env, dict) and env:
-        env_str = ",".join(f"{k}={v}" for k, v in env.items())
+        # The downstream parser splits env on commas, so a comma inside a value
+        # would corrupt it. Skip such entries with a warning rather than
+        # silently producing wrong env vars.
+        safe_pairs = []
+        for k, v in env.items():
+            v_str = str(v)
+            if "," in v_str:
+                import warnings
+                warnings.warn(
+                    f"MCP env var '{k}' contains a comma and cannot be passed "
+                    "via the command-string CLI path; skipping it.",
+                    stacklevel=2,
+                )
+                continue
+            safe_pairs.append(f"{k}={v_str}")
+        if safe_pairs:
+            env_str = ",".join(safe_pairs)
 
     return command_str, env_str
 
@@ -120,14 +139,33 @@ def _resolve_mcp_from_config(config) -> Optional[tuple]:
         Tuple of (command_string, env_string) or None.
     """
     mcp = getattr(config, "mcp", None) or {}
+    if not isinstance(mcp, dict):
+        return None
     servers = mcp.get("servers") or {}
     if not isinstance(servers, dict):
         return None
-    for _name, server in servers.items():
+
+    selected = None
+    enabled_local = []
+    for name, server in servers.items():
         result = _mcp_server_to_command(server)
         if result:
-            return result
-    return None
+            enabled_local.append(name)
+            if selected is None:
+                selected = result
+
+    # The CLI command-string path supports a single server. Warn so a user who
+    # declared several enabled local servers knows only the first is wired.
+    if len(enabled_local) > 1:
+        import warnings
+        warnings.warn(
+            "Multiple enabled local MCP servers found in config "
+            f"({', '.join(enabled_local)}); only '{enabled_local[0]}' will be "
+            "used via the run command path.",
+            stacklevel=2,
+        )
+
+    return selected
 
 
 def _permissions_from_config(config) -> Optional[dict]:
@@ -156,7 +194,7 @@ def _permissions_from_config(config) -> Optional[dict]:
             if isinstance(rule, dict):
                 pattern = rule.get("pattern")
                 action = rule.get("action")
-                if pattern and action:
+                if pattern and action in ("allow", "deny", "ask"):
                     result[pattern] = action
 
     default = permissions.get("default")

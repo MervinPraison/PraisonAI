@@ -8,6 +8,7 @@ with CLI flags still overriding config.
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import yaml
 
@@ -140,19 +141,53 @@ class TestRunWiringConverters:
             is None
         )
 
+    def test_mcp_server_to_command_quotes_tokens(self):
+        from praisonai.cli.commands.run import _mcp_server_to_command
+
+        result = _mcp_server_to_command(
+            {"command": ["python", "/tmp/my server.py", "--label", "hello world"]}
+        )
+        command_str, _ = result
+        import shlex
+
+        assert shlex.split(command_str) == [
+            "python",
+            "/tmp/my server.py",
+            "--label",
+            "hello world",
+        ]
+
+    def test_mcp_server_to_command_skips_comma_env(self):
+        import warnings
+
+        from praisonai.cli.commands.run import _mcp_server_to_command
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            result = _mcp_server_to_command(
+                {
+                    "command": ["npx", "server"],
+                    "env": {"OK": "value", "BAD": "a,b"},
+                }
+            )
+        command_str, env_str = result
+        assert command_str == "npx server"
+        assert env_str == "OK=value"
+
     def test_permissions_from_config_rule_list(self):
         from praisonai.cli.commands.run import _permissions_from_config
 
-        class Cfg:
-            permissions = {
+        cfg = SimpleNamespace(
+            permissions={
                 "default": "ask",
                 "rules": [
                     {"pattern": "bash:git *", "action": "allow"},
                     {"pattern": "bash:rm *", "action": "deny"},
                 ],
             }
+        )
 
-        result = _permissions_from_config(Cfg())
+        result = _permissions_from_config(cfg)
         assert result["bash:git *"] == "allow"
         assert result["bash:rm *"] == "deny"
         assert result["*"] == "ask"
@@ -160,20 +195,37 @@ class TestRunWiringConverters:
     def test_permissions_from_config_flat_mapping(self):
         from praisonai.cli.commands.run import _permissions_from_config
 
-        class Cfg:
-            permissions = {"read:*": "allow", "bash:rm *": "deny"}
+        cfg = SimpleNamespace(permissions={"read:*": "allow", "bash:rm *": "deny"})
 
-        result = _permissions_from_config(Cfg())
+        result = _permissions_from_config(cfg)
         assert result["read:*"] == "allow"
         assert result["bash:rm *"] == "deny"
 
     def test_permissions_from_config_empty(self):
         from praisonai.cli.commands.run import _permissions_from_config
 
-        class Cfg:
-            permissions = {}
+        cfg = SimpleNamespace(permissions={})
 
-        assert _permissions_from_config(Cfg()) is None
+        assert _permissions_from_config(cfg) is None
+
+    def test_permissions_from_config_skips_invalid_action(self):
+        from praisonai.cli.commands.run import _permissions_from_config
+
+        cfg = SimpleNamespace(
+            permissions={
+                "rules": [
+                    {"pattern": "bash:git *", "action": "allow"},
+                    {"pattern": "bash:evil *", "action": "exfiltrate"},
+                ]
+            }
+        )
+        result = _permissions_from_config(cfg)
+        assert result == {"bash:git *": "allow"}
+
+    def test_resolve_mcp_from_config_handles_non_dict(self):
+        from praisonai.cli.commands.run import _resolve_mcp_from_config
+
+        assert _resolve_mcp_from_config(SimpleNamespace(mcp=True)) is None
 
 
 class TestApplyConfigDefaults:
@@ -214,7 +266,7 @@ class TestApplyConfigDefaults:
             },
         )
 
-        mcp, mcp_env, perms = self._resolve_in_dir(
+        mcp, _mcp_env, perms = self._resolve_in_dir(
             tmp_path,
             monkeypatch,
             lambda: _apply_config_defaults(None, None, None),
