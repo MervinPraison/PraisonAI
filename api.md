@@ -1117,6 +1117,8 @@ Methods:
 * <code title="cli">praisonai sandbox sandbox-callback <a href="./src/praisonai/praisonai/cli/commands/sandbox.py">--help</a></code>
 * <code title="cli">praisonai sandbox status <a href="./src/praisonai/praisonai/cli/commands/sandbox.py">--help</a></code>
 * <code title="cli">praisonai schedule add <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
+* <code title="cli">praisonai schedule blueprint <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
+* <code title="cli">praisonai schedule blueprint-list <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
 * <code title="cli">praisonai schedule delete <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
 * <code title="cli">praisonai schedule describe <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
 * <code title="cli">praisonai schedule list <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
@@ -1126,6 +1128,10 @@ Methods:
 * <code title="cli">praisonai schedule start <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
 * <code title="cli">praisonai schedule stats <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
 * <code title="cli">praisonai schedule stop <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
+* <code title="cli">praisonai schedule suggestion-accept <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
+* <code title="cli">praisonai schedule suggestion-dismiss <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
+* <code title="cli">praisonai schedule suggestion-propose <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
+* <code title="cli">praisonai schedule suggestions <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
 * <code title="cli">praisonai serve a2a <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai serve a2u <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
 * <code title="cli">praisonai serve acp <a href="./src/praisonai/praisonai/cli/commands/serve.py">--help</a></code>
