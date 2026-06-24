@@ -393,10 +393,18 @@ class ToolExecutionMixin:
                                     agent_id=self.name,
                                     is_retryable=True,
                                 )
-                            # For other error dicts, treat as non-retryable unless specified
-                            else:
-                                # Success path - return the result
+                            # For other error dicts: approval/permission denials are legitimate
+                            # non-retryable outcomes; everything else represents a tool failure
+                            # that should engage the outer retry/backoff loop.
+                            elif result.get("approval_denied") or result.get("permission_denied") or result.get("approval_error"):
                                 break
+                            else:
+                                raise ToolExecutionError(
+                                    result.get("error", f"Tool '{function_name}' failed"),
+                                    tool_name=function_name,
+                                    agent_id=self.name,
+                                    is_retryable=True,
+                                )
                         else:
                             # Success path - return the result
                             break
