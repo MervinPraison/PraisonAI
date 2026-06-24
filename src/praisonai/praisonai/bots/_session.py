@@ -79,6 +79,7 @@ class BotSessionManager:
         reset_policy: Optional[SessionResetPolicy] = None,
         channel_directory: Optional[Any] = None,
         inject_session_context: bool = True,
+        compaction: Optional[Any] = None,
     ) -> None:
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
         self._locks = LockMap()
@@ -118,6 +119,76 @@ class BotSessionManager:
         # storage_key: (HookRunner, agent_name). Lets any clear path emit
         # SESSION_END with the *correct* runner/agent — never another user's.
         self._session_hook_context: Dict[str, Any] = {}
+        # Optional history compaction. When configured, older turns are
+        # summarised (instead of hard-truncated) once history exceeds the
+        # configured budget, so long-lived conversations retain context.
+        # Default ``None`` preserves the legacy tail-slice truncation.
+        # Store config only and build a fresh compactor per ``_save_history``
+        # so per-conversation state never leaks across users (and there is no
+        # data race on the executor pool). Probe once for availability.
+        self._compaction_config = compaction
+        self._compaction_enabled = self._build_compactor(compaction) is not None
+
+    @staticmethod
+    def _build_compactor(compaction: Optional[Any]) -> Optional[Any]:
+        """Lazily construct a ``ContextCompactor`` from a compaction config.
+
+        Accepts a ``SessionCompactionConfigSchema`` (or any object/dict with
+        the same fields). Returns ``None`` when compaction is disabled or the
+        core compaction engine is unavailable, in which case the manager falls
+        back to the legacy tail-slice truncation.
+        """
+        if compaction is None:
+            return None
+
+        # Normalise to attribute access from either a pydantic model or dict.
+        def _get(name, default=None):
+            if isinstance(compaction, dict):
+                return compaction.get(name, default)
+            return getattr(compaction, name, default)
+
+        if not _get("enabled", False):
+            return None
+
+        strategy = _get("strategy", "summarize")
+        max_tokens = _get("max_tokens", None)
+        max_messages = _get("max_messages", 100)
+        keep_recent = _get("keep_recent", 10)
+
+        try:
+            from praisonaiagents.compaction import ContextCompactor, CompactionStrategy
+        except Exception as e:  # pragma: no cover — optional dependency
+            logger.warning(
+                "Compaction requested but praisonaiagents.compaction is unavailable: %s",
+                e,
+            )
+            return None
+
+        try:
+            strategy_enum = CompactionStrategy(strategy)
+        except ValueError:
+            logger.warning(
+                "Unknown compaction strategy %r; falling back to 'summarize'", strategy
+            )
+            strategy_enum = CompactionStrategy.SUMMARIZE
+
+        # Message-count budgets are translated to a rough token budget so the
+        # core token-based compactor triggers at the intended history length.
+        # ~4 chars/token and an estimated ~80 tokens/message keeps this simple
+        # and avoids touching the core engine.
+        if max_tokens is None:
+            max_tokens = max(1, int(max_messages) * 80)
+
+        try:
+            return ContextCompactor(
+                max_tokens=int(max_tokens),
+                strategy=strategy_enum,
+                preserve_recent=int(keep_recent),
+            )
+        except Exception as e:  # pragma: no cover — defensive
+            logger.warning("Failed to build ContextCompactor: %s", e)
+            return None
+>>>>>>> b75e98f4 (fix: compact long-lived bot/gateway sessions instead of hard-truncating (fixes #2197))
 
     def _storage_key(self, user_id: str) -> str:
         """Resolve a raw platform user id to the in-memory/store key.
@@ -240,8 +311,41 @@ class BotSessionManager:
     def _save_history(
         self, user_id: str, history: List[Dict[str, Any]]
     ) -> None:
-        """Save user history to store (if available) and in-memory cache."""
-        if self._max_history > 0 and len(history) > self._max_history:
+        """Save user history to store (if available) and in-memory cache.
+
+        When a compactor is configured, older turns are summarised (keeping a
+        recent verbatim tail) instead of being permanently discarded, so
+        long-lived conversations retain context across restarts. Without a
+        compactor, the legacy tail-slice truncation is applied.
+        """
+        # Build a fresh compactor per call so per-conversation state
+        # (iterative summaries, anti-thrashing counters) never leaks across
+        # users and there is no data race on the shared executor pool.
+        compactor = (
+            self._build_compactor(self._compaction_config)
+            if self._compaction_enabled
+            else None
+        )
+        if compactor is not None:
+            try:
+                if compactor.needs_compaction(history):
+                    compacted, _result = compactor.compact(history)
+                    history = compacted
+                # Hard cap: a message-count budget is only a rough token
+                # estimate, so short-message bots could otherwise grow history
+                # unbounded. Bound it at ``max_history * 4`` (headroom for the
+                # summary + recent tail) so it can never grow without limit.
+                if self._max_history > 0:
+                    hard_cap = self._max_history * 4
+                    if len(history) > hard_cap:
+                        history = history[-hard_cap:]
+            except Exception as e:  # pragma: no cover — defensive
+                logger.warning(
+                    "History compaction failed; falling back to truncation: %s", e
+                )
+                if self._max_history > 0 and len(history) > self._max_history:
+                    history = history[-self._max_history:]
+        elif self._max_history > 0 and len(history) > self._max_history:
             history = history[-self._max_history:]
 
         # Always update in-memory cache (keyed by storage key)
@@ -949,6 +1053,11 @@ def build_session_manager(config, platform: str, *, run_control=None) -> BotSess
     reset_policy = None
     if getattr(config, "session", None) and getattr(config.session, "reset", None):
         reset_policy = SessionResetPolicy.from_dict(config.session.reset.model_dump())
+
+    # Extract optional history compaction config (disabled unless configured)
+    compaction = None
+    if getattr(config, "session", None) and getattr(config.session, "compaction", None):
+        compaction = config.session.compaction
     
     # Support backward compatibility with max_history at channel level
     max_history = 100
@@ -963,4 +1072,5 @@ def build_session_manager(config, platform: str, *, run_control=None) -> BotSess
         platform=platform,
         reset_policy=reset_policy,
         run_control=run_control,
+        compaction=compaction,
     )

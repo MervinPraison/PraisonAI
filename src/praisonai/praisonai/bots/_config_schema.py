@@ -76,10 +76,50 @@ class SessionResetConfigSchema(BaseModel):
         return self
 
 
+class SessionCompactionConfigSchema(BaseModel):
+    """Schema for session history compaction configuration.
+
+    When enabled, older turns in a long-lived bot/gateway session are
+    summarised (rather than hard-truncated) once the history exceeds the
+    configured budget, so context survives across weeks-long conversations
+    and restarts. Disabled by default to preserve legacy behaviour.
+    """
+    enabled: bool = False
+    strategy: str = "summarize"  # truncate | sliding | summarize | smart | prune
+    max_messages: int = 100  # Compact once history exceeds this many messages
+    max_tokens: Optional[int] = None  # Optional token-based budget (overrides messages)
+    keep_recent: int = 10  # Number of most-recent messages kept verbatim
+
+    @field_validator("strategy")
+    @classmethod
+    def validate_strategy(cls, v: str) -> str:
+        allowed = {"truncate", "sliding", "summarize", "smart", "prune", "llm_summarize"}
+        if v not in allowed:
+            raise ValueError(
+                f"Invalid compaction strategy '{v}'. Must be one of: {', '.join(sorted(allowed))}"
+            )
+        return v
+
+    @field_validator("max_messages")
+    @classmethod
+    def validate_max_messages(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("max_messages must be at least 1")
+        return v
+
+    @field_validator("keep_recent")
+    @classmethod
+    def validate_keep_recent(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("keep_recent must be non-negative")
+        return v
+
+
 class SessionConfigSchema(BaseModel):
     """Schema for session configuration."""
     max_history: int = 100
     reset: Optional[SessionResetConfigSchema] = None
+    compaction: Optional[SessionCompactionConfigSchema] = None
 
 
 class StreamingConfigSchema(BaseModel):
