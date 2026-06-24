@@ -15,7 +15,7 @@ on:
   pull_request_review:
     types: [submitted]
   pull_request:
-    types: [opened]
+    types: [opened, synchronize]
 
 env:
   MAX_POLL_ATTEMPTS: 20
@@ -143,9 +143,12 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo
             });
-            const alreadyPosted = comments.data.some(c =>
-              c.body.includes('@claude') && triggerLogins.includes(c.user.login)
-            );
+            const alreadyPosted = comments.data.some(c => {
+              const body = (c.body || '').toLowerCase();
+              if (!body.includes('@claude') || !triggerLogins.includes(c.user.login)) return false;
+              if (body.includes('merge conflict')) return false;
+              return body.includes('final architecture reviewer') || body.includes('lead engineer');
+            });
             core.setOutput('already_triggered', alreadyPosted ? 'true' : 'false');
             core.setOutput('comments_count', comments.data.length.toString());
             
@@ -295,9 +298,12 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo
             });
-            const alreadyPosted = comments.data.some(c =>
-              c.body.includes('@claude') && triggerLogins.includes(c.user.login)
-            );
+            const alreadyPosted = comments.data.some(c => {
+              const body = (c.body || '').toLowerCase();
+              if (!body.includes('@claude') || !triggerLogins.includes(c.user.login)) return false;
+              if (body.includes('merge conflict')) return false;
+              return body.includes('final architecture reviewer') || body.includes('lead engineer');
+            });
             core.setOutput('already_triggered', alreadyPosted ? 'true' : 'false');
 
       - name: Trigger Claude final review
@@ -399,9 +405,12 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo
             });
-            const alreadyPosted = comments.data.some(c =>
-              c.body.includes('@claude') && triggerLogins.includes(c.user.login)
-            );
+            const alreadyPosted = comments.data.some(c => {
+              const body = (c.body || '').toLowerCase();
+              if (!body.includes('@claude') || !triggerLogins.includes(c.user.login)) return false;
+              if (body.includes('merge conflict')) return false;
+              return body.includes('final architecture reviewer') || body.includes('lead engineer');
+            });
             core.setOutput('already_triggered', alreadyPosted ? 'true' : 'false');
 
       - name: Trigger Claude final review
@@ -453,9 +462,12 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo
             });
-            const alreadyPosted = comments.data.some(c =>
-              c.body.includes('@claude') && triggerLogins.includes(c.user.login)
-            );
+            const alreadyPosted = comments.data.some(c => {
+              const body = (c.body || '').toLowerCase();
+              if (!body.includes('@claude') || !triggerLogins.includes(c.user.login)) return false;
+              if (body.includes('merge conflict')) return false;
+              return body.includes('final architecture reviewer') || body.includes('lead engineer');
+            });
             core.setOutput('already_triggered', alreadyPosted ? 'true' : 'false');
 
       - name: Post Claude analysis request (Lead Engineer)
@@ -470,6 +482,62 @@ jobs:
               repo: context.repo.repo,
               body: '@claude You are the Lead Engineer. If the branch is under MervinPraison/PraisonAI (not a fork), you are able to make modifications to this branch and push directly. SCOPE: Focus ONLY on Python packages (praisonaiagents, praisonai). Do NOT modify praisonai-rust or praisonai-ts. Read ALL analysis and reviews above carefully (Gemini, CodeRabbit, Qodo, Copilot, etc).\n\n**Phase 1: Review per AGENTS.md**\n1. Protocol-driven: check heavy implementations vs core SDK\n2. Backward compatible: ensure zero feature regressions\n3. Performance: no hot-path regressions\n4. SDK value: review in depth whether the change genuinely adds value to the SDK — never add features for the sake of adding them. It must strengthen the SDK (simpler, more user-friendly, robust, world-class, secure). If it does not clearly add value, request changes or recommend rejecting/closing rather than merging scope creep\n\n**Phase 2: FIX Valid Issues**\n5. For any VALID bugs or architectural flaws found by Gemini, CodeRabbit, Qodo, Copilot, or any other reviewer: implement the fix\n6. Push all code fixes directly to THIS branch (do NOT create a new PR)\n7. Comment a summary of exact files modified and what you skipped\n\n**Phase 3: Final Verdict**\n8. If all issues are resolved, approve the PR / close the Issue\n9. If blocking issues remain, request changes / leave clear action items'
             });
+
+  # ================================================================
+  # Recovery: post FINAL @claude if merge-conflict comment blocked the chain
+  # (e.g. conflict fired before claude-after-copilot could post review prompt)
+  # ================================================================
+  claude-review-recovery:
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.action == 'synchronize'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Post missing FINAL Claude review after rebase
+        uses: actions/github-script@v7
+        env:
+          TRIGGER_LOGINS: ${{ env.CLAUDE_TRIGGER_LOGINS }}
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            const triggerLogins = JSON.parse(process.env.TRIGGER_LOGINS);
+            const pr = context.payload.pull_request.number;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              issue_number: pr, owner, repo, per_page: 100,
+            });
+
+            const hasFinalReview = comments.some(c => {
+              const body = (c.body || '').toLowerCase();
+              if (!body.includes('@claude') || !triggerLogins.includes(c.user.login)) return false;
+              if (body.includes('merge conflict')) return false;
+              return body.includes('final architecture reviewer') || body.includes('lead engineer');
+            });
+            if (hasFinalReview) {
+              core.info('FINAL Claude review already posted, skipping recovery');
+              return;
+            }
+
+            const hasReviewerActivity = comments.some(c => {
+              const login = c.user.login.toLowerCase();
+              return login.includes('coderabbit') || login.includes('copilot') ||
+                login.includes('greptile') || login.includes('qodo') || login.includes('gemini');
+            });
+            if (!hasReviewerActivity) {
+              core.info('No bot reviewer activity yet, skipping recovery');
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              issue_number: pr, owner, repo,
+              body: '@claude You are the FINAL architecture reviewer. If the branch is under MervinPraison/PraisonAI (not a fork), you are able to make modifications to this branch and push directly. SCOPE: Focus ONLY on Python packages (praisonaiagents, praisonai). Do NOT modify praisonai-rust or praisonai-ts. Read ALL comments above from Gemini, Qodo, CodeRabbit, and Copilot carefully before responding.\n\n**Phase 1: Review per AGENTS.md**\n1. Protocol-driven: check heavy implementations vs core SDK\n2. Backward compatible: ensure zero feature regressions\n3. Performance: no hot-path regressions\n4. SDK value: review in depth whether the change genuinely adds value to the SDK — never add features for the sake of adding them. It must strengthen the SDK (simpler, more user-friendly, robust, world-class, secure). If it does not clearly add value, request changes or recommend rejecting/closing rather than merging scope creep\n\n**Phase 2: FIX Valid Issues**\n5. For any VALID bugs or architectural flaws found by Gemini, CodeRabbit, Qodo, Copilot, or any other reviewer: implement the fix\n6. Push all code fixes directly to THIS branch (do NOT create a new PR)\n7. Comment a summary of exact files modified and what you skipped\n\n**Phase 3: Final Verdict**\n8. If all issues are resolved, approve the PR / close the Issue\n9. If blocking issues remain, request changes / leave clear action items'
+            });
+            core.info(`Posted recovery FINAL Claude review on PR #${pr}`);
 
   # ================================================================
   # BOT PRs: CodeRabbit/Qodo skip bot-authored PRs by default.

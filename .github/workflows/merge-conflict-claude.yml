@@ -81,6 +81,16 @@ jobs:
               };
             }
 
+            function hasFinalClaudeReviewTrigger(comments) {
+              return comments.some((c) => {
+                const body = (c.body || '').toLowerCase();
+                if (!AUTO_ACTORS.includes(c.user.login)) return false;
+                if (!body.includes('@claude')) return false;
+                if (body.includes('merge conflict')) return false;
+                return body.includes('final architecture reviewer') || body.includes('lead engineer');
+              });
+            }
+
             function hasRecentAutoComment(comments) {
               const cutoff = Date.now() - COOLDOWN_MS;
               return comments.some((c) => {
@@ -124,6 +134,10 @@ jobs:
               });
               if (!isMainPush && hasRecentAutoComment(comments)) {
                 return { skipped: true, reason: 'recent auto comment' };
+              }
+
+              if (!hasFinalClaudeReviewTrigger(comments)) {
+                return { skipped: true, reason: 'awaiting final claude review trigger' };
               }
 
               await github.rest.issues.createComment({
