@@ -267,9 +267,11 @@ def run_main(
         return
     
     # Emit start event
+    from ..output.event_bridge import SCHEMA_VERSION
     output.emit_start(
         message=f"Starting run: {target[:50]}..." if len(target) > 50 else f"Starting run: {target}",
         data={
+            "schema_version": SCHEMA_VERSION,
             "target": target,
             "model": model,
             "framework": framework,
@@ -565,8 +567,21 @@ def _run_prompt(
             agent = Agent(**agent_config)
             if session_id or auto_save_name:
                 apply_cli_session_continuity(agent, session_id or auto_save_name, auto_save=auto_save_name)
-            result = agent.start(prompt)
-            
+
+            # Bridge per-step agent events into the structured output stream
+            # so `--output stream-json` surfaces tool/text events, not just
+            # start/result. No-op in non-JSON modes.
+            from ..output.event_bridge import attach_bridge, detach_bridge
+            bridge = attach_bridge(agent, output)
+            if bridge is not None:
+                bridge.emit_agent_message(agent_config.get("name"))
+            try:
+                result = agent.start(prompt)
+            finally:
+                detach_bridge(agent, bridge)
+
+            if bridge is not None:
+                bridge.emit_run_result(result, ok=True)
             output.emit_result(
                 message="Prompt completed",
                 data={"result": str(result) if result else None}
@@ -639,7 +654,11 @@ def _run_prompt(
         if result and not output.is_json_mode:
             print(result)
     
+    except typer.Exit:
+        raise
     except Exception as e:
+        from ..output.event_bridge import StreamEventBridge
+        StreamEventBridge(output).emit_run_error(str(e))
         output.emit_error(message=str(e))
         output.print_error(str(e))
         raise typer.Exit(1)
@@ -821,8 +840,19 @@ def _run_custom_agent(
         
         # Create and run agent
         agent = Agent(**agent_config)
-        result = agent.start(prompt)
-        
+
+        # Bridge per-step agent events into the structured output stream.
+        from ..output.event_bridge import attach_bridge, detach_bridge
+        bridge = attach_bridge(agent, output)
+        if bridge is not None:
+            bridge.emit_agent_message(agent_config.get("name"))
+        try:
+            result = agent.start(prompt)
+        finally:
+            detach_bridge(agent, bridge)
+
+        if bridge is not None:
+            bridge.emit_run_result(result, ok=True)
         output.emit_result(
             message="Agent completed",
             data={"result": str(result) if result else None}
@@ -831,7 +861,11 @@ def _run_custom_agent(
         if result and not output.is_json_mode:
             print(result)
     
+    except typer.Exit:
+        raise
     except Exception as e:
+        from ..output.event_bridge import StreamEventBridge
+        StreamEventBridge(output).emit_run_error(str(e))
         output.emit_error(message=str(e))
         output.print_error(str(e))
         raise typer.Exit(1)
