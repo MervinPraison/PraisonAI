@@ -183,6 +183,18 @@ class TestBotOSHookResolution:
 # BotSessionManager session lifecycle (async context).
 # ---------------------------------------------------------------------------
 
+async def _drain_hook_tasks():
+    """Deterministically await all pending fire-and-forget hook tasks.
+
+    ``_emit`` schedules SESSION_* hooks via ``loop.create_task`` in async
+    context, so tests must drain those tasks rather than sleep on wall-clock.
+    """
+    current = asyncio.current_task()
+    pending = [t for t in asyncio.all_tasks() if t is not current and not t.done()]
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+
+
 class TestSessionLifecycleHooks:
     def test_session_start_once_and_end_on_reset(self):
         from praisonai.bots._session import BotSessionManager
@@ -197,7 +209,7 @@ class TestSessionLifecycleHooks:
             await mgr.chat(agent, "user1", "hello")
             await mgr.chat(agent, "user1", "again")  # should NOT refire start
             mgr.reset("user1")
-            await asyncio.sleep(0.05)  # let scheduled hook tasks run
+            await _drain_hook_tasks()
 
         asyncio.run(_run())
 
@@ -214,7 +226,64 @@ class TestSessionLifecycleHooks:
         async def _run():
             await mgr.chat(agent, "user1", "hi")
             await mgr.chat(agent, "user2", "hi")
-            await asyncio.sleep(0.05)
+            await _drain_hook_tasks()
 
         asyncio.run(_run())
+        assert fired.count("session_start") == 2
+
+    def test_session_end_uses_per_session_agent_context(self):
+        """reset(user1) must fire SESSION_END for user1's agent, never user2's."""
+        from praisonai.bots._session import BotSessionManager
+
+        runner, fired = _recording_runner(
+            HookEvent.SESSION_START, HookEvent.SESSION_END
+        )
+        ended = []
+        reg = runner.registry
+
+        def _record_end(ev):
+            ended.append(ev.to_dict().get("agent_name"))
+            return HookResult.allow()
+
+        reg.on(HookEvent.SESSION_END)(_record_end)
+
+        agent_a = _FakeAgent(runner)
+        agent_a.agent_name = "agent_a"
+        agent_b = _FakeAgent(runner)
+        agent_b.agent_name = "agent_b"
+        mgr = BotSessionManager(platform="telegram")
+
+        async def _run():
+            await mgr.chat(agent_a, "user1", "hi")
+            await mgr.chat(agent_b, "user2", "hi")  # overwrites no per-session ctx
+            mgr.reset("user1")
+            await _drain_hook_tasks()
+
+        asyncio.run(_run())
+        assert ended == ["agent_a"]
+
+    def test_auto_reset_reopens_session(self):
+        """Policy-driven auto-reset must fire SESSION_END and allow a new START."""
+        from praisonai.bots._session import BotSessionManager
+        from praisonai.bots._reset_policy import SessionResetPolicy
+
+        runner, fired = _recording_runner(
+            HookEvent.SESSION_START, HookEvent.SESSION_END
+        )
+        agent = _FakeAgent(runner)
+        mgr = BotSessionManager(
+            platform="telegram",
+            reset_policy=SessionResetPolicy(mode="none"),
+        )
+
+        async def _run():
+            await mgr.chat(agent, "user1", "hello")
+            # Simulate the policy forcing an auto-reset on the next load.
+            mgr._should_reset_session = lambda key: True
+            await mgr.chat(agent, "user1", "after expiry")
+            await _drain_hook_tasks()
+
+        asyncio.run(_run())
+
+        assert fired.count("session_end") == 1
         assert fired.count("session_start") == 2

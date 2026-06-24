@@ -114,9 +114,10 @@ class BotSessionManager:
         # Track storage keys we've already fired SESSION_START for, so the
         # hook fires exactly once per session lifetime (until reset).
         self._seen_sessions: set = set()
-        # Weak reference to the most recent agent — lets reset() resolve a
-        # HookRunner to fire SESSION_END without changing the public API.
-        self._last_agent_ref: Optional["weakref.ReferenceType[Agent]"] = None
+        # Per-session hook context captured when SESSION_START fires, keyed by
+        # storage_key: (HookRunner, agent_name). Lets any clear path emit
+        # SESSION_END with the *correct* runner/agent — never another user's.
+        self._session_hook_context: Dict[str, Any] = {}
 
     def _storage_key(self, user_id: str) -> str:
         """Resolve a raw platform user id to the in-memory/store key.
@@ -162,25 +163,51 @@ class BotSessionManager:
 
     def _maybe_fire_session_start(self, agent: "Agent", user_id: str) -> None:
         """Fire SESSION_START once per session lifetime (no-op without hooks)."""
-        # Remember the agent so reset() can fire SESSION_END later.
-        try:
-            self._last_agent_ref = weakref.ref(agent)
-        except TypeError:  # pragma: no cover — non-weakrefable agent
-            self._last_agent_ref = None
         storage_key = self._storage_key(user_id)
         if storage_key in self._seen_sessions:
             return
         self._seen_sessions.add(storage_key)
         try:
             from ._protocol_mixin import fire_session_start, _resolve_runner_from_agent
+            runner = _resolve_runner_from_agent(agent)
+            agent_name = getattr(agent, "agent_name", None) or getattr(agent, "name", "bot")
+            # Remember this session's runner+agent so any clear path can fire
+            # SESSION_END with the correct context (never another user's agent).
+            if runner is not None:
+                self._session_hook_context[storage_key] = (runner, agent_name)
             fire_session_start(
-                _resolve_runner_from_agent(agent),
+                runner,
                 session_id=storage_key,
                 platform=self._platform,
-                agent_name=getattr(agent, "agent_name", None) or getattr(agent, "name", "bot"),
+                agent_name=agent_name,
             )
         except Exception as e:
             logger.debug("SESSION_START emit error (non-fatal): %s", e)
+
+    def _fire_session_end(self, storage_key: str, reason: str = "clear") -> None:
+        """Emit SESSION_END for *storage_key* if a session was open, then forget it.
+
+        Idempotent and best-effort: a no-op when the session was never seen or
+        no hook runner was captured. Used by every session-clear path (explicit
+        reset, policy auto-reset, stale reaping, reset_all) so SESSION_START can
+        fire again for the next session lifetime.
+        """
+        if storage_key not in self._seen_sessions:
+            return
+        self._seen_sessions.discard(storage_key)
+        runner, agent_name = self._session_hook_context.pop(storage_key, (None, "bot"))
+        if runner is None:
+            return
+        try:
+            from ._protocol_mixin import fire_session_end
+            fire_session_end(
+                runner,
+                session_id=storage_key,
+                agent_name=agent_name,
+                reason=reason,
+            )
+        except Exception as e:
+            logger.debug("SESSION_END emit error (non-fatal): %s", e)
 
     def _load_history(self, user_id: str) -> List[Dict[str, Any]]:
         """Load user history from store (if available) or in-memory cache.
@@ -193,6 +220,9 @@ class BotSessionManager:
         if self._should_reset_session(storage_key):
             logger.info("Auto-resetting session for user %s based on policy", user_id)
             self._clear_session_data(storage_key, user_id)
+            # End the expiring session so the next message re-opens a fresh one
+            # (otherwise lifecycle hooks would go permanently silent for this user).
+            self._fire_session_end(storage_key, reason="policy")
             # Mark the reset time
             self._last_reset[storage_key] = time.monotonic()
             return []
@@ -655,6 +685,8 @@ class BotSessionManager:
             if (now - ts) > max_age_seconds
         ]
         for storage_key in stale:
+            # End the session so lifecycle hooks fire and can re-open later.
+            self._fire_session_end(storage_key, reason="stale")
             self._histories.pop(storage_key, None)
             self._last_active.pop(storage_key, None)
             self._locks.drop(storage_key)
@@ -745,21 +777,7 @@ class BotSessionManager:
 
         # Fire SESSION_END lifecycle hook (no-op when no hooks registered),
         # then forget the session so a subsequent message re-opens it.
-        if storage_key in self._seen_sessions:
-            self._seen_sessions.discard(storage_key)
-            agent = self._last_agent_ref() if self._last_agent_ref is not None else None
-            try:
-                from ._protocol_mixin import fire_session_end, _resolve_runner_from_agent
-                runner = _resolve_runner_from_agent(agent)
-                if runner is not None:
-                    fire_session_end(
-                        runner,
-                        session_id=storage_key,
-                        agent_name=getattr(agent, "agent_name", None) or getattr(agent, "name", "bot"),
-                        reason="clear",
-                    )
-            except Exception as e:
-                logger.debug("SESSION_END emit error (non-fatal): %s", e)
+        self._fire_session_end(storage_key, reason="clear")
 
         return existed
 
@@ -868,6 +886,10 @@ class BotSessionManager:
     def reset_all(self) -> int:
         """Clear all user sessions.  Returns the count cleared."""
         count = len(self._histories)
+
+        # End every open session so lifecycle hooks fire and can re-open later.
+        for storage_key in list(self._seen_sessions):
+            self._fire_session_end(storage_key, reason="clear_all")
 
         if self._store is not None:
             for storage_key in list(self._histories.keys()):

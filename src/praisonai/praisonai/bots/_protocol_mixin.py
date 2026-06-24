@@ -263,6 +263,23 @@ def _resolve_runner_from_agent(agent: Any) -> Any:
     return getattr(agent, '_hook_runner', None)
 
 
+# Strong references to in-flight fire-and-forget hook tasks. Without this the
+# event loop only holds a weak reference and the task may be garbage-collected
+# before it completes (see asyncio.create_task docs).
+_PENDING_HOOK_TASKS: Set[Any] = set()
+
+
+def _on_hook_task_done(task: Any) -> None:
+    """Drop the finished task and log any swallowed coroutine exception."""
+    _PENDING_HOOK_TASKS.discard(task)
+    try:
+        exc = task.exception()
+    except Exception:  # noqa: BLE001 — cancelled or loop teardown; nothing to log
+        return
+    if exc is not None:
+        logger.debug(f"hook task error (non-fatal): {exc}")
+
+
 def _emit(runner: Any, event: Any, input_data: Any) -> None:
     """Dispatch a hook event, working in both sync and async contexts.
 
@@ -282,10 +299,15 @@ def _emit(runner: Any, event: Any, input_data: Any) -> None:
 
     try:
         if loop is not None and loop.is_running():
-            loop.create_task(runner.execute(event, input_data))
+            # Fire-and-forget inside a running loop, but keep a strong
+            # reference until completion so the task is not GC'd mid-flight,
+            # and surface any coroutine exception via a done callback.
+            task = loop.create_task(runner.execute(event, input_data))
+            _PENDING_HOOK_TASKS.add(task)
+            task.add_done_callback(_on_hook_task_done)
         else:
             runner.execute_sync(event, input_data)
-    except Exception as e:  # pragma: no cover — defensive
+    except Exception as e:  # noqa: BLE001 — best-effort: hooks must never break the runtime
         logger.debug(f"hook emit error for {event} (non-fatal): {e}")
 
 
@@ -423,59 +445,3 @@ def fire_session_end(
         _emit(runner, HookEvent.SESSION_END, event_input)
     except Exception as e:
         logger.debug(f"SESSION_END hook error (non-fatal): {e}")
-
-
-def fire_before_agent(
-    runner: Any,
-    prompt: str,
-    session_id: str = "",
-    agent_name: str = "bot",
-) -> None:
-    """Fire BEFORE_AGENT hook around an inbound-message-triggered agent run."""
-    if runner is None:
-        return
-    try:
-        from praisonaiagents.hooks.types import HookEvent
-        from praisonaiagents.hooks.events import BeforeAgentInput
-
-        event_input = BeforeAgentInput(
-            session_id=session_id,
-            cwd=os.getcwd(),
-            event_name=HookEvent.BEFORE_AGENT,
-            timestamp=str(time.time()),
-            agent_name=agent_name,
-            prompt=prompt,
-        )
-        _emit(runner, HookEvent.BEFORE_AGENT, event_input)
-    except Exception as e:
-        logger.debug(f"BEFORE_AGENT hook error (non-fatal): {e}")
-
-
-def fire_after_agent(
-    runner: Any,
-    prompt: str,
-    response: str,
-    session_id: str = "",
-    agent_name: str = "bot",
-    execution_time_ms: float = 0.0,
-) -> None:
-    """Fire AFTER_AGENT hook after an inbound-message-triggered agent run."""
-    if runner is None:
-        return
-    try:
-        from praisonaiagents.hooks.types import HookEvent
-        from praisonaiagents.hooks.events import AfterAgentInput
-
-        event_input = AfterAgentInput(
-            session_id=session_id,
-            cwd=os.getcwd(),
-            event_name=HookEvent.AFTER_AGENT,
-            timestamp=str(time.time()),
-            agent_name=agent_name,
-            prompt=prompt,
-            response=response if isinstance(response, str) else str(response),
-            execution_time_ms=execution_time_ms,
-        )
-        _emit(runner, HookEvent.AFTER_AGENT, event_input)
-    except Exception as e:
-        logger.debug(f"AFTER_AGENT hook error (non-fatal): {e}")
