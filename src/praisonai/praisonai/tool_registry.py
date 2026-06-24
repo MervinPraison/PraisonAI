@@ -32,23 +32,17 @@ class ToolRegistry:
         logger.debug(f"Registered function tool: {name}")
         # Invalidate all resolver caches for this tool
         self._notify_invalidate(name)
-    
 
-    
     def get_function(self, name: str) -> Optional[Callable]:
         """Get a function tool by name."""
         with self._lock:
             return self._functions.get(name)
-    
 
-    
     def list_functions(self) -> List[str]:
         """List all registered function tool names."""
         with self._lock:
             return list(self._functions.keys())
-    
 
-    
     def get_functions_dict(self) -> Dict[str, Callable]:
         """Get a copy of all registered functions."""
         with self._lock:
@@ -112,9 +106,7 @@ class ToolRegistry:
         
         logger.debug(f"Registered {len(registered)} functions from module: {registered}")
         return registered
-    
 
-    
     def __len__(self) -> int:
         """Return total number of registered tools."""
         with self._lock:

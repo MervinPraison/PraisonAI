@@ -23,25 +23,12 @@ class TestToolRegistryBasic:
         registry = ToolRegistry()
         assert registry.get_function("missing") is None
 
-    def test_register_and_get_autogen_adapter(self):
-        registry = ToolRegistry()
-        adapter = lambda: None
-        registry.register_autogen_adapter("MyTool", adapter)
-        assert registry.get_autogen_adapter("MyTool") is adapter
-
     def test_list_functions(self):
         registry = ToolRegistry()
         registry.register_function("a", lambda: None)
         registry.register_function("b", lambda: None)
         names = registry.list_functions()
         assert sorted(names) == ["a", "b"]
-
-    def test_list_autogen_adapters(self):
-        registry = ToolRegistry()
-        registry.register_autogen_adapter("T1", lambda: None)
-        registry.register_autogen_adapter("T2", lambda: None)
-        names = registry.list_autogen_adapters()
-        assert sorted(names) == ["T1", "T2"]
 
     def test_get_functions_dict_returns_copy(self):
         registry = ToolRegistry()
@@ -56,7 +43,7 @@ class TestToolRegistryBasic:
     def test_clear(self):
         registry = ToolRegistry()
         registry.register_function("f", lambda: None)
-        registry.register_autogen_adapter("A", lambda: None)
+        registry.register_function("g", lambda: None)
         registry.clear()
         assert len(registry) == 0
 
@@ -65,7 +52,7 @@ class TestToolRegistryBasic:
         assert len(registry) == 0
         registry.register_function("f", lambda: None)
         assert len(registry) == 1
-        registry.register_autogen_adapter("A", lambda: None)
+        registry.register_function("g", lambda: None)
         assert len(registry) == 2
 
     def test_contains(self):
