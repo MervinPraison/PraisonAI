@@ -51,6 +51,8 @@ __all__ = [
     "SkillInvocationPolicyProtocol",
     "SkillMutatorProtocol",
     "SkillActivationProtocol",
+    "SkillReviewProtocol",
+    "DefaultSkillReviewPolicy",
     # Events
     "SkillDiscoveredEvent",
     "SkillActivatedEvent",
@@ -103,6 +105,10 @@ def __getattr__(name: str):
 
     if name in ("SkillSourceProtocol", "SkillInvocationPolicyProtocol", "SkillMutatorProtocol"):
         from .protocols import SkillSourceProtocol, SkillInvocationPolicyProtocol, SkillMutatorProtocol
+        return locals()[name]
+
+    if name in ("SkillReviewProtocol", "DefaultSkillReviewPolicy"):
+        from .protocols import SkillReviewProtocol, DefaultSkillReviewPolicy
         return locals()[name]
 
     if name == "SkillActivationProtocol":

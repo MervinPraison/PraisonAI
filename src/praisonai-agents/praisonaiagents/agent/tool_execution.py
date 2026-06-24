@@ -676,6 +676,12 @@ class ToolExecutionMixin:
 
     def _trigger_after_agent_hook(self, prompt, response, start_time, tools_used=None):
         """Trigger AFTER_AGENT hook and return response."""
+        # During a guarded skill-review turn, skip the entire after-agent
+        # side-effect pipeline (hooks, auto-memory, auto-learning, nudge,
+        # skill-review). The review turn is internal and must not re-fire
+        # these effects or recurse into another review.
+        if getattr(self, "_in_skill_review", False):
+            return response
         from ..hooks import HookEvent, AfterAgentInput
         after_agent_input = AfterAgentInput(
             session_id=getattr(self, '_session_id', 'default'),
@@ -711,10 +717,31 @@ class ToolExecutionMixin:
             # Log learning nudge failures for debugging
             logger.warning("Learning nudge generation failed: %s", e, exc_info=True)
 
+        # Autonomous skill self-improvement loop (opt-in via self_improve=True).
+        # Runs a guarded review pass restricted to skill_manage. No-op when
+        # disabled or already inside a review (re-entrancy guarded).
+        try:
+            run_review = getattr(self, "_run_skill_review", None)
+            if run_review is not None:
+                run_review(prompt, response, tools_used)
+        except Exception as e:
+            logger.warning(
+                "Skill self-improvement review failed for agent=%s session_id=%s; "
+                "set self_improve=False to disable this best-effort pass. error=%s",
+                getattr(self, "name", None),
+                getattr(self, "_session_id", None),
+                e,
+                exc_info=True,
+            )
+
         return response
 
     async def _atrigger_after_agent_hook(self, prompt, response, start_time, tools_used=None):
         """Async version: Trigger AFTER_AGENT hook and return response."""
+        # During a guarded skill-review turn, skip the entire after-agent
+        # side-effect pipeline (see sync variant for rationale).
+        if getattr(self, "_in_skill_review", False):
+            return response
         from ..hooks import HookEvent, AfterAgentInput
         after_agent_input = AfterAgentInput(
             session_id=getattr(self, '_session_id', 'default'),
@@ -746,6 +773,21 @@ class ToolExecutionMixin:
         except Exception as e:
             # Log learning nudge failures for debugging
             logger.warning("Learning nudge generation failed: %s", e, exc_info=True)
+
+        # Autonomous skill self-improvement loop (opt-in via self_improve=True).
+        try:
+            arun_review = getattr(self, "_arun_skill_review", None)
+            if arun_review is not None:
+                await arun_review(prompt, response, tools_used)
+        except Exception as e:
+            logger.warning(
+                "Skill self-improvement review failed for agent=%s session_id=%s; "
+                "set self_improve=False to disable this best-effort pass. error=%s",
+                getattr(self, "name", None),
+                getattr(self, "_session_id", None),
+                e,
+                exc_info=True,
+            )
 
         return response
 

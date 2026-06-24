@@ -24,6 +24,7 @@ from .async_safety import AsyncSafeState
 from .unified_execution_mixin import UnifiedExecutionMixin
 from .sandbox_mixin import SandboxMixin
 from .message_steering import SteeringMixin
+from .skill_review import SkillReviewMixin
 
 # Module-level logger for thread safety errors and debugging
 logger = get_logger(__name__)
@@ -207,6 +208,7 @@ if TYPE_CHECKING:
     from ..rag.models import RAGResult, ContextPack
     from ..eval.results import EvaluationLoopResult
     from ..tools.retry import RetryPolicy
+    from ..skills.protocols import SkillReviewProtocol
 
 # Import structured error from central errors module
 from ..errors import BudgetExceededError
@@ -214,7 +216,7 @@ from ..errors import BudgetExceededError
 # Import retry configuration
 from .retry_utils import RetryBackoffConfig
 
-class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin, AsyncMemoryMixin):
+class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin, AsyncMemoryMixin):
     # Class-level counter for generating unique display names for nameless agents
     _agent_counter = 0
     _agent_counter_lock = threading.Lock()
@@ -540,6 +542,7 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
         caching: Optional[Union[bool, str, Dict[str, Any], 'CachingConfig']] = None,
         hooks: Optional[Union[List[Any], Dict[str, Any], 'HooksConfig']] = None,
         skills: Optional[Union[List[str], str, Dict[str, Any], 'SkillsConfig']] = None,
+        self_improve: Optional[Union[bool, 'SkillReviewProtocol']] = False,  # Autonomous skill self-improvement loop (off by default)
         approval: Optional[Union[bool, str, Dict[str, Any], 'ApprovalConfig', 'ApprovalProtocol']] = None,
         tool_config: Optional[Union[bool, 'ToolConfig']] = None,  # Tool execution configuration (timeout, retry, parallel)
         learn: Optional[Union[bool, str, Dict[str, Any], 'LearnConfig']] = None,  # Continuous learning (peer to memory)
@@ -587,6 +590,14 @@ class Agent(SteeringMixin, SandboxMixin, UnifiedExecutionMixin, ToolExecutionMix
             reflection: Self-reflection. Accepts:
                 - bool: True enables with defaults
                 - ReflectionConfig: Custom configuration
+            self_improve: Autonomous skill self-improvement loop (off by default).
+                After each task, runs a guarded review pass restricted to the
+                ``skill_manage`` tool that asks the agent to capture a reusable
+                technique as a new/patched skill. Accepts:
+                - bool: True enables with the default review policy, False disables
+                - SkillReviewProtocol: Custom review policy
+                This is distinct from ``reflection`` (which is answer-quality
+                retry) — it captures durable capability across runs.
             guardrails: Output validation. Accepts:
                 - bool: True enables with defaults
                 - Callable: Validation function
@@ -2015,6 +2026,18 @@ Your Goal: {self.goal}
         self._skill_manager = None  # Lazy loaded
         self._skills_initialized = False
 
+        # Autonomous skill self-improvement loop (issue #2231). Off by default;
+        # when enabled, a guarded review pass restricted to skill_manage runs
+        # after each task. A SkillReviewProtocol instance customises the policy.
+        if self_improve is True or self_improve is False or self_improve is None:
+            self._self_improve = bool(self_improve)
+            self._self_improve_policy = None
+        else:
+            # Custom policy object implementing SkillReviewProtocol.
+            self._self_improve = True
+            self._self_improve_policy = self_improve
+        self._in_skill_review = False
+
         # Database persistence (lazy - no imports until used)
         self._db = db
         self._session_id = session_id
@@ -2182,6 +2205,12 @@ Your Goal: {self.goal}
             'skills': getattr(self, '_skills_config', None),
             'approval': getattr(self, '_approval_config', None),
             'learn': getattr(self, '_learn_config', None),
+            # Autonomous skill self-improvement: forward the custom policy when
+            # set, else the opt-in boolean, so clones keep the same behavior.
+            'self_improve': (
+                getattr(self, '_self_improve_policy', None)
+                or getattr(self, '_self_improve', False)
+            ),
             'tool_search': getattr(self, '_tool_search_config', None),
             # Tool configuration - use consolidated config when available  
             'tool_config': getattr(self, '_tool_config', None),
