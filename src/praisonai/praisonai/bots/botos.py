@@ -149,6 +149,21 @@ class BotOS:
     def get_bot(self, platform: str) -> Optional[Bot]:
         """Get a registered bot by platform name."""
         return self._bots.get(platform.lower())
+
+    def _get_hook_runner(self) -> Any:
+        """Resolve a HookRunner from the first registered bot's agent.
+
+        Returns None when no bot/agent exposes a hook runner — callers
+        treat None as a no-op so there is zero overhead without hooks.
+        """
+        from ._protocol_mixin import _resolve_runner_from_agent
+
+        for bot in self._bots.values():
+            agent = bot.get_agent() if hasattr(bot, "get_agent") else getattr(bot, "_agent", None)
+            runner = _resolve_runner_from_agent(agent)
+            if runner is not None:
+                return runner
+        return None
     
     @property
     def delivery_router(self) -> DeliveryRouter:
@@ -173,7 +188,14 @@ class BotOS:
 
         self._is_running = True
         logger.info(f"BotOS starting {len(self._bots)} bot(s): {', '.join(self._bots.keys())}")
-        
+
+        # Fire GATEWAY_START lifecycle hook (no-op when no hooks registered)
+        try:
+            from ._protocol_mixin import fire_gateway_start
+            fire_gateway_start(self._get_hook_runner(), list(self._bots.keys()))
+        except Exception as e:
+            logger.debug(f"GATEWAY_START emit error (non-fatal): {e}")
+
         # Configure delivery router from bot configurations
         self._configure_delivery_from_bots()
 
@@ -315,6 +337,18 @@ class BotOS:
             logger.debug(f"BotOS: no agent for schedule job {job.name}")
             return (None, False)
 
+        # Fire SCHEDULE_TRIGGER lifecycle hook (no-op when no hooks registered)
+        try:
+            from ._protocol_mixin import fire_schedule_trigger, _resolve_runner_from_agent
+            fire_schedule_trigger(
+                _resolve_runner_from_agent(agent),
+                job_name=getattr(job, "name", ""),
+                job_id=str(getattr(job, "id", "") or getattr(job, "agent_id", "") or ""),
+                message=job.message,
+            )
+        except Exception as e:
+            logger.debug(f"SCHEDULE_TRIGGER emit error (non-fatal): {e}")
+
         # Run the agent
         result = await asyncio.to_thread(agent.chat, job.message)
         result_str = str(result) if result else None
@@ -431,6 +465,13 @@ class BotOS:
             return
 
         logger.info("BotOS stopping all bots...")
+
+        # Fire GATEWAY_STOP lifecycle hook (no-op when no hooks registered)
+        try:
+            from ._protocol_mixin import fire_gateway_stop
+            fire_gateway_stop(self._get_hook_runner(), list(self._bots.keys()))
+        except Exception as e:
+            logger.debug(f"GATEWAY_STOP emit error (non-fatal): {e}")
 
         # Stop health monitoring first
         if self._enable_supervision and self._supervisor:

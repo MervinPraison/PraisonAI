@@ -111,6 +111,12 @@ class BotSessionManager:
         self._active_runs: Dict[str, Any] = {}  # user_id -> InterruptController
         # Session reset policy for automatic lifecycle management
         self._reset_policy = reset_policy or SessionResetPolicy(mode="none")
+        # Track storage keys we've already fired SESSION_START for, so the
+        # hook fires exactly once per session lifetime (until reset).
+        self._seen_sessions: set = set()
+        # Weak reference to the most recent agent — lets reset() resolve a
+        # HookRunner to fire SESSION_END without changing the public API.
+        self._last_agent_ref: Optional["weakref.ReferenceType[Agent]"] = None
 
     def _storage_key(self, user_id: str) -> str:
         """Resolve a raw platform user id to the in-memory/store key.
@@ -153,6 +159,28 @@ class BotSessionManager:
             lock = asyncio.Lock()
             self._agent_locks[agent] = lock
         return lock
+
+    def _maybe_fire_session_start(self, agent: "Agent", user_id: str) -> None:
+        """Fire SESSION_START once per session lifetime (no-op without hooks)."""
+        # Remember the agent so reset() can fire SESSION_END later.
+        try:
+            self._last_agent_ref = weakref.ref(agent)
+        except TypeError:  # pragma: no cover — non-weakrefable agent
+            self._last_agent_ref = None
+        storage_key = self._storage_key(user_id)
+        if storage_key in self._seen_sessions:
+            return
+        self._seen_sessions.add(storage_key)
+        try:
+            from ._protocol_mixin import fire_session_start, _resolve_runner_from_agent
+            fire_session_start(
+                _resolve_runner_from_agent(agent),
+                session_id=storage_key,
+                platform=self._platform,
+                agent_name=getattr(agent, "agent_name", None) or getattr(agent, "name", "bot"),
+            )
+        except Exception as e:
+            logger.debug("SESSION_START emit error (non-fatal): %s", e)
 
     def _load_history(self, user_id: str) -> List[Dict[str, Any]]:
         """Load user history from store (if available) or in-memory cache.
@@ -339,6 +367,12 @@ class BotSessionManager:
                     
                     # Update last active timestamp AFTER history load and reset check
                     self._last_active[self._storage_key(user_id)] = time.monotonic()
+
+                    # Fire SESSION_START once per session lifetime (no-op when
+                    # no hooks registered).  BEFORE_AGENT / AFTER_AGENT are
+                    # emitted by ``agent.chat()`` itself, so we deliberately do
+                    # NOT re-fire them here to avoid double-dispatch.
+                    self._maybe_fire_session_start(agent, user_id)
 
                     # W1 robustness: hold ``agent_lock`` across the FULL LLM call
                     # (not only the history swap) so concurrent users on a shared
@@ -708,7 +742,25 @@ class BotSessionManager:
         self._clear_session_data(storage_key, user_id)
         self._last_active.pop(storage_key, None)
         self._last_reset[storage_key] = time.monotonic()
-        
+
+        # Fire SESSION_END lifecycle hook (no-op when no hooks registered),
+        # then forget the session so a subsequent message re-opens it.
+        if storage_key in self._seen_sessions:
+            self._seen_sessions.discard(storage_key)
+            agent = self._last_agent_ref() if self._last_agent_ref is not None else None
+            try:
+                from ._protocol_mixin import fire_session_end, _resolve_runner_from_agent
+                runner = _resolve_runner_from_agent(agent)
+                if runner is not None:
+                    fire_session_end(
+                        runner,
+                        session_id=storage_key,
+                        agent_name=getattr(agent, "agent_name", None) or getattr(agent, "name", "bot"),
+                        reason="clear",
+                    )
+            except Exception as e:
+                logger.debug("SESSION_END emit error (non-fatal): %s", e)
+
         return existed
 
     def cancel_run(self, user_id: str, reason: str = "user_cancel") -> bool:
