@@ -1,0 +1,160 @@
+name: Auto Merge Conflict → Claude
+
+# Detects internal PRs with mergeStateStatus=DIRTY and posts @claude to trigger claude.yml.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *'
+
+concurrency:
+  group: merge-conflict-scan-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  pull-requests: read
+  issues: write
+
+jobs:
+  detect-and-trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Detect conflicting PRs and trigger Claude
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const baseRepo = `${owner}/${repo}`;
+            const isMainPush = context.eventName === 'push';
+            const COOLDOWN_MS = 12 * 60 * 60 * 1000;
+            const AUTO_ACTORS = ['github-actions[bot]', 'MervinPraison'];
+            const LABEL = 'claude-conflict-pending';
+            const COMMENT_BODY = [
+              '@claude this PR has merge conflicts with `main`.',
+              'Please rebase onto latest `main`, resolve conflicts (keep this PR\'s intent, merge in newer main logic),',
+              'run targeted tests, and force-push with `--force-with-lease`.',
+              'Comment which files you resolved.'
+            ].join(' ');
+
+            const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+            async function getMergeState(prNumber) {
+              const query = `
+                query($owner: String!, $repo: String!, $number: Int!) {
+                  repository(owner: $owner, name: $repo) {
+                    pullRequest(number: $number) {
+                      mergeStateStatus
+                      isDraft
+                      headRef { repository { nameWithOwner } }
+                    }
+                  }
+                }
+              `;
+              for (let attempt = 0; attempt < 3; attempt++) {
+                const result = await github.graphql(query, { owner, repo, number: prNumber });
+                const prGql = result.repository.pullRequest;
+                const status = (prGql?.mergeStateStatus || '').toUpperCase();
+                if (status && status !== 'UNKNOWN') {
+                  return {
+                    status,
+                    isDraft: prGql.isDraft,
+                    headRepo: prGql.headRef?.repository?.nameWithOwner,
+                  };
+                }
+                if (attempt < 2) await sleep(10000);
+              }
+              const pr = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
+              return {
+                status: (pr.data.mergeable_state || '').toUpperCase(),
+                isDraft: pr.data.draft,
+                headRepo: pr.data.head.repo?.full_name,
+              };
+            }
+
+            function hasRecentAutoComment(comments) {
+              const cutoff = Date.now() - COOLDOWN_MS;
+              return comments.some((c) => {
+                if (!AUTO_ACTORS.includes(c.user.login)) return false;
+                const body = (c.body || '').toLowerCase();
+                if (!body.includes('@claude') || !body.includes('merge conflict')) return false;
+                return new Date(c.created_at).getTime() > cutoff;
+              });
+            }
+
+            async function processPR(prNumber) {
+              const { status, isDraft, headRepo } = await getMergeState(prNumber);
+              core.info(`PR #${prNumber}: mergeState=${status}, head=${headRepo}, draft=${isDraft}`);
+
+              const { data: issue } = await github.rest.issues.get({
+                owner,
+                repo,
+                issue_number: prNumber,
+              });
+              const labels = issue.labels.map((l) => l.name);
+
+              if (status !== 'DIRTY' && labels.includes(LABEL)) {
+                await github.rest.issues.removeLabel({
+                  owner,
+                  repo,
+                  issue_number: prNumber,
+                  name: LABEL,
+                });
+                core.info(`Removed ${LABEL} from PR #${prNumber}`);
+              }
+
+              if (status !== 'DIRTY') return { skipped: true, reason: 'not dirty' };
+              if (isDraft) return { skipped: true, reason: 'draft' };
+              if (headRepo && headRepo !== baseRepo) return { skipped: true, reason: 'fork' };
+
+              const { data: comments } = await github.rest.issues.listComments({
+                owner,
+                repo,
+                issue_number: prNumber,
+                per_page: 100,
+              });
+              if (!isMainPush && hasRecentAutoComment(comments)) {
+                return { skipped: true, reason: 'recent auto comment' };
+              }
+
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: prNumber,
+                body: COMMENT_BODY,
+              });
+              if (!labels.includes(LABEL)) {
+                await github.rest.issues.addLabels({
+                  owner,
+                  repo,
+                  issue_number: prNumber,
+                  labels: [LABEL],
+                });
+              }
+              return { triggered: true };
+            }
+
+            let prNumbers = [];
+            if (context.eventName === 'pull_request') {
+              prNumbers = [context.payload.pull_request.number];
+            } else {
+              const prs = await github.paginate(github.rest.pulls.list, {
+                owner,
+                repo,
+                state: 'open',
+                per_page: 100,
+              });
+              prNumbers = prs.map((p) => p.number);
+            }
+
+            const results = [];
+            for (const num of prNumbers) {
+              results.push({ pr: num, ...(await processPR(num)) });
+            }
+            core.summary.addRaw('```json\n' + JSON.stringify(results, null, 2) + '\n```');
+            await core.summary.write();

@@ -173,11 +173,29 @@ jobs:
               pull_number: prNumber
             });
 
+            let mergeState = '';
+            try {
+              const gql = await github.graphql(
+                `query($owner: String!, $repo: String!, $number: Int!) {
+                  repository(owner: $owner, name: $repo) {
+                    pullRequest(number: $number) { mergeStateStatus }
+                  }
+                }`,
+                { owner: context.repo.owner, repo: context.repo.repo, number: prNumber }
+              );
+              mergeState = (gql.repository.pullRequest.mergeStateStatus || '').toUpperCase();
+            } catch (e) {
+              core.warning(`GraphQL mergeStateStatus failed: ${e.message}`);
+            }
+            if (!mergeState) {
+              mergeState = (pr.data.mergeable_state || pr.data.merge_state_status || '').toUpperCase();
+            }
+
             core.setOutput('is_pr', 'true');
             core.setOutput('pr_number', String(prNumber));
             core.setOutput('pr_branch', pr.data.head.ref);
             core.setOutput('head_repo', pr.data.head.repo.full_name);
-            core.setOutput('merge_state', (pr.data.mergeable_state || pr.data.merge_state_status || '').toUpperCase());
+            core.setOutput('merge_state', mergeState);
 
             const baseRepo = `${context.repo.owner}/${context.repo.repo}`;
             if (pr.data.head.repo && pr.data.head.repo.full_name !== baseRepo) {

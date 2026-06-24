@@ -539,7 +539,7 @@ Repeat Phases 12 → 13 → 14 until the mergeability gate in Phase 13 is fully 
 
 ### When the PR has merge conflicts
 
-If `mergeStateStatus=DIRTY`, ask Claude to rebase rather than resolving conflicts yourself on non-trivial logic:
+If `mergeStateStatus=DIRTY`, the **Auto Merge Conflict → Claude** workflow (`.github/workflows/merge-conflict-claude.yml`) posts `@claude` automatically on push to `main` and on PR sync. You can still comment manually:
 
 ```bash
 gh pr comment $PR --repo $REPO --body "@claude this PR has merge conflicts with \`main\` (PR #<X> was merged, touching the same regions). Please rebase onto latest \`main\`, re-run \`pytest <paths>\`, and force-push."
