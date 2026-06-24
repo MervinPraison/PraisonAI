@@ -436,31 +436,33 @@ def handle_model_command(
     Returns:
         Response message
     """
+    # Resolve the storage key so the override is keyed identically to how
+    # chat() looks it up (handles cross-platform identity resolution).
+    storage_key = user_id
+    if hasattr(session_manager, '_storage_key'):
+        try:
+            storage_key = session_manager._storage_key(user_id)
+        except Exception:
+            storage_key = user_id
+
     if not model_name:
-        # Show current model
-        if agent and hasattr(agent, 'llm'):
+        # Show current model — prefer the per-user override if one is set,
+        # otherwise fall back to the agent's configured model.
+        overrides = getattr(session_manager, '_model_overrides', {})
+        current = overrides.get(storage_key)
+        if not current and agent and hasattr(agent, 'llm'):
             current = agent.llm if isinstance(agent.llm, str) else "default"
-            return f"Current model: {current}\nUse /model <name> to switch (e.g., /model gpt-4o)"
-        else:
+        if not current:
             return "No model configured. Use /model <name> to set one."
-    
-    # Store model override in session metadata
-    if hasattr(session_manager, '_model_overrides'):
-        if not hasattr(session_manager, '_model_overrides'):
-            session_manager._model_overrides = {}
-        session_manager._model_overrides[user_id] = model_name
-    
-    # Apply model to agent for this session
-    if agent:
-        original_model = agent.llm
-        agent.llm = model_name
-        
-        # Store original for restoration
-        if not hasattr(session_manager, '_original_models'):
-            session_manager._original_models = {}
-        if user_id not in session_manager._original_models:
-            session_manager._original_models[user_id] = original_model
-    
+        return f"Current model: {current}\nUse /model <name> to switch (e.g., /model gpt-4o)"
+
+    # Store the override per user. chat() applies it inside the per-agent lock
+    # and restores the original afterwards, so the shared Agent instance is
+    # never mutated for other concurrent users.
+    if not hasattr(session_manager, '_model_overrides'):
+        session_manager._model_overrides = {}
+    session_manager._model_overrides[storage_key] = model_name
+
     return f"✅ Model switched to {model_name} for this conversation."
 
 
@@ -595,40 +597,79 @@ def handle_queue_command(
     session_manager,
     user_id: str,
     message_text: Optional[str] = None,
+    run_control: Optional["SessionRunControl"] = None,
 ) -> str:
     """Handle /queue command for message queuing.
-    
+
+    Delegates to the canonical :class:`SessionRunControl` pending slot, which
+    is the only mechanism that is actually drained by the gateway run loop
+    (``chat_with_run_control`` calls ``next_pending``/``finish_run``). A
+    message is only meaningful to queue while a run is in flight; if the bot
+    is idle there is nothing to run "after", so the user is told to just send
+    the message normally instead of being given a false promise.
+
     Args:
         session_manager: BotSessionManager instance
         user_id: User ID
         message_text: Optional message to queue
-        
+        run_control: SessionRunControl instance (falls back to
+            ``session_manager._run_control`` when not supplied)
+
     Returns:
         Response message
     """
+    # Resolve run control from the explicit arg or the session manager.
+    if run_control is None:
+        run_control = getattr(session_manager, "_run_control", None)
+
+    if run_control is None:
+        return (
+            "ℹ️ Message queuing isn't enabled for this bot. "
+            "Just send your message and it will be processed."
+        )
+
     if not message_text:
-        # Show current queue
-        if not hasattr(session_manager, '_message_queues'):
-            return "No messages in queue. Use /queue <message> to add one."
-        
-        queue = session_manager._message_queues.get(user_id, [])
-        if not queue:
-            return "No messages in queue. Use /queue <message> to add one."
-        
-        lines = ["📝 Queued messages:"]
-        for i, msg in enumerate(queue, 1):
-            preview = msg[:50] + "..." if len(msg) > 50 else msg
-            lines.append(f"{i}. {preview}")
-        return "\n".join(lines)
-    
-    # Add message to queue
-    if not hasattr(session_manager, '_message_queues'):
-        session_manager._message_queues = {}
-    
-    if user_id not in session_manager._message_queues:
-        session_manager._message_queues[user_id] = []
-    
-    session_manager._message_queues[user_id].append(message_text)
-    
-    queue_len = len(session_manager._message_queues[user_id])
-    return f"✅ Message queued (position {queue_len}). It will run after the current task completes."
+        # Show whether a follow-up is currently pending for this user.
+        try:
+            status = run_control.get_run_status(user_id)
+        except Exception:
+            status = {}
+        if status.get("has_pending"):
+            preview = status.get("pending_preview", "")
+            return f"📝 Pending follow-up: {preview}"
+        return "No follow-up queued. Use /queue <message> to add one while a task is running."
+
+    # Submit through run control so the message is parked in the pending slot
+    # that the run loop actually drains after the current turn completes.
+    import asyncio
+
+    from ._run_control import RunDecision
+
+    async def _submit() -> "RunDecision":
+        return await run_control.submit(user_id, message_text)
+
+    try:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is not None and loop.is_running():
+            # Schedule on the running loop; we can't block-await from here.
+            loop.create_task(_submit())
+            return "⏳ Follow-up noted — it will run after the current task completes."
+
+        decision = asyncio.run(_submit())
+    except Exception as e:  # noqa: BLE001 - surface a friendly message
+        return f"❌ Could not queue message: {e}"
+
+    if decision == RunDecision.RUN_NOW:
+        return (
+            "ℹ️ No task is currently running, so there's nothing to queue behind. "
+            "Send your message normally to run it now."
+        )
+    if decision == RunDecision.MERGED:
+        return "⏳ Added to your pending follow-up — it will run after the current task completes."
+    if decision == RunDecision.STEERED:
+        return "🧭 Injected into the running task as live guidance."
+    return "⏳ Follow-up queued — it will run after the current task completes."

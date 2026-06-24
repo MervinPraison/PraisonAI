@@ -245,7 +245,7 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                 response = handle_stop_command(self._session, user_id)
                 await say(text=response, thread_ts=event.get("ts"))
                 return
-            elif text.startswith("/model"):
+            elif text.split(maxsplit=1)[:1] == ["/model"]:
                 user_id = event.get("user", "unknown")
                 parts = text.split(maxsplit=1)
                 model_name = parts[1] if len(parts) > 1 else None
@@ -262,7 +262,7 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                 response = handle_compress_command(self._session, user_id, self._agent)
                 await say(text=response, thread_ts=event.get("ts"))
                 return
-            elif text.startswith("/queue"):
+            elif text.split(maxsplit=1)[:1] == ["/queue"]:
                 user_id = event.get("user", "unknown")
                 parts = text.split(maxsplit=1)
                 message_text = parts[1] if len(parts) > 1 else None

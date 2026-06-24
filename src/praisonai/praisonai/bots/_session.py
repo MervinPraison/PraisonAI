@@ -110,6 +110,11 @@ class BotSessionManager:
         # Run timeout and active run tracking for cancellation support
         self._run_timeout = run_timeout
         self._active_runs: Dict[str, Any] = {}  # user_id -> InterruptController
+        # Per-user model overrides set via the /model command. Applied per-turn
+        # inside the agent lock in chat() and restored afterwards so a shared
+        # Agent instance never leaks one user's model to another. Keyed by
+        # storage_key (same as _histories).
+        self._model_overrides: Dict[str, Any] = {}
         # Session reset policy for automatic lifecycle management
         self._reset_policy = reset_policy or SessionResetPolicy(mode="none")
         # Track storage keys we've already fired SESSION_START for, so the
@@ -525,7 +530,21 @@ class BotSessionManager:
                     async with agent_lock:
                         saved_history = agent.chat_history
                         agent.chat_history = user_history
-                        
+
+                        # Apply a per-user model override (set via the /model
+                        # command) for the duration of this turn only. The swap
+                        # happens inside the per-agent lock and is restored in
+                        # the finally below, so a shared Agent instance never
+                        # leaks one user's model to another concurrent user.
+                        _model_overridden = False
+                        _saved_llm = None
+                        _override = self._model_overrides.get(self._storage_key(user_id))
+                        if _override is not None and hasattr(agent, "llm"):
+                            _saved_llm = agent.llm
+                            if _override != _saved_llm:
+                                agent.llm = _override
+                                _model_overridden = True
+
                         # Create interrupt controller for this run and register it
                         try:
                             from praisonaiagents.agent.interrupt import InterruptController
@@ -628,6 +647,10 @@ class BotSessionManager:
                             raise
                         finally:
                             agent.chat_history = saved_history
+                            # Restore the agent's original model if we applied a
+                            # per-user override for this turn.
+                            if _model_overridden:
+                                agent.llm = _saved_llm
                             # Clean up active run tracking
                             if controller:
                                 self._active_runs.pop(storage_key, None)
