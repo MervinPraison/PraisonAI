@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from .bot import Bot
     from .botos import BotOS
     from ._session import BotSessionManager
+    from ._identity import StoreBackedIdentityResolver
     from ._dlq import InboundDLQ, DLQEntry
     from ._ingress import InboundJournal, JournalEntry
     from ._slack_approval import SlackApproval
@@ -81,6 +82,9 @@ def __getattr__(name: str):
     if name == "BotSessionManager":
         from ._session import BotSessionManager
         return BotSessionManager
+    if name == "StoreBackedIdentityResolver":
+        from ._identity import StoreBackedIdentityResolver
+        return StoreBackedIdentityResolver
     # N4 — inbound dead-letter queue
     if name == "InboundDLQ":
         from ._dlq import InboundDLQ
@@ -130,6 +134,7 @@ __all__ = [
     "TelegramBot", "DiscordBot", "SlackBot", "WhatsAppBot", "LinearBot", "EmailBot", "AgentMailBot",
     "Bot", "BotOS",
     "BotSessionManager",
+    "StoreBackedIdentityResolver",
     "InboundDLQ", "DLQEntry",
     "InboundJournal", "JournalEntry",
     "OutboundQueue", "OutboundEntry",
