@@ -1220,19 +1220,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
 
     async def health(self):
         """Get detailed health status of the Telegram bot."""
-        from praisonaiagents.bots import HealthResult
-        probe_result = await self.probe()
-        uptime = (time.time() - self._started_at) if self._started_at else None
-        session_count = len(self._session._histories) if hasattr(self._session, '_histories') else 0
-        return HealthResult(
-            ok=self._is_running and probe_result.ok,
-            platform="telegram",
-            is_running=self._is_running,
-            uptime_seconds=uptime,
-            probe=probe_result,
-            sessions=session_count,
-            error=probe_result.error if not probe_result.ok else None,
-        )
+        return await self._default_health()
 
     def _format_status(self) -> str:
         """Format /status response."""
