@@ -68,3 +68,52 @@ def test_write_file_new_path_unaffected(_auto_approve_write):
         # No prior read: behaves exactly as before.
         assert file_tools.write_file("new.txt", "hi") is True
         assert (Path(tmpdir) / "new.txt").read_text(encoding="utf-8") == "hi"
+
+
+def test_filetools_read_then_edittools_edit_crlf_not_stale(_auto_approve_write):
+    # Regression: FileTools.read_file (text mode) and EditTools.edit_file
+    # (binary mode) must record the same on-disk hash for a CRLF file so a
+    # read-by-one / edit-by-the-other chain is not falsely flagged stale.
+    from praisonaiagents.workspace import Workspace
+    from praisonaiagents.tools.file_tools import FileTools
+    from praisonaiagents.tools.edit_tools import EditTools
+
+    token = set_yaml_approved_tools(["write_file", "edit_file"])
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            workspace = Workspace(root=Path(tmpdir))
+            file_tools = FileTools(workspace=workspace)
+            edit_tools = EditTools(workspace=workspace)
+            target = Path(tmpdir) / "crlf.txt"
+            target.write_bytes(b"alpha\r\nbeta\r\n")
+
+            # Read via FileTools records the shared hash.
+            file_tools.read_file("crlf.txt")
+            # Edit via EditTools must not see it as stale (no external change).
+            result = edit_tools.edit_file("crlf.txt", "alpha", "ALPHA")
+            assert "Success" in result
+            assert target.read_bytes() == b"ALPHA\r\nbeta\r\n"
+    finally:
+        reset_yaml_approved_tools(token)
+
+
+def test_write_file_fails_closed_when_verify_unreadable(_auto_approve_write, monkeypatch):
+    # Regression: if the staleness verification re-read raises, the write must
+    # fail closed (refuse) rather than blindly clobbering the file.
+    from praisonaiagents.workspace import Workspace
+    from praisonaiagents.tools.file_tools import FileTools
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        workspace = Workspace(root=Path(tmpdir))
+        file_tools = FileTools(workspace=workspace)
+        target = Path(tmpdir) / "s.txt"
+        target.write_text("v1", encoding="utf-8")
+        assert file_tools.read_file("s.txt") == "v1"
+
+        def _boom(*args, **kwargs):
+            raise OSError("cannot read for verification")
+
+        monkeypatch.setattr(FileTools, "_content_hash", staticmethod(_boom))
+        # Verification read fails -> write refused, file untouched.
+        assert file_tools.write_file("s.txt", "v2") is False
+        assert target.read_text(encoding="utf-8") == "v1"

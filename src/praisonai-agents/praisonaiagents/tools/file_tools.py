@@ -78,7 +78,23 @@ class FileTools:
             raise ValueError(f"Path traversal detected: {filepath} escapes workspace {cwd}")
         
         return absolute
-    
+
+    @staticmethod
+    def _content_hash(safe_path: str, encoding: str = 'utf-8') -> str:
+        """Hash the on-disk content in the same form EditTools records.
+
+        Reads bytes, strips a UTF-8 BOM, and hashes the decoded string with
+        line endings preserved.  This matches ``EditTools`` (which reads in
+        binary mode) so the shared staleness registry stays consistent when a
+        file is read by one tool and written by the other.
+        """
+        with open(safe_path, 'rb') as f:
+            raw_bytes = f.read()
+        if raw_bytes.startswith(b'\xef\xbb\xbf'):
+            raw_bytes = raw_bytes[3:]
+        content = raw_bytes.decode(encoding)
+        return hashlib.sha256(content.encode('utf-8')).hexdigest()
+
     def read_file(self, filepath: str, encoding: str = 'utf-8') -> str:
         """
         Read content from a file.
@@ -93,14 +109,21 @@ class FileTools:
         try:
             # Validate path to prevent traversal attacks
             safe_path = self._validate_path(filepath)
-            with open(safe_path, 'r', encoding=encoding) as f:
-                data = f.read()
-            # Record the read hash so a later write engages the staleness guard.
-            try:
-                _file_locks.record_read_hash(
-                    safe_path, hashlib.sha256(data.encode('utf-8')).hexdigest())
-            except Exception:
-                pass
+            # Serialise with concurrent writers on this path so the read does
+            # not observe a partially-written file.
+            with _file_locks.get_lock(safe_path):
+                with open(safe_path, 'r', encoding=encoding) as f:
+                    data = f.read()
+                # Record the read hash so a later write engages the staleness
+                # guard.  Hash the on-disk byte form (CRLF preserved, BOM
+                # stripped) so the recorded hash matches what EditTools (binary
+                # mode) records for the same file, keeping the staleness guard
+                # consistent across tools.
+                try:
+                    _file_locks.record_read_hash(
+                        safe_path, self._content_hash(safe_path, encoding))
+                except Exception:
+                    pass
             return data
         except Exception as e:
             error_msg = f"Error reading file {filepath}: {str(e)}"
@@ -145,14 +168,17 @@ class FileTools:
                 if not force and os.path.exists(safe_path):
                     recorded = _file_locks.get_read_hash(safe_path)
                     if recorded is not None:
+                        # Fail closed: if the verification re-read raises (decode,
+                        # permission, etc.) refuse the write rather than blindly
+                        # clobbering the file.
                         try:
-                            with open(safe_path, 'r', encoding=encoding) as f:
-                                on_disk = f.read()
-                            current = hashlib.sha256(
-                                on_disk.encode('utf-8')).hexdigest()
-                        except Exception:
-                            current = None
-                        if current is not None and current != recorded:
+                            current = self._content_hash(safe_path, encoding)
+                        except Exception as e:
+                            logging.error(
+                                "Refusing to write %s: could not verify staleness: %s",
+                                filepath, e)
+                            return False
+                        if current != recorded:
                             logging.error(
                                 "Refusing to write %s: file changed since it was "
                                 "read - re-read before writing (or pass force=True)",
@@ -162,10 +188,12 @@ class FileTools:
                 os.makedirs(os.path.dirname(safe_path), exist_ok=True)
                 with open(safe_path, 'w', encoding=encoding) as f:
                     f.write(content)
-                # Record the new content hash so follow-up writes are not stale.
+                # Record the new content hash (in the on-disk byte form) so
+                # follow-up writes are not falsely flagged stale and the hash
+                # matches what a later read by either tool computes.
                 try:
                     _file_locks.record_read_hash(
-                        safe_path, hashlib.sha256(content.encode('utf-8')).hexdigest())
+                        safe_path, self._content_hash(safe_path, encoding))
                 except Exception:
                     pass
             return True

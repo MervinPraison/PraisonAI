@@ -707,6 +707,21 @@ class EditTools:
                 elif op["op"] == "delete":
                     if not os.path.exists(safe_path):
                         return f"Error: Cannot delete '{op['path']}': file not found"
+                    # Automatic staleness guard: don't silently delete a file
+                    # that changed on disk since it was last read via these tools.
+                    if not force:
+                        recorded = _file_locks.get_read_hash(safe_path)
+                        if recorded is not None:
+                            with open(safe_path, 'rb') as f:
+                                raw_bytes = f.read()
+                            try:
+                                original, _ = self._decode_with_bom(raw_bytes)
+                            except ValueError as e:
+                                return f"Error: Cannot delete '{op['path']}': {e}"
+                            if recorded != self._compute_content_hash(original):
+                                return (f"Error: Cannot delete '{op['path']}': file changed "
+                                       f"since it was read - re-read before editing "
+                                       f"(or pass force=True to override).")
                     planned.append(("delete", safe_path, op["path"], None, "", None))
 
                 elif op["op"] == "update":
@@ -744,9 +759,13 @@ class EditTools:
                         start, end = spans[0]
                         updated = updated[:start] + new_block + updated[end:]
                     encoded = self._encode_preserving(updated, line_ending, bom)
+                    # Hash the exact on-disk form (CRLF preserved, BOM stripped)
+                    # so a subsequent binary read of this file produces an
+                    # identical hash and is not falsely flagged as stale.
+                    on_disk_form = encoded[len(bom):].decode('utf-8')
                     planned.append(("update", safe_path, op["path"], encoded,
                                     self._render_diff(original, updated, op["path"]),
-                                    self._compute_content_hash(updated)))
+                                    self._compute_content_hash(on_disk_form)))
 
             # Phase 2: commit all operations atomically.  Writes are staged to
             # temp files in the same directory and swapped in with os.replace;
@@ -840,22 +859,26 @@ class EditTools:
             if not os.path.exists(safe_path):
                 return f"Error: File not found: {filepath}", ""
             
-            # Read in binary mode to match edit_file behavior
-            with open(safe_path, 'rb') as f:
-                raw_bytes = f.read()
-            
-            # Strip UTF-8 BOM if present (matching edit_file logic)
-            if raw_bytes.startswith(b'\xef\xbb\xbf'):
-                raw_bytes = raw_bytes[3:]
-            
-            # Decode content (UTF-8 only, matching edit_file)
-            content = raw_bytes.decode('utf-8')
-            
-            content_hash = self._compute_content_hash(content)
-            self._file_cache[safe_path] = content_hash
-            # Record the read hash in the shared registry so a later edit/write
-            # to this path engages the automatic staleness guard by default.
-            _file_locks.record_read_hash(safe_path, content_hash)
+            # Serialise with concurrent writers on this path so the read (and
+            # the hash it records) reflects a stable, fully-written file rather
+            # than content observed mid-write.
+            with _file_locks.get_lock(safe_path):
+                # Read in binary mode to match edit_file behavior
+                with open(safe_path, 'rb') as f:
+                    raw_bytes = f.read()
+                
+                # Strip UTF-8 BOM if present (matching edit_file logic)
+                if raw_bytes.startswith(b'\xef\xbb\xbf'):
+                    raw_bytes = raw_bytes[3:]
+                
+                # Decode content (UTF-8 only, matching edit_file)
+                content = raw_bytes.decode('utf-8')
+                
+                content_hash = self._compute_content_hash(content)
+                self._file_cache[safe_path] = content_hash
+                # Record the read hash in the shared registry so a later
+                # edit/write to this path engages the staleness guard by default.
+                _file_locks.record_read_hash(safe_path, content_hash)
             
             return content, content_hash
             

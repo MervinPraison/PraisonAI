@@ -490,6 +490,42 @@ class TestAutomaticStaleness:
         assert "Success" in result
         assert "return 2" in _read(target)
 
+    def test_apply_patch_crlf_consecutive_edits_not_stale(self, tools, tmp_path):
+        # Regression: apply_patch on a CRLF file must record the on-disk
+        # (CRLF-preserved) hash so a follow-up edit is not falsely flagged stale.
+        p = tmp_path / "crlf.py"
+        p.write_bytes(b"a = 1\r\nb = 2\r\n")
+        tools.read_file(str(p))
+        patch = (
+            f"*** Update File: {p}\n"
+            "@@\n"
+            "a = 1\n"
+            "===\n"
+            "a = 10\n"
+        )
+        assert "Success" in tools.apply_patch(patch)
+        # CRLF preserved on disk.
+        assert p.read_bytes() == b"a = 10\r\nb = 2\r\n"
+        # Follow-up edit must not be flagged stale despite the CRLF endings.
+        result = tools.edit_file(str(p), "b = 2", "b = 20")
+        assert "Success" in result
+        assert p.read_bytes() == b"a = 10\r\nb = 20\r\n"
+
+    def test_apply_patch_delete_aborts_when_stale(self, tools, tmp_path):
+        # Regression: a destructive delete must not silently remove a file that
+        # changed on disk since it was last read.
+        p = tmp_path / "d.py"
+        _write(p, "keep = 1\n")
+        tools.read_file(str(p))
+        _write(p, "keep = 1\n# changed externally\n")
+        patch = f"*** Delete File: {p}\n"
+        result = tools.apply_patch(patch)
+        assert "changed" in result
+        assert os.path.exists(str(p))
+        # force=True overrides and deletes.
+        assert "Success" in tools.apply_patch(patch, force=True)
+        assert not os.path.exists(str(p))
+
 
 class TestConcurrency:
     def test_concurrent_edits_serialise_same_file(self, tools, tmp_path):

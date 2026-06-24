@@ -21,6 +21,7 @@ makes the guarantee hold across separate tool calls in an agent loop.
 
 import threading
 import weakref
+from collections import OrderedDict
 
 # Guards access to the registries below.
 _registry_lock = threading.Lock()
@@ -32,9 +33,17 @@ _path_locks: "weakref.WeakValueDictionary[str, threading.RLock]" = (
     weakref.WeakValueDictionary()
 )
 
+# Maximum number of distinct paths whose last-read hash is retained.  The map
+# is bounded with LRU-style eviction so a long-running agent reading thousands
+# of distinct files cannot grow it without bound.  A path evicted here simply
+# loses its automatic staleness guard for that one path (the next read re-arms
+# it); correctness is preserved, only the convenience guard is dropped.
+_MAX_READ_HASHES = 4096
+
 # Automatic last-read content hash per canonical path.  Populated on read,
-# consulted on write/edit for the default staleness guard.
-_read_hashes = {}
+# consulted on write/edit for the default staleness guard.  Insertion-ordered
+# so the oldest entry can be evicted once the cap is exceeded.
+_read_hashes: "OrderedDict[str, str]" = OrderedDict()
 
 
 def get_lock(canonical_path: str) -> threading.RLock:
@@ -53,15 +62,26 @@ def get_lock(canonical_path: str) -> threading.RLock:
 
 
 def record_read_hash(canonical_path: str, content_hash: str) -> None:
-    """Record the content hash observed when ``canonical_path`` was read."""
+    """Record the content hash observed when ``canonical_path`` was read.
+
+    The map is bounded: once it exceeds ``_MAX_READ_HASHES`` the oldest entry
+    is evicted, so long-running agents reading many distinct files do not grow
+    it without bound.
+    """
     with _registry_lock:
         _read_hashes[canonical_path] = content_hash
+        _read_hashes.move_to_end(canonical_path)
+        while len(_read_hashes) > _MAX_READ_HASHES:
+            _read_hashes.popitem(last=False)
 
 
 def get_read_hash(canonical_path: str):
     """Return the last recorded read hash for ``canonical_path`` (or None)."""
     with _registry_lock:
-        return _read_hashes.get(canonical_path)
+        value = _read_hashes.get(canonical_path)
+        if value is not None:
+            _read_hashes.move_to_end(canonical_path)
+        return value
 
 
 def clear_read_hash(canonical_path: str) -> None:
