@@ -101,7 +101,7 @@ class TestCreateProvenance:
             manager_mod.get_default_skill_dirs = lambda: [tmpdir]
             try:
                 manager = manager_mod.SkillManager()
-                result = manager.create_skill("scrape-x", "Do the scrape.")
+                result = manager.create_skill("scrape-x", "Do the scrape.", propose=False)
                 assert result["success"] is True
                 skill = manager.get_skill("scrape-x")
                 assert skill.properties.agent_created is True
@@ -138,7 +138,7 @@ class TestUsageTelemetry:
     def test_patch_increments_patch_count(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = _make_manager(tmpdir)
-            res = manager.patch_skill("my-skill", "Original body.", "New body.")
+            res = manager.patch_skill("my-skill", "Original body.", "New body.", propose=False)
             assert res["success"] is True
             skill = manager.get_skill("my-skill")
             assert skill.properties.patch_count == 1
@@ -179,7 +179,7 @@ class TestArchivalAndRestore:
             try:
                 (Path(tmpdir) / "skills").mkdir()
                 manager = manager_mod.SkillManager()
-                manager.create_skill("temp-skill", "content")
+                manager.create_skill("temp-skill", "content", propose=False)
                 assert "temp-skill" in manager
 
                 res = manager.archive_skill("temp-skill")
@@ -202,8 +202,8 @@ class TestArchivalAndRestore:
             try:
                 (Path(tmpdir) / "skills").mkdir()
                 manager = manager_mod.SkillManager()
-                manager.create_skill("temp-skill", "content")
-                res = manager.delete_skill("temp-skill")
+                manager.create_skill("temp-skill", "content", propose=False)
+                res = manager.delete_skill("temp-skill", propose=False)
                 assert res["success"] is True
                 assert "temp-skill" in manager.list_archived_skills()
             finally:
@@ -212,7 +212,7 @@ class TestArchivalAndRestore:
     def test_hard_delete_is_unrecoverable(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = _make_manager(tmpdir)
-            res = manager.delete_skill("my-skill", hard=True)
+            res = manager.delete_skill("my-skill", hard=True, propose=False)
             assert res["success"] is True
             assert "my-skill" not in manager
 
@@ -221,7 +221,7 @@ class TestRollback:
     def test_rollback_patch(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = _make_manager(tmpdir)
-            manager.patch_skill("my-skill", "Original body.", "Broken body.")
+            manager.patch_skill("my-skill", "Original body.", "Broken body.", propose=False)
             instructions = manager.get_instructions("my-skill")
             assert "Broken body." in instructions
 
@@ -232,7 +232,7 @@ class TestRollback:
     def test_rollback_edit(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             manager = _make_manager(tmpdir)
-            manager.edit_skill("my-skill", "Replacement body.")
+            manager.edit_skill("my-skill", "Replacement body.", propose=False)
             assert "Replacement body." in manager.get_instructions("my-skill")
 
             res = manager.rollback_skill("my-skill")
