@@ -32,6 +32,10 @@ from ._commands import (
     format_status, 
     format_help, 
     handle_stop_command,
+    handle_model_command,
+    handle_usage_command,
+    handle_compress_command,
+    handle_queue_command,
     CommandAccessPolicy,
     get_command_registry
 )
@@ -692,11 +696,77 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             response = self._command_registry.format_whoami(user_id, username, self._command_policy)
             await update.message.reply_text(response)
         
+        async def handle_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message or not update.message.text:
+                return
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return
+            user_id = message.sender.user_id if message.sender else "unknown"
+            # Check command permissions
+            if not self._command_policy.can_run(user_id, "model"):
+                await update.message.reply_text("⛔ You are not permitted to run /model")
+                return
+            # Extract model name from command
+            parts = update.message.text.split(maxsplit=1)
+            model_name = parts[1] if len(parts) > 1 else None
+            response = handle_model_command(self._session, user_id, model_name, self._agent)
+            await update.message.reply_text(response)
+        
+        async def handle_usage(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message:
+                return
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return
+            user_id = message.sender.user_id if message.sender else "unknown"
+            # Check command permissions
+            if not self._command_policy.can_run(user_id, "usage"):
+                await update.message.reply_text("⛔ You are not permitted to run /usage")
+                return
+            response = handle_usage_command(self._session, user_id, self._agent)
+            await update.message.reply_text(response)
+        
+        async def handle_compress(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message:
+                return
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return
+            user_id = message.sender.user_id if message.sender else "unknown"
+            # Check command permissions
+            if not self._command_policy.can_run(user_id, "compress"):
+                await update.message.reply_text("⛔ You are not permitted to run /compress")
+                return
+            response = handle_compress_command(self._session, user_id, self._agent)
+            await update.message.reply_text(response)
+        
+        async def handle_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message or not update.message.text:
+                return
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return
+            user_id = message.sender.user_id if message.sender else "unknown"
+            # Check command permissions
+            if not self._command_policy.can_run(user_id, "queue"):
+                await update.message.reply_text("⛔ You are not permitted to run /queue")
+                return
+            # Extract message text from command
+            parts = update.message.text.split(maxsplit=1)
+            message_text = parts[1] if len(parts) > 1 else None
+            response = handle_queue_command(self._session, user_id, message_text)
+            await update.message.reply_text(response)
+        
         self._application.add_handler(CommandHandler("status", handle_status))
         self._application.add_handler(CommandHandler("new", handle_new))
         self._application.add_handler(CommandHandler("help", handle_help))
         self._application.add_handler(CommandHandler("stop", handle_stop))
         self._application.add_handler(CommandHandler("whoami", handle_whoami))
+        self._application.add_handler(CommandHandler("model", handle_model))
+        self._application.add_handler(CommandHandler("usage", handle_usage))
+        self._application.add_handler(CommandHandler("compress", handle_compress))
+        self._application.add_handler(CommandHandler("queue", handle_queue))
         
         for command in self._command_handlers:
             self._application.add_handler(CommandHandler(command, handle_command))

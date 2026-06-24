@@ -95,6 +95,11 @@ class CommandRegistry:
         self.register("stop", {"description": "Cancel current agent task", "builtin": True})
         self.register("whoami", {"description": "Show your user info and permissions", "builtin": True})
         self.register("sethome", {"description": "Set this chat as the home channel for scheduled deliveries", "builtin": True})
+        # New runtime control commands
+        self.register("model", {"description": "Switch LLM model for this session", "builtin": True})
+        self.register("usage", {"description": "Show token usage and estimated cost", "builtin": True})
+        self.register("compress", {"description": "Compress conversation to free context window", "builtin": True})
+        self.register("queue", {"description": "Queue a follow-up message", "builtin": True})
     
     def register(
         self, 
@@ -412,3 +417,259 @@ def handle_run_status_command(
         return f"⚡ Task running for {elapsed_str}{pending_info}"
     except Exception as e:
         return f"Error getting status: {e}"
+
+
+def handle_model_command(
+    session_manager,
+    user_id: str,
+    model_name: Optional[str] = None,
+    agent: Optional["Agent"] = None,
+) -> str:
+    """Handle /model command for runtime model switching.
+    
+    Args:
+        session_manager: BotSessionManager instance
+        user_id: User ID
+        model_name: Optional model name to switch to
+        agent: Current agent instance
+        
+    Returns:
+        Response message
+    """
+    # Resolve the storage key so the override is keyed identically to how
+    # chat() looks it up (handles cross-platform identity resolution).
+    storage_key = user_id
+    if hasattr(session_manager, '_storage_key'):
+        try:
+            storage_key = session_manager._storage_key(user_id)
+        except Exception:
+            storage_key = user_id
+
+    if not model_name:
+        # Show current model — prefer the per-user override if one is set,
+        # otherwise fall back to the agent's configured model.
+        overrides = getattr(session_manager, '_model_overrides', {})
+        current = overrides.get(storage_key)
+        if not current and agent and hasattr(agent, 'llm'):
+            current = agent.llm if isinstance(agent.llm, str) else "default"
+        if not current:
+            return "No model configured. Use /model <name> to set one."
+        return f"Current model: {current}\nUse /model <name> to switch (e.g., /model gpt-4o)"
+
+    # Store the override per user. chat() applies it inside the per-agent lock
+    # and restores the original afterwards, so the shared Agent instance is
+    # never mutated for other concurrent users.
+    if not hasattr(session_manager, '_model_overrides'):
+        session_manager._model_overrides = {}
+    session_manager._model_overrides[storage_key] = model_name
+
+    return f"✅ Model switched to {model_name} for this conversation."
+
+
+def handle_usage_command(
+    session_manager,
+    user_id: str,
+    agent: Optional["Agent"] = None,
+) -> str:
+    """Handle /usage command to show token usage and cost.
+    
+    Args:
+        session_manager: BotSessionManager instance  
+        user_id: User ID
+        agent: Current agent instance
+        
+    Returns:
+        Response message with usage info
+    """
+    # Check for usage tracking via hooks or session metadata
+    usage_info = {}
+    
+    # Try to get usage from session metadata if tracked
+    if hasattr(session_manager, '_usage_tracker'):
+        usage_info = session_manager._usage_tracker.get(user_id, {})
+    
+    # Check agent's token tracking if available
+    if agent and hasattr(agent, 'get_token_usage'):
+        try:
+            agent_usage = agent.get_token_usage()
+            usage_info.update(agent_usage)
+        except Exception:
+            pass
+    
+    # Format usage response
+    if not usage_info:
+        return "No usage data available. Usage tracking may not be enabled."
+    
+    total_tokens = usage_info.get('total_tokens', 0)
+    prompt_tokens = usage_info.get('prompt_tokens', 0)
+    completion_tokens = usage_info.get('completion_tokens', 0)
+    
+    # Estimate cost (rough estimates, would need model-specific pricing)
+    cost_estimate = total_tokens * 0.00002  # Default estimate
+    
+    lines = [
+        "📊 Token Usage",
+        f"Total: {total_tokens:,} tokens",
+    ]
+    
+    if prompt_tokens or completion_tokens:
+        lines.append(f"Prompt: {prompt_tokens:,} | Completion: {completion_tokens:,}")
+    
+    lines.append(f"Est. cost: ${cost_estimate:.4f}")
+    
+    return "\n".join(lines)
+
+
+def handle_compress_command(
+    session_manager,
+    user_id: str,
+    agent: Optional["Agent"] = None,
+) -> str:
+    """Handle /compress command for context window management.
+    
+    Args:
+        session_manager: BotSessionManager instance
+        user_id: User ID  
+        agent: Current agent instance
+        
+    Returns:
+        Response message
+    """
+    try:
+        # Get user's chat history
+        if not hasattr(session_manager, '_histories'):
+            return "❌ No conversation history to compress."
+        
+        storage_key = user_id
+        if hasattr(session_manager, '_storage_key'):
+            storage_key = session_manager._storage_key(user_id)
+        
+        history = session_manager._histories.get(storage_key, [])
+        if len(history) < 10:
+            return "ℹ️ Conversation too short to compress (need at least 10 messages)."
+        
+        # Import optimizer
+        try:
+            from praisonaiagents.context.optimizer import SummarizeOptimizer
+            from praisonaiagents.context.tokens import estimate_messages_tokens
+        except ImportError:
+            # Fallback to simple truncation
+            original_len = len(history)
+            # Keep system messages and last 5 exchanges
+            system_msgs = [m for m in history if m.get("role") == "system"]
+            other_msgs = [m for m in history if m.get("role") != "system"]
+            compressed = system_msgs + other_msgs[-10:]  # Keep last 5 exchanges (10 messages)
+            
+            session_manager._histories[storage_key] = compressed
+            removed = original_len - len(compressed)
+            
+            return f"✅ Compressed conversation: removed {removed} older messages."
+        
+        # Use SummarizeOptimizer if available
+        original_tokens = estimate_messages_tokens(history)
+        optimizer = SummarizeOptimizer(preserve_recent=10)
+        
+        # Target 50% reduction
+        target_tokens = original_tokens // 2
+        compressed_history, result = optimizer.optimize(history, target_tokens)
+        
+        # Update history
+        session_manager._histories[storage_key] = compressed_history
+        
+        # Persist if store available
+        if hasattr(session_manager, '_store') and session_manager._store:
+            try:
+                session_manager._persist(storage_key)
+            except Exception:
+                pass
+        
+        tokens_saved = result.tokens_saved if hasattr(result, 'tokens_saved') else 0
+        messages_removed = len(history) - len(compressed_history)
+        
+        return f"✅ Compressed {messages_removed} messages, freed ~{tokens_saved:,} tokens."
+        
+    except Exception as e:
+        logger.error(f"Compression failed: {e}")
+        return f"❌ Compression failed: {e}"
+
+
+def handle_queue_command(
+    session_manager,
+    user_id: str,
+    message_text: Optional[str] = None,
+    run_control: Optional["SessionRunControl"] = None,
+) -> str:
+    """Handle /queue command for message queuing.
+
+    Delegates to the canonical :class:`SessionRunControl` pending slot, which
+    is the only mechanism that is actually drained by the gateway run loop
+    (``chat_with_run_control`` calls ``next_pending``/``finish_run``). A
+    message is only meaningful to queue while a run is in flight; if the bot
+    is idle there is nothing to run "after", so the user is told to just send
+    the message normally instead of being given a false promise.
+
+    Args:
+        session_manager: BotSessionManager instance
+        user_id: User ID
+        message_text: Optional message to queue
+        run_control: SessionRunControl instance (falls back to
+            ``session_manager._run_control`` when not supplied)
+
+    Returns:
+        Response message
+    """
+    # Resolve run control from the explicit arg or the session manager.
+    if run_control is None:
+        run_control = getattr(session_manager, "_run_control", None)
+
+    if run_control is None:
+        return (
+            "ℹ️ Message queuing isn't enabled for this bot. "
+            "Just send your message and it will be processed."
+        )
+
+    if not message_text:
+        # Show whether a follow-up is currently pending for this user.
+        try:
+            status = run_control.get_run_status(user_id)
+        except Exception:
+            status = {}
+        if status.get("has_pending"):
+            preview = status.get("pending_preview", "")
+            return f"📝 Pending follow-up: {preview}"
+        return "No follow-up queued. Use /queue <message> to add one while a task is running."
+
+    # Submit through run control so the message is parked in the pending slot
+    # that the run loop actually drains after the current turn completes.
+    import asyncio
+
+    from ._run_control import RunDecision
+
+    async def _submit() -> "RunDecision":
+        return await run_control.submit(user_id, message_text)
+
+    try:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is not None and loop.is_running():
+            # Schedule on the running loop; we can't block-await from here.
+            loop.create_task(_submit())
+            return "⏳ Follow-up noted — it will run after the current task completes."
+
+        decision = asyncio.run(_submit())
+    except Exception as e:  # noqa: BLE001 - surface a friendly message
+        return f"❌ Could not queue message: {e}"
+
+    if decision == RunDecision.RUN_NOW:
+        return (
+            "ℹ️ No task is currently running, so there's nothing to queue behind. "
+            "Send your message normally to run it now."
+        )
+    if decision == RunDecision.MERGED:
+        return "⏳ Added to your pending follow-up — it will run after the current task completes."
+    if decision == RunDecision.STEERED:
+        return "🧭 Injected into the running task as live guidance."
+    return "⏳ Follow-up queued — it will run after the current task completes."
