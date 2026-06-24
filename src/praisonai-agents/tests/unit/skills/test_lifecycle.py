@@ -143,6 +143,31 @@ class TestUsageTelemetry:
             skill = manager.get_skill("my-skill")
             assert skill.properties.patch_count == 1
 
+    def test_telemetry_preserves_embedded_fence_in_value(self):
+        """A frontmatter value containing '---' must not corrupt the file
+        when telemetry is persisted line-wise."""
+        from praisonaiagents.skills.manager import SkillManager
+
+        skill_dir = Path(tmpdir := tempfile.mkdtemp()) / "fence-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            """---
+name: fence-skill
+description: Parse YAML---based configs
+---
+
+The body --- with a fence-like line stays intact.
+"""
+        )
+        manager = SkillManager()
+        manager.add_skill(str(skill_dir))
+        manager.get_instructions("fence-skill")
+
+        content = (skill_dir / "SKILL.md").read_text()
+        assert "description: Parse YAML---based configs" in content
+        assert "The body --- with a fence-like line stays intact." in content
+        assert "use-count: 1" in content
+
 
 class TestArchivalAndRestore:
     def test_archive_then_restore(self):

@@ -254,6 +254,12 @@ class SkillManager:
         if not skill.is_activated:
             self.activate(skill)
 
+        # Only count a genuinely usable skill: a skill that fails to activate
+        # (instructions is None) must not accrue use telemetry, otherwise a
+        # broken skill looks active to the lifecycle curator.
+        if skill.instructions is None:
+            return None
+
         self._record_use(skill)
         return skill.instructions
 
@@ -608,6 +614,10 @@ version: 1.0.0
         ``patch_skill`` call, undoing a mutation that broke a previously
         working skill.
 
+        Note: this is a *single-step* undo. Only the most recent mutation is
+        snapshotted; sequential ``edit``/``patch`` calls overwrite the prior
+        snapshot, so rollback cannot step back more than one mutation.
+
         Args:
             name: Skill name to roll back
 
@@ -789,8 +799,13 @@ version: 1.0.0
             return
         if not content.startswith("---"):
             return
-        parts = content.split("---", 2)
-        if len(parts) < 3:
+        # Split only on a fence that sits on its own line so embedded "---"
+        # sequences inside frontmatter values (e.g. "foo---bar") cannot
+        # fragment the block and corrupt the file. The opening fence is the
+        # leading "---"; the closing fence is the next "\n---\n".
+        after_open = content[3:]
+        fm_body, sep, body = after_open.partition("\n---\n")
+        if not sep:
             return
 
         def _fmt(value):
@@ -800,7 +815,7 @@ version: 1.0.0
                 return f'"{value}"'
             return value
 
-        fm_lines = parts[1].split("\n")
+        fm_lines = fm_body.split("\n")
         remaining = dict(fields)
         new_lines = []
         for line in fm_lines:
@@ -822,7 +837,7 @@ version: 1.0.0
                 insert_at -= 1
             new_lines.insert(insert_at, f"{key}: {_fmt(value)}")
 
-        new_content = "---" + "\n".join(new_lines) + "---" + parts[2]
+        new_content = "---" + "\n".join(new_lines) + "\n---\n" + body
         try:
             self._write_skill_atomically(skill_md, new_content)
         except Exception:
