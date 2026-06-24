@@ -80,6 +80,20 @@ def __getattr__(name: str):
         _module_cache["GateResult"] = GateResult
         return _module_cache[name]
 
+    if name in ("Blueprint", "BlueprintSlot", "BlueprintStoreProtocol"):
+        from .blueprint_defs import Blueprint, BlueprintSlot, BlueprintStoreProtocol
+        _module_cache["Blueprint"] = Blueprint
+        _module_cache["BlueprintSlot"] = BlueprintSlot
+        _module_cache["BlueprintStoreProtocol"] = BlueprintStoreProtocol
+        return _module_cache[name]
+
+    if name in ("Suggestion", "SuggestionStore", "MAX_PENDING_CAP"):
+        from .suggestion_store import Suggestion, SuggestionStore, MAX_PENDING_CAP
+        _module_cache["Suggestion"] = Suggestion
+        _module_cache["SuggestionStore"] = SuggestionStore
+        _module_cache["MAX_PENDING_CAP"] = MAX_PENDING_CAP
+        return _module_cache[name]
+
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -96,4 +110,10 @@ __all__ = [
     "ScheduleStoreProtocol",
     "JobConditionProtocol",
     "GateResult",
+    "Blueprint",
+    "BlueprintSlot",
+    "BlueprintStoreProtocol",
+    "Suggestion",
+    "SuggestionStore",
+    "MAX_PENDING_CAP",
 ]

@@ -498,6 +498,124 @@ class AgentScheduler(_BaseAgentScheduler):
         
         return scheduler
 
+    @classmethod
+    def from_blueprint(
+        cls,
+        blueprint_name: str,
+        *,
+        slots: Optional[Dict[str, Any]] = None,
+        deliver: str = "",
+        agent_id: str = "",
+        interval_override: Optional[str] = None,
+        max_retries_override: Optional[int] = None,
+        timeout_override: Optional[int] = None,
+        max_cost_override: Optional[float] = None,
+        on_success: Optional[Callable] = None,
+        on_failure: Optional[Callable] = None,
+    ) -> 'AgentScheduler':
+        """
+        Create AgentScheduler from a blueprint template.
+
+        Blueprints are parameterized automation templates with fillable
+        slots.  This method resolves the blueprint, fills slots, materializes
+        the prompt and schedule expression, and returns a configured
+        :class:`AgentScheduler`.
+
+        Args:
+            blueprint_name: Name of the blueprint
+                (``"morning-brief"``, ``"important-mail"``, ``"weekly-review"``,
+                or a custom blueprint).
+            slots: Parameter values to fill blueprint slots.
+            deliver: Delivery target token (overrides blueprint default).
+            agent_id: Agent ID to execute the job.
+            interval_override: Override the resolved schedule expression.
+            max_retries_override: Override max retries.
+            timeout_override: Override timeout in seconds.
+            max_cost_override: Override max cost in USD.
+            on_success: Callback for successful execution.
+            on_failure: Callback for failed execution.
+
+        Returns:
+            Configured :class:`AgentScheduler` instance.
+
+        Raises:
+            ValueError: If the blueprint is not found or required slots
+                        are missing.
+
+        Example::
+
+            scheduler = AgentScheduler.from_blueprint(
+                "morning-brief",
+                slots={"hour": 8, "weekdays": "mon-fri"},
+                deliver="telegram",
+            )
+            scheduler.start(schedule_expr=scheduler._yaml_schedule_config["interval"])
+        """
+        from praisonai.scheduler.blueprint_catalogue import BlueprintCatalogue
+
+        catalogue = BlueprintCatalogue()
+        bp = catalogue.get_blueprint(blueprint_name)
+        if bp is None:
+            available = [b.name for b in catalogue.list_blueprints()]
+            raise ValueError(
+                f"Blueprint '{blueprint_name}' not found. "
+                f"Available: {available}"
+            )
+
+        resolved_slots = catalogue.resolve_slots(bp, slots or {})
+        prompt = catalogue.materialize_prompt(bp, resolved_slots)
+        schedule_expr = catalogue.materialize_schedule(bp, resolved_slots)
+
+        # Build a config dict recording the blueprint resolution
+        config: Dict[str, Any] = {
+            "blueprint": blueprint_name,
+            "resolved_slots": resolved_slots,
+            "deliver": deliver or bp.default_deliver,
+            "agent_id": agent_id or bp.default_agent,
+        }
+
+        # Create a lightweight wrapper that makes a blueprint prompt
+        # look like an agent to the scheduler (mirrors RecipeExecutorAgent).
+        class BlueprintAgent:
+            """Wrapper that lets a blueprint prompt drive the scheduler."""
+
+            def __init__(self, prompt_text: str):
+                self.prompt_text = prompt_text
+                self.name = f"Blueprint:{blueprint_name}"
+
+            def start(self, task: str):
+                from praisonaiagents import Agent
+                from praisonai._async_bridge import run_sync
+                from praisonai.scheduler._dispatch import adispatch_agent
+                agent = Agent(instructions=self.prompt_text)
+                return run_sync(adispatch_agent(agent, self.prompt_text))
+
+        agent = BlueprintAgent(prompt)
+
+        timeout = timeout_override or 300
+        max_cost = max_cost_override if max_cost_override is not None else 1.00
+
+        scheduler = cls(
+            agent=agent,
+            task=prompt,
+            timeout=timeout,
+            max_cost=max_cost,
+            on_success=on_success,
+            on_failure=on_failure,
+        )
+
+        scheduler._blueprint_name = blueprint_name
+        scheduler._blueprint_slots = resolved_slots
+        scheduler._yaml_schedule_config = {
+            'interval': interval_override or schedule_expr,
+            'max_retries': max_retries_override if max_retries_override is not None else 3,
+            'run_immediately': False,
+            'timeout': timeout,
+            'max_cost': max_cost,
+        }
+
+        return scheduler
+
 
 def create_agent_scheduler(
     agent,

@@ -22,6 +22,8 @@ __all__ = [
     'JobResult',
     'RunPolicy',
     'PromptScanResult',
+    'BlueprintCatalogue',
+    'SuggestionEngine',
 ]
 
 # Lazy imports for modules that will be created later
@@ -54,4 +56,10 @@ def __getattr__(name):
     elif name in ('RunPolicy', 'PromptScanResult'):
         from .run_policy import RunPolicy, PromptScanResult
         return RunPolicy if name == 'RunPolicy' else PromptScanResult
+    elif name == 'BlueprintCatalogue':
+        from .blueprint_catalogue import BlueprintCatalogue
+        return BlueprintCatalogue
+    elif name == 'SuggestionEngine':
+        from .suggestion_engine import SuggestionEngine
+        return SuggestionEngine
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
