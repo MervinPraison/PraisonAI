@@ -488,6 +488,7 @@ class WebSocketGateway:
         # Multi-bot lifecycle
         self._channel_bots: Dict[str, Any] = {}  # channel_name -> bot instance
         self._routing_rules: Dict[str, Dict[str, str]] = {}  # channel_name -> {context -> agent_id}
+        self._routing_bindings: Dict[str, List[Any]] = {}  # channel_name -> [RouteBinding] (Issue #2225)
         self._channel_tasks: Dict[str, asyncio.Task] = {}  # channel_name -> asyncio task
         
         # Pairing store for channel authorization
@@ -2681,17 +2682,118 @@ class WebSocketGateway:
         return "default"
 
     def _resolve_agent_for_message(
-        self, channel_name: str, context: str
+        self,
+        channel_name: str,
+        context: str,
+        facts: Optional[Any] = None,
     ) -> Optional["Agent"]:
-        """Look up the correct agent for a channel + context."""
+        """Look up the correct agent for a channel + context.
+
+        Resolution order (Issue #2225):
+          1. Priority-ordered ``bindings`` (peer / role / channel_id / account /
+             chat_type) evaluated most-specific-first, when ``facts`` is given.
+          2. Flat ``routes`` map keyed by chat-type context (legacy behaviour).
+          3. The ``default`` agent.
+
+        Args:
+            channel_name: The channel/platform name.
+            context: Chat-type context token ('dm' | 'group' | 'channel' | 'default').
+            facts: Optional :class:`RouteFacts` carrying richer inbound facts
+                (sender id, roles, channel id, account). When omitted, only the
+                flat chat-type routes are consulted.
+
+        Returns:
+            The resolved Agent, or None if it cannot be found.
+        """
         rules = self._routing_rules.get(channel_name, {})
-        agent_id = rules.get(context) or rules.get("default", "default")
+        default_agent_id = rules.get("default", "default")
+
+        agent_id = None
+        bindings = self._routing_bindings.get(channel_name) or []
+        if bindings and facts is not None:
+            try:
+                from praisonaiagents.gateway import resolve_route
+
+                match = resolve_route(bindings, facts, default_agent=default_agent_id)
+                if match.binding is not None:
+                    agent_id = match.agent
+                    logger.debug(
+                        f"Routing channel={channel_name} -> agent='{agent_id}' "
+                        f"({match.reason})"
+                    )
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning(f"Binding resolution failed for {channel_name}: {exc}")
+
+        if agent_id is None:
+            agent_id = rules.get(context) or default_agent_id
+
         agent = self._agents.get(agent_id)
         if not agent:
             logger.warning(
                 f"No agent '{agent_id}' for channel={channel_name} context={context}"
             )
         return agent
+
+    @staticmethod
+    def _build_route_facts(
+        chat_type: str,
+        *,
+        peer: Optional[str] = None,
+        roles: Optional[List[str]] = None,
+        channel_id: Optional[str] = None,
+        account: Optional[str] = None,
+    ) -> Any:
+        """Build a RouteFacts object from inbound message facts.
+
+        Returns None if the core RouteFacts type is unavailable so callers can
+        gracefully fall back to chat-type-only routing.
+        """
+        try:
+            from praisonaiagents.gateway import RouteFacts
+
+            return RouteFacts(
+                chat_type=chat_type or "default",
+                peer=str(peer) if peer is not None else None,
+                roles=list(roles or []),
+                channel_id=str(channel_id) if channel_id is not None else None,
+                account=str(account) if account is not None else None,
+            )
+        except Exception:  # pragma: no cover - defensive
+            return None
+
+    @staticmethod
+    def _parse_bindings(raw: Any) -> List[Any]:
+        """Parse a list of route-binding dicts into RouteBinding objects.
+
+        Returns an empty list for missing/invalid input so routing falls back
+        to the flat ``routes`` map.
+        """
+        if not raw or not isinstance(raw, list):
+            return []
+        try:
+            from praisonaiagents.gateway import RouteBinding
+        except Exception:  # pragma: no cover - defensive
+            return []
+        bindings: List[Any] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                logger.warning("Ignoring non-mapping route binding: %r", item)
+                continue
+            if not item.get("agent"):
+                logger.warning(
+                    "Ignoring route binding without an 'agent' key: %r", item
+                )
+                continue
+            try:
+                bindings.append(RouteBinding.from_dict(item))
+            except (TypeError, ValueError) as exc:
+                logger.warning(
+                    "Ignoring invalid route binding %r: %s. "
+                    "Fix the binding shape or priority value and retry.",
+                    item,
+                    exc,
+                )
+        return bindings
 
     async def start_channels(self, channels_cfg: Dict[str, Dict[str, Any]]) -> None:
         """Start bot instances for each configured channel.
@@ -2718,6 +2820,9 @@ class WebSocketGateway:
 
             routes = ch_cfg.get("routing") or ch_cfg.get("routes") or {"default": "default"}
             self._routing_rules[channel_name] = routes
+            self._routing_bindings[channel_name] = self._parse_bindings(
+                ch_cfg.get("bindings")
+            )
 
             # Resolve default agent for this channel (used as the bot's primary agent)
             default_agent_id = routes.get("default", next(iter(self._agents.keys())) if self._agents else "default")
@@ -2927,7 +3032,28 @@ class WebSocketGateway:
             routing_ctx = gateway._determine_routing_context(
                 channel_name, {"chat_type": ch_type, "is_dm": is_dm}
             )
-            agent = gateway._resolve_agent_for_message(channel_name, routing_ctx)
+            # Build richer facts for binding-based routing (Issue #2225)
+            sender = message.sender
+            peer = getattr(sender, "user_id", None) if sender else None
+            roles = []
+            sender_meta = getattr(sender, "metadata", None) if sender else None
+            if isinstance(sender_meta, dict):
+                raw_roles = sender_meta.get("roles")
+                if isinstance(raw_roles, list):
+                    roles = [str(r) for r in raw_roles]
+            channel_id = getattr(message.channel, "channel_id", None) if message.channel else None
+            bot_user = getattr(bot, "bot_user", None)
+            account = getattr(bot_user, "user_id", None) if bot_user else None
+            facts = gateway._build_route_facts(
+                routing_ctx,
+                peer=peer,
+                roles=roles,
+                channel_id=channel_id,
+                account=account,
+            )
+            agent = gateway._resolve_agent_for_message(
+                channel_name, routing_ctx, facts=facts
+            )
             if agent:
                 bot.set_agent(agent)
 
@@ -2989,7 +3115,22 @@ class WebSocketGateway:
             routing_ctx = gateway._determine_routing_context(
                 "telegram", {"chat_type": chat_type}
             )
-            agent = gateway._resolve_agent_for_message(channel_name, routing_ctx)
+            # Build richer facts for binding-based routing (Issue #2225)
+            chat_id = (
+                str(update.message.chat.id)
+                if update.message.chat is not None
+                else None
+            )
+            account = bot.bot_user.user_id if getattr(bot, "bot_user", None) else None
+            facts = gateway._build_route_facts(
+                routing_ctx,
+                peer=user_id,
+                channel_id=chat_id,
+                account=account,
+            )
+            agent = gateway._resolve_agent_for_message(
+                channel_name, routing_ctx, facts=facts
+            )
             if not agent:
                 agent = bot._agent  # fallback to default
 
@@ -3133,6 +3274,7 @@ class WebSocketGateway:
 
         self._channel_bots.clear()
         self._routing_rules.clear()
+        self._routing_bindings.clear()
 
     def _diff_config_paths(self, old: Dict[str, Any], new: Dict[str, Any], prefix: str = "") -> Set[str]:
         """Find all paths that differ between old and new configs.
@@ -3268,6 +3410,8 @@ class WebSocketGateway:
         # Remove old routing rules
         if channel_name in self._routing_rules:
             del self._routing_rules[channel_name]
+        if channel_name in self._routing_bindings:
+            del self._routing_bindings[channel_name]
         
         # Start the channel again with new config
         if channel_name in channels_cfg:
@@ -3298,6 +3442,9 @@ class WebSocketGateway:
         
         routes = ch_cfg.get("routing") or ch_cfg.get("routes") or {"default": "default"}
         self._routing_rules[channel_name] = routes
+        self._routing_bindings[channel_name] = self._parse_bindings(
+            ch_cfg.get("bindings")
+        )
         
         # Resolve default agent for this channel
         default_agent_id = routes.get("default", next(iter(self._agents.keys())) if self._agents else "default")

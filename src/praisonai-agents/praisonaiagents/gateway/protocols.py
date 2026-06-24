@@ -946,6 +946,181 @@ class OutboundDeliveryProtocol(Protocol):
 
 
 # ---------------------------------------------------------------------------
+# Inbound route binding (Issue #2225)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class RouteBinding:
+    """A single declarative inbound-routing rule.
+
+    A binding maps a set of optional inbound conditions to a handling agent.
+    Bindings are evaluated most-specific-first so operators get deterministic,
+    debuggable routing across a fleet of agents behind one gateway.
+
+    All condition fields are optional; ``None`` means "do not constrain on this
+    field". A binding matches a set of :class:`RouteFacts` only when *every*
+    non-``None`` condition equals the corresponding fact.
+
+    Attributes:
+        agent: The agent id to route to when this binding matches.
+        chat_type: Chat type ("dm" | "group" | "channel").
+        peer: Sender/user id (most specific).
+        role: Role / guild-role membership of the sender.
+        channel_id: Specific chat/channel id.
+        account: Receiving bot account (for multi-account channels).
+        priority: Higher wins; ties are broken by specificity then order.
+    """
+
+    agent: str
+    chat_type: Optional[str] = None
+    peer: Optional[str] = None
+    role: Optional[str] = None
+    channel_id: Optional[str] = None
+    account: Optional[str] = None
+    priority: int = 0
+
+    # Specificity weights — exact peer beats role/channel beats account
+    # beats chat-type. Higher means more specific.
+    _SPECIFICITY = {
+        "peer": 16,
+        "role": 8,
+        "channel_id": 8,
+        "account": 4,
+        "chat_type": 2,
+    }
+
+    @property
+    def specificity(self) -> int:
+        """Sum of weights for the conditions this binding constrains on."""
+        score = 0
+        for field_name, weight in self._SPECIFICITY.items():
+            if getattr(self, field_name) is not None:
+                score += weight
+        return score
+
+    def matches(self, facts: "RouteFacts") -> bool:
+        """Return True if every constrained condition equals the facts."""
+        if self.peer is not None and str(self.peer) != str(facts.peer):
+            return False
+        if self.channel_id is not None and str(self.channel_id) != str(facts.channel_id):
+            return False
+        if self.account is not None and str(self.account) != str(facts.account):
+            return False
+        if self.chat_type is not None and self.chat_type != facts.chat_type:
+            return False
+        if self.role is not None:
+            expected_role = str(self.role)
+            if expected_role not in [str(role) for role in (facts.roles or [])]:
+                return False
+        return True
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "RouteBinding":
+        """Create a binding from a YAML/dict mapping.
+
+        Accepts ``agent`` (required). Unknown keys are ignored so the shape
+        can evolve without breaking older configs.
+        """
+        return cls(
+            agent=data.get("agent", "default"),
+            chat_type=data.get("chat_type"),
+            peer=_as_opt_str(data.get("peer")),
+            role=data.get("role"),
+            channel_id=_as_opt_str(data.get("channel_id")),
+            account=_as_opt_str(data.get("account")),
+            priority=int(data.get("priority", 0) or 0),
+        )
+
+
+@dataclass
+class RouteFacts:
+    """Inbound facts extracted from a message, used to resolve a binding.
+
+    Attributes:
+        chat_type: Normalised chat type ("dm" | "group" | "channel" | "default").
+        peer: Sender/user id.
+        roles: Roles/guild-role memberships of the sender.
+        channel_id: The chat/channel id the message arrived in.
+        account: The receiving bot account (multi-account channels).
+    """
+
+    chat_type: str = "default"
+    peer: Optional[str] = None
+    roles: List[str] = field(default_factory=list)
+    channel_id: Optional[str] = None
+    account: Optional[str] = None
+
+
+@dataclass
+class RouteMatch:
+    """Result of resolving a route.
+
+    Attributes:
+        agent: The resolved agent id.
+        binding: The binding that matched, or ``None`` when the fallback was used.
+        reason: Short human-readable explanation for logging/debugging.
+    """
+
+    agent: str
+    binding: Optional[RouteBinding] = None
+    reason: str = ""
+
+
+def _as_opt_str(value: Any) -> Optional[str]:
+    """Coerce a value to a string, preserving ``None``."""
+    if value is None:
+        return None
+    return str(value)
+
+
+def resolve_route(
+    bindings: List[RouteBinding],
+    facts: RouteFacts,
+    default_agent: str = "default",
+) -> RouteMatch:
+    """Resolve the handling agent from priority-ordered bindings.
+
+    Bindings are evaluated most-specific-first: the matching binding with the
+    highest ``priority`` wins; ties are broken by specificity (exact peer →
+    role/channel → account → chat-type), then by declaration order.
+
+    Args:
+        bindings: Candidate route bindings (any order).
+        facts: Inbound facts extracted from the message.
+        default_agent: Agent id to fall back to when nothing matches.
+
+    Returns:
+        A :class:`RouteMatch` with the selected agent and matched binding.
+    """
+    best: Optional[RouteBinding] = None
+    best_key: tuple = ()
+    for idx, binding in enumerate(bindings):
+        if not binding.matches(facts):
+            continue
+        # Higher priority wins, then higher specificity, then earlier order.
+        key = (binding.priority, binding.specificity, -idx)
+        if best is None or key > best_key:
+            best = binding
+            best_key = key
+
+    if best is not None:
+        return RouteMatch(
+            agent=best.agent,
+            binding=best,
+            reason=(
+                f"matched binding (priority={best.priority}, "
+                f"specificity={best.specificity})"
+            ),
+        )
+
+    return RouteMatch(
+        agent=default_agent,
+        binding=None,
+        reason="no binding matched; using default",
+    )
+
+
+# ---------------------------------------------------------------------------
 # Auth Mode protocols and helpers (bind-aware authentication posture)
 # ---------------------------------------------------------------------------
 
