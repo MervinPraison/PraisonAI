@@ -15,7 +15,7 @@ Usage:
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional, Type, get_type_hints
+from typing import Any, Callable, Dict, List, Optional, get_type_hints
 import inspect
 import json
 import logging
@@ -133,18 +133,6 @@ class BaseTool(ABC):
             skip={"self"},
             func_name=self.name
         )
-    
-    @staticmethod
-    def _python_type_to_json(python_type: Type) -> str:
-        """Convert Python type to JSON Schema type.
-        
-        DEPRECATED: Use annotation_to_json_schema() from schema.py instead.
-        This method is kept for backward compatibility but will be removed.
-        """
-        # Legacy fallback - delegate to new schema utility and extract type
-        from .schema import annotation_to_json_schema
-        schema = annotation_to_json_schema(python_type)
-        return schema.get("type", "string")
     
     @abstractmethod
     def run(self, **kwargs) -> Any:
