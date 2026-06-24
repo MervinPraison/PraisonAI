@@ -12,10 +12,36 @@ from typing import Optional, Dict, Any, Callable, Union
 from abc import ABC, abstractmethod
 
 from .shared import ScheduleParser, backoff_delay, safe_call
-from ._base_scheduler import _BaseAgentScheduler, _compute_run_cost
+from ._base_scheduler import (
+    _BaseAgentScheduler,
+    _compute_run_cost,
+    build_from_recipe,
+    build_from_yaml,
+)
 from ._dispatch import adispatch_agent
 
 logger = logging.getLogger(__name__)
+
+
+class AsyncRecipeExecutorAgent:
+    """Wrapper that makes a recipe look like an agent for the async scheduler."""
+
+    def __init__(self, resolved_recipe):
+        self.resolved = resolved_recipe
+        self.name = f"AsyncRecipeAgent:{resolved_recipe.name}"
+
+    async def astart(self, task: str) -> Any:
+        from praisonai.recipe.bridge import execute_resolved_recipe
+        # Run recipe execution in thread to avoid blocking async loop
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, lambda: execute_resolved_recipe(self.resolved)
+        )
+
+    def start(self, task: str) -> Any:
+        from praisonai.recipe.bridge import execute_resolved_recipe
+        # Fallback sync method
+        return execute_resolved_recipe(self.resolved)
 
 
 class AsyncAgentExecutorInterface(ABC):
@@ -460,44 +486,16 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
             scheduler = AsyncAgentScheduler.from_yaml("agents.yaml")
             await scheduler.start("hourly")
         """
-        from .yaml_loader import load_agent_yaml_with_schedule, create_agent_from_config
-        
-        # Load configuration from YAML
-        agent_config, schedule_config = load_agent_yaml_with_schedule(yaml_path)
-        
-        # Create agent from config
-        agent = create_agent_from_config(agent_config)
-        
-        # Get task
-        task = agent_config.get('task', '')
-        if not task:
-            raise ValueError("No task specified in YAML file")
-        
-        # Apply overrides to schedule config
-        if interval_override:
-            schedule_config['interval'] = interval_override
-        if max_retries_override is not None:
-            schedule_config['max_retries'] = max_retries_override
-        if timeout_override is not None:
-            schedule_config['timeout'] = timeout_override
-        if max_cost_override is not None:
-            schedule_config['max_cost'] = max_cost_override
-        
-        # Create scheduler instance with timeout and cost limits
-        scheduler = cls(
-            agent=agent,
-            task=task,
-            config=agent_config,
-            timeout=schedule_config.get('timeout'),
-            max_cost=schedule_config.get('max_cost'),
+        return build_from_yaml(
+            cls,
+            yaml_path=yaml_path,
+            interval_override=interval_override,
+            max_retries_override=max_retries_override,
+            timeout_override=timeout_override,
+            max_cost_override=max_cost_override,
             on_success=on_success,
-            on_failure=on_failure
+            on_failure=on_failure,
         )
-        
-        # Store schedule config for later use
-        scheduler._yaml_schedule_config = schedule_config
-        
-        return scheduler
 
     async def start_from_yaml_config(self) -> bool:
         """
@@ -553,74 +551,19 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
             scheduler = AsyncAgentScheduler.from_recipe("news-monitor")
             await scheduler.start("hourly")
         """
-        from praisonai.recipe.bridge import resolve, execute_resolved_recipe, get_recipe_task_description
-        
-        # Resolve the recipe
-        resolved = resolve(
+        return build_from_recipe(
+            cls,
+            AsyncRecipeExecutorAgent,
             recipe_name,
             input_data=input_data,
-            config=config or {},
-            options={'timeout_sec': timeout_override or 300},
-        )
-        
-        # Get runtime config defaults from recipe
-        interval = interval_override or "hourly"
-        max_retries = max_retries_override if max_retries_override is not None else 3
-        timeout = timeout_override or 300
-        max_cost = max_cost_override if max_cost_override is not None else 1.00
-        
-        runtime = resolved.runtime_config
-        if runtime and hasattr(runtime, 'schedule'):
-            sched_config = runtime.schedule
-            interval = interval_override or sched_config.interval
-            max_retries = max_retries_override if max_retries_override is not None else sched_config.max_retries
-            timeout = timeout_override or sched_config.timeout_sec
-            max_cost = max_cost_override if max_cost_override is not None else sched_config.max_cost_usd
-        
-        # Create a recipe executor agent wrapper that supports async
-        class AsyncRecipeExecutorAgent:
-            """Wrapper that makes a recipe look like an agent for the async scheduler."""
-            def __init__(self, resolved_recipe):
-                self.resolved = resolved_recipe
-                self.name = f"AsyncRecipeAgent:{resolved_recipe.name}"
-            
-            async def astart(self, task: str) -> Any:
-                # Run recipe execution in thread to avoid blocking async loop
-                loop = asyncio.get_running_loop()
-                return await loop.run_in_executor(
-                    None, lambda: execute_resolved_recipe(self.resolved)
-                )
-            
-            def start(self, task: str) -> Any:
-                # Fallback sync method
-                return execute_resolved_recipe(self.resolved)
-        
-        # Create the agent wrapper
-        agent = AsyncRecipeExecutorAgent(resolved)
-        task = get_recipe_task_description(resolved)
-        
-        # Create scheduler instance
-        scheduler = cls(
-            agent=agent,
-            task=task,
-            timeout=timeout,
-            max_cost=max_cost,
+            config=config,
+            interval_override=interval_override,
+            max_retries_override=max_retries_override,
+            timeout_override=timeout_override,
+            max_cost_override=max_cost_override,
             on_success=on_success,
             on_failure=on_failure,
         )
-        
-        # Store recipe metadata and schedule config
-        scheduler._recipe_name = recipe_name
-        scheduler._recipe_resolved = resolved
-        scheduler._yaml_schedule_config = {
-            'interval': interval,
-            'max_retries': max_retries,
-            'run_immediately': False,
-            'timeout': timeout,
-            'max_cost': max_cost,
-        }
-        
-        return scheduler
 
 
 def create_async_agent_scheduler(
