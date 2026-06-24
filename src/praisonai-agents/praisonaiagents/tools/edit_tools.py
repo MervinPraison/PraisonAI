@@ -12,6 +12,7 @@ import hashlib
 import difflib
 from typing import List, Optional, Tuple
 from ..approval import require_approval
+from . import _file_locks
 
 logger = logging.getLogger(__name__)
 
@@ -418,8 +419,15 @@ class EditTools:
 
     @require_approval(risk_level="high")
     def edit_file(self, filepath: str, old_string: str, new_string: str, 
-                  replace_all: bool = False, expected_hash: Optional[str] = None) -> str:
+                  replace_all: bool = False, expected_hash: Optional[str] = None,
+                  force: bool = False) -> str:
         """Edit a file by replacing text using precise find-and-replace.
+        
+        The entire read-modify-write runs under a per-file lock, so concurrent
+        edits to the same path (parallel tools / multi-agent teams) serialise
+        instead of corrupting the file.  By default the edit also aborts if the
+        file changed on disk since it was last read via this tool, preventing
+        silent clobbering of externally-modified files.
         
         Args:
             filepath: Path to the file to edit
@@ -427,6 +435,8 @@ class EditTools:
             new_string: Replacement text
             replace_all: Whether to replace all occurrences (default: first only)
             expected_hash: Optional SHA256 hash of expected content for staleness check
+            force: Bypass the automatic staleness guard for an intentional
+                blind write (an explicit ``expected_hash`` is still honoured)
             
         Returns:
             Success message with diff or error description
@@ -437,89 +447,109 @@ class EditTools:
             if not os.path.exists(safe_path):
                 return f"Error: File not found: {filepath}"
             
-            # Detect BOM and read file content
-            with open(safe_path, 'rb') as f:
-                raw_bytes = f.read()
-            
-            # Check for UTF-8 BOM only (we don't support UTF-16)
-            bom = b''
-            if raw_bytes.startswith(b'\xef\xbb\xbf'):  # UTF-8 BOM
-                bom = b'\xef\xbb\xbf'
-                raw_bytes = raw_bytes[3:]
-            elif raw_bytes.startswith(b'\xff\xfe') or raw_bytes.startswith(b'\xfe\xff'):
-                # UTF-16 BOM detected - not supported
-                return "Error: UTF-16 encoding is not supported. Please convert the file to UTF-8."
-            
-            # Decode content (UTF-8 only)
-            content = raw_bytes.decode('utf-8')
-            
-            # Detect line endings
-            line_ending = self._detect_line_ending(content)
-            
-            # Staleness check
-            if expected_hash is not None:
+            # Serialise the whole read-modify-write on this canonical path so
+            # concurrent edits/writes cannot interleave and corrupt the file.
+            with _file_locks.get_lock(safe_path):
+                # Detect BOM and read file content
+                with open(safe_path, 'rb') as f:
+                    raw_bytes = f.read()
+                
+                # Check for UTF-8 BOM only (we don't support UTF-16)
+                bom = b''
+                if raw_bytes.startswith(b'\xef\xbb\xbf'):  # UTF-8 BOM
+                    bom = b'\xef\xbb\xbf'
+                    raw_bytes = raw_bytes[3:]
+                elif raw_bytes.startswith(b'\xff\xfe') or raw_bytes.startswith(b'\xfe\xff'):
+                    # UTF-16 BOM detected - not supported
+                    return "Error: UTF-16 encoding is not supported. Please convert the file to UTF-8."
+                
+                # Decode content (UTF-8 only)
+                content = raw_bytes.decode('utf-8')
+                
+                # Detect line endings
+                line_ending = self._detect_line_ending(content)
+                
                 current_hash = self._compute_content_hash(content)
-                if current_hash != expected_hash:
-                    return (f"Error: File has been modified since last read. "
-                           f"Please re-read the file before editing. "
-                           f"Expected hash: {expected_hash[:8]}..., "
-                           f"Current hash: {current_hash[:8]}...")
-            
-            # Cache the current content hash for future staleness checks
-            self._file_cache[safe_path] = self._compute_content_hash(content)
-            
-            # Validation
-            if old_string == "":
-                return "Error: old_string must be non-empty"
-            
-            # Locate the target using the fuzzy matching ladder.  Exact
-            # substring matches are preferred and behave exactly as before;
-            # fuzzy strategies only engage when an exact match is not found.
-            spans = self._find_spans(content, old_string)
-            
-            if not spans:
-                preview = old_string[:50] + ("..." if len(old_string) > 50 else "")
-                return f"Error: String not found in file: '{preview}'"
-            
-            occurrences = len(spans)
-            
-            # Check for ambiguous match
-            if occurrences > 1 and not replace_all:
-                preview = old_string[:30] + ("..." if len(old_string) > 30 else "")
-                return (f"Error: Ambiguous match - '{preview}' occurs {occurrences} times. "
-                       f"Please provide more surrounding context to make the match unique, "
-                       f"or use replace_all=True to replace all occurrences.")
-            
-            # Perform replacement using located spans (apply right-to-left so
-            # earlier offsets remain valid as we splice in new_string).
-            if replace_all:
-                new_content = content
-                for start, end in sorted(spans, reverse=True):
-                    new_content = new_content[:start] + new_string + new_content[end:]
-                replacements = occurrences
-            else:
-                start, end = spans[0]
-                new_content = content[:start] + new_string + content[end:]
-                replacements = 1
-            
-            # Generate diff
-            diff = self._render_diff(content, new_content, filepath)
-            
-            # Normalize line endings for the new content
-            if line_ending == '\r\n':
-                new_content = new_content.replace('\r\n', '\n').replace('\n', '\r\n')
-            
-            # Write updated content back with BOM if present
-            with open(safe_path, 'wb') as f:
-                if bom:
-                    f.write(bom)
-                f.write(new_content.encode('utf-8'))
-            
-            # Update cache with new content hash
-            self._file_cache[safe_path] = self._compute_content_hash(new_content)
-            
-            result = f"Success: Made {replacements} replacement(s) in {filepath}\n\nDiff:\n{diff}"
-            return result + self._run_diagnostics(safe_path, filepath)
+                
+                # Explicit staleness check (caller-supplied hash takes priority).
+                if expected_hash is not None:
+                    if current_hash != expected_hash:
+                        return (f"Error: File has been modified since last read. "
+                               f"Please re-read the file before editing. "
+                               f"Expected hash: {expected_hash[:8]}..., "
+                               f"Current hash: {current_hash[:8]}...")
+                # Automatic staleness guard: if a prior read recorded a hash for
+                # this path, abort when the on-disk content has since changed.
+                elif not force:
+                    recorded = _file_locks.get_read_hash(safe_path)
+                    if recorded is not None and recorded != current_hash:
+                        return (f"Error: File changed since it was read - "
+                               f"re-read before editing (or pass force=True to override). "
+                               f"Recorded hash: {recorded[:8]}..., "
+                               f"Current hash: {current_hash[:8]}...")
+                
+                # Cache the current content hash for future staleness checks
+                self._file_cache[safe_path] = current_hash
+                _file_locks.record_read_hash(safe_path, current_hash)
+                
+                # Validation
+                if old_string == "":
+                    return "Error: old_string must be non-empty"
+                
+                # Locate the target using the fuzzy matching ladder.  Exact
+                # substring matches are preferred and behave exactly as before;
+                # fuzzy strategies only engage when an exact match is not found.
+                spans = self._find_spans(content, old_string)
+                
+                if not spans:
+                    preview = old_string[:50] + ("..." if len(old_string) > 50 else "")
+                    return f"Error: String not found in file: '{preview}'"
+                
+                occurrences = len(spans)
+                
+                # Check for ambiguous match
+                if occurrences > 1 and not replace_all:
+                    preview = old_string[:30] + ("..." if len(old_string) > 30 else "")
+                    return (f"Error: Ambiguous match - '{preview}' occurs {occurrences} times. "
+                           f"Please provide more surrounding context to make the match unique, "
+                           f"or use replace_all=True to replace all occurrences.")
+                
+                # Perform replacement using located spans (apply right-to-left so
+                # earlier offsets remain valid as we splice in new_string).
+                if replace_all:
+                    new_content = content
+                    for start, end in sorted(spans, reverse=True):
+                        new_content = new_content[:start] + new_string + new_content[end:]
+                    replacements = occurrences
+                else:
+                    start, end = spans[0]
+                    new_content = content[:start] + new_string + content[end:]
+                    replacements = 1
+                
+                # Generate diff
+                diff = self._render_diff(content, new_content, filepath)
+                
+                # Normalize line endings for the new content
+                if line_ending == '\r\n':
+                    new_content = new_content.replace('\r\n', '\n').replace('\n', '\r\n')
+                
+                # Write updated content back with BOM if present
+                with open(safe_path, 'wb') as f:
+                    if bom:
+                        f.write(bom)
+                    f.write(new_content.encode('utf-8'))
+                
+                # Update caches with the new content hash so a follow-up edit
+                # in the same session is not flagged as stale.  Hash the exact
+                # on-disk form (CRLF preserved) so a subsequent binary read of
+                # the same file produces an identical hash and is not falsely
+                # flagged as stale.
+                new_hash = self._compute_content_hash(new_content)
+                self._file_cache[safe_path] = new_hash
+                _file_locks.record_read_hash(safe_path, new_hash)
+                
+                result = f"Success: Made {replacements} replacement(s) in {filepath}\n\nDiff:\n{diff}"
+                return result + self._run_diagnostics(safe_path, filepath)
             
         except Exception as e:
             error_msg = f"Error editing file {filepath}: {str(e)}"
@@ -608,7 +638,7 @@ class EditTools:
         return ops
 
     @require_approval(risk_level="high")
-    def apply_patch(self, patch: str) -> str:
+    def apply_patch(self, patch: str, force: bool = False) -> str:
         """Apply a structured multi-file patch atomically.
 
         The patch may Add, Update, and Delete multiple files in a single
@@ -618,12 +648,20 @@ class EditTools:
         the filesystem is left in its original state.  BOM and CRLF line
         endings are preserved on Update, matching ``edit_file``.
 
+        Every affected path is locked for the duration of validate+commit, so
+        a concurrent edit/write to any of those files serialises rather than
+        racing.  Updated files are also checked against their last-read hash by
+        default; pass ``force=True`` to bypass that staleness guard.
+
         Args:
             patch: Structured patch text (see ``_parse_patch`` for format).
+            force: Bypass the automatic staleness guard on Update operations.
 
         Returns:
             Combined success message with diffs, or an error description.
         """
+        import contextlib
+
         try:
             try:
                 ops = self._parse_patch(patch)
@@ -633,6 +671,24 @@ class EditTools:
             if not ops:
                 return "Error: Patch contains no operations"
 
+            # Acquire per-path locks for every affected file up front, in a
+            # stable (sorted) order to avoid deadlock when two patches share
+            # files.  Held across validate+commit so no concurrent edit/write
+            # can interleave with this atomic patch.
+            lock_paths = sorted({self._validate_path(op["path"]) for op in ops})
+            with contextlib.ExitStack() as stack:
+                for lp in lock_paths:
+                    stack.enter_context(_file_locks.get_lock(lp))
+                return self._apply_patch_locked(ops, force)
+
+        except Exception as e:
+            error_msg = f"Error applying patch: {str(e)}"
+            logger.error(error_msg)
+            return error_msg
+
+    def _apply_patch_locked(self, ops, force: bool) -> str:
+        """Validate and commit ``ops`` while holding the per-path locks."""
+        try:
             # Phase 1: validate every operation and compute new content.
             # Each planned entry: (kind, safe_path, display, encoded_bytes,
             # diff, content_hash). encoded_bytes is None for deletes.
@@ -663,6 +719,15 @@ class EditTools:
                         original, bom = self._decode_with_bom(raw_bytes)
                     except ValueError as e:
                         return f"Error: Cannot update '{op['path']}': {e}"
+                    # Automatic staleness guard: abort if the file changed on
+                    # disk since it was last read via these tools.
+                    if not force:
+                        original_hash = self._compute_content_hash(original)
+                        recorded = _file_locks.get_read_hash(safe_path)
+                        if recorded is not None and recorded != original_hash:
+                            return (f"Error: Cannot update '{op['path']}': file changed "
+                                   f"since it was read - re-read before editing "
+                                   f"(or pass force=True to override).")
                     line_ending = self._detect_line_ending(original)
                     updated = original
                     for old_block, new_block in op["hunks"]:
@@ -698,6 +763,7 @@ class EditTools:
                         os.replace(safe_path, backup)
                         applied.append(("delete", safe_path, backup))
                         self._file_cache.pop(safe_path, None)
+                        _file_locks.clear_read_hash(safe_path)
                         messages.append(f"Deleted {display}")
                     else:
                         os.makedirs(os.path.dirname(safe_path) or ".", exist_ok=True)
@@ -721,6 +787,7 @@ class EditTools:
                             raise
                         applied.append(("write", safe_path, backup))
                         self._file_cache[safe_path] = content_hash
+                        _file_locks.record_read_hash(safe_path, content_hash)
                         verb = "Added" if kind == "add" else "Updated"
                         diagnostics = self._run_diagnostics(safe_path, display)
                         messages.append(f"{verb} {display}\n{diff}{diagnostics}")
@@ -786,6 +853,9 @@ class EditTools:
             
             content_hash = self._compute_content_hash(content)
             self._file_cache[safe_path] = content_hash
+            # Record the read hash in the shared registry so a later edit/write
+            # to this path engages the automatic staleness guard by default.
+            _file_locks.record_read_hash(safe_path, content_hash)
             
             return content, content_hash
             
@@ -864,7 +934,8 @@ _edit_tools = EditTools()
 
 @require_approval(risk_level="high")
 def edit_file(filepath: str, old_string: str, new_string: str, 
-              replace_all: bool = False, expected_hash: Optional[str] = None) -> str:
+              replace_all: bool = False, expected_hash: Optional[str] = None,
+              force: bool = False) -> str:
     """Edit a file by replacing text using precise find-and-replace.
     
     Args:
@@ -873,25 +944,28 @@ def edit_file(filepath: str, old_string: str, new_string: str,
         new_string: Replacement text
         replace_all: Whether to replace all occurrences (default: first only)
         expected_hash: Optional SHA256 hash of expected content for staleness check
+        force: Bypass the automatic staleness guard for an intentional blind write
         
     Returns:
         Success message with diff or error description
     """
-    return _edit_tools.edit_file(filepath, old_string, new_string, replace_all, expected_hash)
+    return _edit_tools.edit_file(filepath, old_string, new_string, replace_all,
+                                 expected_hash, force)
 
 
 @require_approval(risk_level="high")
-def apply_patch(patch: str) -> str:
+def apply_patch(patch: str, force: bool = False) -> str:
     """Apply a structured multi-file patch atomically (Add/Update/Delete).
 
     Args:
         patch: Structured patch text with ``*** Add File:``,
             ``*** Update File:`` and ``*** Delete File:`` sections.
+        force: Bypass the automatic staleness guard on Update operations.
 
     Returns:
         Combined success message with diffs or an error description.
     """
-    return _edit_tools.apply_patch(patch)
+    return _edit_tools.apply_patch(patch, force)
 
 
 def read_file(filepath: str) -> Tuple[str, str]:

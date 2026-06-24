@@ -12,11 +12,13 @@ content = read_file("example.txt")
 
 import os
 import json
+import hashlib
 from typing import List, Dict, Union, Optional
 from pathlib import Path
 import shutil
 import logging
 from ..approval import require_approval
+from . import _file_locks
 
 class FileTools:
     """Tools for file operations including read, write, list, and information."""
@@ -92,21 +94,36 @@ class FileTools:
             # Validate path to prevent traversal attacks
             safe_path = self._validate_path(filepath)
             with open(safe_path, 'r', encoding=encoding) as f:
-                return f.read()
+                data = f.read()
+            # Record the read hash so a later write engages the staleness guard.
+            try:
+                _file_locks.record_read_hash(
+                    safe_path, hashlib.sha256(data.encode('utf-8')).hexdigest())
+            except Exception:
+                pass
+            return data
         except Exception as e:
             error_msg = f"Error reading file {filepath}: {str(e)}"
             logging.error(error_msg)
             return error_msg
 
     @require_approval(risk_level="high")
-    def write_file(self, filepath: str, content: str, encoding: str = 'utf-8') -> bool:
+    def write_file(self, filepath: str, content: str, encoding: str = 'utf-8',
+                   force: bool = False) -> bool:
         """
         Write content to a file.
+        
+        The write runs under a per-file lock shared with the edit tools, so a
+        concurrent edit/write to the same path serialises instead of racing.
+        If the file already exists and was previously read via these tools, the
+        write aborts when the on-disk content changed since that read, unless
+        ``force=True`` is passed.
         
         Args:
             filepath: Path to the file
             content: Content to write
             encoding: File encoding (default: utf-8)
+            force: Bypass the automatic staleness guard for a blind overwrite
             
         Returns:
             bool: True if successful, False otherwise
@@ -116,16 +133,41 @@ class FileTools:
             self._require_workspace_access(write=True)
             # Validate path to prevent traversal attacks
             safe_path = self._validate_path(filepath)
-            # Create directory if it doesn't exist
-            os.makedirs(os.path.dirname(safe_path), exist_ok=True)
             # Auto-coerce non-string content (LLMs sometimes pass dicts/lists)
             if not isinstance(content, str):
                 if isinstance(content, (dict, list)):
                     content = json.dumps(content, indent=2, ensure_ascii=False)
                 else:
                     content = str(content)
-            with open(safe_path, 'w', encoding=encoding) as f:
-                f.write(content)
+            # Serialise concurrent writes/edits on this canonical path.
+            with _file_locks.get_lock(safe_path):
+                # Automatic staleness guard for existing files.
+                if not force and os.path.exists(safe_path):
+                    recorded = _file_locks.get_read_hash(safe_path)
+                    if recorded is not None:
+                        try:
+                            with open(safe_path, 'r', encoding=encoding) as f:
+                                on_disk = f.read()
+                            current = hashlib.sha256(
+                                on_disk.encode('utf-8')).hexdigest()
+                        except Exception:
+                            current = None
+                        if current is not None and current != recorded:
+                            logging.error(
+                                "Refusing to write %s: file changed since it was "
+                                "read - re-read before writing (or pass force=True)",
+                                filepath)
+                            return False
+                # Create directory if it doesn't exist
+                os.makedirs(os.path.dirname(safe_path), exist_ok=True)
+                with open(safe_path, 'w', encoding=encoding) as f:
+                    f.write(content)
+                # Record the new content hash so follow-up writes are not stale.
+                try:
+                    _file_locks.record_read_hash(
+                        safe_path, hashlib.sha256(content.encode('utf-8')).hexdigest())
+                except Exception:
+                    pass
             return True
         except Exception as e:
             error_msg = f"Error writing to file {filepath}: {str(e)}"
