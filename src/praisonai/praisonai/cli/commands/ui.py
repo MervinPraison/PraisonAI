@@ -20,27 +20,6 @@ app = typer.Typer(
     )
 )
 
-UI_DIR = Path.home() / ".praisonai" / "ui"
-DEFAULT_APP = UI_DIR / "app.py"
-
-
-def _ensure_default_app() -> Path:
-    """Copy bundled default_app.py to ~/.praisonai/ui/app.py if missing."""
-    if DEFAULT_APP.exists():
-        return DEFAULT_APP
-
-    UI_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Read the bundled default
-    bundled = Path(__file__).parent.parent.parent / "ui_chat" / "default_app.py"
-    if not bundled.exists():
-        print(f"\033[91mERROR: Bundled default_app.py not found at {bundled}\033[0m")
-        raise typer.Abort()
-
-    DEFAULT_APP.write_text(bundled.read_text())
-    print(f"   ✓ Created default chat config: {DEFAULT_APP}")
-    return DEFAULT_APP
-
 
 def _launch_aiui_app(
     app_dir: str,
@@ -137,47 +116,7 @@ def ui(
     if ctx.invoked_subcommand is not None:
         return
 
-    # Use legacy implementation for backward compatibility
-    # 1. Check praisonaiui is installed
-    try:
-        import importlib.util
-        if importlib.util.find_spec("praisonaiui") is None:
-            raise ImportError
-    except ImportError:
-        print("\n\033[91mERROR: PraisonAI UI (aiui) is not installed.\033[0m")
-        print('\nInstall with:\n  pip install "praisonai[ui]"\n')
-        sys.exit(1)
-
-    # 2. Resolve app file
-    if app_file:
-        resolved = Path(app_file)
-        if not resolved.exists():
-            print(f"\033[91mERROR: App file not found: {app_file}\033[0m")
-            sys.exit(1)
-    else:
-        resolved = _ensure_default_app()
-
-    # 3. Launch via aiui run
-    import subprocess
-
-    cmd = ["aiui", "run", str(resolved), "--port", str(port), "--host", host]
-    if reload:
-        cmd.append("--reload")
-
-    print(f"\n🤖 PraisonAI Chat starting at http://{host}:{port}")
-    print(f"   App: {resolved}\n")
-
-    try:
-        subprocess.run(cmd, check=True)
-    except FileNotFoundError:
-        # Fallback: python -m praisonaiui.cli
-        cmd = [sys.executable, "-m", "praisonaiui.cli", "run", str(resolved),
-               "--port", str(port), "--host", host]
-        if reload:
-            cmd.append("--reload")
-        subprocess.run(cmd, check=True)
-    except KeyboardInterrupt:
-        print("\n🤖 Chat stopped.")
+    _launch_aiui_app("ui", "ui_chat", port, host, app_file, reload, "Chat")
 
 
 @app.command()
