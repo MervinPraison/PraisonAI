@@ -54,6 +54,7 @@ jobs:
                   repository(owner: $owner, name: $repo) {
                     pullRequest(number: $number) {
                       mergeStateStatus
+                      maintainerCanModify
                       isDraft
                       headRef { repository { nameWithOwner } }
                     }
@@ -69,6 +70,7 @@ jobs:
                     status,
                     isDraft: prGql.isDraft,
                     headRepo: prGql.headRef?.repository?.nameWithOwner,
+                    maintainerCanModify: prGql.maintainerCanModify === true,
                   };
                 }
                 if (attempt < 2) await sleep(10000);
@@ -78,6 +80,7 @@ jobs:
                 status: (pr.data.mergeable_state || '').toUpperCase(),
                 isDraft: pr.data.draft,
                 headRepo: pr.data.head.repo?.full_name,
+                maintainerCanModify: pr.data.maintainer_can_modify === true,
               };
             }
 
@@ -102,8 +105,8 @@ jobs:
             }
 
             async function processPR(prNumber) {
-              const { status, isDraft, headRepo } = await getMergeState(prNumber);
-              core.info(`PR #${prNumber}: mergeState=${status}, head=${headRepo}, draft=${isDraft}`);
+              const { status, isDraft, headRepo, maintainerCanModify } = await getMergeState(prNumber);
+              core.info(`PR #${prNumber}: mergeState=${status}, head=${headRepo}, draft=${isDraft}, maintainerCanModify=${maintainerCanModify}`);
 
               const { data: issue } = await github.rest.issues.get({
                 owner,
@@ -124,7 +127,9 @@ jobs:
 
               if (status !== 'DIRTY') return { skipped: true, reason: 'not dirty' };
               if (isDraft) return { skipped: true, reason: 'draft' };
-              if (headRepo && headRepo !== baseRepo) return { skipped: true, reason: 'fork' };
+              if (headRepo && headRepo !== baseRepo && !maintainerCanModify) {
+                return { skipped: true, reason: 'fork without maintainer edits' };
+              }
 
               const { data: comments } = await github.rest.issues.listComments({
                 owner,

@@ -257,6 +257,21 @@ find $(python -c "import site; print(site.getsitepackages()[0])") -name "<suspic
 
 ---
 
+## Fork PRs — contributor checklist and Claude push
+
+For PRs from external forks (`head.repo != MervinPraison/PraisonAI`), ask the contributor:
+
+1. **Allow edits from maintainers** on the PR (right sidebar).
+2. **Keep fork and branch** until the PR is merged or closed.
+
+Optional: private fork → add maintainer as collaborator; fork with Actions → only enable “Allow edits and access to secrets by maintainers” if they accept the risk.
+
+When `maintainerCanModify` is true, `claude.yml` pushes via `GH_TOKEN` to the fork remote and `merge-conflict-claude.yml` may auto-trigger `@claude` for `DIRTY` PRs (after FINAL architecture review).
+
+Manual unblock: `gh pr checkout <N> && git fetch origin main && git rebase origin/main && git push --force-with-lease`
+
+---
+
 ## Quick Reference — Common Commands
 
 | Action | Command |
