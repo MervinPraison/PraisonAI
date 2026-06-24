@@ -35,11 +35,16 @@ class SkillManager:
         manager.activate(skill)
     """
 
-    def __init__(self, enforcement_level: Optional[EnforcementLevel] = None):
+    def __init__(self, enforcement_level: Optional[EnforcementLevel] = None,
+                 write_approval: Optional[bool] = None):
         """Initialize the SkillManager.
         
         Args:
             enforcement_level: Capability enforcement level (defaults to environment-based)
+            write_approval: When True, skill mutations are staged for human
+                approval by default (``propose=True``). When None, resolved from
+                the ``SKILL_WRITE_APPROVAL`` environment variable (default True
+                for safe-by-default behaviour).
         """
         self._skills: Dict[str, LoadedSkill] = {}
         self._loader = SkillLoader()
@@ -50,6 +55,11 @@ class SkillManager:
         if enforcement_level is None:
             enforcement_level = self._get_default_enforcement_level()
         self._validator = CapabilityValidator(enforcement_level)
+
+        # Resolve safe-by-default write-approval policy.
+        if write_approval is None:
+            write_approval = self._get_default_write_approval()
+        self._write_approval = write_approval
 
     @property
     def skills(self) -> List[LoadedSkill]:
@@ -280,7 +290,8 @@ class SkillManager:
         return True
 
     def create_skill(self, name: str, content: str, category: str = None,
-                     agent_created: bool = True) -> dict:
+                     agent_created: bool = True,
+                     propose: Optional[bool] = None) -> dict:
         """Create a new skill with the given content.
         
         Args:
@@ -291,10 +302,19 @@ class SkillManager:
                 Defaults to True since skills created via this API originate
                 from the agent's self-improvement loop. Lifecycle curator
                 plugins only ever touch agent-created skills.
+            propose: If True, stage the mutation for human approval instead of
+                writing to disk. Defaults to the manager's ``write_approval``
+                policy (safe-by-default). Pass ``propose=False`` to write
+                directly in trusted/local contexts.
             
         Returns:
             Dict with success status and skill info
         """
+        if self._should_propose(propose):
+            return self._stage_pending(
+                "create", name, content=content, category=category,
+                agent_created=agent_created,
+            )
         try:
             # Validate name
             if not self._validate_skill_name(name):
@@ -308,13 +328,8 @@ class SkillManager:
             if len(content) > 100_000:
                 return {"success": False, "error": "Skill content exceeds maximum size (100KB)"}
             
-            # Create skill directory
-            skill_dirs = get_default_skill_dirs()
-            base_dir = skill_dirs[0] if skill_dirs else "~/.praisonai/skills"
-            
-            from pathlib import Path
-            base_path = Path(base_dir).expanduser()
-            base_path.mkdir(parents=True, exist_ok=True)
+            # Create skill directory (same base as the pending store target)
+            base_path = self._skills_base_dir()
             
             skill_path = base_path / name
             skill_path.mkdir(exist_ok=True)
@@ -351,16 +366,22 @@ version: 1.0.0
         except Exception as e:
             return {"success": False, "error": f"Error creating skill: {str(e)}"}
     
-    def edit_skill(self, name: str, content: str) -> dict:
+    def edit_skill(self, name: str, content: str,
+                   propose: Optional[bool] = None) -> dict:
         """Edit an existing skill's content (full rewrite).
         
         Args:
             name: Skill name to edit
             content: New skill content
+            propose: If True, stage the mutation for human approval instead of
+                writing to disk. Defaults to the manager's ``write_approval``
+                policy. Pass ``propose=False`` to write directly.
             
         Returns:
             Dict with success status
         """
+        if self._should_propose(propose):
+            return self._stage_pending("edit", name, content=content)
         try:
             skill = self.get_skill(name)
             if not skill:
@@ -407,7 +428,8 @@ version: 1.0.0
             return {"success": False, "error": f"Error editing skill: {str(e)}"}
     
     def patch_skill(self, name: str, old_string: str, new_string: str, 
-                   file_path: str = None, replace_all: bool = False) -> dict:
+                   file_path: str = None, replace_all: bool = False,
+                   propose: Optional[bool] = None) -> dict:
         """Apply a patch to a skill using fuzzy find-and-replace.
         
         Args:
@@ -416,10 +438,18 @@ version: 1.0.0
             new_string: Replacement string
             file_path: Optional relative path within skill (defaults to SKILL.md)
             replace_all: Replace all occurrences
+            propose: If True, stage the mutation for human approval instead of
+                writing to disk. Defaults to the manager's ``write_approval``
+                policy. Pass ``propose=False`` to apply directly.
             
         Returns:
             Dict with success status
         """
+        if self._should_propose(propose):
+            return self._stage_pending(
+                "patch", name, old_string=old_string, new_string=new_string,
+                file_path=file_path, replace_all=replace_all,
+            )
         try:
             skill = self.get_skill(name)
             if not skill:
@@ -477,7 +507,8 @@ version: 1.0.0
         except Exception as e:
             return {"success": False, "error": f"Error patching skill: {str(e)}"}
     
-    def delete_skill(self, name: str, hard: bool = False) -> dict:
+    def delete_skill(self, name: str, hard: bool = False,
+                     propose: Optional[bool] = None) -> dict:
         """Remove a skill.
 
         By default this is a *recoverable* archive: the skill directory is
@@ -488,10 +519,15 @@ version: 1.0.0
         Args:
             name: Skill name to delete
             hard: If True, permanently remove the directory (unrecoverable)
+            propose: If True, stage the deletion for human approval instead of
+                removing from disk. Defaults to the manager's ``write_approval``
+                policy. Pass ``propose=False`` to delete directly.
             
         Returns:
             Dict with success status
         """
+        if self._should_propose(propose):
+            return self._stage_pending("delete", name, hard=hard)
         if not hard:
             return self.archive_skill(name)
         try:
@@ -649,17 +685,26 @@ version: 1.0.0
         except Exception as e:
             return {"success": False, "error": f"Error rolling back skill: {str(e)}"}
     
-    def write_skill_file(self, name: str, file_path: str, file_content: str) -> dict:
+    def write_skill_file(self, name: str, file_path: str, file_content: str,
+                         propose: Optional[bool] = None) -> dict:
         """Write a file within a skill's directory.
         
         Args:
             name: Skill name
             file_path: Relative path within skill (must be under allowed subdirs)
             file_content: File content to write
+            propose: If True, stage the write for human approval instead of
+                writing to disk. Defaults to the manager's ``write_approval``
+                policy. Pass ``propose=False`` to write directly.
             
         Returns:
             Dict with success status
         """
+        if self._should_propose(propose):
+            return self._stage_pending(
+                "write_file", name, file_path=file_path,
+                file_content=file_content,
+            )
         try:
             skill = self.get_skill(name)
             if not skill:
@@ -697,16 +742,22 @@ version: 1.0.0
         except Exception as e:
             return {"success": False, "error": f"Error writing skill file: {str(e)}"}
     
-    def remove_skill_file(self, name: str, file_path: str) -> dict:
+    def remove_skill_file(self, name: str, file_path: str,
+                          propose: Optional[bool] = None) -> dict:
         """Remove a file from a skill's directory.
         
         Args:
             name: Skill name
             file_path: Relative path within skill to remove
+            propose: If True, stage the removal for human approval instead of
+                removing from disk. Defaults to the manager's ``write_approval``
+                policy. Pass ``propose=False`` to remove directly.
             
         Returns:
             Dict with success status
         """
+        if self._should_propose(propose):
+            return self._stage_pending("remove_file", name, file_path=file_path)
         try:
             skill = self.get_skill(name)
             if not skill:
@@ -952,7 +1003,281 @@ version: 1.0.0
         }
         
         return level_map.get(level_str, EnforcementLevel.WARN)
-    
+
+    def _get_default_write_approval(self) -> bool:
+        """Resolve the default write-approval policy.
+
+        Safe-by-default: skill mutations are staged for approval unless the
+        ``SKILL_WRITE_APPROVAL`` environment variable explicitly disables it
+        (e.g. ``0``/``false``/``off`` for trusted local contexts).
+        """
+        import os
+        raw = os.getenv('SKILL_WRITE_APPROVAL')
+        if raw is None:
+            return True
+        return raw.strip().lower() not in ('0', 'false', 'off', 'no', 'disabled')
+
+    # ── Approval gate (SkillMutatorProtocol) ──────────────────────────
+
+    def _should_propose(self, propose: Optional[bool]) -> bool:
+        """Decide whether a mutation should be staged for approval."""
+        if propose is None:
+            return self._write_approval
+        return bool(propose)
+
+    def _skills_base_dir(self):
+        """Return the base skills directory where mutations are written.
+
+        Mirrors ``create_skill`` target resolution: prefer the first existing
+        default skill dir, otherwise the user skills dir (honours
+        ``PRAISONAI_HOME``).
+        """
+        from pathlib import Path
+        skill_dirs = get_default_skill_dirs()
+        if skill_dirs:
+            base = Path(skill_dirs[0])
+        else:
+            from ..paths import get_skills_dir
+            base = get_skills_dir()
+        base.mkdir(parents=True, exist_ok=True)
+        return base
+
+    def _pending_store_path(self):
+        """Return the path to the JSON-backed pending-mutation store."""
+        return self._skills_base_dir() / ".pending_skills.json"
+
+    def _audit_log_path(self):
+        """Return the path to the append-only skill-mutation audit log."""
+        return self._pending_store_path().parent / ".skill_audit.log"
+
+    def _load_pending(self) -> Dict[str, dict]:
+        """Load the pending-mutation store (id -> record)."""
+        import json
+        store = self._pending_store_path()
+        if not store.exists():
+            return {}
+        try:
+            with open(store, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Failed to read pending skills store: %s", e)
+            return {}
+
+    def _save_pending(self, pending: Dict[str, dict]) -> None:
+        """Persist the pending-mutation store atomically."""
+        import json
+        self._write_skill_atomically(
+            self._pending_store_path(), json.dumps(pending, indent=2)
+        )
+
+    def _audit(self, event: str, record: dict) -> None:
+        """Append a single audit entry for a skill mutation decision."""
+        import json
+        import time
+        try:
+            entry = {
+                "event": event,
+                "timestamp": time.time(),
+                "id": record.get("id"),
+                "action": record.get("action"),
+                "name": record.get("name"),
+            }
+            with open(self._audit_log_path(), 'a', encoding='utf-8') as f:
+                f.write(json.dumps(entry) + "\n")
+        except OSError as e:
+            logger.debug("Failed to write skill audit log: %s", e)
+
+    def _stage_pending(self, action: str, name: str, **payload) -> dict:
+        """Stage a skill mutation in the pending store instead of writing.
+
+        Returns a dict with ``status='pending'`` and a short ``id`` for the
+        human approval flow (``/skills approve <id>``).
+        """
+        import secrets
+        import time
+
+        if action == "create" and not self._validate_skill_name(name):
+            return {"success": False, "error": f"Invalid skill name: {name}"}
+
+        pending = self._load_pending()
+        request_id = f"skl-{secrets.token_hex(4)}"
+        record = {
+            "id": request_id,
+            "action": action,
+            "name": name,
+            "status": "pending",
+            "created_at": time.time(),
+            "payload": {k: v for k, v in payload.items() if v is not None},
+        }
+        pending[request_id] = record
+        self._save_pending(pending)
+        self._audit("proposed", record)
+        logger.info(
+            "Skill mutation staged for approval: %s (action=%s, skill=%s)",
+            request_id, action, name,
+        )
+        return {
+            "success": True,
+            "status": "pending",
+            "id": request_id,
+            "action": action,
+            "skill": name,
+        }
+
+    def list_pending(self) -> List[dict]:
+        """List all pending skill mutations awaiting approval.
+
+        Returns:
+            List of dicts with keys: id, action, name, status, created_at.
+        """
+        pending = self._load_pending()
+        return [
+            {
+                "id": r.get("id"),
+                "action": r.get("action"),
+                "name": r.get("name"),
+                "status": r.get("status", "pending"),
+                "created_at": r.get("created_at"),
+            }
+            for r in pending.values()
+        ]
+
+    def _resolve_pending_id(self, identifier: str, pending: Dict[str, dict]):
+        """Resolve a pending record by id, or by skill name as a fallback."""
+        if identifier in pending:
+            return identifier
+        # Fall back to matching by skill name (most recent wins).
+        matches = [
+            r for r in pending.values() if r.get("name") == identifier
+        ]
+        if matches:
+            matches.sort(key=lambda r: r.get("created_at", 0), reverse=True)
+            return matches[0].get("id")
+        return None
+
+    def approve(self, identifier: str) -> dict:
+        """Approve a pending skill mutation and apply it to disk.
+
+        Args:
+            identifier: The pending mutation id (preferred) or skill name.
+
+        Returns:
+            Dict with the result of applying the mutation.
+        """
+        pending = self._load_pending()
+        request_id = self._resolve_pending_id(identifier, pending)
+        if request_id is None:
+            return {"success": False, "error": f"No pending mutation: {identifier}"}
+
+        record = pending.pop(request_id)
+        self._save_pending(pending)
+        self._audit("approved", record)
+
+        result = self._apply_pending(record)
+        result.setdefault("id", request_id)
+        return result
+
+    def reject(self, identifier: str) -> dict:
+        """Reject a pending skill mutation without applying it.
+
+        Args:
+            identifier: The pending mutation id (preferred) or skill name.
+
+        Returns:
+            Dict confirming the rejection.
+        """
+        pending = self._load_pending()
+        request_id = self._resolve_pending_id(identifier, pending)
+        if request_id is None:
+            return {"success": False, "error": f"No pending mutation: {identifier}"}
+
+        record = pending.pop(request_id)
+        self._save_pending(pending)
+        self._audit("rejected", record)
+        return {
+            "success": True,
+            "status": "rejected",
+            "id": request_id,
+            "action": record.get("action"),
+            "skill": record.get("name"),
+        }
+
+    def _apply_pending(self, record: dict) -> dict:
+        """Apply an approved mutation directly (bypassing the approval gate)."""
+        action = record.get("action")
+        name = record.get("name")
+        payload = record.get("payload", {})
+
+        if action == "create":
+            return self.create_skill(
+                name, payload.get("content", ""),
+                payload.get("category"),
+                agent_created=payload.get("agent_created", True),
+                propose=False,
+            )
+        if action == "edit":
+            return self.edit_skill(name, payload.get("content", ""), propose=False)
+        if action == "patch":
+            return self.patch_skill(
+                name, payload.get("old_string", ""),
+                payload.get("new_string", ""),
+                payload.get("file_path"),
+                payload.get("replace_all", False),
+                propose=False,
+            )
+        if action == "delete":
+            return self.delete_skill(
+                name, hard=payload.get("hard", False), propose=False,
+            )
+        if action == "write_file":
+            return self.write_skill_file(
+                name, payload.get("file_path", ""),
+                payload.get("file_content", ""), propose=False,
+            )
+        if action == "remove_file":
+            return self.remove_skill_file(
+                name, payload.get("file_path", ""), propose=False,
+            )
+        return {"success": False, "error": f"Unknown action: {action}"}
+
+    # ── SkillMutatorProtocol aliases ──────────────────────────────────
+
+    def create(self, name: str, content: str, category: Optional[str] = None,
+               propose: Optional[bool] = None) -> dict:
+        """Protocol alias for :meth:`create_skill`."""
+        return self.create_skill(name, content, category, propose=propose)
+
+    def edit(self, name: str, content: str,
+             propose: Optional[bool] = None) -> dict:
+        """Protocol alias for :meth:`edit_skill`."""
+        return self.edit_skill(name, content, propose=propose)
+
+    def patch(self, name: str, old_string: str, new_string: str,
+              file_path: Optional[str] = None, replace_all: bool = False,
+              propose: Optional[bool] = None) -> dict:
+        """Protocol alias for :meth:`patch_skill`."""
+        return self.patch_skill(
+            name, old_string, new_string, file_path, replace_all,
+            propose=propose,
+        )
+
+    def delete(self, name: str, propose: Optional[bool] = None) -> dict:
+        """Protocol alias for :meth:`delete_skill`."""
+        return self.delete_skill(name, propose=propose)
+
+    def write_file(self, name: str, file_path: str, file_content: str,
+                   propose: Optional[bool] = None) -> dict:
+        """Protocol alias for :meth:`write_skill_file`."""
+        return self.write_skill_file(
+            name, file_path, file_content, propose=propose,
+        )
+
+    def remove_file(self, name: str, file_path: str,
+                    propose: Optional[bool] = None) -> dict:
+        """Protocol alias for :meth:`remove_skill_file`."""
+        return self.remove_skill_file(name, file_path, propose=propose)
+
     def clear(self) -> None:
         """Clear all loaded skills."""
         self._skills.clear()

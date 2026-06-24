@@ -236,17 +236,26 @@ class SkillTools:
             return f"Error listing skill scripts: {str(e)}"
     
     @require_approval(risk_level="low")
-    def skill_manage(self, action: str, name: str, *, 
+    def skill_manage(self, action: str, name: str = "", *, 
                     content=None, category=None, file_path=None,
                     file_content=None, old_string=None,
-                    new_string=None, replace_all=False) -> str:
+                    new_string=None, replace_all=False,
+                    propose=None) -> str:
         """Hermes-compatible skill management tool.
         
-        Actions: create, edit, patch, delete, write_file, remove_file
+        Mutating actions (create, edit, patch, delete, write_file, remove_file)
+        are *staged for human approval by default* (safe-by-default). The model
+        receives a ``{"status": "pending", "id": ...}`` response and a human
+        approves via the ``approve``/``reject`` actions (or the gateway
+        ``/skills`` commands). Pass ``propose=False`` to write directly in
+        trusted/local contexts.
+        
+        Actions: create, edit, patch, delete, write_file, remove_file,
+                 pending, approve, reject
         
         Args:
             action: Action to perform
-            name: Skill name
+            name: Skill name (or pending id for approve/reject)
             content: Skill content (for create/edit)
             category: Skill category (for create)
             file_path: File path within skill (for patch/write_file/remove_file)
@@ -254,6 +263,9 @@ class SkillTools:
             old_string: String to find (for patch)
             new_string: Replacement string (for patch)
             replace_all: Replace all occurrences (for patch)
+            propose: Override the staging policy. If None, uses the manager's
+                write-approval default; True stages for approval; False writes
+                directly.
             
         Returns:
             JSON string with result
@@ -266,30 +278,43 @@ class SkillTools:
             if action == "create":
                 if not content:
                     return json.dumps({"success": False, "error": "Content required for create action"})
-                result = self.skill_manager.create_skill(name, content, category)
+                result = self.skill_manager.create_skill(name, content, category, propose=propose)
                 
             elif action == "edit":
                 if not content:
                     return json.dumps({"success": False, "error": "Content required for edit action"})
-                result = self.skill_manager.edit_skill(name, content)
+                result = self.skill_manager.edit_skill(name, content, propose=propose)
                 
             elif action == "patch":
                 if not old_string or new_string is None:
                     return json.dumps({"success": False, "error": "old_string and new_string required for patch action"})
-                result = self.skill_manager.patch_skill(name, old_string, new_string, file_path, replace_all)
+                result = self.skill_manager.patch_skill(name, old_string, new_string, file_path, replace_all, propose=propose)
                 
             elif action == "delete":
-                result = self.skill_manager.delete_skill(name)
+                result = self.skill_manager.delete_skill(name, propose=propose)
                 
             elif action == "write_file":
                 if not file_path or not file_content:
                     return json.dumps({"success": False, "error": "file_path and file_content required for write_file action"})
-                result = self.skill_manager.write_skill_file(name, file_path, file_content)
+                result = self.skill_manager.write_skill_file(name, file_path, file_content, propose=propose)
                 
             elif action == "remove_file":
                 if not file_path:
                     return json.dumps({"success": False, "error": "file_path required for remove_file action"})
-                result = self.skill_manager.remove_skill_file(name, file_path)
+                result = self.skill_manager.remove_skill_file(name, file_path, propose=propose)
+                
+            elif action == "pending":
+                result = {"success": True, "pending": self.skill_manager.list_pending()}
+                
+            elif action == "approve":
+                if not name:
+                    return json.dumps({"success": False, "error": "id or name required for approve action"})
+                result = self.skill_manager.approve(name)
+                
+            elif action == "reject":
+                if not name:
+                    return json.dumps({"success": False, "error": "id or name required for reject action"})
+                result = self.skill_manager.reject(name)
                 
             else:
                 return json.dumps({"success": False, "error": f"Unknown action: {action}"})

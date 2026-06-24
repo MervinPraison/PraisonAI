@@ -270,7 +270,7 @@ content
             manager = SkillManager()
             manager.add_skill(str(skill_dir))
 
-            result = manager.patch_skill("safe-skill", "content", "updated", "../outside.md")
+            result = manager.patch_skill("safe-skill", "content", "updated", "../outside.md", propose=False)
             assert result["success"] is False
             assert "Path traversal detected" in result["error"]
 
@@ -291,6 +291,129 @@ content
             manager = SkillManager()
             manager.add_skill(str(skill_dir))
 
-            result = manager.write_skill_file("safe-skill", "scripts/../../outside.py", "print('x')")
+            result = manager.write_skill_file("safe-skill", "scripts/../../outside.py", "print('x')", propose=False)
             assert result["success"] is False
             assert "Path traversal detected" in result["error"]
+
+
+class TestSkillApprovalGate:
+    """Tests for the safe-by-default skill mutation approval gate."""
+
+    def test_create_stages_by_default(self, monkeypatch):
+        """create_skill defaults to staging, not writing to disk."""
+        from praisonaiagents.skills.manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            monkeypatch.chdir(tmpdir)
+            monkeypatch.setenv("PRAISONAI_HOME", str(Path(tmpdir) / "home"))
+            from praisonaiagents import paths
+            paths._clear_cache()
+
+            manager = SkillManager()
+            result = manager.create_skill("staged-skill", "# body")
+
+            assert result["status"] == "pending"
+            assert result["id"].startswith("skl-")
+            # Not written to disk / not loaded live.
+            assert "staged-skill" not in manager
+            skill_path = Path(tmpdir) / "home" / "skills" / "staged-skill"
+            assert not skill_path.exists()
+
+    def test_propose_false_writes_directly(self, monkeypatch):
+        """propose=False bypasses the gate and writes immediately."""
+        from praisonaiagents.skills.manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            monkeypatch.chdir(tmpdir)
+            monkeypatch.setenv("PRAISONAI_HOME", str(Path(tmpdir) / "home"))
+            from praisonaiagents import paths
+            paths._clear_cache()
+
+            manager = SkillManager()
+            result = manager.create_skill("direct-skill", "# body", propose=False)
+
+            assert result["success"] is True
+            assert result.get("status") != "pending"
+            assert "direct-skill" in manager
+
+    def test_env_disables_approval(self, monkeypatch):
+        """SKILL_WRITE_APPROVAL=0 makes writes direct by default."""
+        from praisonaiagents.skills.manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            monkeypatch.chdir(tmpdir)
+            monkeypatch.setenv("PRAISONAI_HOME", str(Path(tmpdir) / "home"))
+            monkeypatch.setenv("SKILL_WRITE_APPROVAL", "0")
+            from praisonaiagents import paths
+            paths._clear_cache()
+
+            manager = SkillManager()
+            result = manager.create_skill("env-skill", "# body")
+
+            assert result.get("status") != "pending"
+            assert "env-skill" in manager
+
+    def test_list_pending_and_approve(self, monkeypatch):
+        """Staged mutation appears in list_pending and applies on approve."""
+        from praisonaiagents.skills.manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            monkeypatch.chdir(tmpdir)
+            monkeypatch.setenv("PRAISONAI_HOME", str(Path(tmpdir) / "home"))
+            from praisonaiagents import paths
+            paths._clear_cache()
+
+            manager = SkillManager()
+            staged = manager.create_skill("approve-me", "# body")
+            request_id = staged["id"]
+
+            pending = manager.list_pending()
+            assert any(p["id"] == request_id for p in pending)
+            assert pending[0]["action"] == "create"
+
+            result = manager.approve(request_id)
+            assert result["success"] is True
+            assert "approve-me" in manager
+            # Pending entry consumed.
+            assert manager.list_pending() == []
+
+    def test_reject_discards_mutation(self, monkeypatch):
+        """Rejecting a staged mutation never writes it."""
+        from praisonaiagents.skills.manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            monkeypatch.chdir(tmpdir)
+            monkeypatch.setenv("PRAISONAI_HOME", str(Path(tmpdir) / "home"))
+            from praisonaiagents import paths
+            paths._clear_cache()
+
+            manager = SkillManager()
+            staged = manager.create_skill("reject-me", "# body")
+            request_id = staged["id"]
+
+            result = manager.reject(request_id)
+            assert result["success"] is True
+            assert result["status"] == "rejected"
+            assert "reject-me" not in manager
+            assert manager.list_pending() == []
+
+    def test_approve_unknown_id_fails(self, monkeypatch):
+        """Approving a non-existent id returns an error."""
+        from praisonaiagents.skills.manager import SkillManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            monkeypatch.chdir(tmpdir)
+            monkeypatch.setenv("PRAISONAI_HOME", str(Path(tmpdir) / "home"))
+            from praisonaiagents import paths
+            paths._clear_cache()
+
+            manager = SkillManager()
+            result = manager.approve("skl-nonexistent")
+            assert result["success"] is False
+
+    def test_protocol_conformance(self):
+        """SkillManager conforms to SkillMutatorProtocol."""
+        from praisonaiagents.skills.manager import SkillManager
+        from praisonaiagents.skills.protocols import SkillMutatorProtocol
+
+        assert isinstance(SkillManager(), SkillMutatorProtocol)
