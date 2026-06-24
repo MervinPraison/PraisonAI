@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from .parser import parse_schedule
     from .runner import ScheduleRunner
     from .loop import ScheduleLoop
-    from .protocols import ScheduleStoreProtocol
+    from .protocols import ScheduleStoreProtocol, JobConditionProtocol, GateResult
 
 _module_cache = {}
 
@@ -69,10 +69,16 @@ def __getattr__(name: str):
         _module_cache[name] = ConfigYamlScheduleStore
         return ConfigYamlScheduleStore
 
-    if name == "ScheduleStoreProtocol":
-        from .protocols import ScheduleStoreProtocol
-        _module_cache[name] = ScheduleStoreProtocol
-        return ScheduleStoreProtocol
+    if name in ("ScheduleStoreProtocol", "JobConditionProtocol", "GateResult"):
+        from .protocols import (
+            ScheduleStoreProtocol,
+            JobConditionProtocol,
+            GateResult,
+        )
+        _module_cache["ScheduleStoreProtocol"] = ScheduleStoreProtocol
+        _module_cache["JobConditionProtocol"] = JobConditionProtocol
+        _module_cache["GateResult"] = GateResult
+        return _module_cache[name]
 
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -88,4 +94,6 @@ __all__ = [
     "ScheduleRunner",
     "ScheduleLoop",
     "ScheduleStoreProtocol",
+    "JobConditionProtocol",
+    "GateResult",
 ]

@@ -7,7 +7,47 @@ Any object implementing these methods can be used as a schedule store.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, List, Optional, Protocol, runtime_checkable
+
+
+@dataclass
+class GateResult:
+    """Decision returned by a job's pre-run condition gate.
+
+    Attributes:
+        run: ``True`` to proceed with the (expensive) model turn,
+             ``False`` to skip this tick — no tokens spent, no delivery.
+        context: Optional text produced by the gate. When present and
+                 ``run`` is ``True``, it is appended to the job message so
+                 the same cheap check both *gates* the run and *seeds* it
+                 with context (e.g. the new emails the agent should summarise).
+        reason: Optional human-readable note recorded with the run
+                (e.g. ``"pre-run gate: nothing to do"``).
+    """
+
+    run: bool = True
+    context: Optional[str] = None
+    reason: Optional[str] = None
+
+
+@runtime_checkable
+class JobConditionProtocol(Protocol):
+    """Protocol for a cheap, deterministic pre-run gate on a scheduled job.
+
+    A gate decides *whether* a job's model turn should happen at all — a
+    cost/efficiency concern, complementary to (and distinct from) the
+    wrapper's ``RunPolicy``, which is a *safety* gate on *what* a run may do.
+
+    Implementations live in the wrapper (e.g. a shell-command gate) or in a
+    deployment (a Python callable, an MCP/tool probe). The core only owns this
+    contract so every front-end (Python ``ScheduleJob``, YAML loader,
+    agent-callable schedule tools) shares one shape.
+    """
+
+    def should_run(self, job: Any) -> "GateResult":
+        """Return a :class:`GateResult` deciding whether ``job`` should run."""
+        ...
 
 
 @runtime_checkable

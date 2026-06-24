@@ -63,6 +63,8 @@ def schedule_add(
     channel_id: str = "",
     agent_id: str = "",
     session_id: str = "",
+    pre_run: str = "",
+    condition: str = "",
 ) -> str:
     """Add a new scheduled job.
 
@@ -85,6 +87,13 @@ def schedule_add(
                   executor uses its default agent.
         session_id: Optional session ID to preserve conversation context.
                     If set, the agent will have access to prior chat history.
+        pre_run: Optional cheap, deterministic pre-run gate (a shell/python
+                 command). It runs before the model turn: exit 0 with output =>
+                 run and feed the output to the agent as context; exit non-zero
+                 => skip the tick (no model tokens spent, no delivery). Use this
+                 for poll-and-react jobs so the LLM only fires when there is
+                 actually something to do.
+        condition: Optional natural-language / expression alias for the gate.
 
     Returns:
         Confirmation string with the job id.
@@ -138,6 +147,8 @@ def schedule_add(
             agent_id=agent_id or None,
             delivery=delivery,
             origin=origin,  # Set origin for "origin" token resolution
+            pre_run=pre_run or None,
+            condition=condition or None,
         )
 
         store = _get_store()

@@ -47,6 +47,8 @@ def schedule_add_cmd(
     channel: str = typer.Option("", "--channel", help="[Legacy] Delivery platform: telegram, discord, slack, whatsapp"),
     channel_id: str = typer.Option("", "--channel-id", help="[Legacy] Target chat/channel ID on the platform"),
     session_id: str = typer.Option("", "--session-id", help="Session ID to preserve conversation context"),
+    pre_run: str = typer.Option("", "--pre-run", help="Cheap pre-run gate command: exit 0 + output => run (output seeds the prompt); non-zero => skip (no model tokens, no delivery)"),
+    condition: str = typer.Option("", "--condition", help="Natural-language / expression alias for the pre-run gate"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
 ):
     """Add a job to the schedule store (with optional delivery target).
@@ -56,6 +58,7 @@ def schedule_add_cmd(
         praisonai schedule add "news" -s daily -m "news summary" --deliver telegram
         praisonai schedule add "report" -s hourly -m "status report" --deliver all
         praisonai schedule add "tg-reminder" -s daily -m "check email" --agent support --channel telegram --channel-id 12345
+        praisonai schedule add "inbox-watch" -s "*/5m" -m "Summarise new emails" --pre-run "scripts/new_mail.sh" --deliver telegram
     """
     output = get_output_controller()
     try:
@@ -79,6 +82,8 @@ def schedule_add_cmd(
             schedule=schedule,
             message=message,
             agent_id=agent,
+            pre_run=pre_run,
+            condition=condition,
             **delivery_kwargs
         )
 

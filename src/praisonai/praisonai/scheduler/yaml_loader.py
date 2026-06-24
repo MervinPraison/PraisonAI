@@ -95,7 +95,15 @@ def load_agent_yaml_with_schedule(yaml_path: str) -> Tuple[Dict[str, Any], Dict[
         'max_retries': schedule_section.get('max_retries', 3),
         'run_immediately': schedule_section.get('run_immediately', False),
         'timeout': schedule_section.get('timeout'),  # Optional timeout in seconds
-        'max_cost': schedule_section.get('max_cost', 1.00)  # Default $1.00 budget limit for safety
+        'max_cost': schedule_section.get('max_cost', 1.00),  # Default $1.00 budget limit for safety
+        # Optional cost/efficiency pre-run gate: a cheap, deterministic check
+        # (shell/python command or registered gate name) that decides whether
+        # the model turn should happen at all. Reports "nothing to do" => the
+        # tick is skipped (no tokens, no delivery); reports "go" => any output
+        # is appended to the message as context.
+        'pre_run': schedule_section.get('pre_run'),
+        'condition': schedule_section.get('condition'),
+        'message': schedule_section.get('message'),
     }
     
     logger.info(f"Loaded agent '{agent_config.get('name', 'Unknown')}' with schedule interval '{schedule_config['interval']}'")
