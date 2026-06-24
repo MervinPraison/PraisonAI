@@ -107,6 +107,12 @@ class ResolvedConfig:
     # Telemetry
     telemetry: bool = True
     
+    # MCP servers declared in project config (single source of truth)
+    mcp: Dict[str, Any] = field(default_factory=dict)
+    
+    # Permission policy declared in project config (single source of truth)
+    permissions: Dict[str, Any] = field(default_factory=dict)
+    
     # Provenance tracking
     sources: List[str] = field(default_factory=list)
     
@@ -115,7 +121,7 @@ class ResolvedConfig:
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
-        return {
+        result = {
             "agent": self.agent.to_dict(),
             "rag": self.rag.to_dict(),
             "output": {
@@ -127,6 +133,11 @@ class ResolvedConfig:
             "telemetry": self.telemetry,
             **self.extra
         }
+        if self.mcp:
+            result["mcp"] = self.mcp
+        if self.permissions:
+            result["permissions"] = self.permissions
+        return result
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ResolvedConfig":
@@ -136,7 +147,7 @@ class ResolvedConfig:
         output_data = data.get("output", {})
         
         # Extract known top-level fields
-        known_keys = {"agent", "rag", "output", "telemetry", "sources"}
+        known_keys = {"agent", "rag", "output", "telemetry", "mcp", "permissions", "sources"}
         extra = {k: v for k, v in data.items() if k not in known_keys}
         
         return cls(
@@ -147,6 +158,8 @@ class ResolvedConfig:
             verbose=output_data.get("verbose", False),
             quiet=output_data.get("quiet", False),
             telemetry=data.get("telemetry", True),
+            mcp=data.get("mcp") or {},
+            permissions=data.get("permissions") or {},
             sources=data.get("sources", []),
             extra=extra,
         )
