@@ -16,7 +16,7 @@ from .version import __version__
 
 # Import new architecture components
 from .framework_adapters.base import FrameworkAdapter
-from .tool_registry import ToolRegistry
+from .framework_adapters.registry import FrameworkAdapterRegistry, get_default_registry
 
 
 def _rich_print(*args, **kwargs):
@@ -237,15 +237,9 @@ class AgentsGenerator:
         elif os.environ.get('LOGLEVEL'):
             self.logger.setLevel(getattr(logging, os.environ.get('LOGLEVEL', 'INFO').upper(), logging.INFO))
         
-        # Keep tool registry for backward compatibility with autogen adapters
-        self.tool_registry = ToolRegistry()
-        
-        # Initialize tool resolver with the registry wired in (single source of truth for tool resolution)
+        # Initialize tool resolver (single source of truth for tool resolution)
         from .tool_resolver import ToolResolver
-        self.tool_resolver = ToolResolver(registry=self.tool_registry)
-        
-        # Wire resolver back to registry for cache invalidation
-        self.tool_registry.set_resolver(self.tool_resolver)
+        self.tool_resolver = ToolResolver()
         
         # DI-friendly: tests/multi-tenant runtimes pass their own registry;
         # CLI users get the process default.
@@ -254,11 +248,6 @@ class AgentsGenerator:
         # Defer framework adapter creation until YAML is loaded
         # This fixes the issue where empty framework string fails before YAML framework is read
         self.framework_adapter = None
-        
-        # Only autogen-family adapters need the autogen tool shim
-        # Note: autogen_v2 is also part of the autogen family
-        if framework and framework in {"autogen", "autogen_v2", "autogen_v4", "ag2"}:
-            self.tool_registry.register_builtin_autogen_adapters()
 
     def _get_framework_adapter(self, framework: str) -> FrameworkAdapter:
         """
