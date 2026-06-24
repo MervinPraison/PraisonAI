@@ -8,15 +8,18 @@
 
 name: Upload Python Package
 
+# Superseded by pypi-release.yml (manual workflow_dispatch with uv publish).
+# Kept as workflow_dispatch-only fallback; release trigger removed to avoid
+# duplicate PyPI publish when bump_and_release creates a GitHub release.
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   deploy:
+    if: false
 
     runs-on: ubuntu-latest
 

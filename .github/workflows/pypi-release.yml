@@ -1,0 +1,275 @@
+name: PyPI Release
+
+# Requires a GitHub Environment named "pypi" (Settings → Environments → pypi)
+# with required reviewers before secrets are exposed to this job.
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type for both packages'
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      dry_run:
+        description: 'Preview versions and steps without publishing or pushing'
+        required: false
+        default: false
+        type: boolean
+      skip_agents:
+        description: 'Skip agents publish (recovery if already on PyPI)'
+        required: false
+        default: false
+        type: boolean
+      skip_wrapper:
+        description: 'Publish agents only'
+        required: false
+        default: false
+        type: boolean
+      agents_version:
+        description: 'Override agents version (empty = auto bump from pyproject.toml)'
+        required: false
+        default: ''
+        type: string
+      wrapper_version:
+        description: 'Override wrapper version (empty = auto bump from version.py)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pypi-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: pypi
+    env:
+      UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN || secrets.PYPI_API_TOKEN }}
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GH_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4
+
+      - name: Configure git
+        run: |
+          git config user.name "MervinPraison"
+          git config user.email "454862+MervinPraison@users.noreply.github.com"
+          gh auth setup-git
+
+      - name: Compute release versions
+        id: versions
+        env:
+          BUMP: ${{ inputs.bump }}
+          AGENTS_OVERRIDE: ${{ inputs.agents_version }}
+          WRAPPER_OVERRIDE: ${{ inputs.wrapper_version }}
+          SKIP_AGENTS: ${{ inputs.skip_agents }}
+        run: |
+          python <<'PY'
+          import os
+          import re
+          import sys
+          from pathlib import Path
+
+          SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
+          root = Path(".")
+          bump = os.environ["BUMP"]
+
+          def bump_version(version: str) -> str:
+              parts = version.split(".")
+              if len(parts) != 3:
+                  print(f"Invalid version: {version}", file=sys.stderr)
+                  sys.exit(1)
+              maj, min_, patch = (int(parts[0]), int(parts[1]), int(parts[2]))
+              if bump == "major":
+                  return f"{maj + 1}.0.0"
+              if bump == "minor":
+                  return f"{maj}.{min_ + 1}.0"
+              return f"{maj}.{min_}.{patch + 1}"
+
+          def validate_version(label: str, value: str) -> None:
+              if value and not SEMVER.match(value):
+                  print(f"Invalid {label} override: {value!r} (expected X.Y.Z)", file=sys.stderr)
+                  sys.exit(1)
+
+          agents_override = os.environ.get("AGENTS_OVERRIDE", "").strip()
+          wrapper_override = os.environ.get("WRAPPER_OVERRIDE", "").strip()
+          validate_version("agents_version", agents_override)
+          validate_version("wrapper_version", wrapper_override)
+
+          agents_pyproject = root / "src/praisonai-agents/pyproject.toml"
+          agents_content = agents_pyproject.read_text()
+          agents_match = re.search(r'^version\s*=\s*"([^"]+)"', agents_content, re.MULTILINE)
+          if not agents_match:
+              print("Could not read agents version from pyproject.toml", file=sys.stderr)
+              sys.exit(1)
+          current_agents = agents_match.group(1)
+          if not SEMVER.match(current_agents):
+              print(f"Invalid current agents version: {current_agents}", file=sys.stderr)
+              sys.exit(1)
+
+          wrapper_version_py = root / "src/praisonai/praisonai/version.py"
+          wrapper_content = wrapper_version_py.read_text()
+          wrapper_match = re.search(r'__version__ = "([^"]+)"', wrapper_content)
+          if not wrapper_match:
+              print("Could not read wrapper version from version.py", file=sys.stderr)
+              sys.exit(1)
+          current_wrapper = wrapper_match.group(1)
+          if not SEMVER.match(current_wrapper):
+              print(f"Invalid current wrapper version: {current_wrapper}", file=sys.stderr)
+              sys.exit(1)
+
+          skip_agents = os.environ.get("SKIP_AGENTS", "false").lower() == "true"
+
+          if agents_override:
+              agents_version = agents_override
+          elif skip_agents:
+              agents_version = current_agents
+          else:
+              agents_version = bump_version(current_agents)
+
+          if wrapper_override:
+              wrapper_version = wrapper_override
+          else:
+              wrapper_version = bump_version(current_wrapper)
+
+          github_output = os.environ["GITHUB_OUTPUT"]
+          with open(github_output, "a", encoding="utf-8") as fh:
+              fh.write(f"agents_version={agents_version}\n")
+              fh.write(f"wrapper_version={wrapper_version}\n")
+              fh.write(f"current_agents={current_agents}\n")
+              fh.write(f"current_wrapper={current_wrapper}\n")
+
+          print(f"Agents:  {current_agents} -> {agents_version}")
+          print(f"Wrapper: {current_wrapper} -> {wrapper_version}")
+          PY
+
+      - name: Dry run summary
+        if: inputs.dry_run
+        run: |
+          echo "Dry run — no publish, commit, or push."
+          echo "Agents version:  ${{ steps.versions.outputs.agents_version }}"
+          echo "Wrapper version: ${{ steps.versions.outputs.wrapper_version }}"
+          echo ""
+          if [ "${{ inputs.skip_agents }}" != "true" ]; then
+            echo "Would publish praisonaiagents ${{ steps.versions.outputs.agents_version }}"
+            echo "Would commit src/praisonai-agents/pyproject.toml and uv.lock"
+          fi
+          if [ "${{ inputs.skip_wrapper }}" != "true" ]; then
+            echo "Would run bump_and_release.py ${{ steps.versions.outputs.wrapper_version }} --agents ${{ steps.versions.outputs.agents_version }}"
+            echo "Would uv publish praisonai ${{ steps.versions.outputs.wrapper_version }}"
+          fi
+
+      - name: Publish praisonaiagents
+        if: inputs.dry_run != true && inputs.skip_agents != true
+        working-directory: src/praisonai-agents
+        run: |
+          set -euo pipefail
+          NEW_VERSION="${{ steps.versions.outputs.agents_version }}"
+          CURRENT="${{ steps.versions.outputs.current_agents }}"
+
+          python <<PY
+          from pathlib import Path
+          path = Path("pyproject.toml")
+          content = path.read_text()
+          path.write_text(content.replace(f'version = "{CURRENT}"', f'version = "{NEW_VERSION}"', 1))
+          PY
+
+          rm -rf dist
+          uv lock
+          uv build
+          uv publish
+
+      - name: Wait for praisonaiagents on PyPI
+        if: inputs.dry_run != true && inputs.skip_agents != true
+        run: |
+          set -euo pipefail
+          PACKAGE="praisonaiagents"
+          VERSION="${{ steps.versions.outputs.agents_version }}"
+          MAX_WAIT=600
+          INTERVAL=30
+          START=$(date +%s)
+
+          while true; do
+            CURRENT=$(curl -fsSL "https://pypi.org/pypi/${PACKAGE}/json" | python3 -c "import json,sys; print(json.load(sys.stdin)['info']['version'])")
+            if [ "$CURRENT" = "$VERSION" ]; then
+              echo "✅ ${PACKAGE}==${VERSION} is available on PyPI"
+              exit 0
+            fi
+            ELAPSED=$(( $(date +%s) - START ))
+            if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then
+              echo "❌ Timeout waiting for ${PACKAGE}==${VERSION} (current: ${CURRENT})"
+              exit 1
+            fi
+            echo "⏳ Current: ${CURRENT}, waiting for: ${VERSION} ($(( MAX_WAIT - ELAPSED ))s remaining...)"
+            sleep "$INTERVAL"
+          done
+
+      - name: Commit agents version bump
+        if: inputs.dry_run != true && inputs.skip_agents != true
+        run: |
+          set -euo pipefail
+          git add src/praisonai-agents/pyproject.toml src/praisonai-agents/uv.lock
+          git diff --cached --quiet && { echo "No agents files to commit"; exit 0; }
+          git commit -m "Bump praisonaiagents to ${{ steps.versions.outputs.agents_version }}"
+          git pull --rebase origin main
+          git push origin main
+
+      - name: Bump and release wrapper
+        if: inputs.dry_run != true && inputs.skip_wrapper != true
+        run: |
+          set -euo pipefail
+          python src/praisonai/scripts/bump_and_release.py "${{ steps.versions.outputs.wrapper_version }}" \
+            --agents "${{ steps.versions.outputs.agents_version }}" \
+            --wait --max-wait 600 --no-add-all
+
+      - name: Publish praisonai wrapper to PyPI
+        if: inputs.dry_run != true && inputs.skip_wrapper != true
+        working-directory: src/praisonai
+        run: uv publish
+
+      - name: Verify PyPI versions
+        if: inputs.dry_run != true
+        run: |
+          set -euo pipefail
+          AGENTS="${{ steps.versions.outputs.agents_version }}"
+          WRAPPER="${{ steps.versions.outputs.wrapper_version }}"
+
+          if [ "${{ inputs.skip_agents }}" != "true" ]; then
+            LIVE=$(curl -fsSL "https://pypi.org/pypi/praisonaiagents/json" | python3 -c "import json,sys; print(json.load(sys.stdin)['info']['version'])")
+            if [ "$LIVE" != "$AGENTS" ]; then
+              echo "❌ praisonaiagents expected ${AGENTS}, got ${LIVE}"
+              exit 1
+            fi
+            echo "✅ praisonaiagents==${AGENTS}"
+          fi
+
+          if [ "${{ inputs.skip_wrapper }}" != "true" ]; then
+            LIVE=$(curl -fsSL "https://pypi.org/pypi/praisonai/json" | python3 -c "import json,sys; print(json.load(sys.stdin)['info']['version'])")
+            if [ "$LIVE" != "$WRAPPER" ]; then
+              echo "❌ praisonai expected ${WRAPPER}, got ${LIVE}"
+              exit 1
+            fi
+            echo "✅ praisonai==${WRAPPER}"
+          fi

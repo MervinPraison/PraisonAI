@@ -13,7 +13,7 @@ on:
 
 concurrency:
   group: merge-conflict-scan-${{ github.repository }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   # PAT posts as MervinPraison so issue_comment triggers claude.yml (GITHUB_TOKEN cannot chain workflows)
@@ -35,7 +35,6 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const baseRepo = `${owner}/${repo}`;
-            const isMainPush = context.eventName === 'push';
             const COOLDOWN_MS = 12 * 60 * 60 * 1000;
             const AUTO_ACTORS = ['github-actions[bot]', 'MervinPraison'];
             const LABEL = 'claude-conflict-pending';
@@ -130,6 +129,9 @@ jobs:
               if (headRepo && headRepo !== baseRepo && !maintainerCanModify) {
                 return { skipped: true, reason: 'fork without maintainer edits' };
               }
+              if (labels.includes(LABEL)) {
+                return { skipped: true, reason: 'conflict resolution pending' };
+              }
 
               const { data: comments } = await github.rest.issues.listComments({
                 owner,
@@ -137,7 +139,7 @@ jobs:
                 issue_number: prNumber,
                 per_page: 100,
               });
-              if (!isMainPush && hasRecentAutoComment(comments)) {
+              if (hasRecentAutoComment(comments)) {
                 return { skipped: true, reason: 'recent auto comment' };
               }
 
@@ -145,20 +147,18 @@ jobs:
                 return { skipped: true, reason: 'awaiting final claude review trigger' };
               }
 
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: prNumber,
+                labels: [LABEL],
+              });
               await github.rest.issues.createComment({
                 owner,
                 repo,
                 issue_number: prNumber,
                 body: COMMENT_BODY,
               });
-              if (!labels.includes(LABEL)) {
-                await github.rest.issues.addLabels({
-                  owner,
-                  repo,
-                  issue_number: prNumber,
-                  labels: [LABEL],
-                });
-              }
               return { triggered: true };
             }
 
