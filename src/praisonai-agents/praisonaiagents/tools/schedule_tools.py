@@ -86,6 +86,14 @@ def schedule_add(
         session_id: Optional session ID to preserve conversation context.
                     If set, the agent will have access to prior chat history.
 
+    Note:
+        The ``pre_run`` shell gate is intentionally NOT exposed through this
+        agent-callable tool. ``pre_run`` runs an arbitrary shell command on the
+        host on every tick, so accepting it from an LLM would let a prompt-
+        injected agent persist server-side command execution. It is configured
+        only by trusted job authors via the ``praisonai schedule add --pre-run``
+        CLI or by constructing a :class:`ScheduleJob` directly in Python.
+
     Returns:
         Confirmation string with the job id.
     """

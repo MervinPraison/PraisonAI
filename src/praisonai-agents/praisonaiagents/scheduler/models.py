@@ -166,6 +166,18 @@ class ScheduleJob:
                   to a channel bot (e.g. Telegram chat).
         origin: Optional original delivery target where the job was created
                 (for "origin" token resolution).
+        pre_run: Optional cheap, deterministic pre-run gate evaluated before
+                 the (expensive) model turn — a shell/python command or a
+                 registered gate name. When it reports "nothing to do" the
+                 tick is recorded as ``skipped`` with no tokens spent and no
+                 delivery. When it reports "go", any output it prints is
+                 appended to ``message`` as context. A cost/efficiency gate,
+                 distinct from the wrapper's safety ``RunPolicy``.
+        condition: Optional natural-language / expression label describing the
+                   gate's intent. Advisory metadata only — it is round-tripped
+                   and surfaced for readability but is NOT itself enforced; the
+                   default :class:`ShellConditionGate` gates on ``pre_run``. A
+                   custom ``condition_resolver`` may interpret it.
     """
 
     name: str = ""
@@ -180,6 +192,8 @@ class ScheduleJob:
     last_run_at: Optional[float] = None
     delivery: Optional[DeliveryTarget] = None
     origin: Optional[DeliveryTarget] = None
+    pre_run: Optional[str] = None
+    condition: Optional[str] = None
 
     # ── serialisation ────────────────────────────────────────────────
 
@@ -200,6 +214,10 @@ class ScheduleJob:
             d["delivery"] = self.delivery.to_dict()
         if self.origin is not None:
             d["origin"] = self.origin.to_dict()
+        if self.pre_run is not None:
+            d["pre_run"] = self.pre_run
+        if self.condition is not None:
+            d["condition"] = self.condition
         return d
 
     @classmethod
@@ -220,4 +238,6 @@ class ScheduleJob:
             last_run_at=d.get("last_run_at"),
             delivery=DeliveryTarget.from_dict(delivery_data) if isinstance(delivery_data, dict) else None,
             origin=DeliveryTarget.from_dict(origin_data) if isinstance(origin_data, dict) else None,
+            pre_run=d.get("pre_run"),
+            condition=d.get("condition"),
         )

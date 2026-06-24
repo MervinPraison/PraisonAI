@@ -47,6 +47,7 @@ from typing import (
 
 if TYPE_CHECKING:
     from praisonaiagents.scheduler import ScheduleRunner, ScheduleJob
+    from praisonaiagents.scheduler.protocols import JobConditionProtocol
     from .run_policy import RunPolicy
 
 logger = logging.getLogger(__name__)
@@ -100,6 +101,17 @@ class ScheduledAgentExecutor:
             applied to every unattended run — scopes the agent's toolset,
             scans the assembled prompt, persists a durable output audit, and
             (when configured) delivers a failure summary on failure.
+        condition_resolver: Optional callable ``(job) -> JobConditionProtocol``
+            returning a *pre-run gate* for the job, or ``None`` for no gate.
+            The gate is evaluated **before** the model turn: when it returns
+            ``run=False`` the tick is recorded as ``skipped`` (no tokens spent,
+            no delivery); when it returns ``run=True`` with ``context`` the
+            context is appended to the job message. Defaults to a resolver that
+            returns a :class:`~praisonai.scheduler.condition_gate.ShellConditionGate`
+            for jobs with a ``pre_run`` command. Pass ``condition_resolver=False``
+            (or a resolver returning ``None``) to disable gating entirely.
+            This is a *cost/efficiency* gate, complementary to the *safety*
+            ``run_policy``.
     """
 
     def __init__(
@@ -111,6 +123,7 @@ class ScheduledAgentExecutor:
         on_success: Optional[Callable[..., None]] = None,
         on_failure: Optional[Callable[..., None]] = None,
         run_policy: Optional["RunPolicy"] = None,
+        condition_resolver: Any = None,
     ) -> None:
         self._runner = runner
         self._resolve = agent_resolver
@@ -118,6 +131,9 @@ class ScheduledAgentExecutor:
         self._on_success = on_success
         self._on_failure = on_failure
         self._run_policy = run_policy
+        # ``None`` → use the default shell gate resolver; ``False`` → disable
+        # gating; otherwise a user-supplied ``(job) -> gate | None`` callable.
+        self._condition_resolver = condition_resolver
 
     # ── public API ───────────────────────────────────────────────────
 
@@ -224,6 +240,40 @@ class ScheduledAgentExecutor:
             return JobResult(
                 job=job, status="failed", error=err, duration=duration,
             )
+
+        # Pre-run condition gate (cost/efficiency): a cheap, deterministic
+        # check that decides whether the (expensive) model turn is warranted.
+        # When it reports "nothing to do" the tick is recorded as ``skipped`` —
+        # no tokens spent, no empty message delivered.  When it reports "go"
+        # any context it produced is appended to the message before the turn.
+        gate = self._resolve_condition(job)
+        if gate is not None:
+            try:
+                # Run off the event loop: the default gate shells out via
+                # subprocess.run(), which would otherwise block every other
+                # tick / delivery / health-check coroutine for the gate's
+                # timeout. Mirrors the agent.chat() offload below.
+                decision = await asyncio.to_thread(gate.should_run, job)
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning(
+                    "Pre-run gate raised for job '%s': %s; running anyway",
+                    job.id, e,
+                )
+                decision = None
+            if decision is not None and not getattr(decision, "run", True):
+                reason = getattr(decision, "reason", None) or "pre-run gate: nothing to do"
+                logger.info("Job '%s' skipped by pre-run gate: %s", job.id, reason)
+                duration = time.time() - started
+                self._runner.mark_run(
+                    job, status="skipped", error=reason, duration=duration,
+                )
+                return JobResult(
+                    job=job, status="skipped", error=reason, duration=duration,
+                )
+            if decision is not None:
+                context = getattr(decision, "context", None)
+                if context:
+                    message = f"{message}\n\n{context}"
 
         # Run-scoped policy: scan the *untrusted* portion of the run before it
         # reaches the model — the user message plus any runtime-loaded skill or
@@ -361,6 +411,35 @@ class ScheduledAgentExecutor:
         job_result.delivered = delivered
         job_result.delivery_error = delivery_error
         return job_result
+
+    # ── condition-gate helpers ───────────────────────────────────────
+
+    def _resolve_condition(self, job: "ScheduleJob") -> Optional["JobConditionProtocol"]:
+        """Resolve the pre-run gate for ``job`` (or ``None`` for no gate).
+
+        Resolution order:
+        - ``condition_resolver is False`` → gating disabled, return ``None``.
+        - a user-supplied callable → call it with the job and return its result.
+        - default (``None``) → return a :class:`ShellConditionGate` when the
+          job declares a ``pre_run`` command, else ``None``.
+        """
+        resolver = self._condition_resolver
+        if resolver is False:
+            return None
+        if resolver is not None:
+            try:
+                return resolver(job)
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning(
+                    "condition_resolver raised for job '%s': %s; no gate applied",
+                    getattr(job, "id", "?"), e,
+                )
+                return None
+        # Default resolver: only build a gate when there is something to gate on.
+        if not (getattr(job, "pre_run", None) or "").strip():
+            return None
+        from .condition_gate import ShellConditionGate
+        return ShellConditionGate()
 
     # ── run-policy helpers ───────────────────────────────────────────
 
