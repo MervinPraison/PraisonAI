@@ -132,6 +132,54 @@ def test_approval_gate_denies(registry):
         remove_approval_requirement("fetch")
 
 
+def test_registry_not_exposed_via_attribute(registry):
+    proxy = ToolProxy(["fetch"], registry=registry)
+    with pytest.raises(AttributeError):
+        _ = proxy._registry
+    with pytest.raises(AttributeError):
+        _ = proxy._allowed
+
+
+def test_registry_bypass_blocked_from_code(registry):
+    code = "r = tools._registry\nr.get('double')()\n"
+    result = execute_code_with_tools(
+        code, allowed_tools=["fetch"], registry=registry
+    )
+    assert result["success"] is False
+
+
+def test_reserved_tools_name_rejected(registry):
+    with pytest.raises(ValueError):
+        execute_code_with_tools(
+            "1\n", allowed_tools=["tools"], registry=registry
+        )
+
+
+def test_positional_args_visible_to_approval(registry):
+    from praisonaiagents.approval import (
+        add_approval_requirement,
+        remove_approval_requirement,
+        set_approval_callback,
+        ApprovalDecision,
+    )
+
+    seen = {}
+
+    def _cb(function_name, arguments, risk_level):
+        seen["args"] = dict(arguments)
+        return ApprovalDecision(approved=True, reason="ok")
+
+    add_approval_requirement("fetch", "high")
+    set_approval_callback(_cb)
+    try:
+        proxy = ToolProxy(["fetch"], registry=registry)
+        assert proxy.fetch("a") == 1
+        assert seen["args"].get("url") == "a"
+    finally:
+        set_approval_callback(None)
+        remove_approval_requirement("fetch")
+
+
 def test_execution_config_flags():
     from praisonaiagents.config.feature_configs import ExecutionConfig
 

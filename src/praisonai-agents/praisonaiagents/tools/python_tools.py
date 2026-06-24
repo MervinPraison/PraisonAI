@@ -421,6 +421,11 @@ def execute_code_with_tools(
     from .tool_proxy import ToolProxy, build_tool_namespace
 
     allowed = list(allowed_tools or [])
+    if "tools" in allowed:
+        raise ValueError(
+            "'tools' is a reserved name in code mode and cannot be an "
+            "allow-listed tool; rename the tool."
+        )
     injected: Dict[str, Any] = {}
     if allowed:
         injected.update(build_tool_namespace(allowed, registry=registry))
@@ -431,7 +436,6 @@ def execute_code_with_tools(
         globals_dict=injected or None,
         timeout=timeout,
         max_output_size=max_output_size,
-        injected_names=set(injected.keys()),
     )
 
 
@@ -441,7 +445,6 @@ def _execute_code_direct(
     locals_dict: Optional[Dict[str, Any]] = None,
     timeout: int = 30,
     max_output_size: int = 10000,
-    injected_names: Optional[set] = None
 ) -> Dict[str, Any]:
     """Execute Python code directly in current process with restricted builtins.
 

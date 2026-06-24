@@ -17,11 +17,26 @@ the model — intermediate tool results never enter the context window.
 Safe by default: tools are callable from code only when the developer turns the
 mode on and only for tools on the allow-list; every call still passes the
 approval gate.
+
+Security note: the proxy must never expose the underlying ``ToolRegistry`` or
+the allow-list to sandboxed code.  Storing them as instance attributes is unsafe
+because plain ``obj._registry`` attribute access bypasses ``__getattr__`` (the
+attribute is found in ``__dict__`` first) and the sandbox's ``getattr`` guard
+(direct attribute access compiles to ``LOAD_ATTR``, not a ``getattr`` call).  We
+therefore keep all state in a closure that is unreachable from any attribute.
 """
 
 from typing import Any, Callable, Dict, Iterable, Optional
 
 from .registry import ToolRegistry, get_registry
+
+
+def _resolve_callable(tool: Any) -> Callable[..., Any]:
+    """Return the underlying callable for a registered tool/BaseTool."""
+    callable_tool = tool.run if hasattr(tool, "run") and not callable(tool) else tool
+    if not callable(callable_tool):
+        callable_tool = getattr(tool, "run", tool)
+    return callable_tool
 
 
 def _invoke_with_approval(
@@ -32,6 +47,10 @@ def _invoke_with_approval(
     The ``require_approval`` decorator (when applied to the tool) already gates
     the call.  For tools that are not decorated but are registered as requiring
     approval, we apply the same gate here so code-mode calls cannot bypass it.
+
+    Positional arguments are bound to their parameter names before being sent to
+    the approval backend so the human approver sees every argument value and can
+    rewrite any of them via ``decision.modified_args``.
     """
     from ..approval import (
         is_approval_required,
@@ -42,9 +61,7 @@ def _invoke_with_approval(
         request_approval,
     )
 
-    callable_tool = tool.run if hasattr(tool, "run") and not callable(tool) else tool
-    if not callable(callable_tool):
-        callable_tool = getattr(tool, "run", tool)
+    callable_tool = _resolve_callable(tool)
 
     needs_gate = is_approval_required(name) and not (
         is_already_approved(name)
@@ -63,16 +80,63 @@ def _invoke_with_approval(
                 f"Tool '{name}' requires approval but cannot prompt from an "
                 f"async context. Configure a non-console approval backend."
             )
-        decision = run_coroutine_from_any_context(request_approval(name, kwargs))
+
+        # Bind positional args to parameter names so the approval backend sees
+        # (and can modify) every argument, not just the keyword ones.
+        approval_args: Dict[str, Any] = dict(kwargs)
+        bound = None
+        try:
+            import inspect
+
+            signature = inspect.signature(callable_tool)
+            bound = signature.bind_partial(*args, **kwargs)
+            approval_args = dict(bound.arguments)
+        except (TypeError, ValueError):
+            # Signature unavailable/unbindable: fall back to positional preview.
+            for index, value in enumerate(args):
+                approval_args.setdefault(f"arg{index}", value)
+
+        decision = run_coroutine_from_any_context(
+            request_approval(name, approval_args)
+        )
         if not decision.approved:
             raise PermissionError(
                 f"Execution of {name} denied: {decision.reason}"
             )
         mark_approved(name)
         if decision.modified_args:
-            kwargs.update(decision.modified_args)
+            approval_args.update(decision.modified_args)
+            if bound is not None:
+                try:
+                    rebound = signature.bind_partial(**approval_args)
+                    return callable_tool(*rebound.args, **rebound.kwargs)
+                except TypeError:
+                    pass
+            # Fall back: apply only keyword modifications.
+            kwargs.update(
+                {k: v for k, v in decision.modified_args.items() if k in kwargs}
+            )
 
     return callable_tool(*args, **kwargs)
+
+
+def _make_proxy(
+    name: str,
+    allowed: frozenset,
+    registry: ToolRegistry,
+) -> Callable[..., Any]:
+    """Build a single tool proxy enforcing the allow-list and approval gate."""
+    if name not in allowed:
+        raise PermissionError(f"tool '{name}' is not allowed from code")
+    tool = registry.get(name)
+    if tool is None:
+        raise NameError(f"tool '{name}' is not registered")
+
+    def _proxy(*args: Any, **kwargs: Any) -> Any:
+        return _invoke_with_approval(name, tool, args, kwargs)
+
+    _proxy.__name__ = name
+    return _proxy
 
 
 class ToolProxy:
@@ -80,6 +144,11 @@ class ToolProxy:
 
     Resolves tool names against a :class:`ToolRegistry`, enforces an
     allow-list, and routes each call through the approval gate.
+
+    The registry and allow-list are held in a closure (``__getattribute__``
+    override) rather than as instance attributes, so sandboxed code cannot reach
+    them through plain attribute access (e.g. ``tools._registry``) to bypass the
+    allow-list or approval gate.
 
     Example (inside model-generated code)::
 
@@ -94,39 +163,38 @@ class ToolProxy:
         allowed: Iterable[str],
         registry: Optional[ToolRegistry] = None,
     ) -> None:
-        # Use object.__setattr__ so __setattr__ guard below never trips here.
-        object.__setattr__(self, "_registry", registry or get_registry())
-        object.__setattr__(self, "_allowed", set(allowed))
+        allowed_set = frozenset(allowed)
+        resolved_registry = registry or get_registry()
 
-    def _make_proxy(self, name: str) -> Callable[..., Any]:
-        if name not in self._allowed:
-            raise PermissionError(
-                f"tool '{name}' is not allowed from code"
-            )
-        tool = self._registry.get(name)
-        if tool is None:
-            raise NameError(f"tool '{name}' is not registered")
+        def _getter(name: str) -> Callable[..., Any]:
+            return _make_proxy(name, allowed_set, resolved_registry)
 
-        def _proxy(*args: Any, **kwargs: Any) -> Any:
-            return _invoke_with_approval(name, tool, args, kwargs)
+        # Stash all state inside a closure; never as an instance attribute.
+        object.__setattr__(self, "_ToolProxy__getter", _getter)
+        object.__setattr__(self, "_ToolProxy__names", sorted(allowed_set))
 
-        _proxy.__name__ = name
-        return _proxy
-
-    def __getattr__(self, name: str) -> Callable[..., Any]:
-        # Only reached for names not found as real attributes.
+    def __getattribute__(self, name: str) -> Any:
+        # Allow a tiny set of dunder methods needed for normal object use;
+        # everything else is treated as a tool-name lookup.
+        if name in ("__class__", "__dict__", "__repr__", "__dir__", "__init__"):
+            return object.__getattribute__(self, name)
         if name.startswith("_"):
             raise AttributeError(name)
-        return self._make_proxy(name)
+        getter = object.__getattribute__(self, "_ToolProxy__getter")
+        return getter(name)
 
     def __setattr__(self, name: str, value: Any) -> None:
         raise AttributeError("ToolProxy is read-only")
 
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError("ToolProxy is read-only")
+
     def __dir__(self):
-        return sorted(self._allowed)
+        return list(object.__getattribute__(self, "_ToolProxy__names"))
 
     def __repr__(self) -> str:
-        return f"ToolProxy(allowed={sorted(self._allowed)})"
+        names = object.__getattribute__(self, "_ToolProxy__names")
+        return f"ToolProxy(allowed={names})"
 
 
 def build_tool_namespace(
@@ -139,11 +207,12 @@ def build_tool_namespace(
     the model can call ``fetch(...)`` by bare name, in addition to the
     ``tools.fetch(...)`` form via :class:`ToolProxy`.
     """
-    proxy = ToolProxy(allowed, registry=registry)
+    allowed_set = frozenset(allowed)
+    resolved_registry = registry or get_registry()
     namespace: Dict[str, Callable[..., Any]] = {}
-    for name in proxy._allowed:
+    for name in sorted(allowed_set):
         try:
-            namespace[name] = proxy._make_proxy(name)
+            namespace[name] = _make_proxy(name, allowed_set, resolved_registry)
         except NameError:
             # Tool on the allow-list but not registered yet — skip silently;
             # calling it would raise NameError at runtime anyway.
