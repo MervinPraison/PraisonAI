@@ -702,6 +702,19 @@ class BotSessionManager:
         # Submit message to run control
         decision = await self._run_control.submit(user_id, prompt)
         
+        if decision == RunDecision.STEERED:
+            # Message was injected into the live run via steering; the running
+            # turn folds in the new guidance without a separate response here.
+            ack_msg = await self._run_control.get_busy_ack_message(user_id, decision)
+            return {
+                "response": ack_msg,
+                "metadata": {
+                    "run_control": True,
+                    "decision": decision.value,
+                    "steered": True,
+                }
+            }
+
         if decision in (RunDecision.QUEUED, RunDecision.MERGED):
             # Message was queued or merged, return acknowledgment
             ack_msg = await self._run_control.get_busy_ack_message(user_id, decision)
@@ -713,6 +726,14 @@ class BotSessionManager:
                     "queued": True
                 }
             }
+
+        # We're running now (RUN_NOW or INTERRUPTED): register the live agent so
+        # subsequent mid-run STEER messages can be injected into it.
+        if hasattr(self._run_control, "register_agent"):
+            try:
+                self._run_control.register_agent(user_id, agent)
+            except Exception:  # noqa: BLE001 - registration is best-effort
+                logger.debug("Failed to register agent for steering", exc_info=True)
         
         # We're running now (RUN_NOW or INTERRUPTED)
         current_prompt = prompt
