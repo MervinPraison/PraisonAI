@@ -654,6 +654,8 @@ def _run_prompt(
         if result and not output.is_json_mode:
             print(result)
     
+    except typer.Exit:
+        raise
     except Exception as e:
         from ..output.event_bridge import StreamEventBridge
         StreamEventBridge(output).emit_run_error(str(e))
@@ -859,6 +861,8 @@ def _run_custom_agent(
         if result and not output.is_json_mode:
             print(result)
     
+    except typer.Exit:
+        raise
     except Exception as e:
         from ..output.event_bridge import StreamEventBridge
         StreamEventBridge(output).emit_run_error(str(e))

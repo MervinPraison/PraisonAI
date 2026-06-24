@@ -123,7 +123,9 @@ def test_error_event_mapped(capsys):
     agent.stream_emitter.emit(_FakeStreamEvent("error", error="boom"))
 
     events = _capture(capsys)
-    assert any(e["event"] == "tool.error" and e["data"]["error"] == "boom" for e in events)
+    # A core stream-level error is a generic streaming/transport failure and
+    # is mapped to run.error (not tool.error, which is reserved for tools).
+    assert any(e["event"] == "run.error" and e["data"]["error"] == "boom" for e in events)
 
 
 def test_run_lifecycle_helpers(capsys):

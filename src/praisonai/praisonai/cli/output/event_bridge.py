@@ -20,7 +20,10 @@ Design goals:
   scripts/CI/observability tooling can depend on it.
 """
 
+import logging
 from typing import Any, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 # Canonical schema version for the NDJSON event stream emitted during `run`.
 # Bump this when the event shape changes in a backward-incompatible way.
@@ -53,10 +56,16 @@ class StreamEventBridge:
     def active(self) -> bool:
         """Whether bridging should produce structured events at all.
 
-        Only JSON / stream-json consumers need per-step events. In human/TTY
-        modes the bridge is a no-op so existing output is unchanged.
+        Only ``stream-json`` consumers receive per-step events on stdout
+        (``OutputController.emit_event`` only flushes in STREAM_JSON mode).
+        In ``json`` and human/TTY modes the bridge is a no-op so we avoid
+        per-step callback overhead that would never surface to a consumer.
         """
-        return bool(getattr(self._output, "is_json_mode", False))
+        try:
+            from .console import OutputMode
+            return getattr(self._output, "mode", None) == OutputMode.STREAM_JSON
+        except Exception:
+            return bool(getattr(self._output, "is_json_mode", False))
 
     def _emit(self, event_type: str, data: Optional[Dict[str, Any]] = None,
               agent_id: Optional[str] = None) -> None:
@@ -95,14 +104,16 @@ class StreamEventBridge:
                     else:
                         self._emit(EVENT_TEXT_DELTA, {"text": content}, agent_id=agent_id)
             elif type_value == "error":
+                # A core stream-level error is a generic streaming/LLM/transport
+                # failure, not a tool-scoped failure -> map to run.error.
                 self._emit(
-                    EVENT_TOOL_ERROR,
-                    {"error": getattr(event, "error", None) or "unknown error"},
+                    EVENT_RUN_ERROR,
+                    {"ok": False, "error": getattr(event, "error", None) or "unknown error"},
                     agent_id=agent_id,
                 )
         except Exception:
             # Never allow observability to break the run.
-            pass
+            logger.debug("StreamEventBridge.on_stream_event failed", exc_info=True)
 
     @staticmethod
     def _event_type_value(event: Any) -> Optional[str]:
@@ -164,7 +175,7 @@ def attach_bridge(agent: Any, output: Any) -> Optional[StreamEventBridge]:
     try:
         emitter.add_callback(bridge.on_stream_event)
     except Exception:
-        pass
+        logger.debug("StreamEventBridge attach failed", exc_info=True)
     return bridge
 
 
@@ -177,4 +188,4 @@ def detach_bridge(agent: Any, bridge: Optional[StreamEventBridge]) -> None:
         try:
             emitter.remove_callback(bridge.on_stream_event)
         except Exception:
-            pass
+            logger.debug("StreamEventBridge detach failed", exc_info=True)

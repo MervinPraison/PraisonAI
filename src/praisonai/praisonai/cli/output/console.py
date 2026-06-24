@@ -319,8 +319,15 @@ class OutputController:
             print(event.to_json(), flush=True)
     
     def emit_start(self, message: Optional[str] = None, data: Optional[Dict[str, Any]] = None) -> None:
-        """Emit a start event."""
+        """Emit a start event.
+
+        Emits both the legacy ``start`` event (existing contract) and the
+        canonical versioned ``run.start`` event so consumers of the
+        stream-json protocol receive the documented first event.
+        """
         self.emit_event("start", message=message, data=data)
+        if self.mode == OutputMode.STREAM_JSON:
+            self.emit_event("run.start", message=message, data=data)
     
     def emit_progress(self, message: Optional[str] = None, data: Optional[Dict[str, Any]] = None, agent_id: Optional[str] = None) -> None:
         """Emit a progress event."""
