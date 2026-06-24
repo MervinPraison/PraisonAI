@@ -93,7 +93,8 @@ in the `praisonai` wrapper. Key modules:
 - `escalation/` — Doom-loop detection, loop guard, escalation pipeline
 - `skills/` — Skill/capability system
 - `mcp/` — MCP protocol support
-- `checkpoints/`, `replay/`, `snapshot/` — Checkpointing and replay primitives
+- `checkpoints/`, `snapshot/` — Checkpoint and snapshot primitives (the
+  higher-level `replay/` engine lives in the wrapper, see below)
 - `bus/`, `trace/`, `streaming/` — Event bus, trace context, streaming events
 - `policy/`, `sandbox/`, `approval/`, `guardrails/` — Execution-boundary controls
 - `ui/a2a/`, `ui/a2ui/`, `ui/agui/` — Agent-to-agent and agent-to-UI protocols
