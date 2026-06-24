@@ -99,26 +99,6 @@ class FrameworkAdapter(Protocol):
         """Clean up any resources after execution."""
         ...
     
-    def resolve_variant(
-        self,
-        config: Dict[str, Any],
-        registry: "FrameworkAdapterRegistry",
-    ) -> "FrameworkAdapter":
-        """Resolve to the appropriate adapter variant based on config.
-        
-        Default implementation returns self. Adapters with multiple versions
-        (e.g., AutoGen v0.2 vs v0.4) should override this to select the
-        appropriate concrete implementation.
-        
-        Args:
-            config: Framework configuration that may contain version hints
-            registry: The adapter registry for creating other adapters if needed
-            
-        Returns:
-            The resolved FrameworkAdapter instance (may be self or another adapter)
-        """
-        return self
-    
     def resolve_alias(self) -> str:
         """Return the concrete adapter name to dispatch to (e.g. 'autogen_v4').
         Default: return self.name."""
@@ -132,10 +112,6 @@ class BaseFrameworkAdapter:
     
     def __init__(self):
         pass
-    
-    def resolve_variant(self, config: Dict[str, Any], registry: Any) -> "BaseFrameworkAdapter":
-        """Default implementation returns self."""
-        return self
     
     def _resolve_llm(self, spec, llm_config):
         """Build a PraisonAIModel from a per-agent llm/function_calling_llm spec.
