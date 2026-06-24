@@ -5,24 +5,26 @@ This example shows how agents can hand off tasks to specialized agents.
 """
 
 from pydantic import BaseModel
-from typing import TypedDict, Optional
-from praisonaiagents import Agent
+from typing import Optional
+from praisonaiagents import Agent, handoff
 
-# Define typed payload contracts for each handoff
+# Define typed payload contracts for each handoff.
+# Using Pydantic BaseModel for all schemas provides runtime validation.
+# Fields are Optional so plain-text requests validate without inventing data.
 class BillingPayload(BaseModel):
-    account_id: str
+    account_id: Optional[str] = None
     invoice_amount: Optional[float] = None
     issue_type: str = "billing"
 
-class RefundPayload(TypedDict):
-    transaction_id: str
-    amount: float
-    reason: str
+class RefundPayload(BaseModel):
+    transaction_id: Optional[str] = None
+    amount: Optional[float] = None
+    reason: Optional[str] = None
 
 class TechnicalPayload(BaseModel):
     error_code: Optional[str] = None
-    device_info: str
-    user_agent: str
+    device_info: Optional[str] = None
+    user_agent: Optional[str] = None
 
 # Create specialized agents that expect typed payloads from the triage
 # (In a real scenario, the agents would validate and use the payload.)
@@ -30,24 +32,21 @@ billing_agent = Agent(
     name="Billing Agent",
     role="Billing Specialist",
     goal="Handle all billing-related inquiries and tasks using structured data",
-    backstory="I am an expert in billing systems, payment processing, and invoice management.",
-    input_payload_schema=BillingPayload  # hypothetical but consistent with design
+    backstory="I am an expert in billing systems, payment processing, and invoice management."
 )
 
 refund_agent = Agent(
     name="Refund Agent",
     role="Refund Specialist",
     goal="Process refund requests and handle refund-related issues with validated data",
-    backstory="I specialize in processing refunds, evaluating refund eligibility, and ensuring customer satisfaction.",
-    input_payload_schema=RefundPayload
+    backstory="I specialize in processing refunds, evaluating refund eligibility, and ensuring customer satisfaction."
 )
 
 technical_support_agent = Agent(
     name="Technical Support",
     role="Technical Support Specialist",
     goal="Resolve technical issues and provide technical assistance with structured context",
-    backstory="I am skilled in troubleshooting technical problems and providing solutions.",
-    input_payload_schema=TechnicalPayload
+    backstory="I am skilled in troubleshooting technical problems and providing solutions."
 )
 
 # Create a triage agent with typed handoffs
@@ -62,11 +61,11 @@ triage_agent = Agent(
     - For technical problems or product issues, transfer to Technical Support
     
     Always explain why you're transferring the customer before doing so.
-    When handing off, populate the appropriate payload with extracted data.""",
+    When handing off, populate only fields explicitly present in the request. Do not invent missing values.""",
     handoffs=[
-        (billing_agent, BillingPayload),
-        (refund_agent, RefundPayload),
-        (technical_support_agent, TechnicalPayload)
+        handoff(billing_agent, input_type=BillingPayload),
+        handoff(refund_agent, input_type=RefundPayload),
+        handoff(technical_support_agent, input_type=TechnicalPayload)
     ]
 )
 
