@@ -739,6 +739,16 @@ class ExecutionConfig:
     # Code execution sandbox mode - "sandbox" (default) uses subprocess isolation
     # "direct" runs in current process (legacy, less secure)
     code_sandbox_mode: str = "sandbox"  # "sandbox" or "direct"
+
+    # Code-execution-with-tools (code mode): when True, model-generated code may
+    # call the agent's registered tools directly via injected proxies, enabling
+    # multi-step tool pipelines in a single turn (intermediate results stay out
+    # of context). Opt-in and gated by code_tools_allow + the approval framework.
+    code_tools: bool = False
+
+    # Explicit per-run allow-list of tool names callable from code when
+    # code_tools is enabled. None/empty = no tools exposed (safe default).
+    code_tools_allow: Optional[List[str]] = None
     
     # Rate limiter instance (consolidated from standalone rate_limiter param)
     rate_limiter: Optional[Any] = None
@@ -833,6 +843,8 @@ class ExecutionConfig:
             "code_execution": self.code_execution,
             "code_mode": self.code_mode,
             "code_sandbox_mode": self.code_sandbox_mode,
+            "code_tools": self.code_tools,
+            "code_tools_allow": self.code_tools_allow,
             "context_compaction": (
                 self.context_compaction.to_dict() 
                 if hasattr(self.context_compaction, 'to_dict') 
@@ -861,6 +873,8 @@ class ExecutionConfig:
             code_execution=data.get("code_execution", False),
             code_mode=data.get("code_mode", "safe"),
             code_sandbox_mode=data.get("code_sandbox_mode", "docker"),
+            code_tools=data.get("code_tools", False),
+            code_tools_allow=data.get("code_tools_allow", None),
             context_compaction=context_compaction,
             max_context_tokens=data.get("max_context_tokens", None),
             max_budget=data.get("max_budget", None),

@@ -8,6 +8,7 @@ from typing import Any
 from .base import BaseTool, ToolResult, ToolValidationError, validate_tool
 from .decorator import tool, FunctionTool
 from .registry import get_registry, register_tool, get_tool, add_tool, has_tool, remove_tool, list_tools, list_available_tools, list_tools_with_allowed_filter, list_tools_with_hermes_filter, ToolRegistry
+from .tool_proxy import ToolProxy, build_tool_namespace
 from .tools import Tools
 
 # Export Injected type directly for easy access
@@ -73,6 +74,7 @@ TOOL_MAPPINGS = {
 
     # Python Tools
     'execute_code': ('.python_tools', None),
+    'execute_code_with_tools': ('.python_tools', None),
     'analyze_code': ('.python_tools', None),
     'format_code': ('.python_tools', None),
     'lint_code': ('.python_tools', None),
@@ -339,7 +341,7 @@ def __getattr__(name: str) -> Any:
         if name in [
             'duckduckgo', 'internet_search', 'searxng_search', 'searxng',
             'scrape_page', 'extract_links', 'crawl', 'extract_text',
-            'execute_command', 'execute_code', 'analyze_code', 'format_code', 'lint_code', 'disassemble_code', 'list_processes', 'kill_process', 'get_system_info',
+            'execute_command', 'execute_code', 'execute_code_with_tools', 'analyze_code', 'format_code', 'lint_code', 'disassemble_code', 'list_processes', 'kill_process', 'get_system_info',
             'tavily', 'tavily_search', 'tavily_extract', 'tavily_crawl', 'tavily_map',
             'tavily_search_async', 'tavily_extract_async',
             'ydc', 'ydc_search', 'ydc_contents', 'ydc_news', 'ydc_images',
@@ -380,6 +382,7 @@ __all__ = list(TOOL_MAPPINGS.keys()) + [
     'tool', 'FunctionTool',
     'get_registry', 'register_tool', 'get_tool', 'add_tool', 'has_tool', 'remove_tool', 
     'list_tools', 'list_available_tools', 'list_tools_with_allowed_filter', 'list_tools_with_hermes_filter', 'ToolRegistry',
+    'ToolProxy', 'build_tool_namespace',
     'Tools',
     # Validation and retry protocols
     'ValidationResult', 'ToolValidatorProtocol', 'AsyncToolValidatorProtocol', 'PassthroughValidator',
