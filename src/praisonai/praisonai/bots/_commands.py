@@ -19,6 +19,13 @@ class CommandAccessPolicy:
     """Manages per-command access control for bot commands."""
     
     ALWAYS_ALLOWED = {"help", "whoami"}
+
+    # Privileged, state-changing commands that default to admin-only whenever a
+    # policy is configured (admin_users and/or user_allowed_commands set). They
+    # remain available to everyone when no policy is configured, so this stays
+    # backward-compatible. /learn reads host sources and authors skills that
+    # alter future agent behaviour, so it belongs here.
+    PRIVILEGED_COMMANDS = {"learn"}
     
     def __init__(
         self, 
@@ -34,6 +41,15 @@ class CommandAccessPolicy:
         """
         self.admin_users = admin_users or set()
         self.user_allowed_commands = user_allowed_commands
+
+    @property
+    def is_configured(self) -> bool:
+        """Whether any access restriction has been configured.
+
+        When False the policy is permissive (legacy behaviour); when True the
+        privileged-command guard applies.
+        """
+        return bool(self.admin_users) or self.user_allowed_commands is not None
     
     def can_run(self, user_id: str, command: str) -> bool:
         """Check if user can run a specific command.
@@ -52,6 +68,14 @@ class CommandAccessPolicy:
         # Always-allowed commands are available to everyone
         if command in self.ALWAYS_ALLOWED:
             return True
+
+        # Privileged commands are admin-only once any policy is configured.
+        # (Admins were already allowed above.) With no policy configured we
+        # fall through to the permissive default below for backward compat.
+        if command in self.PRIVILEGED_COMMANDS and self.is_configured:
+            if self.user_allowed_commands is not None:
+                return command in self.user_allowed_commands
+            return False
         
         # If no restrictions, all commands are allowed
         if self.user_allowed_commands is None:
@@ -74,7 +98,11 @@ class CommandAccessPolicy:
             return all_commands
         
         if self.user_allowed_commands is None:
-            return all_commands
+            if not self.is_configured:
+                return all_commands
+            # admin_users configured but no per-user allow list: everything
+            # except privileged commands is available to regular users.
+            return all_commands - self.PRIVILEGED_COMMANDS
         
         return self.ALWAYS_ALLOWED | (self.user_allowed_commands & all_commands)
 
@@ -250,6 +278,39 @@ def get_command_registry() -> CommandRegistry:
         The global CommandRegistry instance
     """
     return _global_registry
+
+
+def build_command_access_policy(config: Any) -> CommandAccessPolicy:
+    """Build a :class:`CommandAccessPolicy` from a bot config.
+
+    Shared by all adapters (Telegram, Slack, Discord) so per-command
+    authorization is expressed consistently across channels. Reads the optional
+    ``admin_users`` and ``user_allowed_commands`` attributes (comma-separated
+    strings) from ``config``; when neither is set the policy is permissive,
+    preserving legacy behaviour.
+
+    Args:
+        config: Bot configuration object.
+
+    Returns:
+        A configured CommandAccessPolicy.
+    """
+    admin_users: Set[str] = set()
+    admin_raw = getattr(config, "admin_users", None)
+    if admin_raw:
+        admin_users = {u.strip() for u in str(admin_raw).split(",") if u.strip()}
+
+    user_allowed_commands: Optional[Set[str]] = None
+    allowed_raw = getattr(config, "user_allowed_commands", None)
+    if allowed_raw:
+        user_allowed_commands = {
+            c.strip() for c in str(allowed_raw).split(",") if c.strip()
+        }
+
+    return CommandAccessPolicy(
+        admin_users=admin_users,
+        user_allowed_commands=user_allowed_commands,
+    )
 
 
 def format_status(

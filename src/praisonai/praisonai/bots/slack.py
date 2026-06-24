@@ -35,7 +35,8 @@ from ._commands import (
     handle_usage_command,
     handle_compress_command,
     handle_queue_command,
-    handle_learn_command
+    handle_learn_command,
+    build_command_access_policy,
 )
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
@@ -111,6 +112,10 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
         self._message_handlers: List[Callable] = []
         self._command_handlers: Dict[str, Callable] = {}
         self._started_at: Optional[float] = None
+
+        # Per-command authorization, shared with Telegram/Discord so privileged
+        # commands (e.g. /learn) can be restricted consistently across channels.
+        self._command_policy = build_command_access_policy(self.config)
         
         # Use helper to build session manager
         from ._session import build_session_manager
@@ -230,6 +235,18 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                     return
             
             text = event.get("text", "").strip()
+            # Per-command authorization: privileged commands (e.g. /learn) can be
+            # restricted to admins independent of the channel/pairing allow gate,
+            # consistent with Telegram and Discord.
+            if text.startswith("/"):
+                command_name = text[1:].split(maxsplit=1)[0] if len(text) > 1 else ""
+                cmd_user_id = event.get("user", "unknown")
+                if command_name and not self._command_policy.can_run(cmd_user_id, command_name):
+                    await say(
+                        text=f"⛔ You are not permitted to run /{command_name}",
+                        thread_ts=event.get("ts"),
+                    )
+                    return
             if text == "/status":
                 await say(text=self._format_status(), thread_ts=event.get("ts"))
                 return
