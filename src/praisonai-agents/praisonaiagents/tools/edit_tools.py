@@ -18,18 +18,42 @@ logger = logging.getLogger(__name__)
 # Minimum similarity ratio for an accepted block-anchor (fuzzy) match.
 _BLOCK_ANCHOR_THRESHOLD = 0.7
 
+# Maximum characters of diagnostics output appended to a tool result.
+_DIAGNOSTICS_MAX_CHARS = 2000
+
+# Seconds before a diagnostics subprocess is abandoned.
+_DIAGNOSTICS_TIMEOUT = 10
+
 
 class EditTools:
     """Tools for file editing and patching operations."""
     
-    def __init__(self, workspace=None):
+    def __init__(self, workspace=None, post_edit_diagnostics: str = "auto"):
         """Initialize EditTools with optional workspace containment.
         
         Args:
             workspace: Optional Workspace instance for path containment
+            post_edit_diagnostics: When to run a lightweight, language-appropriate
+                check on a file after a successful edit/patch and append the
+                results to the tool output. One of:
+                - ``"auto"`` (default): run a checker if one is available, but
+                  only append a ``Diagnostics`` section when problems are found
+                  (so clean edits return the plain success string — backward
+                  compatible).
+                - ``"on"``: always append a ``Diagnostics`` section when a
+                  checker is available, even if it reports no problems.
+                - ``"off"``: never run diagnostics (zero overhead).
+                Checkers are auto-detected by file type and silently skipped
+                when unavailable; a missing linter never fails the edit.
         """
         self._workspace = workspace
         self._file_cache = {}  # Cache for staleness checking
+        mode = (post_edit_diagnostics or "auto")
+        if isinstance(mode, str):
+            mode = mode.lower()
+        if mode not in ("auto", "on", "off"):
+            mode = "auto"
+        self._post_edit_diagnostics = mode
     
     def _validate_path(self, filepath: str) -> str:
         """Validate and resolve a file path within workspace constraints."""
@@ -116,7 +140,127 @@ class EditTools:
             diff_lines.append(line)
         
         return ''.join(diff_lines) if diff_lines else "No changes detected"
-    
+
+    # ------------------------------------------------------------------
+    # Post-edit diagnostics
+    #
+    # After a successful mutation we optionally run a lightweight, language
+    # appropriate check on the single modified file and surface concise
+    # diagnostics so an agent can self-correct within the same loop.  All
+    # imports are deferred and any failure is swallowed: a missing or broken
+    # checker must never turn a successful edit into a failure.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _diagnostics_command(safe_path: str) -> Optional[Tuple[str, List[str]]]:
+        """Resolve a (tool_name, argv) checker for ``safe_path`` by extension.
+
+        Returns ``None`` when no checker is available for the file type or none
+        of the candidate executables are installed.  Lazy-imports ``shutil``.
+        """
+        import shutil
+
+        ext = os.path.splitext(safe_path)[1].lower()
+        # Ordered candidates per extension: first installed executable wins.
+        candidates: List[Tuple[str, List[str]]] = []
+        if ext in (".py", ".pyi"):
+            if shutil.which("ruff"):
+                # Restrict to error-class rules (pyflakes/syntax) so that
+                # stylistically-imperfect-but-valid edits do not flood output;
+                # this keeps behaviour close to a syntax gate. ``--no-cache``
+                # avoids polluting the workspace.
+                candidates.append((
+                    "ruff",
+                    ["ruff", "check", "--quiet", "--no-cache",
+                     "--select", "E9,F63,F7,F82", safe_path],
+                ))
+            # py_compile is always available via the running interpreter and
+            # catches syntax errors with zero third-party dependencies.
+            import sys
+            candidates.append(("py_compile", [sys.executable, "-m", "py_compile", safe_path]))
+        elif ext in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"):
+            if shutil.which("eslint"):
+                # ``--no-config-lookup`` prevents ESLint from discovering and
+                # executing repository-controlled config/plugins (arbitrary code
+                # execution risk in untrusted workspaces).
+                candidates.append((
+                    "eslint",
+                    ["eslint", "--no-config-lookup", safe_path],
+                ))
+            if shutil.which("tsc") and ext in (".ts", ".tsx"):
+                # Per-file invocation without a project ``tsconfig.json``: relax
+                # project-config coupling so a single valid file does not report
+                # spurious "no inputs"/missing-lib errors.
+                candidates.append((
+                    "tsc",
+                    ["tsc", "--noEmit", "--skipLibCheck", "--allowJs",
+                     "--target", "ESNext", "--moduleResolution", "node",
+                     safe_path],
+                ))
+        elif ext == ".json":
+            # Validate JSON with the stdlib; emitted via a tiny inline check.
+            import sys
+            candidates.append((
+                "json",
+                [sys.executable, "-c",
+                 "import json,sys;json.load(open(sys.argv[1]))", safe_path],
+            ))
+
+        for tool_name, argv in candidates:
+            exe = argv[0]
+            if os.path.isabs(exe) or shutil.which(exe):
+                return tool_name, argv
+        return None
+
+    def _run_diagnostics(self, safe_path: str, display_path: str) -> str:
+        """Run a checker on ``safe_path`` and return a bounded diagnostics block.
+
+        Returns an empty string when diagnostics are disabled, no checker is
+        available, or (in ``auto`` mode) the checker reports no problems.  Any
+        exception is logged and swallowed so the edit result is never lost.
+        """
+        if self._post_edit_diagnostics == "off":
+            return ""
+        try:
+            resolved = self._diagnostics_command(safe_path)
+            if resolved is None:
+                return ""
+            tool_name, argv = resolved
+
+            import subprocess
+            try:
+                proc = subprocess.run(
+                    argv,
+                    capture_output=True,
+                    text=True,
+                    timeout=_DIAGNOSTICS_TIMEOUT,
+                    cwd=os.path.dirname(safe_path) or None,
+                )
+            except (subprocess.TimeoutExpired, OSError) as e:
+                logger.debug("Diagnostics skipped for %s: %s", display_path, e)
+                return ""
+
+            output = (proc.stdout or "") + (proc.stderr or "")
+            output = output.strip()
+            # Replace absolute paths with the display path for cleaner output.
+            if output and safe_path != display_path:
+                output = output.replace(safe_path, display_path)
+
+            has_problems = proc.returncode != 0 or bool(output)
+            if not has_problems:
+                if self._post_edit_diagnostics == "on":
+                    return f"\n\nDiagnostics ({tool_name}): no problems found"
+                return ""
+
+            if not output:
+                output = f"check failed (exit code {proc.returncode})"
+            if len(output) > _DIAGNOSTICS_MAX_CHARS:
+                output = output[:_DIAGNOSTICS_MAX_CHARS] + "\n... (diagnostics truncated)"
+            return f"\n\nDiagnostics ({tool_name}):\n{output}"
+        except Exception as e:  # never let diagnostics break a successful edit
+            logger.debug("Diagnostics error for %s: %s", display_path, e)
+            return ""
+
     # ------------------------------------------------------------------
     # Fuzzy matching ladder
     #
@@ -374,7 +518,8 @@ class EditTools:
             # Update cache with new content hash
             self._file_cache[safe_path] = self._compute_content_hash(new_content)
             
-            return f"Success: Made {replacements} replacement(s) in {filepath}\n\nDiff:\n{diff}"
+            result = f"Success: Made {replacements} replacement(s) in {filepath}\n\nDiff:\n{diff}"
+            return result + self._run_diagnostics(safe_path, filepath)
             
         except Exception as e:
             error_msg = f"Error editing file {filepath}: {str(e)}"
@@ -577,7 +722,8 @@ class EditTools:
                         applied.append(("write", safe_path, backup))
                         self._file_cache[safe_path] = content_hash
                         verb = "Added" if kind == "add" else "Updated"
-                        messages.append(f"{verb} {display}\n{diff}")
+                        diagnostics = self._run_diagnostics(safe_path, display)
+                        messages.append(f"{verb} {display}\n{diff}{diagnostics}")
             except Exception:
                 # Roll back in reverse order to restore the original state.
                 for entry in reversed(applied):
@@ -775,13 +921,15 @@ def search_files(directory: str, pattern: str,
     return _edit_tools.search_files(directory, pattern, file_pattern)
 
 
-def create_edit_tools(workspace=None) -> EditTools:
+def create_edit_tools(workspace=None, post_edit_diagnostics: str = "auto") -> EditTools:
     """Create EditTools instance with optional workspace containment.
     
     Args:
         workspace: Optional Workspace instance for path containment
+        post_edit_diagnostics: Diagnostics mode ("auto"|"on"|"off"); see
+            ``EditTools.__init__`` for details.
         
     Returns:
         EditTools instance configured with workspace
     """
-    return EditTools(workspace=workspace)
+    return EditTools(workspace=workspace, post_edit_diagnostics=post_edit_diagnostics)

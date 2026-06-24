@@ -331,3 +331,80 @@ class TestApplyPatch:
         assert not os.path.exists(a)
         # Update target must retain its original content.
         assert _read(b) == "original b\n"
+
+
+class TestPostEditDiagnostics:
+    """Post-edit diagnostics feedback for the built-in editor."""
+
+    def test_clean_edit_has_no_diagnostics_section_auto(self, tools, tmp_path):
+        # auto mode (default): a valid edit returns the plain success string.
+        p = tmp_path / "ok.py"
+        _write(p, "x = 1\n")
+        result = tools.edit_file(str(p), "x = 1", "x = 2")
+        assert "Success" in result
+        assert "Diagnostics" not in result
+
+    def test_syntax_error_surfaces_diagnostics(self, tmp_path):
+        # Editing a .py file into a syntax error must append a diagnostics block.
+        editor = EditTools(post_edit_diagnostics="auto")
+        p = tmp_path / "broken.py"
+        _write(p, "x = 1\n")
+        result = editor.edit_file(str(p), "x = 1", "def (:")
+        assert "Success" in result
+        assert "Diagnostics" in result
+
+    def test_off_mode_never_runs_diagnostics(self, tmp_path):
+        editor = EditTools(post_edit_diagnostics="off")
+        p = tmp_path / "broken.py"
+        _write(p, "x = 1\n")
+        result = editor.edit_file(str(p), "x = 1", "def (:")
+        assert "Success" in result
+        assert "Diagnostics" not in result
+
+    def test_missing_checker_returns_plain_success(self, tools, tmp_path):
+        # An extension with no available checker yields the plain success string.
+        p = tmp_path / "note.unknownext"
+        _write(p, "hello\n")
+        result = tools.edit_file(str(p), "hello", "world")
+        assert "Success" in result
+        assert "Diagnostics" not in result
+
+    def test_invalid_mode_falls_back_to_auto(self):
+        editor = EditTools(post_edit_diagnostics="bogus")
+        assert editor._post_edit_diagnostics == "auto"
+
+    def test_invalid_mode_behaves_like_auto(self, tmp_path):
+        # Behaviour-based check: an invalid mode must act exactly like ``auto``
+        # (surface diagnostics on a broken edit) rather than only matching an
+        # internal field.
+        editor = EditTools(post_edit_diagnostics="bogus")
+        p = tmp_path / "broken.py"
+        _write(p, "x = 1\n")
+        result = editor.edit_file(str(p), "x = 1", "def (:")
+        assert "Success" in result
+        assert "Diagnostics" in result
+
+    def test_on_mode_clean_edit_reports_no_problems(self, tmp_path):
+        # ``on`` mode appends a diagnostics section even for a clean edit.
+        editor = EditTools(post_edit_diagnostics="on")
+        p = tmp_path / "ok.py"
+        _write(p, "x = 1\n")
+        result = editor.edit_file(str(p), "x = 1", "x = 2")
+        assert "Success" in result
+        assert "Diagnostics" in result
+        assert "no problems found" in result
+
+    def test_apply_patch_surfaces_diagnostics(self, tmp_path):
+        editor = EditTools(post_edit_diagnostics="auto")
+        p = tmp_path / "mod.py"
+        _write(p, "value = 1\n")
+        patch = (
+            "*** Update File: {path}\n"
+            "@@\n"
+            "value = 1\n"
+            "===\n"
+            "def (:\n"
+        ).format(path=str(p))
+        result = editor.apply_patch(patch)
+        assert "Success" in result
+        assert "Diagnostics" in result
