@@ -317,6 +317,14 @@ class TestSandlockSandbox:
             assert "Real sandlock integration test" in result.stdout
             
             await sandbox.stop()
-            
+
         except ImportError:
             pytest.skip("sandlock package not available for integration test")
+        except AttributeError:
+            # Older sandlock builds may not export min_landlock_abi();
+            # skip cleanly rather than hard-fail the suite.
+            pytest.skip("installed sandlock lacks min_landlock_abi()")
+        except RuntimeError as e:
+            # __init__ fails loud when the kernel's Landlock ABI is below
+            # sandlock's minimum; that's expected on unsupported hosts.
+            pytest.skip(f"SandlockSandbox unavailable on this host: {e}")

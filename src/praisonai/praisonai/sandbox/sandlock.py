@@ -64,7 +64,6 @@ class SandlockSandbox:
         self.config = config or SandboxConfig.native()
         self._is_running = False
         self._temp_dir: Optional[str] = None
-        self._used_subprocess_fallback = False
         
         # Lazy import sandlock to avoid import-time dependency
         try:
@@ -512,15 +511,21 @@ class SandlockSandbox:
             return []
     
     def get_status(self) -> Dict[str, Any]:
-        """Get sandbox status information."""
-        kernel_isolated = self.is_available and not self._used_subprocess_fallback
+        """Get sandbox status information.
+
+        ``SandlockSandbox`` never silently degrades to a subprocess: ``__init__``
+        raises ``RuntimeError`` when Landlock is unavailable, so a constructed
+        instance is always kernel-isolated.  Isolation therefore tracks
+        ``is_available`` directly.
+        """
+        kernel_isolated = self.is_available
         return {
             "available": self.is_available,
             "type": self.sandbox_type,
             "running": self._is_running,
             "temp_dir": self._temp_dir,
             "landlock_supported": self.is_available,
-            "subprocess_fallback": self._used_subprocess_fallback,
+            "subprocess_fallback": False,
             "features": {
                 "filesystem_isolation": kernel_isolated,
                 "network_isolation": kernel_isolated,
