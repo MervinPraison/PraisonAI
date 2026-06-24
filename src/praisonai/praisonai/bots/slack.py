@@ -27,7 +27,15 @@ from praisonaiagents.bots import (
 )
 
 from .media import split_media_from_output, is_audio_file
-from ._commands import format_status, format_help, handle_stop_command
+from ._commands import (
+    format_status, 
+    format_help, 
+    handle_stop_command,
+    handle_model_command,
+    handle_usage_command,
+    handle_compress_command,
+    handle_queue_command
+)
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
 from ._ack import AckReactor
@@ -235,6 +243,30 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
             elif text == "/stop":
                 user_id = event.get("user", "unknown")
                 response = handle_stop_command(self._session, user_id)
+                await say(text=response, thread_ts=event.get("ts"))
+                return
+            elif text.startswith("/model"):
+                user_id = event.get("user", "unknown")
+                parts = text.split(maxsplit=1)
+                model_name = parts[1] if len(parts) > 1 else None
+                response = handle_model_command(self._session, user_id, model_name, self._agent)
+                await say(text=response, thread_ts=event.get("ts"))
+                return
+            elif text == "/usage":
+                user_id = event.get("user", "unknown")
+                response = handle_usage_command(self._session, user_id, self._agent)
+                await say(text=response, thread_ts=event.get("ts"))
+                return
+            elif text == "/compress":
+                user_id = event.get("user", "unknown")
+                response = handle_compress_command(self._session, user_id, self._agent)
+                await say(text=response, thread_ts=event.get("ts"))
+                return
+            elif text.startswith("/queue"):
+                user_id = event.get("user", "unknown")
+                parts = text.split(maxsplit=1)
+                message_text = parts[1] if len(parts) > 1 else None
+                response = handle_queue_command(self._session, user_id, message_text)
                 await say(text=response, thread_ts=event.get("ts"))
                 return
             

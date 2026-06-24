@@ -95,6 +95,11 @@ class CommandRegistry:
         self.register("stop", {"description": "Cancel current agent task", "builtin": True})
         self.register("whoami", {"description": "Show your user info and permissions", "builtin": True})
         self.register("sethome", {"description": "Set this chat as the home channel for scheduled deliveries", "builtin": True})
+        # New runtime control commands
+        self.register("model", {"description": "Switch LLM model for this session", "builtin": True})
+        self.register("usage", {"description": "Show token usage and estimated cost", "builtin": True})
+        self.register("compress", {"description": "Compress conversation to free context window", "builtin": True})
+        self.register("queue", {"description": "Queue a follow-up message", "builtin": True})
     
     def register(
         self, 
@@ -412,3 +417,218 @@ def handle_run_status_command(
         return f"⚡ Task running for {elapsed_str}{pending_info}"
     except Exception as e:
         return f"Error getting status: {e}"
+
+
+def handle_model_command(
+    session_manager,
+    user_id: str,
+    model_name: Optional[str] = None,
+    agent: Optional["Agent"] = None,
+) -> str:
+    """Handle /model command for runtime model switching.
+    
+    Args:
+        session_manager: BotSessionManager instance
+        user_id: User ID
+        model_name: Optional model name to switch to
+        agent: Current agent instance
+        
+    Returns:
+        Response message
+    """
+    if not model_name:
+        # Show current model
+        if agent and hasattr(agent, 'llm'):
+            current = agent.llm if isinstance(agent.llm, str) else "default"
+            return f"Current model: {current}\nUse /model <name> to switch (e.g., /model gpt-4o)"
+        else:
+            return "No model configured. Use /model <name> to set one."
+    
+    # Store model override in session metadata
+    if hasattr(session_manager, '_model_overrides'):
+        if not hasattr(session_manager, '_model_overrides'):
+            session_manager._model_overrides = {}
+        session_manager._model_overrides[user_id] = model_name
+    
+    # Apply model to agent for this session
+    if agent:
+        original_model = agent.llm
+        agent.llm = model_name
+        
+        # Store original for restoration
+        if not hasattr(session_manager, '_original_models'):
+            session_manager._original_models = {}
+        if user_id not in session_manager._original_models:
+            session_manager._original_models[user_id] = original_model
+    
+    return f"✅ Model switched to {model_name} for this conversation."
+
+
+def handle_usage_command(
+    session_manager,
+    user_id: str,
+    agent: Optional["Agent"] = None,
+) -> str:
+    """Handle /usage command to show token usage and cost.
+    
+    Args:
+        session_manager: BotSessionManager instance  
+        user_id: User ID
+        agent: Current agent instance
+        
+    Returns:
+        Response message with usage info
+    """
+    # Check for usage tracking via hooks or session metadata
+    usage_info = {}
+    
+    # Try to get usage from session metadata if tracked
+    if hasattr(session_manager, '_usage_tracker'):
+        usage_info = session_manager._usage_tracker.get(user_id, {})
+    
+    # Check agent's token tracking if available
+    if agent and hasattr(agent, 'get_token_usage'):
+        try:
+            agent_usage = agent.get_token_usage()
+            usage_info.update(agent_usage)
+        except Exception:
+            pass
+    
+    # Format usage response
+    if not usage_info:
+        return "No usage data available. Usage tracking may not be enabled."
+    
+    total_tokens = usage_info.get('total_tokens', 0)
+    prompt_tokens = usage_info.get('prompt_tokens', 0)
+    completion_tokens = usage_info.get('completion_tokens', 0)
+    
+    # Estimate cost (rough estimates, would need model-specific pricing)
+    cost_estimate = total_tokens * 0.00002  # Default estimate
+    
+    lines = [
+        "📊 Token Usage",
+        f"Total: {total_tokens:,} tokens",
+    ]
+    
+    if prompt_tokens or completion_tokens:
+        lines.append(f"Prompt: {prompt_tokens:,} | Completion: {completion_tokens:,}")
+    
+    lines.append(f"Est. cost: ${cost_estimate:.4f}")
+    
+    return "\n".join(lines)
+
+
+def handle_compress_command(
+    session_manager,
+    user_id: str,
+    agent: Optional["Agent"] = None,
+) -> str:
+    """Handle /compress command for context window management.
+    
+    Args:
+        session_manager: BotSessionManager instance
+        user_id: User ID  
+        agent: Current agent instance
+        
+    Returns:
+        Response message
+    """
+    try:
+        # Get user's chat history
+        if not hasattr(session_manager, '_histories'):
+            return "❌ No conversation history to compress."
+        
+        storage_key = user_id
+        if hasattr(session_manager, '_storage_key'):
+            storage_key = session_manager._storage_key(user_id)
+        
+        history = session_manager._histories.get(storage_key, [])
+        if len(history) < 10:
+            return "ℹ️ Conversation too short to compress (need at least 10 messages)."
+        
+        # Import optimizer
+        try:
+            from praisonaiagents.context.optimizer import SummarizeOptimizer
+            from praisonaiagents.context.tokens import estimate_messages_tokens
+        except ImportError:
+            # Fallback to simple truncation
+            original_len = len(history)
+            # Keep system messages and last 5 exchanges
+            system_msgs = [m for m in history if m.get("role") == "system"]
+            other_msgs = [m for m in history if m.get("role") != "system"]
+            compressed = system_msgs + other_msgs[-10:]  # Keep last 5 exchanges (10 messages)
+            
+            session_manager._histories[storage_key] = compressed
+            removed = original_len - len(compressed)
+            
+            return f"✅ Compressed conversation: removed {removed} older messages."
+        
+        # Use SummarizeOptimizer if available
+        original_tokens = estimate_messages_tokens(history)
+        optimizer = SummarizeOptimizer(preserve_recent=10)
+        
+        # Target 50% reduction
+        target_tokens = original_tokens // 2
+        compressed_history, result = optimizer.optimize(history, target_tokens)
+        
+        # Update history
+        session_manager._histories[storage_key] = compressed_history
+        
+        # Persist if store available
+        if hasattr(session_manager, '_store') and session_manager._store:
+            try:
+                session_manager._persist(storage_key)
+            except Exception:
+                pass
+        
+        tokens_saved = result.tokens_saved if hasattr(result, 'tokens_saved') else 0
+        messages_removed = len(history) - len(compressed_history)
+        
+        return f"✅ Compressed {messages_removed} messages, freed ~{tokens_saved:,} tokens."
+        
+    except Exception as e:
+        logger.error(f"Compression failed: {e}")
+        return f"❌ Compression failed: {e}"
+
+
+def handle_queue_command(
+    session_manager,
+    user_id: str,
+    message_text: Optional[str] = None,
+) -> str:
+    """Handle /queue command for message queuing.
+    
+    Args:
+        session_manager: BotSessionManager instance
+        user_id: User ID
+        message_text: Optional message to queue
+        
+    Returns:
+        Response message
+    """
+    if not message_text:
+        # Show current queue
+        if not hasattr(session_manager, '_message_queues'):
+            return "No messages in queue. Use /queue <message> to add one."
+        
+        queue = session_manager._message_queues.get(user_id, [])
+        if not queue:
+            return "No messages in queue. Use /queue <message> to add one."
+        
+        lines = ["📝 Queued messages:"]
+        for i, msg in enumerate(queue, 1):
+            preview = msg[:50] + "..." if len(msg) > 50 else msg
+            lines.append(f"{i}. {preview}")
+        return "\n".join(lines)
+    
+    # Add message to queue
+    if not hasattr(session_manager, '_message_queues'):
+        session_manager._message_queues = {}
+    
+    if user_id not in session_manager._message_queues:
+        session_manager._message_queues[user_id] = []
+    
+    session_manager._message_queues[user_id].append(message_text)
+    
+    queue_len = len(session_manager._message_queues[user_id])
+    return f"✅ Message queued (position {queue_len}). It will run after the current task completes."

@@ -25,7 +25,15 @@ from praisonaiagents.bots import (
     PlatformCapabilities,
 )
 
-from ._commands import format_status, format_help, handle_stop_command
+from ._commands import (
+    format_status, 
+    format_help, 
+    handle_stop_command,
+    handle_model_command,
+    handle_usage_command,
+    handle_compress_command,
+    handle_queue_command
+)
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
 from ._ack import AckReactor
@@ -242,6 +250,32 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                 elif command == "stop":
                     user_id = str(message.author.id)
                     response = handle_stop_command(self._session, user_id)
+                    await message.reply(response)
+                    return
+                elif command == "model":
+                    user_id = str(message.author.id)
+                    # Extract model name from message
+                    parts = bot_message.text.split(maxsplit=1)
+                    model_name = parts[1] if len(parts) > 1 else None
+                    response = handle_model_command(self._session, user_id, model_name, self._agent)
+                    await message.reply(response)
+                    return
+                elif command == "usage":
+                    user_id = str(message.author.id)
+                    response = handle_usage_command(self._session, user_id, self._agent)
+                    await message.reply(response)
+                    return
+                elif command == "compress":
+                    user_id = str(message.author.id)
+                    response = handle_compress_command(self._session, user_id, self._agent)
+                    await message.reply(response)
+                    return
+                elif command == "queue":
+                    user_id = str(message.author.id)
+                    # Extract message text from command
+                    parts = bot_message.text.split(maxsplit=1)
+                    message_text = parts[1] if len(parts) > 1 else None
+                    response = handle_queue_command(self._session, user_id, message_text)
                     await message.reply(response)
                     return
                 elif command and command in self._command_handlers:
