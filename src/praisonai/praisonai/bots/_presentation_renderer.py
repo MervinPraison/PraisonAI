@@ -104,19 +104,9 @@ class TelegramPresentationRenderer:
                     if current_row:
                         inline_keyboard.append(current_row)
             
-            elif block.type == BlockType.SELECT or block.type == "select":
-                # Telegram doesn't have native select menus, convert to buttons
-                if block.options:
-                    for option in block.options[:100]:  # Limit options
-                        label = option.label
-                        if option.emoji:
-                            label = f"{option.emoji} {label}"
-                        label = label[:64]
-                        
-                        inline_keyboard.append([{
-                            "text": label,
-                            "callback_data": f"select:{block.action_id}:{option.value[:32]}"
-                        }])
+            # Note: SELECT blocks are converted to BUTTONS by adapt_presentation()
+            # before this loop runs (Telegram has supports_select=False), so no
+            # separate SELECT branch is needed here.
         
         result = {"text": "\n\n".join(text_parts) if text_parts else "\u200B"}  # Zero-width space if no text
         

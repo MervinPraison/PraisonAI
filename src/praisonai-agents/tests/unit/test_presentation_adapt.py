@@ -95,3 +95,38 @@ def test_under_cap_preserves_all_and_order():
     p = _buttons_block(3)
     adapted = adapt_presentation(p, PresentationLimits.slack())
     assert [b.label for b in adapted.blocks[0].buttons] == ["opt 0", "opt 1", "opt 2"]
+
+
+def test_discord_priority_truncation_caps_at_25():
+    p = _buttons_block(40)
+    adapted = adapt_presentation(p, PresentationLimits.discord())  # cap = 5 * 5 = 25
+    kept = adapted.blocks[0].buttons
+    assert len(kept) == 25
+    # Highest-priority buttons survive (opt 15..opt 39), original order preserved.
+    assert kept[0].label == "opt 15"
+    assert kept[-1].label == "opt 39"
+
+
+def test_degraded_select_callback_unique_for_long_action_id():
+    long_id = "a" * 80
+    sel = PresentationBlock.make_select(
+        [
+            SelectOption(label="A", value="alpha" + "x" * 60),
+            SelectOption(label="B", value="beta" + "y" * 60),
+        ],
+        action_id=long_id,
+    )
+    adapted = adapt_presentation(MessagePresentation([sel]), PresentationLimits.telegram())
+    values = [b.action.value for b in adapted.blocks[0].buttons]
+    assert all(len(v) <= 64 for v in values)
+    assert values[0] != values[1]
+
+
+def test_degraded_select_callback_unbounded_kept_raw():
+    sel = PresentationBlock.make_select(
+        [SelectOption(label="A", value="a"), SelectOption(label="B", value="b")],
+        action_id="pick",
+    )
+    adapted = adapt_presentation(MessagePresentation([sel]), PresentationLimits.telegram())
+    values = [b.action.value for b in adapted.blocks[0].buttons]
+    assert values == ["select:pick:a", "select:pick:b"]

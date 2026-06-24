@@ -11,9 +11,14 @@ rendering belongs in the wrapper (praisonai).
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Union
+
+# Most channels (e.g. Telegram) hard-cap inline callback payloads at 64 bytes.
+# Keep degraded select callbacks within this bound while preserving uniqueness.
+_MAX_CALLBACK_LEN = 64
 
 
 class ActionType(str, Enum):
@@ -442,7 +447,7 @@ class PresentationLimits:
     def discord() -> "PresentationLimits":
         """Get Discord-specific limits."""
         return PresentationLimits(
-            max_buttons=25,
+            max_buttons=5,  # per-row capacity; total cap = max_buttons * max_button_rows = 25
             max_button_rows=5,
             max_button_label=80,
             max_options=25,
@@ -484,13 +489,38 @@ def _adapt_button(button: PresentationButton, limits: PresentationLimits) -> Pre
     )
 
 
+def _encode_select_callback(action_id: str, value: str) -> str:
+    """Build a channel-safe callback payload for a degraded select option.
+
+    The raw ``select:<action_id>:<value>`` form can exceed channel callback
+    limits (e.g. Telegram's 64-byte cap) and collide when distinct options
+    share a long prefix. When the raw payload fits within ``_MAX_CALLBACK_LEN``
+    it is returned unchanged; otherwise the value is replaced with a short,
+    collision-resistant hash so distinct options stay distinct after truncation.
+    """
+    raw = f"select:{action_id}:{value}"
+    if len(raw) <= _MAX_CALLBACK_LEN:
+        return raw
+    digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
+    prefix = f"select:{action_id}:"
+    # Reserve room for the digest; trim the action_id prefix if needed.
+    budget = _MAX_CALLBACK_LEN - len(digest)
+    if budget < len("select::"):
+        # action_id itself is too long; hash it too to guarantee the bound.
+        aid_digest = hashlib.sha1((action_id or "").encode("utf-8")).hexdigest()[:8]
+        prefix = f"select:{aid_digest}:"
+    return f"{prefix[:_MAX_CALLBACK_LEN - len(digest)]}{digest}"
+
+
 def _select_to_buttons(block: PresentationBlock) -> PresentationBlock:
     """Convert a SELECT block into an equivalent BUTTONS block.
 
     Used when a channel does not support native select menus. Each option
-    becomes a callback button carrying ``select:<action_id>:<value>``.
+    becomes a callback button carrying a bounded, channel-safe identifier
+    derived from ``select:<action_id>:<value>``.
     """
     buttons: List[PresentationButton] = []
+    action_id = block.action_id or ""
     for option in (block.options or []):
         label = option.label
         if option.emoji:
@@ -500,7 +530,7 @@ def _select_to_buttons(block: PresentationBlock) -> PresentationBlock:
                 label=label,
                 action=PresentationAction(
                     type=ActionType.CALLBACK,
-                    value=f"select:{block.action_id or ''}:{option.value}",
+                    value=_encode_select_callback(action_id, option.value),
                 ),
             )
         )
