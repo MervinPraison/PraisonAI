@@ -83,7 +83,7 @@ def build_from_yaml(
     max_cost_override: Optional[float] = None,
     on_success: Optional[Callable] = None,
     on_failure: Optional[Callable] = None,
-):
+) -> "_BaseAgentScheduler":
     """Construct a scheduler from an agents.yaml file.
 
     Shared by both the sync ``AgentScheduler`` and async ``AsyncAgentScheduler``;
@@ -95,13 +95,13 @@ def build_from_yaml(
     # Load configuration from YAML
     agent_config, schedule_config = load_agent_yaml_with_schedule(yaml_path)
 
-    # Create agent from config
-    agent = create_agent_from_config(agent_config)
-
-    # Get task
+    # Validate task before any (potentially expensive) agent construction
     task = agent_config.get('task', '')
     if not task:
         raise ValueError("No task specified in YAML file")
+
+    # Create agent from config
+    agent = create_agent_from_config(agent_config)
 
     # Apply overrides to schedule config
     if interval_override:
@@ -143,7 +143,7 @@ def build_from_recipe(
     max_cost_override: Optional[float] = None,
     on_success: Optional[Callable] = None,
     on_failure: Optional[Callable] = None,
-):
+) -> "_BaseAgentScheduler":
     """Construct a scheduler from a recipe name.
 
     Shared by both sync and async schedulers. ``scheduler_cls`` selects the
@@ -153,18 +153,26 @@ def build_from_recipe(
     """
     from praisonai.recipe.bridge import resolve, get_recipe_task_description
 
+    # Only pass timeout_sec through to recipe execution when the caller
+    # explicitly overrides it. Otherwise leave options empty so the recipe's
+    # own runtime_config timeout (via resolved.get_timeout_sec()) is honoured
+    # instead of being clobbered by the scheduler default.
+    resolve_options: Dict[str, Any] = {}
+    if timeout_override is not None:
+        resolve_options['timeout_sec'] = timeout_override
+
     # Resolve the recipe
     resolved = resolve(
         recipe_name,
         input_data=input_data,
         config=config or {},
-        options={'timeout_sec': timeout_override or 300},
+        options=resolve_options,
     )
 
     # Get runtime config defaults from recipe
     interval = interval_override or "hourly"
     max_retries = max_retries_override if max_retries_override is not None else 3
-    timeout = timeout_override or 300
+    timeout = timeout_override if timeout_override is not None else 300
     max_cost = max_cost_override if max_cost_override is not None else 1.00
 
     runtime = resolved.runtime_config
