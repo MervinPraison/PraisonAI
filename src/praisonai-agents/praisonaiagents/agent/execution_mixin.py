@@ -918,6 +918,113 @@ Write the complete compiled report:"""
             self.verbose = original_verbose
             self.markdown = original_markdown
 
+    def learn_skill(self, request: str, **kwargs: Any) -> Union[str, Generator[str, None, None], None]:
+        """Author a grounded, reusable skill from sources you describe.
+
+        Point the agent at real source material — a directory of code, API docs,
+        PDFs/manuals, configs, pasted notes, or "what we just did in this chat" —
+        and it gathers them with the tools it already has (file read, fetch, PDF
+        read) and authors **one grounded SKILL.md** via the ``skill_manage`` tool.
+
+        House-style rules keep self-written skills trustworthy: only flags, paths,
+        and APIs that appear verbatim in the source are used (never invented), the
+        SKILL.md is kept tight (~100-200 lines), and long material is moved to
+        supporting files referenced by relative path. The result is a permanent,
+        reusable skill, immediately invocable like any other skill.
+
+        This is the **skill authoring** path and is intentionally distinct from
+        the memory ``learn=`` constructor param (conversation→memory extraction)
+        and the automatic ``self_improve`` loop. It is a prompt + entry point on
+        top of existing tools, not a new distillation engine: it ensures
+        ``skill_manage`` is available, then runs a single turn with :meth:`start`.
+
+        Args:
+            request: Natural-language description of the sources to learn from and
+                the skill to produce, e.g.
+                ``"Read ./my-repo and the docs in ./docs/*.pdf and make a
+                'deploy-flow' skill"``.
+            **kwargs: Additional arguments forwarded to :meth:`start`.
+
+        Returns:
+            The agent's response (the authored skill summary), as returned by
+            :meth:`start`.
+
+        Example::
+
+            agent = Agent()
+            agent.learn_skill("Read ./my-repo and make a 'deploy-flow' skill")
+        """
+        from praisonaiagents.skills import build_learn_prompt
+
+        self._ensure_skill_management_tools()
+        return self.start(build_learn_prompt(request), **kwargs)
+
+    async def alearn_skill(self, request: str, **kwargs: Any) -> Union[str, Generator[str, None, None], None]:
+        """Async variant of :meth:`learn_skill` (parity with ``start``/``astart``).
+
+        Ensures ``skill_manage`` is available, then awaits a single turn via
+        :meth:`astart` so async callers never block the event loop.
+
+        Args:
+            request: See :meth:`learn_skill`.
+            **kwargs: Additional arguments forwarded to :meth:`astart`.
+
+        Returns:
+            The agent's response (the authored skill summary).
+        """
+        from praisonaiagents.skills import build_learn_prompt
+
+        self._ensure_skill_management_tools()
+        return await self.astart(build_learn_prompt(request), **kwargs)
+
+    def learn(self, request: str, **kwargs: Any) -> Union[str, Generator[str, None, None], None]:
+        """Backward-compatible alias for :meth:`learn_skill`.
+
+        Retained so existing ``agent.learn("...")`` calls keep working. Prefer
+        :meth:`learn_skill` to avoid confusion with the memory ``learn=`` param.
+        """
+        return self.learn_skill(request, **kwargs)
+
+    async def alearn(self, request: str, **kwargs: Any) -> Union[str, Generator[str, None, None], None]:
+        """Backward-compatible async alias for :meth:`alearn_skill`."""
+        return await self.alearn_skill(request, **kwargs)
+
+    def _ensure_skill_management_tools(self) -> None:
+        """Ensure the agent has the ``skill_manage`` tool for authoring skills.
+
+        Adds the skill-management tool (and lightweight file readers) to
+        ``self.tools`` if they are not already present, so :meth:`learn` can
+        author a skill without the caller wiring tools manually. Idempotent.
+        """
+        if not hasattr(self, 'tools') or self.tools is None:
+            self.tools = []
+
+        def _tool_id(tool: Any) -> str:
+            # Mirror tool_execution.py: handle callables, dict/JSON specs, and
+            # anything else via a stable string fallback so dedup never lets a
+            # dict-form spec slip past the callable form (or vice versa).
+            name = getattr(tool, '__name__', None)
+            if isinstance(tool, dict):
+                name = name or tool.get('name') or (tool.get('function') or {}).get('name')
+            return name or str(tool)
+
+        existing_names = {_tool_id(t) for t in self.tools}
+
+        try:
+            from praisonaiagents.tools.skill_tools import (
+                skill_manage,
+                read_skill_file,
+                list_skill_scripts,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug(f"Could not import skill tools for learn_skill(): {exc}")
+            return
+
+        for tool in (skill_manage, read_skill_file, list_skill_scripts):
+            if _tool_id(tool) not in existing_names:
+                self.tools.append(tool)
+                existing_names.add(_tool_id(tool))
+
     def execute(self, task: Any, context: Optional[Any] = None) -> Optional[str]:
         """Execute a task synchronously - backward compatibility method"""
         if hasattr(task, 'description'):

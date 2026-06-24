@@ -35,6 +35,8 @@ __all__ = [
     "to_prompt",
     "generate_skills_xml",
     "format_skill_for_prompt",
+    # Learn-from-sources
+    "build_learn_prompt",
     # Discovery
     "discover_skills",
     "get_default_skill_dirs",
@@ -82,6 +84,10 @@ def __getattr__(name: str):
     if name in ("to_prompt", "generate_skills_xml", "format_skill_for_prompt"):
         from .prompt import to_prompt, generate_skills_xml, format_skill_for_prompt
         return locals()[name]
+
+    if name == "build_learn_prompt":
+        from .learn import build_learn_prompt
+        return build_learn_prompt
     
     if name in ("discover_skills", "get_default_skill_dirs"):
         from .discovery import discover_skills, get_default_skill_dirs
