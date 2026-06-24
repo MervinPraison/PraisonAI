@@ -72,7 +72,7 @@ def test_global_file_is_lowest_precedence(project, monkeypatch, tmp_path):
 
 
 def test_duplicate_paths_deduplicated(project):
-    root, nested = project
+    root, _nested = project
     (root / "AGENTS.md").write_text("ROOT")
 
     # cwd == root: walk-up dirs would include root once; ensure no double-read.
@@ -81,6 +81,20 @@ def test_duplicate_paths_deduplicated(project):
 
 
 def test_no_files_returns_empty(project):
-    root, nested = project
+    _root, nested = project
     out = load_context_files(cwd=nested)
     assert out == ""
+
+
+def test_walk_up_disabled_skips_global_file(project, monkeypatch, tmp_path):
+    root, nested = project
+    home = tmp_path / "home"
+    (home / ".praisonai").mkdir(parents=True)
+    (home / ".praisonai" / "AGENTS.md").write_text("GLOBAL")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+
+    (nested / "AGENTS.md").write_text("PACKAGE")
+
+    out = load_context_files(cwd=nested, walk_up=False)
+    # walk_up=False is cwd-only: the global file must not leak in.
+    assert out == "PACKAGE"

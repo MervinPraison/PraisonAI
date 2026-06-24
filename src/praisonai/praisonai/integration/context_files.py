@@ -18,30 +18,44 @@ def _get_git_root(start: Path) -> Optional[Path]:
         from praisonai.cli.utils.project import get_git_root
 
         return get_git_root(str(start))
-    except Exception:
+    except (ImportError, OSError):
         return None
+
+
+# When no git root is found, cap the walk-up to avoid scanning arbitrary
+# system directories up to the filesystem root.
+_MAX_WALK_UP_DEPTH = 10
 
 
 def _discover_search_dirs(base: Path, walk_up: bool) -> List[Path]:
     """Build directories to search, ordered root -> cwd (nearest last).
 
-    Walks up from ``base`` to the git root (or filesystem root) so nearer,
-    more specific instruction files take precedence by appearing last.
+    Walks up from ``base`` to the git root so nearer, more specific
+    instruction files take precedence by appearing last. When no git root
+    is found, the walk-up is capped at ``_MAX_WALK_UP_DEPTH`` levels to avoid
+    scanning arbitrary system directories.
     """
     base = base.resolve()
     if not walk_up:
         return [base]
 
     git_root = _get_git_root(base)
+    if git_root is not None:
+        git_root = git_root.resolve()
+
     dirs: List[Path] = []
     current = base
+    depth = 0
     while True:
         dirs.append(current)
         if git_root and current == git_root:
             break
         if current == current.parent:
             break
+        if git_root is None and depth >= _MAX_WALK_UP_DEPTH:
+            break
         current = current.parent
+        depth += 1
 
     # Reverse so root is first and cwd (nearest) is last.
     dirs.reverse()
@@ -74,33 +88,38 @@ def load_context_files(
     """
     base = cwd or Path.cwd()
 
-    # Explicit paths override discovery and remain cwd-only for compatibility.
-    if paths is not None:
-        chunks: List[str] = []
-        for name in paths:
-            path = base / name
-            if path.is_file():
-                chunks.append(path.read_text(encoding="utf-8"))
-        return "\n\n".join(chunks)
-
     seen: set = set()
-    chunks = []
+    chunks: List[str] = []
 
     def _add(path: Path) -> None:
         if not path.is_file():
             return
-        resolved = path.resolve()
-        if resolved in seen:
+        # De-duplicate by filesystem identity so the same physical file is
+        # read once even via different paths or on case-insensitive volumes.
+        try:
+            stat = path.stat()
+            key = (stat.st_dev, stat.st_ino)
+        except OSError:
+            key = path.resolve()
+        if key in seen:
             return
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
             return
-        seen.add(resolved)
+        seen.add(key)
         chunks.append(text)
 
-    # Lowest-precedence layer: user-global instructions.
-    _add(Path.home() / ".praisonai" / "AGENTS.md")
+    # Explicit paths override discovery and remain cwd-only for compatibility.
+    if paths is not None:
+        for name in paths:
+            _add(base / name)
+        return "\n\n".join(chunks)
+
+    # Lowest-precedence layer: user-global instructions
+    # (skipped when walk_up is False to honour cwd-only semantics).
+    if walk_up:
+        _add(Path.home() / ".praisonai" / "AGENTS.md")
 
     # Walk-up layers: root -> cwd so nearer files take precedence (last).
     for search_dir in _discover_search_dirs(base, walk_up):
