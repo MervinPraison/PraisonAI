@@ -82,10 +82,24 @@ def schedule_add_cmd(
             schedule=schedule,
             message=message,
             agent_id=agent,
-            pre_run=pre_run,
-            condition=condition,
             **delivery_kwargs
         )
+
+        # ``pre_run``/``condition`` run an arbitrary host shell command, so they
+        # are NOT part of the LLM-callable schedule_add surface. The CLI is a
+        # trusted, human-driven surface, so set them on the stored job here.
+        if (pre_run or condition) and "Error" not in result:
+            try:
+                from praisonaiagents.tools.schedule_tools import _get_store
+                store = _get_store()
+                job = store.get_by_name(name)
+                if job is not None:
+                    job.pre_run = pre_run or None
+                    job.condition = condition or None
+                    store.update(job)
+            except Exception as e:
+                output.print_error(f"Failed to set pre-run gate: {e}")
+                raise typer.Exit(1)
 
         if json_output:
             import json as _json

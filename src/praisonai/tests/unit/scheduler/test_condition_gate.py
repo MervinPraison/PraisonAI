@@ -80,6 +80,15 @@ class TestShellConditionGate:
         assert decision.run is False
         assert "nothing to do" in (decision.reason or "")
 
+    def test_nonzero_exit_surfaces_stderr_in_reason(self):
+        gate = ShellConditionGate()
+        decision = gate.should_run(
+            FakeJob(pre_run="echo boom 1>&2; exit 3"),
+        )
+        assert decision.run is False
+        assert "boom" in (decision.reason or "")
+        assert "exit 3" in (decision.reason or "")
+
     def test_timeout_skips(self):
         gate = ShellConditionGate(timeout=0.1)
         decision = gate.should_run(FakeJob(pre_run="sleep 5"))
@@ -203,3 +212,21 @@ class TestModelSerialisation:
         assert "pre_run" not in d
         assert "condition" not in d
         assert ScheduleJob.from_dict(d).pre_run is None
+
+
+# ── security: pre_run must NOT be LLM-callable ───────────────────────
+
+
+class TestPreRunNotAgentCallable:
+    def test_schedule_add_rejects_pre_run_kwarg(self):
+        """The agent-callable tool must not accept arbitrary shell commands.
+
+        An LLM under prompt injection should be unable to persist a host-side
+        shell command via the tool surface; ``pre_run`` is CLI/Python-only.
+        """
+        import inspect
+        from praisonaiagents.tools.schedule_tools import schedule_add
+
+        params = inspect.signature(schedule_add).parameters
+        assert "pre_run" not in params
+        assert "condition" not in params

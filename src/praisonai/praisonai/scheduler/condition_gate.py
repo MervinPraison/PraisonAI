@@ -39,6 +39,8 @@ logger = logging.getLogger(__name__)
 
 # Cap captured gate output so a chatty pre-run script cannot blow up the prompt.
 _MAX_CONTEXT_CHARS = 8000
+# Cap stderr surfaced in the skip ``reason`` so an audit record stays compact.
+_MAX_REASON_CHARS = 500
 
 
 class ShellConditionGate:
@@ -85,10 +87,16 @@ class ShellConditionGate:
             return GateResult(run=False, reason=f"pre-run gate error: {e}")
 
         if completed.returncode != 0:
-            return GateResult(
-                run=False,
-                reason="pre-run gate: nothing to do",
-            )
+            # Surface a truncated stderr so audit/logs can distinguish a genuine
+            # "nothing to do" from a misconfigured gate (auth failure, missing
+            # binary, etc.) rather than discarding the diagnostic entirely.
+            stderr = (completed.stderr or "").strip()
+            reason = "pre-run gate: nothing to do"
+            if stderr:
+                if len(stderr) > _MAX_REASON_CHARS:
+                    stderr = stderr[:_MAX_REASON_CHARS] + "…"
+                reason = f"{reason} (exit {completed.returncode}: {stderr})"
+            return GateResult(run=False, reason=reason)
 
         output = (completed.stdout or "").strip()
         if len(output) > _MAX_CONTEXT_CHARS:

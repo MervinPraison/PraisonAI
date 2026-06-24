@@ -173,8 +173,11 @@ class ScheduleJob:
                  delivery. When it reports "go", any output it prints is
                  appended to ``message`` as context. A cost/efficiency gate,
                  distinct from the wrapper's safety ``RunPolicy``.
-        condition: Optional natural-language / expression alias resolved by
-                   the gate (advisory; enforcement lives in the wrapper).
+        condition: Optional natural-language / expression label describing the
+                   gate's intent. Advisory metadata only — it is round-tripped
+                   and surfaced for readability but is NOT itself enforced; the
+                   default :class:`ShellConditionGate` gates on ``pre_run``. A
+                   custom ``condition_resolver`` may interpret it.
     """
 
     name: str = ""

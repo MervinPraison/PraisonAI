@@ -249,7 +249,11 @@ class ScheduledAgentExecutor:
         gate = self._resolve_condition(job)
         if gate is not None:
             try:
-                decision = gate.should_run(job)
+                # Run off the event loop: the default gate shells out via
+                # subprocess.run(), which would otherwise block every other
+                # tick / delivery / health-check coroutine for the gate's
+                # timeout. Mirrors the agent.chat() offload below.
+                decision = await asyncio.to_thread(gate.should_run, job)
             except Exception as e:  # pragma: no cover - defensive
                 logger.warning(
                     "Pre-run gate raised for job '%s': %s; running anyway",
