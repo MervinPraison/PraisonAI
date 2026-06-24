@@ -9,12 +9,14 @@ from unittest.mock import patch
 import pytest
 
 from praisonai.cli.features.custom_definitions import (
+    BUILTIN_PRESETS,
     CustomAgent,
     CustomCommand,
     CustomDefinitionsDiscovery,
     TemplateInterpolator,
     interpolate_command_template,
     load_agent_from_name,
+    resolve_permission_config,
 )
 
 
@@ -259,3 +261,139 @@ Hello! $ARGUMENTS
         """Test interpolating non-existent command."""
         result = interpolate_command_template("nonexistent", "args")
         assert result is None
+
+
+class TestPermissionResolution:
+    """Test per-agent permission/mode resolution."""
+
+    def test_mode_read_only_denies_mutations(self):
+        """read-only mode denies edit/write/shell, allows read."""
+        config = resolve_permission_config(mode="read-only")
+        assert config["read:*"] == "allow"
+        assert config["edit:*"] == "deny"
+        assert config["write:*"] == "deny"
+        assert config["shell:*"] == "deny"
+
+    def test_mode_build_is_unrestricted(self):
+        """build mode produces no restrictions."""
+        assert resolve_permission_config(mode="build") is None
+
+    def test_flat_permission_block(self):
+        """Flat capability keys are normalised to glob patterns."""
+        config = resolve_permission_config(permission={"read": "allow", "edit": "deny"})
+        assert config["read:*"] == "allow"
+        assert config["edit:*"] == "deny"
+
+    def test_nested_permission_block(self):
+        """Nested per-capability patterns are expanded."""
+        config = resolve_permission_config(
+            permission={"shell": {"git *": "ask", "*": "deny"}}
+        )
+        assert config["shell:git *"] == "ask"
+        assert config["shell:*"] == "deny"
+
+    def test_permission_overrides_mode(self):
+        """Explicit permission rules override mode defaults."""
+        config = resolve_permission_config(
+            permission={"shell": "allow"}, mode="read-only"
+        )
+        # mode denies shell, but permission re-allows it
+        assert config["shell:*"] == "allow"
+
+    def test_empty_returns_none(self):
+        """No mode and no permission yields None."""
+        assert resolve_permission_config() is None
+
+
+class TestPermissionDefinitionLoading:
+    """Test that permission/mode are parsed from definitions."""
+
+    def test_yaml_agent_parses_permission_and_mode(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            agents_dir = Path(tmpdir) / "agents"
+            agents_dir.mkdir()
+            (agents_dir / "reviewer.yaml").write_text("""
+model: gpt-4o-mini
+role: Reviewer
+mode: read-only
+permission:
+  shell:
+    "git *": ask
+""")
+            discovery = CustomDefinitionsDiscovery()
+            agent = discovery._load_agent(agents_dir / "reviewer.yaml", "test")
+            assert agent.mode == "read-only"
+            assert agent.permission == {"shell": {"git *": "ask"}}
+
+    def test_markdown_agent_parses_permission_and_mode(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            agents_dir = Path(tmpdir) / "agents"
+            agents_dir.mkdir()
+            (agents_dir / "reviewer.md").write_text("""---
+model: gpt-4o-mini
+mode: read-only
+permission:
+  read: allow
+  edit: deny
+---
+You are a meticulous code reviewer.
+""")
+            discovery = CustomDefinitionsDiscovery()
+            agent = discovery._load_agent(agents_dir / "reviewer.md", "test")
+            assert agent.mode == "read-only"
+            assert agent.permission["edit"] == "deny"
+
+    def test_load_agent_from_name_includes_permissions(self):
+        """A read-only agent gets a deny-by-default permission config."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            agents_dir = Path(tmpdir) / "agents"
+            agents_dir.mkdir()
+            (agents_dir / "reviewer.md").write_text("""---
+model: gpt-4o-mini
+mode: read-only
+---
+You are a reviewer.
+""")
+            with patch.object(
+                CustomDefinitionsDiscovery, '_find_project_dirs', return_value=[Path(tmpdir)]
+            ):
+                config = load_agent_from_name("reviewer")
+                assert config is not None
+                assert "permissions" in config
+                assert config["permissions"]["edit:*"] == "deny"
+                assert config["permissions"]["shell:*"] == "deny"
+
+
+class TestBuiltinPresets:
+    """Test shipped, zero-config agent presets."""
+
+    def test_builtin_presets_discoverable(self):
+        """build/plan/review are discoverable with no YAML or flags."""
+        discovery = CustomDefinitionsDiscovery()
+        with patch.object(discovery, '_get_user_dir', return_value=Path("/nonexistent")), \
+             patch.object(discovery, '_find_project_dirs', return_value=[]):
+            discovery.discover(force=True)
+            for name in ("build", "plan", "review"):
+                agent = discovery.get_agent(name)
+                assert agent is not None
+                assert agent.source == "builtin"
+
+    def test_plan_preset_is_read_only(self):
+        """The plan preset is deny-by-default for mutating tools."""
+        perms = resolve_permission_config(mode=BUILTIN_PRESETS["plan"]["mode"])
+        assert perms["edit:*"] == "deny"
+        assert perms["shell:*"] == "deny"
+
+    def test_user_definition_overrides_builtin(self):
+        """A user/project agent named 'plan' overrides the builtin preset."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            agents_dir = Path(tmpdir) / "agents"
+            agents_dir.mkdir()
+            (agents_dir / "plan.yaml").write_text("model: custom-model\nmode: build\n")
+            discovery = CustomDefinitionsDiscovery()
+            with patch.object(discovery, '_get_user_dir', return_value=Path("/nonexistent")), \
+                 patch.object(discovery, '_find_project_dirs', return_value=[Path(tmpdir)]):
+                discovery.discover(force=True)
+                agent = discovery.get_agent("plan")
+                assert agent.source == "project"
+                assert agent.model == "custom-model"
