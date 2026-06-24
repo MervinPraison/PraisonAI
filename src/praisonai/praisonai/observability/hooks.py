@@ -6,8 +6,10 @@ used consistently across all entry points without duplicating logic.
 """
 
 import os
+import sys
 import logging
-from typing import List, Optional
+from contextlib import contextmanager
+from typing import Callable, Iterator, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -79,3 +81,70 @@ def is_agentops_available() -> bool:
     """Lazy check — does not import agentops at module load time."""
     from .._framework_availability import is_available
     return is_available("agentops")
+
+
+@contextmanager
+def observability_session(
+    framework_tag: str, *, tags: Optional[List[str]] = None
+) -> Iterator[None]:
+    """Context manager that brackets a run with init/finalize observability.
+
+    Guarantees ``finalize_observability`` always runs — on success *and* on
+    any failure — with the correct status derived from whether an exception is
+    propagating. This prevents AgentOps/other sessions from being orphaned in
+    an "in progress" state on error, KeyboardInterrupt, or rate-limit paths.
+
+    Usage::
+
+        with observability_session(self.name, tags=tags):
+            ... run agents ...
+    """
+    init_observability(framework_tag, tags=tags)
+    try:
+        yield
+    finally:
+        # status reflects whether an exception is currently propagating
+        status = "Failure" if sys.exc_info()[0] is not None else "Success"
+        try:
+            finalize_observability(framework_tag, status=status)
+        except Exception:  # noqa: BLE001 -- telemetry must not crash the caller
+            logger.exception("finalize_observability failed")
+
+
+# ---------------------------------------------------------------------------
+# Pluggable trace-sink discovery (Protocol-driven extensibility).
+#
+# Third-party sinks implementing the core SDK's TraceSinkProtocol can register
+# a zero-arg (or framework-tag-aware) factory under the entry-point group
+# "praisonai.observability_sinks". Discovery is lazy and best-effort so a
+# broken plugin never breaks a user run.
+# ---------------------------------------------------------------------------
+
+def discover_observability_sinks() -> List[Callable]:
+    """Return third-party observability sink factories from entry points.
+
+    Each entry point is expected to load to a callable factory. Failures are
+    swallowed (logged at debug) so observability discovery never crashes a run.
+    """
+    factories: List[Callable] = []
+    try:
+        from importlib.metadata import entry_points
+
+        try:
+            eps = entry_points(group="praisonai.observability_sinks")
+        except TypeError:
+            # Python < 3.10 returns a dict-like mapping from entry_points().
+            eps = entry_points().get("praisonai.observability_sinks", [])
+
+        for ep in eps:
+            try:
+                factory = ep.load()
+                if callable(factory):
+                    factories.append(factory)
+                else:
+                    logger.debug("observability sink %r is not callable; skipping", ep)
+            except Exception:  # noqa: BLE001
+                logger.debug("failed to load observability sink %r", ep, exc_info=True)
+    except Exception:  # noqa: BLE001
+        logger.debug("no third-party observability sinks discovered", exc_info=True)
+    return factories
