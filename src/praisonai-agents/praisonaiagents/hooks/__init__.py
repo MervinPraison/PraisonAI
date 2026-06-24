@@ -75,6 +75,10 @@ __all__ = [
     "MessageReceivedInput",
     "MessageSendingInput",
     "MessageSentInput",
+    # Gateway & schedule lifecycle event inputs
+    "GatewayStartInput",
+    "GatewayStopInput",
+    "ScheduleTriggerInput",
     # Middleware types
     "InvocationContext",
     "ModelRequest",
@@ -137,6 +141,9 @@ _LAZY_GROUPS = {
         'MessageReceivedInput': ('praisonaiagents.hooks.events', 'MessageReceivedInput'),
         'MessageSendingInput': ('praisonaiagents.hooks.events', 'MessageSendingInput'),
         'MessageSentInput': ('praisonaiagents.hooks.events', 'MessageSentInput'),
+        'GatewayStartInput': ('praisonaiagents.hooks.events', 'GatewayStartInput'),
+        'GatewayStopInput': ('praisonaiagents.hooks.events', 'GatewayStopInput'),
+        'ScheduleTriggerInput': ('praisonaiagents.hooks.events', 'ScheduleTriggerInput'),
     },
     'middleware_types': {
         'InvocationContext': ('praisonaiagents.hooks.middleware', 'InvocationContext'),

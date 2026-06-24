@@ -276,3 +276,52 @@ class MessageSentInput(HookInput):
             "message_id": self.message_id,
         })
         return base
+
+
+@dataclass
+class GatewayStartInput(HookInput):
+    """Input for GATEWAY_START hooks (gateway/BotOS started)."""
+    platforms: List[str] = field(default_factory=list)
+    bot_count: int = 0
+    
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({
+            "platforms": self.platforms,
+            "bot_count": self.bot_count,
+        })
+        return base
+
+
+@dataclass
+class GatewayStopInput(HookInput):
+    """Input for GATEWAY_STOP hooks (gateway/BotOS stopped)."""
+    platforms: List[str] = field(default_factory=list)
+    bot_count: int = 0
+    reason: str = "stop"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({
+            "platforms": self.platforms,
+            "bot_count": self.bot_count,
+            "reason": self.reason,
+        })
+        return base
+
+
+@dataclass
+class ScheduleTriggerInput(HookInput):
+    """Input for SCHEDULE_TRIGGER hooks (a scheduled job fired)."""
+    job_name: str = ""
+    job_id: str = ""
+    message: str = ""
+    
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({
+            "job_name": self.job_name,
+            "job_id": self.job_id,
+            "message": self.message[:500] if self.message else "",
+        })
+        return base
