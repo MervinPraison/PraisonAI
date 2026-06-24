@@ -388,12 +388,63 @@ def execute_code(
     )
 
 
+def execute_code_with_tools(
+    code: str,
+    allowed_tools: Optional[List[str]] = None,
+    registry: Optional[Any] = None,
+    timeout: int = 30,
+    max_output_size: int = 10000,
+) -> Dict[str, Any]:
+    """Execute model-generated code that may call the agent's registered tools.
+
+    This is the *code-execution-with-tools* (code mode) bridge. Unlike the
+    subprocess sandbox (which runs in a clean process and therefore cannot see
+    the agent's tools), this runs in-process with restricted builtins and
+    injects thin proxies for the tools on ``allowed_tools``. Each proxy call
+    resolves against the :class:`ToolRegistry`, enforces the allow-list, and
+    passes through the existing ``require_approval`` gate. Only the script's
+    stdout / last-expression value is returned — intermediate tool results stay
+    out of the caller's context.
+
+    Args:
+        code: Python code to execute. May call allowed tools by bare name
+            (e.g. ``fetch(...)``) or via ``tools.fetch(...)``.
+        allowed_tools: Explicit per-run allow-list of tool names callable from
+            code. Empty/None means no tools are exposed.
+        registry: Optional ToolRegistry; defaults to the global registry.
+        timeout: Maximum execution time in seconds.
+        max_output_size: Maximum output size in characters.
+
+    Returns:
+        Dictionary with result, stdout, stderr, and success status.
+    """
+    from .tool_proxy import ToolProxy, build_tool_namespace
+
+    allowed = list(allowed_tools or [])
+    if "tools" in allowed:
+        raise ValueError(
+            "'tools' is a reserved name in code mode and cannot be an "
+            "allow-listed tool; rename the tool."
+        )
+    injected: Dict[str, Any] = {}
+    if allowed:
+        injected.update(build_tool_namespace(allowed, registry=registry))
+        injected["tools"] = ToolProxy(allowed, registry=registry)
+
+    return _execute_code_direct(
+        code,
+        globals_dict=injected or None,
+        timeout=timeout,
+        max_output_size=max_output_size,
+    )
+
+
 def _execute_code_direct(
     code: str,
     globals_dict: Optional[Dict[str, Any]] = None,
     locals_dict: Optional[Dict[str, Any]] = None,
     timeout: int = 30,
-    max_output_size: int = 10000
+    max_output_size: int = 10000,
 ) -> Dict[str, Any]:
     """Execute Python code directly in current process with restricted builtins.
 

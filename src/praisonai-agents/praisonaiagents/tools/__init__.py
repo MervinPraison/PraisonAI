@@ -73,6 +73,7 @@ TOOL_MAPPINGS = {
 
     # Python Tools
     'execute_code': ('.python_tools', None),
+    'execute_code_with_tools': ('.python_tools', None),
     'analyze_code': ('.python_tools', None),
     'format_code': ('.python_tools', None),
     'lint_code': ('.python_tools', None),
@@ -243,8 +244,17 @@ _PROFILE_EXPORTS = frozenset({
     'register_profile', 'get_profile', 'resolve_profiles', 'list_profiles'
 })
 
+# Code-tools bridge exports (lazy loaded to keep import-time cost off the
+# default path; only resolved when the opt-in code mode is used).
+_TOOL_PROXY_EXPORTS = frozenset({'ToolProxy', 'build_tool_namespace'})
+
 def __getattr__(name: str) -> Any:
     """Smart lazy loading of tools and profiles."""
+    # Handle code-tools bridge exports
+    if name in _TOOL_PROXY_EXPORTS:
+        from .tool_proxy import ToolProxy, build_tool_namespace
+        return {'ToolProxy': ToolProxy, 'build_tool_namespace': build_tool_namespace}[name]
+
     # Handle circuit breaker imports first
     if name in _CIRCUIT_BREAKER_EXPORTS:
         from .circuit_breaker import (
@@ -339,7 +349,7 @@ def __getattr__(name: str) -> Any:
         if name in [
             'duckduckgo', 'internet_search', 'searxng_search', 'searxng',
             'scrape_page', 'extract_links', 'crawl', 'extract_text',
-            'execute_command', 'execute_code', 'analyze_code', 'format_code', 'lint_code', 'disassemble_code', 'list_processes', 'kill_process', 'get_system_info',
+            'execute_command', 'execute_code', 'execute_code_with_tools', 'analyze_code', 'format_code', 'lint_code', 'disassemble_code', 'list_processes', 'kill_process', 'get_system_info',
             'tavily', 'tavily_search', 'tavily_extract', 'tavily_crawl', 'tavily_map',
             'tavily_search_async', 'tavily_extract_async',
             'ydc', 'ydc_search', 'ydc_contents', 'ydc_news', 'ydc_images',
@@ -380,6 +390,7 @@ __all__ = list(TOOL_MAPPINGS.keys()) + [
     'tool', 'FunctionTool',
     'get_registry', 'register_tool', 'get_tool', 'add_tool', 'has_tool', 'remove_tool', 
     'list_tools', 'list_available_tools', 'list_tools_with_allowed_filter', 'list_tools_with_hermes_filter', 'ToolRegistry',
+    'ToolProxy', 'build_tool_namespace',
     'Tools',
     # Validation and retry protocols
     'ValidationResult', 'ToolValidatorProtocol', 'AsyncToolValidatorProtocol', 'PassthroughValidator',
