@@ -78,6 +78,49 @@ def skills_create(
         sys.argv = original_argv
 
 
+@app.command("learn")
+def skills_learn(
+    request: str = typer.Argument(
+        ...,
+        help="Sources to learn from and the skill to make, e.g. "
+        "\"deploy steps from ./repo and the runbook PDF\"",
+    ),
+    llm: str = typer.Option(None, "--llm", "-m", help="LLM model to use"),
+):
+    """Author a grounded, reusable skill from sources you describe.
+
+    Points an agent at the sources you name (code, docs, PDFs, configs) and
+    distils one grounded SKILL.md via the existing skill tools.
+
+    This is the **skill authoring** path — distinct from ``praisonai memory
+    learn`` (which captures a recall note) and the memory ``learn=`` param.
+
+    Example:
+        praisonai skills learn "deploy steps from ./repo and the runbook PDF"
+    """
+    try:
+        from praisonaiagents import Agent
+    except ImportError as e:
+        typer.echo(f"Error: praisonaiagents is required for 'skills learn': {e}", err=True)
+        raise typer.Exit(1)
+
+    agent_kwargs = {}
+    if llm:
+        agent_kwargs["llm"] = llm
+
+    agent = Agent(
+        instructions="You author grounded, reusable Agent Skills from real sources.",
+        **agent_kwargs,
+    )
+    try:
+        result = agent.learn_skill(request)
+    except Exception as e:  # noqa: BLE001 - surface a friendly message
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    if result:
+        typer.echo(str(result))
+
+
 @app.command("install")
 def skills_install(
     source: str = typer.Argument(..., help="Skill source (local path or https:// git URL)"),

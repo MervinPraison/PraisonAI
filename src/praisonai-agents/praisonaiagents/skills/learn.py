@@ -54,6 +54,11 @@ Follow this procedure exactly:
 def build_learn_prompt(request: str) -> str:
     """Build a grounded skill-authoring directive from a user request.
 
+    This is the **skill authoring** path: distil a reusable ``SKILL.md`` from
+    real sources. It is complementary to — and distinct from — the memory
+    ``learn=`` recall path (conversation→memory extraction) and the automatic
+    ``self_improve`` loop.
+
     Args:
         request: A natural-language description of the sources to learn from and
             the skill to produce, e.g. ``"Read ./my-repo and the docs in
@@ -65,4 +70,4 @@ def build_learn_prompt(request: str) -> str:
         ``skill_manage``.
     """
     request = (request or "").strip()
-    return _LEARN_HOUSE_STYLE.format(request=request)
+    return _LEARN_HOUSE_STYLE.replace("{request}", request)

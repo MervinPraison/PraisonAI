@@ -32,7 +32,8 @@ from ._commands import (
     handle_model_command,
     handle_usage_command,
     handle_compress_command,
-    handle_queue_command
+    handle_queue_command,
+    handle_learn_command
 )
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
@@ -276,6 +277,13 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                     parts = bot_message.text.split(maxsplit=1)
                     message_text = parts[1] if len(parts) > 1 else None
                     response = handle_queue_command(self._session, user_id, message_text)
+                    await message.reply(response)
+                    return
+                elif command == "learn":
+                    # Extract request text from command
+                    parts = bot_message.text.split(maxsplit=1)
+                    request = parts[1] if len(parts) > 1 else None
+                    response = handle_learn_command(self._agent, request)
                     await message.reply(response)
                     return
                 elif command and command in self._command_handlers:

@@ -683,11 +683,11 @@ def handle_learn_command(
 ) -> str:
     """Handle /learn command to author a grounded skill from sources.
 
-    Drives :meth:`Agent.learn`, which gathers the named sources with the agent's
-    existing tools and authors one grounded SKILL.md via ``skill_manage``.
+    Drives :meth:`Agent.learn_skill`, which gathers the named sources with the
+    agent's existing tools and authors one grounded SKILL.md via ``skill_manage``.
 
     Args:
-        agent: The bot's agent (must support ``learn``).
+        agent: The bot's agent (must support ``learn_skill``/``learn``).
         request: Description of the sources to learn from and the skill to
             produce, e.g. "deploy steps from this repo and the runbook PDF".
 
@@ -703,11 +703,12 @@ def handle_learn_command(
             "Example: /learn deploy steps from this repo and the runbook PDF"
         )
 
-    if not hasattr(agent, "learn"):
+    learn_fn = getattr(agent, "learn_skill", None) or getattr(agent, "learn", None)
+    if not callable(learn_fn):
         return "❌ This agent does not support learning skills from sources."
 
     try:
-        result = agent.learn(request.strip())
+        result = learn_fn(request.strip())
         return str(result) if result else "✅ Skill authored."
     except Exception as e:  # noqa: BLE001 - surface a friendly message
         return f"❌ Could not learn skill: {e}"

@@ -36,6 +36,7 @@ from ._commands import (
     handle_usage_command,
     handle_compress_command,
     handle_queue_command,
+    handle_learn_command,
     CommandAccessPolicy,
     get_command_registry
 )
@@ -757,7 +758,22 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             message_text = parts[1] if len(parts) > 1 else None
             response = handle_queue_command(self._session, user_id, message_text)
             await update.message.reply_text(response)
-        
+
+        async def handle_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message or not update.message.text:
+                return
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return
+            user_id = message.sender.user_id if message.sender else "unknown"
+            if not self._command_policy.can_run(user_id, "learn"):
+                await update.message.reply_text("⛔ You are not permitted to run /learn")
+                return
+            parts = update.message.text.split(maxsplit=1)
+            request = parts[1] if len(parts) > 1 else None
+            response = handle_learn_command(self._agent, request)
+            await update.message.reply_text(response)
+
         self._application.add_handler(CommandHandler("status", handle_status))
         self._application.add_handler(CommandHandler("new", handle_new))
         self._application.add_handler(CommandHandler("help", handle_help))
@@ -767,6 +783,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._application.add_handler(CommandHandler("usage", handle_usage))
         self._application.add_handler(CommandHandler("compress", handle_compress))
         self._application.add_handler(CommandHandler("queue", handle_queue))
+        self._application.add_handler(CommandHandler("learn", handle_learn))
         
         for command in self._command_handlers:
             self._application.add_handler(CommandHandler(command, handle_command))

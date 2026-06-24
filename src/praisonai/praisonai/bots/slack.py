@@ -34,7 +34,8 @@ from ._commands import (
     handle_model_command,
     handle_usage_command,
     handle_compress_command,
-    handle_queue_command
+    handle_queue_command,
+    handle_learn_command
 )
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
@@ -267,6 +268,12 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                 parts = text.split(maxsplit=1)
                 message_text = parts[1] if len(parts) > 1 else None
                 response = handle_queue_command(self._session, user_id, message_text)
+                await say(text=response, thread_ts=event.get("ts"))
+                return
+            elif text.split(maxsplit=1)[:1] == ["/learn"]:
+                parts = text.split(maxsplit=1)
+                request = parts[1] if len(parts) > 1 else None
+                response = handle_learn_command(self._agent, request)
                 await say(text=response, thread_ts=event.get("ts"))
                 return
             
