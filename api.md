@@ -944,6 +944,10 @@ Methods:
 * <code title="cli">praisonai hooks add <a href="./src/praisonai/praisonai/cli/commands/hooks.py">--help</a></code>
 * <code title="cli">praisonai hooks list <a href="./src/praisonai/praisonai/cli/commands/hooks.py">--help</a></code>
 * <code title="cli">praisonai hooks remove <a href="./src/praisonai/praisonai/cli/commands/hooks.py">--help</a></code>
+* <code title="cli">praisonai identity import <a href="./src/praisonai/praisonai/cli/commands/identity.py">--help</a></code>
+* <code title="cli">praisonai identity link <a href="./src/praisonai/praisonai/cli/commands/identity.py">--help</a></code>
+* <code title="cli">praisonai identity list <a href="./src/praisonai/praisonai/cli/commands/identity.py">--help</a></code>
+* <code title="cli">praisonai identity unlink <a href="./src/praisonai/praisonai/cli/commands/identity.py">--help</a></code>
 * <code title="cli">praisonai init init <a href="./src/praisonai/praisonai/cli/commands/init.py">--help</a></code>
 * <code title="cli">praisonai kanban block <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
 * <code title="cli">praisonai kanban boards <a href="./src/praisonai/praisonai/cli/commands/kanban.py">--help</a></code>
