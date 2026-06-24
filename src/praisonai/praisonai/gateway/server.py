@@ -33,6 +33,7 @@ from praisonaiagents.gateway import (
 )
 from praisonaiagents.gateway.protocols import (
     ConnectErrorCode,
+    ConnectRecoveryStep,
     HelloResult,
     HelloError,
     GATEWAY_PROTOCOL_VERSION,
@@ -749,6 +750,33 @@ class WebSocketGateway:
                 "clients": len(self._clients),
             })
         
+        async def _reject_connection(
+            websocket: WebSocket,
+            *,
+            close_code: int,
+            error: HelloError,
+        ) -> None:
+            """Reject a connection with a structured ``hello_error`` envelope.
+
+            Accepts the socket so an application-level frame carrying the
+            machine-readable ``(code, next_step, retry_after_seconds)`` recovery
+            envelope can be delivered, then closes with the transport code.
+            Best-effort: if the frame cannot be sent we still close the socket.
+            """
+            try:
+                await websocket.accept()
+                await websocket.send_json(error.to_dict())
+            except Exception as exc:
+                logger.debug(
+                    f"Could not deliver hello_error envelope ({error.code.value}): {exc}"
+                )
+            try:
+                await websocket.close(code=close_code, reason=error.message)
+            except Exception as exc:
+                logger.debug(
+                    f"Could not close rejected websocket ({error.code.value}): {exc}"
+                )
+
         async def websocket_endpoint(websocket: WebSocket):
             # Get client IP for rate limiting
             client_ip = websocket.client.host if websocket.client else "unknown"
@@ -757,7 +785,16 @@ class WebSocketGateway:
             if not is_loopback(client_ip) and not is_loopback(self._host):
                 if not _ws_upgrade_rate.allow("ws_upgrade", client_ip):
                     retry = _ws_upgrade_rate.time_until_allowed("ws_upgrade", client_ip)
-                    await websocket.close(code=4008, reason="Rate limited")
+                    await _reject_connection(
+                        websocket,
+                        close_code=4008,
+                        error=HelloError(
+                            code=ConnectErrorCode.RATE_LIMITED,
+                            message="Too many connection attempts",
+                            next_step=ConnectRecoveryStep.WAIT_THEN_RETRY,
+                            retry_after_seconds=max(1, int(retry)) if retry else None,
+                        ),
+                    )
                     logger.warning(f"WebSocket upgrade rate limited for {client_ip} (retry in {retry:.0f}s)")
                     return
 
@@ -765,11 +802,30 @@ class WebSocketGateway:
             origin = websocket.headers.get("origin")
             try:
                 if not check_origin(origin, self.config.allowed_origins, self._host):
-                    await websocket.close(code=4003, reason="Origin not allowed")
+                    await _reject_connection(
+                        websocket,
+                        close_code=4003,
+                        error=HelloError(
+                            code=ConnectErrorCode.ORIGIN_NOT_ALLOWED,
+                            message="Origin not allowed",
+                            next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+                        ),
+                    )
                     logger.warning(f"WebSocket connection rejected: origin '{origin}' not in allowed list")
                     return
-            except GatewayStartupError as e:
-                await websocket.close(code=4003, reason="Configuration error")
+            except (GatewayStartupError, ValueError) as e:
+                # check_origin() raises ValueError when an external bind has no
+                # allowed_origins configured; route both through the structured
+                # configuration_error envelope rather than the generic error path.
+                await _reject_connection(
+                    websocket,
+                    close_code=4003,
+                    error=HelloError(
+                        code=ConnectErrorCode.CONFIGURATION_ERROR,
+                        message="Configuration error",
+                        next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+                    ),
+                )
                 logger.error(f"WebSocket connection failed due to configuration error: {e}")
                 return
 
@@ -798,7 +854,15 @@ class WebSocketGateway:
                         operator_token = ws_token
                 
                 if not authenticated:
-                    await websocket.close(code=4003, reason="Authentication required")
+                    await _reject_connection(
+                        websocket,
+                        close_code=4003,
+                        error=HelloError(
+                            code=ConnectErrorCode.AUTH_REQUIRED,
+                            message="Authentication required",
+                            next_step=ConnectRecoveryStep.REAUTHENTICATE,
+                        ),
+                    )
                     return
             
             await websocket.accept()
@@ -1275,14 +1339,10 @@ class WebSocketGateway:
                 error = HelloError(
                     code=ConnectErrorCode.AGENT_NOT_FOUND,
                     message=f"Agent not found: {agent_id}",
-                    next_action="check_agent_id"
+                    next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+                    next_action="check_agent_id",
                 )
-                await self._send_to_client(client_id, {
-                    "type": "hello_error",
-                    "code": error.code.value,
-                    "message": error.message,
-                    "next": error.next_action,
-                })
+                await self._send_to_client(client_id, error.to_dict())
                 return
             
             # Parse protocol version from client
@@ -1307,28 +1367,20 @@ class WebSocketGateway:
                 error = HelloError(
                     code=ConnectErrorCode.PROTOCOL_UNSUPPORTED,
                     message=f"Protocol version {client_max} is too old, minimum required is {MIN_CLIENT_PROTOCOL_VERSION}",
-                    next_action="upgrade_client"
+                    next_step=ConnectRecoveryStep.UPGRADE_CLIENT,
+                    next_action="upgrade_client",
                 )
-                await self._send_to_client(client_id, {
-                    "type": "hello_error",
-                    "code": error.code.value,
-                    "message": error.message,
-                    "next": error.next_action,
-                })
+                await self._send_to_client(client_id, error.to_dict())
                 return
             
             if client_min > GATEWAY_PROTOCOL_VERSION:
                 error = HelloError(
                     code=ConnectErrorCode.PROTOCOL_UNSUPPORTED,
                     message=f"Protocol version {client_min} is too new, server supports up to {GATEWAY_PROTOCOL_VERSION}",
-                    next_action="use_older_client"
+                    next_step=ConnectRecoveryStep.DOWNGRADE_CLIENT,
+                    next_action="use_older_client",
                 )
-                await self._send_to_client(client_id, {
-                    "type": "hello_error",
-                    "code": error.code.value,
-                    "message": error.message,
-                    "next": error.next_action,
-                })
+                await self._send_to_client(client_id, error.to_dict())
                 return
             
             # Select the highest mutually supported version
@@ -1356,14 +1408,10 @@ class WebSocketGateway:
                 error = HelloError(
                     code=ConnectErrorCode.AUTH_UNAUTHORIZED,
                     message="Session does not belong to the requested agent",
-                    next_action="start_new_session"
+                    next_step=ConnectRecoveryStep.REAUTHENTICATE,
+                    next_action="start_new_session",
                 )
-                await self._send_to_client(client_id, {
-                    "type": "hello_error",
-                    "code": error.code.value,
-                    "message": error.message,
-                    "next": error.next_action,
-                })
+                await self._send_to_client(client_id, error.to_dict())
                 return
             
             # Rebind client_id to session for correct routing
