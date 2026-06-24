@@ -27,12 +27,14 @@ from ..utils.project import get_git_root
 # Known top-level sections the resolver consumes.
 KNOWN_TOP_LEVEL_KEYS = {
     "agent", "rag", "output", "telemetry", "sources",
+    # Reserved editor-tooling pointer written by `praisonai init`.
+    "$schema",
     # Tolerated extension sections (validated leniently, not dropped).
-    "traces", "mcp", "model", "llm", "session", "rules",
+    "traces", "mcp", "permissions", "model", "llm", "session", "rules",
 }
 
 # Known keys for the nested output section.
-KNOWN_OUTPUT_KEYS = {"format", "color", "verbose", "quiet", "screen_reader"}
+KNOWN_OUTPUT_KEYS = {"format", "color", "verbose", "quiet"}
 
 
 def _strict_mode_enabled() -> bool:
@@ -100,18 +102,19 @@ def validate_config_data(
             _record(_format_unknown_key_message(key, KNOWN_TOP_LEVEL_KEYS, "top-level", source))
             continue
 
-        if key == "agent" and isinstance(value, dict):
+        section_fields = {
+            "agent": agent_fields,
+            "rag": rag_fields,
+            "output": KNOWN_OUTPUT_KEYS,
+        }.get(key)
+        if section_fields is not None:
+            if not isinstance(value, dict):
+                location = f" in {source}" if source else ""
+                _record(f"Configuration section '{key}'{location} must be a mapping.")
+                continue
             for sub in value:
-                if sub not in agent_fields:
-                    _record(_format_unknown_key_message(sub, agent_fields, "agent", source))
-        elif key == "rag" and isinstance(value, dict):
-            for sub in value:
-                if sub not in rag_fields:
-                    _record(_format_unknown_key_message(sub, rag_fields, "rag", source))
-        elif key == "output" and isinstance(value, dict):
-            for sub in value:
-                if sub not in KNOWN_OUTPUT_KEYS:
-                    _record(_format_unknown_key_message(sub, KNOWN_OUTPUT_KEYS, "output", source))
+                if sub not in section_fields:
+                    _record(_format_unknown_key_message(sub, section_fields, key, source))
 
     return messages
 
@@ -241,7 +244,7 @@ class ResolvedConfig:
         output_data = data.get("output", {})
         
         # Extract known top-level fields
-        known_keys = {"agent", "rag", "output", "telemetry", "mcp", "permissions", "sources"}
+        known_keys = {"agent", "rag", "output", "telemetry", "mcp", "permissions", "sources", "$schema", "_source"}
         extra = {k: v for k, v in data.items() if k not in known_keys}
         
         return cls(
@@ -419,6 +422,24 @@ class ConfigResolver:
         
         return None
     
+    def discover_raw_configs(self) -> List[Dict[str, Any]]:
+        """
+        Return the raw discovered config dicts (global then project), without
+        normalisation through ``ResolvedConfig``.
+
+        Unlike ``resolve()``, this preserves unknown/typo keys so that
+        ``validate_config_data`` can surface nested mistakes (e.g.
+        ``agent.temprature``) that the resolver would otherwise drop.
+        """
+        raw: List[Dict[str, Any]] = []
+        global_config = self._load_global_config()
+        if global_config:
+            raw.append(global_config)
+        project_config = self._load_project_config()
+        if project_config:
+            raw.append(project_config)
+        return raw
+
     def _load_env_config(self) -> Dict[str, Any]:
         """Load configuration from environment variables."""
         config = {}

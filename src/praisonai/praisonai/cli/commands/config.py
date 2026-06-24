@@ -542,11 +542,18 @@ def config_validate(
     """Validate configuration file syntax and schema (catches typos)."""
     output = get_output_controller()
 
-    from ..configuration.resolver import ResolvedConfig, validate_config_data
+    from ..configuration.resolver import (
+        ConfigResolver,
+        ResolvedConfig,
+        validate_config_data,
+    )
+
+    # (raw config dict, source label) pairs to validate.
+    targets: list = []
 
     try:
         if file:
-            # Validate specific file
+            # Validate a specific file.
             config_path = Path(file)
             if not config_path.exists():
                 output.print_error(f"File not found: {file}")
@@ -554,38 +561,66 @@ def config_validate(
 
             with open(config_path, 'r') as f:
                 data = yaml.safe_load(f)
-            source = str(config_path)
+            targets.append((data, str(config_path)))
         else:
-            # Validate current resolved config
-            config = resolve_config()
-            data = config.to_dict()
-            source = "resolved configuration"
+            # Validate the RAW discovered config(s) so nested typos (e.g.
+            # agent.temprature) are caught instead of being normalised away.
+            # Discover with strict=False so loading never raises here; we run
+            # the explicit (optionally strict) validation pass below.
+            resolver = ConfigResolver(strict=False)
+            import warnings as _warnings
+            with _warnings.catch_warnings():
+                _warnings.simplefilter("ignore")
+                raw_configs = resolver.discover_raw_configs()
+            if not raw_configs:
+                if output.is_json_mode:
+                    output.print_json({"valid": True, "warnings": [], "sources": []})
+                else:
+                    output.print_success("✓ No project/global configuration found (defaults in use)")
+                return
+            for raw in raw_configs:
+                targets.append((raw, raw.get("_source", "resolved configuration")))
 
-        if not isinstance(data, dict):
-            output.print_error(f"Configuration must be a dictionary/object: {source}")
-            raise typer.Exit(1)
+        messages: list = []
+        for data, source in targets:
+            if not isinstance(data, dict):
+                output.print_error(f"Configuration must be a dictionary/object: {source}")
+                raise typer.Exit(1)
 
-        # Schema/typo validation (collect-and-report in warn mode).
-        try:
-            messages = validate_config_data(data, source=source, strict=strict)
-        except ValueError as e:
-            output.print_error(f"Schema validation failed: {e}")
-            raise typer.Exit(1) from e
+            # Schema/typo validation (collect-and-report in warn mode).
+            try:
+                messages.extend(validate_config_data(data, source=source, strict=strict))
+            except ValueError as e:
+                output.print_error(f"Schema validation failed: {e}")
+                raise typer.Exit(1) from e
 
-        # Ensure it can also be parsed by the resolver.
-        ResolvedConfig.from_dict(data)
+            # Ensure it can also be parsed by the resolver.
+            ResolvedConfig.from_dict(data)
+
+        sources = [source for _, source in targets]
 
         if messages:
-            for message in messages:
-                output.print_warning(message)
-            output.print_warning(
-                f"Configuration loaded with {len(messages)} warning(s): {source}"
-            )
-            output.print_info(
-                "Use --strict-config (or PRAISONAI_STRICT_CONFIG=1) to fail on these."
-            )
+            if output.is_json_mode:
+                output.print_json({
+                    "valid": False,
+                    "warnings": messages,
+                    "sources": sources,
+                    "hint": "Use --strict-config (or PRAISONAI_STRICT_CONFIG=1) to fail on these.",
+                })
+            else:
+                for message in messages:
+                    output.print_warning(message)
+                output.print_warning(
+                    f"Configuration loaded with {len(messages)} warning(s)."
+                )
+                output.print_info(
+                    "Use --strict-config (or PRAISONAI_STRICT_CONFIG=1) to fail on these."
+                )
         else:
-            output.print_success(f"✓ Configuration is valid: {source}")
+            if output.is_json_mode:
+                output.print_json({"valid": True, "warnings": [], "sources": sources})
+            else:
+                output.print_success(f"✓ Configuration is valid: {', '.join(sources)}")
 
     except typer.Exit:
         raise

@@ -82,6 +82,23 @@ def test_strict_mode_env_var(tmp_path, monkeypatch):
         resolver.resolve(force_refresh=True)
 
 
+def test_schema_pointer_key_is_tolerated():
+    """The `$schema` editor pointer written by `init` must not warn."""
+    data = {"$schema": "https://example/schema.json", "agent": {"model": "gpt-4o-mini"}}
+    assert validate_config_data(data) == []
+
+
+def test_non_mapping_section_is_rejected():
+    msgs = validate_config_data({"agent": "gpt-4o"}, source="cfg.yaml")
+    assert len(msgs) == 1
+    assert "must be a mapping" in msgs[0]
+
+
+def test_non_mapping_section_strict_raises():
+    with pytest.raises(ValueError):
+        validate_config_data({"output": ["text"]}, strict=True)
+
+
 def test_schema_asset_exists_and_is_valid_json():
     import json
 

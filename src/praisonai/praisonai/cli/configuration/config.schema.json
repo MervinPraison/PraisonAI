@@ -6,6 +6,7 @@
   "type": "object",
   "additionalProperties": true,
   "properties": {
+    "$schema": { "type": "string" },
     "agent": {
       "type": "object",
       "description": "Agent configuration defaults.",
@@ -48,8 +49,7 @@
         "format": { "type": "string", "enum": ["text", "json", "stream-json"] },
         "color": { "type": "boolean" },
         "verbose": { "type": "boolean" },
-        "quiet": { "type": "boolean" },
-        "screen_reader": { "type": "boolean" }
+        "quiet": { "type": "boolean" }
       }
     },
     "telemetry": { "type": "boolean" }
