@@ -52,6 +52,7 @@ class RunDecision(Enum):
     QUEUED = "queued"            # Current run active, message queued for next turn
     MERGED = "merged"            # Message merged into existing pending slot
     INTERRUPTED = "interrupted"  # Current run was interrupted, start new run
+    STEERED = "steered"          # Message injected into the live run via steering
 
 
 class BusyMode(Enum):
@@ -71,6 +72,7 @@ class SessionRunState:
         self.interrupt_controller: Optional["InterruptController"] = None
         self.start_time: Optional[float] = None
         self.last_activity: float = time.time()  # Always track activity for cleanup
+        self.agent: Optional[Any] = None  # Live agent handle for STEER mode
 
 
 class SessionRunControl:
@@ -163,11 +165,25 @@ class SessionRunControl:
                 return RunDecision.INTERRUPTED
                 
             elif self._busy_mode == BusyMode.STEER:
-                # Try to inject into running agent via steering
-                # Note: This requires the agent to have steering enabled
-                # For now, we'll fall back to queueing
-                logger.warning("Steer mode is not yet implemented, falling back to queue mode")
-                # TODO: Implement steering integration when agent reference is available
+                # Inject the message into the running agent via steering so the
+                # current turn folds in the new guidance (preserving partial
+                # progress) instead of cancelling or waiting for the run to end.
+                agent = session.agent
+                if agent is not None and getattr(agent, "message_steering_enabled", False):
+                    try:
+                        # priority 30 == SteeringPriority.INTERRUPT (immediate)
+                        msg_id = agent.steer(text, priority=30)
+                    except Exception as exc:  # noqa: BLE001 - fall back safely
+                        logger.warning("Steering injection failed (%s), falling back to queue", exc)
+                    else:
+                        if msg_id:
+                            return RunDecision.STEERED
+                        logger.warning("Steering returned no message id, falling back to queue")
+                else:
+                    logger.warning(
+                        "Steer mode requested but agent has no steering enabled, falling back to queue"
+                    )
+                # Safe fallback: queue the message below.
                 
             # Default to queue mode (or steer fallback)
             if session.pending_message is None:
@@ -196,6 +212,8 @@ class SessionRunControl:
             action = "added to pending request"
         elif decision == RunDecision.INTERRUPTED:
             return "⚠️ Previous task cancelled, starting your new request"
+        elif decision == RunDecision.STEERED:
+            return "🧭 Steering the current task with your new guidance"
         else:
             return ""  # No ack needed for RUN_NOW
             
@@ -235,6 +253,7 @@ class SessionRunControl:
             session.pending_message = None
             session.interrupt_controller = None
             session.start_time = None
+            session.agent = None
             
             return True
 
@@ -269,6 +288,21 @@ class SessionRunControl:
                 session.is_running = False
                 session.interrupt_controller = None
                 session.start_time = None
+                session.agent = None
+
+    def register_agent(self, user_id: str, agent: Any) -> None:
+        """Register the live agent handle for a user's run (for STEER mode).
+
+        The gateway calls this once the run is active so that subsequent
+        mid-run messages in STEER mode can be injected into the agent's
+        steering queue via ``agent.steer(...)``.
+
+        Args:
+            user_id: User identifier
+            agent: The Agent instance handling this user's run
+        """
+        session = self._get_session(user_id)
+        session.agent = agent
 
     def get_interrupt_controller(self, user_id: str) -> Optional["InterruptController"]:
         """Get the interrupt controller for a user's current run.
