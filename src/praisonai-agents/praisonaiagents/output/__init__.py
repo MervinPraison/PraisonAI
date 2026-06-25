@@ -76,7 +76,10 @@ def __getattr__(name: str):
         return StylePreset
     
     if name == "OutputConfig":
-        from .config import OutputConfig
+        # Consolidated to the canonical config.OutputConfig (see issue #2294).
+        # The former divergent dataclass in output/config.py was unused; this
+        # import path is preserved for backward compatibility.
+        from ..config import OutputConfig
         return OutputConfig
     
     # Status output (for status preset - no timestamps)
