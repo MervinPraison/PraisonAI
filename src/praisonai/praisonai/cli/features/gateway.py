@@ -260,7 +260,13 @@ class GatewayHandler:
             if os.path.exists(config_path):
                 try:
                     with open(config_path, "r") as f:
-                        return yaml.safe_load(f) or {}
+                        data = yaml.safe_load(f) or {}
+                    if not isinstance(data, dict):
+                        print(
+                            f"Error: {config_path} must contain a YAML mapping at the root."
+                        )
+                        return {}
+                    return data
                 except Exception as e:
                     print(f"Error reading {config_path}: {e}")
                     return {}

@@ -1223,13 +1223,21 @@ class WebSocketGateway:
 
             try:
                 payload = await request.json()
-            except Exception:
-                payload = {}
+            except ValueError:
+                # Malformed JSON: reject rather than silently running on {} so a
+                # bad request never triggers an agent with an unintended message.
+                return JSONResponse(
+                    {"error": "Invalid JSON. Send a JSON object payload."},
+                    status_code=400,
+                )
             if not isinstance(payload, dict):
                 payload = {"value": payload}
 
+            # Check (do not yet record) the idempotency key. Recording only on a
+            # successful run means a transient failure can still be retried by
+            # the webhook sender instead of being permanently deduplicated.
             idem = hook.resolve_idempotency_key(payload)
-            if self._hook_is_duplicate(idem):
+            if self._hook_seen(idem):
                 return JSONResponse({"ok": True, "deduplicated": True})
 
             try:
@@ -1240,7 +1248,10 @@ class WebSocketGateway:
                     {"ok": False, "error": str(e)}, status_code=500,
                 )
 
-            status = 200 if result.get("ok", False) else 500
+            ok = result.get("ok", False)
+            if ok:
+                self._hook_record(idem)
+            status = 200 if ok else 500
             return JSONResponse(result, status_code=status)
 
         routes = [
@@ -2142,10 +2153,27 @@ class WebSocketGateway:
             except (ValueError, TypeError) as e:
                 logger.warning("Skipping invalid hook config %s: %s", entry, e)
 
-    def _hook_is_duplicate(self, key: str) -> bool:
-        """Return True if ``key`` was already seen, else record it.
+    def _apply_hooks_from_config(self, cfg: Dict[str, Any]) -> None:
+        """Rebuild the hook registry from a parsed gateway config.
 
-        Bounded + TTL-pruned so the dedup store cannot grow unboundedly.
+        Clears any previously registered hooks before re-registering so that a
+        config reload picks up removed hooks and rotated secrets without a full
+        process restart. Hooks may live at the top level (``hooks:``) or nested
+        under ``gateway:`` for grouping.
+        """
+        hooks_cfg = cfg.get("hooks")
+        if hooks_cfg is None:
+            hooks_cfg = cfg.get("gateway", {}).get("hooks")
+        self._hooks.clear()
+        if hooks_cfg:
+            self._register_hooks_from_config(hooks_cfg)
+
+    def _hook_seen(self, key: str) -> bool:
+        """Return True if ``key`` was already recorded (without recording it).
+
+        Expired entries are pruned lazily here. Recording is deferred to
+        :meth:`_hook_record` so a key is only persisted after a successful run,
+        letting webhook senders retry transient failures.
         """
         now = time.time()
         store = self._hook_idempotency
@@ -2155,13 +2183,15 @@ class WebSocketGateway:
             expired = [k for k, ts in store.items() if now - ts > ttl]
             for k in expired:
                 store.pop(k, None)
-        if key in store:
-            return True
-        store[key] = now
+        return key in store
+
+    def _hook_record(self, key: str) -> None:
+        """Record ``key`` as processed. Bounded so the store cannot grow unboundedly."""
+        store = self._hook_idempotency
+        store[key] = time.time()
         # Enforce max size (drop oldest).
         while len(store) > self._hook_idempotency_max:
             store.popitem(last=False)
-        return False
 
     async def _run_hook(self, hook: Any, payload: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a hook: resolve session, run agent (or wake), deliver.
@@ -2179,10 +2209,18 @@ class WebSocketGateway:
 
         # action == "agent": resolve agent, run a turn on the templated message.
         agent_id = hook.agent
-        if agent_id and agent_id in self._agents:
-            agent = self._agents[agent_id]
+        if agent_id:
+            # An explicitly configured agent that is not registered is an error,
+            # not a reason to silently run an unrelated agent.
+            agent = self._agents.get(agent_id)
+            if agent is None:
+                return {
+                    "ok": False,
+                    "error": f"agent '{agent_id}' not available",
+                    "session": session_key,
+                }
         else:
-            # Fall back to the first registered agent.
+            # No agent configured: fall back to the first registered agent.
             agent = next(iter(self._agents.values()), None)
             agent_id = next(iter(self._agents.keys()), None) if self._agents else None
 
@@ -2192,7 +2230,7 @@ class WebSocketGateway:
         message = hook.resolve_message(payload) or ""
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             reply = await loop.run_in_executor(None, agent.chat, message)
         except Exception as e:  # noqa: BLE001 - report run failure to caller
             logger.error("Hook '%s' agent run failed: %s", hook.path, e)
@@ -2203,6 +2241,17 @@ class WebSocketGateway:
         delivered = None
         if hook.deliver_to and reply_text:
             delivered = await self._deliver_hook_reply(hook.deliver_to, reply_text)
+            if not delivered:
+                # Configured delivery failed: surface as a failure so the key is
+                # not recorded and the sender can retry.
+                return {
+                    "ok": False,
+                    "error": "hook reply delivery failed",
+                    "action": "agent",
+                    "agent": agent_id,
+                    "session": session_key,
+                    "delivered": False,
+                }
 
         return {
             "ok": True,
@@ -3868,6 +3917,9 @@ class WebSocketGateway:
                     guardrails_cfg=guardrails_cfg,
                 )
             
+            # Register inbound trigger hooks (Issue #2281).
+            self._apply_hooks_from_config(new_cfg)
+
             # Start channels
             channels_cfg = new_cfg.get("channels", {})
             if channels_cfg:
@@ -3936,6 +3988,10 @@ class WebSocketGateway:
             if plan.hot_reload_paths:
                 logger.info(f"Hot-reload paths (no-op for now): {plan.hot_reload_paths}")
         
+        # Refresh inbound trigger hooks (Issue #2281) so removed hooks and
+        # rotated hook secrets take effect without a full process restart.
+        self._apply_hooks_from_config(new_cfg)
+
         # Update stored config
         self._loaded_config = new_cfg
         logger.info("Hot-reload complete")
@@ -4103,11 +4159,7 @@ class WebSocketGateway:
 
         # Register inbound trigger hooks (Issue #2281). Hooks may live at the
         # top level (``hooks:``) or nested under ``gateway:`` for grouping.
-        hooks_cfg = cfg.get("hooks")
-        if hooks_cfg is None:
-            hooks_cfg = gw_cfg.get("hooks")
-        if hooks_cfg:
-            self._register_hooks_from_config(hooks_cfg)
+        self._apply_hooks_from_config(cfg)
 
         # Start channels + WebSocket server concurrently
         channels_cfg = cfg.get("channels", {})

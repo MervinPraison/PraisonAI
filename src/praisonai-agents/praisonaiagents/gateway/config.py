@@ -429,7 +429,7 @@ class MultiChannelGatewayConfig:
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     agents: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     channels: Dict[str, ChannelRouteConfig] = field(default_factory=dict)
-    hooks: List["Any"] = field(default_factory=list)
+    hooks: List[Any] = field(default_factory=list)
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "MultiChannelGatewayConfig":

@@ -34,9 +34,9 @@ from typing import Any, Dict, Optional, Protocol, runtime_checkable
 __all__ = [
     "HookAction",
     "HookConfig",
-    "render_template",
-    "compute_idempotency_key",
     "InboundTriggerProtocol",
+    "compute_idempotency_key",
+    "render_template",
 ]
 
 
@@ -53,8 +53,10 @@ class HookAction:
 
 # Matches both ``{{ payload.a.b }}`` (Jinja-ish) and ``{a.b}`` (str.format-ish)
 # placeholders so the same template works across the YAML and Python surfaces.
-_DOUBLE_BRACE = re.compile(r"\{\{\s*([^}]+?)\s*\}\}")
-_SINGLE_BRACE = re.compile(r"\{\s*([^{}]+?)\s*\}")
+# A single combined pattern is used (double-brace alternative first so it wins)
+# so each placeholder is substituted exactly once in one pass — a payload value
+# that itself contains ``{...}`` is therefore never re-expanded.
+_PLACEHOLDER = re.compile(r"\{\{\s*([^}]+?)\s*\}\}|\{\s*([^{}]+?)\s*\}")
 
 
 def _lookup(path: str, payload: Dict[str, Any]) -> Any:
@@ -99,17 +101,13 @@ def render_template(template: Optional[str], payload: Dict[str, Any]) -> str:
     if not template:
         return ""
 
-    def _double(match: "re.Match[str]") -> str:
-        value = _lookup(match.group(1), payload)
+    def _resolve(match: "re.Match[str]") -> str:
+        # group(1) is the ``{{ ... }}`` body, group(2) the ``{ ... }`` body.
+        expr = match.group(1) if match.group(1) is not None else match.group(2)
+        value = _lookup(expr, payload)
         return "" if value is None else str(value)
 
-    def _single(match: "re.Match[str]") -> str:
-        value = _lookup(match.group(1), payload)
-        return "" if value is None else str(value)
-
-    rendered = _DOUBLE_BRACE.sub(_double, template)
-    rendered = _SINGLE_BRACE.sub(_single, rendered)
-    return rendered
+    return _PLACEHOLDER.sub(_resolve, template)
 
 
 def compute_idempotency_key(
