@@ -6,7 +6,7 @@ adapters stop re-implementing HMAC comparison with divergent failure modes.
 Public API:
   - webhooks_require_verification() -> bool
   - verify_hmac(secret, body, signature, *, digest="sha256", prefix=None) -> bool
-  - HmacWebhookVerifier — a reusable WebhookVerifier implementation
+  - HmacWebhookVerifier — a reusable WebhookVerifierProtocol implementation
   - enforce_webhook_verification(...) — central, fail-closed gate for ingress
 """
 
@@ -21,10 +21,10 @@ from typing import Iterable, Mapping, Optional, Union
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "webhooks_require_verification",
-    "verify_hmac",
     "HmacWebhookVerifier",
     "enforce_webhook_verification",
+    "verify_hmac",
+    "webhooks_require_verification",
 ]
 
 
@@ -95,7 +95,7 @@ def _first_header(headers: Mapping[str, str], names: Iterable[str]) -> Optional[
 
 
 class HmacWebhookVerifier:
-    """Reusable :class:`WebhookVerifier` backed by :func:`verify_hmac`.
+    """Reusable :class:`WebhookVerifierProtocol` backed by :func:`verify_hmac`.
 
     Adapters can construct this with their secret and the header name(s) that
     carry the signature instead of re-implementing crypto.
@@ -176,6 +176,6 @@ def enforce_webhook_verification(
 
     try:
         return bool(verifier.verify(headers=headers, raw_body=raw_body))
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception as exc:  # noqa: BLE001  # pragma: no cover - intentional fail-closed
         logger.warning("Webhook verification error for %s: %s", platform or "unknown", exc)
         return False

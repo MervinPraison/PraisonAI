@@ -27,7 +27,7 @@ from .protocols import (
     EmailInbox,
     SupportsPresentation,
     PlatformCapabilities,
-    WebhookVerifier,
+    WebhookVerifierProtocol,
 )
 from .presentation import (
     MessagePresentation,
@@ -84,7 +84,7 @@ __all__ = [
     "BlockType",
     "adapt_presentation",
     "PlatformCapabilities",
-    "WebhookVerifier",
+    "WebhookVerifierProtocol",
     "InteractiveContext",
     "InteractiveRegistry",
     "InteractiveHandler",

@@ -496,7 +496,7 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
         )
 
         body_bytes = await request.read()
-        secret = os.getenv("AGENTMAIL_WEBHOOK_SECRET") or self._token
+        secret = os.getenv("AGENTMAIL_WEBHOOK_SECRET", "")
         signature = (
             request.headers.get("X-AgentMail-Signature")
             or request.headers.get("X-Webhook-Signature")

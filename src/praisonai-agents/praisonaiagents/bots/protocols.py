@@ -143,7 +143,7 @@ class PlatformCapabilities:
 
 
 @runtime_checkable
-class WebhookVerifier(Protocol):
+class WebhookVerifierProtocol(Protocol):
     """Protocol for verifying inbound webhook authenticity.
 
     Internet-facing bot adapters (Slack, WhatsApp, Linear, AgentMail, …)
