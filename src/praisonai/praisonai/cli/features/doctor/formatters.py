@@ -337,10 +337,9 @@ class JsonFormatter(BaseFormatter):
         # Ensure deterministic ordering
         return json.dumps(data, indent=2, sort_keys=True)
     
-    def write(self, report: DoctorReport, output: Optional[TextIO] = None) -> None:
-        """Write formatted report to output."""
-        output = output or sys.stdout
-        self._safe_write(output, self.format_report(report) + "\n")
+    # write() is inherited from BaseFormatter: it appends a trailing newline
+    # when absent (json.dumps never emits one) and routes through _safe_write,
+    # so the behaviour is identical and no override is needed.
 
 
 def get_formatter(

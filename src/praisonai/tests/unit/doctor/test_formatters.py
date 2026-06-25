@@ -264,20 +264,21 @@ class TestTextFormatter:
         stream.flush()
         assert raw.getvalue()  # something was written
 
-    def test_json_write_does_not_crash_on_cp1252_stream(self):
-        """JSON write() must also be safe on a strict cp1252 stream."""
+    def test_safe_write_falls_back_on_cp1252_stream(self):
+        """_safe_write must replace unencodable chars instead of crashing."""
         import io
 
-        formatter = JsonFormatter()
-        report = self._sample_report()
-        # Inject a Unicode character into the message to exercise the fallback.
-        report.results[0].message = "café ✓"
-
+        formatter = TextFormatter(no_color=True)
         raw = io.BytesIO()
         stream = io.TextIOWrapper(raw, encoding="cp1252", errors="strict")
-        formatter.write(report, stream)
+        # Raw Unicode that cp1252 cannot encode (box-drawing char).
+        formatter._safe_write(stream, "divider ━ end\n")
         stream.flush()
-        assert raw.getvalue()
+        written = raw.getvalue().decode("cp1252")
+        # The unencodable char is replaced (e.g. with '?') and no error raised.
+        assert "divider" in written
+        assert "end" in written
+        assert "━" not in written
 
 
 class TestJsonFormatter:
@@ -350,6 +351,35 @@ class TestJsonFormatter:
         
         # Should be identical (deterministic)
         assert output1 == output2
+
+    def test_json_write_is_ascii_safe_on_cp1252_stream(self):
+        """JSON output is ASCII-escaped, so it writes cleanly on cp1252."""
+        import io
+
+        formatter = JsonFormatter()
+        report = DoctorReport(
+            results=[
+                CheckResult(
+                    id="test",
+                    title="Test",
+                    category=CheckCategory.ENVIRONMENT,
+                    status=CheckStatus.PASS,
+                    message="café ✓",  # non-ASCII, escaped by json.dumps
+                ),
+            ]
+        )
+        report.calculate_summary()
+
+        raw = io.BytesIO()
+        stream = io.TextIOWrapper(raw, encoding="cp1252", errors="strict")
+        # Must not raise: json.dumps(ensure_ascii=True) escapes non-ASCII,
+        # and BaseFormatter.write routes through _safe_write as a backstop.
+        formatter.write(report, stream)
+        stream.flush()
+        written = raw.getvalue().decode("cp1252")
+        # Valid JSON with the message preserved as escaped unicode.
+        data = json.loads(written)
+        assert data["results"][0]["message"] == "café ✓"
 
 
 class TestGetFormatter:

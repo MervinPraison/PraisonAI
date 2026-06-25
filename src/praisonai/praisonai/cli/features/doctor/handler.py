@@ -519,7 +519,7 @@ class DoctorHandler(CommandHandler):
         
         # Write output
         if config.output_path:
-            with open(config.output_path, "w") as f:
+            with open(config.output_path, "w", encoding="utf-8") as f:
                 formatter.write(report, f)
             if not config.quiet:
                 print(f"Report written to: {config.output_path}")
