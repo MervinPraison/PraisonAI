@@ -182,15 +182,18 @@ def session_resume(
         )
         raise typer.Exit(1)
 
-    if output.is_json_mode:
-        output.print_json({
-            "session": restored.to_dict(),
-            "restored": True,
-        })
-        if prompt is None:
+    # When a prompt is supplied we hand off to `_run_prompt`, which owns all
+    # output for the continuation run. Emitting a restore blob here too would
+    # produce two top-level outputs (and break `--json` consumers), so we skip
+    # the standalone restore rendering in that case.
+    if prompt is None:
+        if output.is_json_mode:
+            output.print_json({
+                "session": restored.to_dict(),
+                "restored": True,
+            })
             return
 
-    if not output.is_json_mode:
         output.print_panel(
             f"Session: {restored.agent_name or restored.session_id}\n"
             f"Model: {restored.model or 'default'}\n"
@@ -198,10 +201,7 @@ def session_resume(
             title="Session Resumed"
         )
 
-    # If no prompt was supplied, restoration is complete: show the restored
-    # conversation so the user can continue from it.
-    if prompt is None:
-        if restored.chat_history and not output.is_json_mode:
+        if restored.chat_history:
             output.print("\n--- Restored Conversation ---\n")
             for msg in restored.chat_history[-10:]:
                 role = msg.get("role", "?")
