@@ -51,6 +51,13 @@ from .protocols import (
     GapInfo,
     ResumeSnapshot,
 )
+from .hooks import (
+    HookAction,
+    HookConfig,
+    InboundTriggerProtocol,
+    render_template,
+    compute_idempotency_key,
+)
 from .config import (
     GatewayConfig,
     SessionConfig,
@@ -143,6 +150,12 @@ __all__ = [
     "ProtocolHelloOk",
     "GapInfo",
     "ResumeSnapshot",
+    # Inbound trigger / webhook contract (Issue #2281)
+    "HookAction",
+    "HookConfig",
+    "InboundTriggerProtocol",
+    "render_template",
+    "compute_idempotency_key",
     # Config (always available)
     "GatewayConfig",
     "SessionConfig",
