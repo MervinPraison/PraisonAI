@@ -227,9 +227,10 @@ runs:
           2. Wrapper (praisonai/): CLI, heavy implementations, optional dependencies.
           3. Tools (PraisonAI-Tools): Specific integrations, external tools (e.g. SurrealDB, Slack), and community extensions MUST go to the `MervinPraison/PraisonAI-Tools` repository. If the feature is a tool, clone `https://github.com/MervinPraison/PraisonAI-Tools`, implement it there, and create the PR using `gh pr create -R MervinPraison/PraisonAI-Tools`.
         - Does it duplicate existing functionality? Check if Agent already supports this via existing params (reflection, planning, tools, hooks, memory).
+        - Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.
         - Does it inherit from Agent properly? New agent types MUST inherit Agent, not wrap it with composition.
         - Does it add new dependencies? Only optional deps allowed, must be lazy-imported.
-        - Will agent.py grow larger? If the change adds >50 lines to agent.py, find a way to extract instead.
+        - Will agent.py grow larger? If the change adds >50 lines to agent.py, find a way to extract instead. PRs with >100 lines added to agent.py require manual review (merge gate will not auto-merge).
         - Is there a name collision with existing exports in __init__.py?
         If ANY of these conceptual checks fail (excluding routing), add a comment to the issue explaining why and close it. Do NOT create a PR.
 

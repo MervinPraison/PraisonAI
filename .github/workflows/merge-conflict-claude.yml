@@ -42,7 +42,8 @@ jobs:
               '@claude this PR has merge conflicts with `main`.',
               'Please rebase onto latest `main`, resolve conflicts (keep this PR\'s intent, merge in newer main logic),',
               'run targeted tests, and force-push with `--force-with-lease`.',
-              'Comment which files you resolved.'
+              'Comment which files you resolved.',
+              'Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.',
             ].join(' ');
 
             const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

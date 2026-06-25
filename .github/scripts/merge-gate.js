@@ -9,6 +9,7 @@ const CONFLICT_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 const CLAUDE_ACTIVE_MS = 35 * 60 * 1000;
 const POST_PUSH_BUFFER_MS = 5 * 60 * 1000;
 const ALLOWED_MERGE_STATES = new Set(['CLEAN', 'UNSTABLE']);
+const AGENT_PY_MAX_AUTO_LINES = 100;
 const BLOCK_LABELS = new Set([
   'claude-conflict-pending',
   'claude-merge-gate-active',
@@ -184,6 +185,62 @@ async function hasInProgressClaudeAssistant(github, owner, repo) {
   }
 }
 
+async function listPullFiles(github, owner, repo, prNumber) {
+  if (typeof github.paginate === 'function') {
+    return github.paginate(github.rest.pulls.listFiles, {
+      owner,
+      repo,
+      pull_number: prNumber,
+      per_page: 100,
+    });
+  }
+  const { data } = await github.rest.pulls.listFiles({
+    owner,
+    repo,
+    pull_number: prNumber,
+    per_page: 100,
+  });
+  return data;
+}
+
+function countNewAgentParams(patch) {
+  if (!patch) return 0;
+  return patch
+    .split('\n')
+    .filter((l) => l.startsWith('+') && !l.startsWith('+++'))
+    .filter((l) => {
+      const t = l.slice(1).trim();
+      if (!t || t.startsWith('#') || t.startsWith('"""') || t.startsWith("'''")) return false;
+      if (/^(def|class|@|return\b|if\b|elif\b|else\b|for\b|while\b)/.test(t)) return false;
+      if (/^\w+\s*[:=]/.test(t) && !t.startsWith('self.')) return true;
+      return false;
+    }).length;
+}
+
+async function getAgentPyChange(github, owner, repo, prNumber) {
+  const files = await listPullFiles(github, owner, repo, prNumber);
+  const agentFile = files.find((f) => f.filename.endsWith('praisonaiagents/agent/agent.py'));
+  if (!agentFile) {
+    return { touched: false, additions: 0, newParams: 0 };
+  }
+  return {
+    touched: true,
+    additions: agentFile.additions || 0,
+    newParams: countNewAgentParams(agentFile.patch || ''),
+  };
+}
+
+function manualReviewReasonForAgentPy(agentChange) {
+  if (!agentChange.touched) return null;
+  if (agentChange.additions > AGENT_PY_MAX_AUTO_LINES) {
+    return `agent.py +${agentChange.additions} lines (>${AGENT_PY_MAX_AUTO_LINES}) requires manual review`;
+  }
+  if (agentChange.newParams > 0) {
+    return `agent.py adds ${agentChange.newParams} new Agent param(s) — requires manual review`;
+  }
+  return null;
+}
+
 async function listAllComments(github, owner, repo, issueNumber) {
   if (typeof github.paginate === 'function') {
     return github.paginate(github.rest.issues.listComments, {
@@ -299,6 +356,10 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
 
   if (hasHumanChangesRequested(ctx.reviews)) reasons.push('human CHANGES_REQUESTED');
 
+  const agentChange = await getAgentPyChange(github, owner, repo, prNumber);
+  const agentManual = manualReviewReasonForAgentPy(agentChange);
+  if (agentManual) reasons.push(agentManual);
+
   const checksOk = await allChecksGreenOnSha(github, owner, repo, ctx.headSha, core);
   if (!checksOk) reasons.push('CI not green on HEAD');
 
@@ -341,6 +402,10 @@ module.exports = {
   getMergeState,
   allChecksGreenOnSha,
   hasInProgressClaudeAssistant,
+  getAgentPyChange,
+  manualReviewReasonForAgentPy,
+  countNewAgentParams,
+  listPullFiles,
   listAllComments,
   getHeadCommitDate,
   isStaleFinalAfterPush,
