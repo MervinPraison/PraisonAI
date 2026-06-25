@@ -407,6 +407,16 @@ class PluginManager:
         Returns:
             Number of plugins loaded
         """
+        import os
+
+        if os.environ.get("PRAISONAI_ALLOW_PLUGIN_DISCOVERY", "").strip().lower() not in (
+            "true", "1", "yes",
+        ):
+            logger.debug(
+                "Plugin auto-discovery disabled; set PRAISONAI_ALLOW_PLUGIN_DISCOVERY=true"
+            )
+            return 0
+
         from .discovery import discover_and_load_plugins
         
         loaded = discover_and_load_plugins(plugin_dirs=None, include_defaults=True)

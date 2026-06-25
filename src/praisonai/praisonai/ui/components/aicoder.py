@@ -3,7 +3,7 @@ import asyncio
 from pathlib import Path
 import difflib
 import platform
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import json
 import logging
 import dotenv
@@ -25,6 +25,10 @@ class AICoder:
             ) from e
             
         self.cwd = cwd or os.getcwd()
+        self._blocked_commands = {
+            "rm", "curl", "wget", "nc", "netcat", "bash", "sh", "zsh",
+            "powershell", "cmd", "chmod", "chown", "sudo", "su",
+        }
         self.tools = [
             {
                 "type": "function",
@@ -109,6 +113,15 @@ class AICoder:
         else:
             self.tavily_client = None
 
+    def _safe_path(self, relative_path: str) -> Optional[str]:
+        from praisonai.code.utils.file_utils import is_path_within_directory
+
+        joined = os.path.join(self.cwd, relative_path.strip())
+        resolved = os.path.realpath(os.path.expanduser(joined))
+        if not is_path_within_directory(resolved, self.cwd):
+            return None
+        return resolved
+
     async def create_directories(self, file_path):
         file_path_obj = Path(file_path)
         dir_path = file_path_obj.parent
@@ -157,6 +170,12 @@ class AICoder:
         return shlex.split(command)
 
     async def execute_command(self, command: str):
+        cmd = command.strip()
+        base_cmd = cmd.split()[0] if cmd else ""
+        if base_cmd in self._blocked_commands:
+            return f"Error: Command '{base_cmd}' is not permitted"
+        if any(token in cmd for token in (";", "&&", "||", "|", "`", "$(", ">"):
+            return "Error: Shell metacharacters are not permitted"
         try:
             # Parameterize command
             cmd_args = self.get_shell_command(command)
@@ -266,7 +285,9 @@ class AICoder:
             for tool_call in parsed_response["data"]:
                 if tool_call["function"]["name"] == "write_to_file":
                     args = json.loads(tool_call["function"]["arguments"])
-                    file_path = os.path.join(self.cwd, args["path"].strip())
+                    file_path = self._safe_path(args["path"])
+                    if file_path is None:
+                        return f"Error: Path outside workspace: {args['path']}"
                     content = args["content"]
                     if await self.file_exists(file_path):
                         original_content = await self.read_file(file_path)
@@ -286,7 +307,10 @@ class AICoder:
                     args = json.loads(tool_call["function"]["arguments"])
                     file_path = args.get("path", "").strip()
                     if file_path:
-                        content = await self.read_file(os.path.join(self.cwd, file_path))
+                        safe_path = self._safe_path(file_path)
+                        if safe_path is None:
+                            return f"Error: Path outside workspace: {file_path}"
+                        content = await self.read_file(safe_path)
                         return True if content is not None else False
                     else:
                         return False

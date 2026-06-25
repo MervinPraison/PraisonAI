@@ -490,9 +490,29 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
     async def _handle_email_webhook(self, request: Any) -> Any:
         """Handle incoming webhook POST from AgentMail."""
         from aiohttp import web
-        
+        import hashlib
+        import hmac
+
+        body_bytes = await request.read()
+        secret = os.getenv("AGENTMAIL_WEBHOOK_SECRET") or self._token
+        if secret:
+            signature = (
+                request.headers.get("X-AgentMail-Signature")
+                or request.headers.get("X-Webhook-Signature")
+                or request.headers.get("X-Signature")
+            )
+            expected = hmac.new(
+                secret.encode(),
+                body_bytes,
+                hashlib.sha256,
+            ).hexdigest()
+            provided = (signature or "").removeprefix("sha256=")
+            if not provided or not hmac.compare_digest(provided, expected):
+                return web.Response(status=401, text="Invalid webhook signature")
+
         try:
-            body = await request.json()
+            import json
+            body = json.loads(body_bytes.decode("utf-8"))
         except Exception:
             return web.Response(status=400, text="Invalid JSON")
         

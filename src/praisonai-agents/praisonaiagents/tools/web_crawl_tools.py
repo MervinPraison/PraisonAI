@@ -99,6 +99,14 @@ def _crawl_with_crawl4ai(urls: List[str]) -> List[Dict[str, Any]]:
         results = []
         async with AsyncWebCrawler() as crawler:
             for url in urls:
+                if not _is_safe_crawl_url(url):
+                    results.append({
+                        "url": url,
+                        "content": "",
+                        "error": "URL blocked by SSRF policy",
+                        "provider": "crawl4ai",
+                    })
+                    continue
                 try:
                     result = await crawler.arun(url=url)
                     results.append({
@@ -132,32 +140,9 @@ def _crawl_with_crawl4ai(urls: List[str]) -> List[Dict[str, Any]]:
 
 def _is_safe_crawl_url(url: str) -> bool:
     """Return True when a URL passes SSRF checks for crawling."""
-    import urllib.parse
-    import socket
-    import ipaddress
+    from praisonaiagents.tools.url_safety import is_safe_http_url
 
-    try:
-        parsed = urllib.parse.urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            return False
-        hostname = parsed.hostname
-        if not hostname:
-            return False
-        if os.environ.get("ALLOW_LOCAL_CRAWL") == "true":
-            return True
-        for info in socket.getaddrinfo(hostname, None):
-            ip = ipaddress.ip_address(info[4][0])
-            if (
-                ip.is_loopback
-                or ip.is_private
-                or ip.is_link_local
-                or ip.is_multicast
-                or ip.is_unspecified
-            ):
-                return False
-        return True
-    except (socket.gaierror, ValueError, OSError):
-        return False
+    return is_safe_http_url(url)
 
 
 def _crawl_with_httpx(urls: List[str]) -> List[Dict[str, Any]]:
@@ -193,6 +178,8 @@ def _crawl_with_httpx(urls: List[str]) -> List[Dict[str, Any]]:
             except ImportError:
                 # Fallback to urllib
                 import urllib.request
+                if not _is_safe_crawl_url(url):
+                    raise ValueError("URL blocked by SSRF policy")
                 with urllib.request.urlopen(url, timeout=30) as response:
                     content = response.read().decode('utf-8', errors='ignore')
             

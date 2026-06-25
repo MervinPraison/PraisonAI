@@ -73,6 +73,49 @@ class SubprocessSandbox:
         env.setdefault("HOME", self._temp_dir or "/tmp")
         return env
     
+    def _validate_command_against_policy(
+        self,
+        cmd: List[str],
+        policy: SecurityPolicy,
+    ) -> Optional[str]:
+        """Return an error message when *cmd* violates *policy*."""
+        if not cmd:
+            return "Empty command"
+
+        cmd_str = " ".join(cmd)
+        for blocked in policy.blocked_commands:
+            if blocked and blocked in cmd_str:
+                return f"Blocked command pattern: {blocked}"
+
+        if policy.allowed_commands:
+            base_cmd = os.path.basename(cmd[0])
+            allowed = {c.split()[0] for c in policy.allowed_commands}
+            if base_cmd not in allowed and cmd[0] not in policy.allowed_commands:
+                return f"Command not in allowlist: {base_cmd}"
+
+        if not policy.allow_subprocess:
+            shell_bins = {"sh", "bash", "dash", "zsh", "csh", "ksh", "cmd", "powershell"}
+            if os.path.basename(cmd[0]) in shell_bins:
+                return "Subprocess execution is disabled by security policy"
+
+        for part in cmd:
+            if not part.startswith(("/", "~", ".")):
+                continue
+            expanded = os.path.realpath(os.path.expanduser(part))
+            for blocked_path in policy.blocked_paths:
+                blocked_abs = os.path.realpath(os.path.expanduser(blocked_path))
+                if expanded == blocked_abs or expanded.startswith(blocked_abs + os.sep):
+                    return f"Access to blocked path: {blocked_path}"
+            if policy.allowed_paths:
+                allowed = any(
+                    expanded == os.path.realpath(os.path.expanduser(p))
+                    or expanded.startswith(os.path.realpath(os.path.expanduser(p)) + os.sep)
+                    for p in policy.allowed_paths
+                )
+                if not allowed:
+                    return f"Path not in allowlist: {part}"
+        return None
+    
     def _apply_rlimits(self, limits: ResourceLimits):
         """Apply resource limits via POSIX setrlimit (Linux/macOS only)."""
         if os.name != "posix":
@@ -277,6 +320,15 @@ class SubprocessSandbox:
         # Import here to avoid circular import
         from ._shell import build_argv
         cmd = build_argv(command, shell=shell)
+
+        policy = self.config.security_policy
+        policy_error = self._validate_command_against_policy(cmd, policy)
+        if policy_error:
+            return SandboxResult(
+                execution_id=execution_id,
+                status=SandboxStatus.FAILED,
+                error=policy_error,
+            )
         
         # Build environment based on security policy instead of copying host environment
         process_env = self._build_child_env(self.config.security_policy, env)

@@ -14,6 +14,7 @@ from ..deps import (
     get_db,
     require_delete_permission,
     require_issue_in_workspace,
+    require_workspace_admin,
     require_workspace_member,
 )
 from ..schemas import LabelCreate, LabelResponse, LabelUpdate
@@ -58,6 +59,7 @@ async def update_label(
     if label is None:
         raise HTTPException(status_code=404, detail="Label not found")
     ensure_resource_in_workspace(label.workspace_id, workspace_id, label="Label")
+    await require_workspace_admin(workspace_id, user, session)
     label = await svc.update(label_id, body.name, body.color)
     if label is None:
         raise HTTPException(status_code=404, detail="Label not found")

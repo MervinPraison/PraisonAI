@@ -109,6 +109,11 @@ class HTTPStreamTransport:
                 logger.warning("External binding without allowed_origins - Origin validation will reject all requests with Origin header")
         else:
             self.allowed_origins = allowed_origins
+
+        if host not in ("127.0.0.1", "localhost", "::1") and not self.api_key:
+            raise ValueError(
+                "api_key is required when MCP HTTP-stream binds to a non-localhost address"
+            )
         
         # Session storage
         self._sessions: Dict[str, Dict[str, Any]] = {}

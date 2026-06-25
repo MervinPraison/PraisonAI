@@ -71,6 +71,12 @@ async def update_project(
     session: AsyncSession = Depends(get_db),
 ):
     svc = ProjectService(session)
+    project = await svc.get(project_id, workspace_id=workspace_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    await require_delete_permission(
+        workspace_id, user, session, resource_owner_id=project.lead_id
+    )
     project = await svc.update(
         project_id,
         workspace_id=workspace_id,

@@ -23,7 +23,7 @@ export interface AgentOSConfig {
     /** Name of the application (default: "PraisonAI App") */
     name?: string;
 
-    /** Host address to bind to (default: "0.0.0.0") */
+    /** Host address to bind to (default: "127.0.0.1") */
     host?: string;
 
     /** Port number to listen on (default: 8000) */
@@ -68,7 +68,7 @@ export interface AgentOSConfig {
  */
 export const DEFAULT_AGENTOS_CONFIG: Required<Omit<AgentOSConfig, 'metadata'>> & { metadata: Record<string, any> } = {
     name: 'PraisonAI App',
-    host: '0.0.0.0',
+    host: '127.0.0.1',
     port: 8000,
     reload: false,
     corsOrigins: ['*'],
@@ -89,7 +89,7 @@ export const DEFAULT_AGENTOS_CONFIG: Required<Omit<AgentOSConfig, 'metadata'>> &
 export function mergeConfig(userConfig?: AgentOSConfig): Required<Omit<AgentOSConfig, 'metadata'>> & { metadata: Record<string, any> } {
     const apiKey = userConfig?.apiKey ?? process.env.PRAISONAI_AGENTOS_API_KEY ?? '';
 
-    return {
+    const merged = {
         ...DEFAULT_AGENTOS_CONFIG,
         ...userConfig,
         apiKey,
@@ -98,6 +98,15 @@ export function mergeConfig(userConfig?: AgentOSConfig): Required<Omit<AgentOSCo
             ...userConfig?.metadata,
         },
     };
+
+    const exposedHosts = new Set(['0.0.0.0', '::', '::0']);
+    if (exposedHosts.has(merged.host) && !merged.apiKey) {
+        throw new Error(
+            'AgentOS requires apiKey (or PRAISONAI_AGENTOS_API_KEY) when binding to a network-exposed host'
+        );
+    }
+
+    return merged;
 }
 
 /**

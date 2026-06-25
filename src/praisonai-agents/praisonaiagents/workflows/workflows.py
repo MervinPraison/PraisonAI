@@ -888,6 +888,15 @@ class AgentFlow:
             tools_path = workflow_dir / "tools.py"
             
             if tools_path.exists():
+                _local_ok = os.environ.get("PRAISONAI_ALLOW_LOCAL_TOOLS", "").strip().lower() in (
+                    "true", "1", "yes",
+                )
+                if not _local_ok:
+                    logger.debug(
+                        "Skipping tools.py load for %s: set PRAISONAI_ALLOW_LOCAL_TOOLS=true",
+                        class_name,
+                    )
+                    return None
                 try:
                     import importlib.util
                     spec = importlib.util.spec_from_file_location("tools", tools_path)

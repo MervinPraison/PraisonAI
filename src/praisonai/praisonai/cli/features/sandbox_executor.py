@@ -181,6 +181,9 @@ class CommandValidator:
         # Check blocked commands
         if cmd_name in self.policy.blocked_commands:
             violations.append(f"Command '{cmd_name}' is blocked by sandbox policy")
+
+        if cmd_name == "find" and "-exec" in command:
+            violations.append("find -exec is blocked by sandbox policy")
         
         # Check for dangerous patterns
         dangerous_patterns = [

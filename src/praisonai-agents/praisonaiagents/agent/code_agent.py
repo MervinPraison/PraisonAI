@@ -252,67 +252,28 @@ Follow best practices and coding standards."""
     
     def _execute_python(self, code: str, **kwargs) -> Dict[str, Any]:
         """Execute Python code."""
-        import subprocess
         import time
-        import tempfile
-        import os
-        
+        from praisonaiagents.tools.python_tools import execute_code
+
         start_time = time.time()
-        
-        # Write code to temp file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-            f.write(code)
-            temp_file = f.name
-        
-        try:
-            # Execute in subprocess (basic sandboxing)
-            env = os.environ.copy()
-            env.update(self._code_config.environment)
-            
-            result = subprocess.run(
-                ["python", temp_file],
-                capture_output=True,
-                text=True,
-                timeout=self._code_config.timeout,
-                cwd=self._code_config.working_directory,
-                env=env
-            )
-            
-            execution_time = time.time() - start_time
-            
-            stdout = result.stdout[:self._code_config.max_output_length]
-            stderr = result.stderr[:self._code_config.max_output_length]
-            
+        mode = "sandbox" if self._code_config.sandbox else "direct"
+        result = execute_code(
+            code,
+            timeout=self._code_config.timeout,
+            max_output_size=self._code_config.max_output_length,
+            sandbox_mode=mode,
+        )
+        execution_time = time.time() - start_time
+
+        if result.get("success"):
             self._log(f"Execution completed in {execution_time:.2f}s", "green")
-            
-            return {
-                "stdout": stdout,
-                "stderr": stderr,
-                "return_code": result.returncode,
-                "execution_time": execution_time
-            }
-            
-        except subprocess.TimeoutExpired:
-            return {
-                "stdout": "",
-                "stderr": f"Execution timed out after {self._code_config.timeout}s",
-                "return_code": -1,
-                "execution_time": self._code_config.timeout
-            }
-        except Exception as e:
-            return {
-                "stdout": "",
-                "stderr": str(e),
-                "return_code": -1,
-                "execution_time": time.time() - start_time
-            }
-        finally:
-            # Clean up temp file
-            try:
-                os.unlink(temp_file)
-            except Exception as e:
-                # Temp file cleanup failed - not critical
-                get_logger(__name__).debug(f"Failed to clean up temp file {temp_file}: {e}")
+
+        return {
+            "stdout": (result.get("stdout") or "")[: self._code_config.max_output_length],
+            "stderr": (result.get("stderr") or "")[: self._code_config.max_output_length],
+            "return_code": 0 if result.get("success") else 1,
+            "execution_time": execution_time,
+        }
     
     async def aexecute(self, code: str, language: str = "python", **kwargs) -> Dict[str, Any]:
         """Execute code asynchronously.

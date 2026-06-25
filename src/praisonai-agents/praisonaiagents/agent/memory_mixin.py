@@ -626,10 +626,18 @@ class MemoryMixin:
         
         try:
             import os
-            
-            # Expand user home directory and resolve path
-            file_path = os.path.expanduser(self._output_file)
-            file_path = os.path.abspath(file_path)
+            from praisonaiagents.tools.path_safety import resolve_within_root
+
+            project_root = os.environ.get("PRAISONAI_PROJECT_ROOT") or os.getcwd()
+            file_path = resolve_within_root(self._output_file, project_root)
+            if file_path is None:
+                logging.warning(
+                    "Output file %r is outside project root %r; skipping save",
+                    self._output_file,
+                    project_root,
+                )
+                print(f"⚠️ Output path outside project root: {self._output_file}")
+                return False
             
             # Create parent directories if they don't exist
             parent_dir = os.path.dirname(file_path)

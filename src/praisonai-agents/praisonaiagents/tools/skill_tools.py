@@ -72,6 +72,13 @@ class SkillTools:
             if not os.path.isabs(script_path):
                 script_path = os.path.join(self._working_directory, script_path)
             script_path = os.path.abspath(script_path)
+
+            root = os.path.realpath(self._working_directory)
+            try:
+                if os.path.commonpath([script_path, root]) != root:
+                    return f"Error: Script path outside working directory: {script_path}"
+            except ValueError:
+                return f"Error: Script path outside working directory: {script_path}"
             
             if not os.path.exists(script_path):
                 return f"Error: Script not found at {script_path}"

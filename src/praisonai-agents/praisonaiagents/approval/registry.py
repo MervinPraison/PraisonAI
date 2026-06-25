@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import hashlib
+import json
 import logging
 from praisonaiagents._logging import get_logger
 import os
@@ -173,15 +175,21 @@ class ApprovalRegistry:
 
     # ── Context helpers ──────────────────────────────────────────────────
 
-    def mark_approved(self, tool_name: str) -> None:
+    @staticmethod
+    def _approval_cache_key(tool_name: str, arguments: Dict) -> str:
+        payload = json.dumps(arguments or {}, sort_keys=True, default=str)
+        digest = hashlib.sha256(payload.encode()).hexdigest()[:16]
+        return f"{tool_name}:{digest}"
+
+    def mark_approved(self, tool_name: str, arguments: Optional[Dict] = None) -> None:
         approved = self._approved_context.get(set())
-        approved.add(tool_name)
+        approved.add(self._approval_cache_key(tool_name, arguments or {}))
         self._approved_context.set(approved)
 
-    def is_already_approved(self, tool_name: str) -> bool:
+    def is_already_approved(self, tool_name: str, arguments: Optional[Dict] = None) -> bool:
         if self.get_risk_level(tool_name) == "critical":
             return False
-        return tool_name in self._approved_context.get(set())
+        return self._approval_cache_key(tool_name, arguments or {}) in self._approved_context.get(set())
 
     def clear_approved(self) -> None:
         self._approved_context.set(set())
@@ -222,22 +230,22 @@ class ApprovalRegistry:
             return ApprovalDecision(approved=True, reason="No approval required")
 
         # Already approved in this context
-        if self.is_already_approved(tool_name):
+        if self.is_already_approved(tool_name, arguments):
             return ApprovalDecision(approved=True, reason="Already approved in context")
 
         # Check per-tool auto-approval (G-A fix)
         if self.is_auto_approved(tool_name, agent_name):
-            self.mark_approved(tool_name)
+            self.mark_approved(tool_name, arguments)
             return ApprovalDecision(approved=True, reason="Auto-approved (skill)", approver="skill")
 
         # Env auto-approve
         if self.is_env_auto_approve():
-            self.mark_approved(tool_name)
+            self.mark_approved(tool_name, arguments)
             return ApprovalDecision(approved=True, reason="Auto-approved (env)", approver="env")
 
         # YAML auto-approve
         if self.is_yaml_approved(tool_name):
-            self.mark_approved(tool_name)
+            self.mark_approved(tool_name, arguments)
             return ApprovalDecision(approved=True, reason="Auto-approved (yaml)", approver="yaml")
 
         # Delegate to backend
@@ -261,7 +269,7 @@ class ApprovalRegistry:
             )
 
         if decision.approved:
-            self.mark_approved(tool_name)
+            self.mark_approved(tool_name, arguments)
         return decision
 
     async def approve_async(
@@ -275,20 +283,20 @@ class ApprovalRegistry:
         if not self.is_required(tool_name):
             return ApprovalDecision(approved=True, reason="No approval required")
 
-        if self.is_already_approved(tool_name):
+        if self.is_already_approved(tool_name, arguments):
             return ApprovalDecision(approved=True, reason="Already approved in context")
 
         # Check per-tool auto-approval (G-A fix)
         if self.is_auto_approved(tool_name, agent_name):
-            self.mark_approved(tool_name)
+            self.mark_approved(tool_name, arguments)
             return ApprovalDecision(approved=True, reason="Auto-approved (skill)", approver="skill")
 
         if self.is_env_auto_approve():
-            self.mark_approved(tool_name)
+            self.mark_approved(tool_name, arguments)
             return ApprovalDecision(approved=True, reason="Auto-approved (env)", approver="env")
 
         if self.is_yaml_approved(tool_name):
-            self.mark_approved(tool_name)
+            self.mark_approved(tool_name, arguments)
             return ApprovalDecision(approved=True, reason="Auto-approved (yaml)", approver="yaml")
 
         backend = self.get_backend(agent_name)
@@ -308,5 +316,5 @@ class ApprovalRegistry:
             decision = ApprovalDecision(approved=False, reason="Approval timed out")
 
         if decision.approved:
-            self.mark_approved(tool_name)
+            self.mark_approved(tool_name, arguments)
         return decision

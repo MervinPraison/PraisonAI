@@ -314,7 +314,8 @@ def read_file(
     start_line: Optional[int] = None,
     end_line: Optional[int] = None,
     context_lines: int = 0,
-    max_lines: int = 500
+    max_lines: int = 500,
+    workspace_root: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Read file contents with optional line range.
     
@@ -328,8 +329,17 @@ def read_file(
     Returns:
         Dictionary with content, line info, and metadata
     """
-    filepath = os.path.abspath(filepath)
-    
+    from praisonaiagents.tools.path_safety import resolve_within_root
+
+    safe_path = resolve_within_root(filepath, workspace_root or os.getcwd())
+    if safe_path is None:
+        return {
+            "success": False,
+            "error": f"Path outside workspace: {filepath}",
+            "path": filepath,
+        }
+    filepath = safe_path
+
     if not os.path.exists(filepath):
         return {
             "success": False,

@@ -125,7 +125,26 @@ def create_app(
         )
 
     jobs_api_key = os.environ.get("PRAISONAI_JOBS_API_KEY")
-    if jobs_api_key:
+    bind_host = os.environ.get("PRAISONAI_JOBS_BIND_HOST", "127.0.0.1")
+    localhost_hosts = {"127.0.0.1", "localhost", "::1"}
+    needs_auth = bind_host not in localhost_hosts
+
+    if needs_auth and not jobs_api_key:
+        import hmac
+        from starlette.middleware.base import BaseHTTPMiddleware
+        from starlette.responses import JSONResponse
+
+        class JobsAuthRequiredMiddleware(BaseHTTPMiddleware):
+            async def dispatch(self, request, call_next):
+                if request.url.path == "/health":
+                    return await call_next(request)
+                return JSONResponse(
+                    {"error": "PRAISONAI_JOBS_API_KEY required for non-localhost binding"},
+                    status_code=401,
+                )
+
+        app.add_middleware(JobsAuthRequiredMiddleware)
+    elif jobs_api_key:
         import hmac
         from starlette.middleware.base import BaseHTTPMiddleware
         from starlette.responses import JSONResponse
@@ -199,6 +218,7 @@ def start_server(
         raise RuntimeError("uvicorn is required. Install with: pip install uvicorn")
     
     logger.info(f"Starting PraisonAI Jobs API on {host}:{port}")
+    os.environ["PRAISONAI_JOBS_BIND_HOST"] = host
     
     uvicorn.run(
         "praisonai.jobs.server:create_app",

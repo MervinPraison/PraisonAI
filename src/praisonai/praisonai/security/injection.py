@@ -233,7 +233,7 @@ def scan_text(text: str, source: str = "external") -> ScanResult:
         level = ThreatLevel.CRITICAL
 
     # Trusted sources are never blocked regardless of level
-    blocked = (level >= ThreatLevel.CRITICAL) and not is_trusted
+    blocked = (level >= ThreatLevel.HIGH) and not is_trusted
 
     if triggered:
         logger.warning(
@@ -270,14 +270,14 @@ class InjectionDefense:
     def __init__(
         self,
         extra_patterns: Optional[List[str]] = None,
-        block_threshold: ThreatLevel = ThreatLevel.CRITICAL,
+        block_threshold: ThreatLevel = ThreatLevel.HIGH,
         trusted_sources: Optional[List[str]] = None,
     ):
         """
         Args:
             extra_patterns: Additional regex patterns to include in Check 1.
             block_threshold: Minimum threat level that causes blocking.
-                             Default: CRITICAL (only block if 3+ checks fire).
+                             Default: HIGH (block single high-severity detections).
             trusted_sources: Source names that bypass blocking.
         """
         self._extra_patterns = extra_patterns or []

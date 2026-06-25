@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from .base import KnowledgeStore, KnowledgeDocument, validate_identifier
+from .base import KnowledgeStore, KnowledgeDocument, validate_identifier, validate_dimension
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,7 @@ class PGVectorKnowledgeStore(KnowledgeStore):
         metadata: Optional[Dict[str, Any]] = None
     ) -> None:
         """Create a new collection table."""
+        validate_dimension(dimension)
         table = self._table_name(name)
         conn = self._get_conn()
         try:

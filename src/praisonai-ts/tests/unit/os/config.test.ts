@@ -13,7 +13,7 @@ describe('AgentOSConfig', () => {
     describe('DEFAULT_AGENTOS_CONFIG', () => {
         it('should have correct default values', () => {
             expect(DEFAULT_AGENTOS_CONFIG.name).toBe('PraisonAI App');
-            expect(DEFAULT_AGENTOS_CONFIG.host).toBe('0.0.0.0');
+            expect(DEFAULT_AGENTOS_CONFIG.host).toBe('127.0.0.1');
             expect(DEFAULT_AGENTOS_CONFIG.port).toBe(8000);
             expect(DEFAULT_AGENTOS_CONFIG.reload).toBe(false);
             expect(DEFAULT_AGENTOS_CONFIG.corsOrigins).toEqual(['*']);
@@ -47,8 +47,13 @@ describe('AgentOSConfig', () => {
             expect(result.port).toBe(9000);
             expect(result.debug).toBe(true);
             // Defaults preserved
-            expect(result.host).toBe('0.0.0.0');
+            expect(result.host).toBe('127.0.0.1');
             expect(result.corsOrigins).toEqual(['*']);
+        });
+
+        it('requires api key when binding to 0.0.0.0', () => {
+            expect(() => mergeConfig({ host: '0.0.0.0' })).toThrow(/apiKey/);
+            expect(() => mergeConfig({ host: '0.0.0.0', apiKey: 'secret' })).not.toThrow();
         });
 
         it('should merge metadata objects', () => {

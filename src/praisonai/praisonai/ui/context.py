@@ -3,6 +3,7 @@ import fnmatch
 import yaml
 from pathlib import Path
 import logging
+from typing import Optional
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -128,6 +129,23 @@ class ContextGatherer:
  
         return include_paths, include_all
 
+    def _resolve_include_path(self, include_path: str) -> Optional[str]:
+        """Resolve an include path and keep it within the project directory."""
+        if os.path.isabs(include_path):
+            candidate = os.path.expanduser(include_path)
+        else:
+            candidate = os.path.join(self.directory, include_path)
+        base = os.path.realpath(self.directory)
+        resolved = os.path.realpath(os.path.normpath(candidate))
+        try:
+            if os.path.commonpath([resolved, base]) != base:
+                logger.warning("Skipping include outside project root: %s", include_path)
+                return None
+        except ValueError:
+            logger.warning("Skipping include outside project root: %s", include_path)
+            return None
+        return resolved
+
     def should_ignore(self, file_path):
         """
         Check if a file or directory should be ignored based on patterns.
@@ -208,13 +226,15 @@ class ContextGatherer:
             
             # Include files from .praisoninclude specifically
             for include_path in self.include_paths:
-                full_path = os.path.join(self.directory, include_path)
-                process_path(full_path)
+                full_path = self._resolve_include_path(include_path)
+                if full_path:
+                    process_path(full_path)
         elif self.include_paths:
             # Include only files specified in .praisoncontext
             for include_path in self.include_paths:
-                full_path = os.path.join(self.directory, include_path)
-                process_path(full_path)
+                full_path = self._resolve_include_path(include_path)
+                if full_path:
+                    process_path(full_path)
         else:
             # No include options, process the entire directory
             process_path(self.directory)

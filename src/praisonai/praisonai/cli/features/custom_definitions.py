@@ -429,12 +429,17 @@ class TemplateInterpolator:
         
         def replace_file(match):
             file_path_str = match.group(1)
-            
-            # Resolve relative to working_dir if provided
+
             if working_dir:
-                file_path = working_dir / file_path_str
+                root = working_dir.resolve()
+                candidate = (working_dir / file_path_str).resolve()
+                try:
+                    candidate.relative_to(root)
+                except ValueError:
+                    return match.group(0)
+                file_path = candidate
             else:
-                file_path = Path(file_path_str)
+                file_path = Path(file_path_str).resolve()
             
             # Try to read the file
             try:

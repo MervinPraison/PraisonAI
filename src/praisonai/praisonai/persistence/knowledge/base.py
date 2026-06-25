@@ -35,6 +35,15 @@ def validate_identifier(value: str, name: str = "identifier") -> str:
     return value
 
 
+def validate_dimension(dimension: int, *, name: str = "dimension", max_dim: int = 65536) -> int:
+    """Ensure vector dimensions are safe positive integers for DDL interpolation."""
+    if isinstance(dimension, bool) or not isinstance(dimension, int):
+        raise ValueError(f"{name} must be a positive integer")
+    if dimension < 1 or dimension > max_dim:
+        raise ValueError(f"{name} must be between 1 and {max_dim}")
+    return dimension
+
+
 @dataclass
 class KnowledgeDocument:
     """A document with vector embedding for semantic search."""

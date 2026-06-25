@@ -70,8 +70,19 @@ async def delete_dependency(
         raise HTTPException(status_code=404, detail="Dependency not found")
     if dep.issue_id != issue_id and dep.depends_on_issue_id != issue_id:
         raise HTTPException(status_code=404, detail="Dependency not found")
+
+    other_issue_id = (
+        dep.depends_on_issue_id if dep.issue_id == issue_id else dep.issue_id
+    )
+    other_issue = await issue_svc.get(other_issue_id, workspace_id=workspace_id)
+    if other_issue is None:
+        raise HTTPException(status_code=404, detail="Issue not found")
+
     await require_delete_permission(
         workspace_id, user, session, resource_owner_id=issue.creator_id
+    )
+    await require_delete_permission(
+        workspace_id, user, session, resource_owner_id=other_issue.creator_id
     )
     deleted = await svc.delete(dep_id)
     if not deleted:

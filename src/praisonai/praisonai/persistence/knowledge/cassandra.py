@@ -8,7 +8,7 @@ Install: pip install cassandra-driver
 import logging
 from typing import Any, Dict, List, Optional
 
-from .base import KnowledgeStore, KnowledgeDocument, validate_identifier
+from .base import KnowledgeStore, KnowledgeDocument, validate_identifier, validate_dimension
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +83,7 @@ class CassandraKnowledgeStore(KnowledgeStore):
     ) -> None:
         """Create a new table with vector column."""
         validate_identifier(name, name="collection name")
+        validate_dimension(dimension)
         similarity_map = {"cosine": "COSINE", "euclidean": "EUCLIDEAN", "dot": "DOT_PRODUCT"}
         
         self._session.execute(f"""

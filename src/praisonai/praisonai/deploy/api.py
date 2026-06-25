@@ -24,6 +24,7 @@ def generate_api_server_code(agents_file: str, config: Optional[APIConfig] = Non
         config = APIConfig()
 
     safe_agents_file = repr(agents_file)
+    safe_host = repr(config.host)
 
     code = f'''"""
 Auto-generated API server for PraisonAI agents.
@@ -105,7 +106,7 @@ def list_agents():
 
 if __name__ == '__main__':
     app.run(
-        host='{config.host}',
+        host={safe_host},
         port={config.port},
         debug={config.reload}
     )

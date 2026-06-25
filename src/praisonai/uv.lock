@@ -1245,8 +1245,14 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/25/3f/30c0f44ec5d727f547c35510ae479053abf56bed24b08f3e128f93d09905/cmake-4.0.3.tar.gz", hash = "sha256:215732f09ea8a7088fe1ab46bbd61669437217278d709fd3851bf8211e8c59e3", size = 34504, upload-time = "2025-06-13T15:34:11.68Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/77/a7/f845c1e129ad37059612e5d66ffe3dac824fdfd7dec58918a802f38650ff/cmake-4.0.3-py3-none-manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:d41b83d061bcc375a7a5f2942ba523a7563368d296d91260f9d8a53a10f5e5e5", size = 26983727, upload-time = "2025-06-13T15:33:16.394Z" },
+    { url = "https://files.pythonhosted.org/packages/db/b5/578e5b50cb848775aee4e04ceecef3c6595c30fb5fe0642a14eaafa02597/cmake-4.0.3-py3-none-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:47dc28bee6cfb4de00c7cf7e87d565b5c86eb4088da81b60a49e214fcdd4ffda", size = 30872393, upload-time = "2025-06-13T15:33:26.316Z" },
+    { url = "https://files.pythonhosted.org/packages/42/7d/e4cdb9903b971dbbab1127e96bab86d3d77cedbb637f47a8e44ec02c3672/cmake-4.0.3-py3-none-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:e10fdc972b3211915b65cc89e8cd24e1a26c9bd684ee71c3f369fb488f2c4388", size = 27028264, upload-time = "2025-06-13T15:33:29.619Z" },
     { url = "https://files.pythonhosted.org/packages/60/cb/1e4d8baab7c946f809d6c59914428c10acaf39d9f4b52e1dffff834a9f0a/cmake-4.0.3-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:d840e780c48c5df1330879d50615176896e8e6eee554507d21ce8e2f1a5f0ff8", size = 27912444, upload-time = "2025-06-13T15:33:33.296Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/3a/ff653130b91d73c172205ac10ad71c62a1474bd85ae110eec085e04aec08/cmake-4.0.3-py3-none-manylinux_2_31_armv7l.whl", hash = "sha256:6ef63bbabcbe3b89c1d80547913b6caceaad57987a27e7afc79ebc88ecd829e4", size = 25156436, upload-time = "2025-06-13T15:33:36.316Z" },
+    { url = "https://files.pythonhosted.org/packages/c0/d8/bbd8eb74bb6c972572293f043a5cd5a56ec9791f8c46ccfbcf53a84aa556/cmake-4.0.3-py3-none-musllinux_1_1_ppc64le.whl", hash = "sha256:c403b660bbff1fd4d7f1c5d9e015ea27566e49ca9461e260c9758f2fd4e5e813", size = 32281822, upload-time = "2025-06-13T15:33:46.544Z" },
+    { url = "https://files.pythonhosted.org/packages/df/a4/aebacccbcab31a1896190d57ac3ad9fdeded18f6ce7634b24958c6de8090/cmake-4.0.3-py3-none-musllinux_1_1_s390x.whl", hash = "sha256:2a66ecdd4c3238484cb0c377d689c086a9b8b533e25329f73d21bd1c38f1ae86", size = 28104040, upload-time = "2025-06-13T15:33:49.687Z" },
     { url = "https://files.pythonhosted.org/packages/a2/b3/42cd72162e7b466863ca4c033fb30ef51109b4eaef9686aa81b86f5afd8b/cmake-4.0.3-py3-none-musllinux_1_1_x86_64.whl", hash = "sha256:004e58b1a1a384c2ca799c9c41ac4ed86ac3b80129462992c43c1121f8729ffd", size = 29638511, upload-time = "2025-06-13T15:33:53.063Z" },
+    { url = "https://files.pythonhosted.org/packages/d4/4d/d81d27a0d86bf2e24e4574f672b17230db676be2dd878d747439f1f4abfa/cmake-4.0.3-py3-none-musllinux_1_2_armv7l.whl", hash = "sha256:133dbc33f995cb97a4456d83d67fa0a7a798f53f979454359140588baa928f43", size = 33324625, upload-time = "2025-06-13T15:33:57.463Z" },
 ]
 
 [[package]]
@@ -5487,7 +5493,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.6.77"
+version = "1.6.78"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },
