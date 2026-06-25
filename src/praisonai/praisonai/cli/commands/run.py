@@ -797,9 +797,11 @@ def _run_prompt(
         # in-process execution otherwise. Only the simple text path attaches;
         # per-invocation tool/approval/memory overrides stay in-process so their
         # behaviour is preserved exactly.
+        # Session continuity/forking is handled in-process; the warm runtime does
+        # not carry session state, so any explicit session flag stays local.
         runtime_eligible = not any([
             mcp, tools, toolset, approval, approve_all_tools,
-            memory, permissions_config,
+            memory, permissions_config, continue_session, session, fork,
         ])
         if runtime_eligible and _try_attach_runtime(
             prompt,

@@ -31,11 +31,14 @@ class WarmRuntime:
         self._default_model = model
         self._agents: Dict[str, Any] = {}
         self._lock = threading.Lock()
+        self._agent_locks: Dict[str, threading.Lock] = {}
         self.last_activity = time.time()
 
-    def _get_agent(self, model: Optional[str]):
-        """Return a warm Agent for ``model``, creating it once and reusing it."""
-        key = model or self._default_model or "__default__"
+    def _agent_key(self, model: Optional[str]) -> str:
+        return model or self._default_model or "__default__"
+
+    def _get_agent(self, key: str):
+        """Return a warm Agent for ``key``, creating it once and reusing it."""
         with self._lock:
             agent = self._agents.get(key)
             if agent is None:
@@ -46,18 +49,35 @@ class WarmRuntime:
                     "role": "Assistant",
                     "goal": "Complete the task",
                 }
-                resolved = model or self._default_model
+                resolved = None if key == "__default__" else key
+                resolved = resolved or self._default_model
                 if resolved:
                     config["llm"] = resolved
                 agent = Agent(**config)
                 self._agents[key] = agent
             return agent
 
+    def _lock_for(self, key: str) -> threading.Lock:
+        """Return a per-agent lock so concurrent /run calls serialize per model."""
+        with self._lock:
+            lock = self._agent_locks.get(key)
+            if lock is None:
+                lock = threading.Lock()
+                self._agent_locks[key] = lock
+            return lock
+
     def run(self, prompt: str, model: Optional[str] = None) -> str:
-        """Execute a prompt against the warm agent and return the result text."""
+        """Execute a prompt against the warm agent and return the result text.
+
+        Access to each cached Agent is serialized via a per-model lock because
+        the ThreadingHTTPServer dispatches requests on parallel threads and a
+        single ``Agent`` instance is not safe for concurrent ``start`` calls.
+        """
         self.last_activity = time.time()
-        agent = self._get_agent(model)
-        result = agent.start(prompt)
+        key = self._agent_key(model)
+        with self._lock_for(key):
+            agent = self._get_agent(key)
+            result = agent.start(prompt)
         self.last_activity = time.time()
         return str(result) if result is not None else ""
 

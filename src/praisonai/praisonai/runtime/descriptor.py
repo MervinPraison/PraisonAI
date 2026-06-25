@@ -77,12 +77,19 @@ class RuntimeDescriptor:
         path = get_runtime_lock_path(project_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         data = json.dumps(asdict(self), indent=2)
-        # Write then tighten permissions so the token is not world-readable.
-        path.write_text(data)
+        # Create with 0600 from the start so the token is never world-readable
+        # (avoids the TOCTOU window of write-then-chmod on shared hosts).
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+            with os.fdopen(fd, "w") as fh:
+                fh.write(data)
+        finally:
+            # If the file pre-existed with looser perms, O_CREAT's mode is
+            # ignored, so tighten explicitly as a belt-and-suspenders step.
+            try:
+                os.chmod(path, 0o600)
+            except OSError:
+                pass
         return path
 
     @classmethod

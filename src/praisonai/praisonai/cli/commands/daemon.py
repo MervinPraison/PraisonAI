@@ -31,6 +31,18 @@ def daemon_start(
     """Start the warm local runtime."""
     output = get_output_controller()
 
+    import ipaddress
+
+    # Local-first: the runtime uses plaintext bearer auth, so it must only ever
+    # bind to a loopback interface. Reject anything externally reachable.
+    try:
+        if not ipaddress.ip_address(host).is_loopback:
+            output.print_error("--host must be a loopback address for the local runtime.")
+            raise typer.Exit(1)
+    except ValueError:
+        output.print_error("--host must be a valid loopback IP address.")
+        raise typer.Exit(1)
+
     from ...runtime import get_runtime_descriptor
 
     existing = get_runtime_descriptor()
@@ -53,7 +65,7 @@ def daemon_start(
         if model:
             cmd.extend(["--model", model])
         # Detach: the child writes the lockfile once it is bound.
-        subprocess.Popen(
+        proc = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -70,6 +82,11 @@ def daemon_start(
                     f"Warm runtime started in background at {descriptor.base_url} (pid {descriptor.pid})."
                 )
                 raise typer.Exit(0)
+        # Readiness timed out: don't leave an orphaned child running silently.
+        try:
+            proc.terminate()
+        except OSError:
+            pass
         output.print_error("Runtime did not report ready in time.")
         raise typer.Exit(1)
 
@@ -90,12 +107,20 @@ def daemon_stop():
     """Stop the running warm runtime."""
     output = get_output_controller()
 
-    from ...runtime import get_runtime_descriptor
+    from ...runtime import RuntimeClient, get_runtime_descriptor
     from ...runtime.descriptor import RuntimeDescriptor
 
     descriptor = get_runtime_descriptor()
     if descriptor is None:
         output.print_info("No warm runtime is running.")
+        raise typer.Exit(0)
+
+    # Verify the recorded pid still belongs to *our* runtime before signalling.
+    # After PID reuse the lockfile pid could point at an unrelated process, so a
+    # failed health check is treated as a stale lockfile rather than a SIGTERM.
+    if not RuntimeClient(descriptor, timeout=2.0).ping():
+        output.print_info("Runtime descriptor is stale; cleaning up lockfile.")
+        RuntimeDescriptor.remove()
         raise typer.Exit(0)
 
     import os
@@ -108,7 +133,7 @@ def daemon_stop():
         output.print_info("Runtime process already gone; cleaning up lockfile.")
     except OSError as e:
         output.print_error(f"Failed to stop runtime: {e}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
     finally:
         RuntimeDescriptor.remove()
 
