@@ -10,6 +10,27 @@ const CLAUDE_ACTIVE_MS = 35 * 60 * 1000;
 const POST_PUSH_BUFFER_MS = 5 * 60 * 1000;
 const ALLOWED_MERGE_STATES = new Set(['CLEAN', 'UNSTABLE']);
 const AGENT_PY_MAX_AUTO_LINES = 100;
+const PR_MAX_AUTO_ADDITIONS = 800;
+const PR_MAX_AUTO_FILES = 30;
+const MANUAL_ONLY_LABELS = new Set(['security', 'breaking-change', 'needs-manual-review', 'release']);
+const SDK_PATH_PREFIXES = ['src/praisonai-agents/', 'src/praisonai/'];
+const SENSITIVE_PATH_PATTERNS = [
+  /^\.github\/workflows\//,
+  /praisonaiagents\/(auth|approval|policy|sandbox)\//,
+  /^src\/praisonai-agents\/pyproject\.toml$/,
+  /^src\/praisonai\/pyproject\.toml$/,
+  /\.env(\.|$)/,
+  /credentials\.json$/i,
+];
+const REQUIRED_SDK_CHECK_PATTERNS = [/test/i, /smoke/i, /core/i, /python package/i, /comprehensive/i, /optimized/i];
+const SECRET_PATTERNS = [
+  /sk-[a-zA-Z0-9]{20,}/,
+  /AKIA[0-9A-Z]{16}/,
+  /ghp_[a-zA-Z0-9]{36,}/,
+  /github_pat_/,
+  /Bearer eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+/,
+  /-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----/,
+];
 const BLOCK_LABELS = new Set([
   'claude-conflict-pending',
   'claude-merge-gate-active',
@@ -60,7 +81,7 @@ function isBotReviewer(login, userType) {
   return ['coderabbit', 'qodo', 'gemini', 'copilot', 'greptile'].some((p) => lower.includes(p));
 }
 
-function hasHumanChangesRequested(reviews) {
+function latestReviewsByUser(reviews) {
   const latestByUser = new Map();
   for (const r of reviews) {
     const login = r.user?.login;
@@ -70,9 +91,20 @@ function hasHumanChangesRequested(reviews) {
       latestByUser.set(login, r);
     }
   }
-  for (const [login, review] of latestByUser) {
+  return latestByUser;
+}
+
+function hasHumanChangesRequested(reviews) {
+  for (const [login, review] of latestReviewsByUser(reviews)) {
     if (review.state !== 'CHANGES_REQUESTED') continue;
     if (!isBotReviewer(login, review.user?.type)) return true;
+  }
+  return false;
+}
+
+function hasAnyChangesRequested(reviews) {
+  for (const [, review] of latestReviewsByUser(reviews)) {
+    if (review.state === 'CHANGES_REQUESTED') return true;
   }
   return false;
 }
@@ -217,8 +249,7 @@ function countNewAgentParams(patch) {
     }).length;
 }
 
-async function getAgentPyChange(github, owner, repo, prNumber) {
-  const files = await listPullFiles(github, owner, repo, prNumber);
+function getAgentPyChangeFromFiles(files) {
   const agentFile = files.find((f) => f.filename.endsWith('praisonaiagents/agent/agent.py'));
   if (!agentFile) {
     return { touched: false, additions: 0, newParams: 0 };
@@ -228,6 +259,91 @@ async function getAgentPyChange(github, owner, repo, prNumber) {
     additions: agentFile.additions || 0,
     newParams: countNewAgentParams(agentFile.patch || ''),
   };
+}
+
+async function getAgentPyChange(github, owner, repo, prNumber) {
+  const files = await listPullFiles(github, owner, repo, prNumber);
+  return getAgentPyChangeFromFiles(files);
+}
+
+function touchesSdk(files) {
+  return files.some((f) => SDK_PATH_PREFIXES.some((p) => f.filename.startsWith(p)));
+}
+
+function hasManualOnlyLabel(labels) {
+  return labels.some((l) => MANUAL_ONLY_LABELS.has(l));
+}
+
+function sensitivePathReasons(files) {
+  const reasons = [];
+  for (const f of files) {
+    if (SENSITIVE_PATH_PATTERNS.some((p) => p.test(f.filename))) {
+      reasons.push(`sensitive path: ${f.filename}`);
+      break;
+    }
+  }
+  return reasons;
+}
+
+function prSizeReasons(files) {
+  const reasons = [];
+  const totalAdditions = files.reduce((sum, f) => sum + (f.additions || 0), 0);
+  if (totalAdditions > PR_MAX_AUTO_ADDITIONS) {
+    reasons.push(`PR +${totalAdditions} lines (>${PR_MAX_AUTO_ADDITIONS}) requires manual review`);
+  }
+  if (files.length > PR_MAX_AUTO_FILES) {
+    reasons.push(`${files.length} files changed (>${PR_MAX_AUTO_FILES}) requires manual review`);
+  }
+  return reasons;
+}
+
+function missingTestsReason(files) {
+  const sdkAdds = files.filter(
+    (f) =>
+      f.filename.startsWith('src/praisonai-agents/') &&
+      f.filename.endsWith('.py') &&
+      !f.filename.endsWith('__init__.py') &&
+      (f.additions || 0) > 0
+  );
+  if (sdkAdds.length === 0) return null;
+  const hasTestChange = files.some(
+    (f) => /\/tests?\//.test(f.filename) || /test_.*\.py$/.test(f.filename) || /_test\.py$/.test(f.filename)
+  );
+  if (!hasTestChange) return 'SDK code added without test file changes — requires manual review';
+  return null;
+}
+
+function secretScanReasons(files) {
+  for (const f of files) {
+    const patch = f.patch || '';
+    if (!patch) continue;
+    for (const pattern of SECRET_PATTERNS) {
+      if (pattern.test(patch)) {
+        return [`possible secret in diff (${f.filename}) — requires manual review`];
+      }
+    }
+  }
+  return [];
+}
+
+async function sdkTestChecksReason(github, owner, repo, sha, files, core) {
+  if (!touchesSdk(files)) return null;
+  const { data } = await github.rest.checks.listForRef({
+    owner,
+    repo,
+    ref: sha,
+    per_page: 100,
+  });
+  const runs = (data.check_runs || []).filter((r) => r.head_sha === sha);
+  if (runs.length === 0) {
+    return 'SDK code changed but no CI checks on HEAD';
+  }
+  const testRuns = runs.filter((r) => REQUIRED_SDK_CHECK_PATTERNS.some((p) => p.test(r.name || '')));
+  if (testRuns.length === 0) {
+    return 'SDK code changed but no test check runs on HEAD';
+  }
+  core?.info?.(`SDK test checks on HEAD: ${testRuns.map((r) => r.name).join(', ')}`);
+  return null;
 }
 
 function manualReviewReasonForAgentPy(agentChange) {
@@ -354,11 +470,28 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
     }
   }
 
-  if (hasHumanChangesRequested(ctx.reviews)) reasons.push('human CHANGES_REQUESTED');
+  if (hasAnyChangesRequested(ctx.reviews)) reasons.push('CHANGES_REQUESTED review');
 
-  const agentChange = await getAgentPyChange(github, owner, repo, prNumber);
+  if (hasManualOnlyLabel(ctx.labels)) {
+    const manualLabel = ctx.labels.find((l) => MANUAL_ONLY_LABELS.has(l));
+    reasons.push(`manual-only label: ${manualLabel}`);
+  }
+
+  const pullFiles = await listPullFiles(github, owner, repo, prNumber);
+
+  const agentChange = getAgentPyChangeFromFiles(pullFiles);
   const agentManual = manualReviewReasonForAgentPy(agentChange);
   if (agentManual) reasons.push(agentManual);
+
+  reasons.push(...sensitivePathReasons(pullFiles));
+  reasons.push(...prSizeReasons(pullFiles));
+  reasons.push(...secretScanReasons(pullFiles));
+
+  const testsReason = missingTestsReason(pullFiles);
+  if (testsReason) reasons.push(testsReason);
+
+  const sdkCheckReason = await sdkTestChecksReason(github, owner, repo, ctx.headSha, pullFiles, core);
+  if (sdkCheckReason) reasons.push(sdkCheckReason);
 
   const checksOk = await allChecksGreenOnSha(github, owner, repo, ctx.headSha, core);
   if (!checksOk) reasons.push('CI not green on HEAD');
@@ -374,12 +507,15 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
   };
 }
 
-function findMergeGateVerdict(comments, minCreatedAt = null) {
+function findMergeGateVerdict(comments, minCreatedAt = null, headPushedAt = null) {
   const minTime = minCreatedAt ? new Date(minCreatedAt).getTime() : 0;
+  const headTime = headPushedAt ? new Date(headPushedAt).getTime() - 60000 : 0;
   const gateComments = comments
     .filter((c) => {
       if (!(c.body || '').includes('MERGE_GATE_VERDICT:')) return false;
-      if (minTime && new Date(c.created_at).getTime() < minTime) return false;
+      const created = new Date(c.created_at).getTime();
+      if (minTime && created < minTime) return false;
+      if (headTime && created < headTime) return false;
       return true;
     })
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
@@ -397,15 +533,24 @@ module.exports = {
   hasRecentClaudeTrigger,
   hasRecentConflictComment,
   hasHumanChangesRequested,
+  hasAnyChangesRequested,
   hasFinalClaudeReviewTrigger,
   finalClaudeCompletedOnSha,
   getMergeState,
   allChecksGreenOnSha,
   hasInProgressClaudeAssistant,
   getAgentPyChange,
+  getAgentPyChangeFromFiles,
   manualReviewReasonForAgentPy,
   countNewAgentParams,
   listPullFiles,
+  touchesSdk,
+  hasManualOnlyLabel,
+  sensitivePathReasons,
+  prSizeReasons,
+  missingTestsReason,
+  secretScanReasons,
+  sdkTestChecksReason,
   listAllComments,
   getHeadCommitDate,
   isStaleFinalAfterPush,
