@@ -80,6 +80,46 @@ def test_client_unreachable_raises():
         client.run("hello")
 
 
+def test_run_evicts_agent_on_failure():
+    """A failed agent.start() must evict the cached agent so state can't bleed."""
+    from praisonai.runtime.server import WarmRuntime
+
+    class _FlakyAgent:
+        created = 0
+        total_calls = 0
+
+        def __init__(self, *args, **kwargs):
+            type(self).created += 1
+
+        def start(self, prompt):
+            type(self).total_calls += 1
+            # Only the very first call (on the first agent) fails.
+            if type(self).total_calls == 1:
+                raise RuntimeError("boom")
+            return f"ok: {prompt}"
+
+    runtime = WarmRuntime()
+
+    def _fake_get_agent(key):
+        with runtime._lock:
+            agent = runtime._agents.get(key)
+            if agent is None:
+                agent = _FlakyAgent()
+                runtime._agents[key] = agent
+            return agent
+
+    runtime._get_agent = _fake_get_agent  # type: ignore[assignment]
+
+    with pytest.raises(RuntimeError):
+        runtime.run("first")
+    # The failed agent should have been dropped from the cache.
+    assert runtime._agents == {}
+
+    # Next call builds a fresh agent and succeeds.
+    assert runtime.run("second") == "ok: second"
+    assert _FlakyAgent.created == 2
+
+
 def test_server_roundtrip(monkeypatch):
     """Boot the real stdlib server with a stubbed agent and round-trip a prompt."""
     from praisonai.runtime import server as server_mod

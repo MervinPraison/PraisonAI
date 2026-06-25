@@ -66,18 +66,31 @@ class WarmRuntime:
                 self._agent_locks[key] = lock
             return lock
 
+    def _evict_agent(self, key: str) -> None:
+        """Drop the cached agent for ``key`` so the next call gets a fresh one."""
+        with self._lock:
+            self._agents.pop(key, None)
+
     def run(self, prompt: str, model: Optional[str] = None) -> str:
         """Execute a prompt against the warm agent and return the result text.
 
         Access to each cached Agent is serialized via a per-model lock because
         the ThreadingHTTPServer dispatches requests on parallel threads and a
         single ``Agent`` instance is not safe for concurrent ``start`` calls.
+
+        If ``agent.start`` raises (LLM error, timeout, etc.) the agent may be
+        left with partial conversation state (e.g. an unmatched user turn), so
+        it is evicted from the cache and the next call rebuilds a clean agent.
         """
         self.last_activity = time.time()
         key = self._agent_key(model)
         with self._lock_for(key):
             agent = self._get_agent(key)
-            result = agent.start(prompt)
+            try:
+                result = agent.start(prompt)
+            except Exception:
+                self._evict_agent(key)
+                raise
         self.last_activity = time.time()
         return str(result) if result is not None else ""
 
