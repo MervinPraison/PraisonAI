@@ -125,18 +125,32 @@ def _provider_key_vars_for_model(model: str) -> tuple[str, ...]:
     case the caller should treat any known credential as acceptable.
     """
     m = model.lower()
-    # Explicit provider prefixes take precedence.
+    # Explicit provider prefixes take precedence. The required var must match
+    # what resolve_llm_endpoint()'s _PROVIDER_MAP reads for the same prefix, or
+    # the gate and the resolver disagree (gate passes, runtime gets no key).
     if m.startswith("anthropic/") or m.startswith("claude"):
         return ("ANTHROPIC_API_KEY",)
-    if m.startswith("gemini/") or m.startswith("google/") or m.startswith("gemini"):
-        return ("GEMINI_API_KEY", "GOOGLE_API_KEY")
+    # google/ routes to GOOGLE_API_KEY in the resolver; gemini/ (and bare
+    # "gemini") routes to GEMINI_API_KEY. Keep them distinct so the gate is
+    # exactly what the endpoint will require at run time.
+    if m.startswith("google/"):
+        return ("GOOGLE_API_KEY",)
+    if m.startswith("gemini/") or m.startswith("gemini"):
+        return ("GEMINI_API_KEY",)
     if m.startswith("groq/"):
         return ("GROQ_API_KEY",)
     if m.startswith("cohere/"):
         return ("COHERE_API_KEY",)
     if m.startswith("ollama/"):
         return ("OLLAMA_HOST",)
-    if m.startswith("gpt") or m.startswith("o1") or m.startswith("openai/"):
+    # OpenAI chat + reasoning families (gpt-*, o1/o3/o4-*) and explicit prefix.
+    if (
+        m.startswith("gpt")
+        or m.startswith("o1")
+        or m.startswith("o3")
+        or m.startswith("o4")
+        or m.startswith("openai/")
+    ):
         return ("OPENAI_API_KEY",)
     return ()
 

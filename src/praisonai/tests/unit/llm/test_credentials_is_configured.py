@@ -24,16 +24,27 @@ class TestProviderKeyVarsForModel:
         assert _provider_key_vars_for_model("claude-3-5-sonnet-latest") == ("ANTHROPIC_API_KEY",)
 
     def test_gemini(self):
-        assert _provider_key_vars_for_model("gemini/gemini-1.5-flash") == ("GEMINI_API_KEY", "GOOGLE_API_KEY")
+        # gemini/ routes to GEMINI_API_KEY in the resolver.
+        assert _provider_key_vars_for_model("gemini/gemini-1.5-flash") == ("GEMINI_API_KEY",)
 
     def test_google(self):
-        assert _provider_key_vars_for_model("google/gemini-1.5-flash") == ("GEMINI_API_KEY", "GOOGLE_API_KEY")
+        # google/ routes to GOOGLE_API_KEY in the resolver (must match _PROVIDER_MAP).
+        assert _provider_key_vars_for_model("google/gemini-1.5-flash") == ("GOOGLE_API_KEY",)
 
     def test_groq(self):
         assert _provider_key_vars_for_model("groq/llama-3.3-70b-versatile") == ("GROQ_API_KEY",)
 
     def test_openai(self):
         assert _provider_key_vars_for_model("gpt-4o-mini") == ("OPENAI_API_KEY",)
+
+    def test_openai_o1_reasoning(self):
+        assert _provider_key_vars_for_model("o1-mini") == ("OPENAI_API_KEY",)
+
+    def test_openai_o3_reasoning(self):
+        assert _provider_key_vars_for_model("o3-mini") == ("OPENAI_API_KEY",)
+
+    def test_openai_o4_reasoning(self):
+        assert _provider_key_vars_for_model("o4-mini") == ("OPENAI_API_KEY",)
 
     def test_ollama(self):
         assert _provider_key_vars_for_model("ollama/llama3.2") == ("OLLAMA_HOST",)
@@ -120,6 +131,33 @@ class TestIsConfiguredExplicitModel:
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-a"}, clear=True):
             assert is_configured("gpt-4o-mini") is False
 
-    def test_gemini_model_accepts_either_google_or_gemini_key(self):
-        with patch.dict(os.environ, {"GOOGLE_API_KEY": "g"}, clear=True):
+    def test_gemini_model_requires_gemini_key(self):
+        # gemini/ routes to GEMINI_API_KEY in the resolver, so GEMINI_API_KEY
+        # satisfies the gate.
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "g"}, clear=True), \
+                patch("praisonai.llm.credentials.CredentialStore") as MockStore:
+            MockStore.return_value.list_providers.return_value = []
             assert is_configured("gemini/gemini-1.5-flash") is True
+
+    def test_gemini_model_with_only_google_key_is_not_configured(self):
+        # A google/ key does not satisfy a gemini/ model: the resolver reads
+        # GEMINI_API_KEY for that prefix and would get no key at run time.
+        with patch.dict(os.environ, {"GOOGLE_API_KEY": "g"}, clear=True), \
+                patch("praisonai.llm.credentials.CredentialStore") as MockStore:
+            MockStore.return_value.list_providers.return_value = []
+            assert is_configured("gemini/gemini-1.5-flash") is False
+
+    def test_google_model_requires_google_key(self):
+        # google/ routes to GOOGLE_API_KEY in the resolver; matching gate.
+        with patch.dict(os.environ, {"GOOGLE_API_KEY": "g"}, clear=True), \
+                patch("praisonai.llm.credentials.CredentialStore") as MockStore:
+            MockStore.return_value.list_providers.return_value = []
+            assert is_configured("google/gemini-1.5-flash") is True
+
+    def test_google_model_with_only_gemini_key_is_not_configured(self):
+        # GEMINI_API_KEY alone must not satisfy a google/ model, because the
+        # resolver reads GOOGLE_API_KEY and would get no key at run time.
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "g"}, clear=True), \
+                patch("praisonai.llm.credentials.CredentialStore") as MockStore:
+            MockStore.return_value.list_providers.return_value = []
+            assert is_configured("google/gemini-1.5-flash") is False
