@@ -67,11 +67,17 @@ def _any_provider_credential() -> bool:
     """Return True if any supported provider credential is present in env."""
     import os
 
-    known_keys = (
-        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY",
-        "GEMINI_API_KEY", "GROQ_API_KEY", "COHERE_API_KEY",
-        "OLLAMA_HOST",
-    )
+    # Derive the credential keys from the single source of truth so this
+    # detection never drifts from default_model_for_available_provider().
+    try:
+        from ...llm.env import _PROVIDER_DEFAULTS
+        known_keys = tuple(key_var for key_var, _ in _PROVIDER_DEFAULTS)
+    except Exception:
+        known_keys = (
+            "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY",
+            "GEMINI_API_KEY", "GROQ_API_KEY", "COHERE_API_KEY",
+            "OLLAMA_HOST",
+        )
     return any(os.environ.get(k) for k in known_keys)
 
 
@@ -114,14 +120,10 @@ def init(
     # Scaffold the default model that matches the user's detected provider
     # credential. Falls back to the OpenAI default when none is detected.
     try:
-        from ...llm.env import (
-            default_model_for_available_provider,
-            _DEFAULT_MODEL,
-        )
+        from ...llm.env import default_model_for_available_provider
         detected_model = default_model_for_available_provider()
     except Exception:
         detected_model = "gpt-4o-mini"
-        _DEFAULT_MODEL = "gpt-4o-mini"
 
     provider_detected = _any_provider_credential()
     scaffold_model = detected_model

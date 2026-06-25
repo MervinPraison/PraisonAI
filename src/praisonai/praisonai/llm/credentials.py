@@ -188,7 +188,10 @@ def is_configured(model: Optional[str] = None) -> bool:
     )
 
     # When no model is given, infer the provider-aware default so the gate
-    # agrees with what resolve_llm_endpoint() would actually pick.
+    # agrees with what resolve_llm_endpoint() would actually pick. Remember
+    # whether the caller supplied the model explicitly so an *inferred* default
+    # can still defer to the resolver (which also consults stored credentials).
+    explicit_model = model is not None
     if model is None:
         model = default_model_for_available_provider()
 
@@ -210,6 +213,18 @@ def is_configured(model: Optional[str] = None) -> bool:
                 return True
         except Exception:
             pass
+        # The required provider was inferred from a default (no explicit model):
+        # defer to the resolver so a stored credential for a *different*
+        # provider can still satisfy the gate (it also picks the matching
+        # default model at run time). An explicitly requested model stays
+        # strictly gated to its own provider.
+        if not explicit_model:
+            try:
+                endpoint = resolve_llm_endpoint_with_credentials()
+                if endpoint.api_key:
+                    return True
+            except Exception:
+                pass
         return False
 
     # Unknown provider: any known credential (env or stored) is acceptable.

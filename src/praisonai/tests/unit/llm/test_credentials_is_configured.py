@@ -62,10 +62,47 @@ class TestIsConfiguredNoModel:
             assert is_configured() is True
 
     def test_no_credentials_not_configured(self):
-        with patch.dict(os.environ, {}, clear=True):
-            # No env creds; may still consult stored credentials, but in a
-            # clean env with no store entries this should be False.
-            assert is_configured() in (False, True)  # tolerate stored-cred envs
+        # Isolate the credential store so the clean-env case is deterministic:
+        # no env vars AND an empty store must report not configured.
+        with patch.dict(os.environ, {}, clear=True), \
+                patch("praisonai.llm.credentials.CredentialStore") as MockStore:
+            instance = MockStore.return_value
+            instance.list_providers.return_value = []
+            instance.get_credential.return_value = None
+            assert is_configured() is False
+
+
+class TestIsConfiguredStoredCredentials:
+    """No env vars, but a stored non-OpenAI credential exists.
+
+    When no model is passed, the inferred default is OpenAI (env-only), but the
+    gate must still defer to the resolver so a stored credential for a different
+    provider satisfies it (regression for the gate/resolver disagreement)."""
+
+    def test_stored_anthropic_only_no_model_is_configured(self):
+        from praisonai.cli.configuration.credentials import ProviderCredential
+
+        with patch.dict(os.environ, {}, clear=True), \
+                patch("praisonai.llm.credentials.CredentialStore") as MockStore:
+            instance = MockStore.return_value
+            instance.list_providers.return_value = ["anthropic"]
+            instance.get_credential.return_value = ProviderCredential(
+                provider="anthropic", api_key="sk-stored-a"
+            )
+            assert is_configured() is True
+
+    def test_explicit_openai_model_with_stored_anthropic_only_not_configured(self):
+        from praisonai.cli.configuration.credentials import ProviderCredential
+
+        with patch.dict(os.environ, {}, clear=True), \
+                patch("praisonai.llm.credentials.CredentialStore") as MockStore:
+            instance = MockStore.return_value
+            instance.list_providers.return_value = ["anthropic"]
+            instance.get_credential.return_value = ProviderCredential(
+                provider="anthropic", api_key="sk-stored-a"
+            )
+            # Explicit OpenAI model must stay strictly gated to OpenAI.
+            assert is_configured("gpt-4o-mini") is False
 
 
 class TestIsConfiguredExplicitModel:

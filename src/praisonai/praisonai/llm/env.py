@@ -69,9 +69,11 @@ def default_model_for_available_provider(
     so behaviour is unchanged for the no-credential case.
 
     Args:
-        validate: When True, validate the chosen model against the model
-            catalogue and fall back to the next candidate (or the last-resort
-            default) if it is unknown.
+        validate: When True, best-effort check the chosen model against the
+            model catalogue (for surfacing issues elsewhere). The provider
+            default is intentionally *not* dropped when the catalogue cannot
+            confirm it, since a valid provider credential should always yield a
+            usable, prefix-routed default.
 
     Returns:
         A model id string appropriate for the detected provider.
