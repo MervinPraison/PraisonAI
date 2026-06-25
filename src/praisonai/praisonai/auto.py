@@ -47,7 +47,11 @@ def _yaml_safe_load(stream):
     return yaml.safe_load(stream)
 
 
-
+try:
+    import litellm
+    LITELLM_AVAILABLE = True
+except ImportError:
+    LITELLM_AVAILABLE = False
 
 # OpenAI client creation removed - create per-call instead of global cache
 
@@ -615,63 +619,63 @@ class BaseAutoGenerator:
 # =============================================================================
 # Pydantic Models for Structured Output - Lazy Loaded
 # =============================================================================
+from pydantic import BaseModel
+from typing import Dict, List
+
+
+class PatternRecommendation(BaseModel):
+    """LLM-based pattern recommendation with reasoning."""
+    pattern: str
+    reasoning: str
+    confidence: float
+
+class SingleAgentStructure(BaseModel):
+    name: str
+    role: str
+    goal: str
+    backstory: str
+    instructions: str
+    tools: List[str] = []
+    task_description: str
+    expected_output: str
+
+class ValidationGate(BaseModel):
+    criteria: str
+    pass_action: str
+    fail_action: str
 
 def _get_team_models():
     """Get team structure models, creating them on first use."""
+
     def _create_team_models():
         from pydantic import BaseModel
-        
+
         class TaskDetails(BaseModel):
-            """Details for a single task."""
             description: str
             expected_output: str
-        
+
         class RoleDetails(BaseModel):
-            """Details for a single role/agent."""
             role: str
             goal: str
             backstory: str
             tasks: Dict[str, TaskDetails]
             tools: List[str]
-        
-        class TeamStructure(BaseModel):
-            """Structure for multi-agent team."""
-            roles: Dict[str, RoleDetails]
-        
-        class SingleAgentStructure(BaseModel):
-            """Structure for single-agent generation (Anthropic's 'start simple' principle)."""
-            name: str
-            role: str
-            goal: str
-            backstory: str
-            instructions: str
-            tools: List[str] = []
-            task_description: str
-            expected_output: str
-        
-        class PatternRecommendation(BaseModel):
-            """LLM-based pattern recommendation with reasoning."""
-            pattern: str  # sequential, parallel, routing, orchestrator-workers, evaluator-optimizer
-            reasoning: str  # Why this pattern was chosen
-            confidence: float  # 0.0 to 1.0 confidence score
-        
-        class ValidationGate(BaseModel):
-            """Validation gate for prompt chaining workflows."""
-            criteria: str  # What to validate
-            pass_action: str  # Action if validation passes (e.g., "continue", "next_step")
-            fail_action: str  # Action if validation fails (e.g., "retry", "escalate", "abort")
-        
-        return {
-            'TaskDetails': TaskDetails,
-            'RoleDetails': RoleDetails,
-            'TeamStructure': TeamStructure,
-            'SingleAgentStructure': SingleAgentStructure,
-            'PatternRecommendation': PatternRecommendation,
-            'ValidationGate': ValidationGate
-        }
-    
-    return lazy_get('team_models', _create_team_models)
 
+        class TeamStructure(BaseModel):
+            roles: Dict[str, RoleDetails]
+
+
+
+        return {
+            "TaskDetails": TaskDetails,
+            "RoleDetails": RoleDetails,
+            "TeamStructure": TeamStructure,
+            "SingleAgentStructure": SingleAgentStructure,
+            "PatternRecommendation": PatternRecommendation,  # <-- use global class
+            "ValidationGate": ValidationGate,
+        }
+
+    return lazy_get("team_models", _create_team_models)
 class AutoGenerator(BaseAutoGenerator):
     """
     Auto-generates agents.yaml files from a topic description.
@@ -1022,7 +1026,41 @@ Use the recommended tools: {', '.join(recommended_tools)}
 # =============================================================================
 # Workflow Auto-Generation (Feature Parity)
 # =============================================================================
-
+from pydantic import BaseModel
+        
+class WorkflowStepDetails(BaseModel):
+    """Details for a workflow step."""
+    agent: str
+    action: str
+    expected_output: Optional[str] = None
+        
+class WorkflowRouteDetails(BaseModel):
+    """Details for a route step."""
+    name: str
+    route: Dict[str, List[str]]
+        
+class WorkflowParallelDetails(BaseModel):
+    """Details for a parallel step."""
+    name: str
+    parallel: List[WorkflowStepDetails]
+        
+class WorkflowAgentDetails(BaseModel):
+    """Details for a workflow agent."""
+    name: str
+    role: str
+    goal: str
+    instructions: str
+    tools: Optional[List[str]] = None
+        
+class WorkflowStructure(BaseModel):
+            
+    """Structure for auto-generated workflow."""
+    name: str
+    description: str
+    agents: Dict[str, WorkflowAgentDetails]
+    steps: List[Dict]  # Can be agent steps, route, parallel, etc.
+    gates: Optional[List[Any]] = None  # Optional validation gates, ValidationGate type resolved at runtime
+        
 def _get_workflow_models():
     """Get workflow structure models, creating them on first use."""
     if 'workflow_models' in _models_cache:
@@ -1032,40 +1070,7 @@ def _get_workflow_models():
         if 'workflow_models' in _models_cache:
             return _models_cache['workflow_models']
         
-        from pydantic import BaseModel
-        
-        class WorkflowStepDetails(BaseModel):
-            """Details for a workflow step."""
-            agent: str
-            action: str
-            expected_output: Optional[str] = None
-        
-        class WorkflowRouteDetails(BaseModel):
-            """Details for a route step."""
-            name: str
-            route: Dict[str, List[str]]
-        
-        class WorkflowParallelDetails(BaseModel):
-            """Details for a parallel step."""
-            name: str
-            parallel: List[WorkflowStepDetails]
-        
-        class WorkflowAgentDetails(BaseModel):
-            """Details for a workflow agent."""
-            name: str
-            role: str
-            goal: str
-            instructions: str
-            tools: Optional[List[str]] = None
-        
-        class WorkflowStructure(BaseModel):
-            """Structure for auto-generated workflow."""
-            name: str
-            description: str
-            agents: Dict[str, WorkflowAgentDetails]
-            steps: List[Dict]  # Can be agent steps, route, parallel, etc.
-            gates: Optional[List[Any]] = None  # Optional validation gates, ValidationGate type resolved at runtime
-        
+
         _models_cache['workflow_models'] = {
             'WorkflowStepDetails': WorkflowStepDetails,
             'WorkflowRouteDetails': WorkflowRouteDetails,
