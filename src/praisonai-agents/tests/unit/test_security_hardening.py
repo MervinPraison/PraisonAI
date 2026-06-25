@@ -18,6 +18,112 @@ def test_webhook_insecure_override(monkeypatch):
     assert webhooks_require_verification() is False
 
 
+def test_verify_hmac_valid_and_invalid():
+    import hashlib
+    import hmac
+
+    from praisonai.bots.webhook_security import verify_hmac
+
+    secret = "s3cret"
+    body = b"payload"
+    sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+
+    assert verify_hmac(secret, body, sig) is True
+    assert verify_hmac(secret, body, "deadbeef") is False
+    assert verify_hmac(secret, body, None) is False
+    assert verify_hmac("", body, sig) is False
+
+
+def test_verify_hmac_prefix_and_algo():
+    import hashlib
+    import hmac
+
+    from praisonai.bots.webhook_security import verify_hmac
+
+    secret = "s3cret"
+    body = b"payload"
+    digest = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+
+    assert verify_hmac(secret, body, f"sha256={digest}", prefix="sha256=") is True
+    assert verify_hmac(secret, body, f"sha256={digest}") is True
+
+
+def test_verify_hmac_unknown_digest_fails_closed():
+    from praisonai.bots.webhook_security import verify_hmac
+
+    assert verify_hmac("s3cret", b"payload", "deadbeef", digest="not-a-real-algo") is False
+
+
+def test_hmac_webhook_verifier_case_insensitive_header():
+    import hashlib
+    import hmac
+
+    from praisonai.bots.webhook_security import HmacWebhookVerifier
+
+    secret = "s3cret"
+    body = b"payload"
+    sig = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+
+    verifier = HmacWebhookVerifier(
+        secret, signature_headers=["X-Hub-Signature-256"], prefix="sha256="
+    )
+    assert verifier.verify(
+        headers={"x-hub-signature-256": sig}, raw_body=body
+    ) is True
+    assert verifier.verify(headers={"x-hub-signature-256": "bad"}, raw_body=body) is False
+
+
+def test_enforce_webhook_verification_gate(monkeypatch):
+    from praisonai.bots.webhook_security import (
+        HmacWebhookVerifier,
+        enforce_webhook_verification,
+    )
+
+    monkeypatch.delenv("PRAISONAI_INSECURE_WEBHOOKS", raising=False)
+
+    assert enforce_webhook_verification(
+        accepts_webhooks=False, verifier=None, headers={}, raw_body=b""
+    ) is True
+
+    assert enforce_webhook_verification(
+        accepts_webhooks=True, verifier=None, headers={}, raw_body=b""
+    ) is False
+
+    monkeypatch.setenv("PRAISONAI_INSECURE_WEBHOOKS", "true")
+    assert enforce_webhook_verification(
+        accepts_webhooks=True, verifier=None, headers={}, raw_body=b""
+    ) is True
+    monkeypatch.delenv("PRAISONAI_INSECURE_WEBHOOKS", raising=False)
+
+    import hashlib
+    import hmac
+
+    secret = "s3cret"
+    body = b"payload"
+    sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    verifier = HmacWebhookVerifier(secret, signature_headers=["X-Signature"])
+    assert enforce_webhook_verification(
+        accepts_webhooks=True,
+        verifier=verifier,
+        headers={"X-Signature": sig},
+        raw_body=body,
+    ) is True
+
+
+def test_webhook_verifier_protocol_and_capabilities_roundtrip():
+    from praisonaiagents.bots import (
+        PlatformCapabilities,
+        WebhookVerifierProtocol,
+    )
+
+    assert WebhookVerifierProtocol is not None
+
+    caps = PlatformCapabilities(accepts_webhooks=True, verifies_webhook_signature=True)
+    restored = PlatformCapabilities.from_dict(caps.to_dict())
+    assert restored.accepts_webhooks is True
+    assert restored.verifies_webhook_signature is True
+
+
 def test_jobs_agent_root_rejects_escape(tmp_path, monkeypatch):
     from praisonai.jobs.path_validation import validate_agent_file_path
 
