@@ -38,9 +38,9 @@ def _call_auth_disabled() -> bool:
     return os.getenv('PRAISONAI_CALL_AUTH', '').lower() == 'disabled'
 
 
-def _configured_bind_host() -> str:
+def _configured_bind_host() -> Optional[str]:
     """Server bind address from env only — never trust client Host headers."""
-    return os.getenv('PRAISONAI_CALL_BIND_HOST', '127.0.0.1')
+    return os.getenv('PRAISONAI_CALL_BIND_HOST')
 
 
 async def verify_token(
@@ -52,10 +52,13 @@ async def verify_token(
         return
     if _call_auth_disabled():
         bind_host = _configured_bind_host()
-        if bind_host not in _LOCALHOST_HOSTS:
+        if bind_host is None or bind_host not in _LOCALHOST_HOSTS:
             raise HTTPException(
                 status_code=503,
-                detail="PRAISONAI_CALL_AUTH=disabled is only permitted for localhost binding",
+                detail=(
+                    "PRAISONAI_CALL_AUTH=disabled is only permitted for localhost binding; "
+                    "set PRAISONAI_CALL_BIND_HOST to 127.0.0.1 when binding locally"
+                ),
             )
         warnings.warn(
             "PRAISONAI_CALL_AUTH=disabled bypasses authentication; "

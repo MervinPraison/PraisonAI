@@ -894,7 +894,10 @@ Launch PraisonAI servers with unified discovery support.
     
     def _run_server(self, app: Any, host: str, port: int, reload: bool) -> None:
         """Run the server with uvicorn."""
+        import os
         import uvicorn
+
+        os.environ["PRAISONAI_CALL_BIND_HOST"] = host
         uvicorn.run(app, host=host, port=port, reload=reload)
 
 

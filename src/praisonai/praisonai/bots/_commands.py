@@ -7,8 +7,11 @@ Telegram, Discord, and Slack bots.  Keep them in one place.
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import Callable, Dict, Optional, Set, TYPE_CHECKING, Any
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from praisonaiagents import Agent
