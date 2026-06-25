@@ -39,6 +39,7 @@ from ._commands import (
     handle_resume_command,
     handle_retry_command,
     handle_reasoning_command,
+    get_last_user_message,
     build_command_access_policy,
 )
 from ._session import BotSessionManager
@@ -324,8 +325,25 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                     return
                 elif command == "retry":
                     user_id = str(message.author.id)
-                    response = handle_retry_command(self._session, user_id)
-                    await message.reply(response)
+                    last_user_msg = get_last_user_message(self._session, user_id)
+                    if not last_user_msg:
+                        await message.reply(
+                            "ℹ️ Nothing to retry — no previous message found."
+                        )
+                        return
+                    await message.reply("🔁 Retrying your last message…")
+                    try:
+                        response = await self._session.chat(
+                            self._agent, user_id, last_user_msg,
+                            chat_id=str(message.channel.id),
+                            user_name=str(getattr(message.author, "name", "")),
+                            message_id=str(message.id),
+                            account=self._config.get("account", "default"),
+                        )
+                        await message.reply(response)
+                    except Exception as e:  # noqa: BLE001 - surface a friendly message
+                        logger.warning("retry failed: %s", e)
+                        await message.reply(f"❌ Retry failed: {e}")
                     return
                 elif command == "reasoning":
                     user_id = str(message.author.id)

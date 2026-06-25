@@ -12,6 +12,8 @@ from praisonai.bots._commands import (
     handle_resume_command,
     handle_retry_command,
     handle_reasoning_command,
+    get_last_user_message,
+    is_reasoning_visible,
 )
 
 
@@ -67,10 +69,28 @@ def test_undo_surfaces_errors():
     assert "Could not undo" in handle_undo_command(FakeAgent(raises=True))
 
 
-def test_sessions_lists_keys():
+def test_sessions_only_lists_requesting_user():
+    # u1 must see only their own session, never u2's storage key (privacy).
     session = FakeSession({"u1": [], "u2": []})
     out = handle_sessions_command(session, "u1")
-    assert "u1" in out and "u2" in out
+    assert "u1" in out
+    assert "u2" not in out
+
+
+def test_sessions_user_without_history():
+    # A user with no in-memory history sees nothing (not other users' keys).
+    session = FakeSession({"u2": []})
+    assert handle_sessions_command(session, "u1") == "No saved sessions yet."
+
+
+def test_sessions_prefers_user_scoped_list_fn():
+    class Session(FakeSession):
+        def list_sessions(self, user_id=None):
+            assert user_id == "u1"
+            return ["u1:s1", "u1:s2"]
+
+    out = handle_sessions_command(Session({}), "u1")
+    assert "u1:s1" in out and "u1:s2" in out
 
 
 def test_sessions_empty():
@@ -81,10 +101,13 @@ def test_resume_requires_id():
     assert "Usage" in handle_resume_command(FakeSession({}), "u1", None)
 
 
-def test_resume_found_in_history():
+def test_resume_found_but_cannot_switch_without_primitive():
+    # Without a resume_session() primitive the handler must NOT claim success;
+    # it can confirm the session exists but cannot switch to it.
     session = FakeSession({"abc": [{"role": "user", "content": "hi"}]})
     out = handle_resume_command(session, "u1", "abc")
-    assert "available" in out
+    assert "isn't supported" in out
+    assert "✅" not in out
 
 
 def test_resume_not_found():
@@ -127,3 +150,27 @@ def test_reasoning_toggles_state():
     assert "hidden" in second
     # Preference is persisted on the session manager.
     assert session._reasoning_visibility["u1"] is False
+
+
+def test_get_last_user_message_returns_latest():
+    history = {
+        "u1": [
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "reply"},
+            {"role": "user", "content": "second"},
+        ]
+    }
+    assert get_last_user_message(FakeSession(history), "u1") == "second"
+
+
+def test_get_last_user_message_none_when_empty():
+    assert get_last_user_message(FakeSession({"u1": []}), "u1") is None
+
+
+def test_is_reasoning_visible_reflects_toggle():
+    session = FakeSession({})
+    assert is_reasoning_visible(session, "u1") is False
+    handle_reasoning_command(session, "u1")  # toggle on
+    assert is_reasoning_visible(session, "u1") is True
+    handle_reasoning_command(session, "u1")  # toggle off
+    assert is_reasoning_visible(session, "u1") is False

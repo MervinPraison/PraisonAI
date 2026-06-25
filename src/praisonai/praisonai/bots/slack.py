@@ -41,6 +41,7 @@ from ._commands import (
     handle_resume_command,
     handle_retry_command,
     handle_reasoning_command,
+    get_last_user_message,
     build_command_access_policy,
 )
 from ._session import BotSessionManager
@@ -316,8 +317,26 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                 return
             elif text == "/retry":
                 user_id = event.get("user", "unknown")
-                response = handle_retry_command(self._session, user_id)
-                await say(text=response, thread_ts=event.get("ts"))
+                last_user_msg = get_last_user_message(self._session, user_id)
+                if not last_user_msg:
+                    await say(
+                        text="ℹ️ Nothing to retry — no previous message found.",
+                        thread_ts=event.get("ts"),
+                    )
+                    return
+                await say(text="🔁 Retrying your last message…", thread_ts=event.get("ts"))
+                try:
+                    response = await self._session.chat(
+                        self._agent, user_id, last_user_msg,
+                        chat_id=str(event.get("channel", "")),
+                        thread_id=event.get("thread_ts", "") or "",
+                        message_id=event.get("ts", ""),
+                        account=self._config.get("account", "default"),
+                    )
+                    await say(text=response, thread_ts=event.get("ts"))
+                except Exception as e:  # noqa: BLE001 - surface a friendly message
+                    logger.warning("retry failed: %s", e)
+                    await say(text=f"❌ Retry failed: {e}", thread_ts=event.get("ts"))
                 return
             elif text == "/reasoning":
                 user_id = event.get("user", "unknown")

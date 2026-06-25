@@ -42,6 +42,7 @@ from ._commands import (
     handle_resume_command,
     handle_retry_command,
     handle_reasoning_command,
+    get_last_user_message,
     build_command_access_policy,
     get_command_registry
 )
@@ -821,8 +822,28 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             if not self._command_policy.can_run(user_id, "retry"):
                 await update.message.reply_text("⛔ You are not permitted to run /retry")
                 return
-            response = handle_retry_command(self._session, user_id)
-            await update.message.reply_text(response)
+            last_user_msg = get_last_user_message(self._session, user_id)
+            if not last_user_msg:
+                await update.message.reply_text(
+                    "ℹ️ Nothing to retry — no previous message found."
+                )
+                return
+            user_name = (
+                update.message.from_user.username or update.message.from_user.first_name or ""
+            ) if update.message.from_user else ""
+            await update.message.reply_text("🔁 Retrying your last message…")
+            try:
+                response = await self._session.chat(
+                    self._agent, user_id, last_user_msg,
+                    chat_id=str(update.message.chat_id) if update.message.chat_id else "",
+                    user_name=user_name,
+                    message_id=str(update.message.message_id),
+                    account=self.config.get("account", "default"),
+                )
+                await update.message.reply_text(response)
+            except Exception as e:  # noqa: BLE001 - surface a friendly message
+                logger.warning("retry failed: %s", e)
+                await update.message.reply_text(f"❌ Retry failed: {e}")
 
         async def handle_reasoning(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not update.message:

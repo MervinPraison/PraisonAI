@@ -834,16 +834,33 @@ def handle_sessions_command(
     Returns:
         A formatted list of session identifiers, or guidance.
     """
-    list_fn = getattr(session_manager, "list_sessions", None)
+    # Scope every lookup to the requesting user's storage key so one user can
+    # never enumerate another user's sessions (the in-memory `_histories` map
+    # is a *shared* dict keyed by per-user storage key).
+    storage_key = user_id
+    if hasattr(session_manager, "_storage_key"):
+        try:
+            storage_key = session_manager._storage_key(user_id)
+        except Exception:
+            storage_key = user_id
+
     keys: List[str] = []
+    list_fn = getattr(session_manager, "list_sessions", None)
     if callable(list_fn):
         try:
-            keys = list(list_fn())
+            # Prefer a user-scoped contract when the manager supports it;
+            # fall back to an unfiltered call only if the signature rejects it.
+            try:
+                keys = list(list_fn(user_id))
+            except TypeError:
+                keys = list(list_fn())
         except Exception:
             keys = []
     elif hasattr(session_manager, "_histories"):
         try:
-            keys = list(session_manager._histories.keys())
+            # Only surface the caller's own session, never other users' keys.
+            if storage_key in session_manager._histories:
+                keys = [storage_key]
         except Exception:
             keys = []
 
@@ -889,34 +906,36 @@ def handle_resume_command(
             else f"❌ Session {session_id} not found."
         )
 
-    # Fallback: verify the session exists in the in-memory history map.
+    # No resume_session() primitive on this manager. Be honest: we can confirm
+    # whether a session exists, but we cannot switch the active conversation to
+    # it, so we must not claim the resume succeeded.
     if hasattr(session_manager, "_histories"):
         if session_id in session_manager._histories:
             return (
-                f"✅ Session {session_id} is available. "
-                "Continue chatting to pick up where it left off."
+                "ℹ️ This bot can see saved sessions, but switching to a "
+                "different one isn't supported here (no resume primitive)."
             )
         return f"❌ Session {session_id} not found. Use /sessions to list them."
 
     return "❌ Resuming sessions isn't supported by this bot."
 
 
-def handle_retry_command(
+def get_last_user_message(
     session_manager,
     user_id: str,
-) -> str:
-    """Handle /retry to re-run the user's last message.
+) -> Optional[str]:
+    """Return the most recent non-empty user message for *user_id*, or None.
 
-    Looks up the most recent user turn in the conversation history so the
-    caller can re-submit it. Returns the message text to retry (prefixed for
-    display) or guidance when there is nothing to retry.
+    Adapters use this to actually re-dispatch the prior turn through the normal
+    conversation path (``session.chat(...)``) so ``/retry`` re-runs the message
+    instead of merely echoing it.
 
     Args:
         session_manager: BotSessionManager instance.
         user_id: User ID issuing the command.
 
     Returns:
-        The previous user message to re-run, or guidance.
+        The previous user message text, or ``None`` if there is nothing to retry.
     """
     storage_key = user_id
     if hasattr(session_manager, "_storage_key"):
@@ -929,13 +948,33 @@ def handle_retry_command(
     if hasattr(session_manager, "_histories"):
         history = session_manager._histories.get(storage_key, []) or []
 
-    last_user_msg: Optional[str] = None
     for msg in reversed(history):
         if msg.get("role") == "user":
             content = msg.get("content")
             if isinstance(content, str) and content.strip():
-                last_user_msg = content
-                break
+                return content
+    return None
+
+
+def handle_retry_command(
+    session_manager,
+    user_id: str,
+) -> str:
+    """Handle /retry to re-run the user's last message.
+
+    Looks up the most recent user turn so the caller can re-submit it. Adapters
+    should call :func:`get_last_user_message` and re-dispatch the returned text
+    through their normal ``session.chat(...)`` path; this helper returns a
+    user-facing acknowledgement (or guidance when there's nothing to retry).
+
+    Args:
+        session_manager: BotSessionManager instance.
+        user_id: User ID issuing the command.
+
+    Returns:
+        A short acknowledgement, or guidance when there's nothing to retry.
+    """
+    last_user_msg = get_last_user_message(session_manager, user_id)
 
     if not last_user_msg:
         return "ℹ️ Nothing to retry — no previous message found."
@@ -994,7 +1033,34 @@ def handle_reasoning_command(
     store[storage_key] = new_state
 
     return (
-        "🧠 Reasoning output is now shown for this conversation."
+        "🧠 Reasoning output will be shown for this conversation."
         if new_state
-        else "🙈 Reasoning output is now hidden for this conversation."
+        else "🙈 Reasoning output will be hidden for this conversation."
     )
+
+
+def is_reasoning_visible(session_manager, user_id: str) -> bool:
+    """Return the current /reasoning visibility preference for *user_id*.
+
+    Response-rendering code can consult this to decide whether to include
+    extended-thinking output. Defaults to ``False`` (hidden) when no
+    preference has been set.
+
+    Args:
+        session_manager: BotSessionManager instance.
+        user_id: User ID whose preference to read.
+
+    Returns:
+        ``True`` if reasoning output should be shown, else ``False``.
+    """
+    storage_key = user_id
+    if hasattr(session_manager, "_storage_key"):
+        try:
+            storage_key = session_manager._storage_key(user_id)
+        except Exception:
+            storage_key = user_id
+
+    store = getattr(session_manager, "_reasoning_visibility", None)
+    if not isinstance(store, dict):
+        store = _reasoning_visibility
+    return bool(store.get(storage_key, False))
