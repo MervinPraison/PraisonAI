@@ -252,6 +252,52 @@ def _apply_config_defaults(
     return mcp, mcp_env, permissions_config
 
 
+def _try_attach_runtime(
+    prompt: str,
+    *,
+    model: Optional[str],
+    output_mode: Optional[str],
+    session_id: Optional[str],
+) -> bool:
+    """Forward a plain prompt to a warm runtime when one is running.
+
+    Returns True when the request was handled by the warm runtime (so the caller
+    should skip in-process execution), or False to fall back to the normal
+    in-process path. Any runtime error is treated as a transparent fall-back.
+
+    Only the simple text path is attached: structured ``actions``/``json`` output
+    modes and session continuity stay in-process to preserve their behaviour.
+    """
+    # Structured output modes have richer in-process event bridging; don't attach.
+    if output_mode in ("actions", "json", "stream", "stream-json"):
+        return False
+
+    try:
+        from ...runtime import get_runtime_descriptor, RuntimeClient, RuntimeUnavailable
+    except ImportError:
+        return False
+
+    descriptor = get_runtime_descriptor()
+    if descriptor is None:
+        return False
+
+    output = get_output_controller()
+    try:
+        client = RuntimeClient(descriptor)
+        result = client.run(prompt, model=model, session_id=session_id)
+    except RuntimeUnavailable:
+        # Runtime went away mid-flight; fall back to in-process execution.
+        return False
+
+    output.emit_result(
+        message="Prompt completed",
+        data={"result": str(result) if result else None},
+    )
+    if result and not output.is_json_mode:
+        print(result)
+    return True
+
+
 @app.callback(invoke_without_command=True)
 def run_main(
     ctx: typer.Context,
@@ -745,6 +791,24 @@ def _run_prompt(
         if not no_save:
             import uuid
             auto_save_name = session_id or "session-" + str(uuid.uuid4())[:8]
+
+        # Detect-and-attach: if a warm runtime is running, forward the plain
+        # prompt to it (skipping per-invocation cold-start) and fall back to
+        # in-process execution otherwise. Only the simple text path attaches;
+        # per-invocation tool/approval/memory overrides stay in-process so their
+        # behaviour is preserved exactly.
+        runtime_eligible = not any([
+            mcp, tools, toolset, approval, approve_all_tools,
+            memory, permissions_config,
+        ])
+        if runtime_eligible and _try_attach_runtime(
+            prompt,
+            model=model,
+            output_mode=output_mode,
+            session_id=session_id,
+        ):
+            return
+
         if output_mode == "actions":
             from praisonaiagents import Agent
             from ..state.project_sessions import build_cli_memory_config, apply_cli_session_continuity
