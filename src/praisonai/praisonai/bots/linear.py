@@ -162,7 +162,19 @@ class LinearBot(ChatCommandMixin, MessageHookMixin):
             raise ValueError("LINEAR_OAUTH_TOKEN or LINEAR_API_KEY required")
             
         if not self._signing_secret:
-            logger.warning("LINEAR_WEBHOOK_SECRET not set - webhook signatures will not be verified")
+            from praisonai.bots.webhook_security import webhooks_require_verification
+
+            if webhooks_require_verification():
+                logger.warning(
+                    "LINEAR_WEBHOOK_SECRET not set - inbound webhooks will be "
+                    "rejected (fail-closed). Set the secret, or set "
+                    "PRAISONAI_INSECURE_WEBHOOKS=true for local dev only."
+                )
+            else:
+                logger.warning(
+                    "LINEAR_WEBHOOK_SECRET not set and PRAISONAI_INSECURE_WEBHOOKS "
+                    "is enabled - webhook signatures will NOT be verified."
+                )
 
         logger.info(f"Starting Linear bot on port {self._webhook_port}")
         
@@ -276,17 +288,10 @@ class LinearBot(ChatCommandMixin, MessageHookMixin):
             return web.Response(status=500, text="Internal error")
 
     def _verify_signature(self, body: bytes, signature: str) -> bool:
-        """Verify Linear webhook signature using HMAC-SHA256."""
-        if not self._signing_secret or not signature:
-            return False
-            
-        expected = hmac.new(
-            self._signing_secret.encode(),
-            body,
-            hashlib.sha256
-        ).hexdigest()
-        
-        return hmac.compare_digest(expected, signature)
+        """Verify Linear webhook signature using shared HMAC-SHA256 helper."""
+        from praisonai.bots.webhook_security import verify_hmac
+
+        return verify_hmac(self._signing_secret, body, signature)
 
     async def _process_webhook(self, event_type: str, body: Dict[str, Any]) -> None:
         """Process webhook events."""

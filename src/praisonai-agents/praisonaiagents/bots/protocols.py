@@ -20,6 +20,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    Mapping,
     Optional,
     Protocol,
     TypedDict,
@@ -85,6 +86,11 @@ class PlatformCapabilities:
         max_files_per_message: Maximum number of file attachments per message
         max_file_size_mb: Maximum file size in megabytes
         supported_file_types: List of supported file extensions/mime types
+        accepts_webhooks: Whether the platform delivers inbound messages via webhook
+        verifies_webhook_signature: Whether the adapter verifies inbound webhook
+            authenticity. Adapters that accept webhooks MUST set this True and
+            expose a ``webhook_verifier`` so central ingress can enforce it
+            fail-closed.
     """
     
     max_message_length: int = 4096
@@ -97,6 +103,8 @@ class PlatformCapabilities:
     max_files_per_message: int = 1
     max_file_size_mb: int = 10
     supported_file_types: List[str] = field(default_factory=lambda: ["*"])
+    accepts_webhooks: bool = False
+    verifies_webhook_signature: bool = False
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -111,6 +119,8 @@ class PlatformCapabilities:
             "max_files_per_message": self.max_files_per_message,
             "max_file_size_mb": self.max_file_size_mb,
             "supported_file_types": self.supported_file_types,
+            "accepts_webhooks": self.accepts_webhooks,
+            "verifies_webhook_signature": self.verifies_webhook_signature,
         }
     
     @classmethod
@@ -127,7 +137,42 @@ class PlatformCapabilities:
             max_files_per_message=data.get("max_files_per_message", 1),
             max_file_size_mb=data.get("max_file_size_mb", 10),
             supported_file_types=data.get("supported_file_types", ["*"]),
+            accepts_webhooks=data.get("accepts_webhooks", False),
+            verifies_webhook_signature=data.get("verifies_webhook_signature", False),
         )
+
+
+@runtime_checkable
+class WebhookVerifier(Protocol):
+    """Protocol for verifying inbound webhook authenticity.
+
+    Internet-facing bot adapters (Slack, WhatsApp, Linear, AgentMail, …)
+    receive webhooks that must be authenticated before they become an agent
+    run. This protocol declares the contract so the wrapper ingress can
+    enforce verification centrally and fail-closed: an adapter that declares
+    ``PlatformCapabilities.accepts_webhooks`` must expose a verifier and that
+    verifier must pass before dispatch.
+
+    Implementations live in the ``praisonai`` wrapper package and typically
+    wrap an HMAC comparison over the raw request body.
+
+    Example:
+        class SlackVerifier:
+            def verify(self, *, headers, raw_body):
+                ...
+    """
+
+    def verify(self, *, headers: Mapping[str, str], raw_body: bytes) -> bool:
+        """Return True if the inbound webhook is authentic.
+
+        Args:
+            headers: Inbound request headers (case-insensitive mapping).
+            raw_body: The exact raw request body bytes (pre-parse).
+
+        Returns:
+            True if the signature/secret verifies, False otherwise.
+        """
+        ...
 
 
 class MessageType(str, Enum):

@@ -629,15 +629,10 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
         return web.Response(status=200, text="OK")
 
     def _verify_signature(self, body: bytes, signature: str) -> bool:
-        """Verify webhook signature using app secret."""
-        if not signature.startswith("sha256="):
-            return False
-        expected = hmac.new(
-            self._app_secret.encode(),
-            body,
-            hashlib.sha256,
-        ).hexdigest()
-        return hmac.compare_digest(f"sha256={expected}", signature)
+        """Verify webhook signature using app secret (shared HMAC helper)."""
+        from praisonai.bots.webhook_security import verify_hmac
+
+        return verify_hmac(self._app_secret, body, signature, prefix="sha256=")
 
     async def _process_webhook_data(self, data: dict) -> None:
         """Process webhook data and route to appropriate handler."""
