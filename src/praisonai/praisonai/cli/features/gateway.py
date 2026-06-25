@@ -244,6 +244,105 @@ class GatewayHandler:
         except (OSError, ProcessLookupError):
             print(f"Process {pid} not found or already stopped")
 
+    def hooks(self, args) -> int:
+        """Manage inbound trigger hooks in a gateway.yaml file (Issue #2281).
+
+        Sub-actions: ``add``, ``list``, ``remove``. Edits the ``hooks:`` section
+        of ``gateway.yaml`` so the trigger surface is declarable from the CLI,
+        consistent with the YAML and Python surfaces.
+        """
+        import yaml
+
+        action = getattr(args, "hooks_command", None)
+        config_path = getattr(args, "config_file", None) or "gateway.yaml"
+
+        def _load() -> Dict:
+            if os.path.exists(config_path):
+                try:
+                    with open(config_path, "r") as f:
+                        return yaml.safe_load(f) or {}
+                except Exception as e:
+                    print(f"Error reading {config_path}: {e}")
+                    return {}
+            return {}
+
+        def _save(cfg: Dict) -> None:
+            with open(config_path, "w") as f:
+                yaml.safe_dump(cfg, f, default_flow_style=False, sort_keys=False)
+
+        cfg = _load()
+        hooks = cfg.get("hooks") or []
+        if not isinstance(hooks, list):
+            hooks = []
+
+        if action == "list":
+            if not hooks:
+                print(f"No hooks configured in {config_path}")
+                return 0
+            print(f"Hooks in {config_path}:")
+            for h in hooks:
+                if isinstance(h, dict):
+                    print(
+                        f"  POST /hooks/{h.get('path')}  "
+                        f"-> agent={h.get('agent') or '<default>'} "
+                        f"deliver_to={h.get('deliver_to') or '-'}"
+                    )
+            return 0
+
+        if action == "remove":
+            path = getattr(args, "path", None)
+            if not path:
+                print("Error: hook path required")
+                return 1
+            path = path.strip().strip("/")
+            new_hooks = [
+                h for h in hooks
+                if not (isinstance(h, dict) and h.get("path") == path)
+            ]
+            if len(new_hooks) == len(hooks):
+                print(f"No hook '{path}' found in {config_path}")
+                return 1
+            cfg["hooks"] = new_hooks
+            _save(cfg)
+            print(f"Removed hook '{path}' from {config_path}")
+            return 0
+
+        if action == "add":
+            path = getattr(args, "path", None)
+            if not path:
+                print("Error: hook path required (e.g. 'gmail')")
+                return 1
+            path = path.strip().strip("/")
+            entry: Dict = {"path": path}
+            if getattr(args, "agent", None):
+                entry["agent"] = args.agent
+            if getattr(args, "action_type", None):
+                entry["action"] = args.action_type
+            if getattr(args, "auth", None):
+                entry["auth"] = args.auth
+            if getattr(args, "session_key", None):
+                entry["session_key"] = args.session_key
+            if getattr(args, "idempotency_key", None):
+                entry["idempotency_key"] = args.idempotency_key
+            if getattr(args, "deliver_to", None):
+                entry["deliver_to"] = args.deliver_to
+            if getattr(args, "message", None):
+                entry["message"] = args.message
+
+            # Replace any existing hook on the same path.
+            hooks = [
+                h for h in hooks
+                if not (isinstance(h, dict) and h.get("path") == path)
+            ]
+            hooks.append(entry)
+            cfg["hooks"] = hooks
+            _save(cfg)
+            print(f"Added hook 'POST /hooks/{path}' to {config_path}")
+            return 0
+
+        print("Usage: praisonai gateway hooks {add|list|remove} ...")
+        return 1
+
     def status(self, host: str = "127.0.0.1", port: int = 8765) -> None:
         """Check gateway status.
         
@@ -326,7 +425,47 @@ def handle_gateway_command(args) -> int:
         status_parser = subparsers.add_parser("status", help="Check gateway status")
         status_parser.add_argument("--host", default="127.0.0.1", help="Gateway host (default: 127.0.0.1)")
         status_parser.add_argument("--port", type=int, default=8765, help="Gateway port (default: 8765)")
-        
+
+        # hooks subcommand — manage inbound trigger hooks (Issue #2281)
+        hooks_parser = subparsers.add_parser(
+            "hooks", help="Manage inbound trigger hooks (POST /hooks/<path>)"
+        )
+        hooks_sub = hooks_parser.add_subparsers(
+            dest="hooks_command", help="Hook commands"
+        )
+
+        hooks_add = hooks_sub.add_parser("add", help="Add a hook to gateway.yaml")
+        hooks_add.add_argument("path", help="Hook path, e.g. 'gmail' -> POST /hooks/gmail")
+        hooks_add.add_argument("--agent", help="Agent id to run (default: first agent)")
+        hooks_add.add_argument(
+            "--action", dest="action_type", default="agent",
+            choices=["agent", "wake"], help="agent runs a turn, wake nudges a session",
+        )
+        hooks_add.add_argument("--auth", help="Bearer token / shared secret for this hook")
+        hooks_add.add_argument("--session-key", dest="session_key", help="Session key template")
+        hooks_add.add_argument(
+            "--idempotency-key", dest="idempotency_key", help="Idempotency key template",
+        )
+        hooks_add.add_argument("--deliver-to", dest="deliver_to", help="channel:target for the reply")
+        hooks_add.add_argument("--message", help="Message template from the payload")
+        hooks_add.add_argument(
+            "--config", dest="config_file", default="gateway.yaml",
+            help="Path to gateway.yaml (default: gateway.yaml)",
+        )
+
+        hooks_list = hooks_sub.add_parser("list", help="List configured hooks")
+        hooks_list.add_argument(
+            "--config", dest="config_file", default="gateway.yaml",
+            help="Path to gateway.yaml (default: gateway.yaml)",
+        )
+
+        hooks_remove = hooks_sub.add_parser("remove", help="Remove a hook")
+        hooks_remove.add_argument("path", help="Hook path to remove")
+        hooks_remove.add_argument(
+            "--config", dest="config_file", default="gateway.yaml",
+            help="Path to gateway.yaml (default: gateway.yaml)",
+        )
+
         try:
             args = parser.parse_args(args)
         except SystemExit:
@@ -348,8 +487,10 @@ def handle_gateway_command(args) -> int:
             host=getattr(args, "host", "127.0.0.1"),
             port=getattr(args, "port", 8765),
         )
+    elif subcommand == "hooks":
+        return handler.hooks(args)
     else:
         print(f"Unknown gateway command: {subcommand}")
-        print("Available commands: start, status")
+        print("Available commands: start, status, hooks")
         return 1
     return 0

@@ -14,6 +14,7 @@ import re
 import secrets
 import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING
@@ -511,6 +512,15 @@ class WebSocketGateway:
         # Channel supervisor for resilient bot management
         self._channel_supervisor = ChannelSupervisor()
         self._health_config = None  # Will be set from config if provided
+
+        # Inbound trigger hooks (Issue #2281): declarative POST /hooks/<path>
+        # surfaces that start an agent run from an external event. Routes are
+        # mounted dynamically when the server starts.
+        self._hooks: Dict[str, Any] = {}  # path -> HookConfig
+        # Bounded idempotency store: dedup key -> insertion time (seconds).
+        self._hook_idempotency: "OrderedDict[str, float]" = OrderedDict()
+        self._hook_idempotency_max = 10_000
+        self._hook_idempotency_ttl = 86_400.0  # 24h
     
     @property
     def is_running(self) -> bool:
@@ -1168,8 +1178,74 @@ class WebSocketGateway:
                 "message": f"Channel '{channel_name}' {'reconnected' if success else 'could not be reconnected'}"
             })
         
+        def _check_hook_auth(request, hook) -> Optional[JSONResponse]:
+            """Authenticate an inbound hook request.
+
+            Prefers a hook-specific ``auth`` secret when configured; otherwise
+            falls back to the gateway's standard auth (``_check_auth``). The
+            secret is accepted via ``Authorization: Bearer <token>`` or the
+            ``?token=`` query parameter, compared in constant time.
+            """
+            secret = getattr(hook, "auth", None)
+            if not secret:
+                return _check_auth(request)
+            auth_header = request.headers.get("authorization", "")
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:]
+            else:
+                token = request.query_params.get("token", "")
+            if not token:
+                return JSONResponse(
+                    {"error": "Authentication required"},
+                    status_code=401,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+            if not secrets.compare_digest(token, str(secret)):
+                return JSONResponse(
+                    {"error": "Invalid authentication token"}, status_code=403,
+                )
+            return None
+
+        async def hook_handler(request) -> JSONResponse:
+            """POST /hooks/{path} — generic inbound event trigger (Issue #2281).
+
+            Authenticates, deduplicates, resolves a session, runs the agent (or
+            wakes a session) and delivers the reply through a channel bot.
+            """
+            path = request.path_params.get("path", "")
+            hook = self.get_hook(path)
+            if hook is None or not getattr(hook, "enabled", True):
+                return JSONResponse({"error": "hook not found"}, status_code=404)
+
+            auth_err = _check_hook_auth(request, hook)
+            if auth_err:
+                return auth_err
+
+            try:
+                payload = await request.json()
+            except Exception:
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {"value": payload}
+
+            idem = hook.resolve_idempotency_key(payload)
+            if self._hook_is_duplicate(idem):
+                return JSONResponse({"ok": True, "deduplicated": True})
+
+            try:
+                result = await self._run_hook(hook, payload)
+            except Exception as e:  # noqa: BLE001
+                logger.error("Hook '%s' execution error: %s", path, e)
+                return JSONResponse(
+                    {"ok": False, "error": str(e)}, status_code=500,
+                )
+
+            status = 200 if result.get("ok", False) else 500
+            return JSONResponse(result, status_code=status)
+
         routes = [
             Route("/", magic_link_handler, methods=["GET"]),
+            Route("/hooks/{path:path}", hook_handler, methods=["POST"]),
             Route("/health", health, methods=["GET"]),
             Route("/ready", ready, methods=["GET"]),
             Route("/live", live, methods=["GET"]),
@@ -1970,7 +2046,202 @@ class WebSocketGateway:
             True if the bot exists, False otherwise
         """
         return name in self._channel_bots
-    
+
+    # ── Inbound trigger hooks (Public API - Issue #2281) ─────────────────
+
+    def register_hook(
+        self,
+        hook: "Any" = None,
+        *,
+        path: Optional[str] = None,
+        agent: Optional[str] = None,
+        action: str = "agent",
+        auth: Optional[str] = None,
+        session_key: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
+        deliver_to: Optional[str] = None,
+        message_template: Optional[str] = None,
+        message: Optional[str] = None,
+        enabled: bool = True,
+    ) -> str:
+        """Register an inbound trigger that exposes ``POST /hooks/<path>``.
+
+        On a request, the gateway authenticates, deduplicates by an idempotency
+        key derived from the payload, resolves a session from a templated
+        ``session_key``, runs the configured agent on a templated ``message``
+        (or, with ``action="wake"``, nudges an existing session), then delivers
+        the reply through the delivery router to ``deliver_to``.
+
+        Args:
+            hook: An existing ``HookConfig`` or a dict; mutually exclusive with
+                the keyword form.
+            path: URL segment, e.g. ``"gmail"`` -> ``POST /hooks/gmail``.
+            agent: Agent id to run (defaults to the first registered agent).
+            action: ``"agent"`` runs a turn, ``"wake"`` nudges a session.
+            auth: Bearer token required on the request (defaults to the
+                gateway ``auth_token``).
+            session_key: Template for the session id.
+            idempotency_key: Template for the dedup key.
+            deliver_to: ``channel:target`` to deliver the reply to.
+            message_template / message: Template for the agent message.
+            enabled: Whether the hook is active.
+
+        Returns:
+            The registered hook path.
+        """
+        from praisonaiagents.gateway import HookConfig
+
+        if hook is not None:
+            if isinstance(hook, dict):
+                cfg = HookConfig.from_dict(hook)
+            else:
+                cfg = hook  # assume HookConfig-like
+        else:
+            cfg = HookConfig(
+                path=path or "",
+                agent=agent,
+                action=action,
+                auth=auth,
+                session_key=session_key,
+                idempotency_key=idempotency_key,
+                deliver_to=deliver_to,
+                message=message_template if message_template is not None else message,
+                enabled=enabled,
+            )
+
+        self._hooks[cfg.path] = cfg
+        logger.info("Inbound hook registered: POST /hooks/%s", cfg.path)
+        return cfg.path
+
+    def unregister_hook(self, path: str) -> bool:
+        """Remove a registered hook by path."""
+        key = (path or "").strip().strip("/")
+        if key in self._hooks:
+            del self._hooks[key]
+            logger.info("Inbound hook unregistered: %s", key)
+            return True
+        return False
+
+    def list_hooks(self) -> List[str]:
+        """List registered hook paths."""
+        return list(self._hooks.keys())
+
+    def get_hook(self, path: str) -> Optional[Any]:
+        """Get a registered hook config by path."""
+        return self._hooks.get((path or "").strip().strip("/"))
+
+    def _register_hooks_from_config(self, hooks_cfg: Any) -> None:
+        """Register inbound trigger hooks from a parsed YAML ``hooks:`` list.
+
+        Accepts either a list of dicts or a list of ``HookConfig`` objects.
+        Invalid entries are skipped with a warning rather than aborting startup.
+        """
+        for entry in hooks_cfg or []:
+            try:
+                self.register_hook(entry)
+            except (ValueError, TypeError) as e:
+                logger.warning("Skipping invalid hook config %s: %s", entry, e)
+
+    def _hook_is_duplicate(self, key: str) -> bool:
+        """Return True if ``key`` was already seen, else record it.
+
+        Bounded + TTL-pruned so the dedup store cannot grow unboundedly.
+        """
+        now = time.time()
+        store = self._hook_idempotency
+        # Prune expired entries lazily.
+        if store:
+            ttl = self._hook_idempotency_ttl
+            expired = [k for k, ts in store.items() if now - ts > ttl]
+            for k in expired:
+                store.pop(k, None)
+        if key in store:
+            return True
+        store[key] = now
+        # Enforce max size (drop oldest).
+        while len(store) > self._hook_idempotency_max:
+            store.popitem(last=False)
+        return False
+
+    async def _run_hook(self, hook: Any, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a hook: resolve session, run agent (or wake), deliver.
+
+        Returns a JSON-serializable result dict describing what happened.
+        """
+        session_key = hook.resolve_session_key(payload)
+
+        # action == "wake": just nudge an existing session, no new turn.
+        if hook.action == "wake":
+            session = self._sessions.get(session_key)
+            if session is not None:
+                session._last_activity = time.time()
+            return {"ok": True, "action": "wake", "session": session_key}
+
+        # action == "agent": resolve agent, run a turn on the templated message.
+        agent_id = hook.agent
+        if agent_id and agent_id in self._agents:
+            agent = self._agents[agent_id]
+        else:
+            # Fall back to the first registered agent.
+            agent = next(iter(self._agents.values()), None)
+            agent_id = next(iter(self._agents.keys()), None) if self._agents else None
+
+        if agent is None:
+            return {"ok": False, "error": "no agent available", "session": session_key}
+
+        message = hook.resolve_message(payload) or ""
+
+        try:
+            loop = asyncio.get_event_loop()
+            reply = await loop.run_in_executor(None, agent.chat, message)
+        except Exception as e:  # noqa: BLE001 - report run failure to caller
+            logger.error("Hook '%s' agent run failed: %s", hook.path, e)
+            return {"ok": False, "error": str(e), "session": session_key}
+
+        reply_text = reply if isinstance(reply, str) else str(reply)
+
+        delivered = None
+        if hook.deliver_to and reply_text:
+            delivered = await self._deliver_hook_reply(hook.deliver_to, reply_text)
+
+        return {
+            "ok": True,
+            "action": "agent",
+            "agent": agent_id,
+            "session": session_key,
+            "delivered": delivered,
+        }
+
+    async def _deliver_hook_reply(self, deliver_to: str, text: str) -> bool:
+        """Deliver a hook reply to a ``channel:target`` via a channel bot.
+
+        Reuses the same channel-bot send path as scheduled delivery so hooks
+        and the scheduler route outbound messages identically.
+        """
+        if ":" not in deliver_to:
+            logger.warning(
+                "Hook deliver_to '%s' must be 'channel:target'; skipping",
+                deliver_to,
+            )
+            return False
+        channel, target = [p.strip() for p in deliver_to.split(":", 1)]
+        bot = self.get_channel_bot(channel)
+        if bot is None:
+            for name, b in self._channel_bots.items():
+                if name.lower() == channel.lower():
+                    bot = b
+                    break
+        if bot is None:
+            logger.warning("No channel bot '%s' for hook delivery", channel)
+            return False
+        try:
+            await bot.send_message(target, text)
+            logger.info("Hook delivered reply to %s:%s", channel, target)
+            return True
+        except Exception as e:  # noqa: BLE001
+            logger.error("Hook delivery to %s:%s failed: %s", channel, target, e)
+            return False
+
     def create_session(
         self,
         agent_id: str,
@@ -3829,6 +4100,14 @@ class WebSocketGateway:
                 default_model=default_model,
                 guardrails_cfg=guardrails_cfg,
             )
+
+        # Register inbound trigger hooks (Issue #2281). Hooks may live at the
+        # top level (``hooks:``) or nested under ``gateway:`` for grouping.
+        hooks_cfg = cfg.get("hooks")
+        if hooks_cfg is None:
+            hooks_cfg = gw_cfg.get("hooks")
+        if hooks_cfg:
+            self._register_hooks_from_config(hooks_cfg)
 
         # Start channels + WebSocket server concurrently
         channels_cfg = cfg.get("channels", {})

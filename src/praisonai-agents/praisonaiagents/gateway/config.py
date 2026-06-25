@@ -429,6 +429,7 @@ class MultiChannelGatewayConfig:
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     agents: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     channels: Dict[str, ChannelRouteConfig] = field(default_factory=dict)
+    hooks: List["Any"] = field(default_factory=list)
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "MultiChannelGatewayConfig":
@@ -533,10 +534,29 @@ class MultiChannelGatewayConfig:
                     },
                 )
         
+        # Parse inbound trigger hooks (Issue #2281). The hooks live either at
+        # the top level (``hooks:``) or nested under ``gateway:`` for grouping.
+        from .hooks import HookConfig
+
+        raw_hooks = data.get("hooks")
+        if raw_hooks is None:
+            raw_hooks = gw_data.get("hooks")
+        hooks: List[HookConfig] = []
+        for entry in raw_hooks or []:
+            if isinstance(entry, dict) and entry.get("path"):
+                try:
+                    hooks.append(HookConfig.from_dict(entry))
+                except (ValueError, TypeError):
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "Skipping invalid gateway hook entry: %s", entry
+                    )
+
         return cls(
             gateway=gateway_config,
             agents=agents,
             channels=channels,
+            hooks=hooks,
         )
     
     def to_dict(self) -> Dict[str, Any]:
@@ -547,4 +567,5 @@ class MultiChannelGatewayConfig:
             "channels": {
                 name: ch.to_dict() for name, ch in self.channels.items()
             },
+            "hooks": [h.to_dict() for h in self.hooks],
         }
