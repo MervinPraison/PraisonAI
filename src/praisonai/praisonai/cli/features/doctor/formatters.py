@@ -133,12 +133,27 @@ class BaseFormatter:
         """Format a single check result."""
         raise NotImplementedError
     
+    def _safe_write(self, output: TextIO, text: str) -> None:
+        """Write text, falling back to ASCII on legacy-console encoding errors.
+
+        On Windows consoles using a legacy code page (e.g. cp1252), writing
+        Unicode characters raises UnicodeEncodeError. When that happens we
+        retry with an ASCII-safe representation so the command never crashes.
+        """
+        try:
+            output.write(text)
+        except UnicodeEncodeError:
+            encoding = getattr(output, "encoding", None) or "ascii"
+            safe_text = text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+            output.write(safe_text)
+
     def write(self, report: DoctorReport, output: Optional[TextIO] = None) -> None:
         """Write formatted report to output."""
         output = output or sys.stdout
-        output.write(self.format_report(report))
-        if not self.format_report(report).endswith("\n"):
-            output.write("\n")
+        rendered = self.format_report(report)
+        if not rendered.endswith("\n"):
+            rendered += "\n"
+        self._safe_write(output, rendered)
 
 
 class TextFormatter(BaseFormatter):
@@ -193,11 +208,20 @@ class TextFormatter(BaseFormatter):
         CheckStatus.ERROR: "[X]",
     }
     
+    # Divider character with ASCII fallback for legacy (cp1252) consoles
+    DIVIDER_UNICODE = "━"
+    DIVIDER_ASCII = "-"
+
     def _color(self, text: str, color: str) -> str:
         """Apply color to text if colors are enabled."""
         if self.no_color:
             return text
         return f"{self.COLORS.get(color, '')}{text}{self.COLORS['reset']}"
+
+    def _divider(self, width: int = 70) -> str:
+        """Return a horizontal divider, using ASCII on non-Unicode consoles."""
+        char = self.DIVIDER_UNICODE if self._unicode_supported else self.DIVIDER_ASCII
+        return char * width
     
     def _can_encode_unicode(self) -> bool:
         """Check if stdout can encode Unicode symbols."""
@@ -210,7 +234,7 @@ class TextFormatter(BaseFormatter):
                 return True
                 
             # Test if we can encode our specific Unicode symbols
-            test_symbols = ["✓", "⚠", "✗", "○"]
+            test_symbols = ["✓", "⚠", "✗", "○", self.DIVIDER_UNICODE]
             for symbol in test_symbols:
                 try:
                     symbol.encode(encoding, errors='strict')
@@ -276,7 +300,7 @@ class TextFormatter(BaseFormatter):
         if not self.quiet:
             header = f"PraisonAI Doctor v{report.version}"
             lines.append(self._color(header, "bold"))
-            lines.append("━" * 70)
+            lines.append(self._divider())
         
         # Results
         for result in report.results:
@@ -284,7 +308,7 @@ class TextFormatter(BaseFormatter):
         
         # Summary
         if not self.quiet:
-            lines.append("━" * 70)
+            lines.append(self._divider())
         lines.append(self.format_summary(report.summary))
         
         # Duration
@@ -316,8 +340,7 @@ class JsonFormatter(BaseFormatter):
     def write(self, report: DoctorReport, output: Optional[TextIO] = None) -> None:
         """Write formatted report to output."""
         output = output or sys.stdout
-        output.write(self.format_report(report))
-        output.write("\n")
+        self._safe_write(output, self.format_report(report) + "\n")
 
 
 def get_formatter(

@@ -162,37 +162,122 @@ class TestTextFormatter:
     def test_unicode_encoding_safety_with_utf8(self):
         """Test that Unicode symbols are used when UTF-8 is supported."""
         formatter = TextFormatter(no_color=True)
-        
-        # Mock sys.stdout to report UTF-8 encoding
-        with patch.object(sys.stdout, 'encoding', 'utf-8'):
-            result = CheckResult(
-                id="test",
-                title="Test Check",
-                category=CheckCategory.ENVIRONMENT,
-                status=CheckStatus.PASS,
-                message="OK",
-            )
-            output = formatter.format_result(result)
-            # Should use Unicode symbol for pass
-            assert "✓" in output
+        # Simulate a console that can encode Unicode (e.g. UTF-8).
+        formatter._unicode_supported = True
+        result = CheckResult(
+            id="test",
+            title="Test Check",
+            category=CheckCategory.ENVIRONMENT,
+            status=CheckStatus.PASS,
+            message="OK",
+        )
+        output = formatter.format_result(result)
+        # Should use Unicode symbol for pass
+        assert "✓" in output
     
     def test_unicode_encoding_safety_with_cp1252(self):
         """Test that ASCII symbols are used when encoding doesn't support Unicode."""
         formatter = TextFormatter(no_color=True)
-        
-        # Mock sys.stdout to report cp1252 encoding (Windows default)
-        with patch.object(sys.stdout, 'encoding', 'cp1252'):
-            result = CheckResult(
-                id="test",
-                title="Test Check", 
-                category=CheckCategory.ENVIRONMENT,
-                status=CheckStatus.PASS,
-                message="OK",
-            )
-            output = formatter.format_result(result)
-            # Should use ASCII symbol for pass instead of Unicode
-            assert "[OK]" in output
-            assert "✓" not in output
+        # Simulate a legacy (cp1252) console that cannot encode Unicode.
+        formatter._unicode_supported = False
+        result = CheckResult(
+            id="test",
+            title="Test Check", 
+            category=CheckCategory.ENVIRONMENT,
+            status=CheckStatus.PASS,
+            message="OK",
+        )
+        output = formatter.format_result(result)
+        # Should use ASCII symbol for pass instead of Unicode
+        assert "[OK]" in output
+        assert "✓" not in output
+
+    @staticmethod
+    def _sample_report():
+        report = DoctorReport(
+            results=[
+                CheckResult(
+                    id="test",
+                    title="Test",
+                    category=CheckCategory.ENVIRONMENT,
+                    status=CheckStatus.PASS,
+                    message="OK",
+                ),
+            ]
+        )
+        report.calculate_summary()
+        return report
+
+    def test_divider_uses_ascii_on_cp1252(self):
+        """Divider must fall back to ASCII on legacy (cp1252) consoles."""
+        formatter = TextFormatter(no_color=True)
+        # Simulate a console that cannot encode Unicode.
+        formatter._unicode_supported = False
+        output = formatter.format_report(self._sample_report())
+        # The Unicode box-drawing divider must not appear.
+        assert "━" not in output
+        assert "-" * 70 in output
+        # Whole report must be encodable on cp1252 without errors.
+        output.encode("cp1252")
+
+    def test_divider_uses_unicode_on_utf8(self):
+        """Divider should keep Unicode characters on UTF-8 consoles."""
+        formatter = TextFormatter(no_color=True)
+        formatter._unicode_supported = True
+        output = formatter.format_report(self._sample_report())
+        assert "━" in output
+
+    def test_can_encode_unicode_detects_cp1252(self):
+        """_can_encode_unicode should report False for cp1252 streams."""
+        formatter = TextFormatter(no_color=True)
+
+        class _FakeStdout:
+            encoding = "cp1252"
+
+        with patch("praisonai.cli.features.doctor.formatters.sys.stdout", _FakeStdout()):
+            assert formatter._can_encode_unicode() is False
+
+    def test_can_encode_unicode_detects_utf8(self):
+        """_can_encode_unicode should report True for utf-8 streams."""
+        formatter = TextFormatter(no_color=True)
+
+        class _FakeStdout:
+            encoding = "utf-8"
+
+        with patch("praisonai.cli.features.doctor.formatters.sys.stdout", _FakeStdout()):
+            assert formatter._can_encode_unicode() is True
+
+    def test_write_does_not_crash_on_cp1252_stream(self):
+        """write() must not raise UnicodeEncodeError on a strict cp1252 stream."""
+        import io
+
+        formatter = TextFormatter(no_color=True)
+        # Force Unicode content even though destination can't encode it.
+        formatter._unicode_supported = True
+        report = self._sample_report()
+
+        # Destination stream only supports cp1252 (strict).
+        raw = io.BytesIO()
+        stream = io.TextIOWrapper(raw, encoding="cp1252", errors="strict")
+        # Should not raise despite Unicode content in the rendered report.
+        formatter.write(report, stream)
+        stream.flush()
+        assert raw.getvalue()  # something was written
+
+    def test_json_write_does_not_crash_on_cp1252_stream(self):
+        """JSON write() must also be safe on a strict cp1252 stream."""
+        import io
+
+        formatter = JsonFormatter()
+        report = self._sample_report()
+        # Inject a Unicode character into the message to exercise the fallback.
+        report.results[0].message = "café ✓"
+
+        raw = io.BytesIO()
+        stream = io.TextIOWrapper(raw, encoding="cp1252", errors="strict")
+        formatter.write(report, stream)
+        stream.flush()
+        assert raw.getvalue()
 
 
 class TestJsonFormatter:
