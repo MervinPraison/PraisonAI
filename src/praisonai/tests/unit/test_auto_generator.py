@@ -204,7 +204,7 @@ class TestAutoGeneratorLiteLLMFallback:
     """Test suite for LiteLLM fallback to OpenAI."""
 
     def test_uses_litellm_when_available(self):
-        with patch('praisonai.auto.is_available', return_value=True):
+        with patch('praisonai.auto.is_available', side_effect=lambda x: x == "litellm"):
             with patch('praisonai.auto._get_litellm') as mock_litellm:
 
                 mock_response = Mock()
