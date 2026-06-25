@@ -34,6 +34,11 @@ from ._commands import (
     handle_compress_command,
     handle_queue_command,
     handle_learn_command,
+    handle_undo_command,
+    handle_sessions_command,
+    handle_resume_command,
+    handle_retry_command,
+    handle_reasoning_command,
     build_command_access_policy,
 )
 from ._session import BotSessionManager
@@ -299,6 +304,32 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                     parts = bot_message.text.split(maxsplit=1)
                     request = parts[1] if len(parts) > 1 else None
                     response = handle_learn_command(self._agent, request)
+                    await message.reply(response)
+                    return
+                elif command == "undo":
+                    response = handle_undo_command(self._agent)
+                    await message.reply(response)
+                    return
+                elif command == "sessions":
+                    user_id = str(message.author.id)
+                    response = handle_sessions_command(self._session, user_id)
+                    await message.reply(response)
+                    return
+                elif command == "resume":
+                    user_id = str(message.author.id)
+                    parts = bot_message.text.split(maxsplit=1)
+                    session_id = parts[1] if len(parts) > 1 else None
+                    response = handle_resume_command(self._session, user_id, session_id)
+                    await message.reply(response)
+                    return
+                elif command == "retry":
+                    user_id = str(message.author.id)
+                    response = handle_retry_command(self._session, user_id)
+                    await message.reply(response)
+                    return
+                elif command == "reasoning":
+                    user_id = str(message.author.id)
+                    response = handle_reasoning_command(self._session, user_id, self._agent)
                     await message.reply(response)
                     return
                 elif command and command in self._command_handlers:
