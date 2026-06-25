@@ -18,14 +18,14 @@ if TYPE_CHECKING:
 class CommandAccessPolicy:
     """Manages per-command access control for bot commands."""
     
-    ALWAYS_ALLOWED = {"help", "whoami"}
+    ALWAYS_ALLOWED = frozenset({"help", "whoami"})
 
     # Privileged, state-changing commands that default to admin-only whenever a
     # policy is configured (admin_users and/or user_allowed_commands set). They
     # remain available to everyone when no policy is configured, so this stays
     # backward-compatible. /learn reads host sources and authors skills that
     # alter future agent behaviour, so it belongs here.
-    PRIVILEGED_COMMANDS = {"learn"}
+    PRIVILEGED_COMMANDS = frozenset({"learn"})
     
     def __init__(
         self, 
@@ -302,7 +302,9 @@ def build_command_access_policy(config: Any) -> CommandAccessPolicy:
 
     user_allowed_commands: Optional[Set[str]] = None
     allowed_raw = getattr(config, "user_allowed_commands", None)
-    if allowed_raw:
+    if allowed_raw is not None:
+        # An explicitly empty string is a deliberate "allow no extra commands"
+        # allow-list (still configured), distinct from None (unset/permissive).
         user_allowed_commands = {
             c.strip() for c in str(allowed_raw).split(",") if c.strip()
         }

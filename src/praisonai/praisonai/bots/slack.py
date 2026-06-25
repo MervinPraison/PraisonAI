@@ -239,7 +239,7 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
             # restricted to admins independent of the channel/pairing allow gate,
             # consistent with Telegram and Discord.
             if text.startswith("/"):
-                command_name = text[1:].split(maxsplit=1)[0] if len(text) > 1 else ""
+                command_name = text[1:].split(maxsplit=1)[0].lower() if len(text) > 1 else ""
                 cmd_user_id = event.get("user", "unknown")
                 if command_name and not self._command_policy.can_run(cmd_user_id, command_name):
                     await say(
@@ -449,6 +449,13 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
             @self._app.command(f"/{command}")
             async def handle_command(ack, command_data, respond, cmd=command, hdlr=handler):
                 await ack()
+                # Per-command authorization for registered slash commands, mirroring
+                # the message-event gate so privileged commands can't bypass policy.
+                if not self._command_policy.can_run(
+                    command_data.get("user_id", ""), cmd
+                ):
+                    await respond(f"⛔ You are not permitted to run /{cmd}")
+                    return
                 bot_message = BotMessage(
                     message_id=command_data.get("trigger_id", ""),
                     content=command_data.get("text", ""),

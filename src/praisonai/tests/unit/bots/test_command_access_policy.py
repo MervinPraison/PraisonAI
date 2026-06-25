@@ -74,3 +74,32 @@ def test_builder_defaults_to_permissive():
     policy = build_command_access_policy(Cfg())
     assert policy.is_configured is False
     assert policy.can_run("anyone", "learn") is True
+
+
+def test_admins_bypass_while_allow_list_governs_regular_users():
+    # When both fields are set, admins run anything and regular users are
+    # routed through the explicit allow-list for privileged commands.
+    policy = CommandAccessPolicy(
+        admin_users={"admin"},
+        user_allowed_commands={"learn", "status"},
+    )
+    assert policy.can_run("admin", "learn") is True
+    assert policy.can_run("admin", "model") is True
+    assert policy.can_run("user", "learn") is True
+    assert policy.can_run("user", "status") is True
+    assert policy.can_run("user", "model") is False
+
+
+def test_builder_treats_empty_allow_list_as_configured():
+    # An explicitly empty user_allowed_commands is a deliberate "allow nothing
+    # extra" allow-list, not an unset/permissive policy.
+    class Cfg:
+        admin_users = None
+        user_allowed_commands = ""
+
+    policy = build_command_access_policy(Cfg())
+    assert policy.is_configured is True
+    assert policy.user_allowed_commands == set()
+    assert policy.can_run("user", "learn") is False
+    # Always-allowed commands stay available even with an empty allow-list.
+    assert policy.can_run("user", "help") is True

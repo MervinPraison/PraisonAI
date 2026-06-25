@@ -37,7 +37,7 @@ from ._commands import (
     handle_compress_command,
     handle_queue_command,
     handle_learn_command,
-    CommandAccessPolicy,
+    build_command_access_policy,
     get_command_registry
 )
 from ._session import BotSessionManager
@@ -212,23 +212,14 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._auto_tts = enabled
     
     def _init_command_access_policy(self):
-        """Initialize command access policy from config."""
-        # Parse admin users from config
-        admin_users = set()
-        if hasattr(self.config, 'admin_users') and self.config.admin_users:
-            admin_users = set(user.strip() for user in self.config.admin_users.split(',') if user.strip())
-        
-        # Parse user allowed commands from config  
-        user_allowed_commands = None
-        if hasattr(self.config, 'user_allowed_commands') and self.config.user_allowed_commands:
-            user_allowed_commands = set(cmd.strip() for cmd in self.config.user_allowed_commands.split(',') if cmd.strip())
-        
-        # Create command access policy
-        self._command_policy = CommandAccessPolicy(
-            admin_users=admin_users,
-            user_allowed_commands=user_allowed_commands
-        )
-        
+        """Initialize command access policy from config.
+
+        Uses the shared :func:`build_command_access_policy` builder so every
+        adapter (Telegram, Slack, Discord) parses ``admin_users`` /
+        ``user_allowed_commands`` identically and can't silently diverge.
+        """
+        self._command_policy = build_command_access_policy(self.config)
+
         # Get the global command registry
         self._command_registry = get_command_registry()
     
