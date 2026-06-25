@@ -602,7 +602,7 @@ def _run_from_file(
         auto_save_name = None
         
         if continue_session or session or fork:
-            from ..state.project_sessions import get_project_session_store, find_last_session
+            from ..state.project_sessions import find_last_session, session_exists_anywhere
             
             if continue_session:
                 # Find last session for this project
@@ -614,8 +614,7 @@ def _run_from_file(
                     
             elif session:
                 # Use specific session
-                project_store = get_project_session_store()
-                if project_store.session_exists(session):
+                if session_exists_anywhere(session):
                     session_id = session
                     output.print_info(f"Resuming session: {session_id}")
                 else:
@@ -710,7 +709,7 @@ def _run_prompt(
         auto_save_name = None
         
         if continue_session or session or fork:
-            from ..state.project_sessions import get_project_session_store, find_last_session
+            from ..state.project_sessions import find_last_session, session_exists_anywhere
             
             if continue_session:
                 # Find last session for this project
@@ -722,8 +721,7 @@ def _run_prompt(
                     
             elif session:
                 # Use specific session
-                project_store = get_project_session_store()
-                if project_store.session_exists(session):
+                if session_exists_anywhere(session):
                     session_id = session
                     output.print_info(f"Resuming session: {session_id}")
                 else:
@@ -920,15 +918,14 @@ def _run_from_file_profiled(
     auto_save_name = None
     
     if continue_session or session or fork:
-        from ..state.project_sessions import get_project_session_store, find_last_session
+        from ..state.project_sessions import find_last_session, session_exists_anywhere
         
         if continue_session:
             session_id = find_last_session()
             if not session_id:
                 typer.echo("Warning: No previous sessions found. Starting new session.", err=True)
         elif session:
-            project_store = get_project_session_store()
-            if project_store.session_exists(session):
+            if session_exists_anywhere(session):
                 session_id = session
                 
                 if fork:
@@ -1047,7 +1044,7 @@ def _run_custom_agent(
         auto_save_name = None
         
         if continue_session or session or fork:
-            from ..state.project_sessions import get_project_session_store, find_last_session
+            from ..state.project_sessions import find_last_session, session_exists_anywhere
             
             if continue_session:
                 session_id = find_last_session()
@@ -1057,8 +1054,7 @@ def _run_custom_agent(
                     output.print_warning("No previous sessions found. Starting new session.")
                     
             elif session:
-                project_store = get_project_session_store()
-                if project_store.session_exists(session):
+                if session_exists_anywhere(session):
                     session_id = session
                     output.print_info(f"Resuming session: {session_id}")
                 else:
@@ -1166,15 +1162,14 @@ def _run_prompt_profiled(
     auto_save_name = None
     
     if continue_session or session or fork:
-        from ..state.project_sessions import get_project_session_store, find_last_session
+        from ..state.project_sessions import find_last_session, session_exists_anywhere
         
         if continue_session:
             session_id = find_last_session()
             if not session_id:
                 typer.echo("Warning: No previous sessions found. Starting new session.", err=True)
         elif session:
-            project_store = get_project_session_store()
-            if project_store.session_exists(session):
+            if session_exists_anywhere(session):
                 session_id = session
                 
                 if fork:

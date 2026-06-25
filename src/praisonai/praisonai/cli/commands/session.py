@@ -152,46 +152,104 @@ def session_list(
 @app.command("resume")
 def session_resume(
     session_id: str = typer.Argument(..., help="Session ID to resume"),
+    prompt: Optional[str] = typer.Argument(
+        None,
+        help="Optional prompt to continue the session with",
+    ),
+    transcript: bool = typer.Option(
+        False,
+        "--transcript",
+        help="Only show the session transcript instead of restoring state",
+    ),
 ):
-    """Resume a session."""
+    """Resume a session with full conversational state restored."""
     output = get_output_controller()
+
+    # Transcript-only path (opt-in for the old behaviour).
+    if transcript:
+        _print_session_transcript(session_id, output)
+        return
+
+    # Deterministic restoration via the shared rehydrate helper.
+    from ..session.resume import rehydrate_session
+
+    restored = rehydrate_session(session_id)
+
+    if not restored.found:
+        output.print_error(
+            f"Session not found: {session_id}",
+            remediation="Use 'praisonai session list' to see available sessions"
+        )
+        raise typer.Exit(1)
+
+    # When a prompt is supplied we hand off to `_run_prompt`, which owns all
+    # output for the continuation run. Emitting a restore blob here too would
+    # produce two top-level outputs (and break `--json` consumers), so we skip
+    # the standalone restore rendering in that case.
+    if prompt is None:
+        if output.is_json_mode:
+            output.print_json({
+                "session": restored.to_dict(),
+                "restored": True,
+            })
+            return
+
+        output.print_panel(
+            f"Session: {restored.agent_name or restored.session_id}\n"
+            f"Model: {restored.model or 'default'}\n"
+            f"Messages restored: {len(restored.chat_history)}",
+            title="Session Resumed"
+        )
+
+        if restored.chat_history:
+            output.print("\n--- Restored Conversation ---\n")
+            for msg in restored.chat_history[-10:]:
+                role = msg.get("role", "?")
+                content = msg.get("content", "")
+                output.print(f"[{role}] {content}")
+        return
+
+    # Continue the run with the restored state via the shared run path so
+    # behaviour matches `praisonai run --session <id>`.
+    from .run import _run_prompt
+
+    _run_prompt(
+        prompt=prompt,
+        model=restored.model,
+        session=session_id,
+    )
+
+
+def _print_session_transcript(session_id: str, output) -> None:
+    """Print a session transcript (legacy ``--transcript`` behaviour)."""
     manager = get_session_manager()
-    
     session = manager.get(session_id)
-    
+
     if not session:
         output.print_error(
             f"Session not found: {session_id}",
             remediation="Use 'praisonai session list' to see available sessions"
         )
         raise typer.Exit(1)
-    
-    # Load session events
+
     events = manager.get_events(session_id)
-    
+
     if output.is_json_mode:
         output.print_json({
             "session": session.to_dict(),
             "events": events,
-            "message": "Session loaded. True resume not supported - showing transcript.",
         })
         return
-    
+
     output.print_panel(
         f"Session: {session.name or session.session_id}\n"
         f"Run ID: {session.run_id}\n"
         f"Trace ID: {session.trace_id}\n"
         f"Events: {session.event_count}\n"
         f"Status: {session.status}",
-        title="Session Loaded"
+        title="Session Transcript"
     )
-    
-    output.print_warning(
-        "True session resume is not yet supported. "
-        "Showing session transcript instead."
-    )
-    
-    # Show recent events
+
     if events:
         output.print("\n--- Recent Events ---\n")
         for event in events[-10:]:
