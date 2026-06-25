@@ -107,3 +107,12 @@ def test_directory_error_is_swallowed(tmp_path):
 
     resolver = DeliveryResolver(_registry(tmp_path), directory=_BrokenDir())
     assert resolver.resolve("family") == []
+
+
+def test_malformed_directory_result_falls_back_to_empty(tmp_path):
+    class _MalformedDir:
+        def resolve_alias(self, name):
+            return ("telegram", "111", "extra")
+
+    resolver = DeliveryResolver(_registry(tmp_path), directory=_MalformedDir())
+    assert resolver.resolve("family") == []

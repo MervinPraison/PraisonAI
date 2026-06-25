@@ -156,8 +156,8 @@ class DeliveryResolver(DeliveryResolverProtocol):
         """Resolve a friendly alias/name via the optional channel directory.
         
         Returns a concrete ``DeliveryTarget`` when the directory knows the
-        alias, otherwise ``None`` so the caller can fall through to the
-        existing home-channel resolution.
+        alias, otherwise ``None`` so the caller falls through to the
+        unresolved-token warning and returns an empty list.
         """
         if self._directory is None:
             return None
@@ -166,12 +166,19 @@ class DeliveryResolver(DeliveryResolverProtocol):
             return None
         try:
             resolved = resolve_alias(token)
-        except Exception as e:  # pragma: no cover - defensive
+        except Exception as e:
             logger.warning("Channel directory alias lookup failed for %s: %s", token, e)
             return None
         if not resolved:
             return None
-        platform, chat_id = resolved
+        try:
+            platform, chat_id = resolved
+        except (TypeError, ValueError) as e:
+            logger.warning(
+                "Channel directory alias lookup returned invalid target for %s: %s",
+                token, e,
+            )
+            return None
         return DeliveryTarget(
             channel=platform,
             channel_id=chat_id,
