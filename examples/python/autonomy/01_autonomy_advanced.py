@@ -70,7 +70,7 @@ def main():
     explorer_profile = get_profile("explorer") if "explorer" in BUILTIN_PROFILES else None
     subagent = Agent(
         name="subagent_explorer",
-        instructions=explorer_profile.system_prompt if explorer_profile else "You are a explorer assistant.",
+        instructions=explorer_profile.system_prompt if explorer_profile else "You are an explorer assistant.",
     )
     print(f"   Created subagent: {subagent.name}")
     print(f"   Profile: explorer (read-only)")
