@@ -184,10 +184,17 @@ def _get_autogen():
     # execution protocol. This still honours any user-registered "autogen"
     # adapter discovered via the praisonai.framework_adapters entry points.
     adapter = get_default_registry().resolve("autogen")()
+    hint = getattr(adapter, "install_hint", 'pip install "praisonai[autogen]"')
     if not adapter.is_available():
-        hint = getattr(adapter, "install_hint", 'pip install "praisonai[autogen]"')
         raise ImportError(f"AutoGen is not installed. {hint}")
-    import autogen
+    # The family adapter's is_available() is True if *any* variant (v0.2/v0.4/AG2)
+    # is present, but this helper returns the classic ``autogen`` (v0.2) module.
+    # Guard the bare import so a future-enabled v0.4/AG2-only environment surfaces
+    # the actionable install hint instead of a raw ModuleNotFoundError.
+    try:
+        import autogen
+    except ImportError as e:
+        raise ImportError(f"AutoGen is not installed. {hint}") from e
     return autogen
 
 # Configure root logging only at CLI entrypoint

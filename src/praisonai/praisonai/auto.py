@@ -1110,7 +1110,7 @@ class WorkflowAutoGenerator(BaseAutoGenerator):
         self.framework = framework
         self.single_agent = single_agent
     
-    def recommend_pattern_llm(self, topic: str = None) -> "PatternRecommendation":
+    def recommend_pattern_llm(self, topic: Optional[str] = None) -> Any:
         """
         Use LLM to recommend the best workflow pattern with reasoning.
         

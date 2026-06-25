@@ -6,6 +6,7 @@ handling nested event loop scenarios without creating a new event loop
 on every call (which is expensive and breaks multi-agent workflows).
 """
 import asyncio
+import atexit
 import os
 import threading
 import concurrent.futures
@@ -24,6 +25,10 @@ class AsyncBridge:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        # Identity of the thread currently holding ``self._lock``. Set under the
+        # lock by ``get()``/``submit()`` so ``_spawn_locked()`` can verify the
+        # *caller* (not merely *someone*) owns the lock.
+        self._lock_owner: int | None = None
 
     def _spawn_locked(self) -> asyncio.AbstractEventLoop:
         """Create the loop+thread; caller must hold ``self._lock``.
@@ -34,12 +39,11 @@ class AsyncBridge:
         server processes should call :meth:`shutdown` explicitly to cancel
         in-flight tasks before process exit.
         """
-        # Enforce the "caller must hold the lock" contract. A non-reentrant
-        # ``Lock`` that is currently held cannot be acquired again (even by the
-        # owning thread), so a successful non-blocking acquire here proves the
-        # lock was *not* held by the caller.
-        if self._lock.acquire(blocking=False):
-            self._lock.release()
+        # Enforce the "caller must hold the lock" contract. We compare the
+        # recorded lock owner against the current thread so the check detects
+        # both an unlocked lock *and* a lock held by a different thread (a bare
+        # non-blocking acquire could only prove the lock was free for *anyone*).
+        if self._lock_owner != threading.get_ident():
             raise AssertionError(
                 "_spawn_locked() must be called while holding self._lock"
             )
@@ -55,13 +59,21 @@ class AsyncBridge:
 
     def get(self) -> asyncio.AbstractEventLoop:
         with self._lock:
-            return self._spawn_locked()
+            self._lock_owner = threading.get_ident()
+            try:
+                return self._spawn_locked()
+            finally:
+                self._lock_owner = None
 
     def submit(self, coro):
         """Atomically (re)spawn loop if needed and submit coro. Returns concurrent.futures.Future."""
         with self._lock:
-            loop = self._spawn_locked()
-            return asyncio.run_coroutine_threadsafe(coro, loop)
+            self._lock_owner = threading.get_ident()
+            try:
+                loop = self._spawn_locked()
+                return asyncio.run_coroutine_threadsafe(coro, loop)
+            finally:
+                self._lock_owner = None
 
     def run_sync(self, coro: Awaitable[T], *, timeout: float | None = _DEFAULT_TIMEOUT) -> T:
         try:
@@ -129,7 +141,6 @@ class AsyncBridge:
 # to every other agent/session. Embedders that need explicit lifecycle control
 # must construct and own their own :class:`AsyncBridge` instance and pass it via
 # dependency injection.
-import atexit
 
 # Single stable shared instance. It is created eagerly (cheap: no loop/thread is
 # spawned until the first ``run_sync()`` call) so the reference never has to be

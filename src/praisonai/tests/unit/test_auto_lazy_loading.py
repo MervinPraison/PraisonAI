@@ -47,19 +47,19 @@ class TestAutoLazyLoading:
         # Note: This test documents the DESIRED behavior
     
     def test_litellm_lazy_check_available(self):
-        """Test that _check_litellm_available works correctly."""
-        from praisonai.auto import _check_litellm_available
-        
-        result = _check_litellm_available()
+        """Test that litellm availability is reported via the centralized helper."""
+        from praisonai.auto import is_available
+
+        result = is_available("litellm")
         assert isinstance(result, bool)
-    
+
     def test_openai_lazy_check_available(self):
-        """Test that _check_openai_available works correctly."""
-        from praisonai.auto import _check_openai_available
-        
-        result = _check_openai_available()
+        """Test that openai availability is reported via the centralized helper."""
+        from praisonai.auto import is_available
+
+        result = is_available("openai")
         assert isinstance(result, bool)
-    
+
     def test_framework_availability_functions_exist(self):
         """Test that lazy loading infrastructure exists.
 
@@ -70,9 +70,11 @@ class TestAutoLazyLoading:
         loaders/checkers were removed.
         """
         from praisonai import auto
+        from praisonai._framework_availability import is_available
+        from praisonai._lazy_cache import lazy_get
 
-        assert hasattr(auto, 'is_available')
-        assert hasattr(auto, 'lazy_get')
+        assert auto.is_available is is_available
+        assert auto.lazy_get is lazy_get
 
 
 class TestSafeStringSubstitution:
