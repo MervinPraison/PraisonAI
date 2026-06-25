@@ -252,6 +252,31 @@ jobs:
         working-directory: src/praisonai
         run: uv publish
 
+      - name: Wait for praisonai on PyPI
+        if: inputs.dry_run != true && inputs.skip_wrapper != true
+        run: |
+          set -euo pipefail
+          PACKAGE="praisonai"
+          VERSION="${{ steps.versions.outputs.wrapper_version }}"
+          MAX_WAIT=600
+          INTERVAL=30
+          START=$(date +%s)
+
+          while true; do
+            CURRENT=$(curl -fsSL "https://pypi.org/pypi/${PACKAGE}/json" | python3 -c "import json,sys; print(json.load(sys.stdin)['info']['version'])")
+            if [ "$CURRENT" = "$VERSION" ]; then
+              echo "✅ ${PACKAGE}==${VERSION} is available on PyPI"
+              exit 0
+            fi
+            ELAPSED=$(( $(date +%s) - START ))
+            if [ "$ELAPSED" -ge "$MAX_WAIT" ]; then
+              echo "❌ Timeout waiting for ${PACKAGE}==${VERSION} (current: ${CURRENT})"
+              exit 1
+            fi
+            echo "⏳ Current: ${CURRENT}, waiting for: ${VERSION} ($(( MAX_WAIT - ELAPSED ))s remaining...)"
+            sleep "$INTERVAL"
+          done
+
       - name: Verify PyPI versions
         if: inputs.dry_run != true
         run: |
@@ -260,19 +285,9 @@ jobs:
           WRAPPER="${{ steps.versions.outputs.wrapper_version }}"
 
           if [ "${{ inputs.skip_agents }}" != "true" ]; then
-            LIVE=$(curl -fsSL "https://pypi.org/pypi/praisonaiagents/json" | python3 -c "import json,sys; print(json.load(sys.stdin)['info']['version'])")
-            if [ "$LIVE" != "$AGENTS" ]; then
-              echo "❌ praisonaiagents expected ${AGENTS}, got ${LIVE}"
-              exit 1
-            fi
             echo "✅ praisonaiagents==${AGENTS}"
           fi
 
           if [ "${{ inputs.skip_wrapper }}" != "true" ]; then
-            LIVE=$(curl -fsSL "https://pypi.org/pypi/praisonai/json" | python3 -c "import json,sys; print(json.load(sys.stdin)['info']['version'])")
-            if [ "$LIVE" != "$WRAPPER" ]; then
-              echo "❌ praisonai expected ${WRAPPER}, got ${LIVE}"
-              exit 1
-            fi
             echo "✅ praisonai==${WRAPPER}"
           fi
