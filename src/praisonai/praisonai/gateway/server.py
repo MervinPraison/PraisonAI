@@ -521,6 +521,11 @@ class WebSocketGateway:
         self._hook_idempotency: "OrderedDict[str, float]" = OrderedDict()
         self._hook_idempotency_max = 10_000
         self._hook_idempotency_ttl = 86_400.0  # 24h
+        # Keys currently being processed. Used to deduplicate *concurrent*
+        # identical deliveries: the idempotency store is only written after a
+        # run succeeds, so without this set two simultaneous requests would both
+        # pass the seen-check across the ``await`` and run the agent twice.
+        self._hook_inflight: set = set()
     
     @property
     def is_running(self) -> bool:
@@ -1183,17 +1188,16 @@ class WebSocketGateway:
 
             Prefers a hook-specific ``auth`` secret when configured; otherwise
             falls back to the gateway's standard auth (``_check_auth``). The
-            secret is accepted via ``Authorization: Bearer <token>`` or the
-            ``?token=`` query parameter, compared in constant time.
+            secret is accepted only via ``Authorization: Bearer <token>`` and
+            compared in constant time. A query-parameter token is deliberately
+            not accepted: it would be written verbatim into the server's (and
+            any reverse-proxy's) access logs, leaking the shared secret.
             """
             secret = getattr(hook, "auth", None)
             if not secret:
                 return _check_auth(request)
             auth_header = request.headers.get("authorization", "")
-            if auth_header.startswith("Bearer "):
-                token = auth_header[7:]
-            else:
-                token = request.query_params.get("token", "")
+            token = auth_header[7:] if auth_header.startswith("Bearer ") else ""
             if not token:
                 return JSONResponse(
                     {"error": "Authentication required"},
@@ -1233,16 +1237,19 @@ class WebSocketGateway:
             if not isinstance(payload, dict):
                 payload = {"value": payload}
 
-            # Check (do not yet record) the idempotency key. Recording only on a
-            # successful run means a transient failure can still be retried by
-            # the webhook sender instead of being permanently deduplicated.
+            # Atomically reserve the idempotency key. ``_hook_reserve`` rejects
+            # keys already recorded *or* currently in flight, so concurrent
+            # identical deliveries are deduplicated even though recording is
+            # deferred until after a successful run (which lets webhook senders
+            # retry transient failures).
             idem = hook.resolve_idempotency_key(payload)
-            if self._hook_seen(idem):
+            if not self._hook_reserve(idem):
                 return JSONResponse({"ok": True, "deduplicated": True})
 
             try:
                 result = await self._run_hook(hook, payload)
             except Exception as e:  # noqa: BLE001
+                self._hook_release(idem)
                 logger.error("Hook '%s' execution error: %s", path, e)
                 return JSONResponse(
                     {"ok": False, "error": str(e)}, status_code=500,
@@ -1251,6 +1258,8 @@ class WebSocketGateway:
             ok = result.get("ok", False)
             if ok:
                 self._hook_record(idem)
+            else:
+                self._hook_release(idem)
             status = 200 if ok else 500
             return JSONResponse(result, status_code=status)
 
@@ -2168,12 +2177,19 @@ class WebSocketGateway:
         if hooks_cfg:
             self._register_hooks_from_config(hooks_cfg)
 
-    def _hook_seen(self, key: str) -> bool:
-        """Return True if ``key`` was already recorded (without recording it).
+    def _hook_reserve(self, key: str) -> bool:
+        """Atomically claim ``key`` for processing.
 
-        Expired entries are pruned lazily here. Recording is deferred to
-        :meth:`_hook_record` so a key is only persisted after a successful run,
-        letting webhook senders retry transient failures.
+        Returns ``True`` when the caller may proceed, ``False`` when the key was
+        already recorded *or* is currently being processed by a concurrent
+        request. This check-and-reserve runs entirely synchronously (no
+        ``await``), so on the single-threaded event loop it is atomic and closes
+        the time-of-check/time-of-use race between the seen-check and the
+        deferred :meth:`_hook_record`.
+
+        On a falsy outcome the caller must release the reservation via
+        :meth:`_hook_release`; on success it must call :meth:`_hook_record`.
+        Expired entries are pruned lazily here.
         """
         now = time.time()
         store = self._hook_idempotency
@@ -2183,10 +2199,18 @@ class WebSocketGateway:
             expired = [k for k, ts in store.items() if now - ts > ttl]
             for k in expired:
                 store.pop(k, None)
-        return key in store
+        if key in store or key in self._hook_inflight:
+            return False
+        self._hook_inflight.add(key)
+        return True
+
+    def _hook_release(self, key: str) -> None:
+        """Release an in-flight reservation so the delivery can be retried."""
+        self._hook_inflight.discard(key)
 
     def _hook_record(self, key: str) -> None:
         """Record ``key`` as processed. Bounded so the store cannot grow unboundedly."""
+        self._hook_inflight.discard(key)
         store = self._hook_idempotency
         store[key] = time.time()
         # Enforce max size (drop oldest).
