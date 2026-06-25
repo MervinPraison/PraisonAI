@@ -29,14 +29,14 @@ STARTER_CONFIG = """\
 # Defaults applied to scaffolded agents and commands.
 # Sections are nested exactly as the resolver consumes them.
 agent:
-  model: gpt-4o-mini
+  model: {model}
 output:
   format: text
 """
 
 STARTER_AGENT_MD = """\
 ---
-model: gpt-4o-mini
+model: {model}
 role: Assistant
 goal: Help the user accomplish tasks accurately and concisely
 instructions: |
@@ -61,6 +61,18 @@ If a file path is provided, here are its contents:
 
 @$ARGUMENTS
 """
+
+
+def _any_provider_credential() -> bool:
+    """Return True if any supported provider credential is present in env."""
+    import os
+
+    known_keys = (
+        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY",
+        "GEMINI_API_KEY", "GROQ_API_KEY", "COHERE_API_KEY",
+        "OLLAMA_HOST",
+    )
+    return any(os.environ.get(k) for k in known_keys)
 
 
 def _write(path: Path, content: str, force: bool) -> bool:
@@ -99,9 +111,24 @@ def init(
     else:
         base = (get_git_root() or Path.cwd()) / ".praisonai"
 
+    # Scaffold the default model that matches the user's detected provider
+    # credential. Falls back to the OpenAI default when none is detected.
+    try:
+        from ...llm.env import (
+            default_model_for_available_provider,
+            _DEFAULT_MODEL,
+        )
+        detected_model = default_model_for_available_provider()
+    except Exception:
+        detected_model = "gpt-4o-mini"
+        _DEFAULT_MODEL = "gpt-4o-mini"
+
+    provider_detected = _any_provider_credential()
+    scaffold_model = detected_model
+
     targets = [
-        (base / "config.yaml", STARTER_CONFIG),
-        (base / "agents" / "assistant.md", STARTER_AGENT_MD),
+        (base / "config.yaml", STARTER_CONFIG.format(model=scaffold_model)),
+        (base / "agents" / "assistant.md", STARTER_AGENT_MD.format(model=scaffold_model)),
         (base / "commands" / "review.md", STARTER_COMMAND_MD),
     ]
 
@@ -127,6 +154,15 @@ def init(
 
     if written:
         output.print_success(f"Initialised {base}")
+        if provider_detected:
+            output.print_info(f"Detected provider — scaffolded model: {scaffold_model}")
+        else:
+            output.print_warning(
+                f"No provider credential detected — scaffolded placeholder model "
+                f"'{scaffold_model}'. Set one of OPENAI_API_KEY, ANTHROPIC_API_KEY, "
+                f"GEMINI_API_KEY/GOOGLE_API_KEY, GROQ_API_KEY, COHERE_API_KEY or "
+                f"OLLAMA_HOST, then update the model if needed."
+            )
         output.print_info("You can now run:")
         output.print_info('  praisonai agent run assistant "hello"')
         output.print_info('  praisonai command run review "src/foo.py"')
