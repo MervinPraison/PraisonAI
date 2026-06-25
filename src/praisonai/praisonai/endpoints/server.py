@@ -183,13 +183,31 @@ def mount_provider_routes(
     from fastapi import Request, Response
     from fastapi.responses import StreamingResponse
 
+    def _json_error(message: str, status_code: int = 400, error_type: str = "invalid_request_error") -> Response:
+        return Response(
+            content=json.dumps({"error": {"message": message, "type": error_type}}),
+            status_code=status_code,
+            media_type="application/json",
+        )
+
+    async def _read_json_object(request: Request):
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, ValueError):
+            return None, _json_error("Invalid JSON body")
+        if not isinstance(body, dict):
+            return None, _json_error("Request body must be a JSON object")
+        return body, None
+
     register_provider_to_discovery(app, provider.get_provider_info())
     for endpoint in provider.list_endpoints():
         register_endpoint_to_discovery(app, endpoint)
 
     @app.post("/v1/chat/completions")
     async def chat_completions(request: Request):
-        body = await request.json()
+        body, error_response = await _read_json_object(request)
+        if error_response:
+            return error_response
 
         if body.get("stream", False):
             def generate():
@@ -212,38 +230,32 @@ def mount_provider_routes(
 
         result = provider.invoke("chat_completions", body, stream=False)
         if not result.ok:
-            return Response(
-                content=json.dumps({"error": {"message": result.error, "type": "api_error"}}),
-                status_code=400,
-                media_type="application/json",
-            )
+            return _json_error(result.error, status_code=400, error_type="api_error")
         return result.data
 
     @app.post("/v1/completions")
     async def completions(request: Request):
-        body = await request.json()
+        body, error_response = await _read_json_object(request)
+        if error_response:
+            return error_response
         result = provider.invoke("completions", body)
         if not result.ok:
-            return Response(
-                content=json.dumps({"error": {"message": result.error, "type": "api_error"}}),
-                status_code=400,
-                media_type="application/json",
-            )
+            return _json_error(result.error, status_code=400, error_type="api_error")
         return result.data
 
     @app.get("/v1/models")
     async def models():
         result = provider.invoke("models")
-        return result.data if result.ok else {"error": result.error}
+        if not result.ok:
+            return _json_error(result.error, status_code=400, error_type="api_error")
+        return result.data
 
     @app.post("/v1/tools/invoke")
     async def tools_invoke(request: Request):
-        body = await request.json()
+        body, error_response = await _read_json_object(request)
+        if error_response:
+            return error_response
         result = provider.invoke("tools_invoke", body)
         if not result.ok:
-            return Response(
-                content=json.dumps({"error": {"message": result.error, "type": "api_error"}}),
-                status_code=400,
-                media_type="application/json",
-            )
+            return _json_error(result.error, status_code=400, error_type="api_error")
         return result.data
