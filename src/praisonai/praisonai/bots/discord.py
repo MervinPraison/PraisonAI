@@ -33,7 +33,8 @@ from ._commands import (
     handle_usage_command,
     handle_compress_command,
     handle_queue_command,
-    handle_learn_command
+    handle_learn_command,
+    build_command_access_policy,
 )
 from ._session import BotSessionManager
 from ._debounce import InboundDebouncer
@@ -98,6 +99,10 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
         self._message_handlers: List[Callable] = []
         self._command_handlers: Dict[str, Callable] = {}
         self._started_at: Optional[float] = None
+
+        # Per-command authorization, shared with Telegram/Slack so privileged
+        # commands (e.g. /learn) can be restricted consistently across channels.
+        self._command_policy = build_command_access_policy(self.config)
         # Use helper to build session manager
         from ._session import build_session_manager
         self._session: BotSessionManager = build_session_manager(
@@ -237,6 +242,16 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
             
             if bot_message.is_command:
                 command = bot_message.command
+                # Per-command authorization: privileged commands (e.g. /learn)
+                # can be restricted to admins independent of the channel/pairing
+                # allow gate, consistent with Telegram and Slack.
+                if command and not self._command_policy.can_run(
+                    str(message.author.id), command
+                ):
+                    await message.reply(
+                        f"⛔ You are not permitted to run /{command}"
+                    )
+                    return
                 if command == "status":
                     await message.reply(self._format_status())
                     return
