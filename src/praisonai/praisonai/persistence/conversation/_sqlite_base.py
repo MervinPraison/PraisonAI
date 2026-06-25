@@ -14,8 +14,9 @@ import json
 import logging
 import sqlite3
 import time as _time
-from contextlib import contextmanager
-from typing import Any, Iterator, List, Optional
+from abc import abstractmethod
+from contextlib import AbstractContextManager
+from typing import Any, List, Optional
 
 from .base import ConversationStore, ConversationSession, ConversationMessage
 
@@ -51,13 +52,14 @@ class _SQLiteConversationStoreBase(ConversationStore):
     def messages_table(self) -> str:
         return f"{self.table_prefix}messages"
 
-    @contextmanager
-    def _connection(self) -> Iterator[sqlite3.Connection]:
-        """Yield a connection for a single logical operation.
+    @abstractmethod
+    def _connection(self) -> "AbstractContextManager[sqlite3.Connection]":
+        """Return a context manager yielding a connection for one operation.
 
-        Subclasses must implement this. Implementations are responsible for
-        committing (the base commits via ``conn.commit()`` for write paths) and
-        for releasing/closing the connection as appropriate to their strategy.
+        Subclasses must implement this as a ``@contextmanager`` method.
+        Implementations are responsible for committing (the base commits via
+        ``conn.commit()`` for write paths) and for releasing/closing the
+        connection as appropriate to their strategy.
         """
         raise NotImplementedError
 
@@ -127,8 +129,8 @@ class _SQLiteConversationStoreBase(ConversationStore):
             user_id=row["user_id"],
             agent_id=row["agent_id"],
             name=row["name"],
-            state=json.loads(row["state"]) if row["state"] else None,
-            metadata=json.loads(row["metadata"]) if row["metadata"] else None,
+            state=json.loads(row["state"]) if row["state"] is not None else None,
+            metadata=json.loads(row["metadata"]) if row["metadata"] is not None else None,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
@@ -140,9 +142,9 @@ class _SQLiteConversationStoreBase(ConversationStore):
             session_id=row["session_id"],
             role=row["role"],
             content=row["content"],
-            tool_calls=json.loads(row["tool_calls"]) if row["tool_calls"] else None,
+            tool_calls=json.loads(row["tool_calls"]) if row["tool_calls"] is not None else None,
             tool_call_id=row["tool_call_id"],
-            metadata=json.loads(row["metadata"]) if row["metadata"] else None,
+            metadata=json.loads(row["metadata"]) if row["metadata"] is not None else None,
             created_at=row["created_at"],
         )
 
@@ -162,8 +164,8 @@ class _SQLiteConversationStoreBase(ConversationStore):
                 session.user_id,
                 session.agent_id,
                 session.name,
-                json.dumps(session.state) if session.state else None,
-                json.dumps(session.metadata) if session.metadata else None,
+                json.dumps(session.state) if session.state is not None else None,
+                json.dumps(session.metadata) if session.metadata is not None else None,
                 session.created_at,
                 session.updated_at,
             ))
@@ -196,8 +198,8 @@ class _SQLiteConversationStoreBase(ConversationStore):
                 session.user_id,
                 session.agent_id,
                 session.name,
-                json.dumps(session.state) if session.state else None,
-                json.dumps(session.metadata) if session.metadata else None,
+                json.dumps(session.state) if session.state is not None else None,
+                json.dumps(session.metadata) if session.metadata is not None else None,
                 session.updated_at,
                 session.session_id,
             ))
@@ -230,10 +232,10 @@ class _SQLiteConversationStoreBase(ConversationStore):
         conditions: List[str] = []
         params: List[Any] = []
 
-        if user_id:
+        if user_id is not None:
             conditions.append("user_id = ?")
             params.append(user_id)
-        if agent_id:
+        if agent_id is not None:
             conditions.append("agent_id = ?")
             params.append(agent_id)
 
@@ -283,9 +285,9 @@ class _SQLiteConversationStoreBase(ConversationStore):
                 actual_session_id,
                 message.role,
                 message.content,
-                json.dumps(message.tool_calls) if message.tool_calls else None,
+                json.dumps(message.tool_calls) if message.tool_calls is not None else None,
                 message.tool_call_id,
-                json.dumps(message.metadata) if message.metadata else None,
+                json.dumps(message.metadata) if message.metadata is not None else None,
                 message.created_at,
             ))
             conn.commit()
@@ -339,12 +341,14 @@ class _SQLiteConversationStoreBase(ConversationStore):
     def delete_messages(self, session_id: str, message_ids: Optional[List[str]] = None) -> int:
         """Delete messages. If message_ids is None, delete all messages in session."""
         with self._connection() as conn:
-            if message_ids:
+            if message_ids is not None:
+                if not message_ids:
+                    return 0
                 placeholders = ",".join(["?"] * len(message_ids))
                 cur = conn.execute(
                     f"DELETE FROM {self.messages_table}"
                     f" WHERE session_id = ? AND id IN ({placeholders})",
-                    [session_id] + message_ids,
+                    [session_id, *message_ids],
                 )
             else:
                 cur = conn.execute(

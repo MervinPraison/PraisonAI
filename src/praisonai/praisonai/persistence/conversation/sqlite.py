@@ -64,13 +64,23 @@ class SQLiteConversationStore(_SQLiteConversationStoreBase):
                 self.path,
                 check_same_thread=self._check_same_thread
             )
+            self._local.conn.execute("PRAGMA foreign_keys = ON")
             self._local.conn.row_factory = sqlite3.Row
         return self._local.conn
     
     @contextmanager
     def _connection(self) -> Iterator[sqlite3.Connection]:
-        """Yield the shared thread-local connection (kept open across calls)."""
-        yield self._get_conn()
+        """Yield the shared thread-local connection (kept open across calls).
+
+        Rolls back any uncommitted transaction if an exception escapes so the
+        persistent connection is not left in a stale, partially-applied state.
+        """
+        conn = self._get_conn()
+        try:
+            yield conn
+        except Exception:
+            conn.rollback()
+            raise
     
     def close(self) -> None:
         """Close the store."""

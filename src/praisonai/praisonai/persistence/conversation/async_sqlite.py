@@ -69,6 +69,7 @@ class AsyncSQLiteConversationStore(AsyncConversationStore):
             
             self._aiosqlite = aiosqlite
             self._conn = await aiosqlite.connect(self.path)
+            await self._conn.execute("PRAGMA foreign_keys = ON")
             self._conn.row_factory = aiosqlite.Row
             await self._create_tables()
             self._initialized = True
