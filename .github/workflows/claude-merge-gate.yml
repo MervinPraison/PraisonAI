@@ -161,6 +161,9 @@ jobs:
               labels: ['claude-merge-gate-active'],
             });
 
+      - name: Stash merge gate helpers
+        run: cp .github/scripts/merge-gate.js /tmp/merge-gate.js
+
       - name: Fetch PR branch
         env:
           PR_NUMBER: ${{ matrix.pr_number }}
@@ -225,8 +228,7 @@ jobs:
         with:
           github-token: ${{ env.GH_TOKEN }}
           script: |
-            const path = require('path');
-            const mergeGate = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/merge-gate.js'));
+            const mergeGate = require('/tmp/merge-gate.js');
             const comments = await mergeGate.listAllComments(
               github, context.repo.owner, context.repo.repo, ${{ matrix.pr_number }}
             );
