@@ -103,12 +103,13 @@ def rehydrate_session(
         chat_history = data.get_chat_history() if data else []
         metadata = dict(getattr(data, "metadata", {}) or {})
         model = metadata.get("model") or metadata.get("llm")
+        agent_name = getattr(data, "agent_name", None) or metadata.get("agent_name")
 
         return RehydratedSession(
             session_id=session_id,
             chat_history=chat_history,
             model=model,
-            agent_name=getattr(data, "agent_name", None),
+            agent_name=agent_name,
             metadata=metadata,
             found=True,
         )
