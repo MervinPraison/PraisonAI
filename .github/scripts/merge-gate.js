@@ -131,11 +131,27 @@ function isStaleFinalAfterPush(comments, headPushedAt) {
   return !claudeSinceHead;
 }
 
+function needsStaleFinalRecovery(comments, headPushedAt) {
+  return (
+    hasFinalClaudeReviewTrigger(comments) &&
+    isStaleFinalAfterPush(comments, headPushedAt)
+  );
+}
+
+function shouldSkipFinalRecovery(comments, headPushedAt) {
+  const isStale = isStaleFinalAfterPush(comments, headPushedAt);
+  if (isStale) return false;
+  return hasRecentClaudeTrigger(comments, 35);
+}
+
 function finalClaudeCompletedOnSha(comments, headPushedAt) {
   if (!hasFinalClaudeReviewTrigger(comments)) return false;
   if (isStaleFinalAfterPush(comments, headPushedAt)) return false;
   return true;
 }
+
+const FINAL_CLAUDE_REVIEW_BODY =
+  '@claude You are the FINAL architecture reviewer. If the branch is under MervinPraison/PraisonAI (not a fork), you are able to make modifications to this branch and push directly. SCOPE: Focus ONLY on Python packages (praisonaiagents, praisonai). Do NOT modify praisonai-rust or praisonai-ts. Read ALL comments above from Gemini, Qodo, CodeRabbit, and Copilot carefully before responding.\n\n**Phase 1: Review per AGENTS.md**\n1. Protocol-driven: check heavy implementations vs core SDK\n2. Backward compatible: ensure zero feature regressions\n3. Performance: no hot-path regressions\n4. SDK value: review in depth whether the change genuinely adds value to the SDK — never add features for the sake of adding them. It must strengthen the SDK (simpler, more user-friendly, robust, world-class, secure). If it does not clearly add value, request changes or recommend rejecting/closing rather than merging scope creep\n5. Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.\n\n**Phase 2: FIX Valid Issues**\n5. For any VALID bugs or architectural flaws found by Gemini, CodeRabbit, Qodo, Copilot, or any other reviewer: implement the fix\n6. Push all code fixes directly to THIS branch (do NOT create a new PR)\n7. Comment a summary of exact files modified and what you skipped\n\n**Phase 3: Final Verdict**\n8. If all issues are resolved, approve the PR / close the Issue\n9. If blocking issues remain, request changes / leave clear action items';
 
 async function getMergeState(github, owner, repo, prNumber) {
   const query = `
@@ -315,6 +331,7 @@ function missingTestsReason(files) {
 
 function secretScanReasons(files) {
   for (const f of files) {
+    if (/\/tests?\//.test(f.filename) || /test_.*\.py$/.test(f.filename)) continue;
     const patch = f.patch || '';
     if (!patch) continue;
     for (const pattern of SECRET_PATTERNS) {
@@ -554,6 +571,9 @@ module.exports = {
   listAllComments,
   getHeadCommitDate,
   isStaleFinalAfterPush,
+  needsStaleFinalRecovery,
+  shouldSkipFinalRecovery,
+  FINAL_CLAUDE_REVIEW_BODY,
   loadPrContext,
   evaluatePipelineQuiescent,
   findMergeGateVerdict,

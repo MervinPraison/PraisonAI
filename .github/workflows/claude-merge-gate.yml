@@ -39,6 +39,11 @@ permissions:
 jobs:
   scan-candidates:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: write
+      actions: read
     outputs:
       matrix: ${{ steps.scan.outputs.matrix }}
       has_candidates: ${{ steps.scan.outputs.has_candidates }}
@@ -93,6 +98,26 @@ jobs:
             core.summary.addRaw(`Candidates: ${candidates.length}\n`);
             core.summary.addRaw('```json\n' + JSON.stringify({ candidates, skipped }, null, 2) + '\n```');
             await core.summary.write();
+
+            if (inputPr && skipped.length === 1 && skipped[0].pr === parseInt(inputPr, 10)) {
+              const reasons = skipped[0].reasons;
+              const body = [
+                '**Merge gate scan** — not eligible for auto-merge.',
+                '',
+                ...reasons.map((r) => `- \`${r}\``),
+                '',
+                '**Actions:** wait for CI / `@claude` chain, or add label `needs-manual-review` and merge manually.',
+                '**Opt out:** label `no-auto-merge`.',
+              ].join('\n');
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: skipped[0].pr, body,
+              });
+            } else if (inputPr && candidates.length === 1) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: candidates[0].pr_number,
+                body: '**Merge gate scan** — eligible for assessment. Claude merge gate will assess and may auto-merge if `MERGE_GATE_VERDICT: APPROVE`.',
+              });
+            }
 
   claude-assess:
     needs: scan-candidates
@@ -215,7 +240,7 @@ jobs:
     if: |
       always() &&
       needs.scan-candidates.outputs.has_candidates == 'true' &&
-      needs.claude-assess.result != 'cancelled'
+      needs.claude-assess.result == 'success'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

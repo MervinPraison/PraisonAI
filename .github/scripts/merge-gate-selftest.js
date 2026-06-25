@@ -1,0 +1,65 @@
+#!/usr/bin/env node
+/**
+ * Local self-test for merge-gate.js heuristics (no GitHub API).
+ * Run: node .github/scripts/merge-gate-selftest.js
+ */
+const mg = require('./merge-gate.js');
+
+let failed = 0;
+function assert(name, cond) {
+  if (!cond) {
+    console.error('FAIL:', name);
+    failed++;
+  } else {
+    console.log('ok:', name);
+  }
+}
+
+// Stale FINAL: push after FINAL, no @claude since head
+const finals = [
+  { user: { login: 'github-actions[bot]' }, body: '@claude FINAL architecture reviewer', created_at: '2026-06-12T08:00:00Z' },
+];
+assert('stale when head after final', mg.isStaleFinalAfterPush(finals, '2026-06-12T09:00:00Z'));
+
+const withRecovery = [
+  ...finals,
+  { user: { login: 'github-actions[bot]' }, body: '@claude FINAL architecture reviewer', created_at: '2026-06-12T09:30:00Z' },
+];
+assert('not stale when @claude after head', !mg.isStaleFinalAfterPush(withRecovery, '2026-06-12T09:00:00Z'));
+
+// Bot CHANGES_REQUESTED then APPROVE
+const reviews = [
+  { user: { login: 'coderabbit[bot]', type: 'Bot' }, state: 'CHANGES_REQUESTED', submitted_at: '2026-06-12T08:00:00Z' },
+  { user: { login: 'coderabbit[bot]', type: 'Bot' }, state: 'APPROVED', submitted_at: '2026-06-12T09:00:00Z' },
+];
+assert('bot approve clears CR', !mg.hasAnyChangesRequested(reviews));
+assert('human CR blocks', mg.hasAnyChangesRequested([
+  { user: { login: 'MervinPraison', type: 'User' }, state: 'CHANGES_REQUESTED', submitted_at: '2026-06-12T09:00:00Z' },
+]));
+
+// Verdict after HEAD
+const verdictComments = [
+  { body: 'MERGE_GATE_VERDICT: APPROVE', created_at: '2026-06-12T08:00:00Z' },
+];
+assert('verdict before head rejected', mg.findMergeGateVerdict(verdictComments, null, '2026-06-12T09:00:00Z') === null);
+assert('verdict after head accepted', mg.findMergeGateVerdict(
+  [{ body: 'MERGE_GATE_VERDICT: APPROVE', created_at: '2026-06-12T10:00:00Z' }],
+  null,
+  '2026-06-12T09:00:00Z'
+) === 'APPROVE');
+
+// Sensitive + secrets
+assert('workflow path sensitive', mg.sensitivePathReasons([{ filename: '.github/workflows/foo.yml' }]).length === 1);
+assert('secret in patch', mg.secretScanReasons([{ filename: 'x.py', patch: '+key = "ghp_abcdefghijklmnopqrstuvwxyz1234567890"' }]).length === 1);
+
+// Tests heuristic
+assert('sdk without tests', mg.missingTestsReason([{ filename: 'src/praisonai-agents/a/b.py', additions: 3 }]) !== null);
+assert('sdk with tests ok', mg.missingTestsReason([
+  { filename: 'src/praisonai-agents/a/b.py', additions: 3 },
+  { filename: 'src/praisonai-agents/tests/test_x.py', additions: 10 },
+]) === null);
+
+// PR size
+assert('large PR blocked', mg.prSizeReasons([{ additions: 900 }]).length > 0);
+
+process.exit(failed ? 1 : 0);

@@ -16,6 +16,9 @@ on:
     types: [submitted]
   pull_request:
     types: [opened, synchronize]
+  schedule:
+    - cron: '30 3,9,15,21 * * *'
+  workflow_dispatch:
 
 env:
   MAX_POLL_ATTEMPTS: 20
@@ -514,15 +517,15 @@ jobs:
             const headPushedAt = (await mergeGate.getHeadCommitDate(github, owner, repo, pr))
               || context.payload.pull_request.updated_at;
 
-            if (mergeGate.hasRecentClaudeTrigger(comments, 35)) {
-              core.info('Recent @claude within 35min — skip recovery');
-              return;
-            }
-
             const hasFinal = mergeGate.hasFinalClaudeReviewTrigger(comments);
             const isStale = mergeGate.isStaleFinalAfterPush(comments, headPushedAt);
 
-            const finalBody = '@claude You are the FINAL architecture reviewer. If the branch is under MervinPraison/PraisonAI (not a fork), you are able to make modifications to this branch and push directly. SCOPE: Focus ONLY on Python packages (praisonaiagents, praisonai). Do NOT modify praisonai-rust or praisonai-ts. Read ALL comments above from Gemini, Qodo, CodeRabbit, and Copilot carefully before responding.\n\n**Phase 1: Review per AGENTS.md**\n1. Protocol-driven: check heavy implementations vs core SDK\n2. Backward compatible: ensure zero feature regressions\n3. Performance: no hot-path regressions\n4. SDK value: review in depth whether the change genuinely adds value to the SDK — never add features for the sake of adding them. It must strengthen the SDK (simpler, more user-friendly, robust, world-class, secure). If it does not clearly add value, request changes or recommend rejecting/closing rather than merging scope creep\n5. Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.\n\n**Phase 2: FIX Valid Issues**\n5. For any VALID bugs or architectural flaws found by Gemini, CodeRabbit, Qodo, Copilot, or any other reviewer: implement the fix\n6. Push all code fixes directly to THIS branch (do NOT create a new PR)\n7. Comment a summary of exact files modified and what you skipped\n\n**Phase 3: Final Verdict**\n8. If all issues are resolved, approve the PR / close the Issue\n9. If blocking issues remain, request changes / leave clear action items';
+            if (mergeGate.shouldSkipFinalRecovery(comments, headPushedAt)) {
+              core.info('Recent @claude within 35min and FINAL not stale — skip recovery');
+              return;
+            }
+
+            const finalBody = mergeGate.FINAL_CLAUDE_REVIEW_BODY;
 
             if (hasFinal && isStale) {
               await github.rest.issues.createComment({ issue_number: pr, owner, repo, body: finalBody });
@@ -547,6 +550,49 @@ jobs:
 
             await github.rest.issues.createComment({ issue_number: pr, owner, repo, body: finalBody });
             core.info(`Posted missing FINAL Claude review on PR #${pr}`);
+
+  # Scheduled: re-post @claude when FINAL is stale (Claude pushed after last FINAL trigger)
+  stale-final-recovery-scheduled:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Re-post stale FINAL @claude on open internal PRs
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            const path = require('path');
+            const mergeGate = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/merge-gate.js'));
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prs = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'open', per_page: 100,
+            });
+            let posted = 0;
+            for (const pr of prs) {
+              if (pr.draft) continue;
+              if (pr.head?.repo?.full_name && pr.head.repo.full_name !== `${owner}/${repo}`) continue;
+              const comments = await mergeGate.listAllComments(github, owner, repo, pr.number);
+              const headPushedAt = (await mergeGate.getHeadCommitDate(github, owner, repo, pr.number)) || pr.updated_at;
+              if (!mergeGate.needsStaleFinalRecovery(comments, headPushedAt)) continue;
+              if (mergeGate.hasRecentClaudeTrigger(comments, 10)) {
+                core.info(`PR #${pr.number}: stale FINAL but @claude within 10min — skip`);
+                continue;
+              }
+              await github.rest.issues.createComment({
+                issue_number: pr.number, owner, repo,
+                body: mergeGate.FINAL_CLAUDE_REVIEW_BODY,
+              });
+              posted++;
+              core.info(`Posted scheduled stale-FINAL recovery on PR #${pr.number}`);
+              if (posted >= 5) break;
+            }
+            core.info(`Scheduled stale-FINAL recovery complete (${posted} posted)`);
 
   # ================================================================
   # BOT PRs: CodeRabbit/Qodo skip bot-authored PRs by default.
