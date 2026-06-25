@@ -235,9 +235,12 @@ async function hasInProgressClaudeAssistant(github, owner, repo) {
       repo,
       workflow_id: 'claude.yml',
       status: 'in_progress',
-      per_page: 5,
+      per_page: 10,
     });
-    return (data.total_count || 0) > 0;
+    const runs = data.workflow_runs || [];
+    // Issue-only runs (labeled/opened) must not block PR merge gate
+    const prBlocking = runs.filter((r) => r.event !== 'issues');
+    return prBlocking.length > 0;
   } catch {
     return false;
   }
