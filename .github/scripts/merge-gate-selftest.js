@@ -48,6 +48,9 @@ assert('verdict after head accepted', mg.findMergeGateVerdict(
   '2026-06-12T09:00:00Z'
 ) === 'APPROVE');
 
+const noise = [{ user: { login: 'MervinPraison' }, body: '**Merge gate scan** — wait for `@claude`', created_at: new Date().toISOString() }];
+assert('diagnostic comment not a trigger', !mg.hasRecentClaudeTrigger(noise, 35));
+
 // Sensitive + secrets
 assert('workflow path sensitive', mg.sensitivePathReasons([{ filename: '.github/workflows/foo.yml' }]).length === 1);
 assert('secret in patch', mg.secretScanReasons([{ filename: 'x.py', patch: '+key = "ghp_abcdefghijklmnopqrstuvwxyz1234567890"' }]).length === 1);

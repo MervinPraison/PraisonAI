@@ -55,10 +55,19 @@ function isFinalClaudeTriggerComment(c) {
   return body.includes('final architecture reviewer') || body.includes('lead engineer');
 }
 
+function isClaudeTriggerNoise(c) {
+  const body = c.body || '';
+  if (body.includes('Merge gate scan')) return true;
+  if (body.includes('MERGE_GATE_VERDICT')) return true;
+  if (body.includes('Merged by **Claude PR merge gate**')) return true;
+  return false;
+}
+
 function hasRecentClaudeTrigger(comments, minutes = 35) {
   const cutoff = Date.now() - minutes * 60 * 1000;
   return comments.some((c) => {
     if (!CLAUDE_TRIGGER_LOGINS.includes(c.user.login)) return false;
+    if (isClaudeTriggerNoise(c)) return false;
     if (!(c.body || '').includes('@claude')) return false;
     return new Date(c.created_at).getTime() > cutoff;
   });
@@ -125,6 +134,7 @@ function isStaleFinalAfterPush(comments, headPushedAt) {
   if (headTime <= finalTime + 60000) return false;
   const claudeSinceHead = comments.some((c) => {
     if (!CLAUDE_TRIGGER_LOGINS.includes(c.user.login)) return false;
+    if (isClaudeTriggerNoise(c)) return false;
     if (!(c.body || '').includes('@claude')) return false;
     return new Date(c.created_at).getTime() >= headTime - 60000;
   });
@@ -547,6 +557,7 @@ module.exports = {
   CLAUDE_TRIGGER_LOGINS,
   AUTO_ACTORS,
   isFinalClaudeTriggerComment,
+  isClaudeTriggerNoise,
   hasRecentClaudeTrigger,
   hasRecentConflictComment,
   hasHumanChangesRequested,

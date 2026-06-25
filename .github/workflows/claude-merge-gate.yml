@@ -106,7 +106,7 @@ jobs:
                 '',
                 ...reasons.map((r) => `- \`${r}\``),
                 '',
-                '**Actions:** wait for CI / `@claude` chain, or add label `needs-manual-review` and merge manually.',
+                '**Actions:** wait for CI and the Claude review chain, or add label `needs-manual-review` and merge manually.',
                 '**Opt out:** label `no-auto-merge`.',
               ].join('\n');
               await github.rest.issues.createComment({
@@ -169,6 +169,8 @@ jobs:
           git checkout "pr-${PR_NUMBER}"
 
       - name: Claude merge gate assessment (read-only)
+        id: assess
+        continue-on-error: true
         uses: anthropics/claude-code-action@beta
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -176,6 +178,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ steps.app-token.outputs.token }}
           model: claude-opus-4-8
+          mode: agent
           trigger_phrase: '@claude-merge-gate-internal'
           direct_prompt: |
             You are the MERGE GATE reviewer for PraisonAI PR #${{ matrix.pr_number }}.
@@ -234,6 +237,29 @@ jobs:
             const verdict = mergeGate.findMergeGateVerdict(comments, minCreatedAt, ctx.headPushedAt);
             core.setOutput('verdict', verdict || 'NONE');
             if (!verdict) core.warning('No recent MERGE_GATE_VERDICT comment found after assessment');
+
+      - name: Remove merge gate active label
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ env.GH_TOKEN }}
+          script: |
+            const prNumber = ${{ matrix.pr_number }};
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                name: 'claude-merge-gate-active',
+              });
+              core.info(`Removed claude-merge-gate-active from PR #${prNumber}`);
+            } catch (e) {
+              core.info(`Label claude-merge-gate-active already removed or missing on PR #${prNumber}`);
+            }
+
+      - name: Fail job if assessment failed
+        if: steps.assess.outcome == 'failure'
+        run: exit 1
 
   merge-only:
     needs: [scan-candidates, claude-assess]
