@@ -136,4 +136,17 @@ def apply_cli_session_continuity(agent, session_id: str, project_path: Optional[
                 existing.add(key)
         agent._auto_save_last_index = len(agent.chat_history)
 
+    # Persist model/agent so a later resume is deterministic regardless of the
+    # flags/config in effect at resume time (Issue #2274).
+    try:
+        model = getattr(agent, "llm", None)
+        if isinstance(model, str):
+            store.update_session_metadata(
+                session_id,
+                model=model,
+                agent_name=getattr(agent, "name", None),
+            )
+    except Exception:
+        pass
+
     agent._session_store_initialized = True
