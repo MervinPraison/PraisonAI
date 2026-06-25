@@ -20,10 +20,6 @@ from praisonai._logging import get_logger
 # Type variable for Pydantic models - will be bound at runtime
 T = TypeVar('T')
 
-# Module-level cache for models (for backward compatibility)
-_models_cache: Dict = {}
-_models_lock = threading.Lock()
-
 # =============================================================================
 # THREAD-SAFE LAZY LOADING INFRASTRUCTURE - All heavy imports are deferred
 # =============================================================================
@@ -63,37 +59,11 @@ from ._framework_availability import is_available
 # Redundant wrapper functions removed - use is_available() directly
 
 
-def _get_crewai():
-    """Lazy load crewai classes (thread-safe)."""
-    return lazy_get("crewai_classes", lambda: (
-        __import__("crewai", fromlist=["Agent", "Task", "Crew"]).Agent,
-        __import__("crewai", fromlist=["Agent", "Task", "Crew"]).Task,
-        __import__("crewai", fromlist=["Agent", "Task", "Crew"]).Crew,
-    ))
-
-
-def _get_autogen():
-    """Lazy load autogen module (thread-safe)."""
-    return lazy_get("autogen_module", lambda: __import__("autogen"))
-
-
-def _get_autogen_v4():
-    """Lazy load autogen v0.4 classes (thread-safe)."""
-    def autogen_v4_loader():
-        from autogen_agentchat.agents import AssistantAgent
-        from autogen_ext.models.openai import OpenAIChatCompletionClient
-        return (AssistantAgent, OpenAIChatCompletionClient)
-    
-    return lazy_get("autogen_v4_classes", autogen_v4_loader)
-
-
-def _get_praisonai():
-    """Lazy load praisonaiagents classes (thread-safe)."""
-    def praisonai_loader():
-        from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask, AgentTeam as Agents
-        return (PraisonAgent, PraisonTask, Agents)
-    
-    return lazy_get("praisonai_classes", praisonai_loader)
+# Framework class loaders removed: framework selection and resolution now go
+# exclusively through the canonical FrameworkAdapter protocol + registry
+# (see framework_adapters/). The previous hand-rolled _get_crewai/_get_autogen/
+# _get_autogen_v4/_get_praisonai loaders were dead code that bypassed the
+# adapter system. Use framework_adapters.registry.get_default_registry().
 
 
 # --- PraisonAI Tools lazy loading ---
@@ -1140,7 +1110,7 @@ class WorkflowAutoGenerator(BaseAutoGenerator):
         self.framework = framework
         self.single_agent = single_agent
     
-    def recommend_pattern_llm(self, topic: str = None) -> PatternRecommendation:
+    def recommend_pattern_llm(self, topic: Optional[str] = None) -> Any:
         """
         Use LLM to recommend the best workflow pattern with reasoning.
         
