@@ -372,7 +372,9 @@ def run_server(port: int, host: str = "127.0.0.1", use_public: bool = False):
     if host == "0.0.0.0" and not use_public:
         print("WARNING: Server is binding to all network interfaces (0.0.0.0). "
               "This exposes the service to your local network.")
-    
+
+    os.environ["PRAISONAI_CALL_BIND_HOST"] = host
+
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 def main(args=None):

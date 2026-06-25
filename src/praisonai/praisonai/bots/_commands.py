@@ -11,6 +11,8 @@ import logging
 import time
 from typing import Callable, Dict, List, Optional, Set, TYPE_CHECKING, Any
 
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from praisonaiagents import Agent
     from ._run_control import SessionRunControl

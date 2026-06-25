@@ -113,6 +113,25 @@ async def test_call_auth_disabled_rejected_for_non_localhost_bind(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_call_auth_disabled_rejected_when_bind_host_unset(monkeypatch):
+    """Fail closed when auth is disabled but bind host was never declared."""
+    pytest.importorskip("fastapi")
+    from fastapi import HTTPException
+
+    monkeypatch.delenv("CALL_SERVER_TOKEN", raising=False)
+    monkeypatch.delenv("PRAISONAI_CALL_BIND_HOST", raising=False)
+    monkeypatch.setenv("PRAISONAI_CALL_AUTH", "disabled")
+
+    from praisonai.api import agent_invoke
+
+    class _Req:
+        query_params = {}
+
+    with pytest.raises(HTTPException):
+        await agent_invoke.verify_token(_Req(), authorization=None)
+
+
+@pytest.mark.asyncio
 async def test_call_auth_disabled_rejects_spoofed_host_header(monkeypatch):
     """GHSA-2gpf: client Host header must not bypass bind check."""
     pytest.importorskip("fastapi")
