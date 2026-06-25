@@ -22,7 +22,9 @@ def generate_api_server_code(agents_file: str, config: Optional[APIConfig] = Non
     """
     if config is None:
         config = APIConfig()
-    
+
+    safe_agents_file = repr(agents_file)
+
     code = f'''"""
 Auto-generated API server for PraisonAI agents.
 """
@@ -77,7 +79,7 @@ def chat():
         return jsonify({{"error": "Message required"}}), 400
     
     try:
-        praisonai = PraisonAI(agent_file="{agents_file}")
+        praisonai = PraisonAI(agent_file={safe_agents_file})
         result = praisonai.run()
         
         return jsonify({{
@@ -98,7 +100,7 @@ def list_agents():
     
     return jsonify({{
         "agents": ["default"],
-        "agent_file": "{agents_file}"
+        "agent_file": {safe_agents_file}
     }})
 
 if __name__ == '__main__':

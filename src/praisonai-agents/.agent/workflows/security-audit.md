@@ -32,7 +32,7 @@ gh api repos/MervinPraison/PraisonAI/security-advisories/<GHSA_ID> --jq '{ghsa: 
 3. For each advisory, validate the vulnerability in source code:
    - Read the file(s) mentioned in the advisory description
    - Confirm the vulnerability exists (or is already fixed)
-   - Classify: `real` | `already-fixed` | `not-reproducible`
+   - Classify using triage labels (see **Managing ongoing audits** below)
    - Reference the official repository for latest source: https://github.com/MervinPraison/PraisonAI
 
 ## PHASE 2 — VALIDATE & FIX
@@ -99,9 +99,29 @@ pip index versions praisonaiagents | head -1
 pip index versions praisonai | head -1
 ```
 
-## PHASE 4 — UPDATE ADVISORIES (only after packages are on PyPI)
+13. Publish **praisonai-platform** (only when the advisory targets platform code):
+```bash
+cd /Users/praison/praisonai-package/src/praisonai-platform
+praisonai publish pypi
+# or: uv lock && uv build && uv publish --token $PYPI_TOKEN
+```
+Platform releases are **independent** of `praisonai` / `praisonaiagents` version numbers. A platform-only fix (e.g. `0.1.8`) does **not** require bumping the main SDK.
 
-13. For each advisory, reopen to draft state and set patched versions + credits:
+14. Publish **praisonai (npm / TypeScript)** (only when the advisory targets `src/praisonai-ts`):
+```bash
+cd /Users/praison/praisonai-package/src/praisonai-ts
+npm version patch && npm publish
+```
+
+15. Verify platform / npm when applicable:
+```bash
+pip index versions praisonai-platform | head -1
+npm view praisonai version
+```
+
+## PHASE 4 — UPDATE ADVISORIES (only after packages are on PyPI/npm)
+
+16. For each advisory, reopen to draft state and set patched versions + credits:
 ```bash
 gh api repos/MervinPraison/PraisonAI/security-advisories/<GHSA_ID> \
   --method PATCH \
@@ -119,34 +139,86 @@ gh api repos/MervinPraison/PraisonAI/security-advisories/<GHSA_ID> \
 }
 EOF
 ```
-- `<PACKAGE_NAME>`: `praisonaiagents` for core SDK, `praisonai` for wrapper
+- `<PACKAGE_NAME>`: `praisonaiagents` (core SDK), `praisonai` (Python wrapper), `praisonai-platform` (platform layer), or `praisonai` (npm ecosystem for TypeScript)
 - `<LAST_VULNERABLE_VERSION>`: version before the fix
 - `<FIRST_PATCHED_VERSION>`: the version just published with the fix
 - Always include credits for the reporter
 
-14. Publish each advisory:
+17. Publish each advisory:
 ```bash
 gh api repos/MervinPraison/PraisonAI/security-advisories/<GHSA_ID> \
   --method PATCH --field state=published
 ```
 
-15. Request CVE for each published advisory:
+18. Request CVE for each published advisory:
 ```bash
 gh api repos/MervinPraison/PraisonAI/security-advisories/<GHSA_ID>/cve --method POST
 ```
 GitHub reviews and assigns CVE IDs within 1-3 business days.
 
-16. Verify final state:
+19. Verify final state:
 ```bash
 gh api repos/MervinPraison/PraisonAI/security-advisories --jq '.[] | "\(.ghsa_id)  \(.state)  \(.cve_id // "pending")  \(.severity)  \([.credits[].login] | join(",") )  \(.summary | .[0:50])"'
 ```
 
+## MANAGING ONGOING AUDITS
+
+Continuous security reports are **expected** for an agent framework. Treat them as a product signal, not a crisis. Use a consistent process so triage stays manageable.
+
+### Triage labels
+
+After validating each advisory in source code, assign **one** label:
+
+| Label | Meaning | Action |
+|---|---|---|
+| `real` | Reproducible, valid security issue | Fix → publish → advisory |
+| `already-fixed` | Fixed in `main` but advisory still open | Set patched version to current release; publish advisory |
+| `duplicate` | Same root cause as another GHSA | Close or merge; link to primary advisory |
+| `not-reproducible` | Cannot reproduce with steps provided | Request more detail; hold in triage |
+| `theoretical` | Requires unlikely preconditions or no practical impact | Document reasoning; close as wontfix or low priority |
+| `documented-opt-out` | Behaviour is intentional with documented escape hatch | Close as wontfix; point to docs/env var |
+| `out-of-scope` | Wrong package, fork, or deployment the project does not ship | Close with explanation |
+
+### Triage load
+
+- Not every report is valid — filter with the labels above before writing code.
+- Batch related GHSAs (same file, same pattern) into one fix where possible.
+- Prefer regression tests per GHSA so fixes are not re-opened by the next audit round.
+
+### Version churn and release boundaries
+
+| Package | Version line | Notes |
+|---|---|---|
+| `praisonaiagents` + `praisonai` | Aligned patch (e.g. `1.6.62` / `4.6.62`) | Main SDK + wrapper; bump together via `bump_and_release.py` |
+| `praisonai-platform` | Independent semver (e.g. `0.1.8`) | Platform-only fixes; users need **not** upgrade the main SDK |
+| `praisonai` (npm) | Independent semver (e.g. `1.7.2`) | TypeScript SDK; publish from `src/praisonai-ts` |
+
+Always set the advisory `patched_versions` to the **package that actually contains the fix**. Do not imply users must upgrade all packages when only one changed.
+
+### Researcher incentives
+
+- Some reports are bounty-driven or low-quality — still acknowledge and triage promptly.
+- Credit valid reporters in the advisory even for small fixes.
+- Close invalid reports with a clear label and short rationale (no exploit discussion in public issues).
+- Never fix “for the sake of it” — see Phase 2 validate checks.
+
+### When to close as wontfix
+
+Close (or publish advisory with no code change only if already mitigated) when:
+
+- Documented opt-out exists and risk is accepted (e.g. localhost-only dev modes with explicit env vars).
+- Issue is theoretical with no realistic attack path in supported deployments.
+- Fix would remove existing features or materially bloat the SDK — escalate instead.
+- Duplicate of an existing published advisory.
+
 ## REFERENCE — Package-to-file mapping
 
-| Package | Canonical Path | Key files |
-|---|---|---|
-| praisonaiagents | src/praisonai-agents/praisonaiagents/ | tools/python_tools.py, mcp/, memory/, agent/ |
-| praisonai | src/praisonai/praisonai/ | ui/sql_alchemy.py, capabilities/, mcp_server/, cli/ |
+| Package | Ecosystem | Canonical Path | Key files |
+|---|---|---|---|
+| praisonaiagents | pip | src/praisonai-agents/praisonaiagents/ | tools/, mcp/, memory/, agent/, sandbox/ |
+| praisonai | pip | src/praisonai/praisonai/ | cli/, capabilities/, mcp_server/, sandbox/, recipe/ |
+| praisonai-platform | pip | src/praisonai-platform/praisonai_platform/ | api/routes/, services/, auth |
+| praisonai | npm | src/praisonai-ts/src/ | agent/, mcp/, tools/, code-mode/ |
 
 ## RESOURCES & DOCUMENTATION
 
@@ -160,8 +232,10 @@ gh api repos/MervinPraison/PraisonAI/security-advisories --jq '.[] | "\(.ghsa_id
 - NEVER expose exploit details in public issues or PRs
 - ALWAYS credit the reporter in the advisory
 - ALWAYS set patched_versions before publishing advisory
-- ALWAYS publish to PyPI BEFORE publishing advisories (so Dependabot can point users to a fix) - to publish `praisonai publish pypi` from praisonai-agents folder, after that 
-`cd /Users/praison/praisonai-package/src/praisonai && python scripts/bump_and_release.py 4.5.125 --agents 1.5.125 --wait`. 4.5.125 is praisonai version number and 1.5.125 is praisonaiagents version number. Last 2 numbers will be same 4/1.xx.xxx
+- ALWAYS publish to PyPI/npm BEFORE publishing advisories (so Dependabot can point users to a fix)
+- Python SDK: `praisonai publish pypi` from `src/praisonai-agents`, then `bump_and_release.py` for the wrapper
+- Platform-only: `praisonai publish pypi` from `src/praisonai-platform` — no SDK bump required
+- npm: `npm publish` from `src/praisonai-ts` when the TypeScript SDK is affected
 - ALWAYS request CVE AFTER publishing advisory
 - Use generic commit messages: "refactor: harden X" not "fix: SQL injection in Y"
 - Fix on main, push directly — no feature branches for security patches
@@ -172,7 +246,6 @@ gh api repos/MervinPraison/PraisonAI/security-advisories --jq '.[] | "\(.ghsa_id
 
 ## REPORTING SECURITY ISSUES
 
-If you discover a security vulnerability, please report it responsibly:
-1. Open a draft security advisory at https://github.com/MervinPraison/PraisonAI/security/advisories/new
-2. Include detailed reproduction steps and impact assessment
-3. Allow time for the maintainers to address the issue before public disclosure
+If you discover a security vulnerability, please report it responsibly. See [SECURITY.md](../../../../SECURITY.md) at the monorepo root for scope, supported packages, and the private advisory link.
+
+Maintainers and agents: use [.cursor/skills/security-audit/SKILL.md](../../.cursor/skills/security-audit/SKILL.md) for Cursor skill entry point.

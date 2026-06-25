@@ -100,14 +100,11 @@ async def test_call_auth_disabled_rejected_for_non_localhost_bind(monkeypatch):
 
     monkeypatch.delenv("CALL_SERVER_TOKEN", raising=False)
     monkeypatch.setenv("PRAISONAI_CALL_AUTH", "disabled")
+    monkeypatch.setenv("PRAISONAI_CALL_BIND_HOST", "0.0.0.0")
 
     from praisonai.api import agent_invoke
 
-    class _Url:
-        hostname = "0.0.0.0"
-
     class _Req:
-        url = _Url()
         query_params = {}
 
     with pytest.raises(HTTPException) as exc:
@@ -116,13 +113,15 @@ async def test_call_auth_disabled_rejected_for_non_localhost_bind(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_call_auth_disabled_allowed_on_localhost(monkeypatch):
+async def test_call_auth_disabled_rejects_spoofed_host_header(monkeypatch):
+    """GHSA-2gpf: client Host header must not bypass bind check."""
     pytest.importorskip("fastapi")
-    import warnings
 
     monkeypatch.delenv("CALL_SERVER_TOKEN", raising=False)
     monkeypatch.setenv("PRAISONAI_CALL_AUTH", "disabled")
+    monkeypatch.setenv("PRAISONAI_CALL_BIND_HOST", "0.0.0.0")
 
+    from fastapi import HTTPException
     from praisonai.api import agent_invoke
 
     class _Url:
@@ -132,6 +131,34 @@ async def test_call_auth_disabled_allowed_on_localhost(monkeypatch):
         url = _Url()
         query_params = {}
 
+    with pytest.raises(HTTPException):
+        await agent_invoke.verify_token(_Req(), authorization=None)
+
+
+@pytest.mark.asyncio
+async def test_call_auth_disabled_allowed_on_localhost(monkeypatch):
+    pytest.importorskip("fastapi")
+    import warnings
+
+    monkeypatch.delenv("CALL_SERVER_TOKEN", raising=False)
+    monkeypatch.setenv("PRAISONAI_CALL_AUTH", "disabled")
+    monkeypatch.setenv("PRAISONAI_CALL_BIND_HOST", "127.0.0.1")
+
+    from praisonai.api import agent_invoke
+
+    class _Req:
+        query_params = {}
+
     with warnings.catch_warnings(record=True):
         warnings.simplefilter("always")
         await agent_invoke.verify_token(_Req(), authorization=None)
+
+
+# GHSA-g6j7 deploy codegen
+def test_deploy_api_server_code_escapes_agents_file():
+    from praisonai.deploy.api import generate_api_server_code
+
+    malicious = 'agents.yaml"); import os; os.system("echo pwned'
+    code = generate_api_server_code(malicious)
+    assert f'agent_file="{malicious}"' not in code
+    assert f"PraisonAI(agent_file={repr(malicious)})" in code

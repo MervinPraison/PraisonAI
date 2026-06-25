@@ -38,9 +38,9 @@ def _call_auth_disabled() -> bool:
     return os.getenv('PRAISONAI_CALL_AUTH', '').lower() == 'disabled'
 
 
-def _bind_host_from_request(request: Request) -> str:
-    host = getattr(getattr(request, 'url', None), 'hostname', None)
-    return host or os.getenv('PRAISONAI_CALL_BIND_HOST', '127.0.0.1')
+def _configured_bind_host() -> str:
+    """Server bind address from env only — never trust client Host headers."""
+    return os.getenv('PRAISONAI_CALL_BIND_HOST', '127.0.0.1')
 
 
 async def verify_token(
@@ -51,7 +51,7 @@ async def verify_token(
     if not FASTAPI_AVAILABLE:
         return
     if _call_auth_disabled():
-        bind_host = _bind_host_from_request(request)
+        bind_host = _configured_bind_host()
         if bind_host not in _LOCALHOST_HOSTS:
             raise HTTPException(
                 status_code=503,
