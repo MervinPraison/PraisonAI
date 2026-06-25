@@ -18,19 +18,19 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 20 | 41 | 11111 |
+| ✅ Agent | 20 | 42 | 11340 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2880 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 575 |
 | ✅ Approval | 1 | 3 | 1344 |
 | ✅ Audio | 2 | 10 | 649 |
 | ✅ Auto Generation | 5 | 6 | 1637 |
 | ✅ Autonomy | 3 | 5 | 1919 |
-| ✅ Bots | 7 | 23 | 7357 |
+| ✅ Bots | 7 | 23 | 7710 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 107 | 26699 |
+| ✅ CLI | 5 | 107 | 26753 |
 | ✅ Chunking | 2 | 2 | 288 |
 | ✅ Citations | 2 | 1 | 202 |
-| ✅ Code Execution | 2 | 13 | 3551 |
+| ✅ Code Execution | 2 | 13 | 3554 |
 | ✅ Conditions | 1 | 3 | 1085 |
 | ✅ Configuration | 3 | 7 | 2160 |
 | ✅ Context Management | 16 | 33 | 10280 |
@@ -44,12 +44,12 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 372 |
 | ✅ Files | 2 | 6 | 1632 |
 | ✅ Flow | 1 | 2 | 435 |
-| ✅ Gateway | 7 | 19 | 6767 |
+| ✅ Gateway | 7 | 19 | 6769 |
 | ✅ Guardrails | 4 | 4 | 1619 |
 | ✅ Handoffs | 11 | 6 | 2499 |
 | ✅ Hooks | 2 | 8 | 3146 |
 | ✅ Image | 1 | 11 | 1096 |
-| ✅ Knowledge | 4 | 23 | 4282 |
+| ✅ Knowledge | 4 | 24 | 4525 |
 | ✅ LLM | 3 | 10 | 3674 |
 | ✅ Loops | 4 | 3 | 774 |
 | ✅ MCP | 1 | 51 | 10939 |
@@ -64,24 +64,24 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Prompts | 2 | 7 | 1569 |
 | ✅ Providers | 1 | 52 | 6214 |
 | ✅ Query | 1 | 2 | 616 |
-| ✅ RAG | 5 | 15 | 3190 |
+| ✅ RAG | 5 | 15 | 3193 |
 | ✅ Realtime | 2 | 5 | 584 |
 | ✅ Reflection | 3 | 2 | 477 |
-| ✅ Retrieval | 2 | 5 | 944 |
+| ✅ Retrieval | 2 | 5 | 945 |
 | ✅ Routing | 1 | 2 | 597 |
-| ✅ Sandbox | 5 | 6 | 2478 |
-| ✅ Security | 1 | 3 | 2550 |
-| ✅ Sessions | 4 | 11 | 3445 |
-| ✅ Skills | 6 | 10 | 3641 |
+| ✅ Sandbox | 5 | 6 | 2512 |
+| ✅ Security | 1 | 3 | 2563 |
+| ✅ Sessions | 4 | 12 | 3793 |
+| ✅ Skills | 6 | 10 | 3663 |
 | ✅ Tasks | 2 | 6 | 3064 |
 | ✅ Telemetry | 1 | 2 | 560 |
 | ✅ Templates | 1 | 7 | 1411 |
-| ✅ Tools | 12 | 118 | 25896 |
+| ✅ Tools | 12 | 118 | 25895 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Video | 2 | 6 | 510 |
 | ✅ Vision | 2 | 1 | 283 |
-| ✅ Web | 3 | 6 | 1352 |
-| ✅ Workflows | 4 | 14 | 5810 |
+| ✅ Web | 3 | 7 | 1533 |
+| ✅ Workflows | 4 | 14 | 5893 |
 
 ## Undocumented Categories (Need Documentation)
 
