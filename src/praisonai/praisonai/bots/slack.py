@@ -36,6 +36,11 @@ from ._commands import (
     handle_compress_command,
     handle_queue_command,
     handle_learn_command,
+    handle_undo_command,
+    handle_sessions_command,
+    handle_resume_command,
+    handle_reasoning_command,
+    get_last_user_message,
     build_command_access_policy,
 )
 from ._session import BotSessionManager
@@ -291,6 +296,50 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                 parts = text.split(maxsplit=1)
                 request = parts[1] if len(parts) > 1 else None
                 response = handle_learn_command(self._agent, request)
+                await say(text=response, thread_ts=event.get("ts"))
+                return
+            elif text == "/undo":
+                response = handle_undo_command(self._agent)
+                await say(text=response, thread_ts=event.get("ts"))
+                return
+            elif text == "/sessions":
+                user_id = event.get("user", "unknown")
+                response = handle_sessions_command(self._session, user_id)
+                await say(text=response, thread_ts=event.get("ts"))
+                return
+            elif text.split(maxsplit=1)[:1] == ["/resume"]:
+                user_id = event.get("user", "unknown")
+                parts = text.split(maxsplit=1)
+                session_id = parts[1] if len(parts) > 1 else None
+                response = handle_resume_command(self._session, user_id, session_id)
+                await say(text=response, thread_ts=event.get("ts"))
+                return
+            elif text == "/retry":
+                user_id = event.get("user", "unknown")
+                last_user_msg = get_last_user_message(self._session, user_id)
+                if not last_user_msg:
+                    await say(
+                        text="ℹ️ Nothing to retry — no previous message found.",
+                        thread_ts=event.get("ts"),
+                    )
+                    return
+                await say(text="🔁 Retrying your last message…", thread_ts=event.get("ts"))
+                try:
+                    response = await self._session.chat(
+                        self._agent, user_id, last_user_msg,
+                        chat_id=str(event.get("channel", "")),
+                        thread_id=event.get("thread_ts", "") or "",
+                        message_id=event.get("ts", ""),
+                        account=self._config.get("account", "default"),
+                    )
+                    await say(text=response, thread_ts=event.get("ts"))
+                except Exception as e:  # noqa: BLE001 - surface a friendly message
+                    logger.warning("retry failed: %s", e)
+                    await say(text=f"❌ Retry failed: {e}", thread_ts=event.get("ts"))
+                return
+            elif text == "/reasoning":
+                user_id = event.get("user", "unknown")
+                response = handle_reasoning_command(self._session, user_id, self._agent)
                 await say(text=response, thread_ts=event.get("ts"))
                 return
             

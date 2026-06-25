@@ -37,6 +37,11 @@ from ._commands import (
     handle_compress_command,
     handle_queue_command,
     handle_learn_command,
+    handle_undo_command,
+    handle_sessions_command,
+    handle_resume_command,
+    handle_reasoning_command,
+    get_last_user_message,
     build_command_access_policy,
     get_command_registry
 )
@@ -765,6 +770,93 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             response = handle_learn_command(self._agent, request)
             await update.message.reply_text(response)
 
+        async def handle_undo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message:
+                return
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return
+            user_id = message.sender.user_id if message.sender else "unknown"
+            if not self._command_policy.can_run(user_id, "undo"):
+                await update.message.reply_text("⛔ You are not permitted to run /undo")
+                return
+            response = handle_undo_command(self._agent)
+            await update.message.reply_text(response)
+
+        async def handle_sessions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message:
+                return
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return
+            user_id = message.sender.user_id if message.sender else "unknown"
+            if not self._command_policy.can_run(user_id, "sessions"):
+                await update.message.reply_text("⛔ You are not permitted to run /sessions")
+                return
+            response = handle_sessions_command(self._session, user_id)
+            await update.message.reply_text(response)
+
+        async def handle_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message or not update.message.text:
+                return
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return
+            user_id = message.sender.user_id if message.sender else "unknown"
+            if not self._command_policy.can_run(user_id, "resume"):
+                await update.message.reply_text("⛔ You are not permitted to run /resume")
+                return
+            parts = update.message.text.split(maxsplit=1)
+            session_id = parts[1] if len(parts) > 1 else None
+            response = handle_resume_command(self._session, user_id, session_id)
+            await update.message.reply_text(response)
+
+        async def handle_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message:
+                return
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return
+            user_id = message.sender.user_id if message.sender else "unknown"
+            if not self._command_policy.can_run(user_id, "retry"):
+                await update.message.reply_text("⛔ You are not permitted to run /retry")
+                return
+            last_user_msg = get_last_user_message(self._session, user_id)
+            if not last_user_msg:
+                await update.message.reply_text(
+                    "ℹ️ Nothing to retry — no previous message found."
+                )
+                return
+            user_name = (
+                update.message.from_user.username or update.message.from_user.first_name or ""
+            ) if update.message.from_user else ""
+            await update.message.reply_text("🔁 Retrying your last message…")
+            try:
+                response = await self._session.chat(
+                    self._agent, user_id, last_user_msg,
+                    chat_id=str(update.message.chat_id) if update.message.chat_id else "",
+                    user_name=user_name,
+                    message_id=str(update.message.message_id),
+                    account=self.config.get("account", "default"),
+                )
+                await update.message.reply_text(response)
+            except Exception as e:  # noqa: BLE001 - surface a friendly message
+                logger.warning("retry failed: %s", e)
+                await update.message.reply_text(f"❌ Retry failed: {e}")
+
+        async def handle_reasoning(update: Update, context: ContextTypes.DEFAULT_TYPE):
+            if not update.message:
+                return
+            message = await process_inbound_telegram_message(update, self)
+            if not message:
+                return
+            user_id = message.sender.user_id if message.sender else "unknown"
+            if not self._command_policy.can_run(user_id, "reasoning"):
+                await update.message.reply_text("⛔ You are not permitted to run /reasoning")
+                return
+            response = handle_reasoning_command(self._session, user_id, self._agent)
+            await update.message.reply_text(response)
+
         self._application.add_handler(CommandHandler("status", handle_status))
         self._application.add_handler(CommandHandler("new", handle_new))
         self._application.add_handler(CommandHandler("help", handle_help))
@@ -775,6 +867,11 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._application.add_handler(CommandHandler("compress", handle_compress))
         self._application.add_handler(CommandHandler("queue", handle_queue))
         self._application.add_handler(CommandHandler("learn", handle_learn))
+        self._application.add_handler(CommandHandler("undo", handle_undo))
+        self._application.add_handler(CommandHandler("sessions", handle_sessions))
+        self._application.add_handler(CommandHandler("resume", handle_resume))
+        self._application.add_handler(CommandHandler("retry", handle_retry))
+        self._application.add_handler(CommandHandler("reasoning", handle_reasoning))
         
         for command in self._command_handlers:
             self._application.add_handler(CommandHandler(command, handle_command))

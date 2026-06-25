@@ -7,12 +7,15 @@ Telegram, Discord, and Slack bots.  Keep them in one place.
 
 from __future__ import annotations
 
+import logging
 import time
-from typing import Callable, Dict, Optional, Set, TYPE_CHECKING, Any
+from typing import Callable, Dict, List, Optional, Set, TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from praisonaiagents import Agent
     from ._run_control import SessionRunControl
+
+logger = logging.getLogger(__name__)
 
 
 class CommandAccessPolicy:
@@ -130,6 +133,12 @@ class CommandRegistry:
         self.register("queue", {"description": "Queue a follow-up message", "builtin": True})
         # Learn a grounded skill from sources (codebase, docs, PDFs, or this chat)
         self.register("learn", {"description": "Learn a reusable skill from sources you describe (e.g. /learn deploy steps from this repo)", "builtin": True})
+        # Conversation-control primitives surfacing existing core capabilities
+        self.register("undo", {"description": "Undo the last turn's file changes", "builtin": True})
+        self.register("sessions", {"description": "List recent saved sessions/checkpoints", "builtin": True})
+        self.register("resume", {"description": "Resume a saved session: /resume <id>", "builtin": True})
+        self.register("retry", {"description": "Retry your last message", "builtin": True})
+        self.register("reasoning", {"description": "Toggle whether extended-thinking output is shown", "builtin": True})
     
     def register(
         self, 
@@ -775,3 +784,283 @@ def handle_learn_command(
         return str(result) if result else "✅ Skill authored."
     except Exception as e:  # noqa: BLE001 - surface a friendly message
         return f"❌ Could not learn skill: {e}"
+
+
+def handle_undo_command(
+    agent: Optional["Agent"],
+) -> str:
+    """Handle /undo to rewind the last turn's file changes.
+
+    Surfaces the existing core primitive :meth:`Agent.undo`, which restores
+    files to the state before the last autonomous iteration. Available only
+    when the agent tracks changes (``autonomy`` with ``track_changes``); the
+    handler degrades gracefully otherwise.
+
+    Args:
+        agent: The bot's agent (may be None).
+
+    Returns:
+        Response message indicating whether anything was reverted.
+    """
+    if agent is None:
+        return "❌ Undo is not available (no agent configured)."
+
+    undo_fn = getattr(agent, "undo", None)
+    if not callable(undo_fn):
+        return "❌ This agent does not support undo (change tracking not enabled)."
+
+    try:
+        reverted = undo_fn()
+    except Exception as e:  # noqa: BLE001 - surface a friendly message
+        return f"❌ Could not undo: {e}"
+
+    return "✅ Reverted the last turn." if reverted else "ℹ️ Nothing to undo."
+
+
+def handle_sessions_command(
+    session_manager,
+    user_id: str,
+) -> str:
+    """Handle /sessions to list recent saved sessions.
+
+    Lists the conversation sessions the gateway is currently tracking so a
+    user can pick one to ``/resume``. Falls back gracefully when the session
+    manager does not expose session keys.
+
+    Args:
+        session_manager: BotSessionManager instance.
+        user_id: User ID requesting the listing.
+
+    Returns:
+        A formatted list of session identifiers, or guidance.
+    """
+    # Scope every lookup to the requesting user's storage key so one user can
+    # never enumerate another user's sessions (the in-memory `_histories` map
+    # is a *shared* dict keyed by per-user storage key).
+    storage_key = user_id
+    if hasattr(session_manager, "_storage_key"):
+        try:
+            storage_key = session_manager._storage_key(user_id)
+        except Exception:
+            storage_key = user_id
+
+    keys: List[str] = []
+    list_fn = getattr(session_manager, "list_sessions", None)
+    if callable(list_fn):
+        try:
+            # Prefer a user-scoped contract when the manager supports it;
+            # fall back to an unfiltered call only if the signature rejects it.
+            try:
+                keys = list(list_fn(user_id))
+            except TypeError:
+                keys = list(list_fn())
+        except Exception:
+            keys = []
+    elif hasattr(session_manager, "_histories"):
+        try:
+            # Only surface the caller's own session, never other users' keys.
+            if storage_key in session_manager._histories:
+                keys = [storage_key]
+        except Exception:
+            keys = []
+
+    if not keys:
+        return "No saved sessions yet."
+
+    lines = ["📁 Recent sessions:"]
+    for key in keys[:50]:
+        lines.append(f"• {key}")
+    lines.append("\nUse /resume <id> to switch to one.")
+    return "\n".join(lines)
+
+
+def handle_resume_command(
+    session_manager,
+    user_id: str,
+    session_id: Optional[str] = None,
+) -> str:
+    """Handle /resume to switch to a previously saved session.
+
+    Args:
+        session_manager: BotSessionManager instance.
+        user_id: User ID issuing the command.
+        session_id: Identifier of the session to resume.
+
+    Returns:
+        Response message confirming the resume, or usage guidance.
+    """
+    if not session_id or not session_id.strip():
+        return "ℹ️ Usage: /resume <id>  (see /sessions for the list)"
+
+    session_id = session_id.strip()
+
+    resume_fn = getattr(session_manager, "resume_session", None)
+    if callable(resume_fn):
+        try:
+            ok = resume_fn(user_id, session_id)
+        except Exception as e:  # noqa: BLE001
+            return f"❌ Could not resume session: {e}"
+        return (
+            f"✅ Resumed session {session_id}."
+            if ok
+            else f"❌ Session {session_id} not found."
+        )
+
+    # No resume_session() primitive on this manager. Be honest: we can confirm
+    # whether a session exists, but we cannot switch the active conversation to
+    # it, so we must not claim the resume succeeded.
+    if hasattr(session_manager, "_histories"):
+        if session_id in session_manager._histories:
+            return (
+                "ℹ️ This bot can see saved sessions, but switching to a "
+                "different one isn't supported here (no resume primitive)."
+            )
+        return f"❌ Session {session_id} not found. Use /sessions to list them."
+
+    return "❌ Resuming sessions isn't supported by this bot."
+
+
+def get_last_user_message(
+    session_manager,
+    user_id: str,
+) -> Optional[str]:
+    """Return the most recent non-empty user message for *user_id*, or None.
+
+    Adapters use this to actually re-dispatch the prior turn through the normal
+    conversation path (``session.chat(...)``) so ``/retry`` re-runs the message
+    instead of merely echoing it.
+
+    Args:
+        session_manager: BotSessionManager instance.
+        user_id: User ID issuing the command.
+
+    Returns:
+        The previous user message text, or ``None`` if there is nothing to retry.
+    """
+    storage_key = user_id
+    if hasattr(session_manager, "_storage_key"):
+        try:
+            storage_key = session_manager._storage_key(user_id)
+        except Exception:
+            storage_key = user_id
+
+    history: List[Dict[str, Any]] = []
+    if hasattr(session_manager, "_histories"):
+        history = session_manager._histories.get(storage_key, []) or []
+
+    for msg in reversed(history):
+        if msg.get("role") == "user":
+            content = msg.get("content")
+            if isinstance(content, str) and content.strip():
+                return content
+    return None
+
+
+def handle_retry_command(
+    session_manager,
+    user_id: str,
+) -> str:
+    """Handle /retry to re-run the user's last message.
+
+    Looks up the most recent user turn so the caller can re-submit it. Adapters
+    should call :func:`get_last_user_message` and re-dispatch the returned text
+    through their normal ``session.chat(...)`` path; this helper returns a
+    user-facing acknowledgement (or guidance when there's nothing to retry).
+
+    Args:
+        session_manager: BotSessionManager instance.
+        user_id: User ID issuing the command.
+
+    Returns:
+        A short acknowledgement, or guidance when there's nothing to retry.
+    """
+    last_user_msg = get_last_user_message(session_manager, user_id)
+
+    if not last_user_msg:
+        return "ℹ️ Nothing to retry — no previous message found."
+
+    return f"🔁 Retrying your last message:\n{last_user_msg}"
+
+
+# Tracks per-user reasoning-visibility preferences for /reasoning. Stored on
+# the session manager when available so it survives alongside other per-user
+# state; falls back to this module-level map otherwise.
+_reasoning_visibility: Dict[str, bool] = {}
+
+
+def handle_reasoning_command(
+    session_manager,
+    user_id: str,
+    agent: Optional["Agent"] = None,
+) -> str:
+    """Handle /reasoning to toggle extended-thinking visibility.
+
+    Toggles whether extended-thinking ("reasoning") output is shown to the
+    user for this conversation. The preference is stored per user on the
+    session manager when possible so the gateway can consult it when rendering
+    responses.
+
+    Args:
+        session_manager: BotSessionManager instance.
+        user_id: User ID issuing the command.
+        agent: Current agent instance (optional).
+
+    Returns:
+        Response message reflecting the new visibility state.
+    """
+    storage_key = user_id
+    if hasattr(session_manager, "_storage_key"):
+        try:
+            storage_key = session_manager._storage_key(user_id)
+        except Exception:
+            storage_key = user_id
+
+    store = getattr(session_manager, "_reasoning_visibility", None)
+    if store is None:
+        if session_manager is not None and not hasattr(
+            session_manager, "_reasoning_visibility"
+        ):
+            try:
+                session_manager._reasoning_visibility = {}
+                store = session_manager._reasoning_visibility
+            except Exception:
+                store = _reasoning_visibility
+        else:
+            store = _reasoning_visibility
+
+    current = store.get(storage_key, False)
+    new_state = not current
+    store[storage_key] = new_state
+
+    return (
+        "🧠 Reasoning output will be shown for this conversation."
+        if new_state
+        else "🙈 Reasoning output will be hidden for this conversation."
+    )
+
+
+def is_reasoning_visible(session_manager, user_id: str) -> bool:
+    """Return the current /reasoning visibility preference for *user_id*.
+
+    Response-rendering code can consult this to decide whether to include
+    extended-thinking output. Defaults to ``False`` (hidden) when no
+    preference has been set.
+
+    Args:
+        session_manager: BotSessionManager instance.
+        user_id: User ID whose preference to read.
+
+    Returns:
+        ``True`` if reasoning output should be shown, else ``False``.
+    """
+    storage_key = user_id
+    if hasattr(session_manager, "_storage_key"):
+        try:
+            storage_key = session_manager._storage_key(user_id)
+        except Exception:
+            storage_key = user_id
+
+    store = getattr(session_manager, "_reasoning_visibility", None)
+    if not isinstance(store, dict):
+        store = _reasoning_visibility
+    return bool(store.get(storage_key, False))
