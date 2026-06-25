@@ -214,8 +214,13 @@ def example_subagent_delegation():
     assert hasattr(agent, "delegate"), "Agent should have delegate method"
     assert callable(agent.delegate), "delegate should be callable"
     
-    # Check _create_subagent method
-    subagent = agent._create_subagent("explorer")
+    # Create a subagent using the public profile API
+    from praisonaiagents.agents.profiles import BUILTIN_PROFILES, get_profile
+    explorer_profile = get_profile("explorer") if "explorer" in BUILTIN_PROFILES else None
+    subagent = Agent(
+        name="subagent_explorer",
+        instructions=explorer_profile.system_prompt if explorer_profile else "You are an explorer assistant.",
+    )
     print(f"Created subagent: {subagent.name}")
     print(f"Subagent instructions: {subagent.instructions[:50]}...")
     

@@ -4063,37 +4063,6 @@ Summary:"""
         )
         return await handoff_obj.execute_async(self, prompt, context)
     
-    def _create_subagent(
-        self,
-        profile: str,
-        context: Optional[Dict[str, Any]] = None,
-    ) -> 'Agent':
-        """Create a subagent with the specified profile.
-        
-        Args:
-            profile: Agent profile name
-            context: Additional context
-            
-        Returns:
-            Configured Agent instance
-        """
-        from ..agents.profiles import get_profile, BUILTIN_PROFILES
-        
-        # Get profile config
-        profile_config = get_profile(profile) if profile in BUILTIN_PROFILES else None
-        
-        if profile_config:
-            return Agent(
-                name=f"subagent_{profile}",
-                instructions=profile_config.system_prompt,
-            )
-        else:
-            # Default subagent
-            return Agent(
-                name=f"subagent_{profile}",
-                instructions=f"You are a {profile} assistant.",
-            )
-    
     # -------------------------------------------------------------------------
     #                     Runtime Capability Management
     # -------------------------------------------------------------------------
