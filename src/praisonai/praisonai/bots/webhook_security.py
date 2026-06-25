@@ -16,9 +16,22 @@ import hashlib
 import hmac
 import logging
 import os
-from typing import Iterable, Mapping, Optional, Union
+from typing import Iterable, Mapping, Optional, Protocol, Union, runtime_checkable
 
 logger = logging.getLogger(__name__)
+
+
+@runtime_checkable
+class _WebhookVerifier(Protocol):
+    """Structural type mirroring ``praisonaiagents.bots.WebhookVerifierProtocol``.
+
+    Declared locally to keep this wrapper module dependency-light while still
+    giving static type checkers a precise signature for the ``verifier``
+    argument of :func:`enforce_webhook_verification`.
+    """
+
+    def verify(self, *, headers: Mapping[str, str], raw_body: bytes) -> bool: ...
+
 
 __all__ = [
     "HmacWebhookVerifier",
@@ -52,12 +65,16 @@ def verify_hmac(
         body: Raw request body bytes (or str, encoded as utf-8).
         signature: Signature header value provided by the platform.
         digest: Hash algorithm name (e.g. "sha256", "sha1").
-        prefix: Optional signature prefix to strip/compare (e.g. "sha256=").
+        prefix: Optional signature prefix. When provided, the comparison is
+            performed against the fully-prefixed computed value (e.g.
+            ``"sha256=<hex>"``), so callers must pass the raw, prefixed header
+            value unchanged. When omitted, any ``algo=`` style prefix on the
+            provided signature is auto-stripped before comparison.
 
     Returns:
         True only if a non-empty signature matches the computed HMAC using a
-        constant-time comparison. Fail-closed: missing secret or signature
-        returns False.
+        constant-time comparison. Fail-closed: a missing secret/signature or an
+        unknown ``digest`` algorithm returns False (never raises).
     """
     if not secret or not signature:
         return False
@@ -70,7 +87,12 @@ def verify_hmac(
     except AttributeError:
         digestmod = lambda d=b"": hashlib.new(digest, d)  # noqa: E731
 
-    computed = hmac.new(secret_bytes, body_bytes, digestmod).hexdigest()
+    # Fail-closed on an unknown/invalid algorithm rather than letting
+    # hmac.new() raise ValueError up the call stack (would surface as HTTP 500).
+    try:
+        computed = hmac.new(secret_bytes, body_bytes, digestmod).hexdigest()
+    except (ValueError, TypeError):
+        return False
 
     provided = signature
     if prefix:
@@ -138,7 +160,7 @@ class HmacWebhookVerifier:
 def enforce_webhook_verification(
     *,
     accepts_webhooks: bool,
-    verifier: Optional["object"],
+    verifier: Optional[_WebhookVerifier],
     headers: Mapping[str, str],
     raw_body: bytes,
     platform: str = "",

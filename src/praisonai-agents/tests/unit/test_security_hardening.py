@@ -48,6 +48,12 @@ def test_verify_hmac_prefix_and_algo():
     assert verify_hmac(secret, body, f"sha256={digest}") is True
 
 
+def test_verify_hmac_unknown_digest_fails_closed():
+    from praisonai.bots.webhook_security import verify_hmac
+
+    assert verify_hmac("s3cret", b"payload", "deadbeef", digest="not-a-real-algo") is False
+
+
 def test_hmac_webhook_verifier_case_insensitive_header():
     import hashlib
     import hmac
