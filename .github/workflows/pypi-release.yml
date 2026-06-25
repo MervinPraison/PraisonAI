@@ -184,16 +184,19 @@ jobs:
       - name: Publish praisonaiagents
         if: inputs.dry_run != true && inputs.skip_agents != true
         working-directory: src/praisonai-agents
+        env:
+          NEW_VERSION: ${{ steps.versions.outputs.agents_version }}
+          CURRENT: ${{ steps.versions.outputs.current_agents }}
         run: |
           set -euo pipefail
-          NEW_VERSION="${{ steps.versions.outputs.agents_version }}"
-          CURRENT="${{ steps.versions.outputs.current_agents }}"
-
-          python <<PY
+          python <<'PY'
+          import os
           from pathlib import Path
           path = Path("pyproject.toml")
           content = path.read_text()
-          path.write_text(content.replace(f'version = "{CURRENT}"', f'version = "{NEW_VERSION}"', 1))
+          current = os.environ["CURRENT"]
+          new = os.environ["NEW_VERSION"]
+          path.write_text(content.replace(f'version = "{current}"', f'version = "{new}"', 1))
           PY
 
           rm -rf dist
