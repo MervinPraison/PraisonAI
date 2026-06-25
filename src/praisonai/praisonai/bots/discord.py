@@ -37,7 +37,6 @@ from ._commands import (
     handle_undo_command,
     handle_sessions_command,
     handle_resume_command,
-    handle_retry_command,
     handle_reasoning_command,
     get_last_user_message,
     build_command_access_policy,
