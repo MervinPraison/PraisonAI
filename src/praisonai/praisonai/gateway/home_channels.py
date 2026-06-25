@@ -11,7 +11,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from praisonaiagents.gateway.protocols import (
     DeliveryResolverProtocol,
@@ -132,13 +132,58 @@ class DeliveryResolver(DeliveryResolverProtocol):
     targets at fire time.
     """
     
-    def __init__(self, home_registry: HomeChannelRegistryProtocol):
+    def __init__(
+        self,
+        home_registry: HomeChannelRegistryProtocol,
+        *,
+        directory: Optional[Any] = None,
+    ):
         """Initialize the delivery resolver.
         
         Args:
-            home_registry: Registry for looking up home channels
+            home_registry: Registry for looking up home channels.
+            directory: Optional channel directory (e.g. a
+                ``praisonai.bots.delivery.ChannelDirectory``) exposing
+                ``resolve_alias(name) -> Optional[(platform, channel_id)]``.
+                When supplied, friendly aliases/names can be used as delivery
+                tokens. Resolution falls back to the single home channel for
+                full backward compatibility when no alias matches.
         """
         self._home_registry = home_registry
+        self._directory = directory
+    
+    def _resolve_alias(self, token: str) -> Optional[DeliveryTarget]:
+        """Resolve a friendly alias/name via the optional channel directory.
+        
+        Returns a concrete ``DeliveryTarget`` when the directory knows the
+        alias, otherwise ``None`` so the caller falls through to the
+        unresolved-token warning and returns an empty list.
+        """
+        if self._directory is None:
+            return None
+        resolve_alias = getattr(self._directory, "resolve_alias", None)
+        if not callable(resolve_alias):
+            return None
+        try:
+            resolved = resolve_alias(token)
+        except Exception as e:
+            logger.warning("Channel directory alias lookup failed for %s: %s", token, e)
+            return None
+        if not resolved:
+            return None
+        try:
+            platform, chat_id = resolved
+        except (TypeError, ValueError) as e:
+            logger.warning(
+                "Channel directory alias lookup returned invalid target for %s: %s",
+                token, e,
+            )
+            return None
+        return DeliveryTarget(
+            channel=platform,
+            channel_id=chat_id,
+            thread_id=None,
+        )
     
     def resolve(
         self,
@@ -152,6 +197,7 @@ class DeliveryResolver(DeliveryResolverProtocol):
         - "origin": Reply to the chat where the job was created (requires origin)
         - "<platform>": That platform's home channel
         - "<platform>:<chat_id>[:<thread_id>]": Explicit target
+        - "<alias>": Friendly name from the channel directory (if configured)
         - "all": Fan-out to every connected platform with a home channel
         
         Args:
@@ -213,6 +259,13 @@ class DeliveryResolver(DeliveryResolverProtocol):
                 channel_id=chat_id,
                 thread_id=thread_id,
             )]
+        
+        # Handle friendly alias/name via the optional channel directory.
+        # Checked after platform/home resolution so existing tokens keep their
+        # meaning; aliases only resolve names that are not platforms.
+        alias_target = self._resolve_alias(token)
+        if alias_target is not None:
+            return [alias_target]
         
         logger.warning("Could not resolve delivery token: %s", token)
         return []
