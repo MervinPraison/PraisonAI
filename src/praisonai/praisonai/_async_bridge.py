@@ -31,11 +31,18 @@ class AsyncBridge:
         The thread is marked ``daemon=True`` so that short-lived scripts
         (e.g. CLI commands, smoke tests) exit cleanly without waiting on
         the background loop to be shut down explicitly. Long-running
-        server processes should call :func:`shutdown` explicitly to cancel
+        server processes should call :meth:`shutdown` explicitly to cancel
         in-flight tasks before process exit.
         """
-        # Create the loop+thread; caller must hold self._lock.
-        # The lock contract is now enforced structurally by submit() method.
+        # Enforce the "caller must hold the lock" contract. A non-reentrant
+        # ``Lock`` that is currently held cannot be acquired again (even by the
+        # owning thread), so a successful non-blocking acquire here proves the
+        # lock was *not* held by the caller.
+        if self._lock.acquire(blocking=False):
+            self._lock.release()
+            raise AssertionError(
+                "_spawn_locked() must be called while holding self._lock"
+            )
         if self._loop is None or self._loop.is_closed():
             self._loop = asyncio.new_event_loop()
             self._thread = threading.Thread(
@@ -112,17 +119,42 @@ class AsyncBridge:
             if not loop.is_closed():
                 loop.close()
 
-# Backwards-compatible module-level shared default:
-_DEFAULT_BRIDGE: AsyncBridge | None = None
-_DEFAULT_LOCK = threading.Lock()
+# Backwards-compatible module-level shared default.
+#
+# The shared bridge's lifecycle is owned exclusively by the process (via the
+# ``atexit`` hook registered on first use). It is intentionally NOT exposed as a
+# public ``shutdown()`` on the module surface: in a multi-agent / multi-tenant
+# process every ``run_sync()`` caller shares this single loop+thread, so allowing
+# any one caller to tear it down would silently cancel in-flight work belonging
+# to every other agent/session. Embedders that need explicit lifecycle control
+# must construct and own their own :class:`AsyncBridge` instance and pass it via
+# dependency injection.
+import atexit
+
+# Single stable shared instance. It is created eagerly (cheap: no loop/thread is
+# spawned until the first ``run_sync()`` call) so the reference never has to be
+# rebound. Keeping the *same* object means callers that captured ``_BG`` always
+# observe its live state, and only the process-exit hook tears it down.
+_BG: AsyncBridge = AsyncBridge()
+
 
 def _default_bridge() -> AsyncBridge:
-    global _DEFAULT_BRIDGE
-    if _DEFAULT_BRIDGE is None:
-        with _DEFAULT_LOCK:
-            if _DEFAULT_BRIDGE is None:
-                _DEFAULT_BRIDGE = AsyncBridge()
-    return _DEFAULT_BRIDGE
+    return _BG
+
+
+def _shutdown_default() -> None:
+    """Private process-exit hook: tear down the shared default bridge.
+
+    Registered with :mod:`atexit`. This is the ONLY sanctioned way the shared
+    default is shut down; it is deliberately absent from the public module
+    surface so a single caller cannot terminate async work for the whole
+    process. Embedders needing explicit lifecycle control own their own
+    :class:`AsyncBridge` instance.
+    """
+    _BG.shutdown()
+
+
+atexit.register(_shutdown_default)
 
 
 def run_sync(coro: Awaitable[T], *, timeout: float | None = _DEFAULT_TIMEOUT) -> T:
@@ -145,12 +177,3 @@ def run_sync(coro: Awaitable[T], *, timeout: float | None = _DEFAULT_TIMEOUT) ->
         Any exception raised by the coroutine
     """
     return _default_bridge().run_sync(coro, timeout=timeout)
-
-
-def shutdown() -> None:
-    """Shut down ONLY the shared default bridge (not user-owned instances)."""
-    global _DEFAULT_BRIDGE
-    with _DEFAULT_LOCK:
-        if _DEFAULT_BRIDGE is not None:
-            _DEFAULT_BRIDGE.shutdown()
-            _DEFAULT_BRIDGE = None

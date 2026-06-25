@@ -61,16 +61,18 @@ class TestAutoLazyLoading:
         assert isinstance(result, bool)
     
     def test_framework_availability_functions_exist(self):
-        """Test that lazy loading functions exist."""
+        """Test that lazy loading infrastructure exists.
+
+        Framework availability is delegated to the centralized
+        ``_framework_availability.is_available`` helper, and framework
+        resolution goes through the canonical FrameworkAdapter protocol +
+        registry (framework_adapters/). The old hand-rolled per-framework
+        loaders/checkers were removed.
+        """
         from praisonai import auto
-        
-        # These functions should exist for lazy loading
-        assert hasattr(auto, '_check_crewai_available')
-        assert hasattr(auto, '_check_autogen_available')
-        assert hasattr(auto, '_check_praisonai_available')
-        assert hasattr(auto, '_get_crewai')
-        assert hasattr(auto, '_get_autogen')
-        assert hasattr(auto, '_get_praisonai')
+
+        assert hasattr(auto, 'is_available')
+        assert hasattr(auto, 'lazy_get')
 
 
 class TestSafeStringSubstitution:

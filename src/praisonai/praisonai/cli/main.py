@@ -167,15 +167,26 @@ def _get_gradio():
     return gr
 
 def _get_autogen():
-    """Lazy import autogen only when autogen framework is used.
-    
+    """Resolve the autogen framework via the canonical adapter registry.
+
+    Routing through ``framework_adapters.registry`` keeps a single source of
+    truth for framework availability (honouring any user-registered adapter
+    via the ``praisonai.framework_adapters`` entry-point group) instead of a
+    parallel hand-rolled import path.
+
     Raises:
         ImportError: If autogen is not installed
     """
-    if not AUTOGEN_AVAILABLE:
-        raise ImportError(
-            "AutoGen is not installed. Install with: pip install \"praisonai[autogen]\""
-        )
+    from ..framework_adapters.registry import get_default_registry
+    # Use resolve() (returns the adapter class without the strict run()-signature
+    # validation that create() applies) because "autogen" maps to the family
+    # *router* adapter, whose run() intentionally does not implement the full
+    # execution protocol. This still honours any user-registered "autogen"
+    # adapter discovered via the praisonai.framework_adapters entry points.
+    adapter = get_default_registry().resolve("autogen")()
+    if not adapter.is_available():
+        hint = getattr(adapter, "install_hint", 'pip install "praisonai[autogen]"')
+        raise ImportError(f"AutoGen is not installed. {hint}")
     import autogen
     return autogen
 
