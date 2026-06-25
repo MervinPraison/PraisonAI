@@ -129,7 +129,9 @@ python -m pytest tests/ -q \
 
 ## Step 6 — Approve or Request Changes
 
-**If the PR is good:**
+**Primary (automated):** The **Claude PR merge gate** (`.github/workflows/claude-merge-gate.yml`) assesses readiness and merges when `MERGE_GATE_VERDICT: APPROVE`, CI is green, and the PR lacks `no-auto-merge`. It never posts `@claude` and does not use `gh pr review` (avoids re-triggering `claude.yml`).
+
+**Manual fallback — if the PR is good and gate is skipped or opted out:**
 
 ```bash
 cd /Users/praison/praisonai-package && \
@@ -146,6 +148,14 @@ gh pr review <NUMBER> --request-changes --body "Requesting changes: <specific fe
 ---
 
 ## Step 7 — Merge
+
+**Primary:** Wait for merge gate or verify `mergedAt` after a gate run:
+
+```bash
+cd /Users/praison/praisonai-package && gh pr view <NUMBER> --json state,mergedAt,labels
+```
+
+**Manual fallback** (label `no-auto-merge` or gate disabled):
 
 ```bash
 cd /Users/praison/praisonai-package && \

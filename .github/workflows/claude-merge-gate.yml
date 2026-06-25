@@ -1,0 +1,297 @@
+name: Claude PR Merge Gate
+
+# Read-only Claude assesses merge readiness; GH_TOKEN merges (no @claude, no gh pr review).
+# Does not overlap with merge-conflict-claude.yml or auto-pr-comment @claude chains.
+
+on:
+  schedule:
+    - cron: '0 2,8,14,20 * * *'
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Optional PR number (scan all open internal PRs if empty)'
+        required: false
+        type: string
+      merge_method:
+        description: 'Merge method'
+        required: false
+        type: choice
+        default: merge
+        options:
+          - merge
+          - squash
+          - rebase
+
+concurrency:
+  group: claude-merge-gate-${{ github.repository }}-${{ github.event.inputs.pr_number || 'scan' }}
+  cancel-in-progress: true
+
+env:
+  GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
+  MAX_CANDIDATES: 3
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+  actions: read
+
+jobs:
+  scan-candidates:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.scan.outputs.matrix }}
+      has_candidates: ${{ steps.scan.outputs.has_candidates }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan open PRs for merge gate eligibility
+        id: scan
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ env.GH_TOKEN }}
+          script: |
+            const path = require('path');
+            const mergeGate = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/merge-gate.js'));
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const maxCandidates = parseInt(process.env.MAX_CANDIDATES || '3', 10);
+            const inputPr = '${{ github.event.inputs.pr_number }}'.trim();
+
+            let prNumbers = [];
+            if (inputPr) {
+              const n = parseInt(inputPr, 10);
+              if (Number.isNaN(n)) {
+                throw new Error(`Invalid pr_number input: ${inputPr}`);
+              }
+              prNumbers = [n];
+            } else {
+              const prs = await github.paginate(github.rest.pulls.list, {
+                owner, repo, state: 'open', per_page: 100,
+              });
+              prNumbers = prs.map((p) => p.number);
+            }
+
+            const candidates = [];
+            const skipped = [];
+
+            for (const num of prNumbers) {
+              const result = await mergeGate.evaluatePipelineQuiescent(github, owner, repo, num, core);
+              if (result.ready) {
+                candidates.push({ pr_number: num, head_sha: result.headSha });
+              } else {
+                skipped.push({ pr: num, reasons: result.reasons });
+              }
+              if (candidates.length >= maxCandidates) break;
+            }
+
+            core.info('Skipped: ' + JSON.stringify(skipped));
+            core.setOutput('matrix', JSON.stringify({ include: candidates }));
+            core.setOutput('has_candidates', candidates.length > 0 ? 'true' : 'false');
+
+            core.summary.addRaw('## Merge gate scan\n');
+            core.summary.addRaw(`Candidates: ${candidates.length}\n`);
+            core.summary.addRaw('```json\n' + JSON.stringify({ candidates, skipped }, null, 2) + '\n```');
+            await core.summary.write();
+
+  claude-assess:
+    needs: scan-candidates
+    if: needs.scan-candidates.outputs.has_candidates == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.scan-candidates.outputs.matrix) }}
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: write
+      actions: read
+      id-token: write
+    steps:
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CLAUDE_APP_ID }}
+          private-key: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Mark merge gate active
+        id: mark_active
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ env.GH_TOKEN }}
+          script: |
+            core.setOutput('started_at', new Date().toISOString());
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ matrix.pr_number }},
+              labels: ['claude-merge-gate-active'],
+            });
+
+      - name: Fetch PR branch
+        env:
+          PR_NUMBER: ${{ matrix.pr_number }}
+        run: |
+          git fetch origin "pull/${PR_NUMBER}/head:pr-${PR_NUMBER}"
+          git checkout "pr-${PR_NUMBER}"
+
+      - name: Claude merge gate assessment (read-only)
+        uses: anthropics/claude-code-action@beta
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ steps.app-token.outputs.token }}
+          model: claude-opus-4-8
+          trigger_phrase: '@claude-merge-gate-internal'
+          direct_prompt: |
+            You are the MERGE GATE reviewer for PraisonAI PR #${{ matrix.pr_number }}.
+            READ-ONLY: do not modify code, commit, push, rebase, or create branches.
+
+            CRITICAL OUTPUT RULE:
+            Post exactly one PR comment via GitHub MCP containing either:
+            MERGE_GATE_VERDICT: APPROVE
+            or
+            MERGE_GATE_VERDICT: BLOCK
+            followed by a short rationale on the next lines.
+
+            NEVER include @claude in any comment. NEVER mention merge conflict resolution.
+
+            Review checklist:
+            1. Read AGENTS.md and the PR diff on the current branch.
+            2. Read all PR comments and reviews (FINAL architecture reviewer / Lead Engineer must have run).
+            3. Confirm SDK value gate: change strengthens praisonaiagents (no scope creep).
+            4. Confirm no blocking human CHANGES_REQUESTED and CI should be green on HEAD ${{ matrix.head_sha }}.
+            5. If ready to merge: MERGE_GATE_VERDICT: APPROVE. Otherwise: MERGE_GATE_VERDICT: BLOCK with reasons.
+
+            Do not approve or merge via GitHub UI/API — only post the verdict comment.
+          disallowed_tools: |
+            Bash
+            Edit
+            Write
+            Replace
+          allowed_tools: |
+            View
+            GlobTool
+            GrepTool
+            Read
+            mcp__github__get_issue
+            mcp__github__get_issue_comments
+            mcp__github__create_comment
+          timeout_minutes: 15
+
+      - name: Verify verdict posted
+        id: verdict
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ env.GH_TOKEN }}
+          script: |
+            const path = require('path');
+            const mergeGate = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/merge-gate.js'));
+            const comments = await mergeGate.listAllComments(
+              github, context.repo.owner, context.repo.repo, ${{ matrix.pr_number }}
+            );
+            const minCreatedAt = new Date(Date.now() - 25 * 60 * 1000).toISOString();
+            const verdict = mergeGate.findMergeGateVerdict(comments, minCreatedAt);
+            core.setOutput('verdict', verdict || 'NONE');
+            if (!verdict) core.warning('No recent MERGE_GATE_VERDICT comment found after assessment');
+
+  merge-only:
+    needs: [scan-candidates, claude-assess]
+    if: |
+      always() &&
+      needs.scan-candidates.outputs.has_candidates == 'true' &&
+      needs.claude-assess.result != 'cancelled'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.scan-candidates.outputs.matrix) }}
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Re-check gates and merge
+        uses: actions/github-script@v7
+        env:
+          MERGE_METHOD: ${{ github.event.inputs.merge_method || 'merge' }}
+          SCAN_HEAD_SHA: ${{ matrix.head_sha }}
+        with:
+          github-token: ${{ env.GH_TOKEN }}
+          script: |
+            const path = require('path');
+            const mergeGate = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/merge-gate.js'));
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = ${{ matrix.pr_number }};
+            const scanHeadSha = process.env.SCAN_HEAD_SHA;
+
+            const removeLabels = async () => {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner, repo, issue_number: prNumber, name: 'claude-merge-gate-active',
+                });
+              } catch (e) {
+                core.info('Label claude-merge-gate-active already removed or missing');
+              }
+            };
+
+            try {
+              const comments = await mergeGate.listAllComments(github, owner, repo, prNumber);
+              const verdictMin = new Date(Date.now() - 25 * 60 * 1000).toISOString();
+              const verdict = mergeGate.findMergeGateVerdict(comments, verdictMin);
+              if (verdict !== 'APPROVE') {
+                core.info(`Skip merge: verdict=${verdict || 'NONE'}`);
+                await removeLabels();
+                return;
+              }
+
+              const check = await mergeGate.evaluatePipelineQuiescent(
+                github, owner, repo, prNumber, core, { forMergeStep: true }
+              );
+              if (!check.ready) {
+                core.info(`Skip merge: ${check.reasons.join(', ')}`);
+                await removeLabels();
+                return;
+              }
+
+              if (check.headSha !== scanHeadSha) {
+                core.info(`Skip merge: HEAD moved ${scanHeadSha.slice(0, 7)} → ${check.headSha.slice(0, 7)}`);
+                await removeLabels();
+                return;
+              }
+
+              const method = process.env.MERGE_METHOD || 'merge';
+              await github.rest.pulls.merge({
+                owner, repo, pull_number: prNumber, merge_method: method,
+              });
+
+              await github.rest.issues.addLabels({
+                owner, repo, issue_number: prNumber, labels: ['auto-merged-by-gate'],
+              });
+
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: prNumber,
+                body: [
+                  'Merged by **Claude PR merge gate** (`claude-merge-gate.yml`).',
+                  `Verdict: MERGE_GATE_VERDICT: APPROVE`,
+                  `SHA: \`${check.headSha.slice(0, 7)}\``,
+                  `Method: ${method}`,
+                ].join('\n'),
+              });
+
+              core.info(`Merged PR #${prNumber}`);
+            } finally {
+              await removeLabels();
+            }

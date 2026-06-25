@@ -161,4 +161,4 @@ Step 3 — Publish praisonai-tools (External, if needed):
   # Bump version in pyproject.toml, then:
   python3.13 -m build && uv run twine upload dist/*
 
-PraisonAI PRs: NEVER merge automatically — user merges manually.
+PraisonAI PRs: default merge via **Claude PR merge gate** (`.github/workflows/claude-merge-gate.yml`) when validation passes. Add label `no-auto-merge` to opt out. Manual `gh pr merge` only as fallback when the gate cannot run.

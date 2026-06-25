@@ -50,7 +50,7 @@ The workflow uses the agent configuration at `.github/praisonai-reviewer.yaml` a
 - Copilot NEVER triggers before CodeRabbit/Qodo complete.
 - Claude NEVER triggers before Copilot completes.
 - Duplicate `@copilot` comments are prevented by checking existing comments.
-- PraisonAI PRs: NEVER merge automatically — user merges manually.
+- Default merge: **Claude PR merge gate** (`.github/workflows/claude-merge-gate.yml`) after review chain + CI green. Opt out with label `no-auto-merge`. Manual merge only as fallback.
 
 ## Security & Credentials
 

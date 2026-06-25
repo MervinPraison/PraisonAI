@@ -571,6 +571,17 @@ gh pr diff $PR --repo $REPO | less
 
 ### 15b. Merge
 
+**Primary:** Trigger or wait for **Claude PR merge gate** (`.github/workflows/claude-merge-gate.yml`):
+
+```bash
+gh workflow run claude-merge-gate.yml --repo $REPO -f pr_number=$PR
+gh pr view $PR --repo $REPO --json state,mergedAt,labels
+```
+
+The gate merges when `MERGE_GATE_VERDICT: APPROVE`, CI is green, and the PR lacks `no-auto-merge`. Do not merge while `claude-conflict-pending` or during active `@claude` review/fix.
+
+**Manual fallback** (opt-out or gate unavailable):
+
 ```bash
 gh pr merge $PR --repo $REPO --squash --delete-branch
 # --squash preserves linear main; --delete-branch keeps the repo clean

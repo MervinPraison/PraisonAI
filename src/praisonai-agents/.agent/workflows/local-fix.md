@@ -187,7 +187,7 @@ gh pr create \
 
 **Commit prefixes:** `fix:`, `feat:`, `security:`, `refactor:`, `docs:`, `test:`
 
-> **Do NOT merge automatically** — user merges manually unless explicitly told otherwise.
+> **Merge:** Default is the **Claude PR merge gate** (`.github/workflows/claude-merge-gate.yml`). Do not merge manually unless the PR has `no-auto-merge` or you are explicitly told to use `gh pr merge`.
 
 ### 5b. Verify PR state
 
