@@ -50,7 +50,7 @@ def test_authorized_actor_resolves():
         async def request():
             return await handler.request_approval(
                 tool_name="delete_file",
-                arguments={"path": "/tmp/x"},
+                arguments={"path": "sample/path.txt"},
                 allowed_actors={"requester", "admin"},
                 timeout=1.0,
             )
@@ -100,7 +100,7 @@ def test_replay_is_noop():
             )
             return first, second
 
-        result, (first, second) = await asyncio.gather(request(), approver())
+        _result, (first, second) = await asyncio.gather(request(), approver())
         return first, second
 
     first, second = asyncio.run(run())
@@ -156,3 +156,42 @@ def test_is_authorized_helper():
     assert authorized is True
     assert unauthorized is False
     assert unknown is False
+
+
+def test_replay_and_audit_state_is_bounded():
+    async def run():
+        handler = PresentationApprovalHandler(history_limit=3)
+        for _ in range(5):
+            fut = asyncio.ensure_future(
+                handler.request_approval(tool_name="t", arguments={}, timeout=1.0)
+            )
+            await asyncio.sleep(0)
+            approval_id = next(iter(handler._pending_approvals))
+            await handler.handle_approval_command(approval_id, "allow")
+            await fut
+        return handler
+
+    handler = asyncio.run(run())
+    # Both replay and audit state are capped at history_limit.
+    assert len(handler._resolved_ids) == 3
+    assert len(handler._resolved_order) == 3
+    assert len(handler.audit_log) == 3
+
+
+def test_audit_log_returns_copies():
+    async def run():
+        handler = PresentationApprovalHandler()
+        fut = asyncio.ensure_future(
+            handler.request_approval(tool_name="t", arguments={}, timeout=1.0)
+        )
+        await asyncio.sleep(0)
+        approval_id = next(iter(handler._pending_approvals))
+        await handler.handle_approval_command(approval_id, "allow", actor="admin")
+        await fut
+        return handler
+
+    handler = asyncio.run(run())
+    snapshot = handler.audit_log
+    snapshot[0]["actor"] = "tampered"
+    # Mutating the returned copy must not affect internal state.
+    assert handler.audit_log[0]["actor"] == "admin"

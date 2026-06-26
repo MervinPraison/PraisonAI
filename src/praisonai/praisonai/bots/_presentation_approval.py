@@ -11,27 +11,58 @@ import asyncio
 import logging
 import time
 import uuid
-from typing import Any, Dict, Iterable, List, Optional, Set, TYPE_CHECKING
+from collections import deque
+from typing import Any, Deque, Dict, Iterable, List, Optional, Set, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from praisonaiagents.bots.presentation import MessagePresentation
 
 logger = logging.getLogger(__name__)
 
+# Bound replay/audit retention so long-running bots don't grow unboundedly.
+# The newest N resolved ids/audit entries are retained; older ones are evicted.
+_DEFAULT_HISTORY_LIMIT = 1000
+
 
 class PresentationApprovalHandler:
     """Handles tool approvals using interactive presentations."""
     
-    def __init__(self):
-        """Initialize the approval handler."""
+    def __init__(self, history_limit: int = _DEFAULT_HISTORY_LIMIT):
+        """Initialize the approval handler.
+
+        Args:
+            history_limit: Maximum number of resolved approval ids and audit
+                entries to retain. Bounds memory for long-running bots; the
+                oldest entries are evicted once the limit is exceeded. Replay
+                protection still holds for the most recent ``history_limit``
+                approvals, which far exceeds any realistic in-flight window.
+        """
         self._pending_approvals: Dict[str, Dict[str, Any]] = {}
         self._approval_futures: Dict[str, asyncio.Future] = {}
         # Audit trail of resolved approvals for replay protection and
         # accountability. Records who resolved each approval, the decision,
         # and when. A resolved id is single-use: subsequent callbacks for it
-        # are treated as no-ops.
-        self._audit_log: List[Dict[str, Any]] = []
+        # are treated as no-ops. Both containers are bounded (FIFO eviction)
+        # to avoid unbounded memory growth in long-running bots.
+        self._history_limit = max(1, int(history_limit))
+        self._audit_log: Deque[Dict[str, Any]] = deque(maxlen=self._history_limit)
         self._resolved_ids: Set[str] = set()
+        # Insertion-ordered queue mirroring _resolved_ids for FIFO eviction.
+        self._resolved_order: Deque[str] = deque()
+
+    def _mark_resolved(self, approval_id: str) -> None:
+        """Record an approval id as resolved with bounded FIFO retention.
+
+        Evicts the oldest resolved id once the configured ``history_limit`` is
+        exceeded so replay-protection state cannot grow without bound.
+        """
+        if approval_id in self._resolved_ids:
+            return
+        self._resolved_ids.add(approval_id)
+        self._resolved_order.append(approval_id)
+        while len(self._resolved_order) > self._history_limit:
+            oldest = self._resolved_order.popleft()
+            self._resolved_ids.discard(oldest)
     
     async def request_approval(
         self,
@@ -107,7 +138,7 @@ class PresentationApprovalHandler:
             # callback for this id is treated as a no-op (replay protection).
             self._pending_approvals.pop(approval_id, None)
             self._approval_futures.pop(approval_id, None)
-            self._resolved_ids.add(approval_id)
+            self._mark_resolved(approval_id)
             self._audit_log.append({
                 "approval_id": approval_id,
                 "tool_name": tool_name,
@@ -278,7 +309,7 @@ class PresentationApprovalHandler:
         # Get approval context (single-use from here on)
         context = self._pending_approvals.pop(approval_id)
         future = self._approval_futures.pop(approval_id, None)
-        self._resolved_ids.add(approval_id)
+        self._mark_resolved(approval_id)
         
         if not future:
             return False
@@ -317,9 +348,10 @@ class PresentationApprovalHandler:
         """Return the immutable-ish audit trail of resolved approvals.
 
         Each entry records ``approval_id``, ``tool_name``, ``actor``,
-        ``decision``, ``approved``, and ``timestamp``.
+        ``decision``, ``approved``, and ``timestamp``. Entries are copied so
+        callers cannot mutate the handler's internal audit trail.
         """
-        return list(self._audit_log)
+        return [dict(entry) for entry in self._audit_log]
     
     def parse_approval_callback(self, callback_data: str) -> Optional[Dict[str, str]]:
         """Parse approval callback data from button clicks.
