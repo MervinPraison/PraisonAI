@@ -272,12 +272,13 @@ class BotOS:
         Resets the process-wide idle timer. Safe to call always — it is a
         cheap timestamp write whether or not an idle policy is configured.
 
-        Integration contract: platform adapters (or the user's message
-        handler) call this on every inbound message, together with
-        :meth:`turn_started`/:meth:`turn_finished` around agent execution,
-        so :meth:`_run_idle_loop` reflects live traffic and never quiesces
-        mid-conversation. When no ``idle_policy`` is configured these are
-        no-op-cheap and the gateway stays always-on as before.
+        Note: the idle loop also passively probes each bot's session
+        manager (``_active_runs``/``_last_active``) via
+        :meth:`_probe_activity`, so live traffic is reflected even without
+        calling this — these hooks are an optional explicit override for
+        adapters that don't expose a session manager. When no
+        ``idle_policy`` is configured they are no-op-cheap and the gateway
+        stays always-on as before.
         """
         self._last_inbound_ts = time.time()
 
@@ -290,6 +291,48 @@ class BotOS:
         """Mark an agent turn as complete."""
         if self._running_turns > 0:
             self._running_turns -= 1
+
+    def _probe_activity(self) -> tuple[int, float]:
+        """Passively read live liveness facts from bot session managers.
+
+        Closes the "stale counters" gap (#2332 reviewer P1): rather than
+        relying solely on explicit :meth:`notify_inbound`/:meth:`turn_started`
+        calls (which not every adapter wires), this reads the session
+        manager state that *every* adapter already maintains:
+
+        * ``_active_runs`` — in-flight agent turns per user, populated and
+          popped around each agent run.
+        * ``_last_active`` — per-user last-inbound timestamp (monotonic),
+          stamped on every inbound message.
+
+        Returns ``(running_turns, last_inbound_ts)`` where the timestamp is
+        wall-clock (``time.time``) to match the policy contract. Explicitly
+        recorded activity (``self._running_turns`` / ``self._last_inbound_ts``)
+        is merged in, so adapters that do call the hooks still win and any
+        adapter that exposes neither degrades to the construction-time value.
+        """
+        running = self._running_turns
+        last_ts = self._last_inbound_ts
+        now_wall = time.time()
+        now_mono = time.monotonic()
+        for bot in self._bots.values():
+            session = getattr(bot, "_session", None)
+            if session is None:
+                adapter = getattr(bot, "_adapter", None)
+                session = getattr(adapter, "_session", None)
+            if session is None:
+                continue
+            active_runs = getattr(session, "_active_runs", None)
+            if isinstance(active_runs, dict):
+                running += len(active_runs)
+            last_active = getattr(session, "_last_active", None)
+            if isinstance(last_active, dict) and last_active:
+                # Stored as monotonic; convert the most-recent to wall-clock.
+                newest_mono = max(last_active.values())
+                wall = now_wall - max(0.0, now_mono - newest_mono)
+                if wall > last_ts:
+                    last_ts = wall
+        return running, last_ts
 
     def _has_background_work(self) -> bool:
         """Whether live background work should block dormancy.
@@ -405,9 +448,13 @@ class BotOS:
             if self._is_dormant:
                 continue
             try:
+                # Probe live liveness from session managers so the decision
+                # reflects real traffic even when adapters don't call the
+                # explicit notify_inbound/turn_* hooks (#2332 reviewer P1).
+                running_turns, last_inbound_ts = self._probe_activity()
                 decision = policy.is_idle(
-                    running_turns=self._running_turns,
-                    last_inbound_ts=self._last_inbound_ts,
+                    running_turns=running_turns,
+                    last_inbound_ts=last_inbound_ts,
                     has_background_work=self._has_background_work(),
                     now=time.time(),
                 )
