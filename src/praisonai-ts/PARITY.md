@@ -9,7 +9,7 @@
 |--------|-------|
 | Python Core Features | 388 |
 | Python Wrapper Features | 100 |
-| TypeScript Features | 1188 |
+| TypeScript Features | 1190 |
 | **Gap Count** | **95** |
 | P0 (Critical) | 2 |
 | P1 (High) | 5 |
@@ -921,7 +921,7 @@ import { AgentStats, AgentTelemetry, MetricEntry, MinimalTelemetry, PerformanceM
 </details>
 
 <details>
-<summary><strong>tools</strong> (87 exports)</summary>
+<summary><strong>tools</strong> (89 exports)</summary>
 
 ```typescript
 import { BaseTool, BudgetExceededError, DelegatorConfig, FunctionTool, InstallHints, MissingDependencyError, MissingEnvVarError, PraisonTool, RedactionHooks, RegisteredTool... } from 'praisonai';
