@@ -30,6 +30,13 @@ if TYPE_CHECKING:
     from ._outbox import OutboundQueue, OutboundEntry
     from ._delivery import DurableDelivery, deliver_with_retry
     from ._durable_adapter import DurableAdapterMixin
+    from ._correlation import (
+        correlation_id_from,
+        current_correlation_id,
+        new_correlation_id,
+        use_correlation_id,
+    )
+    from ._metrics import GatewayMetrics
 
 def __getattr__(name: str):
     """Lazy loading of bot components."""
@@ -128,6 +135,23 @@ def __getattr__(name: str):
     if name == "DurableAdapterMixin":
         from ._durable_adapter import DurableAdapterMixin
         return DurableAdapterMixin
+    # End-to-end correlation IDs (inbound -> run -> outbound)
+    if name == "correlation_id_from":
+        from ._correlation import correlation_id_from
+        return correlation_id_from
+    if name == "current_correlation_id":
+        from ._correlation import current_correlation_id
+        return current_correlation_id
+    if name == "new_correlation_id":
+        from ._correlation import new_correlation_id
+        return new_correlation_id
+    if name == "use_correlation_id":
+        from ._correlation import use_correlation_id
+        return use_correlation_id
+    # Gateway message-flow metrics
+    if name == "GatewayMetrics":
+        from ._metrics import GatewayMetrics
+        return GatewayMetrics
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
@@ -140,6 +164,9 @@ __all__ = [
     "OutboundQueue", "OutboundEntry",
     "DurableDelivery", "deliver_with_retry", "deliver_chunked",
     "DurableAdapterMixin",
+    # Correlation + metrics (gateway message-flow observability)
+    "correlation_id_from", "current_correlation_id", "new_correlation_id",
+    "use_correlation_id", "GatewayMetrics",
     "SlackApproval", "TelegramApproval", "DiscordApproval",
     "WebhookApproval", "HTTPApproval",
     # Streaming
