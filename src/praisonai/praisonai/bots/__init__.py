@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from ._http_approval import HTTPApproval
     from ._streaming import StreamingConfig, StreamingMode, DraftStreamer
     from ._outbox import OutboundQueue, OutboundEntry
+    from ._approval_store import ApprovalStore
     from ._delivery import DurableDelivery, deliver_with_retry
     from ._durable_adapter import DurableAdapterMixin
     from ._correlation import (
@@ -123,6 +124,9 @@ def __getattr__(name: str):
     if name == "OutboundEntry":
         from ._outbox import OutboundEntry
         return OutboundEntry
+    if name == "ApprovalStore":
+        from ._approval_store import ApprovalStore
+        return ApprovalStore
     if name == "DurableDelivery":
         from ._delivery import DurableDelivery
         return DurableDelivery
@@ -162,6 +166,7 @@ __all__ = [
     "InboundDLQ", "DLQEntry",
     "InboundJournal", "JournalEntry",
     "OutboundQueue", "OutboundEntry",
+    "ApprovalStore",
     "DurableDelivery", "deliver_with_retry", "deliver_chunked",
     "DurableAdapterMixin",
     # Correlation + metrics (gateway message-flow observability)
