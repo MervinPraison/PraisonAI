@@ -23,6 +23,12 @@ from praisonaiagents import Agent, Tool
 
 MUAPI_BASE_URL = "https://api.muapi.ai/api/v1"
 
+ALLOWED_MODELS = {
+    "flux-schnell", "flux-dev", "flux-kontext-dev", "flux-kontext-pro",
+    "midjourney", "gpt4o", "imagen4", "imagen4-fast", "seedream",
+    "hidream-fast", "hidream-dev", "reve", "ideogram", "hunyuan",
+}
+
 
 def generate_image(prompt: str, model: str = "flux-schnell") -> str:
     """Generate an image using MuAPI and return the output URL.
@@ -35,6 +41,11 @@ def generate_image(prompt: str, model: str = "flux-schnell") -> str:
     Returns:
         URL of the generated image.
     """
+    if model not in ALLOWED_MODELS:
+        raise ValueError(
+            f"Unsupported model '{model}'. Choose from: {sorted(ALLOWED_MODELS)}"
+        )
+
     api_key = os.environ.get("MUAPI_API_KEY", "")
     if not api_key:
         raise ValueError("MUAPI_API_KEY environment variable not set")
@@ -49,7 +60,10 @@ def generate_image(prompt: str, model: str = "flux-schnell") -> str:
         timeout=30,
     )
     submit_resp.raise_for_status()
-    request_id = submit_resp.json()["request_id"]
+    submit_data = submit_resp.json()
+    request_id = submit_data.get("request_id")
+    if not request_id:
+        raise RuntimeError(f"MuAPI did not return a request_id: {submit_data}")
 
     # Poll until completion
     for _ in range(120):
@@ -61,37 +75,40 @@ def generate_image(prompt: str, model: str = "flux-schnell") -> str:
         )
         poll_resp.raise_for_status()
         data = poll_resp.json()
-        if data["status"] == "completed":
-            return data["outputs"][0]
-        if data["status"] in ("failed", "cancelled"):
-            raise RuntimeError(f"Image generation {data['status']}: {data.get('error', '')}")
+        status = data.get("status")
+        if status == "completed":
+            outputs = data.get("outputs") or []
+            if not outputs:
+                raise RuntimeError(f"Generation completed but returned no outputs: {data}")
+            return outputs[0]
+        if status in ("failed", "cancelled"):
+            raise RuntimeError(f"Image generation {status}: {data.get('error', '')}")
 
     raise TimeoutError("Image generation timed out after 6 minutes")
 
 
-# Register as a PraisonAI tool
-image_tool = Tool(
-    name="generate_image",
-    description=(
-        "Generate an image from a text description using MuAPI's 400+ model library. "
-        "Supported models: flux-schnell (fast), flux-dev, midjourney, gpt4o, imagen4, "
-        "seedream, hidream-fast, reve. Returns a URL to the generated image."
-    ),
-    function=generate_image,
-)
-
-agent = Agent(
-    name="Image Generator",
-    instructions=(
-        "You are a creative image generation assistant. "
-        "When asked to create an image, use the generate_image tool. "
-        "Pick the best model for the task: flux-schnell for speed, "
-        "midjourney for artistic quality, gpt4o for photorealism."
-    ),
-    tools=[image_tool],
-)
-
 if __name__ == "__main__":
+    image_tool = Tool(
+        name="generate_image",
+        description=(
+            "Generate an image from a text description using MuAPI's 400+ model library. "
+            "Supported models: flux-schnell (fast), flux-dev, midjourney, gpt4o, imagen4, "
+            "seedream, hidream-fast, reve. Returns a URL to the generated image."
+        ),
+        function=generate_image,
+    )
+
+    agent = Agent(
+        name="Image Generator",
+        instructions=(
+            "You are a creative image generation assistant. "
+            "When asked to create an image, use the generate_image tool. "
+            "Pick the best model for the task: flux-schnell for speed, "
+            "midjourney for artistic quality, gpt4o for photorealism."
+        ),
+        tools=[image_tool],
+    )
+
     # Example: generate a product photo
     response = agent.start(
         "Generate a photorealistic product photo of a sleek black coffee mug "
