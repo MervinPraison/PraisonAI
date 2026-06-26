@@ -811,7 +811,14 @@ class WebSocketGateway:
             gauges (outbox depth, approval pending, active sessions) so a live
             bot fleet can be monitored without grepping logs. Returns 404 when
             the metrics surface is unavailable.
+
+            Protected by the same token check as other operational endpoints
+            (e.g. ``/info``) so channel names and message-flow volumes are not
+            exposed to unauthenticated clients on externally bound gateways.
             """
+            auth_err = _check_auth(request)
+            if auth_err:
+                return auth_err
             self._refresh_metric_gauges()
             if self._metrics is None:
                 return JSONResponse({"error": "metrics unavailable"}, status_code=404)

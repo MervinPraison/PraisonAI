@@ -557,7 +557,15 @@ class BotSessionManager:
                 payload=payload
             )
             if journal_key is None:
-                # Duplicate message - return empty response
+                # Duplicate message - restore the correlation id before the
+                # early return so the contextvar set for this turn never leaks
+                # into an unrelated subsequent call sharing the same task.
+                if cid_token is not None:
+                    try:
+                        from ._correlation import reset_correlation_id
+                        reset_correlation_id(cid_token)
+                    except Exception as e:  # pragma: no cover — defensive
+                        logger.debug("Failed to reset correlation id: %s", e)
                 return ""
                 
         user_lock = self._get_lock(user_id)
