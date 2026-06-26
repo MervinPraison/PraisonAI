@@ -561,17 +561,43 @@ class TestBoundedRetention:
     def test_max_entries_keeps_most_used(self):
         """Least-used entries are evicted first."""
         store = InsightStore(store_path=self.store_path, user_id="u", max_entries=3)
-        keep = store.add("keep me")
+        store.add("keep me")
         for i in range(2):
             store.add(f"filler {i}")
-        # Bump usage on the entry we want to keep
+        # Bump usage on the entry we want to keep via the public retrieval path
         for _ in range(5):
-            store._touch([keep])
+            assert store.search("keep me")
         for i in range(5):
             store.add(f"new {i}")
         contents = [e.content for e in store._entries.values()]
         assert "keep me" in contents
         assert len(store._entries) == 3
+
+    def test_new_entry_not_evicted_when_full(self):
+        """A freshly added entry is never the one pruned away on write."""
+        store = InsightStore(store_path=self.store_path, user_id="u", max_entries=3)
+        for i in range(3):
+            store.add(f"old {i}")
+        # Give existing entries usage so the newcomer is the least-used
+        for _ in range(3):
+            store.search("old")
+        new = store.add("brand new")
+        assert store.get(new.id) is not None
+        contents = [e.content for e in store._entries.values()]
+        assert "brand new" in contents
+        assert len(store._entries) == 3
+
+    def test_archive_failure_restores_entries(self):
+        """If archival cannot persist, pruned entries stay in the active store."""
+        store = InsightStore(store_path=self.store_path, user_id="u", max_entries=2)
+        for i in range(5):
+            store.add(f"insight {i}")
+        # Force the archive write to fail; entries must not be lost
+        store._archive = lambda entries: False
+        before = dict(store._entries)
+        store.add("trigger prune")
+        # No entries dropped beyond the new add (archival failed -> restore)
+        assert set(before).issubset(set(store._entries))
 
     def test_archive_is_recoverable(self):
         """Evicted entries are written to a recoverable archive file."""
@@ -605,13 +631,19 @@ class TestBoundedRetention:
 
     def test_manager_prune_propagates_config(self):
         """LearnManager.prune() runs across stores with config-driven limits."""
-        config = LearnConfig(persona=True, insights=True, thread=False, max_entries=3)
+        from datetime import datetime, timedelta
+        config = LearnConfig(persona=True, insights=False, thread=False, retention_days=30)
         manager = LearnManager(config=config, user_id="u", store_path=self.temp_dir)
-        for i in range(8):
-            manager.capture_persona(f"pref {i}")
-        assert manager.get_stats()["persona"] == 3
+        manager.capture_persona("fresh")
+        stale = manager.capture_persona("stale")
+        old = (datetime.utcnow() - timedelta(days=60)).isoformat()
+        stale.last_used = old
+        stale.updated_at = old
+        stale.created_at = old
+        manager._stores["persona"]._save()
         result = manager.prune()
-        assert "persona" in result
+        assert result["persona"] == 1
+        assert manager.get_stats()["persona"] == 1
 
     def test_config_to_dict_has_retention(self):
         """LearnConfig exposes retention fields via to_dict."""

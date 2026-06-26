@@ -162,8 +162,10 @@ class BaseStore(ABC):
             metadata=metadata or {},
         )
         self._entries[entry_id] = entry
-        # Bounded retention: prune stale/excess entries on write (no-op if unconfigured)
-        self.prune(save=False)
+        # Bounded retention: prune stale/excess entries on write (no-op if unconfigured).
+        # Protect the entry we just added so a full store never evicts the new
+        # learning and returns a value that is no longer retrievable.
+        self.prune(save=False, protect_id=entry_id)
         self._save()
         self._was_updated = True
         return entry
@@ -181,6 +183,7 @@ class BaseStore(ABC):
             entry.use_count += 1
             entry.last_used = now
         self._save()
+        self._was_updated = True
     
     def get(self, entry_id: str) -> Optional[LearnEntry]:
         """Get entry by ID."""
@@ -239,27 +242,33 @@ class BaseStore(ABC):
         """Path to the recoverable archive file for this store."""
         return Path(self.store_path).with_suffix(".archive.json")
     
-    def _archive(self, entries: List[LearnEntry]) -> None:
-        """Append evicted entries to a recoverable archive (never hard-delete)."""
+    def _archive(self, entries: List[LearnEntry]) -> bool:
+        """Append evicted entries to a recoverable archive (never hard-delete).
+
+        Returns True only when the entries were durably written, so callers can
+        keep the active store and archive consistent (no silent data loss when
+        the sidecar is unwritable).
+        """
         if not entries:
-            return
+            return True
         try:
             import json
             archive_path = self._archive_path()
             existing: List[Dict[str, Any]] = []
             if archive_path.exists():
-                try:
-                    with open(archive_path, "r", encoding="utf-8") as f:
-                        existing = json.load(f)
-                except Exception:
+                with open(archive_path, "r", encoding="utf-8") as f:
+                    existing = json.load(f)
+                if not isinstance(existing, list):
                     existing = []
             existing.extend(e.to_dict() for e in entries)
             archive_path.parent.mkdir(parents=True, exist_ok=True)
             with open(archive_path, "w", encoding="utf-8") as f:
                 json.dump(existing, f, ensure_ascii=False, indent=2)
+            return True
         except Exception as e:
             import logging
             logging.warning(f"Failed to archive pruned entries: {e}")
+            return False
     
     def _is_stale(self, entry: LearnEntry, now: datetime) -> bool:
         """Whether an entry exceeds the retention window (usage-driven, deterministic)."""
@@ -273,7 +282,7 @@ class BaseStore(ABC):
         age_days = (now - ref_dt).total_seconds() / 86400.0
         return age_days > self.retention_days
     
-    def prune(self, save: bool = True) -> int:
+    def prune(self, save: bool = True, protect_id: Optional[str] = None) -> int:
         """Archive stale and least-used/oldest excess entries.
         
         Deterministic, usage-driven retention (no LLM judgment):
@@ -284,6 +293,11 @@ class BaseStore(ABC):
         Archival is recoverable (entries moved to a ``.archive.json`` sidecar);
         never a silent hard-delete. Returns the number of entries archived.
         No-op (returns 0) when neither limit is configured — backward-compatible.
+        
+        Args:
+            save: Persist the active store after pruning.
+            protect_id: Entry id that must never be evicted (e.g. a learning
+                just added), so a full store cannot discard the new value.
         """
         if self.max_entries <= 0 and self.retention_days <= 0:
             return 0
@@ -294,13 +308,18 @@ class BaseStore(ABC):
         # 1. Staleness: archive entries beyond the retention window
         if self.retention_days > 0:
             for entry_id, entry in list(self._entries.items()):
+                if entry_id == protect_id:
+                    continue
                 if self._is_stale(entry, now):
                     evicted.append(self._entries.pop(entry_id))
         
         # 2. Cap: archive least-used (then oldest) beyond max_entries
         if self.max_entries > 0 and len(self._entries) > self.max_entries:
+            candidates = [
+                e for e in self._entries.values() if e.id != protect_id
+            ]
             remaining = sorted(
-                self._entries.values(),
+                candidates,
                 key=lambda e: (e.use_count, e.last_used or "", e.created_at),
             )
             overflow = len(self._entries) - self.max_entries
@@ -308,7 +327,12 @@ class BaseStore(ABC):
                 evicted.append(self._entries.pop(entry.id))
         
         if evicted:
-            self._archive(evicted)
+            # Recoverable archival is mandatory: if the sidecar write fails,
+            # restore the evicted entries rather than silently losing them.
+            if not self._archive(evicted):
+                for entry in evicted:
+                    self._entries[entry.id] = entry
+                return 0
             self._was_updated = True
             if save:
                 self._save()
