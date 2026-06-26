@@ -4641,20 +4641,29 @@ Do NOT add any explanations or formatting."""
                 if getattr(self.args, 'auto_memory', False):
                     print("[bold cyan]Auto Memory enabled - will extract and store memories[/bold cyan]")
                 
-                # MCP - Model Context Protocol tools
-                if getattr(self.args, 'mcp', None):
-                    from .features.mcp import MCPHandler
-                    mcp_handler = MCPHandler(verbose=getattr(self.args, 'verbose', False))
-                    mcp_tools = mcp_handler.create_mcp_tools(
-                        self.args.mcp,
-                        getattr(self.args, 'mcp_env', None)
+                # MCP - Model Context Protocol tools.
+                # Wire BOTH the ad-hoc single --mcp command string AND every
+                # enabled server from project config (local stdio *and*
+                # remote/URL), so multi-server and remote MCP setups are all
+                # available — not just the first stdio server.
+                mcp_command = getattr(self.args, 'mcp', None)
+                mcp_servers = getattr(self.args, 'mcp_servers', None) or []
+                if mcp_command or mcp_servers:
+                    # Single source of truth for MCP tool aggregation, shared
+                    # with the actions-mode run path (commands/run.py).
+                    from .commands.run import _build_mcp_tools
+                    aggregated_mcp_tools = _build_mcp_tools(
+                        mcp_command,
+                        getattr(self.args, 'mcp_env', None),
+                        mcp_servers,
+                        verbose=getattr(self.args, 'verbose', False),
                     )
-                    if mcp_tools:
+                    if aggregated_mcp_tools:
                         existing_tools = agent_config.get('tools', [])
                         if isinstance(existing_tools, list):
-                            existing_tools.extend(list(mcp_tools))
+                            existing_tools.extend(aggregated_mcp_tools)
                         else:
-                            existing_tools = list(mcp_tools)
+                            existing_tools = aggregated_mcp_tools
                         agent_config['tools'] = existing_tools
                 
                 # External Agent - Use external AI CLI tools with manager delegation

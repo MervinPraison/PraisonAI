@@ -129,43 +129,71 @@ def _mcp_server_to_command(server: dict) -> Optional[tuple]:
     return command_str, env_str
 
 
-def _resolve_mcp_from_config(config) -> Optional[tuple]:
-    """Pick the first enabled local MCP server from resolved config.
+def _collect_mcp_servers_from_config(config) -> List[dict]:
+    """Collect all enabled MCP servers from resolved config.
 
-    The CLI ``--mcp`` flag accepts a single server command, so when wiring
-    project config we surface the first enabled stdio server.
+    Returns a list of normalized server dicts (both local stdio and remote
+    URL servers). The structured list is handed to the core MCP client, which
+    already supports stdio, SSE, HTTP-stream and websocket transports — so a
+    project that declares multiple and/or remote servers gets every enabled
+    one wired, not just the first stdio one.
 
     Returns:
-        Tuple of (command_string, env_string) or None.
+        List of server config dicts (possibly empty).
     """
     mcp = getattr(config, "mcp", None) or {}
     if not isinstance(mcp, dict):
-        return None
+        return []
     servers = mcp.get("servers") or {}
     if not isinstance(servers, dict):
-        return None
+        return []
 
-    selected = None
-    enabled_local = []
+    collected: List[dict] = []
     for name, server in servers.items():
-        result = _mcp_server_to_command(server)
-        if result:
-            enabled_local.append(name)
-            if selected is None:
-                selected = result
+        if not isinstance(server, dict):
+            continue
+        if server.get("enabled") is False:
+            continue
+        entry = dict(server)
+        entry.setdefault("name", name)
+        collected.append(entry)
+    return collected
 
-    # The CLI command-string path supports a single server. Warn so a user who
-    # declared several enabled local servers knows only the first is wired.
-    if len(enabled_local) > 1:
-        import warnings
-        warnings.warn(
-            "Multiple enabled local MCP servers found in config "
-            f"({', '.join(enabled_local)}); only '{enabled_local[0]}' will be "
-            "used via the run command path.",
-            stacklevel=2,
-        )
 
-    return selected
+def _build_mcp_tools(
+    mcp: Optional[str],
+    mcp_env: Optional[str],
+    mcp_servers: Optional[List[dict]],
+    verbose: bool = False,
+) -> list:
+    """Build aggregated MCP tools from a command string and/or structured list.
+
+    Both the single ``--mcp`` command string (ad-hoc) and every enabled server
+    from project config (local stdio *and* remote/URL) are wired, so the run
+    path exposes all configured MCP servers to the agent — not just the first.
+
+    Returns:
+        A flat list of MCP tool callables (possibly empty).
+    """
+    tools: list = []
+    try:
+        from ..features.mcp import MCPHandler
+    except ImportError:
+        return tools
+
+    handler = MCPHandler(verbose=verbose)
+
+    if mcp:
+        mcp_instance = handler.create_mcp_tools(mcp, mcp_env)
+        if mcp_instance:
+            tools.extend(list(mcp_instance))
+
+    for server in mcp_servers or []:
+        mcp_instance = handler.create_mcp_from_server(server)
+        if mcp_instance:
+            tools.extend(list(mcp_instance))
+
+    return tools
 
 
 def _permissions_from_config(config) -> Optional[dict]:
@@ -223,21 +251,25 @@ def _apply_config_defaults(
     flags always take precedence (they are passed in already-resolved and only
     config-derived values fill the gaps).
 
+    All enabled MCP servers from config — multiple local stdio servers *and*
+    remote/URL servers — are collected into a structured list so the run path
+    can wire every one of them, not just the first stdio server.
+
     Returns:
-        Tuple of (mcp, mcp_env, permissions_config) with config defaults applied.
+        Tuple of (mcp, mcp_env, permissions_config, mcp_servers) with config
+        defaults applied. ``mcp_servers`` is a (possibly empty) list of
+        structured server config dicts.
     """
+    mcp_servers: List[dict] = []
     try:
         config = resolve_config()
     except (ValueError, OSError):
-        return mcp, mcp_env, permissions_config
+        return mcp, mcp_env, permissions_config, mcp_servers
 
-    # MCP: only fill in if no explicit --mcp flag was given.
-    if not mcp:
-        resolved_mcp = _resolve_mcp_from_config(config)
-        if resolved_mcp:
-            mcp, config_env = resolved_mcp
-            if not mcp_env and config_env:
-                mcp_env = config_env
+    # MCP: collect all enabled servers (local + remote) from config. The
+    # explicit single-string ``--mcp`` flag, when given, is wired separately
+    # via ``args.mcp`` and merged alongside these by the run handler.
+    mcp_servers = _collect_mcp_servers_from_config(config)
 
     # Permissions: merge config rules underneath CLI-provided rules.
     config_perms = _permissions_from_config(config)
@@ -249,7 +281,7 @@ def _apply_config_defaults(
         else:
             permissions_config = config_perms
 
-    return mcp, mcp_env, permissions_config
+    return mcp, mcp_env, permissions_config, mcp_servers
 
 
 def _checkpoints_auto_enabled() -> bool:
@@ -560,7 +592,7 @@ def run_main(
         
         # Run the interpolated command as a prompt
         permissions_config = _parse_permissions(allow, deny, permissions, permission_default)
-        mcp_command, mcp_env, permissions_config = _apply_config_defaults(
+        mcp_command, mcp_env, permissions_config, mcp_servers = _apply_config_defaults(
             None, None, permissions_config
         )
         _run_prompt(
@@ -581,6 +613,7 @@ def run_main(
             permissions_config=permissions_config,
             mcp=mcp_command,
             mcp_env=mcp_env,
+            mcp_servers=mcp_servers,
             continue_session=continue_session,
             session=session,
             fork=fork,
@@ -699,7 +732,7 @@ def run_main(
     else:
         # Run as prompt
         permissions_config = _parse_permissions(allow, deny, permissions, permission_default)
-        mcp_command, mcp_env, permissions_config = _apply_config_defaults(
+        mcp_command, mcp_env, permissions_config, mcp_servers = _apply_config_defaults(
             None, None, permissions_config
         )
         _run_prompt(
@@ -720,6 +753,7 @@ def run_main(
             permissions_config=permissions_config,
             mcp=mcp_command,
             mcp_env=mcp_env,
+            mcp_servers=mcp_servers,
             continue_session=continue_session,
             session=session,
             fork=fork,
@@ -850,6 +884,7 @@ def _run_prompt(
     permissions_config: Optional[dict] = None,
     mcp: Optional[str] = None,
     mcp_env: Optional[str] = None,
+    mcp_servers: Optional[List[dict]] = None,
     continue_session: bool = False,
     session: Optional[str] = None,
     fork: bool = False,
@@ -917,7 +952,7 @@ def _run_prompt(
         # Session continuity/forking is handled in-process; the warm runtime does
         # not carry session state, so any explicit session flag stays local.
         runtime_eligible = not any([
-            mcp, tools, toolset, approval, approve_all_tools,
+            mcp, mcp_servers, tools, toolset, approval, approve_all_tools,
             memory, permissions_config, continue_session, session, fork,
         ])
         if runtime_eligible and _try_attach_runtime(
@@ -954,7 +989,13 @@ def _run_prompt(
             memory_cfg = build_cli_memory_config(session_id=session_id, auto_save=auto_save_name)
             if memory_cfg is not None:
                 agent_config["memory"] = memory_cfg
-            
+
+            # Wire all configured MCP servers (ad-hoc --mcp + config local/remote).
+            if mcp or mcp_servers:
+                mcp_tools = _build_mcp_tools(mcp, mcp_env, mcp_servers, verbose=verbose)
+                if mcp_tools:
+                    agent_config["tools"] = list(agent_config.get("tools", [])) + mcp_tools
+
             agent = Agent(**agent_config)
             if session_id or auto_save_name:
                 apply_cli_session_continuity(agent, session_id or auto_save_name, auto_save=auto_save_name)
@@ -1020,6 +1061,7 @@ def _run_prompt(
         args.telemetry = False
         args.mcp = mcp
         args.mcp_env = mcp_env
+        args.mcp_servers = mcp_servers or None
         args.fast_context = None
         args.handoff = None
         args.auto_memory = False

@@ -71,6 +71,46 @@ class MCPHandler(FlagHandler):
         except ImportError:
             return False, "praisonaiagents not installed. Install with: pip install praisonaiagents"
     
+    @staticmethod
+    def _validate_mcp_executable(cmd: str, args: List[str]) -> None:
+        """Validate an MCP executable + its args against the security policy.
+
+        Enforces the same rules for every entry point (ad-hoc ``--mcp`` string
+        and structured config servers):
+
+        1. the executable basename must be in :data:`ALLOWED_MCP_COMMANDS`;
+        2. inline code-execution flags (``python -c``, ``node -e``,
+           ``deno eval``, ``bun -e``, ...) are rejected.
+
+        Args:
+            cmd: The executable (may include a path).
+            args: The argument list passed to the executable.
+
+        Raises:
+            ValueError: If the command is not allowed or uses an inline-exec flag.
+        """
+        basename = os.path.basename(cmd)
+        if basename not in ALLOWED_MCP_COMMANDS:
+            raise ValueError(
+                f"Command '{cmd}' is not in the allowed MCP executables list. "
+                f"Allowed: {', '.join(sorted(ALLOWED_MCP_COMMANDS - {c for c in ALLOWED_MCP_COMMANDS if '.' in c}))}"
+            )
+
+        # Reject inline-eval flags that allow arbitrary code execution for
+        # interpreters (python -c, node -e, deno eval, bun -e, ...).
+        base_key = basename.lower()
+        for suffix in (".exe", ".cmd"):
+            if base_key.endswith(suffix):
+                base_key = base_key[: -len(suffix)]
+        forbidden = _INLINE_EXEC_ARGS.get(base_key)
+        if forbidden:
+            for arg in args:
+                if arg in forbidden:
+                    raise ValueError(
+                        f"Argument '{arg}' is not allowed for '{basename}' "
+                        "(inline code execution is blocked in MCP commands)."
+                    )
+
     def parse_mcp_command(self, command: str, env_vars: str = None) -> Tuple[str, List[str], Dict[str, str]]:
         """
         Parse MCP command string into command, args, and environment.
@@ -93,28 +133,8 @@ class MCPHandler(FlagHandler):
         cmd = parts[0]
         args = parts[1:] if len(parts) > 1 else []
         
-        # Validate executable against allowlist
-        basename = os.path.basename(cmd)
-        if basename not in ALLOWED_MCP_COMMANDS:
-            raise ValueError(
-                f"Command '{cmd}' is not in the allowed MCP executables list. "
-                f"Allowed: {', '.join(sorted(ALLOWED_MCP_COMMANDS - {c for c in ALLOWED_MCP_COMMANDS if '.' in c}))}"
-            )
-
-        # Reject inline-eval flags that allow arbitrary code execution for
-        # interpreters (python -c, node -e, deno eval, bun -e, ...).
-        base_key = basename.lower()
-        for suffix in (".exe", ".cmd"):
-            if base_key.endswith(suffix):
-                base_key = base_key[: -len(suffix)]
-        forbidden = _INLINE_EXEC_ARGS.get(base_key)
-        if forbidden:
-            for arg in args:
-                if arg in forbidden:
-                    raise ValueError(
-                        f"Argument '{arg}' is not allowed for '{basename}' "
-                        "(inline code execution is blocked in MCP commands)."
-                    )
+        # Validate executable against allowlist + reject inline-eval flags.
+        self._validate_mcp_executable(cmd, args)
         
         # Parse environment variables
         env = {}
@@ -168,6 +188,106 @@ class MCPHandler(FlagHandler):
             self.print_status(f"Failed to connect to MCP server: {e}", "error")
             return None
     
+    def create_mcp_from_server(self, server: Dict[str, Any], timeout: int = 30) -> Any:
+        """
+        Create an MCP instance from a structured server config dict.
+
+        Supports both local (stdio) servers and remote (URL/HTTP/SSE/WS)
+        servers, so the run path can aggregate multiple and remote MCP servers
+        declared in project config — not just a single stdio command string.
+
+        Args:
+            server: Server config dict. Local servers provide ``command``
+                (str or list) plus optional ``args``/``env``. Remote servers
+                provide ``url`` (or ``type == "remote"``) plus optional
+                ``headers``. A per-server ``timeout`` (milliseconds, per the
+                config schema) overrides the default.
+
+        Returns:
+            MCP instance or None if unavailable / misconfigured.
+        """
+        available, msg = self.check_dependencies()
+        if not available:
+            self.print_status(msg, "error")
+            return None
+
+        if not isinstance(server, dict):
+            return None
+        if server.get("enabled") is False:
+            return None
+
+        from praisonaiagents import MCP
+
+        # Per-server timeout in the config schema is expressed in milliseconds;
+        # the SDK MCP() class expects seconds.
+        server_timeout = server.get("timeout")
+        if isinstance(server_timeout, (int, float)) and server_timeout > 0:
+            timeout = max(1, int(server_timeout / 1000))
+
+        is_remote = server.get("type") == "remote" or bool(server.get("url"))
+
+        try:
+            if is_remote:
+                url = server.get("url")
+                if not url:
+                    self.print_status("Remote MCP server missing 'url'", "error")
+                    return None
+                kwargs: Dict[str, Any] = {"timeout": timeout}
+                headers = server.get("headers")
+                if isinstance(headers, dict) and headers:
+                    # Legacy SSE URLs (".../sse") use the SDK's SSEMCPClient,
+                    # which does not forward custom headers. Warn so an
+                    # authenticated SSE server doesn't silently connect without
+                    # its authorization header.
+                    if isinstance(url, str) and url.rstrip("/").endswith("/sse"):
+                        self.print_status(
+                            "Custom 'headers' are not supported for legacy SSE "
+                            f"MCP URLs and will be ignored: {url}",
+                            "warning",
+                        )
+                    else:
+                        kwargs["headers"] = headers
+                mcp = MCP(url, **kwargs)
+                self.print_status(f"🔌 MCP server connected: {url}", "success")
+                return mcp
+
+            command = server.get("command")
+            raw_args = server.get("args") or []
+            if isinstance(command, list):
+                parts = [str(p) for p in command]
+                cmd = parts[0] if parts else ""
+                args = parts[1:] + [str(a) for a in raw_args]
+            elif isinstance(command, str) and command:
+                parts = shlex.split(command)
+                cmd = parts[0] if parts else ""
+                args = parts[1:] + [str(a) for a in raw_args]
+            else:
+                self.print_status("Local MCP server missing 'command'", "error")
+                return None
+
+            if not cmd:
+                self.print_status("Invalid MCP command", "error")
+                return None
+
+            # Mirror parse_mcp_command: enforce the allowlist AND block inline
+            # code-execution flags (python -c, node -e, deno eval, bun -e, ...)
+            # so config-declared local servers can't bypass the run-path guard.
+            try:
+                self._validate_mcp_executable(cmd, args)
+            except ValueError as e:
+                self.print_status(str(e), "error")
+                return None
+
+            env = server.get("env") or {}
+            env = {str(k): str(v) for k, v in env.items()} if isinstance(env, dict) else None
+
+            mcp = MCP(command=cmd, args=args, env=env or None, timeout=timeout)
+            self.print_status(f"🔌 MCP server connected: {cmd}", "success")
+            return mcp
+        except Exception as e:
+            self.print_status(f"Failed to connect to MCP server: {e}", "error")
+            return None
+
     def apply_to_agent_config(self, config: Dict[str, Any], flag_value: Any) -> Dict[str, Any]:
         """
         Apply MCP configuration to agent config.
