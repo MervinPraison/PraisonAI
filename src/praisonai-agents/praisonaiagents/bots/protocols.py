@@ -91,6 +91,16 @@ class PlatformCapabilities:
             authenticity. Adapters that accept webhooks MUST set this True and
             expose a ``webhook_verifier`` so central ingress can enforce it
             fail-closed.
+        reconciles_unknown_send: Whether the adapter can confirm whether a prior
+            send attempt actually landed (e.g. via a provider message-status
+            lookup keyed on the idempotency key). When True the durable outbox
+            reconciles an in-flight (``sending``) entry on restart before
+            re-dispatch, upgrading delivery from at-least-once to
+            effectively-once. When False, delivery remains at-least-once and a
+            crash mid-send may re-send the message.
+        supports_idempotency_token: Whether the transport accepts a
+            provider-level idempotency token so the platform itself
+            de-duplicates a retried send.
     """
     
     max_message_length: int = 4096
@@ -105,6 +115,8 @@ class PlatformCapabilities:
     supported_file_types: List[str] = field(default_factory=lambda: ["*"])
     accepts_webhooks: bool = False
     verifies_webhook_signature: bool = False
+    reconciles_unknown_send: bool = False
+    supports_idempotency_token: bool = False
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -121,6 +133,8 @@ class PlatformCapabilities:
             "supported_file_types": self.supported_file_types,
             "accepts_webhooks": self.accepts_webhooks,
             "verifies_webhook_signature": self.verifies_webhook_signature,
+            "reconciles_unknown_send": self.reconciles_unknown_send,
+            "supports_idempotency_token": self.supports_idempotency_token,
         }
     
     @classmethod
@@ -139,6 +153,8 @@ class PlatformCapabilities:
             supported_file_types=data.get("supported_file_types", ["*"]),
             accepts_webhooks=data.get("accepts_webhooks", False),
             verifies_webhook_signature=data.get("verifies_webhook_signature", False),
+            reconciles_unknown_send=data.get("reconciles_unknown_send", False),
+            supports_idempotency_token=data.get("supports_idempotency_token", False),
         )
 
 
