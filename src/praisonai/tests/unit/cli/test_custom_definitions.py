@@ -10,9 +10,11 @@ import pytest
 
 from praisonai.cli.features.custom_definitions import (
     BUILTIN_PRESETS,
+    SHELL_SUBSTITUTION_ENV,
     CustomAgent,
     CustomCommand,
     CustomDefinitionsDiscovery,
+    ShellSubstitutionError,
     TemplateInterpolator,
     interpolate_command_template,
     load_agent_from_name,
@@ -210,6 +212,95 @@ Shell command: $(echo test)"""
             assert "Task: Analyze this" in result
             assert "# Context\nImportant info" in result
             assert "\\$(echo test)" in result
+
+
+class TestShellSubstitution:
+    """Test opt-in live shell substitution (!`cmd`)."""
+
+    def test_shell_disabled_by_default_raises(self):
+        """A !`cmd` template raises when shell execution is not enabled."""
+        template = "Diff: !`echo hello`"
+        with pytest.raises(ShellSubstitutionError):
+            TemplateInterpolator.interpolate(template)
+
+    def test_shell_enabled_runs_command(self):
+        """With allow_shell=True the command runs and stdout is inlined."""
+        template = "Output: !`echo hello world`"
+        result = TemplateInterpolator.interpolate(template, allow_shell=True)
+        assert result == "Output: hello world"
+
+    def test_shell_runs_in_working_dir(self):
+        """Commands execute in the provided working_dir."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "marker.txt").write_text("x")
+            template = "Files: !`ls`"
+            result = TemplateInterpolator.interpolate(
+                template, working_dir=Path(tmpdir), allow_shell=True
+            )
+            assert "marker.txt" in result
+
+    def test_shell_nonzero_exit_raises(self):
+        """A failing command surfaces a ShellSubstitutionError."""
+        template = "!`exit 3`"
+        with pytest.raises(ShellSubstitutionError):
+            TemplateInterpolator.interpolate(template, allow_shell=True)
+
+    def test_dollar_substitution_still_escaped_when_shell_enabled(self):
+        """$(...) is still escaped even with allow_shell=True (only !`cmd` runs)."""
+        template = "Run: $(rm -rf /) and !`echo ok`"
+        result = TemplateInterpolator.interpolate(template, allow_shell=True)
+        assert "\\$(rm -rf /)" in result
+        assert "echo" not in result
+        assert "ok" in result
+
+    def test_env_flag_enables_shell(self):
+        """PRAISONAI_ALLOW_SHELL=true enables substitution via interpolate_command_template."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            commands_dir = Path(tmpdir) / "commands"
+            commands_dir.mkdir()
+            (commands_dir / "diff.md").write_text("Output: !`echo hi`\n")
+
+            with patch.object(
+                CustomDefinitionsDiscovery, '_find_project_dirs', return_value=[Path(tmpdir)]
+            ), patch.dict("os.environ", {SHELL_SUBSTITUTION_ENV: "true"}):
+                result = interpolate_command_template("diff")
+                assert result == "Output: hi"
+
+    def test_frontmatter_allow_shell_enables(self):
+        """allow_shell: true frontmatter enables substitution for that command."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            commands_dir = Path(tmpdir) / "commands"
+            commands_dir.mkdir()
+            (commands_dir / "diff.md").write_text(
+                "---\nallow_shell: true\n---\nOutput: !`echo hey`\n"
+            )
+
+            discovery = CustomDefinitionsDiscovery()
+            cmd = discovery._load_command(commands_dir / "diff.md", "test")
+            assert cmd.allow_shell is True
+
+            with patch.object(
+                CustomDefinitionsDiscovery, '_find_project_dirs', return_value=[Path(tmpdir)]
+            ), patch.dict("os.environ", {}, clear=False):
+                import os as _os
+                _os.environ.pop(SHELL_SUBSTITUTION_ENV, None)
+                result = interpolate_command_template("diff")
+                assert result == "Output: hey"
+
+    def test_default_command_disables_shell(self):
+        """Without any gate, a !`cmd` command raises a clear error."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            commands_dir = Path(tmpdir) / "commands"
+            commands_dir.mkdir()
+            (commands_dir / "diff.md").write_text("Output: !`echo hi`\n")
+
+            with patch.object(
+                CustomDefinitionsDiscovery, '_find_project_dirs', return_value=[Path(tmpdir)]
+            ), patch.dict("os.environ", {}, clear=False):
+                import os as _os
+                _os.environ.pop(SHELL_SUBSTITUTION_ENV, None)
+                with pytest.raises(ShellSubstitutionError):
+                    interpolate_command_template("diff")
 
 
 class TestIntegrationFunctions:

@@ -76,6 +76,20 @@ MODE_RULES: Dict[str, Dict[str, str]] = {
 VALID_PERMISSION_ACTIONS = {"allow", "deny", "ask"}
 
 
+# Environment gate mirroring PRAISONAI_ALLOW_LOCAL_TOOLS: live shell
+# substitution in command templates is disabled unless explicitly enabled.
+SHELL_SUBSTITUTION_ENV = "PRAISONAI_ALLOW_SHELL"
+
+# Safety bounds for opt-in `!`cmd`` substitution.
+SHELL_SUBSTITUTION_TIMEOUT = 30  # seconds
+SHELL_SUBSTITUTION_MAX_BYTES = 100_000  # captured stdout byte cap
+
+
+class ShellSubstitutionError(Exception):
+    """Raised when a command template contains live shell substitution that
+    cannot be executed (e.g. it is present but shell execution is not enabled)."""
+
+
 # Built-in, zero-config agent presets shipped with the wrapper.
 # Resolved before user/project definitions so they can be overridden by name.
 # Each entry maps a preset name to its CustomAgent field kwargs.
@@ -177,6 +191,7 @@ class CustomCommand:
     path: Path
     description: Optional[str] = None
     template: str = ""
+    allow_shell: bool = False  # per-command opt-in for live `!`cmd`` substitution
     source: str = "unknown"  # 'user' or 'project'
 
 
@@ -330,6 +345,7 @@ class CustomDefinitionsDiscovery:
                 path=file_path,
                 description=frontmatter.get("description"),
                 template=body,
+                allow_shell=bool(frontmatter.get("allow_shell", False)),
                 source=source
             )
         
@@ -389,20 +405,36 @@ class CustomDefinitionsDiscovery:
 class TemplateInterpolator:
     """Handles template interpolation for custom commands."""
     
+    # Opt-in live substitution syntax: !`command`. Chosen over $(...) to avoid
+    # ambiguity with the existing $(...) escape behaviour and to keep the safe
+    # default unchanged.
+    SHELL_PATTERN = re.compile(r'!`([^`]+)`')
+
     @staticmethod
-    def interpolate(template: str, arguments: str = "", working_dir: Optional[Path] = None) -> str:
+    def interpolate(
+        template: str,
+        arguments: str = "",
+        working_dir: Optional[Path] = None,
+        allow_shell: bool = False,
+    ) -> str:
         """
         Interpolate a command template.
         
         Supported patterns:
         - $ARGUMENTS - User-provided arguments
         - @path/to/file - Inline file contents
-        - $(command) - Shell command substitution (escaped)
+        - $(command) - Shell command substitution (always escaped, never run)
+        - !`command` - Live shell substitution (opt-in via ``allow_shell``)
         
         Args:
             template: Template string to interpolate
             arguments: User arguments to substitute for $ARGUMENTS
             working_dir: Working directory for file resolution
+            allow_shell: When True, ``!`cmd``` substitutions are executed in
+                ``working_dir`` with a timeout and output byte cap and their
+                stdout inlined. When False (default), the presence of any
+                ``!`cmd``` substitution raises :class:`ShellSubstitutionError`
+                so the failure is explicit rather than silent.
             
         Returns:
             Interpolated string
@@ -414,6 +446,17 @@ class TemplateInterpolator:
         
         # Replace @file references
         result = TemplateInterpolator._interpolate_files(result, working_dir)
+
+        # Live shell substitution (!`cmd`) is opt-in and bounded.
+        if allow_shell:
+            result = TemplateInterpolator._interpolate_shell(result, working_dir)
+        elif TemplateInterpolator.SHELL_PATTERN.search(result):
+            raise ShellSubstitutionError(
+                "Command template contains live shell substitution (!`...`) but "
+                "shell execution is not enabled. Enable it with "
+                f"{SHELL_SUBSTITUTION_ENV}=true, the `commands.allow_shell` config "
+                "flag, or `allow_shell: true` in the command's frontmatter."
+            )
         
         # Handle escaped shell substitution $(...) 
         # (We escape it to prevent accidental execution)
@@ -461,6 +504,55 @@ class TemplateInterpolator:
         # Replace $(...) with \$(...)
         return re.sub(r'\$\(([^)]+)\)', r'\\$(\1)', text)
 
+    @staticmethod
+    def _interpolate_shell(text: str, working_dir: Optional[Path] = None) -> str:
+        """Execute ``!`cmd``` substitutions and inline their stdout.
+
+        Each command runs in ``working_dir`` (defaulting to the current
+        directory) with a timeout and a captured-output byte cap. Failures are
+        surfaced as :class:`ShellSubstitutionError` so a broken command does not
+        silently produce an empty prompt.
+        """
+        cwd = str(working_dir) if working_dir else None
+
+        def replace_command(match):
+            command = match.group(1).strip()
+            try:
+                completed = subprocess.run(
+                    command,
+                    shell=True,
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    timeout=SHELL_SUBSTITUTION_TIMEOUT,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise ShellSubstitutionError(
+                    f"Shell substitution timed out after "
+                    f"{SHELL_SUBSTITUTION_TIMEOUT}s: {command!r}"
+                ) from exc
+            except OSError as exc:
+                raise ShellSubstitutionError(
+                    f"Failed to run shell substitution {command!r}: {exc}"
+                ) from exc
+
+            if completed.returncode != 0:
+                stderr = (completed.stderr or "").strip()
+                raise ShellSubstitutionError(
+                    f"Shell substitution {command!r} exited with "
+                    f"{completed.returncode}: {stderr}"
+                )
+
+            output = completed.stdout or ""
+            encoded = output.encode("utf-8", errors="replace")
+            if len(encoded) > SHELL_SUBSTITUTION_MAX_BYTES:
+                output = encoded[:SHELL_SUBSTITUTION_MAX_BYTES].decode(
+                    "utf-8", errors="replace"
+                )
+            return output.rstrip("\n")
+
+        return TemplateInterpolator.SHELL_PATTERN.sub(replace_command, text)
+
 
 def load_agent_from_name(name: str) -> Optional[Dict[str, Any]]:
     """
@@ -507,13 +599,46 @@ def load_agent_from_name(name: str) -> Optional[Dict[str, Any]]:
     return config
 
 
-def interpolate_command_template(name: str, arguments: str = "") -> Optional[str]:
+def _env_flag(name: str) -> bool:
+    """Return True when an environment flag is set to a truthy value."""
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _config_allows_shell() -> bool:
+    """Resolve the ``commands.allow_shell`` flag from project config.
+
+    Returns False on any error so the safe default is preserved when no config
+    is present or it cannot be parsed.
+    """
+    try:
+        from ...cli.configuration.resolver import resolve_config
+
+        config = resolve_config()
+    except Exception:
+        return False
+
+    commands = getattr(config, "commands", None)
+    if isinstance(commands, dict):
+        return bool(commands.get("allow_shell", False))
+    return False
+
+
+def interpolate_command_template(
+    name: str,
+    arguments: str = "",
+    allow_shell: Optional[bool] = None,
+) -> Optional[str]:
     """
     Load and interpolate a command template by name.
     
     Args:
         name: Command name to load
         arguments: Arguments to substitute for $ARGUMENTS
+        allow_shell: Explicitly enable/disable live ``!`cmd``` substitution.
+            When None (default), the value is resolved from (in order, any
+            enabling): the ``PRAISONAI_ALLOW_SHELL`` env var, the
+            ``commands.allow_shell`` config flag, or the command's
+            ``allow_shell: true`` frontmatter.
         
     Returns:
         Interpolated command text, or None if not found
@@ -523,6 +648,15 @@ def interpolate_command_template(name: str, arguments: str = "") -> Optional[str
     
     if not command:
         return None
-    
+
+    if allow_shell is None:
+        allow_shell = (
+            _env_flag(SHELL_SUBSTITUTION_ENV)
+            or _config_allows_shell()
+            or command.allow_shell
+        )
+
     interpolator = TemplateInterpolator()
-    return interpolator.interpolate(command.template, arguments, Path.cwd())
+    return interpolator.interpolate(
+        command.template, arguments, Path.cwd(), allow_shell=allow_shell
+    )
