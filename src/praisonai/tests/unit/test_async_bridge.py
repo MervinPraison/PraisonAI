@@ -102,11 +102,44 @@ class TestBackgroundThread(unittest.TestCase):
             _BG._spawn_locked()
 
     def test_spawn_locked_works_when_lock_held(self):
-        """The same call succeeds while the lock is held."""
+        """The same call succeeds while the caller holds the lock.
+
+        Mirrors the real calling convention in ``get()``/``submit()``: the
+        holder records its identity in ``_lock_owner`` so ``_spawn_locked()``
+        can verify the *caller* (not merely *someone*) owns the lock.
+        """
         with _BG._lock:
-            loop = _BG._spawn_locked()
+            _BG._lock_owner = threading.get_ident()
+            try:
+                loop = _BG._spawn_locked()
+            finally:
+                _BG._lock_owner = None
         self.assertIsNotNone(loop)
         self.assertFalse(loop.is_closed())
+
+    def test_spawn_locked_rejects_foreign_lock_holder(self):
+        """A thread that does not own the lock must trip the assert even if
+        another thread currently holds ``self._lock``."""
+        holding = threading.Event()
+        release = threading.Event()
+
+        def _holder():
+            with _BG._lock:
+                _BG._lock_owner = threading.get_ident()
+                holding.set()
+                release.wait(timeout=2.0)
+                _BG._lock_owner = None
+
+        t = threading.Thread(target=_holder)
+        t.start()
+        try:
+            self.assertTrue(holding.wait(timeout=2.0))
+            # Different thread (this one) does not own the lock.
+            with self.assertRaises(AssertionError):
+                _BG._spawn_locked()
+        finally:
+            release.set()
+            t.join(timeout=2.0)
 
 
 if __name__ == "__main__":

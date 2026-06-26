@@ -252,6 +252,52 @@ def _apply_config_defaults(
     return mcp, mcp_env, permissions_config
 
 
+def _try_attach_runtime(
+    prompt: str,
+    *,
+    model: Optional[str],
+    output_mode: Optional[str],
+    session_id: Optional[str],
+) -> bool:
+    """Forward a plain prompt to a warm runtime when one is running.
+
+    Returns True when the request was handled by the warm runtime (so the caller
+    should skip in-process execution), or False to fall back to the normal
+    in-process path. Any runtime error is treated as a transparent fall-back.
+
+    Only the simple text path is attached: structured ``actions``/``json`` output
+    modes and session continuity stay in-process to preserve their behaviour.
+    """
+    # Structured output modes have richer in-process event bridging; don't attach.
+    if output_mode in ("actions", "json", "stream", "stream-json"):
+        return False
+
+    try:
+        from ...runtime import get_runtime_descriptor, RuntimeClient, RuntimeUnavailable
+    except ImportError:
+        return False
+
+    descriptor = get_runtime_descriptor()
+    if descriptor is None:
+        return False
+
+    output = get_output_controller()
+    try:
+        client = RuntimeClient(descriptor)
+        result = client.run(prompt, model=model, session_id=session_id)
+    except RuntimeUnavailable:
+        # Runtime went away mid-flight; fall back to in-process execution.
+        return False
+
+    output.emit_result(
+        message="Prompt completed",
+        data={"result": str(result) if result else None},
+    )
+    if result and not output.is_json_mode:
+        print(result)
+    return True
+
+
 @app.callback(invoke_without_command=True)
 def run_main(
     ctx: typer.Context,
@@ -602,7 +648,7 @@ def _run_from_file(
         auto_save_name = None
         
         if continue_session or session or fork:
-            from ..state.project_sessions import get_project_session_store, find_last_session
+            from ..state.project_sessions import find_last_session, session_exists_anywhere
             
             if continue_session:
                 # Find last session for this project
@@ -614,8 +660,7 @@ def _run_from_file(
                     
             elif session:
                 # Use specific session
-                project_store = get_project_session_store()
-                if project_store.session_exists(session):
+                if session_exists_anywhere(session):
                     session_id = session
                     output.print_info(f"Resuming session: {session_id}")
                 else:
@@ -710,7 +755,7 @@ def _run_prompt(
         auto_save_name = None
         
         if continue_session or session or fork:
-            from ..state.project_sessions import get_project_session_store, find_last_session
+            from ..state.project_sessions import find_last_session, session_exists_anywhere
             
             if continue_session:
                 # Find last session for this project
@@ -722,8 +767,7 @@ def _run_prompt(
                     
             elif session:
                 # Use specific session
-                project_store = get_project_session_store()
-                if project_store.session_exists(session):
+                if session_exists_anywhere(session):
                     session_id = session
                     output.print_info(f"Resuming session: {session_id}")
                 else:
@@ -745,6 +789,26 @@ def _run_prompt(
         if not no_save:
             import uuid
             auto_save_name = session_id or "session-" + str(uuid.uuid4())[:8]
+
+        # Detect-and-attach: if a warm runtime is running, forward the plain
+        # prompt to it (skipping per-invocation cold-start) and fall back to
+        # in-process execution otherwise. Only the simple text path attaches;
+        # per-invocation tool/approval/memory overrides stay in-process so their
+        # behaviour is preserved exactly.
+        # Session continuity/forking is handled in-process; the warm runtime does
+        # not carry session state, so any explicit session flag stays local.
+        runtime_eligible = not any([
+            mcp, tools, toolset, approval, approve_all_tools,
+            memory, permissions_config, continue_session, session, fork,
+        ])
+        if runtime_eligible and _try_attach_runtime(
+            prompt,
+            model=model,
+            output_mode=output_mode,
+            session_id=session_id,
+        ):
+            return
+
         if output_mode == "actions":
             from praisonaiagents import Agent
             from ..state.project_sessions import build_cli_memory_config, apply_cli_session_continuity
@@ -920,15 +984,14 @@ def _run_from_file_profiled(
     auto_save_name = None
     
     if continue_session or session or fork:
-        from ..state.project_sessions import get_project_session_store, find_last_session
+        from ..state.project_sessions import find_last_session, session_exists_anywhere
         
         if continue_session:
             session_id = find_last_session()
             if not session_id:
                 typer.echo("Warning: No previous sessions found. Starting new session.", err=True)
         elif session:
-            project_store = get_project_session_store()
-            if project_store.session_exists(session):
+            if session_exists_anywhere(session):
                 session_id = session
                 
                 if fork:
@@ -1047,7 +1110,7 @@ def _run_custom_agent(
         auto_save_name = None
         
         if continue_session or session or fork:
-            from ..state.project_sessions import get_project_session_store, find_last_session
+            from ..state.project_sessions import find_last_session, session_exists_anywhere
             
             if continue_session:
                 session_id = find_last_session()
@@ -1057,8 +1120,7 @@ def _run_custom_agent(
                     output.print_warning("No previous sessions found. Starting new session.")
                     
             elif session:
-                project_store = get_project_session_store()
-                if project_store.session_exists(session):
+                if session_exists_anywhere(session):
                     session_id = session
                     output.print_info(f"Resuming session: {session_id}")
                 else:
@@ -1166,15 +1228,14 @@ def _run_prompt_profiled(
     auto_save_name = None
     
     if continue_session or session or fork:
-        from ..state.project_sessions import get_project_session_store, find_last_session
+        from ..state.project_sessions import find_last_session, session_exists_anywhere
         
         if continue_session:
             session_id = find_last_session()
             if not session_id:
                 typer.echo("Warning: No previous sessions found. Starting new session.", err=True)
         elif session:
-            project_store = get_project_session_store()
-            if project_store.session_exists(session):
+            if session_exists_anywhere(session):
                 session_id = session
                 
                 if fork:

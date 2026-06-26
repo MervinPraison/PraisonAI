@@ -87,6 +87,28 @@ def get_project_session_store(project_path: Optional[str] = None, project_id: Op
         return ProjectSessionStore(project_path)
 
 
+def session_exists_anywhere(session_id: str, project_path: Optional[str] = None) -> bool:
+    """Return True if a session exists in the project store or global store.
+
+    Resume must work regardless of whether the session was created via the
+    project-scoped ``run --continue`` path or the global default store (e.g.
+    sessions created by the gateway or interactive TUI). This mirrors the
+    lookup semantics of ``rehydrate_session`` (Issue #2274).
+    """
+    try:
+        if get_project_session_store(project_path).session_exists(session_id):
+            return True
+    except Exception:
+        pass
+
+    try:
+        from praisonaiagents.session.store import get_default_session_store
+
+        return get_default_session_store().session_exists(session_id)
+    except Exception:
+        return False
+
+
 def find_last_session(project_path: Optional[str] = None) -> Optional[str]:
     """
     Find the last session ID for the current project.
@@ -135,5 +157,23 @@ def apply_cli_session_continuity(agent, session_id: str, project_path: Optional[
                 agent.chat_history.append(entry)
                 existing.add(key)
         agent._auto_save_last_index = len(agent.chat_history)
+
+    # Persist model/agent so a later resume is deterministic regardless of the
+    # flags/config in effect at resume time (Issue #2274).
+    try:
+        model = getattr(agent, "llm", None)
+        fields = {"agent_name": getattr(agent, "name", None)}
+        if isinstance(model, str):
+            fields["model"] = model
+        else:
+            # Object-based LLM configs (e.g. a LiteLLM instance) expose the
+            # model name via a `model` attribute; persist it when available so
+            # resume stays deterministic for non-string configs (Issue #2274).
+            model_name = getattr(model, "model", None)
+            if isinstance(model_name, str):
+                fields["model"] = model_name
+        store.update_session_metadata(session_id, **fields)
+    except Exception:
+        pass
 
     agent._session_store_initialized = True

@@ -14,7 +14,13 @@ import pytest
 from unittest.mock import patch
 
 try:
-    from praisonai.llm.env import resolve_llm_endpoint, LLMEndpoint, _DEFAULT_MODEL, _DEFAULT_BASE
+    from praisonai.llm.env import (
+        resolve_llm_endpoint,
+        LLMEndpoint,
+        _DEFAULT_MODEL,
+        _DEFAULT_BASE,
+        default_model_for_available_provider,
+    )
 except ImportError as e:
     pytest.skip(f"Could not import praisonai.llm.env: {e}", allow_module_level=True)
 
@@ -126,6 +132,55 @@ class TestLLMEndpointDataclass:
         assert hasattr(ep, "model")
         assert hasattr(ep, "base_url")
         assert hasattr(ep, "api_key")
+
+
+class TestProviderAwareDefaultModel:
+    """Tests for default_model_for_available_provider() and its use as fallback."""
+
+    def test_no_credentials_falls_back_to_openai_default(self):
+        with patch.dict(os.environ, {}, clear=True):
+            assert default_model_for_available_provider() == _DEFAULT_MODEL
+
+    def test_openai_key_keeps_openai_default(self):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-x"}, clear=True):
+            assert default_model_for_available_provider() == "gpt-4o-mini"
+
+    def test_anthropic_only_uses_claude_default(self):
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-a"}, clear=True):
+            model = default_model_for_available_provider()
+            assert "claude" in model
+            assert model.startswith("anthropic/")
+
+    def test_gemini_only_uses_gemini_default(self):
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "g"}, clear=True):
+            model = default_model_for_available_provider()
+            assert model.startswith("gemini/")
+
+    def test_google_only_uses_gemini_default(self):
+        with patch.dict(os.environ, {"GOOGLE_API_KEY": "g"}, clear=True):
+            model = default_model_for_available_provider()
+            assert "gemini" in model
+            assert model.startswith("google/")
+
+    def test_groq_only_uses_groq_default(self):
+        with patch.dict(os.environ, {"GROQ_API_KEY": "g"}, clear=True):
+            assert default_model_for_available_provider().startswith("groq/")
+
+    def test_ollama_host_uses_ollama_default(self):
+        with patch.dict(os.environ, {"OLLAMA_HOST": "http://localhost:11434"}, clear=True):
+            assert default_model_for_available_provider().startswith("ollama/")
+
+    def test_openai_wins_when_multiple_present(self):
+        env = {"OPENAI_API_KEY": "sk-x", "ANTHROPIC_API_KEY": "sk-a"}
+        with patch.dict(os.environ, env, clear=True):
+            assert default_model_for_available_provider() == "gpt-4o-mini"
+
+    def test_resolve_endpoint_picks_anthropic_default_with_only_anthropic_key(self):
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-a"}, clear=True):
+            ep = resolve_llm_endpoint()
+        assert "claude" in ep.model
+        assert ep.api_key == "sk-a"
+        assert ep.base_url == "https://api.anthropic.com/v1"
 
 
 class TestProviderMapping:

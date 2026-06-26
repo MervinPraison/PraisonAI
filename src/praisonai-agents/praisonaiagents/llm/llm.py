@@ -1516,46 +1516,6 @@ Now provide your final answer using this result. Summarize the information natur
             return self._is_ollama_provider() and iteration_count == 0
         return False
 
-    def _try_parse_tool_call_json(self, response_text: str, iteration_count: int) -> tuple:
-        """
-        Try to parse tool call from JSON response text.
-        
-        Returns:
-            tuple: (tool_calls list or None, parse_error string or None)
-        """
-        if not response_text or not response_text.strip():
-            return None, None
-        
-        try:
-            response_json = json.loads(response_text.strip())
-            if isinstance(response_json, dict) and "name" in response_json:
-                tool_calls = [{
-                    "id": f"tool_{iteration_count}",
-                    "type": "function",
-                    "function": {
-                        "name": response_json["name"],
-                        "arguments": json.dumps(response_json.get("arguments", {}))
-                    }
-                }]
-                return tool_calls, None
-            elif isinstance(response_json, list):
-                tool_calls = []
-                for idx, tool_json in enumerate(response_json):
-                    if isinstance(tool_json, dict) and "name" in tool_json:
-                        tool_calls.append({
-                            "id": f"tool_{iteration_count}_{idx}",
-                            "type": "function",
-                            "function": {
-                                "name": tool_json["name"],
-                                "arguments": json.dumps(tool_json.get("arguments", {}))
-                            }
-                        })
-                return tool_calls if tool_calls else None, None
-            else:
-                return None, "Response is not a valid tool call format (missing 'name' field)"
-        except json.JSONDecodeError as e:
-            return None, f"JSON parse error: {str(e)}"
-
     def _validate_tool_call(self, tool_call: Dict, formatted_tools: Optional[List]) -> Optional[str]:
         """
         Validate a tool call against available tools.
@@ -5573,26 +5533,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             })
 
         return response_text, tool_calls if tool_calls else None
-
-    def _prepare_response_logging(self, temperature: float, stream: bool, verbose: bool, markdown: bool, **kwargs) -> Optional[Dict[str, Any]]:
-        """Prepare debug logging information for response methods"""
-        if get_logger().getEffectiveLevel() == logging.DEBUG:
-            debug_info = {
-                "model": self.model,
-                "timeout": self.timeout,
-                "temperature": temperature,
-                "top_p": self.top_p,
-                "n": self.n,
-                "max_tokens": self.max_tokens,
-                "presence_penalty": self.presence_penalty,
-                "frequency_penalty": self.frequency_penalty,
-                "stream": stream,
-                "verbose": verbose,
-                "markdown": markdown,
-                "kwargs": str(kwargs)
-            }
-            return debug_info
-        return None
 
     def _process_streaming_chunk(self, chunk) -> Optional[str]:
         """Extract content from a streaming chunk"""

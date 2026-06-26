@@ -47,30 +47,34 @@ class TestAutoLazyLoading:
         # Note: This test documents the DESIRED behavior
     
     def test_litellm_lazy_check_available(self):
-        """Test that _check_litellm_available works correctly."""
-        from praisonai.auto import _check_litellm_available
-        
-        result = _check_litellm_available()
+        """Test that litellm availability is reported via the centralized helper."""
+        from praisonai.auto import is_available
+
+        result = is_available("litellm")
         assert isinstance(result, bool)
-    
+
     def test_openai_lazy_check_available(self):
-        """Test that _check_openai_available works correctly."""
-        from praisonai.auto import _check_openai_available
-        
-        result = _check_openai_available()
+        """Test that openai availability is reported via the centralized helper."""
+        from praisonai.auto import is_available
+
+        result = is_available("openai")
         assert isinstance(result, bool)
-    
+
     def test_framework_availability_functions_exist(self):
-        """Test that lazy loading functions exist."""
+        """Test that lazy loading infrastructure exists.
+
+        Framework availability is delegated to the centralized
+        ``_framework_availability.is_available`` helper, and framework
+        resolution goes through the canonical FrameworkAdapter protocol +
+        registry (framework_adapters/). The old hand-rolled per-framework
+        loaders/checkers were removed.
+        """
         from praisonai import auto
-        
-        # These functions should exist for lazy loading
-        assert hasattr(auto, '_check_crewai_available')
-        assert hasattr(auto, '_check_autogen_available')
-        assert hasattr(auto, '_check_praisonai_available')
-        assert hasattr(auto, '_get_crewai')
-        assert hasattr(auto, '_get_autogen')
-        assert hasattr(auto, '_get_praisonai')
+        from praisonai._framework_availability import is_available
+        from praisonai._lazy_cache import lazy_get
+
+        assert auto.is_available is is_available
+        assert auto.lazy_get is lazy_get
 
 
 class TestSafeStringSubstitution:

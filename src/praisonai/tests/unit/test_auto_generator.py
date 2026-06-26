@@ -20,10 +20,14 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 try:
-    from praisonai.auto import AutoGenerator, WorkflowAutoGenerator, LITELLM_AVAILABLE
+    from praisonai.auto import AutoGenerator, WorkflowAutoGenerator
 except ImportError as e:
     pytest.skip(f"Could not import required modules: {e}", allow_module_level=True)
 
+from pydantic import BaseModel
+
+class DummyModel(BaseModel):
+    pass
 
 class TestAutoGeneratorDefaultModel:
     """Test suite for default model configuration."""
@@ -165,7 +169,7 @@ class TestAutoGeneratorToolsPreservation:
 
 class TestAutoGeneratorLazyLoading:
     """Test suite for lazy loading of client."""
-    
+
     def test_client_is_not_created_on_init(self):
         """Test that client is not created during __init__."""
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
@@ -173,72 +177,92 @@ class TestAutoGeneratorLazyLoading:
                 topic="Test topic",
                 framework="praisonai"
             )
-            
-            # Check that _client is None (lazy loading)
-            assert generator._client is None
-    
+
+            # Check that clients are not created yet
+            assert generator._openai_client is None
+            assert generator._async_openai_client is None
+
     def test_client_is_created_on_first_access(self):
-        """Test that client is created on first access."""
+        """Test that OpenAI client is created on first access."""
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
             generator = AutoGenerator(
                 topic="Test topic",
                 framework="praisonai"
             )
+
+            # Before access
+            assert generator._openai_client is None
+
+            # Trigger lazy loading
+            client = generator._get_openai_client()
+
+            # After access
+            assert client is not None
+            assert generator._openai_client is not None
             
-            # Access client property
-            with patch('praisonai.auto.instructor') as mock_instructor:
-                mock_instructor.from_litellm.return_value = Mock()
-                mock_instructor.patch.return_value = Mock()
-                
-                client = generator.client
-                
-                # Check that client is now set
-                assert generator._client is not None
-
-
 class TestAutoGeneratorLiteLLMFallback:
     """Test suite for LiteLLM fallback to OpenAI."""
-    
-    def test_uses_litellm_when_available(self):
-        """Test that LiteLLM is used when available via from_provider."""
-        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
-            with patch('praisonai.auto.LITELLM_AVAILABLE', True):
-                with patch('praisonai.auto.instructor') as mock_instructor:
-                    mock_instructor.from_provider.return_value = Mock()
-                    
-                    generator = AutoGenerator(
-                        topic="Test topic",
-                        framework="praisonai"
-                    )
-                    
-                    # Access client to trigger creation
-                    _ = generator.client
-                    
-                    # Check that from_provider was called with litellm prefix
-                    mock_instructor.from_provider.assert_called_once()
-                    call_args = mock_instructor.from_provider.call_args[0][0]
-                    assert call_args.startswith('litellm/')
-    
-    def test_falls_back_to_openai_when_litellm_unavailable(self):
-        """Test that OpenAI SDK is used when LiteLLM is not available."""
-        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
-            with patch('praisonai.auto.LITELLM_AVAILABLE', False):
-                with patch('praisonai.auto.instructor') as mock_instructor:
-                    with patch('praisonai.auto.OpenAI') as mock_openai:
-                        mock_instructor.patch.return_value = Mock()
-                        mock_openai.return_value = Mock()
-                        
-                        generator = AutoGenerator(
-                            topic="Test topic",
-                            framework="praisonai"
-                        )
-                        
-                        # Access client to trigger creation
-                        _ = generator.client
-                        
-                        # Check that patch was called (OpenAI fallback)
-                        mock_instructor.patch.assert_called_once()
 
+    def test_uses_litellm_when_available(self):
+        with patch('praisonai.auto.is_available', side_effect=lambda x: x == "litellm"):
+            with patch('praisonai.auto._get_litellm') as mock_litellm:
+
+                mock_response = Mock()
+                mock_response.choices = [
+                    Mock(message=Mock(content="{}"))
+                ]
+
+                mock_litellm.return_value.completion.return_value = mock_response
+
+                generator = AutoGenerator(
+                    topic="Test topic",
+                    framework="praisonai"
+                )
+
+                generator._structured_completion(
+                    response_model=DummyModel,
+                    messages=[]
+                )
+
+                mock_litellm.return_value.completion.assert_called_once()
+
+
+    def test_falls_back_to_openai_when_litellm_unavailable(self):
+
+        with patch('praisonai.auto.is_available') as mock_available:
+            mock_available.side_effect = lambda x: x == "openai"
+
+            with patch.object(
+                AutoGenerator,
+                "_get_openai_client"
+            ) as mock_client:
+
+                mock_response = Mock()
+
+                choice = Mock()
+                choice.message = Mock()
+                choice.message.parsed = DummyModel()
+
+                mock_response.choices = [choice]
+
+                mock_client.return_value \
+                    .beta \
+                    .chat \
+                    .completions \
+                    .parse \
+                    .return_value = mock_response
+
+                generator = AutoGenerator(
+                    topic="Test topic",
+                    framework="praisonai"
+                )
+
+                generator._structured_completion(
+                    response_model=DummyModel,
+                    messages=[]
+                )
+
+                mock_client.assert_called_once()
 
 class TestWorkflowAutoGenerator:
     """Test suite for WorkflowAutoGenerator."""
@@ -255,85 +279,194 @@ class TestWorkflowAutoGenerator:
             assert generator.config_list[0]['model'] == 'gpt-4o-mini'
     
     def test_lazy_loading(self):
-        """Test that client uses lazy loading."""
+        """Test that OpenAI client uses lazy loading."""
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
             generator = WorkflowAutoGenerator(
                 topic="Test workflow"
             )
-            
-            assert generator._client is None
-    
-    def test_litellm_fallback(self):
-        """Test LiteLLM fallback to OpenAI."""
-        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
-            with patch('praisonai.auto.LITELLM_AVAILABLE', False):
-                with patch('praisonai.auto.instructor') as mock_instructor:
-                    with patch('praisonai.auto.OpenAI') as mock_openai:
-                        mock_instructor.patch.return_value = Mock()
-                        mock_openai.return_value = Mock()
-                        
-                        generator = WorkflowAutoGenerator(
-                            topic="Test workflow"
-                        )
-                        
-                        # Access client to trigger creation
-                        _ = generator.client
-                        
-                        # Check that patch was called (OpenAI fallback)
-                        mock_instructor.patch.assert_called_once()
 
+            assert generator._openai_client is None
+            assert generator._async_openai_client is None
+
+
+
+    def test_litellm_fallback(self):
+        with patch('praisonai.auto.is_available') as mock_available:
+
+            mock_available.side_effect = (
+                lambda provider: provider == "openai"
+            )
+
+            with patch.object(
+                WorkflowAutoGenerator,
+                "_get_openai_client"
+            ) as mock_client:
+
+                mock_response = Mock()
+                mock_response.choices = [
+                    Mock(
+                        message=Mock(
+                            parsed=DummyModel()
+                        )
+                    )
+                ]
+
+                mock_client.return_value \
+                    .beta \
+                    .chat \
+                    .completions \
+                    .parse \
+                    .return_value = mock_response
+
+                generator = WorkflowAutoGenerator(
+                    topic="Test workflow"
+                )
+
+                generator._structured_completion(
+                    response_model=DummyModel,
+                    messages=[]
+                )
+
+                mock_client.assert_called_once()
 
 class TestAutoGeneratorJSONMode:
-    """Test suite for JSON mode (critical fix for nested Dict structures)."""
-    
+    """Test suite for JSON mode structured output."""
+
     def test_uses_json_mode_not_tools_mode(self):
-        """Test that JSON mode is used instead of TOOLS mode for OpenAI fallback.
-        
-        TOOLS mode doesn't handle nested Dict[str, ...] structures properly,
-        causing validation errors. JSON mode works correctly.
         """
+        Test that OpenAI fallback uses response_format
+        instead of tools mode.
+        """
+
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
-            with patch('praisonai.auto.LITELLM_AVAILABLE', False):
-                with patch('praisonai.auto.instructor') as mock_instructor:
-                    with patch('praisonai.auto.OpenAI') as mock_openai:
-                        mock_instructor.patch.return_value = Mock()
-                        mock_instructor.Mode.JSON = 'JSON_MODE'
-                        mock_openai.return_value = Mock()
-                        
-                        generator = AutoGenerator(
-                            topic="Test topic",
-                            framework="praisonai"
-                        )
-                        
-                        # Access client to trigger creation
-                        _ = generator.client
-                        
-                        # Verify JSON mode was used
-                        call_kwargs = mock_instructor.patch.call_args[1]
-                        assert call_kwargs['mode'] == 'JSON_MODE'
-    
+
+            with patch(
+                'praisonai.auto.is_available'
+            ) as mock_available:
+
+                mock_available.side_effect = (
+                    lambda provider: provider == "openai"
+                )
+
+                with patch.object(
+                    AutoGenerator,
+                    "_get_openai_client"
+                ) as mock_client:
+
+                    mock_response = Mock()
+                    mock_response.choices = [
+                        Mock(message=Mock(parsed=DummyModel()))
+                    ]
+
+                    mock_client.return_value \
+                        .beta \
+                        .chat \
+                        .completions \
+                        .parse \
+                        .return_value = mock_response
+
+
+                    generator = AutoGenerator(
+                        topic="Test topic",
+                        framework="praisonai"
+                    )
+
+
+                    generator._structured_completion(
+                        response_model=DummyModel,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": "test"
+                            }
+                        ]
+                    )
+
+
+                    call_kwargs = (
+                        mock_client
+                        .return_value
+                        .beta
+                        .chat
+                        .completions
+                        .parse
+                        .call_args
+                        .kwargs
+                    )
+
+
+                    assert "response_format" in call_kwargs
+                    assert "tools" not in call_kwargs
+
+
+
     def test_workflow_generator_uses_json_mode(self):
-        """Test that WorkflowAutoGenerator also uses JSON mode."""
+        """
+        Test that WorkflowAutoGenerator also uses
+        OpenAI structured JSON response format.
+        """
+
         with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
-            with patch('praisonai.auto.LITELLM_AVAILABLE', False):
-                with patch('praisonai.auto.instructor') as mock_instructor:
-                    with patch('praisonai.auto.OpenAI') as mock_openai:
-                        mock_instructor.patch.return_value = Mock()
-                        mock_instructor.Mode.JSON = 'JSON_MODE'
-                        mock_openai.return_value = Mock()
-                        
-                        generator = WorkflowAutoGenerator(
-                            topic="Test workflow"
-                        )
-                        
-                        # Access client to trigger creation
-                        _ = generator.client
-                        
-                        # Verify JSON mode was used
-                        call_kwargs = mock_instructor.patch.call_args[1]
-                        assert call_kwargs['mode'] == 'JSON_MODE'
+
+            with patch(
+                'praisonai.auto.is_available'
+            ) as mock_available:
+
+                mock_available.side_effect = (
+                    lambda provider: provider == "openai"
+                )
 
 
+                with patch.object(
+                    WorkflowAutoGenerator,
+                    "_get_openai_client"
+                ) as mock_client:
+
+
+                    mock_response = Mock()
+                    mock_response.choices = [
+                        Mock(message=Mock(parsed=DummyModel()))
+                    ]
+
+
+                    mock_client.return_value \
+                        .beta \
+                        .chat \
+                        .completions \
+                        .parse \
+                        .return_value = mock_response
+
+
+                    generator = WorkflowAutoGenerator(
+                        topic="Test workflow"
+                    )
+
+
+                    generator._structured_completion(
+                        response_model=DummyModel,
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": "test"
+                            }
+                        ]
+                    )
+
+
+                    call_kwargs = (
+                        mock_client
+                        .return_value
+                        .beta
+                        .chat
+                        .completions
+                        .parse
+                        .call_args
+                        .kwargs
+                    )
+
+
+                    assert "response_format" in call_kwargs
+                    assert "tools" not in call_kwargs
 class TestAutoGeneratorImprovedPrompt:
     """Test suite for improved task analysis prompt."""
     

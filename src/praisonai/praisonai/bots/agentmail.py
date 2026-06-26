@@ -490,25 +490,24 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
     async def _handle_email_webhook(self, request: Any) -> Any:
         """Handle incoming webhook POST from AgentMail."""
         from aiohttp import web
-        import hashlib
-        import hmac
+        from praisonai.bots.webhook_security import (
+            verify_hmac,
+            webhooks_require_verification,
+        )
 
         body_bytes = await request.read()
-        secret = os.getenv("AGENTMAIL_WEBHOOK_SECRET") or self._token
+        secret = os.getenv("AGENTMAIL_WEBHOOK_SECRET", "")
+        signature = (
+            request.headers.get("X-AgentMail-Signature")
+            or request.headers.get("X-Webhook-Signature")
+            or request.headers.get("X-Signature")
+        )
         if secret:
-            signature = (
-                request.headers.get("X-AgentMail-Signature")
-                or request.headers.get("X-Webhook-Signature")
-                or request.headers.get("X-Signature")
-            )
-            expected = hmac.new(
-                secret.encode(),
-                body_bytes,
-                hashlib.sha256,
-            ).hexdigest()
-            provided = (signature or "").removeprefix("sha256=")
-            if not provided or not hmac.compare_digest(provided, expected):
+            if not verify_hmac(secret, body_bytes, signature):
                 return web.Response(status=401, text="Invalid webhook signature")
+        elif webhooks_require_verification():
+            logger.warning("Webhook rejected: AgentMail signing secret not configured")
+            return web.Response(status=401, text="Webhook verification not configured")
 
         try:
             import json

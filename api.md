@@ -890,6 +890,10 @@ Methods:
 * <code title="cli">praisonai context show <a href="./src/praisonai/praisonai/cli/commands/context.py">--help</a></code>
 * <code title="cli">praisonai context stats <a href="./src/praisonai/praisonai/cli/commands/context.py">--help</a></code>
 * <code title="cli">praisonai context tail <a href="./src/praisonai/praisonai/cli/commands/context.py">--help</a></code>
+* <code title="cli">praisonai daemon daemon-main <a href="./src/praisonai/praisonai/cli/commands/daemon.py">--help</a></code>
+* <code title="cli">praisonai daemon start <a href="./src/praisonai/praisonai/cli/commands/daemon.py">--help</a></code>
+* <code title="cli">praisonai daemon status <a href="./src/praisonai/praisonai/cli/commands/daemon.py">--help</a></code>
+* <code title="cli">praisonai daemon stop <a href="./src/praisonai/praisonai/cli/commands/daemon.py">--help</a></code>
 * <code title="cli">praisonai dashboard unified <a href="./src/praisonai/praisonai/cli/commands/dashboard.py">--help</a></code>
 * <code title="cli">praisonai debug acp <a href="./src/praisonai/praisonai/cli/commands/debug.py">--help</a></code>
 * <code title="cli">praisonai debug debug-callback <a href="./src/praisonai/praisonai/cli/commands/debug.py">--help</a></code>

@@ -642,9 +642,9 @@ def serve_openai(
     
     try:
         import uvicorn
-        from fastapi import FastAPI
         from praisonai.endpoints.providers import OpenAICompatProvider, AgentsAPIProvider
-        from praisonai.endpoints.server import create_unified_app, register_provider_to_discovery, register_endpoint_to_discovery
+        from praisonai.endpoints.server import create_unified_app, mount_provider_routes
+        from ..features.serve import _install_api_key_middleware
         
         output.print_info(f"Starting OpenAI-compatible server on {host}:{port}")
         
@@ -656,83 +656,11 @@ def serve_openai(
             agent_provider=agents_provider
         )
         
-        # Create server and register OpenAI provider
+        # Create server, mount provider routes, and apply shared auth middleware
+        # (same gate used by cmd_agents / cmd_unified).
         app = create_unified_app(server_name="PraisonAI OpenAI API")
-        register_provider_to_discovery(app, openai_provider.get_provider_info())
-        for endpoint in openai_provider.list_endpoints():
-            register_endpoint_to_discovery(app, endpoint)
-        
-        # Add OpenAI-style route mappings
-        from fastapi import Request, Response
-        from fastapi.responses import StreamingResponse
-        import json
-        
-        @app.post("/v1/chat/completions")
-        async def chat_completions(request: Request):
-            body = await request.json()
-            
-            if body.get("stream", False):
-                def generate():
-                    for chunk in openai_provider.invoke_stream("chat_completions", body):
-                        if chunk["event"] == "data":
-                            yield f"data: {json.dumps(chunk['data'])}\n\n"
-                        elif chunk["event"] == "done":
-                            yield "data: [DONE]\n\n"
-                        elif chunk["event"] == "error":
-                            # Send error as OpenAI-formatted SSE error chunk
-                            error_chunk = {
-                                "error": {
-                                    "message": chunk.get("data", {}).get("error", "Stream error occurred"),
-                                    "type": "stream_error"
-                                }
-                            }
-                            yield f"data: {json.dumps(error_chunk)}\n\n"
-                            yield "data: [DONE]\n\n"
-                            break
-                return StreamingResponse(generate(), media_type="text/event-stream")
-            
-            result = openai_provider.invoke("chat_completions", body, stream=False)
-            if not result.ok:
-                return Response(
-                    content=json.dumps({"error": {"message": result.error, "type": "api_error"}}),
-                    status_code=400,
-                    media_type="application/json"
-                )
-            
-            return result.data
-        
-        @app.post("/v1/completions")
-        async def completions(request: Request):
-            body = await request.json()
-            result = openai_provider.invoke("completions", body)
-            
-            if not result.ok:
-                return Response(
-                    content=json.dumps({"error": {"message": result.error, "type": "api_error"}}),
-                    status_code=400,
-                    media_type="application/json"
-                )
-            
-            return result.data
-        
-        @app.get("/v1/models")
-        async def models():
-            result = openai_provider.invoke("models")
-            return result.data if result.ok else {"error": result.error}
-        
-        @app.post("/v1/tools/invoke")
-        async def tools_invoke(request: Request):
-            body = await request.json()
-            result = openai_provider.invoke("tools_invoke", body)
-            
-            if not result.ok:
-                return Response(
-                    content=json.dumps({"error": {"message": result.error, "type": "api_error"}}),
-                    status_code=400,
-                    media_type="application/json"
-                )
-            
-            return result.data
+        mount_provider_routes(app, openai_provider)
+        _install_api_key_middleware(app, api_key)
         
         output.print("OpenAI-compatible endpoints available:")
         output.print("  POST /v1/chat/completions")

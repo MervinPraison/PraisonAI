@@ -39,6 +39,70 @@ _DEFAULT_MODEL = "gpt-4o-mini"
 _DEFAULT_BASE = "https://api.openai.com/v1"
 _DEFAULT_KEY_VAR = "OPENAI_API_KEY"
 
+# Ordered list of (credential env-var, provider-appropriate default model).
+# Precedence: the first provider whose credential is present wins. OpenAI is
+# listed first so existing OpenAI users keep their current default, but any
+# other single configured provider yields a matching default model.
+# Models carry an explicit provider prefix (where one exists in _PROVIDER_MAP)
+# so resolve_llm_endpoint() routes the request to the correct base URL and
+# credential. OpenAI stays bare for backward compatibility.
+_PROVIDER_DEFAULTS = (
+    ("OPENAI_API_KEY", "gpt-4o-mini"),
+    ("ANTHROPIC_API_KEY", "anthropic/claude-3-5-sonnet-latest"),
+    ("GEMINI_API_KEY", "gemini/gemini-1.5-flash"),
+    ("GOOGLE_API_KEY", "google/gemini-1.5-flash"),
+    ("GROQ_API_KEY", "groq/llama-3.3-70b-versatile"),
+    ("COHERE_API_KEY", "cohere/command-r"),
+    ("OLLAMA_HOST", "ollama/llama3.2"),
+)
+
+
+def default_model_for_available_provider(
+    *, validate: bool = False
+) -> str:
+    """
+    Choose a default model that matches an available provider credential.
+
+    Inspects the same credential environment variables that ``is_configured``
+    knows about and returns a provider-appropriate default model. When no
+    supported provider credential is present, falls back to ``_DEFAULT_MODEL``
+    so behaviour is unchanged for the no-credential case.
+
+    Args:
+        validate: When True, best-effort check the chosen model against the
+            model catalogue (for surfacing issues elsewhere). The provider
+            default is intentionally *not* dropped when the catalogue cannot
+            confirm it, since a valid provider credential should always yield a
+            usable, prefix-routed default.
+
+    Returns:
+        A model id string appropriate for the detected provider.
+    """
+    catalogue = None
+    if validate:
+        try:
+            from .catalogue import ModelCatalogue
+            catalogue = ModelCatalogue()
+        except Exception:
+            catalogue = None
+
+    for key_var, model in _PROVIDER_DEFAULTS:
+        if not os.environ.get(key_var):
+            continue
+        if catalogue is not None:
+            # Validate the bare model id (catalogue ids are unprefixed) but
+            # keep the provider prefix so endpoint routing still works. If the
+            # catalogue can't confirm it, use the model as-is rather than
+            # dropping a perfectly valid provider default.
+            bare = model.split("/", 1)[-1]
+            try:
+                catalogue.validate_model(bare)
+            except Exception:
+                pass
+        return model
+
+    return _DEFAULT_MODEL
+
 
 def _first_set(*names: str) -> Optional[str]:
     """Return the first environment variable that is set and non-empty."""
@@ -93,7 +157,9 @@ def resolve_llm_endpoint(
     elif resolved_config and resolved_config.agent.model:
         model = resolved_config.agent.model
     else:
-        model = _DEFAULT_MODEL
+        # No explicit model: pick a default that matches whichever supported
+        # provider credential is actually present (falls back to _DEFAULT_MODEL).
+        model = default_model_for_available_provider(validate=validate_model)
     
     # Validate model if requested (before provider resolution)
     catalogue = None

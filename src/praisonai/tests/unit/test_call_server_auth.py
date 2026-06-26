@@ -30,6 +30,7 @@ async def test_verify_token_requires_token_by_default(monkeypatch):
 async def test_verify_token_optout(monkeypatch):
     monkeypatch.delenv("CALL_SERVER_TOKEN", raising=False)
     monkeypatch.setenv("PRAISONAI_CALL_AUTH", "disabled")
+    monkeypatch.setenv("PRAISONAI_CALL_BIND_HOST", "127.0.0.1")
 
     mod = importlib.import_module("praisonai.api.agent_invoke")
     importlib.reload(mod)
