@@ -32,8 +32,13 @@ def _handler(workspace: Optional[str] = None, verbose: bool = False):
 async def _resolve_checkpoint_id(handler, ref: str) -> Optional[str]:
     """Resolve a checkpoint reference (an id/short_id or the literal 'last').
 
-    Returns the resolved checkpoint id, or ``None`` when no matching
-    checkpoint exists.
+    Resolution order: literal ``last``/``latest`` -> exact id/short_id ->
+    unique id prefix. Ambiguous prefixes (matching more than one checkpoint)
+    are rejected so a workspace-mutating restore never targets the wrong
+    checkpoint.
+
+    Returns the resolved checkpoint id, or ``None`` when no matching (or an
+    ambiguous) checkpoint reference is given.
     """
     service = await handler._get_service()
     checkpoints = await service.list_checkpoints(limit=100)
@@ -44,9 +49,15 @@ async def _resolve_checkpoint_id(handler, ref: str) -> Optional[str]:
         # list_checkpoints returns newest-first.
         return checkpoints[0].id
 
-    for cp in checkpoints:
-        if cp.id == ref or cp.id.startswith(ref) or cp.short_id == ref:
-            return cp.id
+    exact = [cp.id for cp in checkpoints if cp.id == ref or cp.short_id == ref]
+    if exact:
+        return exact[0]
+
+    prefix_matches = [cp.id for cp in checkpoints if cp.id.startswith(ref)]
+    if len(prefix_matches) == 1:
+        return prefix_matches[0]
+    if len(prefix_matches) > 1:
+        handler._print_error(f"Ambiguous checkpoint reference: {ref}")
     return None
 
 
@@ -100,7 +111,25 @@ def diff(
 ):
     """Show the diff between checkpoints (or against the working directory)."""
     handler = _handler(workspace)
-    asyncio.run(handler.diff(from_id, to_id))
+
+    async def _run() -> None:
+        # Resolve the same references restore accepts ('last'/short id/prefix)
+        # so `diff last` or `diff <short_id>` don't reach git as literal refs.
+        resolved_from = (
+            await _resolve_checkpoint_id(handler, from_id) if from_id else None
+        )
+        resolved_to = (
+            await _resolve_checkpoint_id(handler, to_id) if to_id else None
+        )
+        if from_id and resolved_from is None:
+            handler._print_error(f"No checkpoint found for: {from_id}")
+            return
+        if to_id and resolved_to is None:
+            handler._print_error(f"No checkpoint found for: {to_id}")
+            return
+        await handler.diff(resolved_from, resolved_to)
+
+    asyncio.run(_run())
 
 
 @app.command("delete")

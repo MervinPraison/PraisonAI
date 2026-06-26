@@ -271,11 +271,17 @@ def _checkpoints_auto_enabled() -> bool:
     return True
 
 
-def _auto_checkpoint(label: str, *, no_checkpoint: bool) -> None:
+def _auto_checkpoint(label: str, *, no_checkpoint: bool, workspace_dir: Optional[str] = None) -> None:
     """Create an automatic checkpoint of the workspace before a run.
 
-    Best-effort: any failure (e.g. protected path, no git) is swallowed so a
-    checkpoint problem never blocks the actual run.
+    ``workspace_dir`` defaults to the current directory but should be the
+    directory of the project being run (e.g. the directory containing a target
+    YAML file) so the checkpoint protects the files the run will actually
+    touch.
+
+    Best-effort and quiet: any failure (e.g. protected path, no git, no
+    changes) is swallowed so a checkpoint problem never blocks the run and the
+    auto-checkpoint never leaks into machine-readable run output.
     """
     if no_checkpoint or not _checkpoints_auto_enabled():
         return
@@ -287,22 +293,21 @@ def _auto_checkpoint(label: str, *, no_checkpoint: bool) -> None:
     try:
         from ..features.checkpoints import CheckpointsHandler
 
-        handler = CheckpointsHandler(workspace_dir=os.getcwd())
-        asyncio.run(handler.save(label, allow_empty=False))
+        handler = CheckpointsHandler(workspace_dir=workspace_dir or os.getcwd())
+        asyncio.run(handler.save(label, allow_empty=False, quiet=True))
     except Exception as e:  # pragma: no cover - defensive, never block the run
         if getattr(output, "is_verbose", False):
             output.print_info(f"Auto-checkpoint skipped: {e}")
 
 
-def _restore_checkpoint(ref: str) -> None:
+def _restore_checkpoint(ref: str, workspace_dir: Optional[str] = None) -> None:
     """Restore the workspace to a checkpoint reference ('last' or an id)."""
     import asyncio
     import os
 
-    output = get_output_controller()
     from ..features.checkpoints import CheckpointsHandler
 
-    handler = CheckpointsHandler(workspace_dir=os.getcwd())
+    handler = CheckpointsHandler(workspace_dir=workspace_dir or os.getcwd())
 
     async def _run() -> bool:
         service = await handler._get_service()
@@ -313,14 +318,21 @@ def _restore_checkpoint(ref: str) -> None:
         if ref in ("last", "latest"):
             target = checkpoints[0].id
         else:
-            target = next(
-                (cp.id for cp in checkpoints
-                 if cp.id == ref or cp.id.startswith(ref) or cp.short_id == ref),
-                None,
-            )
-            if target is None:
-                handler._print_error(f"No checkpoint found for: {ref}")
-                return False
+            # Exact id/short_id first, then a unique prefix; reject ambiguous
+            # prefixes so we never restore the wrong workspace.
+            exact = [cp.id for cp in checkpoints if cp.id == ref or cp.short_id == ref]
+            if exact:
+                target = exact[0]
+            else:
+                prefix_matches = [cp.id for cp in checkpoints if cp.id.startswith(ref)]
+                if len(prefix_matches) == 1:
+                    target = prefix_matches[0]
+                elif len(prefix_matches) > 1:
+                    handler._print_error(f"Ambiguous checkpoint reference: {ref}")
+                    return False
+                else:
+                    handler._print_error(f"No checkpoint found for: {ref}")
+                    return False
         return await handler.restore(target)
 
     if not asyncio.run(_run()):
@@ -609,19 +621,25 @@ def run_main(
         }
     )
     
-    # Auto-checkpoint the workspace before the agent runs so a bad turn can be
-    # rewound with `praisonai run --restore last`. Best-effort and gated by
-    # config (`checkpoints.auto`, default on) and `--no-checkpoint`.
-    from ..state.identifiers import get_current_context as _get_ctx
-    _run_id = getattr(_get_ctx(), "run_id", None)
-    _auto_checkpoint(
-        f"run:{_run_id}" if _run_id else "auto checkpoint before run",
-        no_checkpoint=no_checkpoint,
-    )
-
     # Check if target is a file or prompt
     import os
     is_file = os.path.exists(target) and (target.endswith('.yaml') or target.endswith('.yml'))
+
+    # Auto-checkpoint before file-based runs so a bad turn can be rewound with
+    # `praisonai run --restore last`. Scoped to YAML-file runs (which mutate
+    # project files) and snapshotted against the file's own directory so the
+    # checkpoint protects the right workspace. Plain-prompt runs don't touch
+    # project files, so they skip checkpointing (avoiding spurious "no changes"
+    # noise). Best-effort and gated by config (`checkpoints.auto`, default on)
+    # and `--no-checkpoint`.
+    if is_file:
+        from ..state.identifiers import get_current_context as _get_ctx
+        _run_id = getattr(_get_ctx(), "run_id", None)
+        _auto_checkpoint(
+            f"run:{_run_id}" if _run_id else "auto checkpoint before run",
+            no_checkpoint=no_checkpoint,
+            workspace_dir=os.path.dirname(os.path.abspath(target)) or None,
+        )
     
     # Handle profiling
     if profile or profile_deep:
