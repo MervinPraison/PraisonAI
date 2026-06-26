@@ -32,6 +32,8 @@ class LearnEntry:
     metadata: Dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
     updated_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    use_count: int = 0
+    last_used: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -40,6 +42,8 @@ class LearnEntry:
             "metadata": self.metadata,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "use_count": self.use_count,
+            "last_used": self.last_used,
         }
     
     @classmethod
@@ -50,6 +54,8 @@ class LearnEntry:
             metadata=data.get("metadata", {}),
             created_at=data.get("created_at", datetime.utcnow().isoformat()),
             updated_at=data.get("updated_at", datetime.utcnow().isoformat()),
+            use_count=data.get("use_count", 0),
+            last_used=data.get("last_used"),
         )
 
 
@@ -67,10 +73,15 @@ class BaseStore(ABC):
         user_id: Optional[str] = None,
         scope: str = "private",
         backend: Optional["StorageBackendProtocol"] = None,
+        max_entries: int = 0,
+        retention_days: int = 0,
     ):
         self.user_id = user_id or "default"
         self.scope = scope
         self._backend = backend
+        # Retention policy: 0 disables (permissive default — backward-compatible)
+        self.max_entries = max_entries or 0
+        self.retention_days = retention_days or 0
         self.store_path = store_path or self._default_path()
         self._entries: Dict[str, LearnEntry] = {}
         self._was_updated: bool = False
@@ -151,9 +162,28 @@ class BaseStore(ABC):
             metadata=metadata or {},
         )
         self._entries[entry_id] = entry
+        # Bounded retention: prune stale/excess entries on write (no-op if unconfigured).
+        # Protect the entry we just added so a full store never evicts the new
+        # learning and returns a value that is no longer retrievable.
+        self.prune(save=False, protect_id=entry_id)
         self._save()
         self._was_updated = True
         return entry
+    
+    def _touch(self, entries: List[LearnEntry]) -> None:
+        """Record usage telemetry for retrieved entries.
+        
+        Bumps use_count/last_used so value is observable and retention is
+        usage-aware. Persisted only when entries were actually touched.
+        """
+        if not entries:
+            return
+        now = datetime.utcnow().isoformat()
+        for entry in entries:
+            entry.use_count += 1
+            entry.last_used = now
+        self._save()
+        self._was_updated = True
     
     def get(self, entry_id: str) -> Optional[LearnEntry]:
         """Get entry by ID."""
@@ -166,13 +196,17 @@ class BaseStore(ABC):
             entry for entry in self._entries.values()
             if query_lower in entry.content.lower()
         ]
-        return results[:limit]
+        results = results[:limit]
+        self._touch(results)
+        return results
     
     def list_all(self, limit: int = 100) -> List[LearnEntry]:
         """List all entries."""
         entries = list(self._entries.values())
         entries.sort(key=lambda x: x.updated_at, reverse=True)
-        return entries[:limit]
+        entries = entries[:limit]
+        self._touch(entries)
+        return entries
     
     def update(self, entry_id: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> Optional[LearnEntry]:
         """Update an existing entry."""
@@ -203,6 +237,106 @@ class BaseStore(ABC):
         self._save()
         self._was_updated = True
         return count
+    
+    def _archive_path(self) -> Path:
+        """Path to the recoverable archive file for this store."""
+        return Path(self.store_path).with_suffix(".archive.json")
+    
+    def _archive(self, entries: List[LearnEntry]) -> bool:
+        """Append evicted entries to a recoverable archive (never hard-delete).
+
+        Returns True only when the entries were durably written, so callers can
+        keep the active store and archive consistent (no silent data loss when
+        the sidecar is unwritable).
+        """
+        if not entries:
+            return True
+        try:
+            import json
+            archive_path = self._archive_path()
+            existing: List[Dict[str, Any]] = []
+            if archive_path.exists():
+                with open(archive_path, "r", encoding="utf-8") as f:
+                    existing = json.load(f)
+                if not isinstance(existing, list):
+                    existing = []
+            existing.extend(e.to_dict() for e in entries)
+            archive_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(archive_path, "w", encoding="utf-8") as f:
+                json.dump(existing, f, ensure_ascii=False, indent=2)
+            return True
+        except Exception as e:
+            import logging
+            logging.warning(f"Failed to archive pruned entries: {e}")
+            return False
+    
+    def _is_stale(self, entry: LearnEntry, now: datetime) -> bool:
+        """Whether an entry exceeds the retention window (usage-driven, deterministic)."""
+        if self.retention_days <= 0:
+            return False
+        reference = entry.last_used or entry.updated_at or entry.created_at
+        try:
+            ref_dt = datetime.fromisoformat(reference)
+        except (ValueError, TypeError):
+            return False
+        age_days = (now - ref_dt).total_seconds() / 86400.0
+        return age_days > self.retention_days
+    
+    def prune(self, save: bool = True, protect_id: Optional[str] = None) -> int:
+        """Archive stale and least-used/oldest excess entries.
+        
+        Deterministic, usage-driven retention (no LLM judgment):
+        - Entries unused beyond ``retention_days`` are archived as stale.
+        - When more than ``max_entries`` remain, the least-used (then oldest)
+          are archived until the cap is met.
+        
+        Archival is recoverable (entries moved to a ``.archive.json`` sidecar);
+        never a silent hard-delete. Returns the number of entries archived.
+        No-op (returns 0) when neither limit is configured — backward-compatible.
+        
+        Args:
+            save: Persist the active store after pruning.
+            protect_id: Entry id that must never be evicted (e.g. a learning
+                just added), so a full store cannot discard the new value.
+        """
+        if self.max_entries <= 0 and self.retention_days <= 0:
+            return 0
+        
+        now = datetime.utcnow()
+        evicted: List[LearnEntry] = []
+        
+        # 1. Staleness: archive entries beyond the retention window
+        if self.retention_days > 0:
+            for entry_id, entry in list(self._entries.items()):
+                if entry_id == protect_id:
+                    continue
+                if self._is_stale(entry, now):
+                    evicted.append(self._entries.pop(entry_id))
+        
+        # 2. Cap: archive least-used (then oldest) beyond max_entries
+        if self.max_entries > 0 and len(self._entries) > self.max_entries:
+            candidates = [
+                e for e in self._entries.values() if e.id != protect_id
+            ]
+            remaining = sorted(
+                candidates,
+                key=lambda e: (e.use_count, e.last_used or "", e.created_at),
+            )
+            overflow = len(self._entries) - self.max_entries
+            for entry in remaining[:overflow]:
+                evicted.append(self._entries.pop(entry.id))
+        
+        if evicted:
+            # Recoverable archival is mandatory: if the sidecar write fails,
+            # restore the evicted entries rather than silently losing them.
+            if not self._archive(evicted):
+                for entry in evicted:
+                    self._entries[entry.id] = entry
+                return 0
+            self._was_updated = True
+            if save:
+                self._save()
+        return len(evicted)
 
 
 class PersonaStore(BaseStore):

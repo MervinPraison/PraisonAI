@@ -145,6 +145,10 @@ class LearnConfig:
     db_url: Optional[str] = None  # Database connection URL (for non-file backends)
     store_path: Optional[str] = None  # Custom storage path (for file backend)
     
+    # Retention / lifecycle governance (0 = unbounded; backward-compatible default)
+    max_entries: int = 0      # Per-store cap; least-used/oldest archived beyond it
+    retention_days: int = 0   # Archive entries unused for this many days (staleness)
+    
     # LLM for learning extraction
     llm: Optional[str] = None  # LLM model for extracting learnings (defaults to agent's LLM)
     
@@ -166,6 +170,8 @@ class LearnConfig:
             "backend": self.backend.value if isinstance(self.backend, LearnBackend) else self.backend,
             "db_url": self.db_url,
             "store_path": self.store_path,
+            "max_entries": self.max_entries,
+            "retention_days": self.retention_days,
             "llm": self.llm,
         }
 

@@ -478,3 +478,176 @@ class TestNoCortexParam:
         
         spec = importlib.util.find_spec("praisonaiagents.cortex")
         assert spec is None, "praisonaiagents.cortex module should not exist"
+
+
+class TestUsageTelemetry:
+    """Test use_count/last_used usage telemetry on retrieval."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.store_path = os.path.join(self.temp_dir, "persona.json")
+
+    def teardown_method(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_new_entry_defaults(self):
+        """New entries start with use_count 0 and no last_used."""
+        store = PersonaStore(store_path=self.store_path, user_id="u")
+        entry = store.add("User likes Python")
+        assert entry.use_count == 0
+        assert entry.last_used is None
+
+    def test_search_bumps_use_count(self):
+        """search() records access on returned entries."""
+        store = PersonaStore(store_path=self.store_path, user_id="u")
+        store.add("User likes Python")
+        results = store.search("Python")
+        assert len(results) == 1
+        assert results[0].use_count == 1
+        assert results[0].last_used is not None
+
+    def test_list_all_bumps_use_count(self):
+        """list_all() records access on returned entries."""
+        store = PersonaStore(store_path=self.store_path, user_id="u")
+        store.add("User likes Python")
+        store.list_all()
+        store.list_all()
+        entry = list(store._entries.values())[0]
+        assert entry.use_count == 2
+
+    def test_telemetry_persisted(self):
+        """Usage telemetry survives reload."""
+        store = PersonaStore(store_path=self.store_path, user_id="u")
+        store.add("User likes Python")
+        store.search("Python")
+        reloaded = PersonaStore(store_path=self.store_path, user_id="u")
+        entry = list(reloaded._entries.values())[0]
+        assert entry.use_count == 1
+        assert entry.last_used is not None
+
+    def test_entry_roundtrip_preserves_telemetry(self):
+        """LearnEntry to_dict/from_dict preserves telemetry fields."""
+        entry = LearnEntry(id="x", content="c", use_count=3, last_used="2025-01-01T00:00:00")
+        restored = LearnEntry.from_dict(entry.to_dict())
+        assert restored.use_count == 3
+        assert restored.last_used == "2025-01-01T00:00:00"
+
+
+class TestBoundedRetention:
+    """Test max_entries / retention_days pruning and archival."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.store_path = os.path.join(self.temp_dir, "insights.json")
+
+    def teardown_method(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_unbounded_by_default(self):
+        """No limits configured -> behaviour unchanged, prune is a no-op."""
+        store = InsightStore(store_path=self.store_path, user_id="u")
+        for i in range(20):
+            store.add(f"insight {i}")
+        assert len(store._entries) == 20
+        assert store.prune() == 0
+
+    def test_max_entries_evicts_on_add(self):
+        """Exceeding max_entries archives least-used/oldest on write."""
+        store = InsightStore(store_path=self.store_path, user_id="u", max_entries=5)
+        for i in range(10):
+            store.add(f"insight {i}")
+        assert len(store._entries) == 5
+
+    def test_max_entries_keeps_most_used(self):
+        """Least-used entries are evicted first."""
+        store = InsightStore(store_path=self.store_path, user_id="u", max_entries=3)
+        store.add("keep me")
+        for i in range(2):
+            store.add(f"filler {i}")
+        # Bump usage on the entry we want to keep via the public retrieval path
+        for _ in range(5):
+            assert store.search("keep me")
+        for i in range(5):
+            store.add(f"new {i}")
+        contents = [e.content for e in store._entries.values()]
+        assert "keep me" in contents
+        assert len(store._entries) == 3
+
+    def test_new_entry_not_evicted_when_full(self):
+        """A freshly added entry is never the one pruned away on write."""
+        store = InsightStore(store_path=self.store_path, user_id="u", max_entries=3)
+        for i in range(3):
+            store.add(f"old {i}")
+        # Give existing entries usage so the newcomer is the least-used
+        for _ in range(3):
+            store.search("old")
+        new = store.add("brand new")
+        assert store.get(new.id) is not None
+        contents = [e.content for e in store._entries.values()]
+        assert "brand new" in contents
+        assert len(store._entries) == 3
+
+    def test_archive_failure_restores_entries(self):
+        """If archival cannot persist, pruned entries stay in the active store."""
+        store = InsightStore(store_path=self.store_path, user_id="u", max_entries=2)
+        for i in range(5):
+            store.add(f"insight {i}")
+        # Force the archive write to fail; entries must not be lost
+        store._archive = lambda entries: False
+        before = dict(store._entries)
+        store.add("trigger prune")
+        # No entries dropped beyond the new add (archival failed -> restore)
+        assert set(before).issubset(set(store._entries))
+
+    def test_archive_is_recoverable(self):
+        """Evicted entries are written to a recoverable archive file."""
+        from pathlib import Path
+        import json
+        store = InsightStore(store_path=self.store_path, user_id="u", max_entries=2)
+        for i in range(6):
+            store.add(f"insight {i}")
+        archive = Path(self.store_path).with_suffix(".archive.json")
+        assert archive.exists()
+        with open(archive) as f:
+            archived = json.load(f)
+        assert len(archived) == 4
+
+    def test_retention_days_archives_stale(self):
+        """Entries unused beyond retention_days are archived by prune()."""
+        from datetime import datetime, timedelta
+        store = InsightStore(store_path=self.store_path, user_id="u", retention_days=30)
+        store.add("fresh")
+        stale = store.add("stale")
+        old = (datetime.utcnow() - timedelta(days=60)).isoformat()
+        stale.last_used = old
+        stale.updated_at = old
+        stale.created_at = old
+        store._save()
+        pruned = store.prune()
+        assert pruned == 1
+        contents = [e.content for e in store._entries.values()]
+        assert "fresh" in contents
+        assert "stale" not in contents
+
+    def test_manager_prune_propagates_config(self):
+        """LearnManager.prune() runs across stores with config-driven limits."""
+        from datetime import datetime, timedelta
+        config = LearnConfig(persona=True, insights=False, thread=False, retention_days=30)
+        manager = LearnManager(config=config, user_id="u", store_path=self.temp_dir)
+        manager.capture_persona("fresh")
+        stale = manager.capture_persona("stale")
+        old = (datetime.utcnow() - timedelta(days=60)).isoformat()
+        stale.last_used = old
+        stale.updated_at = old
+        stale.created_at = old
+        manager._stores["persona"]._save()
+        result = manager.prune()
+        assert result["persona"] == 1
+        assert manager.get_stats()["persona"] == 1
+
+    def test_config_to_dict_has_retention(self):
+        """LearnConfig exposes retention fields via to_dict."""
+        config = LearnConfig(max_entries=100, retention_days=90)
+        d = config.to_dict()
+        assert d["max_entries"] == 100
+        assert d["retention_days"] == 90
