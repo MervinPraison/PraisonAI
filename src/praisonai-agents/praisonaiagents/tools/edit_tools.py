@@ -25,6 +25,22 @@ _DIAGNOSTICS_MAX_CHARS = 2000
 # Seconds before a diagnostics subprocess is abandoned.
 _DIAGNOSTICS_TIMEOUT = 10
 
+# File extension -> LSP language id, used to pick a language server for the
+# edited file.  Mirrors the languages with a default server in ``lsp/config.py``
+# (DEFAULT_SERVERS); anything not listed falls back to the per-language checker.
+_LSP_LANGUAGE_BY_EXT = {
+    ".py": "python",
+    ".pyi": "python",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".rs": "rust",
+    ".go": "go",
+}
+
 
 class EditTools:
     """Tools for file editing and patching operations."""
@@ -213,15 +229,150 @@ class EditTools:
                 return tool_name, argv
         return None
 
-    def _run_diagnostics(self, safe_path: str, display_path: str) -> str:
-        """Run a checker on ``safe_path`` and return a bounded diagnostics block.
+    @staticmethod
+    def _bound_output(output: str) -> str:
+        """Truncate ``output`` to the shared diagnostics character budget."""
+        if len(output) > _DIAGNOSTICS_MAX_CHARS:
+            return output[:_DIAGNOSTICS_MAX_CHARS] + "\n... (diagnostics truncated)"
+        return output
 
-        Returns an empty string when diagnostics are disabled, no checker is
-        available, or (in ``auto`` mode) the checker reports no problems.  Any
-        exception is logged and swallowed so the edit result is never lost.
+    def _try_lsp_diagnostics(self, safe_path: str, display_path: str) -> Optional[str]:
+        """Query the existing LSP client for diagnostics on ``safe_path``.
+
+        Returns a formatted, bounded diagnostics block (matching the shape used
+        by the per-language checker) when a language server is available for the
+        file's language, ``None`` when no server is configured/installed so the
+        caller can fall back to the legacy checker.  Everything is lazy: the LSP
+        client is only imported and spawned when a server actually exists, so
+        Python-only/silent runs pay no startup cost.  Any failure returns
+        ``None`` so a missing/slow server never blocks a successful edit.
+        """
+        import shutil
+
+        ext = os.path.splitext(safe_path)[1].lower()
+        language = _LSP_LANGUAGE_BY_EXT.get(ext)
+        if language is None:
+            return None
+
+        try:
+            from ..lsp.config import DEFAULT_SERVERS
+        except Exception:
+            return None
+
+        server = DEFAULT_SERVERS.get(language)
+        if not server:
+            return None
+        # Only spawn a server whose command is actually installed; otherwise
+        # fall back to the zero-config checker without importing the client.
+        if not shutil.which(server["command"]):
+            return None
+
+        try:
+            import asyncio
+            from ..lsp.client import LSPClient
+            from ..lsp.types import DiagnosticSeverity
+        except Exception as e:
+            logger.debug("LSP diagnostics unavailable for %s: %s", display_path, e)
+            return None
+
+        async def _collect() -> Optional[list]:
+            client = LSPClient(language=language)
+            # Keep the whole exchange inside the shared diagnostics budget so a
+            # slow server cannot stall the edit result.
+            client.config.timeout = min(client.config.timeout, _DIAGNOSTICS_TIMEOUT)
+            try:
+                if not await client.start():
+                    return None
+                if not await client.open_document(safe_path):
+                    return None
+                # Diagnostics arrive asynchronously via publishDiagnostics; poll
+                # briefly within the timeout budget for the server to report.
+                deadline = asyncio.get_event_loop().time() + _DIAGNOSTICS_TIMEOUT
+                diags: list = []
+                while asyncio.get_event_loop().time() < deadline:
+                    diags = await client.get_diagnostics(safe_path)
+                    if diags:
+                        break
+                    await asyncio.sleep(0.2)
+                return diags
+            finally:
+                try:
+                    await client.close_document(safe_path)
+                except Exception:
+                    pass
+                await client.stop()
+
+        try:
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                running = False
+            else:
+                running = True
+            if running:
+                # An event loop is already running (e.g. async agent context);
+                # don't risk re-entrancy — defer to the checker fallback.
+                return None
+            diagnostics = asyncio.run(
+                asyncio.wait_for(_collect(), timeout=_DIAGNOSTICS_TIMEOUT + 5)
+            )
+        except Exception as e:
+            logger.debug("LSP diagnostics error for %s: %s", display_path, e)
+            return None
+
+        if diagnostics is None:
+            return None
+
+        if not diagnostics:
+            if self._post_edit_diagnostics == "on":
+                return f"\n\nDiagnostics (lsp:{language}): no problems found"
+            return ""
+
+        _severity_label = {
+            DiagnosticSeverity.ERROR: "error",
+            DiagnosticSeverity.WARNING: "warning",
+            DiagnosticSeverity.INFORMATION: "info",
+            DiagnosticSeverity.HINT: "hint",
+        }
+        lines = []
+        for d in diagnostics:
+            try:
+                line = d.range.start.line + 1
+                char = d.range.start.character + 1
+                label = _severity_label.get(d.severity, "error")
+                message = " ".join((d.message or "").split())
+                lines.append(f"{display_path}:{line}:{char}: {label}: {message}")
+            except Exception:
+                continue
+        if not lines:
+            if self._post_edit_diagnostics == "on":
+                return f"\n\nDiagnostics (lsp:{language}): no problems found"
+            return ""
+
+        output = self._bound_output("\n".join(lines))
+        return f"\n\nDiagnostics (lsp:{language}):\n{output}"
+
+    def _run_diagnostics(self, safe_path: str, display_path: str) -> str:
+        """Run diagnostics on ``safe_path`` and return a bounded diagnostics block.
+
+        Tries the wired-in LSP client first (for any language the user has a
+        language server installed for) and falls back to the zero-config
+        per-language checker when no server is available.  Returns an empty
+        string when diagnostics are disabled, no checker is available, or (in
+        ``auto`` mode) no problems are found.  Any exception is logged and
+        swallowed so the edit result is never lost.
         """
         if self._post_edit_diagnostics == "off":
             return ""
+        # Prefer the existing LSP client when a language server is available so
+        # multi-language edits get language-aware diagnostics; ``None`` means no
+        # server, so we fall through to the legacy checker below.
+        try:
+            lsp_block = self._try_lsp_diagnostics(safe_path, display_path)
+            if lsp_block is not None:
+                return lsp_block
+        except Exception as e:  # never let LSP wiring break a successful edit
+            logger.debug("LSP diagnostics skipped for %s: %s", display_path, e)
         try:
             resolved = self._diagnostics_command(safe_path)
             if resolved is None:
@@ -255,8 +406,7 @@ class EditTools:
 
             if not output:
                 output = f"check failed (exit code {proc.returncode})"
-            if len(output) > _DIAGNOSTICS_MAX_CHARS:
-                output = output[:_DIAGNOSTICS_MAX_CHARS] + "\n... (diagnostics truncated)"
+            output = self._bound_output(output)
             return f"\n\nDiagnostics ({tool_name}):\n{output}"
         except Exception as e:  # never let diagnostics break a successful edit
             logger.debug("Diagnostics error for %s: %s", display_path, e)

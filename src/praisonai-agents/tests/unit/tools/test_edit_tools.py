@@ -410,6 +410,85 @@ class TestPostEditDiagnostics:
         assert "Diagnostics" in result
 
 
+class TestLSPDiagnostics:
+    """The post-edit diagnostics hook is wired to the existing LSP client."""
+
+    def test_off_mode_skips_lsp(self, tmp_path, monkeypatch):
+        # ``off`` short-circuits before any LSP attempt (zero overhead).
+        editor = EditTools(post_edit_diagnostics="off")
+        called = {"n": 0}
+
+        def _spy(self, safe_path, display_path):
+            called["n"] += 1
+            return None
+
+        monkeypatch.setattr(EditTools, "_try_lsp_diagnostics", _spy)
+        p = tmp_path / "x.py"
+        _write(p, "x = 1\n")
+        result = editor.edit_file(str(p), "x = 1", "x = 2")
+        assert "Diagnostics" not in result
+        assert called["n"] == 0
+
+    def test_no_server_falls_back_to_checker(self, tmp_path):
+        # With no language server installed for the extension, LSP returns None
+        # and the legacy per-language checker still surfaces syntax errors.
+        editor = EditTools(post_edit_diagnostics="auto")
+        # No server is configured for an unknown extension -> None.
+        assert editor._try_lsp_diagnostics(str(tmp_path / "f.unknownext"), "f") is None
+        p = tmp_path / "broken.py"
+        _write(p, "x = 1\n")
+        result = editor.edit_file(str(p), "x = 1", "def (:")
+        assert "Success" in result
+        assert "Diagnostics" in result
+
+    def test_lsp_block_used_when_available(self, tmp_path, monkeypatch):
+        # When the LSP path returns a formatted block, it is used verbatim and
+        # the legacy checker is not consulted.
+        editor = EditTools(post_edit_diagnostics="auto")
+
+        def _fake_lsp(self, safe_path, display_path):
+            return f"\n\nDiagnostics (lsp:typescript):\n{display_path}:1:1: error: oops"
+
+        def _boom(self, safe_path):
+            raise AssertionError("checker fallback should not run when LSP returns a block")
+
+        monkeypatch.setattr(EditTools, "_try_lsp_diagnostics", _fake_lsp)
+        monkeypatch.setattr(EditTools, "_diagnostics_command", staticmethod(_boom))
+        p = tmp_path / "a.ts"
+        _write(p, "const x = 1;\n")
+        result = editor.edit_file(str(p), "const x = 1;", "const y = 2;")
+        assert "Success" in result
+        assert "Diagnostics (lsp:typescript)" in result
+
+    def test_lsp_no_problems_auto_is_silent(self, tmp_path, monkeypatch):
+        # An LSP run with no diagnostics in ``auto`` mode appends nothing.
+        editor = EditTools(post_edit_diagnostics="auto")
+        monkeypatch.setattr(
+            EditTools, "_try_lsp_diagnostics",
+            lambda self, safe_path, display_path: "",
+        )
+        p = tmp_path / "a.ts"
+        _write(p, "const x = 1;\n")
+        result = editor.edit_file(str(p), "const x = 1;", "const y = 2;")
+        assert "Success" in result
+        assert "Diagnostics" not in result
+
+    def test_lsp_failure_falls_back_to_checker(self, tmp_path, monkeypatch):
+        # A raising LSP attempt must not break the edit; the checker fallback
+        # still runs and surfaces the Python syntax error.
+        editor = EditTools(post_edit_diagnostics="auto")
+
+        def _raise(self, safe_path, display_path):
+            raise RuntimeError("server crashed")
+
+        monkeypatch.setattr(EditTools, "_try_lsp_diagnostics", _raise)
+        p = tmp_path / "broken.py"
+        _write(p, "x = 1\n")
+        result = editor.edit_file(str(p), "x = 1", "def (:")
+        assert "Success" in result
+        assert "Diagnostics" in result
+
+
 class TestAutomaticStaleness:
     def test_edit_aborts_when_changed_after_read(self, tools, tmp_path):
         p = tmp_path / "a.py"
