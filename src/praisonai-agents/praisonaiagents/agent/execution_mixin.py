@@ -35,10 +35,6 @@ class ExecutionMixin:
         """Synchronous sleep - safe for sync contexts only."""
         time.sleep(duration)
 
-    async def _safe_sleep_async(self, duration: float) -> None:
-        """Async sleep - use this in async contexts."""
-        await asyncio.sleep(duration)
-
     def generate_task(self) -> 'Task':
         """Generate a Task object from the agent's instructions"""
         from ..task.task import Task
