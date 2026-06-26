@@ -77,10 +77,18 @@ class BotOS:
         identity_resolver: Optional[Any] = None,
         health_monitor: Optional[HealthMonitorConfig] = None,
         enable_supervision: bool = True,
+        idle_policy: Optional[Any] = None,
     ):
         self._bots: Dict[str, Bot] = {}
         self._is_running = False
         self._config = config
+        # Issue #2332: opt-in idle-dormancy / scale-to-zero. Default off —
+        # when None the gateway behaves exactly as before (always-on).
+        self._idle_policy = idle_policy
+        self._last_inbound_ts: float = time.time()
+        self._running_turns: int = 0
+        self._is_dormant: bool = False
+        self._on_quiesce = None  # optional callable(): host-suspend driver
         # W1: shared identity resolver applied to every managed bot —
         # gives cross-platform unified-user sessions out of the box.
         self._identity_resolver = identity_resolver
@@ -219,6 +227,15 @@ class BotOS:
         )
         self._tasks.append(schedule_task)
 
+        # Issue #2332: opt-in idle-dormancy loop. Only scheduled when an
+        # idle_policy is configured, so always-on gateways pay zero cost.
+        if self._idle_policy is not None:
+            idle_task = asyncio.create_task(
+                self._run_idle_loop(),
+                name="botos-idle",
+            )
+            self._tasks.append(idle_task)
+
         try:
             await asyncio.gather(*self._tasks, return_exceptions=True)
         except asyncio.CancelledError:
@@ -246,6 +263,206 @@ class BotOS:
                 await bot.start()
             except Exception as e:
                 logger.error(f"BotOS: {platform} failed: {e}")
+
+    # ── Idle-dormancy / scale-to-zero (Issue #2332) ─────────────────
+
+    def notify_inbound(self) -> None:
+        """Record an inbound message for idle tracking.
+
+        Resets the process-wide idle timer. Safe to call always — it is a
+        cheap timestamp write whether or not an idle policy is configured.
+
+        Note: the idle loop also passively probes each bot's session
+        manager (``_active_runs``/``_last_active``) via
+        :meth:`_probe_activity`, so live traffic is reflected even without
+        calling this — these hooks are an optional explicit override for
+        adapters that don't expose a session manager. When no
+        ``idle_policy`` is configured they are no-op-cheap and the gateway
+        stays always-on as before.
+        """
+        self._last_inbound_ts = time.time()
+
+    def turn_started(self) -> None:
+        """Mark an agent turn as in-flight (blocks dormancy)."""
+        self._running_turns += 1
+        self._last_inbound_ts = time.time()
+
+    def turn_finished(self) -> None:
+        """Mark an agent turn as complete."""
+        if self._running_turns > 0:
+            self._running_turns -= 1
+
+    def _probe_activity(self) -> tuple[int, float]:
+        """Passively read live liveness facts from bot session managers.
+
+        Closes the "stale counters" gap (#2332 reviewer P1): rather than
+        relying solely on explicit :meth:`notify_inbound`/:meth:`turn_started`
+        calls (which not every adapter wires), this reads the session
+        manager state that *every* adapter already maintains:
+
+        * ``_active_runs`` — in-flight agent turns per user, populated and
+          popped around each agent run.
+        * ``_last_active`` — per-user last-inbound timestamp (monotonic),
+          stamped on every inbound message.
+
+        Returns ``(running_turns, last_inbound_ts)`` where the timestamp is
+        wall-clock (``time.time``) to match the policy contract. Explicitly
+        recorded activity (``self._running_turns`` / ``self._last_inbound_ts``)
+        is merged in, so adapters that do call the hooks still win and any
+        adapter that exposes neither degrades to the construction-time value.
+        """
+        running = self._running_turns
+        last_ts = self._last_inbound_ts
+        now_wall = time.time()
+        now_mono = time.monotonic()
+        for bot in self._bots.values():
+            session = getattr(bot, "_session", None)
+            if session is None:
+                adapter = getattr(bot, "_adapter", None)
+                session = getattr(adapter, "_session", None)
+            if session is None:
+                continue
+            active_runs = getattr(session, "_active_runs", None)
+            if isinstance(active_runs, dict):
+                running += len(active_runs)
+            last_active = getattr(session, "_last_active", None)
+            if isinstance(last_active, dict) and last_active:
+                # Stored as monotonic; convert the most-recent to wall-clock.
+                newest_mono = max(last_active.values())
+                wall = now_wall - max(0.0, now_mono - newest_mono)
+                if wall > last_ts:
+                    last_ts = wall
+        return running, last_ts
+
+    def _has_background_work(self) -> bool:
+        """Whether live background work should block dormancy.
+
+        Conservative: any *enabled* scheduled job keeps the gateway awake.
+        Checking only currently-due jobs is unsafe — a job scheduled to
+        fire after the idle timeout would let the gateway quiesce first,
+        and the schedule loop would later deliver its output through
+        stopped transports, losing the result. While transports cannot be
+        revived in-process, an enabled schedule means the gateway must
+        stay resident to honour it (#2332 reviewer feedback).
+        """
+        try:
+            from praisonaiagents.tools.schedule_tools import _get_store
+            from praisonaiagents.scheduler import ScheduleRunner
+        except ImportError:
+            return False
+        try:
+            runner = ScheduleRunner(_get_store())
+            if runner.get_due_jobs():
+                return True
+            store = _get_store()
+            jobs = store.list() if hasattr(store, "list") else []
+            return any(getattr(job, "enabled", False) for job in jobs)
+        except Exception:
+            return False
+
+    async def wake(self) -> None:
+        """Resume the gateway from dormancy and reconnect transports.
+
+        Idempotent: a no-op when not dormant. Reuses ``HookAction.WAKE``
+        semantics — an inbound poke revives the process and reconnects
+        the messaging transports with session state preserved.
+        """
+        if not self._is_dormant:
+            return
+        logger.info("BotOS: waking from dormancy")
+        self._is_dormant = False
+        self.notify_inbound()
+        # Prune finished task handles so repeated wake cycles don't
+        # accumulate stale entries.
+        self._tasks = [t for t in self._tasks if not t.done()]
+        for platform, bot in self._bots.items():
+            try:
+                start = getattr(bot, "start", None)
+                if start is not None:
+                    task = asyncio.create_task(
+                        self._run_bot(platform, bot),
+                        name=f"botos-{platform}",
+                    )
+                    # Supervise: the main start() gather already returned the
+                    # handles it had at launch, so wake-restarted tasks run
+                    # outside it. Attach a callback to surface their failures.
+                    task.add_done_callback(self._on_wake_task_done)
+                    self._tasks.append(task)
+            except Exception as e:
+                logger.warning(f"BotOS: error waking {platform}: {e}")
+
+    @staticmethod
+    def _on_wake_task_done(task: "asyncio.Task") -> None:
+        """Surface exceptions from wake-restarted transport tasks."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error(f"BotOS: wake task {task.get_name()} failed: {exc}")
+
+    async def _quiesce(self, reason: str) -> None:
+        """Stand transports down and signal the compute host to suspend."""
+        if self._is_dormant:
+            return
+        logger.info(f"BotOS: quiescing (scale-to-zero): {reason}")
+        self._is_dormant = True
+        for platform, bot in self._bots.items():
+            try:
+                stop = getattr(bot, "stop", None)
+                if stop is not None:
+                    await bot.stop()
+            except Exception as e:
+                logger.warning(f"BotOS: error quiescing {platform}: {e}")
+        # Drive the optional compute-host suspend (Fly/Modal/Daytona) only
+        # after transports are cleanly down, so no inbound is dropped.
+        if self._on_quiesce is not None:
+            try:
+                result = self._on_quiesce()
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception as e:
+                logger.warning(f"BotOS: on_quiesce driver error: {e}")
+
+    async def _run_idle_loop(self) -> None:
+        """Evaluate the idle policy and quiesce when fully idle.
+
+        Only scheduled when an ``idle_policy`` is configured. The policy
+        decision is a pure, core-side predicate; this loop supplies live
+        facts and owns the side effects.
+        """
+        policy = self._idle_policy
+        wake_url = getattr(policy, "wake_url", None)
+        # Arm gating: never quiesce into a state we cannot resume from.
+        if hasattr(policy, "should_arm"):
+            if not policy.should_arm(
+                transports_quiescable=True,
+                wake_registered=wake_url is not None,
+            ):
+                logger.info(
+                    "BotOS: idle policy not armed (no wake path); staying always-on"
+                )
+                return
+        logger.info("BotOS: idle-dormancy armed (scale-to-zero)")
+        while self._is_running:
+            await asyncio.sleep(30)
+            if self._is_dormant:
+                continue
+            try:
+                # Probe live liveness from session managers so the decision
+                # reflects real traffic even when adapters don't call the
+                # explicit notify_inbound/turn_* hooks (#2332 reviewer P1).
+                running_turns, last_inbound_ts = self._probe_activity()
+                decision = policy.is_idle(
+                    running_turns=running_turns,
+                    last_inbound_ts=last_inbound_ts,
+                    has_background_work=self._has_background_work(),
+                    now=time.time(),
+                )
+            except Exception as e:
+                logger.debug(f"BotOS: idle evaluation error: {e}")
+                continue
+            if getattr(decision, "idle", False):
+                await self._quiesce(getattr(decision, "reason", ""))
 
     async def _run_schedule_loop(self) -> None:
         """Poll for due scheduled jobs and execute them.
