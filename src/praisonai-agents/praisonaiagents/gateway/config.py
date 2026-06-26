@@ -229,6 +229,9 @@ class GatewayConfig:
         ssl_cert: Path to SSL certificate (for HTTPS/WSS)
         ssl_key: Path to SSL key
         max_buffered_bytes: Maximum buffered bytes before slow consumer disconnect (default 1MB)
+        max_queued_frames: Maximum queued outbound frames per client before slow
+            consumer disconnect (0 = unlimited frame count; byte ceiling still
+            applies). Default 1000.
         push: Push notification service configuration
         auth_scopes: Optional operator scope policy mapping token -> list of
             scope names (see OperatorScope). When None/empty (default), any
@@ -251,6 +254,7 @@ class GatewayConfig:
     ssl_cert: Optional[str] = None
     ssl_key: Optional[str] = None
     max_buffered_bytes: int = 1024 * 1024  # 1MB default
+    max_queued_frames: int = 1000  # Per-client outbound frame ceiling
     push: PushConfig = field(default_factory=PushConfig)
     auth_scopes: Optional[Dict[str, List[str]]] = None
 
@@ -261,6 +265,10 @@ class GatewayConfig:
         if self.max_buffered_bytes < 0:
             raise ValueError(
                 "max_buffered_bytes must be >= 0 (use 0 to disable slow-consumer checks)"
+            )
+        if self.max_queued_frames < 0:
+            raise ValueError(
+                "max_queued_frames must be >= 0 (use 0 to disable the frame-count ceiling)"
             )
         if self.max_connections < 0:
             raise ValueError("max_connections must be >= 0")
@@ -335,6 +343,7 @@ class GatewayConfig:
             "reconnect_timeout": self.reconnect_timeout,
             "ssl_enabled": bool(self.ssl_cert and self.ssl_key),
             "max_buffered_bytes": self.max_buffered_bytes,
+            "max_queued_frames": self.max_queued_frames,
             "push": self.push.to_dict(),
             "scope_policy_enabled": self.has_scope_policy,
         }
@@ -511,7 +520,8 @@ class MultiChannelGatewayConfig:
             reconnect_timeout=gw_data.get("reconnect_timeout", 60),
             ssl_cert=gw_data.get("ssl_cert"),
             ssl_key=gw_data.get("ssl_key"),
-            max_buffered_bytes=gw_data.get("max_buffered_bytes", 1024 * 1024),
+            max_buffered_bytes=int(gw_data.get("max_buffered_bytes", 1024 * 1024)),
+            max_queued_frames=int(gw_data.get("max_queued_frames", 1000)),
             auth_scopes=auth_scopes,
         )
         
