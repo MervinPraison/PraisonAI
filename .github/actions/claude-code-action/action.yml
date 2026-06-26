@@ -289,11 +289,36 @@ runs:
         if [[ -n "$INPUT_ALLOWED_TOOLS" ]]; then
           TOOLS="$TOOLS,$INPUT_ALLOWED_TOOLS"
         fi
+        
+        # Remove any explicitly disallowed tools from the effective allow-list so
+        # the read-only contract is enforced deterministically (no reliance on CLI
+        # precedence between --allowedTools and --disallowedTools).
+        if [[ -n "$INPUT_DISALLOWED_TOOLS" ]]; then
+          DISALLOWED_CSV=$(echo "$INPUT_DISALLOWED_TOOLS" | tr ',\n' '  ' | xargs)
+          FILTERED=""
+          IFS=',' read -ra TOOL_ARR <<< "$TOOLS"
+          for tool in "${TOOL_ARR[@]}"; do
+            tool=$(echo "$tool" | xargs)
+            [[ -z "$tool" ]] && continue
+            skip="false"
+            for bad in $DISALLOWED_CSV; do
+              if [[ "$tool" == "$bad" ]]; then
+                skip="true"
+                break
+              fi
+            done
+            if [[ "$skip" == "false" ]]; then
+              FILTERED="${FILTERED:+$FILTERED,}$tool"
+            fi
+          done
+          TOOLS="$FILTERED"
+        fi
         CMD_ARGS+=("--allowedTools" "$TOOLS")
         
         # Add disallowed tools
         if [[ -n "$INPUT_DISALLOWED_TOOLS" ]]; then
-          CMD_ARGS+=("--disallowedTools" "$INPUT_DISALLOWED_TOOLS")
+          DISALLOWED_FLAG=$(echo "$INPUT_DISALLOWED_TOOLS" | tr '\n' ',' | sed 's/,*$//')
+          CMD_ARGS+=("--disallowedTools" "$DISALLOWED_FLAG")
         fi
         
         echo "📝 Executing Claude Code with prompt from file..."
