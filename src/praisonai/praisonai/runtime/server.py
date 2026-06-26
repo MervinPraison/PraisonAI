@@ -18,21 +18,73 @@ import os
 import secrets
 import threading
 import time
+import queue
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
-from .descriptor import RuntimeDescriptor
+from .descriptor import RuntimeDescriptor, get_runtime_version
+
+
+class SessionEventHub:
+    """Fan out per-session events to all attached clients.
+
+    Each ``/run`` carries an optional ``session_id``. While a prompt executes,
+    the runtime publishes structured events (start, result, error) tagged with
+    that session id; any number of ``attach`` clients subscribed to the same id
+    receive them in real time via Server-Sent Events. This is the building block
+    that lets a second terminal observe a live session.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        # session_id -> list of subscriber queues
+        self._subscribers: Dict[str, List["queue.Queue[Optional[Dict[str, Any]]]"]] = {}
+
+    def subscribe(self, session_id: str) -> "queue.Queue[Optional[Dict[str, Any]]]":
+        """Register a subscriber for ``session_id`` and return its queue."""
+        q: "queue.Queue[Optional[Dict[str, Any]]]" = queue.Queue()
+        with self._lock:
+            self._subscribers.setdefault(session_id, []).append(q)
+        return q
+
+    def unsubscribe(self, session_id: str, q: "queue.Queue[Optional[Dict[str, Any]]]") -> None:
+        """Remove a subscriber queue for ``session_id`` (idempotent)."""
+        with self._lock:
+            subs = self._subscribers.get(session_id)
+            if not subs:
+                return
+            try:
+                subs.remove(q)
+            except ValueError:
+                pass
+            if not subs:
+                self._subscribers.pop(session_id, None)
+
+    def publish(self, session_id: str, event: Dict[str, Any]) -> None:
+        """Publish ``event`` to every subscriber of ``session_id``."""
+        if not session_id:
+            return
+        with self._lock:
+            subs = list(self._subscribers.get(session_id, ()))
+        for q in subs:
+            q.put(event)
+
+    def has_subscribers(self, session_id: str) -> bool:
+        with self._lock:
+            return bool(self._subscribers.get(session_id))
 
 
 class WarmRuntime:
     """Holds warm agent state and executes prompts for the runtime server."""
 
-    def __init__(self, model: Optional[str] = None):
+    def __init__(self, model: Optional[str] = None, hub: Optional[SessionEventHub] = None):
         self._default_model = model
         self._agents: Dict[str, Any] = {}
         self._lock = threading.Lock()
         self._agent_locks: Dict[str, threading.Lock] = {}
         self.last_activity = time.time()
+        # Event hub used to fan out live session events to attached clients.
+        self.hub = hub or SessionEventHub()
 
     def _agent_key(self, model: Optional[str]) -> str:
         return model or self._default_model or "__default__"
@@ -71,7 +123,12 @@ class WarmRuntime:
         with self._lock:
             self._agents.pop(key, None)
 
-    def run(self, prompt: str, model: Optional[str] = None) -> str:
+    def run(
+        self,
+        prompt: str,
+        model: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> str:
         """Execute a prompt against the warm agent and return the result text.
 
         Access to each cached Agent is serialized via a per-model lock because
@@ -81,18 +138,42 @@ class WarmRuntime:
         If ``agent.start`` raises (LLM error, timeout, etc.) the agent may be
         left with partial conversation state (e.g. an unmatched user turn), so
         it is evicted from the cache and the next call rebuilds a clean agent.
+
+        When ``session_id`` is given, live events (start/result/error) are
+        published to the hub so attached clients can observe the session in real
+        time.
         """
         self.last_activity = time.time()
         key = self._agent_key(model)
+        if session_id:
+            self.hub.publish(session_id, {
+                "type": "run.start",
+                "session_id": session_id,
+                "prompt": prompt,
+            })
         with self._lock_for(key):
             agent = self._get_agent(key)
             try:
                 result = agent.start(prompt)
-            except Exception:
+            except Exception as e:
                 self._evict_agent(key)
+                if session_id:
+                    self.hub.publish(session_id, {
+                        "type": "run.error",
+                        "session_id": session_id,
+                        "error": str(e),
+                    })
                 raise
         self.last_activity = time.time()
-        return str(result) if result is not None else ""
+        text = str(result) if result is not None else ""
+        if session_id:
+            self.hub.publish(session_id, {
+                "type": "run.result",
+                "session_id": session_id,
+                "ok": True,
+                "result": text,
+            })
+        return text
 
 
 def _make_handler(token: str, runtime: WarmRuntime):
@@ -132,7 +213,10 @@ def _make_handler(token: str, runtime: WarmRuntime):
                 return
 
             if self.path == "/healthz":
-                self._send_json(200, {"ok": True})
+                # Advertise the runtime version so clients can run the
+                # version-compat handshake over the wire as well as via the
+                # lockfile descriptor.
+                self._send_json(200, {"ok": True, "version": get_runtime_version()})
                 return
 
             if self.path == "/run":
@@ -142,13 +226,67 @@ def _make_handler(token: str, runtime: WarmRuntime):
                     self._send_json(400, {"ok": False, "error": "missing prompt"})
                     return
                 try:
-                    result = runtime.run(prompt, model=payload.get("model"))
+                    result = runtime.run(
+                        prompt,
+                        model=payload.get("model"),
+                        session_id=payload.get("session_id"),
+                    )
                     self._send_json(200, {"ok": True, "result": result})
                 except Exception as e:  # noqa: BLE001 - surface to client as error
                     self._send_json(200, {"ok": False, "error": str(e)})
                 return
 
             self._send_json(404, {"ok": False, "error": "not found"})
+
+        def do_GET(self) -> None:  # noqa: N802
+            if not self._authorized():
+                self._send_json(401, {"ok": False, "error": "unauthorized"})
+                return
+
+            # Live session event stream: /sessions/{id}/events (Server-Sent
+            # Events). An attached client opens this and receives each event the
+            # runtime publishes for that session until it disconnects.
+            prefix, suffix = "/sessions/", "/events"
+            if self.path.startswith(prefix) and self.path.endswith(suffix):
+                session_id = self.path[len(prefix):-len(suffix)]
+                if not session_id:
+                    self._send_json(400, {"ok": False, "error": "missing session id"})
+                    return
+                self._stream_session_events(session_id)
+                return
+
+            self._send_json(404, {"ok": False, "error": "not found"})
+
+        def _stream_session_events(self, session_id: str) -> None:
+            """Stream session events as SSE until the client disconnects."""
+            q = runtime.hub.subscribe(session_id)
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "keep-alive")
+                self.end_headers()
+                # Initial comment so the client knows the stream is live.
+                self.wfile.write(b": connected\n\n")
+                self.wfile.flush()
+                while True:
+                    try:
+                        event = q.get(timeout=15.0)
+                    except queue.Empty:
+                        # Heartbeat keeps idle connections (and proxies) alive.
+                        self.wfile.write(b": keep-alive\n\n")
+                        self.wfile.flush()
+                        continue
+                    if event is None:
+                        break
+                    line = "data: " + json.dumps(event) + "\n\n"
+                    self.wfile.write(line.encode("utf-8"))
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                # Client disconnected; fall through to cleanup.
+                pass
+            finally:
+                runtime.hub.unsubscribe(session_id, q)
 
     return _Handler
 
@@ -181,6 +319,7 @@ def serve_runtime(
         port=int(bound_port),
         token=token,
         pid=os.getpid(),
+        version=get_runtime_version(),
     )
     descriptor.write(project_path)
 

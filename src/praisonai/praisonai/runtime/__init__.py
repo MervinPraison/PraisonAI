@@ -20,6 +20,8 @@ from .descriptor import (
     RuntimeDescriptor,
     get_runtime_descriptor,
     get_runtime_lock_path,
+    get_runtime_version,
+    versions_compatible,
 )
 from .client import RuntimeClient, RuntimeUnavailable
 
@@ -27,6 +29,8 @@ __all__ = [
     "RuntimeDescriptor",
     "get_runtime_descriptor",
     "get_runtime_lock_path",
+    "get_runtime_version",
+    "versions_compatible",
     "RuntimeClient",
     "RuntimeUnavailable",
 ]

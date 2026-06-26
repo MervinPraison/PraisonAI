@@ -12,7 +12,7 @@ the caller can fall back to in-process execution transparently.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterator, Optional
 from urllib import request as _urlrequest
 from urllib import error as _urlerror
 
@@ -77,3 +77,44 @@ class RuntimeClient:
         if not result.get("ok", False):
             raise RuntimeUnavailable(result.get("error", "runtime run failed"))
         return str(result.get("result", ""))
+
+    def attach(self, session_id: str) -> Iterator[Dict[str, Any]]:
+        """Yield live events for ``session_id`` as they are published.
+
+        Opens the runtime's Server-Sent Events stream for the session and yields
+        each decoded event dict until the stream closes or the runtime goes away.
+        Heartbeat/comment lines are skipped.
+
+        Raises:
+            RuntimeUnavailable: if the stream cannot be opened.
+        """
+        url = f"{self._descriptor.base_url}/sessions/{session_id}/events"
+        req = _urlrequest.Request(url, method="GET")
+        req.add_header("Authorization", f"Bearer {self._descriptor.token}")
+        req.add_header("Accept", "text/event-stream")
+        try:
+            # No read timeout: the stream is long-lived and uses heartbeats.
+            resp = _urlrequest.urlopen(req)
+        except _urlerror.HTTPError as e:
+            raise RuntimeUnavailable(f"runtime returned HTTP {e.code}") from e
+        except (_urlerror.URLError, OSError) as e:
+            raise RuntimeUnavailable(f"runtime unreachable: {e}") from e
+        try:
+            for raw in resp:
+                line = raw.decode("utf-8", errors="replace").rstrip("\n")
+                if not line or line.startswith(":"):
+                    # Blank separators and comment/heartbeat lines.
+                    continue
+                if line.startswith("data:"):
+                    data = line[len("data:"):].strip()
+                    if not data:
+                        continue
+                    try:
+                        yield json.loads(data)
+                    except ValueError:
+                        continue
+        finally:
+            try:
+                resp.close()
+            except Exception:
+                pass

@@ -160,13 +160,17 @@ def daemon_status(
                 "port": descriptor.port,
                 "pid": descriptor.pid,
                 "base_url": descriptor.base_url,
+                "version": descriptor.version,
+                "compatible": descriptor.is_compatible(),
             })
         print(json.dumps(payload))
         return
 
     if running:
+        compat = "" if descriptor.is_compatible() else " [version mismatch]"
         output.print_success(
-            f"Warm runtime running at {descriptor.base_url} (pid {descriptor.pid})."
+            f"Warm runtime running at {descriptor.base_url} "
+            f"(pid {descriptor.pid}, v{descriptor.version or '?'}){compat}."
         )
     else:
         output.print_info("No warm runtime is running.")
