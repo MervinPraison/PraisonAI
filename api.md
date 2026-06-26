@@ -861,6 +861,11 @@ Methods:
 * <code title="cli">praisonai call call-main <a href="./src/praisonai/praisonai/cli/commands/call.py">--help</a></code>
 * <code title="cli">praisonai chat <a href="./src/praisonai/praisonai/cli/main.py">--help</a></code>
 * <code title="cli">praisonai chat chat-main <a href="./src/praisonai/praisonai/cli/commands/chat.py">--help</a></code>
+* <code title="cli">praisonai checkpoint delete <a href="./src/praisonai/praisonai/cli/commands/checkpoint.py">--help</a></code>
+* <code title="cli">praisonai checkpoint diff <a href="./src/praisonai/praisonai/cli/commands/checkpoint.py">--help</a></code>
+* <code title="cli">praisonai checkpoint list <a href="./src/praisonai/praisonai/cli/commands/checkpoint.py">--help</a></code>
+* <code title="cli">praisonai checkpoint restore <a href="./src/praisonai/praisonai/cli/commands/checkpoint.py">--help</a></code>
+* <code title="cli">praisonai checkpoint save <a href="./src/praisonai/praisonai/cli/commands/checkpoint.py">--help</a></code>
 * <code title="cli">praisonai claw claw <a href="./src/praisonai/praisonai/cli/commands/claw.py">--help</a></code>
 * <code title="cli">praisonai code <a href="./src/praisonai/praisonai/cli/main.py">--help</a></code>
 * <code title="cli">praisonai code code-main <a href="./src/praisonai/praisonai/cli/commands/code.py">--help</a></code>
