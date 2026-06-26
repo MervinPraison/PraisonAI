@@ -252,6 +252,93 @@ def _apply_config_defaults(
     return mcp, mcp_env, permissions_config
 
 
+def _checkpoints_auto_enabled() -> bool:
+    """Whether automatic run-checkpointing is enabled via project config.
+
+    Reads the ``checkpoints.auto`` key from the resolved project config
+    (stored under ``extra``). Defaults to ``True`` so interactive terminal
+    runs get an automatic safety net; opt out with ``--no-checkpoint`` or
+    ``checkpoints: {auto: false}``.
+    """
+    try:
+        config = resolve_config()
+    except (ValueError, OSError):
+        return True
+
+    checkpoints = (getattr(config, "extra", None) or {}).get("checkpoints")
+    if isinstance(checkpoints, dict) and "auto" in checkpoints:
+        return bool(checkpoints["auto"])
+    return True
+
+
+def _auto_checkpoint(label: str, *, no_checkpoint: bool, workspace_dir: Optional[str] = None) -> None:
+    """Create an automatic checkpoint of the workspace before a run.
+
+    ``workspace_dir`` defaults to the current directory but should be the
+    directory of the project being run (e.g. the directory containing a target
+    YAML file) so the checkpoint protects the files the run will actually
+    touch.
+
+    Best-effort and quiet: any failure (e.g. protected path, no git, no
+    changes) is swallowed so a checkpoint problem never blocks the run and the
+    auto-checkpoint never leaks into machine-readable run output.
+    """
+    if no_checkpoint or not _checkpoints_auto_enabled():
+        return
+
+    import asyncio
+    import os
+
+    output = get_output_controller()
+    try:
+        from ..features.checkpoints import CheckpointsHandler
+
+        handler = CheckpointsHandler(workspace_dir=workspace_dir or os.getcwd())
+        asyncio.run(handler.save(label, allow_empty=False, quiet=True))
+    except Exception as e:  # pragma: no cover - defensive, never block the run
+        if getattr(output, "is_verbose", False):
+            output.print_info(f"Auto-checkpoint skipped: {e}")
+
+
+def _restore_checkpoint(ref: str, workspace_dir: Optional[str] = None) -> None:
+    """Restore the workspace to a checkpoint reference ('last' or an id)."""
+    import asyncio
+    import os
+
+    from ..features.checkpoints import CheckpointsHandler
+
+    handler = CheckpointsHandler(workspace_dir=workspace_dir or os.getcwd())
+
+    async def _run() -> bool:
+        service = await handler._get_service()
+        checkpoints = await service.list_checkpoints(limit=100)
+        if not checkpoints:
+            handler._print_error("No checkpoints found to restore")
+            return False
+        if ref in ("last", "latest"):
+            target = checkpoints[0].id
+        else:
+            # Exact id/short_id first, then a unique prefix; reject ambiguous
+            # prefixes so we never restore the wrong workspace.
+            exact = [cp.id for cp in checkpoints if cp.id == ref or cp.short_id == ref]
+            if exact:
+                target = exact[0]
+            else:
+                prefix_matches = [cp.id for cp in checkpoints if cp.id.startswith(ref)]
+                if len(prefix_matches) == 1:
+                    target = prefix_matches[0]
+                elif len(prefix_matches) > 1:
+                    handler._print_error(f"Ambiguous checkpoint reference: {ref}")
+                    return False
+                else:
+                    handler._print_error(f"No checkpoint found for: {ref}")
+                    return False
+        return await handler.restore(target)
+
+    if not asyncio.run(_run()):
+        raise typer.Exit(1)
+
+
 def _try_attach_runtime(
     prompt: str,
     *,
@@ -332,6 +419,9 @@ def run_main(
     # Custom definitions
     agent: Optional[str] = typer.Option(None, "--agent", "-a", help="Use a named custom agent"),
     command: Optional[str] = typer.Option(None, "--command", help="Execute a named custom command"),
+    # Checkpoint / rewind
+    no_checkpoint: bool = typer.Option(False, "--no-checkpoint", help="Disable automatic file checkpoint before the run"),
+    restore: Optional[str] = typer.Option(None, "--restore", help="Restore the workspace to a checkpoint id (or 'last') and exit"),
 ):
     """
     Run agents from a file or prompt.
@@ -346,7 +436,13 @@ def run_main(
     """
     output = get_output_controller()
     _ = get_current_context()  # Initialize context
-    
+
+    # Rewind: restore the workspace to a prior checkpoint and exit. Handled
+    # before any execution so `praisonai run --restore last` is a pure undo.
+    if restore:
+        _restore_checkpoint(restore)
+        return
+
     # Early credential check before any processing
     if target:  # Only check if we actually have something to run
         from ...llm.credentials import is_configured
@@ -535,6 +631,22 @@ def run_main(
     # Check if target is a file or prompt
     import os
     is_file = os.path.exists(target) and (target.endswith('.yaml') or target.endswith('.yml'))
+
+    # Auto-checkpoint before file-based runs so a bad turn can be rewound with
+    # `praisonai run --restore last`. Scoped to YAML-file runs (which mutate
+    # project files) and snapshotted against the file's own directory so the
+    # checkpoint protects the right workspace. Plain-prompt runs don't touch
+    # project files, so they skip checkpointing (avoiding spurious "no changes"
+    # noise). Best-effort and gated by config (`checkpoints.auto`, default on)
+    # and `--no-checkpoint`.
+    if is_file:
+        from ..state.identifiers import get_current_context as _get_ctx
+        _run_id = getattr(_get_ctx(), "run_id", None)
+        _auto_checkpoint(
+            f"run:{_run_id}" if _run_id else "auto checkpoint before run",
+            no_checkpoint=no_checkpoint,
+            workspace_dir=os.path.dirname(os.path.abspath(target)) or None,
+        )
     
     # Handle profiling
     if profile or profile_deep:

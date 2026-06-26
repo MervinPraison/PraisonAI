@@ -47,13 +47,15 @@ class CheckpointsHandler:
             await self._service.initialize()
         return self._service
     
-    async def save(self, message: str, allow_empty: bool = False) -> bool:
+    async def save(self, message: str, allow_empty: bool = False, quiet: bool = False) -> bool:
         """
         Save a checkpoint.
         
         Args:
             message: Checkpoint message
             allow_empty: Allow checkpoint even if no changes
+            quiet: Suppress success/error console output (for auto-checkpointing
+                in machine-readable run modes)
             
         Returns:
             True if successful
@@ -62,11 +64,13 @@ class CheckpointsHandler:
         result = await service.save(message, allow_empty=allow_empty)
         
         if result.success:
-            self._print_success(f"Checkpoint saved: {result.checkpoint.short_id}")
-            self._print_info(f"Message: {result.checkpoint.message}")
+            if not quiet:
+                self._print_success(f"Checkpoint saved: {result.checkpoint.short_id}")
+                self._print_info(f"Message: {result.checkpoint.message}")
             return True
         else:
-            self._print_error(f"Failed to save checkpoint: {result.error}")
+            if not quiet:
+                self._print_error(f"Failed to save checkpoint: {result.error}")
             return False
     
     async def restore(self, checkpoint_id: str) -> bool:

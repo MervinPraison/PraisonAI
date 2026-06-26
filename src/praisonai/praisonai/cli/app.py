@@ -136,6 +136,7 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "schedule": (".commands.schedule", "app", "Scheduler management"),
     "kanban": (".commands.kanban", "app", "Kanban task management"),
     "run": (".commands.run", "app", "Run agents"),
+    "checkpoint": (".commands.checkpoint", "app", "File-level checkpoint management (save/restore/diff)"),
     "profile": (".commands.profile", "app", "Performance profiling and diagnostics"),
     "benchmark": (".commands.benchmark", "app", "Comprehensive performance benchmarking"),
     "paths": (".commands.paths", "app", "Storage path inspection and migration"),
