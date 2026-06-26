@@ -52,6 +52,23 @@ class ConnectErrorCode(str, Enum):
     CONFIGURATION_ERROR = "configuration_error"
 
 
+class GatewayCloseCode(str, Enum):
+    """Structured, machine-readable reasons for a server-initiated close.
+
+    Distinct from :class:`ConnectErrorCode` (which describes why a *connection*
+    was rejected at/handshake time), these describe why an already-established
+    connection is being torn down by the server mid-session.
+
+    Codes:
+        SLOW_CONSUMER: The client's outbound buffer exceeded the gateway's
+            advertised ``max_buffered_bytes`` policy (a genuinely slow/stalled
+            consumer). The server evicts it so its backlog cannot grow without
+            bound or stall delivery to healthy clients.
+    """
+
+    SLOW_CONSUMER = "slow_consumer"
+
+
 class ConnectRecoveryStep(str, Enum):
     """Machine-readable recovery hint for a connection rejection.
 

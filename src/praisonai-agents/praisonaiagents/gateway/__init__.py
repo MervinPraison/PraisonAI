@@ -19,6 +19,7 @@ from .protocols import (
     GatewayMessage,
     EventType,
     OperatorScope,
+    GatewayCloseCode,
     # Push protocols and dataclasses
     PushChannelProtocol,
     PresenceProtocol,
@@ -119,6 +120,7 @@ __all__ = [
     "GatewayMessage",
     "EventType",
     "OperatorScope",
+    "GatewayCloseCode",
     # Push protocols (always available)
     "PushChannelProtocol",
     "PresenceProtocol",

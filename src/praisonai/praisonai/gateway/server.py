@@ -35,6 +35,7 @@ from praisonaiagents.gateway import (
 from praisonaiagents.gateway.protocols import (
     ConnectErrorCode,
     ConnectRecoveryStep,
+    GatewayCloseCode,
     HelloResult,
     HelloError,
     GATEWAY_PROTOCOL_VERSION,
@@ -47,6 +48,139 @@ logger = logging.getLogger(__name__)
 
 from .unicode_utils import safe_error_message, safe_log_message, extract_root_cause_from_error
 from .supervisor import ChannelSupervisor
+
+
+# WebSocket close code for a slow-consumer eviction. 1013 ("Try Again Later")
+# is the closest standard code for a server that is shedding a client it cannot
+# keep up with; the structured GatewayCloseCode.SLOW_CONSUMER reason travels in
+# the close ``reason`` so clients can branch deterministically.
+SLOW_CONSUMER_CLOSE_CODE = 1013
+
+
+class _ClientConn:
+    """Per-connection outbound delivery with a bounded buffer.
+
+    Each connected client gets its own bounded send queue drained by a
+    dedicated task. This isolates the shared broadcast path so one slow,
+    stalled, or half-open consumer cannot apply backpressure to (head-of-line
+    block) delivery to healthy clients, and bounds how much can accumulate for
+    any single client.
+
+    ``offer`` is non-blocking: it admits a frame only if doing so keeps the
+    client within both the queued-frame and buffered-byte ceilings. When a
+    frame cannot be admitted the client is a genuine slow consumer and the
+    caller evicts it with a typed ``SLOW_CONSUMER`` reason.
+
+    Backwards compatibility: when ``max_buffered_bytes <= 0`` and
+    ``max_queued_frames <= 0`` the bounds are disabled and ``offer`` always
+    admits, preserving best-effort delivery.
+    """
+
+    __slots__ = (
+        "ws",
+        "client_id",
+        "max_buffered_bytes",
+        "max_queued_frames",
+        "_queue",
+        "buffered_bytes",
+        "_task",
+        "_closed",
+    )
+
+    def __init__(
+        self,
+        ws: Any,
+        client_id: str,
+        max_buffered_bytes: int,
+        max_queued_frames: int,
+    ) -> None:
+        self.ws = ws
+        self.client_id = client_id
+        self.max_buffered_bytes = max(0, int(max_buffered_bytes))
+        self.max_queued_frames = max(0, int(max_queued_frames))
+        # Unbounded asyncio.Queue; the ceilings are enforced in ``offer`` so we
+        # never block the producer (the shared broadcast loop).
+        self._queue: asyncio.Queue = asyncio.Queue()
+        self.buffered_bytes = 0
+        self._task: Optional[asyncio.Task] = None
+        self._closed = False
+
+    @staticmethod
+    def _frame_size(data: Any) -> int:
+        """Approximate the wire size of a frame for byte accounting."""
+        try:
+            import json
+
+            return len(json.dumps(data, default=str).encode("utf-8"))
+        except Exception:
+            return 0
+
+    def start(self) -> None:
+        """Start the background drain task for this connection."""
+        if self._task is None:
+            self._task = asyncio.ensure_future(self._drain())
+
+    def offer(self, data: Any) -> bool:
+        """Try to enqueue a frame within the configured bounds.
+
+        Returns ``True`` if the frame was admitted, ``False`` if admitting it
+        would exceed a ceiling (the caller should evict this slow consumer).
+        """
+        if self._closed:
+            return False
+        size = self._frame_size(data)
+        if self.max_queued_frames > 0 and self._queue.qsize() >= self.max_queued_frames:
+            return False
+        if (
+            self.max_buffered_bytes > 0
+            and self.buffered_bytes + size > self.max_buffered_bytes
+            and self._queue.qsize() > 0
+        ):
+            # Always allow at least one in-flight frame so a single large
+            # payload below max_payload is never spuriously rejected.
+            return False
+        self._queue.put_nowait((data, size))
+        self.buffered_bytes += size
+        return True
+
+    async def _drain(self) -> None:
+        """Drain queued frames to the websocket one at a time."""
+        try:
+            while True:
+                data, size = await self._queue.get()
+                if data is None:  # sentinel: stop draining
+                    self._queue.task_done()
+                    break
+                try:
+                    await self.ws.send_json(data)
+                except Exception as e:
+                    logger.error(
+                        f"Send error to client {self.client_id}: {e}"
+                    )
+                    self._queue.task_done()
+                    break
+                finally:
+                    self.buffered_bytes = max(0, self.buffered_bytes - size)
+                self._queue.task_done()
+        except asyncio.CancelledError:  # pragma: no cover - shutdown path
+            raise
+
+    async def close(self) -> None:
+        """Stop the drain task and release accounting state."""
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._queue.put_nowait((None, 0))
+        except Exception:
+            pass
+        task = self._task
+        if task is not None and not task.done():
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=1.0)
+            except Exception:
+                task.cancel()
+        self.buffered_bytes = 0
 
 
 @dataclass
@@ -466,6 +600,7 @@ class WebSocketGateway:
         self._agents: Dict[str, "Agent"] = {}
         self._sessions: Dict[str, GatewaySession] = {}
         self._clients: Dict[str, Any] = {}  # WebSocket connections
+        self._client_conns: Dict[str, _ClientConn] = {}  # client_id -> bounded outbound conn
         self._client_sessions: Dict[str, str] = {}  # client_id -> session_id
         self._client_scopes: Dict[str, List[str]] = {}  # client_id -> operator scopes
         
@@ -883,6 +1018,7 @@ class WebSocketGateway:
             await websocket.accept()
             client_id = str(uuid.uuid4())
             self._clients[client_id] = websocket
+            self._register_client_conn(client_id, websocket)
             # Resolve operator scopes for this connection (all scopes if no policy).
             self._client_scopes[client_id] = self.config.resolve_scopes(operator_token)
             
@@ -904,6 +1040,7 @@ class WebSocketGateway:
                 logger.error(f"WebSocket error: {e}")
             finally:
                 self._clients.pop(client_id, None)
+                await self._teardown_client_conn(client_id)
                 self._client_scopes.pop(client_id, None)
                 session_id = self._client_sessions.pop(client_id, None)
                 if session_id:
@@ -1401,12 +1538,14 @@ class WebSocketGateway:
         self._is_running = False
         
         for client_id, ws in list(self._clients.items()):
+            await self._teardown_client_conn(client_id)
             try:
                 await ws.close()
             except Exception:
                 pass
         
         self._clients.clear()
+        self._client_conns.clear()
         self._client_sessions.clear()
         self._client_scopes.clear()
         
@@ -1553,6 +1692,7 @@ class WebSocketGateway:
             policy = {
                 "max_payload": getattr(self.config, 'max_payload', 1048576),  # 1MB default
                 "max_buffered_bytes": getattr(self.config, 'max_buffered_bytes', 8388608),  # 8MB default
+                "max_queued_frames": getattr(self.config, 'max_queued_frames', 1000),
                 "heartbeat_ms": int(heartbeat_interval * 1000),  # Convert seconds to ms
             }
             
@@ -1905,8 +2045,52 @@ class WebSocketGateway:
 
         return _relay
     
+    def _register_client_conn(self, client_id: str, websocket: Any) -> "_ClientConn":
+        """Create and start a bounded outbound connection for a client."""
+        conn = _ClientConn(
+            websocket,
+            client_id,
+            max_buffered_bytes=getattr(self.config, "max_buffered_bytes", 1024 * 1024),
+            max_queued_frames=getattr(self.config, "max_queued_frames", 1000),
+        )
+        conn.start()
+        self._client_conns[client_id] = conn
+        return conn
+
+    async def _teardown_client_conn(self, client_id: str) -> None:
+        """Stop and remove a client's bounded outbound connection."""
+        conn = self._client_conns.pop(client_id, None)
+        if conn is not None:
+            await conn.close()
+
+    async def _evict_slow_consumer(self, client_id: str) -> None:
+        """Evict a slow/stalled consumer with a typed SLOW_CONSUMER close.
+
+        Closing isolates a genuinely slow client so its unbounded backlog can
+        neither grow without limit nor delay delivery to healthy clients.
+        """
+        logger.warning(
+            "Evicting slow consumer %s (outbound buffer exceeded "
+            "max_buffered_bytes=%s / max_queued_frames=%s)",
+            client_id,
+            getattr(self.config, "max_buffered_bytes", None),
+            getattr(self.config, "max_queued_frames", None),
+        )
+        ws = self._clients.pop(client_id, None)
+        await self._teardown_client_conn(client_id)
+        if ws is not None:
+            try:
+                await ws.close(
+                    code=SLOW_CONSUMER_CLOSE_CODE,
+                    reason=GatewayCloseCode.SLOW_CONSUMER.value,
+                )
+            except Exception as exc:
+                logger.debug(
+                    "Could not close slow consumer %s: %s", client_id, exc
+                )
+
     async def _send_to_client(self, client_id: str, data: Dict[str, Any]) -> None:
-        """Send data to a specific client."""
+        """Send data to a specific client through its bounded outbound queue."""
         ws = self._clients.get(client_id)
         if ws:
             try:
@@ -1934,9 +2118,18 @@ class WebSocketGateway:
                             data["cursor"] = cursor
                             # Add top-level sequence number for integrity checking
                             data["seq"] = cursor
-                
-                # Send ONCE with cursor already attached if applicable
-                await ws.send_json(data)
+
+                # Offer to the per-client bounded queue (isolated, drained by
+                # its own task). A genuine slow consumer is evicted rather than
+                # allowed to grow an unbounded backlog or stall other clients.
+                conn = self._client_conns.get(client_id)
+                if conn is not None:
+                    if not conn.offer(data):
+                        await self._evict_slow_consumer(client_id)
+                else:
+                    # No bounded conn (e.g. directly registered client) — fall
+                    # back to a best-effort direct send for compatibility.
+                    await ws.send_json(data)
             except Exception as e:
                 logger.error(f"Error sending to client {client_id}: {e}")
     
@@ -2000,6 +2193,7 @@ class WebSocketGateway:
             websocket: WebSocket connection object
         """
         self._clients[client_id] = websocket
+        self._register_client_conn(client_id, websocket)
         logger.debug(f"Client added: {client_id}")
     
     def remove_client(self, client_id: str) -> bool:
@@ -2012,6 +2206,14 @@ class WebSocketGateway:
             True if client was found and removed, False otherwise
         """
         removed = self._clients.pop(client_id, None) is not None
+        conn = self._client_conns.pop(client_id, None)
+        if conn is not None:
+            # Best-effort async teardown of the drain task; schedule it on the
+            # running loop when one is available, otherwise drop the reference.
+            try:
+                asyncio.ensure_future(conn.close())
+            except RuntimeError:
+                pass
         if removed:
             logger.debug(f"Client removed: {client_id}")
         return removed
@@ -2558,13 +2760,28 @@ class WebSocketGateway:
         """
         exclude_set = set(exclude or [])
         data = event.to_dict()
-        
+
+        # Per-connection send isolation: offer to each client's bounded queue
+        # so one slow/stalled consumer cannot head-of-line block delivery to
+        # healthy clients. Clients whose buffer is exhausted are collected and
+        # evicted with a typed SLOW_CONSUMER reason after the fan-out.
+        slow: List[str] = []
         for client_id, ws in list(self._clients.items()):
-            if client_id not in exclude_set and self._event_visible_to(event, client_id):
+            if client_id in exclude_set or not self._event_visible_to(event, client_id):
+                continue
+            conn = self._client_conns.get(client_id)
+            if conn is not None:
+                if not conn.offer(data):
+                    slow.append(client_id)
+            else:
+                # Compatibility fallback for directly-registered clients.
                 try:
                     await ws.send_json(data)
                 except Exception as e:
                     logger.error(f"Broadcast error to {client_id}: {e}")
+
+        for client_id in slow:
+            await self._evict_slow_consumer(client_id)
     
     def health(self) -> Dict[str, Any]:
         """Get gateway health status including per-channel bot status and supervision state."""
