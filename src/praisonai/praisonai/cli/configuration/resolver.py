@@ -31,6 +31,8 @@ KNOWN_TOP_LEVEL_KEYS = {
     "$schema",
     # Tolerated extension sections (validated leniently, not dropped).
     "traces", "mcp", "permissions", "model", "llm", "session", "rules",
+    # Custom command settings (e.g. opt-in live shell substitution gate).
+    "commands",
 }
 
 # Known keys for the nested output section.

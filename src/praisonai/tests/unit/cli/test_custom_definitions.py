@@ -302,6 +302,92 @@ class TestShellSubstitution:
                 with pytest.raises(ShellSubstitutionError):
                     interpolate_command_template("diff")
 
+    def test_arguments_cannot_inject_shell(self):
+        """A !`cmd` inside $ARGUMENTS must NOT be executed (injection guard)."""
+        template = "Review: $ARGUMENTS"
+        result = TemplateInterpolator.interpolate(
+            template, arguments="!`echo INJECTED_OUTPUT`", allow_shell=True
+        )
+        # The injected !`cmd` is inert text: it appears verbatim and is NOT
+        # replaced by the command's executed output.
+        assert result == "Review: !`echo INJECTED_OUTPUT`"
+
+    def test_files_cannot_inject_shell(self, tmp_path):
+        """A !`cmd` inside an @file's contents must NOT be executed."""
+        injected = tmp_path / "payload.txt"
+        injected.write_text("!`echo FILE_INJECTED`")
+        template = "Context: @payload.txt"
+        result = TemplateInterpolator.interpolate(
+            template, working_dir=tmp_path, allow_shell=True
+        )
+        assert result == "Context: !`echo FILE_INJECTED`"
+
+    def test_arguments_dollar_substitution_escaped(self):
+        """$(...) carried by $ARGUMENTS is escaped even with shell enabled."""
+        template = "Run: $ARGUMENTS"
+        result = TemplateInterpolator.interpolate(
+            template, arguments="$(rm -rf /)", allow_shell=True
+        )
+        assert "\\$(rm -rf /)" in result
+
+    def test_shell_output_with_dollar_not_mangled(self):
+        """Command stdout containing $(...) is inlined verbatim, not escaped."""
+        template = "Out: !`printf '%s' '$(git rev-parse HEAD)'`"
+        result = TemplateInterpolator.interpolate(template, allow_shell=True)
+        assert result == "Out: $(git rev-parse HEAD)"
+
+    def test_quoted_false_frontmatter_disables_shell(self):
+        """allow_shell: "false" (quoted) must NOT enable shell (fail closed)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            commands_dir = Path(tmpdir) / "commands"
+            commands_dir.mkdir()
+            (commands_dir / "diff.md").write_text(
+                '---\nallow_shell: "false"\n---\nOutput: !`echo hi`\n'
+            )
+
+            discovery = CustomDefinitionsDiscovery()
+            cmd = discovery._load_command(commands_dir / "diff.md", "test")
+            assert cmd.allow_shell is False
+
+            with patch.object(
+                CustomDefinitionsDiscovery, '_find_project_dirs', return_value=[Path(tmpdir)]
+            ), patch.dict("os.environ", {}, clear=False):
+                import os as _os
+                _os.environ.pop(SHELL_SUBSTITUTION_ENV, None)
+                with pytest.raises(ShellSubstitutionError):
+                    interpolate_command_template("diff")
+
+    def test_config_allow_shell_enables(self):
+        """commands.allow_shell: true in project config enables substitution."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project = Path(tmpdir)
+            praisonai_dir = project / ".praisonai"
+            commands_dir = praisonai_dir / "commands"
+            commands_dir.mkdir(parents=True)
+            (commands_dir / "diff.md").write_text("Output: !`echo hi`\n")
+            (praisonai_dir / "config.yaml").write_text(
+                "commands:\n  allow_shell: true\n"
+            )
+
+            from praisonai.cli.features.custom_definitions import _config_allows_shell
+            from praisonai.cli.configuration import resolver as _resolver
+
+            with patch.object(
+                CustomDefinitionsDiscovery,
+                '_find_project_dirs',
+                return_value=[praisonai_dir],
+            ), patch.object(
+                _resolver, "resolve_config",
+                lambda *a, **k: _resolver.ConfigResolver(cwd=project).resolve(
+                    force_refresh=True
+                ),
+            ), patch.dict("os.environ", {}, clear=False):
+                import os as _os
+                _os.environ.pop(SHELL_SUBSTITUTION_ENV, None)
+                assert _config_allows_shell() is True
+                result = interpolate_command_template("diff")
+                assert result == "Output: hi"
+
 
 class TestIntegrationFunctions:
     """Test integration helper functions."""
