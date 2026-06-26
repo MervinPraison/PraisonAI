@@ -25,9 +25,9 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Audio | 2 | 10 | 649 |
 | ✅ Auto Generation | 5 | 6 | 1637 |
 | ✅ Autonomy | 3 | 5 | 1919 |
-| ✅ Bots | 7 | 23 | 7710 |
+| ✅ Bots | 7 | 23 | 7714 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 107 | 26753 |
+| ✅ CLI | 5 | 108 | 26975 |
 | ✅ Chunking | 2 | 2 | 288 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 13 | 3554 |
@@ -44,10 +44,10 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Failover | 2 | 1 | 372 |
 | ✅ Files | 2 | 6 | 1632 |
 | ✅ Flow | 1 | 2 | 435 |
-| ✅ Gateway | 7 | 19 | 6769 |
+| ✅ Gateway | 7 | 21 | 7477 |
 | ✅ Guardrails | 4 | 4 | 1619 |
 | ✅ Handoffs | 11 | 6 | 2499 |
-| ✅ Hooks | 2 | 8 | 3146 |
+| ✅ Hooks | 2 | 8 | 3150 |
 | ✅ Image | 1 | 11 | 1096 |
 | ✅ Knowledge | 4 | 24 | 4525 |
 | ✅ LLM | 3 | 10 | 3674 |
@@ -80,7 +80,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Video | 2 | 6 | 510 |
 | ✅ Vision | 2 | 1 | 283 |
-| ✅ Web | 3 | 7 | 1533 |
+| ✅ Web | 3 | 7 | 1537 |
 | ✅ Workflows | 4 | 14 | 5893 |
 
 ## Undocumented Categories (Need Documentation)
