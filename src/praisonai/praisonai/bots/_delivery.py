@@ -517,10 +517,45 @@ class DurableDelivery:
         
         return success
     
+    def _build_reconciler(self) -> Optional[Callable[[Any], Awaitable[bool]]]:
+        """Build a reconciler for the outbox drain, if the adapter supports it.
+
+        Returns an async callable that confirms whether a recovered (mid-send
+        crash) entry was already delivered, enabling effectively-once delivery.
+        Returns None when the adapter cannot reconcile, in which case drain
+        falls back to at-least-once re-send.
+
+        An adapter opts in by declaring
+        ``PlatformCapabilities.reconciles_unknown_send`` and exposing an async
+        ``was_delivered(idempotency_key) -> bool`` method.
+        """
+        adapter = self.adapter
+        if adapter is None:
+            return None
+
+        caps = getattr(adapter, "platform_capabilities", None)
+        if caps is None or not getattr(caps, "reconciles_unknown_send", False):
+            return None
+
+        was_delivered = getattr(adapter, "was_delivered", None)
+        if not callable(was_delivered):
+            return None
+
+        async def reconciler(entry: Any) -> bool:
+            return bool(await was_delivered(entry.idempotency_key))
+
+        return reconciler
+
     async def drain_pending(self, limit: Optional[int] = None) -> tuple[int, int]:
         """Process pending messages from the outbox.
         
         Called on startup to retry messages that failed to send.
+        
+        Recovered entries (those that were in-flight when the process last
+        crashed) are reconciled before re-dispatch when the adapter declares
+        ``reconciles_unknown_send`` and exposes ``was_delivered`` — this avoids
+        sending the same channel message twice (effectively-once). Otherwise
+        delivery remains at-least-once.
         
         Args:
             limit: Optional max messages to process
@@ -563,7 +598,9 @@ class DurableDelivery:
             
             return success
         
-        return await self.outbox.drain(sender, limit=limit)
+        return await self.outbox.drain(
+            sender, limit=limit, reconciler=self._build_reconciler()
+        )
 
 
 __all__ = [

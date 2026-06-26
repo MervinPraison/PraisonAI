@@ -12,6 +12,14 @@ Design constraints (per PraisonAI principles):
   - Bounded: TTL + max_size prevent unbounded disk growth
   - Thread-safe: per-instance threading.Lock guards SQLite writes
   - Atomic: claim/complete mechanism ensures at-least-once delivery
+  - Effectively-once (opt-in): a crash after a message is handed to the channel
+    API but before its terminal status is recorded leaves the entry in the
+    ``sending`` state. On restart such entries are moved to ``recovered`` rather
+    than blindly re-sent. If a ``reconciler`` is supplied to ``drain`` (only
+    adapters that declare ``PlatformCapabilities.reconciles_unknown_send`` can),
+    it is asked whether the prior attempt actually landed; if so the entry is
+    marked ``sent`` without re-dispatch. Without a reconciler, ``recovered``
+    entries fall back to at-least-once re-send (current behaviour).
 
 Storage schema::
 
@@ -22,7 +30,7 @@ Storage schema::
         target TEXT,
         payload TEXT,
         metadata TEXT,
-        status TEXT,  -- 'pending', 'sending', 'sent', 'failed', 'permanent_failure'
+        status TEXT,  -- 'pending', 'sending', 'recovered', 'sent', 'failed', 'permanent_failure'
         attempts INTEGER DEFAULT 0,
         last_attempt REAL,
         error TEXT,
@@ -34,7 +42,7 @@ Public API:
   - enqueue(idempotency_key, target, payload, metadata) -> str
   - mark_sent(key)
   - mark_failed(key, error, permanent=False)
-  - drain(sender) -> (succeeded, failed)
+  - drain(sender, *, reconciler=None) -> (succeeded, failed)
 """
 
 from __future__ import annotations
@@ -171,10 +179,15 @@ class OutboundQueue:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_ts ON outbound_queue(ts)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_sent_at ON outbound_queue(sent_at)")
             
-            # Reset stale 'sending' claims from previous crashes
+            # Move in-flight 'sending' claims from a previous crash into the
+            # 'recovered' state. These were handed to (or about to be handed to)
+            # the channel API before the process died, so they MUST be
+            # reconciled before re-dispatch to avoid duplicate delivery. Drain
+            # treats 'recovered' like a retryable entry but offers it to a
+            # reconciler first.
             conn.execute("""
                 UPDATE outbound_queue
-                SET status = 'pending'
+                SET status = 'recovered'
                 WHERE status = 'sending'
             """)
             conn.commit()
@@ -257,8 +270,9 @@ class OutboundQueue:
             cur = conn.execute("""
                 UPDATE outbound_queue 
                 SET status = 'sent', sent_at = ?
-                WHERE id = ? AND status IN ('pending', 'sending', 'failed')
+                WHERE id = ? AND status IN ('pending', 'sending', 'recovered', 'failed')
             """, (time.time(), entry_id))
+            conn.commit()
             
             # Release active claim
             self._active_claims.pop(key, None)
@@ -281,11 +295,16 @@ class OutboundQueue:
         status = 'permanent_failure' if permanent else 'failed'
         
         with self._lock, closing(self._connect()) as conn:
+            # Never overwrite a terminal state. A concurrent direct send may have
+            # already recorded 'sent' for this row; clobbering it with 'failed'
+            # here would re-queue an entry that already reached the channel and
+            # produce a duplicate. Only in-flight states may transition to failed.
             cur = conn.execute("""
                 UPDATE outbound_queue
                 SET status = ?, error = ?, last_attempt = ?, attempts = attempts + 1
-                WHERE id = ?
+                WHERE id = ? AND status IN ('pending', 'sending', 'recovered', 'failed')
             """, (status, error, time.time(), entry_id))
+            conn.commit()
             
             # Release active claim
             self._active_claims.pop(key, None)
@@ -296,12 +315,22 @@ class OutboundQueue:
         self,
         sender: Callable[[str, Dict[str, Any]], Awaitable[bool]],
         limit: Optional[int] = None,
+        *,
+        reconciler: Optional[Callable[[OutboundEntry], Awaitable[bool]]] = None,
     ) -> Tuple[int, int]:
         """Process pending messages.
         
         Args:
             sender: Async function that attempts delivery
             limit: Optional max messages to process
+            reconciler: Optional async function that, given a ``recovered`` entry
+                (one that was in-flight when the process last crashed), returns
+                True if the prior send actually landed. When it returns True the
+                entry is marked sent WITHOUT re-dispatch, giving effectively-once
+                delivery. Only entries recovered from a crash are reconciled;
+                fresh ``pending``/``failed`` entries are sent normally. If no
+                reconciler is supplied, recovered entries are re-sent
+                (at-least-once).
             
         Returns:
             Tuple of (succeeded, failed) counts
@@ -329,6 +358,31 @@ class OutboundQueue:
             key = f"{entry.target}:{entry.idempotency_key}:{entry.id}"
             if not self._claim_entry(key, entry.id):
                 continue
+            
+            # Effectively-once: an entry recovered from a mid-send crash may have
+            # already been delivered. Reconcile before re-dispatch so the user
+            # does not receive a duplicate.
+            if entry.status == "recovered" and reconciler is not None:
+                try:
+                    if await reconciler(entry):
+                        # Only treat as delivered if the terminal write actually
+                        # landed. If another worker mutated the row between claim
+                        # and here, mark_sent returns False; fall through to a
+                        # normal send rather than counting a non-terminal row.
+                        if await self.mark_sent(key):
+                            succeeded += 1
+                            logger.info(
+                                f"Reconciled recovered entry {key} as already "
+                                f"delivered; skipped re-send"
+                            )
+                            continue
+                except Exception as e:
+                    # Reconciliation is best-effort; if it fails, fall through to
+                    # an at-least-once re-send rather than dropping the message.
+                    logger.warning(
+                        f"Reconciliation failed for {key}: {e}; "
+                        f"falling back to re-send"
+                    )
             
             try:
                 # Attempt delivery
@@ -370,17 +424,29 @@ class OutboundQueue:
             # Claim it
             self._active_claims[key] = now
             
+            stale_claim_cutoff = now - 300  # mirrors _get_pending_entries
             with closing(self._connect()) as conn:
+                # Claim retryable rows, plus stale 'sending' rows whose owning
+                # process died without recording a terminal status. Without the
+                # stale clause an abandoned in-process claim is selected by
+                # _get_pending_entries forever but never re-claimed until restart.
                 cur = conn.execute("""
                     UPDATE outbound_queue
                     SET status = 'sending', last_attempt = ?
-                    WHERE id = ? AND status IN ('pending', 'failed')
-                """, (now, entry_id))
+                    WHERE id = ? AND (
+                        status IN ('pending', 'recovered', 'failed')
+                        OR (
+                            status = 'sending'
+                            AND (last_attempt IS NULL OR last_attempt <= ?)
+                        )
+                    )
+                """, (now, entry_id, stale_claim_cutoff))
                 
                 if cur.rowcount == 0:
                     # Already being processed
                     self._active_claims.pop(key, None)
                     return False
+                conn.commit()
                     
             return True
     
@@ -392,6 +458,7 @@ class OutboundQueue:
                 SET status = 'permanent_failure', error = ?, last_attempt = ?
                 WHERE id = ?
             """, (error, time.time(), entry_id))
+            conn.commit()
     
     def _get_pending_entries(self, limit: Optional[int] = None) -> List[OutboundEntry]:
         """Get pending entries for processing."""
@@ -401,7 +468,7 @@ class OutboundQueue:
                 SELECT id, ts, idempotency_key, target, payload, metadata,
                        status, attempts, last_attempt, error, sent_at
                 FROM outbound_queue
-                WHERE status IN ('pending', 'failed')
+                WHERE status IN ('pending', 'recovered', 'failed')
                    OR (status = 'sending' AND (last_attempt IS NULL OR last_attempt <= ?))
                 ORDER BY ts ASC
             """
@@ -469,7 +536,7 @@ class OutboundQueue:
         """Get count of pending messages awaiting delivery."""
         with self._lock, closing(self._connect()) as conn:
             return int(conn.execute(
-                "SELECT COUNT(*) FROM outbound_queue WHERE status IN ('pending', 'failed')"
+                "SELECT COUNT(*) FROM outbound_queue WHERE status IN ('pending', 'recovered', 'failed')"
             ).fetchone()[0])
     
     def size(self) -> int:
