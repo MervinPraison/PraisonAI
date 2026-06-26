@@ -906,36 +906,8 @@ Your Goal: {self.goal}"""
         return CompactionRoute.COMPACT_NEEDED, compacted_msgs
 
     async def _apply_tool_truncation_async(self, messages, compactor, policy):
-        """Async version of _apply_tool_truncation."""
-        from ..context.policy import CompactionRoute
-        import logging
-        
-        # Create a copy to avoid modifying original
-        truncated_msgs = []
-        
-        for msg in messages:
-            if msg.get("role") == "tool" or msg.get("tool_call_id"):
-                content = msg.get("content", "")
-                if isinstance(content, str) and len(content) > 1000:
-                    # Truncate large tool outputs
-                    truncated_msg = msg.copy()
-                    head = content[:300]
-                    tail = content[-200:] if len(content) > 500 else ""
-                    truncated_msg["content"] = f"{head}\n...[truncated {len(content):,} chars for context budget]...\n{tail}"
-                    truncated_msgs.append(truncated_msg)
-                    continue
-            
-            truncated_msgs.append(msg)
-        
-        original_tokens = compactor.count_total_tokens(messages)
-        new_tokens = compactor.count_total_tokens(truncated_msgs)
-        
-        logging.info(
-            f"[tool-truncation-async] {self.name}: {original_tokens}→{new_tokens} tokens "
-            f"(truncated large tool outputs)"
-        )
-        
-        return CompactionRoute.TRUNCATE_TOOLS, truncated_msgs
+        """Async wrapper around _apply_tool_truncation (no awaitable work involved)."""
+        return self._apply_tool_truncation(messages, compactor, policy)
 
     def _get_next_fallback_model(self, fallback_index):
         """Get the next fallback model from the chain, if available.
