@@ -168,6 +168,94 @@ class MCPHandler(FlagHandler):
             self.print_status(f"Failed to connect to MCP server: {e}", "error")
             return None
     
+    def create_mcp_from_server(self, server: Dict[str, Any], timeout: int = 30) -> Any:
+        """
+        Create an MCP instance from a structured server config dict.
+
+        Supports both local (stdio) servers and remote (URL/HTTP/SSE/WS)
+        servers, so the run path can aggregate multiple and remote MCP servers
+        declared in project config — not just a single stdio command string.
+
+        Args:
+            server: Server config dict. Local servers provide ``command``
+                (str or list) plus optional ``args``/``env``. Remote servers
+                provide ``url`` (or ``type == "remote"``) plus optional
+                ``headers``. A per-server ``timeout`` (milliseconds, per the
+                config schema) overrides the default.
+
+        Returns:
+            MCP instance or None if unavailable / misconfigured.
+        """
+        available, msg = self.check_dependencies()
+        if not available:
+            self.print_status(msg, "error")
+            return None
+
+        if not isinstance(server, dict):
+            return None
+        if server.get("enabled") is False:
+            return None
+
+        from praisonaiagents import MCP
+
+        # Per-server timeout in the config schema is expressed in milliseconds;
+        # the SDK MCP() class expects seconds.
+        server_timeout = server.get("timeout")
+        if isinstance(server_timeout, (int, float)) and server_timeout > 0:
+            timeout = max(1, int(server_timeout / 1000))
+
+        is_remote = server.get("type") == "remote" or bool(server.get("url"))
+
+        try:
+            if is_remote:
+                url = server.get("url")
+                if not url:
+                    self.print_status("Remote MCP server missing 'url'", "error")
+                    return None
+                kwargs: Dict[str, Any] = {"timeout": timeout}
+                headers = server.get("headers")
+                if isinstance(headers, dict) and headers:
+                    kwargs["headers"] = headers
+                mcp = MCP(url, **kwargs)
+                self.print_status(f"🔌 MCP server connected: {url}", "success")
+                return mcp
+
+            command = server.get("command")
+            raw_args = server.get("args") or []
+            if isinstance(command, list):
+                parts = [str(p) for p in command]
+                cmd = parts[0] if parts else ""
+                args = parts[1:] + [str(a) for a in raw_args]
+            elif isinstance(command, str) and command:
+                parts = shlex.split(command)
+                cmd = parts[0] if parts else ""
+                args = parts[1:] + [str(a) for a in raw_args]
+            else:
+                self.print_status("Local MCP server missing 'command'", "error")
+                return None
+
+            if not cmd:
+                self.print_status("Invalid MCP command", "error")
+                return None
+
+            basename = os.path.basename(cmd)
+            if basename not in ALLOWED_MCP_COMMANDS:
+                self.print_status(
+                    f"Command '{cmd}' is not in the allowed MCP executables list.",
+                    "error",
+                )
+                return None
+
+            env = server.get("env") or {}
+            env = {str(k): str(v) for k, v in env.items()} if isinstance(env, dict) else None
+
+            mcp = MCP(command=cmd, args=args, env=env or None, timeout=timeout)
+            self.print_status(f"🔌 MCP server connected: {cmd}", "success")
+            return mcp
+        except Exception as e:
+            self.print_status(f"Failed to connect to MCP server: {e}", "error")
+            return None
+
     def apply_to_agent_config(self, config: Dict[str, Any], flag_value: Any) -> Dict[str, Any]:
         """
         Apply MCP configuration to agent config.

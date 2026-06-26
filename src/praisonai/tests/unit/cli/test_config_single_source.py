@@ -222,10 +222,10 @@ class TestRunWiringConverters:
         result = _permissions_from_config(cfg)
         assert result == {"bash:git *": "allow"}
 
-    def test_resolve_mcp_from_config_handles_non_dict(self):
-        from praisonai.cli.commands.run import _resolve_mcp_from_config
+    def test_collect_mcp_servers_handles_non_dict(self):
+        from praisonai.cli.commands.run import _collect_mcp_servers_from_config
 
-        assert _resolve_mcp_from_config(SimpleNamespace(mcp=True)) is None
+        assert _collect_mcp_servers_from_config(SimpleNamespace(mcp=True)) == []
 
 
 class TestApplyConfigDefaults:
@@ -248,7 +248,7 @@ class TestApplyConfigDefaults:
 
             resolver_mod.get_resolver(reset=True)
 
-    def test_config_fills_mcp_and_permissions(self, tmp_path, monkeypatch):
+    def test_config_collects_mcp_servers_and_permissions(self, tmp_path, monkeypatch):
         from praisonai.cli.commands.run import _apply_config_defaults
 
         _write_project_config(
@@ -266,15 +266,49 @@ class TestApplyConfigDefaults:
             },
         )
 
-        mcp, _mcp_env, perms = self._resolve_in_dir(
+        mcp, _mcp_env, perms, mcp_servers = self._resolve_in_dir(
             tmp_path,
             monkeypatch,
             lambda: _apply_config_defaults(None, None, None),
         )
 
-        assert mcp == "npx -y @playwright/mcp"
+        # Config MCP now flows through the structured server list, not a single
+        # collapsed command string.
+        assert mcp is None
+        assert len(mcp_servers) == 1
+        assert mcp_servers[0]["command"] == ["npx", "-y", "@playwright/mcp"]
+        assert mcp_servers[0]["name"] == "playwright"
         assert perms["bash:rm *"] == "deny"
         assert perms["*"] == "ask"
+
+    def test_config_collects_multiple_and_remote_mcp_servers(self, tmp_path, monkeypatch):
+        from praisonai.cli.commands.run import _apply_config_defaults
+
+        _write_project_config(
+            tmp_path,
+            {
+                "mcp": {
+                    "servers": {
+                        "playwright": {"command": ["npx", "-y", "@playwright/mcp"]},
+                        "postgres": {"command": ["npx", "-y", "@pg/mcp"]},
+                        "remote": {"type": "remote", "url": "http://localhost:8080/mcp"},
+                        "disabled": {"command": ["npx", "x"], "enabled": False},
+                    }
+                },
+            },
+        )
+
+        _mcp, _mcp_env, _perms, mcp_servers = self._resolve_in_dir(
+            tmp_path,
+            monkeypatch,
+            lambda: _apply_config_defaults(None, None, None),
+        )
+
+        names = {s["name"] for s in mcp_servers}
+        # All enabled servers (local + remote) collected; disabled dropped.
+        assert names == {"playwright", "postgres", "remote"}
+        remote = next(s for s in mcp_servers if s["name"] == "remote")
+        assert remote["url"] == "http://localhost:8080/mcp"
 
     def test_cli_permissions_override_config(self, tmp_path, monkeypatch):
         from praisonai.cli.commands.run import _apply_config_defaults
@@ -290,7 +324,7 @@ class TestApplyConfigDefaults:
 
         # CLI flag allows what config denies; CLI must win.
         cli_perms = {"bash:rm *": "allow"}
-        _, _, perms = self._resolve_in_dir(
+        _, _, perms, _ = self._resolve_in_dir(
             tmp_path,
             monkeypatch,
             lambda: _apply_config_defaults(None, None, cli_perms),
@@ -312,7 +346,7 @@ class TestApplyConfigDefaults:
             },
         )
 
-        mcp, _, _ = self._resolve_in_dir(
+        mcp, _, _, _ = self._resolve_in_dir(
             tmp_path,
             monkeypatch,
             lambda: _apply_config_defaults("custom-cmd", None, None),
