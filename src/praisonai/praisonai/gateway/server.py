@@ -3126,6 +3126,39 @@ class WebSocketGateway:
             )
         return agent
 
+    def _resolve_tool_policy_for_message(
+        self,
+        channel_name: str,
+        facts: Optional[Any] = None,
+    ) -> Optional[Any]:
+        """Resolve the per-route toolset scope for an inbound message (Issue #2298).
+
+        Returns the :class:`ToolPolicy` declared by the matching route binding
+        (via ``trust`` / ``allow_tools`` / ``deny_tools``), or ``None`` when no
+        binding matched or the matched binding does not constrain the toolset.
+        Down-scoping untrusted routes here means dangerous tools are never even
+        advertised to the model, shrinking the prompt-injection attack surface.
+        """
+        if facts is None:
+            return None
+        bindings = self._routing_bindings.get(channel_name) or []
+        if not bindings:
+            return None
+        try:
+            from praisonaiagents.gateway import resolve_route
+
+            match = resolve_route(bindings, facts)
+            binding = getattr(match, "binding", None)
+            if binding is None:
+                return None
+            tool_policy = getattr(binding, "tool_policy", None)
+            return tool_policy() if callable(tool_policy) else None
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                f"Tool-policy resolution failed for {channel_name}: {exc}"
+            )
+            return None
+
     @staticmethod
     def _build_route_facts(
         chat_type: str,
@@ -3448,6 +3481,22 @@ class WebSocketGateway:
             )
             if agent:
                 bot.set_agent(agent)
+                # Per-route toolset scope (Issue #2298): the adapter's own
+                # on_message calls ``_session.chat()`` without a tool_policy
+                # arg, so stage the resolved policy on the session here — this
+                # handler runs synchronously right before that chat() in the
+                # same dispatch, so an untrusted Discord/Slack route never
+                # advertises dangerous tools. ``None`` clears any prior staging
+                # so a trusted route can't inherit an earlier untrusted scope.
+                session = getattr(bot, "_session", None)
+                if session is None:
+                    adapter = getattr(bot, "_adapter", None)
+                    session = getattr(adapter, "_session", None)
+                if session is not None and hasattr(session, "set_pending_tool_policy"):
+                    tool_policy = gateway._resolve_tool_policy_for_message(
+                        channel_name, facts=facts
+                    )
+                    session.set_pending_tool_policy(agent, tool_policy)
 
         logger.info(f"Injected routing handler for channel '{channel_name}'")
 
@@ -3525,6 +3574,10 @@ class WebSocketGateway:
             )
             if not agent:
                 agent = bot._agent  # fallback to default
+            # Per-route toolset scope for this inbound message (Issue #2298).
+            tool_policy = gateway._resolve_tool_policy_for_message(
+                channel_name, facts=facts
+            )
 
             # Ack reaction — show processing indicator
             ack_ctx = None
@@ -3562,10 +3615,14 @@ class WebSocketGateway:
                     
                     response = await with_typing_renewal(
                         typing_func=_typing_action,
-                        operation_coro=bot._session.chat(agent, user_id, message_text)
+                        operation_coro=bot._session.chat(
+                            agent, user_id, message_text, tool_policy=tool_policy
+                        )
                     )
                 else:
-                    response = await bot._session.chat(agent, user_id, message_text)
+                    response = await bot._session.chat(
+                        agent, user_id, message_text, tool_policy=tool_policy
+                    )
                 if hasattr(bot, '_send_response_with_media'):
                     await bot._send_response_with_media(
                         update.message.chat_id,

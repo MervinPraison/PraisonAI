@@ -115,6 +115,15 @@ class BotSessionManager:
         # Agent instance never leaks one user's model to another. Keyed by
         # storage_key (same as _histories).
         self._model_overrides: Dict[str, Any] = {}
+        # Per-route toolset scope staged by a routing handler that cannot thread
+        # ``tool_policy`` through the adapter's own ``chat()`` call (Issue #2298).
+        # The gateway's injected on_message handler runs synchronously right
+        # before the adapter's ``_session.chat()`` in the same dispatch, so it
+        # stages the resolved policy here keyed by agent identity; ``chat()``
+        # consumes-and-clears it when no explicit ``tool_policy`` was passed.
+        # Keyed by ``id(agent)`` so a shared session serving multiple agents
+        # never crosses policies.
+        self._pending_tool_policies: Dict[int, Any] = {}
         # Session reset policy for automatic lifecycle management
         self._reset_policy = reset_policy or SessionResetPolicy(mode="none")
         # Track storage keys we've already fired SESSION_START for, so the
@@ -384,6 +393,77 @@ class BotSessionManager:
             except Exception as e:
                 logger.warning("Failed to persist session to store: %s", e)
 
+    def set_pending_tool_policy(
+        self, agent: "Agent", tool_policy: Optional[Any]
+    ) -> None:
+        """Stage a per-route toolset scope for ``agent``'s next ``chat()`` turn.
+
+        Used by routing handlers (e.g. the gateway's injected Discord/Slack
+        ``on_message``) that resolve a :class:`ToolPolicy` but cannot thread it
+        through the adapter's own ``_session.chat()`` call (Issue #2298). The
+        handler runs synchronously right before that ``chat()`` in the same
+        dispatch, so the staged policy is consumed-and-cleared by the very next
+        ``chat()`` for the same agent. ``None`` clears any prior staging so a
+        trusted route never inherits an earlier untrusted route's scope.
+        """
+        if agent is None:
+            return
+        key = id(agent)
+        if tool_policy is None:
+            self._pending_tool_policies.pop(key, None)
+        else:
+            self._pending_tool_policies[key] = tool_policy
+
+    @staticmethod
+    def _apply_tool_policy(
+        agent: "Agent", tool_policy: Optional[Any]
+    ) -> Optional[Any]:
+        """Scope ``agent.tools`` per ``tool_policy`` for one turn (Issue #2298).
+
+        Returns a zero-arg callable that restores the agent's original tools,
+        or ``None`` when no scoping was applied (no policy, no tools, or the
+        policy removed nothing). The apply/restore mirrors the scheduler's
+        proven ``_apply_toolset_scope`` so attended/trusted uses of the same
+        shared agent are never affected.
+        """
+        if tool_policy is None:
+            return None
+        filter_tools = getattr(tool_policy, "filter_tools", None)
+        if not callable(filter_tools):
+            return None
+        original = getattr(agent, "tools", None)
+        if not original:
+            return None
+        try:
+            filtered = filter_tools(list(original))
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning("Tool policy could not scope agent tools: %s", e)
+            return None
+        if len(filtered) == len(original):
+            return None
+        try:
+            agent.tools = filtered
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning("Tool policy could not assign scoped tools: %s", e)
+            return None
+
+        removed = len(original) - len(filtered)
+        logger.info(
+            "Route tool policy scoped agent tools for inbound turn: "
+            "%d -> %d (%d removed)",
+            len(original),
+            len(filtered),
+            removed,
+        )
+
+        def _restore() -> None:
+            try:
+                agent.tools = original
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning("Tool policy could not restore agent tools: %s", e)
+
+        return _restore
+
     async def chat(
         self,
         agent: "Agent",
@@ -395,6 +475,7 @@ class BotSessionManager:
         message_id: str = "",
         account: str = "",
         stream_callback: Optional[Any] = None,
+        tool_policy: Optional[Any] = None,
     ) -> str:
         """Run ``agent.chat(prompt)`` with *user_id*-scoped history.
 
@@ -407,6 +488,14 @@ class BotSessionManager:
         Args:
             stream_callback: Optional async callback for streaming events.
                             When provided, events are bridged via agent.stream_emitter.
+            tool_policy: Optional per-route toolset scope (Issue #2298). When
+                            supplied, the agent's tools are filtered to the
+                            policy-allowed subset for the duration of this turn
+                            and restored afterwards, so an untrusted inbound
+                            route never advertises dangerous tools to the model
+                            while attended/trusted uses of the same shared agent
+                            stay unaffected. Anything exposing ``filter_tools``
+                            is accepted (e.g. ``ToolPolicy`` / ``RunPolicy``).
 
         N4 — Inbound DLQ: if a ``dlq`` was passed to ``__init__`` and
         ``agent.chat()`` raises, the failing message is persisted to
@@ -419,6 +508,17 @@ class BotSessionManager:
         and ``message_id`` is provided, the message is journaled with deduplication
         and claim/complete semantics for crash-safe, exactly-once processing.
         """
+        # Consume any per-route toolset scope staged by a routing handler that
+        # could not thread it through this call directly (Issue #2298). The
+        # staged policy is always popped (so it applies exactly once and never
+        # leaks into a later turn — including the dedup early-return below); an
+        # explicit ``tool_policy`` argument wins, otherwise the staged one is
+        # used. ``None`` here means "no policy resolved" (full toolset), so an
+        # absent explicit arg safely inherits a fail-closed staged scope.
+        staged_policy = self._pending_tool_policies.pop(id(agent), None)
+        if tool_policy is None:
+            tool_policy = staged_policy
+
         # Handle ingress journaling for durable message processing
         journal_key = None
         if self._ingress_journal is not None and message_id:
@@ -530,6 +630,14 @@ class BotSessionManager:
                     async with agent_lock:
                         saved_history = agent.chat_history
                         agent.chat_history = user_history
+
+                        # Per-route toolset scope (Issue #2298): swap the
+                        # agent's tools to the policy-allowed subset for this
+                        # turn so untrusted inbound routes never advertise
+                        # dangerous tools to the model. Restored in the finally
+                        # below alongside chat_history/model, so a shared Agent
+                        # instance never leaks a scoped toolset to another turn.
+                        _restore_tools = self._apply_tool_policy(agent, tool_policy)
 
                         # Apply a per-user model override (set via the /model
                         # command) for the duration of this turn only. The swap
@@ -647,6 +755,10 @@ class BotSessionManager:
                             raise
                         finally:
                             agent.chat_history = saved_history
+                            # Restore the agent's original toolset if a
+                            # per-route policy scoped it for this turn.
+                            if _restore_tools is not None:
+                                _restore_tools()
                             # Restore the agent's original model if we applied a
                             # per-user override for this turn.
                             if _model_overridden:
