@@ -831,6 +831,41 @@ class ToolExecutionMixin:
             response=response,
         )
 
+    def _estimate_min_call_cost(self, messages, max_tokens=None) -> float:
+        """Estimate the minimum cost of an upcoming LLM call before dispatch.
+
+        Uses the known input size (messages) plus the configured ``max_tokens``
+        output reservation so the budget can be enforced as a hard pre-call
+        ceiling. Input tokens are approximated as ~4 characters per token,
+        matching the rest of the codebase.
+
+        Args:
+            messages: The messages that will be sent to the LLM.
+            max_tokens: Optional output-token reservation (defaults to 0 when
+                the agent has no ``max_tokens`` configured).
+
+        Returns:
+            Estimated minimum cost in USD for the call.
+        """
+        prompt_chars = 0
+        if messages:
+            for _msg in messages:
+                _content = _msg.get("content") if isinstance(_msg, dict) else None
+                if isinstance(_content, str):
+                    prompt_chars += len(_content)
+                elif isinstance(_content, list):
+                    for _part in _content:
+                        if isinstance(_part, dict):
+                            _text = _part.get("text")
+                            if isinstance(_text, str):
+                                prompt_chars += len(_text)
+                elif _content is not None:
+                    prompt_chars += len(str(_content))
+
+        prompt_tokens = prompt_chars // 4
+        completion_tokens = int(max_tokens) if max_tokens else 0
+        return self._calculate_llm_cost(prompt_tokens, completion_tokens)
+
     def _truncate_dict_fields(self, data: dict, tool_name: str, max_field_chars: int = None, tool_call_id: str = None) -> dict:
         """Truncate large string fields in a dict to prevent context overflow."""
         if max_field_chars is None:

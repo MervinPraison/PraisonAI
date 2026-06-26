@@ -994,6 +994,29 @@ Your Goal: {self.goal}"""
         # before_llm_input.messages; adopt that value for the actual LLM call.
         messages = before_llm_input.messages
 
+        # Pre-call budget guard (zero overhead when _max_budget is None).
+        # Estimate this call's minimum cost from the known input size plus the
+        # configured max_tokens output reservation and refuse to dispatch when
+        # it would breach the ceiling. This turns max_budget into a genuine hard
+        # cap instead of one that can be overshot by a whole LLM call.
+        if self._max_budget and self._on_budget_exceeded == "stop":
+            _est_min_cost = self._estimate_min_call_cost(
+                messages, getattr(self, 'max_tokens', None)
+            )
+            with self._cost_lock:
+                _projected_cost = self._total_cost + _est_min_cost
+                _current_cost = self._total_cost
+            if _projected_cost >= self._max_budget:
+                raise BudgetExceededError(
+                    f"Agent '{self.name}' would exceed budget before call: "
+                    f"${_current_cost:.4f} + est ${_est_min_cost:.4f} >= "
+                    f"${self._max_budget:.4f}",
+                    budget_type="cost",
+                    limit=self._max_budget,
+                    used=_current_cost,
+                    agent_id=self.name
+                )
+
         logging.debug(f"{self.name} sending messages to LLM: {messages}")
         
         # Emit LLM request trace event (zero overhead when not set)
