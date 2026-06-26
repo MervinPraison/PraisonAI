@@ -44,7 +44,8 @@ from .protocols import (
     SendPolicy,
     # Gateway idle-dormancy / scale-to-zero (Issue #2332)
     IdleDecision,
-    GatewayIdlePolicy,
+    GatewayIdlePolicyProtocol,
+    GatewayIdlePolicy,  # backward-compat alias
     ScaleToZeroPolicy,
     # Protocol version negotiation
     PROTOCOL_VERSION,
@@ -148,6 +149,7 @@ __all__ = [
     "SendPolicy",
     # Gateway idle-dormancy / scale-to-zero (Issue #2332)
     "IdleDecision",
+    "GatewayIdlePolicyProtocol",
     "GatewayIdlePolicy",
     "ScaleToZeroPolicy",
     # Protocol version negotiation

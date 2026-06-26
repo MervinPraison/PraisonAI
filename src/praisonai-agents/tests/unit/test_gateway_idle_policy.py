@@ -8,6 +8,7 @@ import pytest
 
 from praisonaiagents.gateway import (
     GatewayIdlePolicy,
+    GatewayIdlePolicyProtocol,
     IdleDecision,
     ScaleToZeroPolicy,
 )
@@ -15,7 +16,13 @@ from praisonaiagents.gateway import (
 
 def test_protocol_conformance():
     policy = ScaleToZeroPolicy(idle_timeout_minutes=5)
-    assert isinstance(policy, GatewayIdlePolicy)
+    assert isinstance(policy, GatewayIdlePolicyProtocol)
+
+
+def test_backward_compat_alias():
+    # The old name remains importable and points at the canonical protocol.
+    assert GatewayIdlePolicy is GatewayIdlePolicyProtocol
+    assert isinstance(ScaleToZeroPolicy(idle_timeout_minutes=5), GatewayIdlePolicy)
 
 
 def test_invalid_timeout_raises():

@@ -1711,7 +1711,7 @@ class IdleDecision:
 
 
 @runtime_checkable
-class GatewayIdlePolicy(Protocol):
+class GatewayIdlePolicyProtocol(Protocol):
     """Protocol for gateway-process idle/scale-to-zero decisions.
 
     Pure, import-free decision contract consumed by the wrapper's
@@ -1834,6 +1834,12 @@ class ScaleToZeroPolicy:
             idle=True,
             reason=f"idle for {elapsed:.0f}s with nothing in flight",
         )
+
+
+# Backward-compatible alias. The canonical name follows the repo's
+# ``*Protocol`` suffix convention (e.g. ``SendPolicyProtocol``); the old
+# name is retained so existing imports keep working.
+GatewayIdlePolicy = GatewayIdlePolicyProtocol
 
 
 # ---------------------------------------------------------------------------

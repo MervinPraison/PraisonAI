@@ -271,6 +271,13 @@ class BotOS:
 
         Resets the process-wide idle timer. Safe to call always — it is a
         cheap timestamp write whether or not an idle policy is configured.
+
+        Integration contract: platform adapters (or the user's message
+        handler) call this on every inbound message, together with
+        :meth:`turn_started`/:meth:`turn_finished` around agent execution,
+        so :meth:`_run_idle_loop` reflects live traffic and never quiesces
+        mid-conversation. When no ``idle_policy`` is configured these are
+        no-op-cheap and the gateway stays always-on as before.
         """
         self._last_inbound_ts = time.time()
 
@@ -287,8 +294,13 @@ class BotOS:
     def _has_background_work(self) -> bool:
         """Whether live background work should block dormancy.
 
-        Conservative: any due scheduled job keeps the gateway awake so a
-        cron turn is never dropped by suspending mid-run.
+        Conservative: any *enabled* scheduled job keeps the gateway awake.
+        Checking only currently-due jobs is unsafe — a job scheduled to
+        fire after the idle timeout would let the gateway quiesce first,
+        and the schedule loop would later deliver its output through
+        stopped transports, losing the result. While transports cannot be
+        revived in-process, an enabled schedule means the gateway must
+        stay resident to honour it (#2332 reviewer feedback).
         """
         try:
             from praisonaiagents.tools.schedule_tools import _get_store
@@ -297,7 +309,11 @@ class BotOS:
             return False
         try:
             runner = ScheduleRunner(_get_store())
-            return bool(runner.get_due_jobs())
+            if runner.get_due_jobs():
+                return True
+            store = _get_store()
+            jobs = store.list() if hasattr(store, "list") else []
+            return any(getattr(job, "enabled", False) for job in jobs)
         except Exception:
             return False
 
@@ -313,6 +329,9 @@ class BotOS:
         logger.info("BotOS: waking from dormancy")
         self._is_dormant = False
         self.notify_inbound()
+        # Prune finished task handles so repeated wake cycles don't
+        # accumulate stale entries.
+        self._tasks = [t for t in self._tasks if not t.done()]
         for platform, bot in self._bots.items():
             try:
                 start = getattr(bot, "start", None)
@@ -321,9 +340,22 @@ class BotOS:
                         self._run_bot(platform, bot),
                         name=f"botos-{platform}",
                     )
+                    # Supervise: the main start() gather already returned the
+                    # handles it had at launch, so wake-restarted tasks run
+                    # outside it. Attach a callback to surface their failures.
+                    task.add_done_callback(self._on_wake_task_done)
                     self._tasks.append(task)
             except Exception as e:
                 logger.warning(f"BotOS: error waking {platform}: {e}")
+
+    @staticmethod
+    def _on_wake_task_done(task: "asyncio.Task") -> None:
+        """Surface exceptions from wake-restarted transport tasks."""
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error(f"BotOS: wake task {task.get_name()} failed: {exc}")
 
     async def _quiesce(self, reason: str) -> None:
         """Stand transports down and signal the compute host to suspend."""
