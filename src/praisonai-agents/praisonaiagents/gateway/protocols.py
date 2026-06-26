@@ -1085,6 +1085,9 @@ class ToolPolicy:
             fn = tool.get("function")
             if isinstance(fn, dict) and isinstance(fn.get("name"), str):
                 return fn["name"]
+            top = tool.get("name")
+            if isinstance(top, str) and top:
+                return top
         return str(tool)
 
     def is_tool_allowed(self, tool: Any) -> bool:
@@ -1160,6 +1163,24 @@ class RouteBinding:
         "account": 4,
         "chat_type": 2,
     }
+
+    def __post_init__(self) -> None:
+        """Normalise ``trust`` so config typos cannot silently fail open.
+
+        Whitespace/case variants of a known tier (e.g. ``" Untrusted "``) are
+        canonicalised. Any *unknown* non-empty value is treated as the most
+        restrictive tier (``untrusted``) rather than as "no policy", so a
+        misconfigured route can never accidentally expose the full toolset.
+        """
+        if self.trust is None:
+            return
+        normalized = str(self.trust).strip().lower()
+        if not normalized:
+            self.trust = None
+        elif normalized in TRUST_TIERS:
+            self.trust = normalized
+        else:
+            self.trust = "untrusted"
 
     @property
     def specificity(self) -> int:

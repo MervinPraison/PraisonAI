@@ -56,6 +56,20 @@ class TestToolPolicyFilter:
         kept = p.filter_tools([tool, keep])
         assert kept == [keep]
 
+    def test_top_level_name_dict_is_resolved(self):
+        # Plain schema dicts (no OpenAI ``function`` wrapper) must still resolve
+        # by name so exact denies / untrusted substrings remove them.
+        p = ToolPolicy(deny_tools={"shell"})
+        tool = {"name": "shell", "description": "run a command"}
+        keep = {"name": "search"}
+        assert p.filter_tools([tool, keep]) == [keep]
+
+    def test_top_level_name_dict_untrusted_substring(self):
+        p = ToolPolicy(deny_substrings=["shell"])
+        tool = {"name": "RunShellCommand"}
+        keep = {"name": "search"}
+        assert p.filter_tools([tool, keep]) == [keep]
+
 
 class TestRouteBindingToolPolicy:
     def test_no_constraints_returns_none(self):
@@ -110,6 +124,31 @@ class TestRouteBindingToolPolicy:
             [_named("web_search"), _named("run_shell"), _named("read_file")]
         )
         assert [t.__name__ for t in kept] == ["read_file"]
+
+
+class TestRouteBindingTrustNormalization:
+    def test_case_and_whitespace_variants_canonicalise(self):
+        assert RouteBinding(agent="a", trust=" Untrusted ").trust == "untrusted"
+        assert RouteBinding(agent="a", trust="TRUSTED").trust == "trusted"
+
+    def test_unknown_trust_fails_closed_to_untrusted(self):
+        # A typo must NOT silently expose the full toolset — it down-tiers to
+        # the most restrictive policy instead.
+        b = RouteBinding(agent="a", trust="untrustd")
+        assert b.trust == "untrusted"
+        pol = b.tool_policy()
+        assert pol is not None
+        kept = pol.filter_tools([_named("run_shell"), _named("read_file")])
+        assert [t.__name__ for t in kept] == ["read_file"]
+
+    def test_empty_trust_string_is_none(self):
+        assert RouteBinding(agent="a", trust="   ").trust is None
+        assert RouteBinding(agent="a", trust="   ").tool_policy() is None
+
+    def test_from_dict_unknown_trust_fails_closed(self):
+        b = RouteBinding.from_dict({"agent": "a", "trust": "Untrusted!"})
+        assert b.trust == "untrusted"
+        assert b.tool_policy() is not None
 
 
 class TestRouteBindingFromDict:
