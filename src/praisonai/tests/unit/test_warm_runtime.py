@@ -219,6 +219,30 @@ def test_get_runtime_descriptor_require_compatible_skips_mismatch():
     assert get_runtime_descriptor(require_compatible=True) is None
 
 
+def test_daemon_start_rejects_incompatible_live_runtime():
+    """`daemon start` must not report a version-mismatched runtime as already
+    running: that strands the user with an orphan run/attach can't talk to.
+    It should error and point at `daemon stop` instead.
+    """
+    import typer
+    from praisonai.cli.commands import daemon as daemon_cmd
+
+    # A live (this pid) but incompatible runtime sits in the lockfile.
+    RuntimeDescriptor(
+        host="127.0.0.1", port=1, token="t", pid=os.getpid(),
+        version="0.0.0-incompatible",
+    ).write()
+
+    with pytest.raises(typer.Exit) as exc:
+        daemon_cmd.daemon_start(
+            host="127.0.0.1", port=0, model=None,
+            idle_timeout=0.0, background=False,
+        )
+    # Non-zero exit => the user is told to stop the old runtime, not a silent
+    # "already running" success (which would be exit 0).
+    assert exc.value.exit_code == 1
+
+
 # --- Live session event fan-out ----------------------------------------------
 
 

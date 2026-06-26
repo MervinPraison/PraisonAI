@@ -47,6 +47,17 @@ def daemon_start(
 
     existing = get_runtime_descriptor()
     if existing is not None:
+        if not existing.is_compatible():
+            # A live but version-mismatched runtime is unusable by this client
+            # (run/attach skip it via the compat gate). Don't silently report
+            # "already running" — that strands the user with an orphan the new
+            # client can't talk to. Point them at the explicit fix instead.
+            output.print_error(
+                f"A runtime is running at {existing.base_url} (pid {existing.pid}) but "
+                f"speaks an incompatible version (v{existing.version or '?'}). "
+                "Stop it first with: praisonai daemon stop"
+            )
+            raise typer.Exit(1)
         output.print_warning(
             f"Runtime already running at {existing.base_url} (pid {existing.pid})."
         )
