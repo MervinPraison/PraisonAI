@@ -547,9 +547,9 @@ def run_main(
         raise typer.Exit(1)
 
     # --attach tags a warm-runtime run so other terminals can observe it, but
-    # only the direct-prompt path forwards to the warm runtime. Reject it on
-    # agent/command/profile paths up front so users don't silently pass --attach
-    # and get a session that produces no events.
+    # only the direct-prompt path forwards to the warm runtime. Reject it up
+    # front on profile/custom-agent/custom-command flows so users never
+    # pass --attach and silently get a session that produces no events.
     if attach and (agent or command or profile or profile_deep):
         output.print_error("--attach is only supported for direct prompt runs")
         raise typer.Exit(1)
@@ -678,8 +678,9 @@ def run_main(
     import os
     is_file = os.path.exists(target) and (target.endswith('.yaml') or target.endswith('.yml'))
 
-    # Reject --attach on file execution rather than letting it run with no
-    # observable session (the attach client would wait forever for events).
+    # Only the direct-prompt path forwards to the warm runtime, so reject
+    # --attach on file execution rather than letting it run with no observable
+    # session (the attach client would wait forever for events).
     if attach and is_file:
         output.print_error("--attach is only supported for direct prompt runs")
         raise typer.Exit(1)

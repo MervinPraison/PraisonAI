@@ -328,3 +328,65 @@ def test_attach_streams_live_session_events(monkeypatch):
         assert "run.result" in types
     finally:
         RuntimeDescriptor.remove()
+
+
+def test_attach_session_id_with_reserved_chars_round_trips(monkeypatch):
+    """A session id with path/query-reserved chars must encode and route back.
+
+    Without percent-encoding, ids like ``a/b#c?d e`` would change the request
+    path/query and the server would subscribe to the wrong id, so the attach
+    client would never see the run's events.
+    """
+    from praisonai.runtime import server as server_mod
+
+    class _SlowAgent:
+        def __init__(self, *a, **k):
+            pass
+
+        def start(self, prompt):
+            time.sleep(0.2)
+            return f"done: {prompt}"
+
+    import praisonaiagents
+
+    monkeypatch.setattr(praisonaiagents, "Agent", _SlowAgent, raising=False)
+
+    t = threading.Thread(
+        target=server_mod.serve_runtime,
+        kwargs={"host": "127.0.0.1", "port": 0, "idle_timeout": 0},
+        daemon=True,
+    )
+    t.start()
+
+    descriptor = None
+    for _ in range(50):
+        descriptor = get_runtime_descriptor()
+        if descriptor is not None:
+            break
+        time.sleep(0.05)
+    assert descriptor is not None, "runtime did not start"
+
+    session = "a/b#c?d e"
+    try:
+        client = RuntimeClient(descriptor, timeout=5.0)
+        events = []
+
+        def _collect():
+            for ev in client.attach(session):
+                events.append(ev)
+                if ev.get("type") == "run.result":
+                    break
+
+        watcher = threading.Thread(target=_collect, daemon=True)
+        watcher.start()
+        time.sleep(0.1)
+
+        result = client.run("ping", session_id=session)
+        assert result == "done: ping"
+
+        watcher.join(timeout=5.0)
+        types = [e.get("type") for e in events]
+        assert "run.start" in types
+        assert "run.result" in types
+    finally:
+        RuntimeDescriptor.remove()

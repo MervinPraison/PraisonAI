@@ -21,6 +21,7 @@ import time
 import queue
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional
+from urllib.parse import unquote, urlsplit
 
 from .descriptor import RuntimeDescriptor, get_runtime_version
 
@@ -246,9 +247,13 @@ def _make_handler(token: str, runtime: WarmRuntime):
             # Live session event stream: /sessions/{id}/events (Server-Sent
             # Events). An attached client opens this and receives each event the
             # runtime publishes for that session until it disconnects.
+            # Strip any query string before matching the path, then percent-
+            # decode the session id so it round-trips with the client's
+            # ``quote(session_id, safe="")`` encoding.
+            path = urlsplit(self.path).path
             prefix, suffix = "/sessions/", "/events"
-            if self.path.startswith(prefix) and self.path.endswith(suffix):
-                session_id = self.path[len(prefix):-len(suffix)]
+            if path.startswith(prefix) and path.endswith(suffix):
+                session_id = unquote(path[len(prefix):-len(suffix)])
                 if not session_id:
                     self._send_json(400, {"ok": False, "error": "missing session id"})
                     return

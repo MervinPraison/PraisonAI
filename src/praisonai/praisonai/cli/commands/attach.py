@@ -48,10 +48,13 @@ def attach_main(
         output.print_error(f"Runtime module not available: {e}")
         raise typer.Exit(4)
 
-    descriptor = get_runtime_descriptor()
+    # Require a compatible runtime (same major version) so we never attach to an
+    # older runtime that lacks /sessions/{id}/events or speaks a different event
+    # contract — mirrors the gate the `run` path uses before reusing a runtime.
+    descriptor = get_runtime_descriptor(require_compatible=True)
     if descriptor is None:
         output.print_error(
-            "No warm runtime is running. Start one with: praisonai daemon start"
+            "No compatible warm runtime is running. Start one with: praisonai daemon start"
         )
         raise typer.Exit(1)
 

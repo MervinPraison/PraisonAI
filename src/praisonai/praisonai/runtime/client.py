@@ -11,10 +11,12 @@ the caller can fall back to in-process execution transparently.
 
 from __future__ import annotations
 
+import http.client as _httpclient
 import json
 from typing import Any, Dict, Iterator, Optional
 from urllib import request as _urlrequest
 from urllib import error as _urlerror
+from urllib.parse import quote as _urlquote
 
 from .descriptor import RuntimeDescriptor
 
@@ -88,7 +90,11 @@ class RuntimeClient:
         Raises:
             RuntimeUnavailable: if the stream cannot be opened.
         """
-        url = f"{self._descriptor.base_url}/sessions/{session_id}/events"
+        # Percent-encode so session ids containing path/query-reserved
+        # characters (``/``, ``?``, ``#``, spaces, ...) round-trip to the
+        # server and match the id the run was tagged with.
+        encoded_session_id = _urlquote(session_id, safe="")
+        url = f"{self._descriptor.base_url}/sessions/{encoded_session_id}/events"
         req = _urlrequest.Request(url, method="GET")
         req.add_header("Authorization", f"Bearer {self._descriptor.token}")
         req.add_header("Accept", "text/event-stream")
@@ -113,6 +119,11 @@ class RuntimeClient:
                         yield json.loads(data)
                     except ValueError:
                         continue
+        except (_urlerror.URLError, OSError, _httpclient.HTTPException) as e:
+            # A mid-stream disconnect (runtime stopped, network drop) surfaces
+            # here as a raw read error; normalize it so callers can catch a
+            # single RuntimeUnavailable instead of leaking a traceback.
+            raise RuntimeUnavailable(f"runtime stream interrupted: {e}") from e
         finally:
             try:
                 resp.close()
