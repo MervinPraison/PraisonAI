@@ -100,7 +100,10 @@ class PlatformCapabilities:
             crash mid-send may re-send the message.
         supports_idempotency_token: Whether the transport accepts a
             provider-level idempotency token so the platform itself
-            de-duplicates a retried send.
+            de-duplicates a retried send. This is an informational capability
+            descriptor only; the durable outbox does not forward a token on
+            resend, so adapters relying on provider-side dedupe should also set
+            ``reconciles_unknown_send`` to get effectively-once delivery.
     """
     
     max_message_length: int = 4096

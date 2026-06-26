@@ -128,6 +128,7 @@ def test_no_reconciler_falls_back_to_at_least_once(tmp_path):
         succeeded, failed = await q2.drain(sender)
 
         assert succeeded == 1
+        assert failed == 0
         assert len(sent) == 1  # at-least-once re-send
 
     asyncio.run(run())
@@ -154,6 +155,7 @@ def test_reconciler_only_applies_to_recovered_entries(tmp_path):
         succeeded, failed = await q.drain(sender, reconciler=reconciler)
 
         assert succeeded == 1
+        assert failed == 0
         assert len(sent) == 1  # pending entry sent normally
         assert reconciler_calls == []  # reconciler never consulted
 
@@ -181,6 +183,7 @@ def test_reconciler_failure_falls_back_to_resend(tmp_path):
         succeeded, failed = await q2.drain(sender, reconciler=reconciler)
 
         assert succeeded == 1
+        assert failed == 0
         assert len(sent) == 1  # fell back to re-send
 
     asyncio.run(run())

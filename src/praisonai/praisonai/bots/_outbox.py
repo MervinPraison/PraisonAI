@@ -295,10 +295,14 @@ class OutboundQueue:
         status = 'permanent_failure' if permanent else 'failed'
         
         with self._lock, closing(self._connect()) as conn:
+            # Never overwrite a terminal state. A concurrent direct send may have
+            # already recorded 'sent' for this row; clobbering it with 'failed'
+            # here would re-queue an entry that already reached the channel and
+            # produce a duplicate. Only in-flight states may transition to failed.
             cur = conn.execute("""
                 UPDATE outbound_queue
                 SET status = ?, error = ?, last_attempt = ?, attempts = attempts + 1
-                WHERE id = ?
+                WHERE id = ? AND status IN ('pending', 'sending', 'recovered', 'failed')
             """, (status, error, time.time(), entry_id))
             conn.commit()
             
@@ -361,13 +365,17 @@ class OutboundQueue:
             if entry.status == "recovered" and reconciler is not None:
                 try:
                     if await reconciler(entry):
-                        await self.mark_sent(key)
-                        succeeded += 1
-                        logger.info(
-                            f"Reconciled recovered entry {key} as already "
-                            f"delivered; skipped re-send"
-                        )
-                        continue
+                        # Only treat as delivered if the terminal write actually
+                        # landed. If another worker mutated the row between claim
+                        # and here, mark_sent returns False; fall through to a
+                        # normal send rather than counting a non-terminal row.
+                        if await self.mark_sent(key):
+                            succeeded += 1
+                            logger.info(
+                                f"Reconciled recovered entry {key} as already "
+                                f"delivered; skipped re-send"
+                            )
+                            continue
                 except Exception as e:
                     # Reconciliation is best-effort; if it fails, fall through to
                     # an at-least-once re-send rather than dropping the message.
@@ -416,12 +424,23 @@ class OutboundQueue:
             # Claim it
             self._active_claims[key] = now
             
+            stale_claim_cutoff = now - 300  # mirrors _get_pending_entries
             with closing(self._connect()) as conn:
+                # Claim retryable rows, plus stale 'sending' rows whose owning
+                # process died without recording a terminal status. Without the
+                # stale clause an abandoned in-process claim is selected by
+                # _get_pending_entries forever but never re-claimed until restart.
                 cur = conn.execute("""
                     UPDATE outbound_queue
                     SET status = 'sending', last_attempt = ?
-                    WHERE id = ? AND status IN ('pending', 'recovered', 'failed')
-                """, (now, entry_id))
+                    WHERE id = ? AND (
+                        status IN ('pending', 'recovered', 'failed')
+                        OR (
+                            status = 'sending'
+                            AND (last_attempt IS NULL OR last_attempt <= ?)
+                        )
+                    )
+                """, (now, entry_id, stale_claim_cutoff))
                 
                 if cur.rowcount == 0:
                     # Already being processed
