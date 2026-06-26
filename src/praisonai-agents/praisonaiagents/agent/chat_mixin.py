@@ -786,7 +786,7 @@ Your Goal: {self.goal}"""
         from ..context.policy import CompactionRoute
         return CompactionRoute.COMPACT_NEEDED, compacted_msgs
 
-    def _apply_tool_truncation(self, messages, compactor, policy):
+    def _apply_tool_truncation(self, messages, compactor, policy, log_tag="tool-truncation"):
         """Apply targeted tool output truncation."""
         from ..context.policy import CompactionRoute
         import logging
@@ -812,7 +812,7 @@ Your Goal: {self.goal}"""
         new_tokens = compactor.count_total_tokens(truncated_msgs)
         
         logging.info(
-            f"[tool-truncation] {self.name}: {original_tokens}→{new_tokens} tokens "
+            f"[{log_tag}] {self.name}: {original_tokens}→{new_tokens} tokens "
             f"(truncated large tool outputs)"
         )
         
@@ -907,7 +907,7 @@ Your Goal: {self.goal}"""
 
     async def _apply_tool_truncation_async(self, messages, compactor, policy):
         """Async wrapper around _apply_tool_truncation (no awaitable work involved)."""
-        return self._apply_tool_truncation(messages, compactor, policy)
+        return self._apply_tool_truncation(messages, compactor, policy, log_tag="tool-truncation-async")
 
     def _get_next_fallback_model(self, fallback_index):
         """Get the next fallback model from the chain, if available.
