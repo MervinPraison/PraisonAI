@@ -53,7 +53,29 @@ assert('diagnostic comment not a trigger', !mg.hasRecentClaudeTrigger(noise, 35)
 
 // Sensitive + secrets
 assert('workflow path sensitive', mg.sensitivePathReasons([{ filename: '.github/workflows/foo.yml' }]).length === 1);
+assert('ci-only label exempts workflows', mg.sensitivePathReasons(
+  [{ filename: '.github/workflows/foo.yml' }],
+  [mg.WORKFLOW_ONLY_LABEL]
+).length === 0);
+assert('ci-only label not exempt mixed changes', mg.sensitivePathReasons(
+  [{ filename: '.github/workflows/foo.yml' }, { filename: 'src/foo.py' }],
+  [mg.WORKFLOW_ONLY_LABEL]
+).length === 1);
 assert('secret in patch', mg.secretScanReasons([{ filename: 'x.py', patch: '+key = "ghp_abcdefghijklmnopqrstuvwxyz1234567890"' }]).length === 1);
+
+// Claude run scoping — other PR branches must not block
+assert('other branch claude does not block', !mg.hasBlockingClaudeRunForPr(
+  [{ event: 'issue_comment', head_branch: 'other-branch' }],
+  'my-branch'
+));
+assert('same branch claude blocks', mg.hasBlockingClaudeRunForPr(
+  [{ event: 'issue_comment', head_branch: 'my-branch' }],
+  'my-branch'
+));
+assert('issues event never blocks', !mg.hasBlockingClaudeRunForPr(
+  [{ event: 'issues', head_branch: 'my-branch' }],
+  'my-branch'
+));
 
 // Tests heuristic
 assert('sdk without tests', mg.missingTestsReason([{ filename: 'src/praisonai-agents/a/b.py', additions: 3 }]) !== null);

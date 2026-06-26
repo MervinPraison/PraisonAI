@@ -13,6 +13,8 @@ const AGENT_PY_MAX_AUTO_LINES = 100;
 const PR_MAX_AUTO_ADDITIONS = 800;
 const PR_MAX_AUTO_FILES = 30;
 const MANUAL_ONLY_LABELS = new Set(['security', 'breaking-change', 'needs-manual-review', 'release']);
+const WORKFLOW_ONLY_LABEL = 'merge-gate-ci-only';
+const CI_ONLY_PATH_PREFIXES = ['.github/workflows/', '.github/actions/', '.github/scripts/merge-gate'];
 const SDK_PATH_PREFIXES = ['src/praisonai-agents/', 'src/praisonai/'];
 const SENSITIVE_PATH_PATTERNS = [
   /^\.github\/workflows\//,
@@ -228,22 +230,55 @@ async function allChecksGreenOnSha(github, owner, repo, sha, core) {
   return true;
 }
 
-async function hasInProgressClaudeAssistant(github, owner, repo) {
+function claudeRunBlocksPr(run, headRef) {
+  if (!run || run.event === 'issues') return false;
+  if (!headRef) return true;
+  return run.head_branch === headRef;
+}
+
+function hasBlockingClaudeRunForPr(runs, headRef) {
+  return (runs || []).some((r) => claudeRunBlocksPr(r, headRef));
+}
+
+async function hasInProgressClaudeAssistant(github, owner, repo, prNumber = null) {
   try {
     const { data } = await github.rest.actions.listWorkflowRuns({
       owner,
       repo,
       workflow_id: 'claude.yml',
       status: 'in_progress',
-      per_page: 10,
+      per_page: 20,
     });
-    const runs = data.workflow_runs || [];
-    // Issue-only runs (labeled/opened) must not block PR merge gate
-    const prBlocking = runs.filter((r) => r.event !== 'issues');
-    return prBlocking.length > 0;
+    const runs = (data.workflow_runs || []).filter((r) => r.event !== 'issues');
+    if (runs.length === 0) return false;
+    if (prNumber == null) return runs.length > 0;
+
+    const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
+    const headRef = pr.head.ref;
+    return hasBlockingClaudeRunForPr(runs, headRef);
   } catch {
     return false;
   }
+}
+
+function isCiOnlyChange(files) {
+  if (!files.length) return false;
+  return files.every((f) => CI_ONLY_PATH_PREFIXES.some((p) => f.filename.startsWith(p)));
+}
+
+async function resolvePrNumberFromWorkflowRun(github, owner, repo, workflowRun) {
+  const linked = workflowRun.pull_requests || [];
+  if (linked.length > 0 && linked[0].number) return linked[0].number;
+  const branch = workflowRun.head_branch;
+  if (!branch) return null;
+  const { data } = await github.rest.pulls.list({
+    owner,
+    repo,
+    state: 'open',
+    head: `${owner}:${branch}`,
+    per_page: 1,
+  });
+  return data[0]?.number || null;
 }
 
 async function listPullFiles(github, owner, repo, prNumber) {
@@ -303,7 +338,10 @@ function hasManualOnlyLabel(labels) {
   return labels.some((l) => MANUAL_ONLY_LABELS.has(l));
 }
 
-function sensitivePathReasons(files) {
+function sensitivePathReasons(files, labels = []) {
+  if (labels.includes(WORKFLOW_ONLY_LABEL) && isCiOnlyChange(files)) {
+    return [];
+  }
   const reasons = [];
   for (const f of files) {
     if (SENSITIVE_PATH_PATTERNS.some((p) => p.test(f.filename))) {
@@ -460,7 +498,11 @@ async function loadPrContext(github, owner, repo, prNumber) {
 }
 
 async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, options = {}) {
-  const { forMergeStep = false, skipGlobalClaudeRunCheck = false } = options;
+  const {
+    forMergeStep = false,
+    skipGlobalClaudeRunCheck = false,
+    skipRecentClaudeCooldown = false,
+  } = options;
   const ctx = await loadPrContext(github, owner, repo, prNumber);
   const reasons = [];
 
@@ -481,9 +523,11 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
   }
 
   if (hasRecentConflictComment(ctx.comments)) reasons.push('recent merge-conflict @claude');
-  if (hasRecentClaudeTrigger(ctx.comments, 35)) reasons.push('recent @claude within 35min');
+  if (!skipRecentClaudeCooldown && hasRecentClaudeTrigger(ctx.comments, 35)) {
+    reasons.push('recent @claude within 35min');
+  }
 
-  if (!skipGlobalClaudeRunCheck && (await hasInProgressClaudeAssistant(github, owner, repo))) {
+  if (!skipGlobalClaudeRunCheck && (await hasInProgressClaudeAssistant(github, owner, repo, prNumber))) {
     reasons.push('claude.yml in progress');
   }
 
@@ -513,7 +557,7 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
   const agentManual = manualReviewReasonForAgentPy(agentChange);
   if (agentManual) reasons.push(agentManual);
 
-  reasons.push(...sensitivePathReasons(pullFiles));
+  reasons.push(...sensitivePathReasons(pullFiles, ctx.labels));
   reasons.push(...prSizeReasons(pullFiles));
   reasons.push(...secretScanReasons(pullFiles));
 
@@ -534,6 +578,24 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
     reasons,
     headSha: ctx.headSha,
     prNumber,
+  };
+}
+
+async function selectMergeGateCandidates(github, owner, repo, prNumbers, maxCandidates, core) {
+  const readyList = [];
+  const skipped = [];
+  for (const num of prNumbers) {
+    const result = await evaluatePipelineQuiescent(github, owner, repo, num, core);
+    if (result.ready) {
+      readyList.push({ pr_number: num, head_sha: result.headSha });
+    } else {
+      skipped.push({ pr: num, reasons: result.reasons });
+    }
+  }
+  readyList.sort((a, b) => a.pr_number - b.pr_number);
+  return {
+    candidates: readyList.slice(0, maxCandidates),
+    skipped,
   };
 }
 
@@ -570,6 +632,11 @@ module.exports = {
   getMergeState,
   allChecksGreenOnSha,
   hasInProgressClaudeAssistant,
+  claudeRunBlocksPr,
+  hasBlockingClaudeRunForPr,
+  isCiOnlyChange,
+  resolvePrNumberFromWorkflowRun,
+  WORKFLOW_ONLY_LABEL,
   getAgentPyChange,
   getAgentPyChangeFromFiles,
   manualReviewReasonForAgentPy,
@@ -590,5 +657,6 @@ module.exports = {
   FINAL_CLAUDE_REVIEW_BODY,
   loadPrContext,
   evaluatePipelineQuiescent,
+  selectMergeGateCandidates,
   findMergeGateVerdict,
 };

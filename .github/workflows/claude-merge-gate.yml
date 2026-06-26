@@ -21,14 +21,20 @@ on:
           - merge
           - squash
           - rebase
+  workflow_run:
+    workflows:
+      - Claude Assistant
+      - Core Tests
+    types:
+      - completed
 
 concurrency:
-  group: claude-merge-gate-${{ github.repository }}-${{ github.event.inputs.pr_number || 'scan' }}
+  group: claude-merge-gate-${{ github.repository }}-${{ github.event.inputs.pr_number || github.event.workflow_run.id || 'scan' }}
   cancel-in-progress: true
 
 env:
   GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
-  MAX_CANDIDATES: 3
+  MAX_CANDIDATES: 5
 
 permissions:
   contents: read
@@ -37,7 +43,67 @@ permissions:
   actions: read
 
 jobs:
+  auto-dispatch:
+    if: github.event_name == 'workflow_run'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dispatch merge gate when PR pipeline is ready
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ env.GH_TOKEN }}
+          script: |
+            const path = require('path');
+            const mergeGate = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/merge-gate.js'));
+            const wr = context.payload.workflow_run;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            if (wr.conclusion !== 'success') {
+              core.info(`Skip dispatch: ${wr.name} conclusion=${wr.conclusion}`);
+              return;
+            }
+            const allowed = ['Claude Assistant', 'Core Tests'];
+            if (!allowed.includes(wr.name)) {
+              core.info(`Skip dispatch: workflow ${wr.name}`);
+              return;
+            }
+
+            const prNumber = await mergeGate.resolvePrNumberFromWorkflowRun(github, owner, repo, wr);
+            if (!prNumber) {
+              core.info('Skip dispatch: could not resolve PR from workflow run');
+              return;
+            }
+
+            const fromClaude = wr.name === 'Claude Assistant';
+            const check = await mergeGate.evaluatePipelineQuiescent(
+              github, owner, repo, prNumber, core, {
+                skipGlobalClaudeRunCheck: fromClaude,
+                skipRecentClaudeCooldown: fromClaude,
+              }
+            );
+            if (!check.ready) {
+              core.info(`PR #${prNumber} not ready: ${check.reasons.join(', ')}`);
+              return;
+            }
+
+            await github.rest.actions.createWorkflowDispatch({
+              owner,
+              repo,
+              workflow_id: 'claude-merge-gate.yml',
+              ref: 'main',
+              inputs: { pr_number: String(prNumber) },
+            });
+            core.info(`Dispatched merge gate for PR #${prNumber} after ${wr.name}`);
+
   scan-candidates:
+    if: github.event_name != 'workflow_run'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -60,34 +126,33 @@ jobs:
             const mergeGate = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/merge-gate.js'));
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const maxCandidates = parseInt(process.env.MAX_CANDIDATES || '3', 10);
+            const maxCandidates = parseInt(process.env.MAX_CANDIDATES || '5', 10);
             const inputPr = '${{ github.event.inputs.pr_number }}'.trim();
 
-            let prNumbers = [];
+            const candidates = [];
+            const skipped = [];
+
             if (inputPr) {
               const n = parseInt(inputPr, 10);
               if (Number.isNaN(n)) {
                 throw new Error(`Invalid pr_number input: ${inputPr}`);
               }
-              prNumbers = [n];
+              const result = await mergeGate.evaluatePipelineQuiescent(github, owner, repo, n, core);
+              if (result.ready) {
+                candidates.push({ pr_number: n, head_sha: result.headSha });
+              } else {
+                skipped.push({ pr: n, reasons: result.reasons });
+              }
             } else {
               const prs = await github.paginate(github.rest.pulls.list, {
-                owner, repo, state: 'open', per_page: 100,
+                owner, repo, state: 'open', per_page: 100, sort: 'created', direction: 'asc',
               });
-              prNumbers = prs.map((p) => p.number);
-            }
-
-            const candidates = [];
-            const skipped = [];
-
-            for (const num of prNumbers) {
-              const result = await mergeGate.evaluatePipelineQuiescent(github, owner, repo, num, core);
-              if (result.ready) {
-                candidates.push({ pr_number: num, head_sha: result.headSha });
-              } else {
-                skipped.push({ pr: num, reasons: result.reasons });
-              }
-              if (candidates.length >= maxCandidates) break;
+              const prNumbers = prs.map((p) => p.number);
+              const selected = await mergeGate.selectMergeGateCandidates(
+                github, owner, repo, prNumbers, maxCandidates, core
+              );
+              candidates.push(...selected.candidates);
+              skipped.push(...selected.skipped);
             }
 
             core.info('Skipped: ' + JSON.stringify(skipped));
@@ -203,7 +268,7 @@ jobs:
             3. Confirm SDK value gate: change strengthens praisonaiagents (no scope creep).
             4. Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.
             5. If agent.py adds >100 lines or new Agent __init__ params, respond MERGE_GATE_VERDICT: BLOCK (manual review required).
-            6. BLOCK if labels security/breaking-change/needs-manual-review/release, sensitive paths (.github/workflows, auth, pyproject.toml), secrets in diff, PR >800 lines or >30 files, or SDK changes without tests.
+            6. BLOCK if labels security/breaking-change/needs-manual-review/release, sensitive paths (.github/workflows, auth, pyproject.toml), secrets in diff, PR >800 lines or >30 files, or SDK changes without tests. Label `merge-gate-ci-only` exempts CI-only changes under `.github/workflows/`, `.github/actions/`, or merge-gate scripts.
             7. Confirm no CHANGES_REQUESTED reviews and CI green on HEAD ${{ matrix.head_sha }}.
             8. If ready to merge: MERGE_GATE_VERDICT: APPROVE. Otherwise: MERGE_GATE_VERDICT: BLOCK with reasons.
 
