@@ -91,6 +91,13 @@ class WarmRuntime:
             except Exception:
                 self._evict_agent(key)
                 raise
+            # Each /run call must be isolated: clear in-memory history so prior
+            # prompts cannot leak into the next invocation (the warm agent is
+            # reused only for client/MCP cold-start savings, not conversation state).
+            if hasattr(agent, "_replace_chat_history"):
+                agent._replace_chat_history([])
+            elif hasattr(agent, "chat_history"):
+                agent.chat_history = []
         self.last_activity = time.time()
         return str(result) if result is not None else ""
 

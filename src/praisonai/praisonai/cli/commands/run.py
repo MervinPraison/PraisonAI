@@ -951,7 +951,9 @@ def _run_prompt(
         # behaviour is preserved exactly.
         # Session continuity/forking is handled in-process; the warm runtime does
         # not carry session state, so any explicit session flag stays local.
-        runtime_eligible = not any([
+        # Default auto-save also stays in-process until the warm path can persist
+        # sessions the same way as the normal run path.
+        runtime_eligible = no_save and not any([
             mcp, mcp_servers, tools, toolset, approval, approve_all_tools,
             memory, permissions_config, continue_session, session, fork,
         ])
