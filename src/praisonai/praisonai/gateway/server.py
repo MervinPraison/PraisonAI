@@ -131,13 +131,16 @@ class _ClientConn:
         size = self._frame_size(data)
         if self.max_queued_frames > 0 and self._queue.qsize() >= self.max_queued_frames:
             return False
-        if (
-            self.max_buffered_bytes > 0
-            and self.buffered_bytes + size > self.max_buffered_bytes
-            and self._queue.qsize() > 0
+        if self.max_buffered_bytes > 0 and (
+            size > self.max_buffered_bytes
+            or (
+                self.buffered_bytes + size > self.max_buffered_bytes
+                and self._queue.qsize() > 0
+            )
         ):
-            # Always allow at least one in-flight frame so a single large
-            # payload below max_payload is never spuriously rejected.
+            # Allow at least one in-flight frame so a single payload that fits
+            # within the byte ceiling is never spuriously rejected, but reject a
+            # single frame that already exceeds the ceiling on its own.
             return False
         self._queue.put_nowait((data, size))
         self.buffered_bytes += size
@@ -157,6 +160,10 @@ class _ClientConn:
                     logger.error(
                         f"Send error to client {self.client_id}: {e}"
                     )
+                    # The transport is broken; mark closed so subsequent
+                    # ``offer`` calls are rejected instead of silently
+                    # enqueueing frames into a queue with no live consumer.
+                    self._closed = True
                     self._queue.task_done()
                     break
                 finally:
@@ -523,6 +530,12 @@ class WebSocketGateway:
             reconnect_timeout=int(gateway_config.get("reconnect_timeout", 60)),
             ssl_cert=_substitute(gateway_config.get("ssl_cert")),
             ssl_key=_substitute(gateway_config.get("ssl_key")),
+            max_buffered_bytes=int(
+                gateway_config.get("max_buffered_bytes", 1024 * 1024)
+            ),
+            max_queued_frames=int(
+                gateway_config.get("max_queued_frames", 1000)
+            ),
             session_config=session_config,
         )
         
@@ -2078,6 +2091,12 @@ class WebSocketGateway:
         )
         ws = self._clients.pop(client_id, None)
         await self._teardown_client_conn(client_id)
+        # Mirror the normal disconnect cleanup so evicted clients do not leave
+        # stale scope/session entries that accumulate until shutdown.
+        self._client_scopes.pop(client_id, None)
+        session_id = self._client_sessions.pop(client_id, None)
+        if session_id:
+            self.close_session(session_id)
         if ws is not None:
             try:
                 await ws.close(
@@ -2124,7 +2143,11 @@ class WebSocketGateway:
                 # allowed to grow an unbounded backlog or stall other clients.
                 conn = self._client_conns.get(client_id)
                 if conn is not None:
-                    if not conn.offer(data):
+                    # Offer a per-client snapshot: ``cursor``/``seq`` are
+                    # client-specific and the caller may reuse the same ``data``
+                    # dict across subscribers, so queue a copy to avoid a later
+                    # call overwriting a not-yet-drained frame.
+                    if not conn.offer(dict(data)):
                         await self._evict_slow_consumer(client_id)
                 else:
                     # No bounded conn (e.g. directly registered client) — fall
@@ -2771,7 +2794,9 @@ class WebSocketGateway:
                 continue
             conn = self._client_conns.get(client_id)
             if conn is not None:
-                if not conn.offer(data):
+                # Queue a per-client snapshot so a later mutation of ``data``
+                # cannot alter frames already buffered for other clients.
+                if not conn.offer(dict(data)):
                     slow.append(client_id)
             else:
                 # Compatibility fallback for directly-registered clients.
@@ -4377,6 +4402,13 @@ class WebSocketGateway:
             self._host = gw_cfg["host"]
         if gw_cfg.get("port"):
             self._port = int(gw_cfg["port"])
+        # Propagate slow-consumer flow-control limits so YAML/CLI users get the
+        # configured ceilings instead of the in-memory defaults when clients
+        # register via ``_register_client_conn``.
+        if "max_buffered_bytes" in gw_cfg:
+            self.config.max_buffered_bytes = int(gw_cfg["max_buffered_bytes"])
+        if "max_queued_frames" in gw_cfg:
+            self.config.max_queued_frames = int(gw_cfg["max_queued_frames"])
         
         # Parse health monitoring configuration
         health_cfg = gw_cfg.get("health")

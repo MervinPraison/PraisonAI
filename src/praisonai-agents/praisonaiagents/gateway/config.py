@@ -520,8 +520,8 @@ class MultiChannelGatewayConfig:
             reconnect_timeout=gw_data.get("reconnect_timeout", 60),
             ssl_cert=gw_data.get("ssl_cert"),
             ssl_key=gw_data.get("ssl_key"),
-            max_buffered_bytes=gw_data.get("max_buffered_bytes", 1024 * 1024),
-            max_queued_frames=gw_data.get("max_queued_frames", 1000),
+            max_buffered_bytes=int(gw_data.get("max_buffered_bytes", 1024 * 1024)),
+            max_queued_frames=int(gw_data.get("max_queued_frames", 1000)),
             auth_scopes=auth_scopes,
         )
         

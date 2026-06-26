@@ -80,13 +80,27 @@ async def test_offer_rejects_when_frame_ceiling_exceeded():
 @pytest.mark.asyncio
 async def test_offer_rejects_when_byte_ceiling_exceeded():
     ws = _StallingWS()
+    conn = _ClientConn(ws, "c1", max_buffered_bytes=200, max_queued_frames=0)
+    conn.start()
+    try:
+        # First frame (fits within the ceiling) admitted: one in-flight allowed.
+        assert conn.offer({"payload": "x" * 100}) is True
+        # Second would push buffered_bytes over the 200-byte ceiling.
+        assert conn.offer({"payload": "y" * 100}) is False
+    finally:
+        ws.release()
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_offer_rejects_oversized_single_frame():
+    ws = _StallingWS()
     conn = _ClientConn(ws, "c1", max_buffered_bytes=40, max_queued_frames=0)
     conn.start()
     try:
-        # First frame always admitted (at least one in-flight allowed).
-        assert conn.offer({"payload": "x" * 100}) is True
-        # Second would push buffered_bytes over the 40-byte ceiling.
-        assert conn.offer({"payload": "y" * 100}) is False
+        # A single frame that already exceeds the byte ceiling is rejected
+        # outright so one oversized payload cannot blow the per-client bound.
+        assert conn.offer({"payload": "x" * 100}) is False
     finally:
         ws.release()
         await conn.close()
@@ -156,6 +170,59 @@ async def test_broadcast_evicts_slow_consumer_without_stalling_healthy():
 
     slow_ws.release()
     await gateway._teardown_client_conn("fast")
+
+
+class _FailingWS:
+    """A websocket whose send_json always raises (broken transport)."""
+
+    def __init__(self):
+        self.closed = False
+
+    async def send_json(self, data):
+        raise RuntimeError("transport gone")
+
+    async def close(self, code=None, reason=None):
+        self.closed = True
+
+
+@pytest.mark.asyncio
+async def test_dead_drain_rejects_subsequent_offers():
+    ws = _FailingWS()
+    conn = _ClientConn(ws, "c1", max_buffered_bytes=0, max_queued_frames=0)
+    conn.start()
+    try:
+        # First frame admitted, but the drain task fails sending it and marks
+        # the connection closed.
+        assert conn.offer({"n": 1}) is True
+        for _ in range(10):
+            await asyncio.sleep(0)
+            if conn._closed:
+                break
+        assert conn._closed is True
+        # Subsequent offers are rejected instead of buffering into a dead queue.
+        assert conn.offer({"n": 2}) is False
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_eviction_clears_scope_and_session_state():
+    gateway = WebSocketGateway(
+        config=GatewayConfig(max_buffered_bytes=0, max_queued_frames=1)
+    )
+    ws = _StallingWS()
+    gateway.add_client("c1", ws)
+    gateway._client_scopes["c1"] = set()
+    session = gateway.create_session("agent")
+    gateway._client_sessions["c1"] = session.session_id
+
+    await gateway._evict_slow_consumer("c1")
+
+    assert "c1" not in gateway._clients
+    assert "c1" not in gateway._client_conns
+    assert "c1" not in gateway._client_scopes
+    assert "c1" not in gateway._client_sessions
+    ws.release()
 
 
 def test_policy_advertises_buffer_dimensions():
