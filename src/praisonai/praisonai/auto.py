@@ -60,10 +60,22 @@ def _atomic_write_text(path, content_writer):
     target_dir = os.path.dirname(os.path.abspath(path)) or "."
     fd, tmp_path = tempfile.mkstemp(prefix=".tmp_", suffix=".yaml", dir=target_dir)
     try:
+        # Preserve the existing file's permission bits so a replaced, shared or
+        # deployment-managed config does not silently become unreadable to the
+        # process that later loads it (mkstemp creates 0600 by default).
+        try:
+            existing_mode = os.stat(path).st_mode
+        except OSError:
+            existing_mode = None
         with os.fdopen(fd, "w") as f:
             content_writer(f)
             f.flush()
             os.fsync(f.fileno())  # durability before rename
+        if existing_mode is not None:
+            try:
+                os.chmod(tmp_path, existing_mode)
+            except OSError:
+                pass  # best-effort; do not block the write on a chmod failure
         os.replace(tmp_path, path)  # atomic on POSIX + Windows
     except BaseException:
         try:
@@ -387,20 +399,25 @@ class BaseAutoGenerator:
         self._client_lock = threading.Lock()
         
     def _get_openai_client(self):
-        """Get or create the OpenAI client for this instance."""
-        if self._openai_client is None:
-            with self._client_lock:
-                if self._openai_client is None:
-                    try:
-                        from openai import OpenAI
-                    except ImportError as e:
-                        raise ImportError("Install with: pip install openai") from e
-                    cfg = self.config_list[0]
-                    self._openai_client = OpenAI(
-                        api_key=cfg.get("api_key") or os.environ.get("OPENAI_API_KEY"),
-                        base_url=cfg.get("base_url"),
-                    )
-        return self._openai_client
+        """Get or create the OpenAI client for this instance.
+
+        Lazy-init AND snapshot the client under the same lock so the returned
+        local reference survives a concurrent close() that nulls the attribute,
+        closing the shutdown-during-request race (mirrors the async path).
+        """
+        with self._client_lock:
+            client = self._openai_client
+            if client is None:
+                try:
+                    from openai import OpenAI
+                except ImportError as e:
+                    raise ImportError("Install with: pip install openai") from e
+                cfg = self.config_list[0]
+                client = self._openai_client = OpenAI(
+                    api_key=cfg.get("api_key") or os.environ.get("OPENAI_API_KEY"),
+                    base_url=cfg.get("base_url"),
+                )
+            return client
 
     def close(self):
         """Close the sync OpenAI client if it exists."""

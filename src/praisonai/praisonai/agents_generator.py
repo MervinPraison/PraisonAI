@@ -4,6 +4,7 @@ import sys
 import os
 import inspect
 import logging
+import threading
 import re
 import keyword
 import difflib
@@ -80,7 +81,36 @@ def __dir__():
 
 
 _TOOL_TIMEOUT_EXECUTOR = None
-_TOOL_TIMEOUT_EXECUTOR_LOCK = None
+# Eagerly initialised so concurrent first-callers always share one lock (and
+# therefore one executor); a lazily-created lock would itself race.
+_TOOL_TIMEOUT_EXECUTOR_LOCK = threading.Lock()
+_DEFAULT_TOOL_TIMEOUT_WORKERS = 32
+
+
+def _resolve_tool_timeout_workers():
+    """Resolve the timeout worker count, tolerating a bad env value.
+
+    A typo or non-positive ``PRAISONAI_TOOL_TIMEOUT_WORKERS`` must not crash
+    every timed tool call; we warn and fall back to the safe default instead.
+    """
+    raw = os.environ.get("PRAISONAI_TOOL_TIMEOUT_WORKERS")
+    if raw is None:
+        return _DEFAULT_TOOL_TIMEOUT_WORKERS
+    try:
+        workers = int(raw)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid PRAISONAI_TOOL_TIMEOUT_WORKERS=%r; using default of %d.",
+            raw, _DEFAULT_TOOL_TIMEOUT_WORKERS,
+        )
+        return _DEFAULT_TOOL_TIMEOUT_WORKERS
+    if workers < 1:
+        logger.warning(
+            "PRAISONAI_TOOL_TIMEOUT_WORKERS must be >= 1 (got %d); using default of %d.",
+            workers, _DEFAULT_TOOL_TIMEOUT_WORKERS,
+        )
+        return _DEFAULT_TOOL_TIMEOUT_WORKERS
+    return workers
 
 
 def _get_tool_timeout_executor():
@@ -90,16 +120,13 @@ def _get_tool_timeout_executor():
     background work left running after a timeout is at least capped and named,
     so operators can enumerate it rather than accumulating phantom threads.
     """
-    global _TOOL_TIMEOUT_EXECUTOR, _TOOL_TIMEOUT_EXECUTOR_LOCK
+    global _TOOL_TIMEOUT_EXECUTOR
     import concurrent.futures
-    import threading
 
-    if _TOOL_TIMEOUT_EXECUTOR_LOCK is None:
-        _TOOL_TIMEOUT_EXECUTOR_LOCK = threading.Lock()
     with _TOOL_TIMEOUT_EXECUTOR_LOCK:
         if _TOOL_TIMEOUT_EXECUTOR is None:
             _TOOL_TIMEOUT_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
-                max_workers=int(os.environ.get("PRAISONAI_TOOL_TIMEOUT_WORKERS", "32")),
+                max_workers=_resolve_tool_timeout_workers(),
                 thread_name_prefix="praisonai-tool-timeout",
             )
     return _TOOL_TIMEOUT_EXECUTOR
