@@ -819,6 +819,7 @@ Methods:
 * <code title="cli">praisonai agents info <a href="./src/praisonai/praisonai/cli/commands/agents.py">--help</a></code>
 * <code title="cli">praisonai agents list <a href="./src/praisonai/praisonai/cli/commands/agents.py">--help</a></code>
 * <code title="cli">praisonai app app <a href="./src/praisonai/praisonai/cli/commands/app.py">--help</a></code>
+* <code title="cli">praisonai attach attach-main <a href="./src/praisonai/praisonai/cli/commands/attach.py">--help</a></code>
 * <code title="cli">praisonai audit agent-centric <a href="./src/praisonai/praisonai/cli/commands/audit.py">--help</a></code>
 * <code title="cli">praisonai auth list <a href="./src/praisonai/praisonai/cli/commands/auth.py">--help</a></code>
 * <code title="cli">praisonai auth login <a href="./src/praisonai/praisonai/cli/commands/auth.py">--help</a></code>
