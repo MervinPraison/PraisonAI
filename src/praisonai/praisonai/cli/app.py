@@ -133,6 +133,7 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "mcp": (".commands.mcp", "app", "MCP server management"),
     "serve": (".commands.serve", "app", "API server management"),
     "daemon": (".commands.daemon", "app", "Warm local runtime (keeps MCP/provider clients hot)"),
+    "attach": (".commands.attach", "app", "Attach to a live session on the warm runtime"),
     "schedule": (".commands.schedule", "app", "Scheduler management"),
     "kanban": (".commands.kanban", "app", "Kanban task management"),
     "run": (".commands.run", "app", "Run agents"),

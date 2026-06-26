@@ -47,6 +47,17 @@ def daemon_start(
 
     existing = get_runtime_descriptor()
     if existing is not None:
+        if not existing.is_compatible():
+            # A live but version-mismatched runtime is unusable by this client
+            # (run/attach skip it via the compat gate). Don't silently report
+            # "already running" — that strands the user with an orphan the new
+            # client can't talk to. Point them at the explicit fix instead.
+            output.print_error(
+                f"A runtime is running at {existing.base_url} (pid {existing.pid}) but "
+                f"speaks an incompatible version (v{existing.version or '?'}). "
+                "Stop it first with: praisonai daemon stop"
+            )
+            raise typer.Exit(1)
         output.print_warning(
             f"Runtime already running at {existing.base_url} (pid {existing.pid})."
         )
@@ -160,13 +171,17 @@ def daemon_status(
                 "port": descriptor.port,
                 "pid": descriptor.pid,
                 "base_url": descriptor.base_url,
+                "version": descriptor.version,
+                "compatible": descriptor.is_compatible(),
             })
         print(json.dumps(payload))
         return
 
     if running:
+        compat = "" if descriptor.is_compatible() else " [version mismatch]"
         output.print_success(
-            f"Warm runtime running at {descriptor.base_url} (pid {descriptor.pid})."
+            f"Warm runtime running at {descriptor.base_url} "
+            f"(pid {descriptor.pid}, v{descriptor.version or '?'}){compat}."
         )
     else:
         output.print_info("No warm runtime is running.")

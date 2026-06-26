@@ -396,7 +396,10 @@ def _try_attach_runtime(
     except ImportError:
         return False
 
-    descriptor = get_runtime_descriptor()
+    # Require a version-compatible runtime: a stale (major-mismatched) server is
+    # not attached to, so the cold in-process path runs instead of silently
+    # talking to an incompatible runtime.
+    descriptor = get_runtime_descriptor(require_compatible=True)
     if descriptor is None:
         return False
 
@@ -454,6 +457,8 @@ def run_main(
     # Checkpoint / rewind
     no_checkpoint: bool = typer.Option(False, "--no-checkpoint", help="Disable automatic file checkpoint before the run"),
     restore: Optional[str] = typer.Option(None, "--restore", help="Restore the workspace to a checkpoint id (or 'last') and exit"),
+    # Warm-runtime live session: tag this run so other terminals can `attach`.
+    attach: Optional[str] = typer.Option(None, "--attach", help="Run on the warm runtime under this session id so other terminals can observe it via `praisonai attach <id>`"),
 ):
     """
     Run agents from a file or prompt.
@@ -540,7 +545,15 @@ def run_main(
     if continue_session and session:
         output.print_error("Cannot use both --continue and --session together")
         raise typer.Exit(1)
-    
+
+    # --attach tags a warm-runtime run so other terminals can observe it, but
+    # only the direct-prompt path forwards to the warm runtime. Reject it up
+    # front on profile/custom-agent/custom-command flows so users never
+    # pass --attach and silently get a session that produces no events.
+    if attach and (agent or command or profile or profile_deep):
+        output.print_error("--attach is only supported for direct prompt runs")
+        raise typer.Exit(1)
+
     # Handle custom agent or command
     if agent:
         from ..features.custom_definitions import load_agent_from_name
@@ -665,6 +678,13 @@ def run_main(
     import os
     is_file = os.path.exists(target) and (target.endswith('.yaml') or target.endswith('.yml'))
 
+    # Only the direct-prompt path forwards to the warm runtime, so reject
+    # --attach on file execution rather than letting it run with no observable
+    # session (the attach client would wait forever for events).
+    if attach and is_file:
+        output.print_error("--attach is only supported for direct prompt runs")
+        raise typer.Exit(1)
+
     # Auto-checkpoint before file-based runs so a bad turn can be rewound with
     # `praisonai run --restore last`. Scoped to YAML-file runs (which mutate
     # project files) and snapshotted against the file's own directory so the
@@ -758,6 +778,7 @@ def run_main(
             session=session,
             fork=fork,
             no_save=no_save,
+            attach_session=attach,
         )
 
 
@@ -889,6 +910,7 @@ def _run_prompt(
     session: Optional[str] = None,
     fork: bool = False,
     no_save: bool = False,
+    attach_session: Optional[str] = None,
 ):
     """Run a direct prompt."""
     output = get_output_controller()
@@ -957,11 +979,14 @@ def _run_prompt(
             mcp, mcp_servers, tools, toolset, approval, approve_all_tools,
             memory, permissions_config, continue_session, session, fork,
         ])
+        # When --attach <id> is given, tag the warm-runtime run with that id so
+        # other terminals (`praisonai attach <id>`) observe its live events.
+        runtime_session_id = attach_session or session_id
         if runtime_eligible and _try_attach_runtime(
             prompt,
             model=model,
             output_mode=output_mode,
-            session_id=session_id,
+            session_id=runtime_session_id,
         ):
             return
 

@@ -17,6 +17,8 @@ from praisonai.runtime import (
     RuntimeUnavailable,
     get_runtime_descriptor,
     get_runtime_lock_path,
+    get_runtime_version,
+    versions_compatible,
 )
 
 
@@ -260,4 +262,247 @@ def test_server_roundtrip(monkeypatch):
     finally:
         # Stop the server by hitting it from another thread is complex; instead
         # rely on daemon thread + test process teardown. Clean the lockfile.
+        RuntimeDescriptor.remove()
+
+
+# --- Version-compat handshake -------------------------------------------------
+
+
+def test_versions_compatible_major_match():
+    assert versions_compatible("2.3.4", "2.9.0") is True
+    assert versions_compatible("2.0.0", "2.0.0") is True
+
+
+def test_versions_compatible_major_mismatch_or_missing():
+    assert versions_compatible("2.3.4", "3.0.0") is False
+    assert versions_compatible("", "2.0.0") is False
+    assert versions_compatible("2.0.0", "") is False
+    assert versions_compatible(None, "2.0.0") is False
+
+
+def test_descriptor_version_roundtrip_and_compatible():
+    desc = RuntimeDescriptor(
+        host="127.0.0.1", port=1, token="t", pid=os.getpid(),
+        version=get_runtime_version(),
+    )
+    desc.write()
+    loaded = RuntimeDescriptor.read()
+    assert loaded is not None
+    assert loaded.version == get_runtime_version()
+    assert loaded.is_compatible() is True
+
+
+def test_descriptor_missing_version_is_incompatible():
+    # An older runtime wrote no version field; treat it as incompatible.
+    desc = RuntimeDescriptor(host="127.0.0.1", port=1, token="t", pid=os.getpid())
+    assert desc.version == ""
+    assert desc.is_compatible() is False
+
+
+def test_get_runtime_descriptor_require_compatible_skips_mismatch():
+    # Live pid but an incompatible (bogus) version -> not returned when
+    # require_compatible is set.
+    desc = RuntimeDescriptor(
+        host="127.0.0.1", port=1, token="t", pid=os.getpid(),
+        version="0.0.0-incompatible",
+    )
+    desc.write()
+    assert get_runtime_descriptor(require_compatible=False) is not None
+    assert get_runtime_descriptor(require_compatible=True) is None
+
+
+def test_daemon_start_rejects_incompatible_live_runtime():
+    """`daemon start` must not report a version-mismatched runtime as already
+    running: that strands the user with an orphan run/attach can't talk to.
+    It should error and point at `daemon stop` instead.
+    """
+    import typer
+    from praisonai.cli.commands import daemon as daemon_cmd
+
+    # A live (this pid) but incompatible runtime sits in the lockfile.
+    RuntimeDescriptor(
+        host="127.0.0.1", port=1, token="t", pid=os.getpid(),
+        version="0.0.0-incompatible",
+    ).write()
+
+    with pytest.raises(typer.Exit) as exc:
+        daemon_cmd.daemon_start(
+            host="127.0.0.1", port=0, model=None,
+            idle_timeout=0.0, background=False,
+        )
+    # Non-zero exit => the user is told to stop the old runtime, not a silent
+    # "already running" success (which would be exit 0).
+    assert exc.value.exit_code == 1
+
+
+# --- Live session event fan-out ----------------------------------------------
+
+
+def test_session_event_hub_fan_out():
+    from praisonai.runtime.server import SessionEventHub
+
+    hub = SessionEventHub()
+    q1 = hub.subscribe("sess-a")
+    q2 = hub.subscribe("sess-a")
+    q_other = hub.subscribe("sess-b")
+
+    hub.publish("sess-a", {"type": "run.start"})
+    assert q1.get_nowait() == {"type": "run.start"}
+    assert q2.get_nowait() == {"type": "run.start"}
+    assert q_other.empty()
+
+    hub.unsubscribe("sess-a", q1)
+    hub.publish("sess-a", {"type": "run.result"})
+    assert q2.get_nowait() == {"type": "run.result"}
+    assert hub.has_subscribers("sess-b") is True  # sess-b still subscribed
+
+    hub.unsubscribe("sess-a", q2)
+    assert hub.has_subscribers("sess-a") is False
+
+
+def test_warm_runtime_publishes_session_events():
+    from praisonai.runtime.server import WarmRuntime
+
+    class _StubAgent:
+        def __init__(self, *a, **k):
+            pass
+
+        def start(self, prompt):
+            return f"echo: {prompt}"
+
+    runtime = WarmRuntime()
+
+    def _fake_get_agent(key):
+        return _StubAgent()
+
+    runtime._get_agent = _fake_get_agent  # type: ignore[assignment]
+
+    q = runtime.hub.subscribe("sess-x")
+    result = runtime.run("hello", session_id="sess-x")
+    assert result == "echo: hello"
+
+    start = q.get_nowait()
+    assert start["type"] == "run.start"
+    assert start["session_id"] == "sess-x"
+    done = q.get_nowait()
+    assert done["type"] == "run.result"
+    assert done["result"] == "echo: hello"
+
+
+def test_attach_streams_live_session_events(monkeypatch):
+    """End-to-end: a run with session_id is observable via client.attach()."""
+    from praisonai.runtime import server as server_mod
+
+    class _SlowAgent:
+        def __init__(self, *a, **k):
+            pass
+
+        def start(self, prompt):
+            # Give the attach subscriber time to connect first.
+            time.sleep(0.2)
+            return f"done: {prompt}"
+
+    import praisonaiagents
+
+    monkeypatch.setattr(praisonaiagents, "Agent", _SlowAgent, raising=False)
+
+    t = threading.Thread(
+        target=server_mod.serve_runtime,
+        kwargs={"host": "127.0.0.1", "port": 0, "idle_timeout": 0},
+        daemon=True,
+    )
+    t.start()
+
+    descriptor = None
+    for _ in range(50):
+        descriptor = get_runtime_descriptor()
+        if descriptor is not None:
+            break
+        time.sleep(0.05)
+    assert descriptor is not None, "runtime did not start"
+
+    try:
+        client = RuntimeClient(descriptor, timeout=5.0)
+        events = []
+
+        def _collect():
+            for ev in client.attach("sess-live"):
+                events.append(ev)
+                if ev.get("type") == "run.result":
+                    break
+
+        watcher = threading.Thread(target=_collect, daemon=True)
+        watcher.start()
+        time.sleep(0.1)  # let the SSE stream connect
+
+        result = client.run("ping", session_id="sess-live")
+        assert result == "done: ping"
+
+        watcher.join(timeout=5.0)
+        types = [e.get("type") for e in events]
+        assert "run.start" in types
+        assert "run.result" in types
+    finally:
+        RuntimeDescriptor.remove()
+
+
+def test_attach_session_id_with_reserved_chars_round_trips(monkeypatch):
+    """A session id with path/query-reserved chars must encode and route back.
+
+    Without percent-encoding, ids like ``a/b#c?d e`` would change the request
+    path/query and the server would subscribe to the wrong id, so the attach
+    client would never see the run's events.
+    """
+    from praisonai.runtime import server as server_mod
+
+    class _SlowAgent:
+        def __init__(self, *a, **k):
+            pass
+
+        def start(self, prompt):
+            time.sleep(0.2)
+            return f"done: {prompt}"
+
+    import praisonaiagents
+
+    monkeypatch.setattr(praisonaiagents, "Agent", _SlowAgent, raising=False)
+
+    t = threading.Thread(
+        target=server_mod.serve_runtime,
+        kwargs={"host": "127.0.0.1", "port": 0, "idle_timeout": 0},
+        daemon=True,
+    )
+    t.start()
+
+    descriptor = None
+    for _ in range(50):
+        descriptor = get_runtime_descriptor()
+        if descriptor is not None:
+            break
+        time.sleep(0.05)
+    assert descriptor is not None, "runtime did not start"
+
+    session = "a/b#c?d e"
+    try:
+        client = RuntimeClient(descriptor, timeout=5.0)
+        events = []
+
+        def _collect():
+            for ev in client.attach(session):
+                events.append(ev)
+                if ev.get("type") == "run.result":
+                    break
+
+        watcher = threading.Thread(target=_collect, daemon=True)
+        watcher.start()
+        time.sleep(0.1)
+
+        result = client.run("ping", session_id=session)
+        assert result == "done: ping"
+
+        watcher.join(timeout=5.0)
+        types = [e.get("type") for e in events]
+        assert "run.start" in types
+        assert "run.result" in types
+    finally:
         RuntimeDescriptor.remove()
