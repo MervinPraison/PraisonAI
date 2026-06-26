@@ -10,9 +10,11 @@ import pytest
 
 from praisonai.cli.features.custom_definitions import (
     BUILTIN_PRESETS,
+    SHELL_SUBSTITUTION_ENV,
     CustomAgent,
     CustomCommand,
     CustomDefinitionsDiscovery,
+    ShellSubstitutionError,
     TemplateInterpolator,
     interpolate_command_template,
     load_agent_from_name,
@@ -210,6 +212,197 @@ Shell command: $(echo test)"""
             assert "Task: Analyze this" in result
             assert "# Context\nImportant info" in result
             assert "\\$(echo test)" in result
+
+
+class TestShellSubstitution:
+    """Test opt-in live shell substitution (!`cmd`)."""
+
+    def test_shell_disabled_by_default_raises(self):
+        """A !`cmd` template raises when shell execution is not enabled."""
+        template = "Diff: !`echo hello`"
+        with pytest.raises(ShellSubstitutionError):
+            TemplateInterpolator.interpolate(template)
+
+    def test_shell_enabled_runs_command(self):
+        """With allow_shell=True the command runs and stdout is inlined."""
+        template = "Output: !`echo hello world`"
+        result = TemplateInterpolator.interpolate(template, allow_shell=True)
+        assert result == "Output: hello world"
+
+    def test_shell_runs_in_working_dir(self):
+        """Commands execute in the provided working_dir."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "marker.txt").write_text("x")
+            template = "Files: !`ls`"
+            result = TemplateInterpolator.interpolate(
+                template, working_dir=Path(tmpdir), allow_shell=True
+            )
+            assert "marker.txt" in result
+
+    def test_shell_nonzero_exit_raises(self):
+        """A failing command surfaces a ShellSubstitutionError."""
+        template = "!`exit 3`"
+        with pytest.raises(ShellSubstitutionError):
+            TemplateInterpolator.interpolate(template, allow_shell=True)
+
+    def test_shell_output_capped_at_max_bytes(self):
+        """Large stdout is bounded to SHELL_SUBSTITUTION_MAX_BYTES while reading."""
+        from praisonai.cli.features.custom_definitions import (
+            SHELL_SUBSTITUTION_MAX_BYTES,
+        )
+
+        # Emit far more than the cap; the command would buffer unbounded memory
+        # if the limit were only applied after the process completes.
+        template = (
+            "!`yes A | head -c "
+            f"{SHELL_SUBSTITUTION_MAX_BYTES * 4}`"
+        )
+        result = TemplateInterpolator.interpolate(template, allow_shell=True)
+        assert len(result.encode("utf-8")) <= SHELL_SUBSTITUTION_MAX_BYTES
+        assert result  # non-empty: some output was captured
+
+    def test_dollar_substitution_still_escaped_when_shell_enabled(self):
+        """$(...) is still escaped even with allow_shell=True (only !`cmd` runs)."""
+        template = "Run: $(rm -rf /) and !`echo ok`"
+        result = TemplateInterpolator.interpolate(template, allow_shell=True)
+        assert "\\$(rm -rf /)" in result
+        assert "echo" not in result
+        assert "ok" in result
+
+    def test_env_flag_enables_shell(self):
+        """PRAISONAI_ALLOW_SHELL=true enables substitution via interpolate_command_template."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            commands_dir = Path(tmpdir) / "commands"
+            commands_dir.mkdir()
+            (commands_dir / "diff.md").write_text("Output: !`echo hi`\n")
+
+            with patch.object(
+                CustomDefinitionsDiscovery, '_find_project_dirs', return_value=[Path(tmpdir)]
+            ), patch.dict("os.environ", {SHELL_SUBSTITUTION_ENV: "true"}):
+                result = interpolate_command_template("diff")
+                assert result == "Output: hi"
+
+    def test_frontmatter_allow_shell_enables(self):
+        """allow_shell: true frontmatter enables substitution for that command."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            commands_dir = Path(tmpdir) / "commands"
+            commands_dir.mkdir()
+            (commands_dir / "diff.md").write_text(
+                "---\nallow_shell: true\n---\nOutput: !`echo hey`\n"
+            )
+
+            discovery = CustomDefinitionsDiscovery()
+            cmd = discovery._load_command(commands_dir / "diff.md", "test")
+            assert cmd.allow_shell is True
+
+            with patch.object(
+                CustomDefinitionsDiscovery, '_find_project_dirs', return_value=[Path(tmpdir)]
+            ), patch.dict("os.environ", {}, clear=False):
+                import os as _os
+                _os.environ.pop(SHELL_SUBSTITUTION_ENV, None)
+                result = interpolate_command_template("diff")
+                assert result == "Output: hey"
+
+    def test_default_command_disables_shell(self):
+        """Without any gate, a !`cmd` command raises a clear error."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            commands_dir = Path(tmpdir) / "commands"
+            commands_dir.mkdir()
+            (commands_dir / "diff.md").write_text("Output: !`echo hi`\n")
+
+            with patch.object(
+                CustomDefinitionsDiscovery, '_find_project_dirs', return_value=[Path(tmpdir)]
+            ), patch.dict("os.environ", {}, clear=False):
+                import os as _os
+                _os.environ.pop(SHELL_SUBSTITUTION_ENV, None)
+                with pytest.raises(ShellSubstitutionError):
+                    interpolate_command_template("diff")
+
+    def test_arguments_cannot_inject_shell(self):
+        """A !`cmd` inside $ARGUMENTS must NOT be executed (injection guard)."""
+        template = "Review: $ARGUMENTS"
+        result = TemplateInterpolator.interpolate(
+            template, arguments="!`echo INJECTED_OUTPUT`", allow_shell=True
+        )
+        # The injected !`cmd` is inert text: it appears verbatim and is NOT
+        # replaced by the command's executed output.
+        assert result == "Review: !`echo INJECTED_OUTPUT`"
+
+    def test_files_cannot_inject_shell(self, tmp_path):
+        """A !`cmd` inside an @file's contents must NOT be executed."""
+        injected = tmp_path / "payload.txt"
+        injected.write_text("!`echo FILE_INJECTED`")
+        template = "Context: @payload.txt"
+        result = TemplateInterpolator.interpolate(
+            template, working_dir=tmp_path, allow_shell=True
+        )
+        assert result == "Context: !`echo FILE_INJECTED`"
+
+    def test_arguments_dollar_substitution_escaped(self):
+        """$(...) carried by $ARGUMENTS is escaped even with shell enabled."""
+        template = "Run: $ARGUMENTS"
+        result = TemplateInterpolator.interpolate(
+            template, arguments="$(rm -rf /)", allow_shell=True
+        )
+        assert "\\$(rm -rf /)" in result
+
+    def test_shell_output_with_dollar_not_mangled(self):
+        """Command stdout containing $(...) is inlined verbatim, not escaped."""
+        template = "Out: !`printf '%s' '$(git rev-parse HEAD)'`"
+        result = TemplateInterpolator.interpolate(template, allow_shell=True)
+        assert result == "Out: $(git rev-parse HEAD)"
+
+    def test_quoted_false_frontmatter_disables_shell(self):
+        """allow_shell: "false" (quoted) must NOT enable shell (fail closed)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            commands_dir = Path(tmpdir) / "commands"
+            commands_dir.mkdir()
+            (commands_dir / "diff.md").write_text(
+                '---\nallow_shell: "false"\n---\nOutput: !`echo hi`\n'
+            )
+
+            discovery = CustomDefinitionsDiscovery()
+            cmd = discovery._load_command(commands_dir / "diff.md", "test")
+            assert cmd.allow_shell is False
+
+            with patch.object(
+                CustomDefinitionsDiscovery, '_find_project_dirs', return_value=[Path(tmpdir)]
+            ), patch.dict("os.environ", {}, clear=False):
+                import os as _os
+                _os.environ.pop(SHELL_SUBSTITUTION_ENV, None)
+                with pytest.raises(ShellSubstitutionError):
+                    interpolate_command_template("diff")
+
+    def test_config_allow_shell_enables(self):
+        """commands.allow_shell: true in project config enables substitution."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            project = Path(tmpdir)
+            praisonai_dir = project / ".praisonai"
+            commands_dir = praisonai_dir / "commands"
+            commands_dir.mkdir(parents=True)
+            (commands_dir / "diff.md").write_text("Output: !`echo hi`\n")
+            (praisonai_dir / "config.yaml").write_text(
+                "commands:\n  allow_shell: true\n"
+            )
+
+            from praisonai.cli.features.custom_definitions import _config_allows_shell
+            from praisonai.cli.configuration import resolver as _resolver
+
+            with patch.object(
+                CustomDefinitionsDiscovery,
+                '_find_project_dirs',
+                return_value=[praisonai_dir],
+            ), patch.object(
+                _resolver, "resolve_config",
+                lambda *a, **k: _resolver.ConfigResolver(cwd=project).resolve(
+                    force_refresh=True
+                ),
+            ), patch.dict("os.environ", {}, clear=False):
+                import os as _os
+                _os.environ.pop(SHELL_SUBSTITUTION_ENV, None)
+                assert _config_allows_shell() is True
+                result = interpolate_command_template("diff")
+                assert result == "Output: hi"
 
 
 class TestIntegrationFunctions:

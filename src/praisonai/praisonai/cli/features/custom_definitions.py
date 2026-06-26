@@ -12,7 +12,9 @@ Discovery order (later wins on name collision):
 
 import os
 import re
+import secrets
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -74,6 +76,38 @@ MODE_RULES: Dict[str, Dict[str, str]] = {
 
 # Allowed permission actions. Anything else is rejected to fail closed.
 VALID_PERMISSION_ACTIONS = {"allow", "deny", "ask"}
+
+
+# Environment gate mirroring PRAISONAI_ALLOW_LOCAL_TOOLS: live shell
+# substitution in command templates is disabled unless explicitly enabled.
+SHELL_SUBSTITUTION_ENV = "PRAISONAI_ALLOW_SHELL"
+
+# Safety bounds for opt-in `!`cmd`` substitution.
+SHELL_SUBSTITUTION_TIMEOUT = 30  # seconds
+SHELL_SUBSTITUTION_MAX_BYTES = 100_000  # captured stdout byte cap
+
+
+class ShellSubstitutionError(Exception):
+    """Raised when a command template contains live shell substitution that
+    cannot be executed (e.g. it is present but shell execution is not enabled)."""
+
+
+def _coerce_bool(value: Any) -> bool:
+    """Coerce a config/frontmatter value to a strict boolean.
+
+    YAML already yields real booleans for ``true``/``false``, but values can
+    also arrive quoted (``"false"``, ``"0"``, ``"no"``). Using ``bool(value)``
+    would treat any non-empty string as ``True``, silently enabling a
+    security-sensitive flag. This fails closed: only explicit truthy tokens
+    enable the flag.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return False
 
 
 # Built-in, zero-config agent presets shipped with the wrapper.
@@ -177,6 +211,7 @@ class CustomCommand:
     path: Path
     description: Optional[str] = None
     template: str = ""
+    allow_shell: bool = False  # per-command opt-in for live `!`cmd`` substitution
     source: str = "unknown"  # 'user' or 'project'
 
 
@@ -330,6 +365,7 @@ class CustomDefinitionsDiscovery:
                 path=file_path,
                 description=frontmatter.get("description"),
                 template=body,
+                allow_shell=_coerce_bool(frontmatter.get("allow_shell", False)),
                 source=source
             )
         
@@ -389,36 +425,76 @@ class CustomDefinitionsDiscovery:
 class TemplateInterpolator:
     """Handles template interpolation for custom commands."""
     
+    # Opt-in live substitution syntax: !`command`. Chosen over $(...) to avoid
+    # ambiguity with the existing $(...) escape behaviour and to keep the safe
+    # default unchanged.
+    SHELL_PATTERN = re.compile(r'!`([^`]+)`')
+
     @staticmethod
-    def interpolate(template: str, arguments: str = "", working_dir: Optional[Path] = None) -> str:
+    def interpolate(
+        template: str,
+        arguments: str = "",
+        working_dir: Optional[Path] = None,
+        allow_shell: bool = False,
+    ) -> str:
         """
         Interpolate a command template.
         
         Supported patterns:
         - $ARGUMENTS - User-provided arguments
         - @path/to/file - Inline file contents
-        - $(command) - Shell command substitution (escaped)
+        - $(command) - Shell command substitution (always escaped, never run)
+        - !`command` - Live shell substitution (opt-in via ``allow_shell``)
         
         Args:
             template: Template string to interpolate
             arguments: User arguments to substitute for $ARGUMENTS
             working_dir: Working directory for file resolution
+            allow_shell: When True, ``!`cmd``` substitutions are executed in
+                ``working_dir`` with a timeout and output byte cap and their
+                stdout inlined. When False (default), the presence of any
+                ``!`cmd``` substitution raises :class:`ShellSubstitutionError`
+                so the failure is explicit rather than silent.
             
         Returns:
             Interpolated string
         """
-        result = template
-        
-        # Replace $ARGUMENTS
-        result = result.replace("$ARGUMENTS", arguments)
-        
-        # Replace @file references
+        # IMPORTANT (security & correctness):
+        #   * Live shell substitution (!`cmd`) is resolved against the ORIGINAL
+        #     template only, BEFORE $ARGUMENTS / @file injection, so untrusted
+        #     input can never introduce a !`cmd` that gets executed.
+        #   * Executed-command stdout is held aside as opaque placeholders so it
+        #     is NOT mangled by the $(...) escape pass and cannot itself be
+        #     re-parsed; it is restored verbatim at the very end.
+        if not allow_shell and TemplateInterpolator.SHELL_PATTERN.search(template):
+            raise ShellSubstitutionError(
+                "Command template contains live shell substitution (!`...`) but "
+                "shell execution is not enabled. Enable it with "
+                f"{SHELL_SUBSTITUTION_ENV}=true, the `commands.allow_shell` config "
+                "flag, or `allow_shell: true` in the command's frontmatter."
+            )
+
+        shell_outputs: List[str] = []
+        if allow_shell:
+            template = TemplateInterpolator._extract_shell(
+                template, working_dir, shell_outputs
+            )
+
+        # Escape literal $(...) from the template.
+        result = TemplateInterpolator._escape_shell_substitution(template)
+
+        # Inject untrusted $ARGUMENTS, escaping $(...) it carries so it can never
+        # be executed downstream.
+        safe_arguments = TemplateInterpolator._escape_shell_substitution(arguments)
+        result = result.replace("$ARGUMENTS", safe_arguments)
+
+        # Replace @file references.
         result = TemplateInterpolator._interpolate_files(result, working_dir)
-        
-        # Handle escaped shell substitution $(...) 
-        # (We escape it to prevent accidental execution)
-        result = TemplateInterpolator._escape_shell_substitution(result)
-        
+
+        # Restore executed-command stdout verbatim (after all escaping passes).
+        if shell_outputs:
+            result = TemplateInterpolator._restore_shell(result, shell_outputs)
+
         return result
     
     @staticmethod
@@ -460,6 +536,141 @@ class TemplateInterpolator:
         """Escape shell command substitution for safety."""
         # Replace $(...) with \$(...)
         return re.sub(r'\$\(([^)]+)\)', r'\\$(\1)', text)
+
+    # Per-process random token making shell-output placeholders unguessable so
+    # untrusted $ARGUMENTS / @file content cannot forge one to inject text at a
+    # command-output position.
+    _SHELL_PLACEHOLDER_TOKEN = secrets.token_hex(8)
+
+    @staticmethod
+    def _shell_placeholder(index: int) -> str:
+        return f"\x00PRAISONAI_SHELL_{TemplateInterpolator._SHELL_PLACEHOLDER_TOKEN}_{index}\x00"
+
+    @staticmethod
+    def _run_shell_command(command: str, cwd: Optional[str]) -> str:
+        """Run a single ``!`cmd``` and return its bounded stdout.
+
+        stdout is read incrementally and capped at
+        ``SHELL_SUBSTITUTION_MAX_BYTES`` *while* reading, so a noisy command
+        cannot buffer unbounded output in memory before the cap is applied.
+        The process is killed once the cap is reached and a wall-clock timeout
+        still bounds total runtime.
+        """
+        try:
+            process = subprocess.Popen(
+                command,
+                shell=True,
+                cwd=cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except OSError as exc:
+            raise ShellSubstitutionError(
+                f"Failed to run shell substitution {command!r}: {exc}"
+            ) from exc
+
+        deadline = time.monotonic() + SHELL_SUBSTITUTION_TIMEOUT
+        collected = bytearray()
+        capped = False
+        assert process.stdout is not None
+        try:
+            os.set_blocking(process.stdout.fileno(), False)
+            while True:
+                if time.monotonic() > deadline:
+                    TemplateInterpolator._kill_process(process)
+                    raise ShellSubstitutionError(
+                        f"Shell substitution timed out after "
+                        f"{SHELL_SUBSTITUTION_TIMEOUT}s: {command!r}"
+                    )
+
+                chunk = process.stdout.read(8192)
+                if chunk:
+                    remaining = SHELL_SUBSTITUTION_MAX_BYTES - len(collected)
+                    collected.extend(chunk[:remaining])
+                    if len(collected) >= SHELL_SUBSTITUTION_MAX_BYTES:
+                        # Cap reached: stop reading and terminate the producer.
+                        # Treat this as success-with-truncation rather than a
+                        # failure, since the kill is our own doing.
+                        capped = True
+                        TemplateInterpolator._kill_process(process)
+                        break
+                elif process.poll() is not None:
+                    # No data and process exited: drain any final bytes.
+                    tail = process.stdout.read()
+                    if tail:
+                        remaining = SHELL_SUBSTITUTION_MAX_BYTES - len(collected)
+                        collected.extend(tail[:remaining])
+                        if len(collected) >= SHELL_SUBSTITUTION_MAX_BYTES:
+                            capped = True
+                    break
+                else:
+                    time.sleep(0.01)
+        finally:
+            try:
+                process.stdout.close()
+            except OSError:
+                pass
+
+        returncode = process.wait()
+        if returncode != 0 and not capped:
+            try:
+                stderr = (process.stderr.read() or b"").decode(
+                    "utf-8", errors="replace"
+                ).strip()
+            except (OSError, AttributeError):
+                stderr = ""
+            finally:
+                if process.stderr is not None:
+                    process.stderr.close()
+            raise ShellSubstitutionError(
+                f"Shell substitution {command!r} exited with "
+                f"{returncode}: {stderr}"
+            )
+
+        if process.stderr is not None:
+            process.stderr.close()
+
+        output = bytes(collected).decode("utf-8", errors="replace")
+        return output.rstrip("\n")
+
+    @staticmethod
+    def _kill_process(process: "subprocess.Popen") -> None:
+        """Terminate a runaway shell-substitution process, best-effort."""
+        try:
+            process.kill()
+            process.wait(timeout=5)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _extract_shell(
+        text: str,
+        working_dir: Optional[Path],
+        outputs: List[str],
+    ) -> str:
+        """Execute the template's ``!`cmd``` markers and replace each with an
+        opaque placeholder, collecting their stdout in ``outputs``.
+
+        Running here (on the original template, before any untrusted injection)
+        and deferring re-insertion via :meth:`_restore_shell` keeps command
+        output out of the escaping passes and prevents injected text from being
+        executed as shell.
+        """
+        cwd = str(working_dir) if working_dir else None
+
+        def replace_command(match):
+            command = match.group(1).strip()
+            outputs.append(TemplateInterpolator._run_shell_command(command, cwd))
+            return TemplateInterpolator._shell_placeholder(len(outputs) - 1)
+
+        return TemplateInterpolator.SHELL_PATTERN.sub(replace_command, text)
+
+    @staticmethod
+    def _restore_shell(text: str, outputs: List[str]) -> str:
+        """Replace shell-output placeholders with their captured stdout."""
+        for index, output in enumerate(outputs):
+            text = text.replace(TemplateInterpolator._shell_placeholder(index), output)
+        return text
 
 
 def load_agent_from_name(name: str) -> Optional[Dict[str, Any]]:
@@ -507,13 +718,55 @@ def load_agent_from_name(name: str) -> Optional[Dict[str, Any]]:
     return config
 
 
-def interpolate_command_template(name: str, arguments: str = "") -> Optional[str]:
+def _env_flag(name: str) -> bool:
+    """Return True when an environment flag is set to a truthy value."""
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _config_allows_shell() -> bool:
+    """Resolve the ``commands.allow_shell`` flag from project config.
+
+    Returns False on any error so the safe default is preserved when no config
+    is present or it cannot be parsed.
+    """
+    try:
+        from ...cli.configuration.resolver import resolve_config
+
+        config = resolve_config()
+    except Exception:
+        return False
+
+    # ``commands`` is not a first-class resolved-config field, so the resolver
+    # stores it under ``extra`` (see ResolvedConfig.from_dict). Read it from
+    # there; fall back to a direct attribute for forward compatibility.
+    commands = None
+    extra = getattr(config, "extra", None)
+    if isinstance(extra, dict):
+        commands = extra.get("commands")
+    if commands is None:
+        commands = getattr(config, "commands", None)
+
+    if isinstance(commands, dict):
+        return _coerce_bool(commands.get("allow_shell", False))
+    return False
+
+
+def interpolate_command_template(
+    name: str,
+    arguments: str = "",
+    allow_shell: Optional[bool] = None,
+) -> Optional[str]:
     """
     Load and interpolate a command template by name.
     
     Args:
         name: Command name to load
         arguments: Arguments to substitute for $ARGUMENTS
+        allow_shell: Explicitly enable/disable live ``!`cmd``` substitution.
+            When None (default), the value is resolved from (in order, any
+            enabling): the ``PRAISONAI_ALLOW_SHELL`` env var, the
+            ``commands.allow_shell`` config flag, or the command's
+            ``allow_shell: true`` frontmatter.
         
     Returns:
         Interpolated command text, or None if not found
@@ -523,6 +776,15 @@ def interpolate_command_template(name: str, arguments: str = "") -> Optional[str
     
     if not command:
         return None
-    
+
+    if allow_shell is None:
+        allow_shell = (
+            _env_flag(SHELL_SUBSTITUTION_ENV)
+            or _config_allows_shell()
+            or command.allow_shell
+        )
+
     interpolator = TemplateInterpolator()
-    return interpolator.interpolate(command.template, arguments, Path.cwd())
+    return interpolator.interpolate(
+        command.template, arguments, Path.cwd(), allow_shell=allow_shell
+    )

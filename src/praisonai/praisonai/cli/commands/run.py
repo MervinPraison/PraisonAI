@@ -449,8 +449,15 @@ def run_main(
         return
     
     if command:
-        from ..features.custom_definitions import interpolate_command_template
-        prompt = interpolate_command_template(command, target or "")
+        from ..features.custom_definitions import (
+            ShellSubstitutionError,
+            interpolate_command_template,
+        )
+        try:
+            prompt = interpolate_command_template(command, target or "")
+        except ShellSubstitutionError as exc:
+            output.print_error(str(exc))
+            raise typer.Exit(1)
         if not prompt:
             output.print_error(f"Command '{command}' not found")
             raise typer.Exit(1)
