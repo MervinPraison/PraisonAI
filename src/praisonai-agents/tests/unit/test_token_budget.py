@@ -196,9 +196,20 @@ class TestPreCallEstimate:
         from praisonaiagents import Agent
         agent = Agent(name="test", instructions="test", llm="gpt-4o")
         msgs = [{"role": "user", "content": "hello world"}]
-        without = agent._estimate_min_call_cost(msgs, None)
-        with_out = agent._estimate_min_call_cost(msgs, 1000)
-        assert with_out > without
+        # A larger explicit max_tokens reservation costs more than a smaller one.
+        small_out = agent._estimate_min_call_cost(msgs, 100)
+        large_out = agent._estimate_min_call_cost(msgs, 5000)
+        assert large_out > small_out
+
+    def test_estimate_reserves_default_output_when_max_tokens_unset(self):
+        """Unset max_tokens must still reserve a non-zero output cost so a small
+        prompt with a large provider-default response cannot bypass the guard."""
+        from praisonaiagents import Agent
+        agent = Agent(name="test", instructions="test", llm="gpt-4o")
+        msgs = [{"role": "user", "content": "hi"}]
+        # Input alone (2 chars -> 0 tokens) would otherwise be ~free; the default
+        # output reservation guarantees a positive estimate.
+        assert agent._estimate_min_call_cost(msgs, None) > 0.0
 
     def test_estimate_handles_list_content(self):
         from praisonaiagents import Agent

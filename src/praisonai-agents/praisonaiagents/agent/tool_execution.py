@@ -831,18 +831,28 @@ class ToolExecutionMixin:
             response=response,
         )
 
+    DEFAULT_OUTPUT_RESERVATION_TOKENS = 1024
+
     def _estimate_min_call_cost(self, messages, max_tokens=None) -> float:
         """Estimate the minimum cost of an upcoming LLM call before dispatch.
 
-        Uses the known input size (messages) plus the configured ``max_tokens``
-        output reservation so the budget can be enforced as a hard pre-call
-        ceiling. Input tokens are approximated as ~4 characters per token,
-        matching the rest of the codebase.
+        Uses the known input size (messages) plus an output-token reservation
+        so the budget can be enforced as a hard pre-call ceiling. When the agent
+        has no ``max_tokens`` configured, a conservative default reservation
+        (``DEFAULT_OUTPUT_RESERVATION_TOKENS``) is used so a small prompt with a
+        large provider-default response cannot trivially bypass the guard and
+        then overshoot the cap. Input tokens are approximated as ~4 characters
+        per token, matching the rest of the codebase.
+
+        Note: This is intentionally a *minimum* estimate. It counts message
+        content only and does not include tool-schema tokens, so a tool-heavy
+        request may still cost more than estimated; the reactive post-call
+        accounting remains the backstop for that case.
 
         Args:
             messages: The messages that will be sent to the LLM.
-            max_tokens: Optional output-token reservation (defaults to 0 when
-                the agent has no ``max_tokens`` configured).
+            max_tokens: Optional output-token reservation. Falls back to
+                ``DEFAULT_OUTPUT_RESERVATION_TOKENS`` when not provided.
 
         Returns:
             Estimated minimum cost in USD for the call.
@@ -863,7 +873,12 @@ class ToolExecutionMixin:
                     prompt_chars += len(str(_content))
 
         prompt_tokens = prompt_chars // 4
-        completion_tokens = int(max_tokens) if max_tokens else 0
+        if max_tokens:
+            completion_tokens = int(max_tokens)
+        elif prompt_chars > 0:
+            completion_tokens = self.DEFAULT_OUTPUT_RESERVATION_TOKENS
+        else:
+            completion_tokens = 0
         return self._calculate_llm_cost(prompt_tokens, completion_tokens)
 
     def _truncate_dict_fields(self, data: dict, tool_name: str, max_field_chars: int = None, tool_call_id: str = None) -> dict:
