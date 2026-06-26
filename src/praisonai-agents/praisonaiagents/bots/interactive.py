@@ -51,6 +51,43 @@ InteractiveHandler = Callable[[InteractiveContext], Awaitable[Optional[str]]]
 # privileged actions (e.g. tool approvals).
 InteractiveAuthorizer = Callable[[InteractiveContext], bool]
 
+REPLY_NAMESPACE = "reply"
+
+
+def make_reply_handler(
+    continue_turn: Callable[[str, "InteractiveContext"], Awaitable[Optional[str]]],
+) -> InteractiveHandler:
+    """Build a handler for agent-authored ``reply`` button/select callbacks.
+
+    A ``reply`` action (see ``PresentationAction.reply``) carries the value the
+    user chose. When clicked, the channel dispatches the ``reply:<value>``
+    callback to this handler, which extracts ``<value>`` and feeds it back into
+    the agent turn via *continue_turn* — without channels inferring intent from
+    ``/``-prefixed strings.
+
+    Args:
+        continue_turn: Async callable ``(value, context) -> Optional[str]`` that
+            continues the agent loop with the chosen value as the next input and
+            returns the agent's response (or ``None``).
+
+    Returns:
+        An ``InteractiveHandler`` to register under the ``reply`` namespace.
+    """
+
+    async def _handler(context: "InteractiveContext") -> Optional[str]:
+        payload = context.platform_data.get("decoded_payload") or {}
+        value = payload.get("value")
+        if value is None:
+            # Fall back to parsing the raw callback when dispatch didn't decode.
+            data = context.callback_data or ""
+            if data.startswith(f"{REPLY_NAMESPACE}:"):
+                value = data[len(REPLY_NAMESPACE) + 1:]
+        if value is None:
+            return None
+        return await continue_turn(value, context)
+
+    return _handler
+
 
 def encode_action(namespace: str, action: "PresentationAction") -> str:
     """Encode an action with namespace for callback data.
@@ -64,7 +101,13 @@ def encode_action(namespace: str, action: "PresentationAction") -> str:
     """
     from .presentation import ActionType
     
-    if action.type == ActionType.CALLBACK:
+    if action.type == ActionType.REPLY:
+        # Reply actions route the chosen value back into the next agent turn.
+        # The ``reply:`` namespace is reserved for this; the value is the input.
+        if action.value is not None:
+            return f"reply:{action.value}"
+        return namespace
+    elif action.type == ActionType.CALLBACK:
         # For callback type, encode namespace with the value
         if action.value:
             return f"{namespace}:{action.value}"

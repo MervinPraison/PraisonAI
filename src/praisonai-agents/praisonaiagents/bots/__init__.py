@@ -52,6 +52,12 @@ from .interactive import (
     get_registry,
     register_handler,
     unregister_handler,
+    make_reply_handler,
+    REPLY_NAMESPACE,
+)
+from .agent_reply import (
+    AgentReply,
+    extract_presentation,
 )
 from .config import BotConfig, BotOSConfig
 
@@ -96,4 +102,8 @@ __all__ = [
     "get_registry",
     "register_handler",
     "unregister_handler",
+    "make_reply_handler",
+    "REPLY_NAMESPACE",
+    "AgentReply",
+    "extract_presentation",
 ]

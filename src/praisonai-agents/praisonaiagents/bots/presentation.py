@@ -28,6 +28,7 @@ class ActionType(str, Enum):
     CALLBACK = "callback"     # Opaque callback data for the plugin
     URL = "url"              # Open a URL
     WEB_APP = "web_app"      # Open a web app (Telegram mini apps, etc)
+    REPLY = "reply"          # Feed value back into the agent turn as next input
 
 
 class ButtonStyle(str, Enum):
@@ -91,6 +92,33 @@ class PresentationAction:
             url=data.get("url"),
             web_app_url=data.get("web_app_url"),
         )
+
+    @classmethod
+    def reply(cls, value: str) -> "PresentationAction":
+        """Create a ``reply`` action that feeds *value* back into the agent turn.
+
+        When a user clicks a button (or picks a select option) carrying a reply
+        action, the chosen *value* is routed back through the interactive
+        registry as the next agent input — no ``/``-prefixed command parsing by
+        channels required. See ``ActionType.REPLY`` and the ``reply`` namespace
+        handler in ``interactive.py``.
+        """
+        return cls(type=ActionType.REPLY, value=value)
+
+    @classmethod
+    def callback(cls, value: str) -> "PresentationAction":
+        """Create an opaque ``callback`` action carrying *value*."""
+        return cls(type=ActionType.CALLBACK, value=value)
+
+    @classmethod
+    def command(cls, command: str) -> "PresentationAction":
+        """Create a ``command`` action that runs a slash *command*."""
+        return cls(type=ActionType.COMMAND, command=command)
+
+    @classmethod
+    def open_url(cls, url: str) -> "PresentationAction":
+        """Create a ``url`` action that opens *url*."""
+        return cls(type=ActionType.URL, url=url)
 
 
 @dataclass
@@ -224,6 +252,33 @@ class PresentationBlock:
     def make_context(content: str) -> "PresentationBlock":
         """Create a context block (smaller text)."""
         return PresentationBlock(type=BlockType.CONTEXT, text=content)
+
+    @staticmethod
+    def quick_replies(
+        choices: List[Any],
+        priority_base: int = 0,
+    ) -> "PresentationBlock":
+        """Create a row of quick-reply buttons from ``(label, value)`` pairs.
+
+        Each choice may be a ``(label, value)`` tuple or a plain string (used as
+        both label and value). Every button carries a ``reply`` action so a
+        click feeds ``value`` back into the next agent turn. This is the
+        agent-facing shortcut for the common "pick one" interaction.
+        """
+        items: List["PresentationButton"] = []
+        for choice in choices:
+            if isinstance(choice, (tuple, list)) and len(choice) >= 2:
+                label, value = choice[0], choice[1]
+            else:
+                label = value = choice
+            items.append(
+                PresentationButton(
+                    label=str(label),
+                    action=PresentationAction.reply(str(value)),
+                    priority=priority_base,
+                )
+            )
+        return PresentationBlock(type=BlockType.BUTTONS, buttons=items)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -471,9 +526,22 @@ def _adapt_button(button: PresentationButton, limits: PresentationLimits) -> Pre
 
     action = button.action
     url = button.url
-    if action is not None and not limits.supports_web_apps:
+    if action is not None:
         action_type = action.type.value if isinstance(action.type, ActionType) else action.type
-        if action_type == ActionType.WEB_APP.value and action.web_app_url:
+        # Degrade reply -> callback so existing per-channel renderers (which only
+        # map command/callback/url/web_app) can carry the payload. The
+        # ``reply:`` prefix lets the inbound registry route the chosen value
+        # back into the next agent turn (see interactive.py).
+        if action_type == ActionType.REPLY.value and action.value is not None:
+            action = PresentationAction(
+                type=ActionType.CALLBACK,
+                value=_encode_reply_callback(action.value),
+            )
+        elif (
+            not limits.supports_web_apps
+            and action_type == ActionType.WEB_APP.value
+            and action.web_app_url
+        ):
             # Degrade web_app -> url when unsupported
             if url is None:
                 url = action.web_app_url
@@ -487,6 +555,26 @@ def _adapt_button(button: PresentationButton, limits: PresentationLimits) -> Pre
         style=button.style,
         disabled=button.disabled,
     )
+
+
+REPLY_CALLBACK_PREFIX = "reply:"
+
+
+def _encode_reply_callback(value: str) -> str:
+    """Build a channel-safe callback payload for a ``reply`` action.
+
+    Produces ``reply:<value>`` so the inbound interactive registry can route
+    the chosen value back into the next agent turn. When the raw form exceeds
+    ``_MAX_CALLBACK_LEN`` (e.g. Telegram's 64-byte cap), the value is replaced
+    with a short, collision-resistant hash; channels then resolve the hash back
+    to the original value via the presentation's reply map (the wrapper keeps
+    that mapping when it renders an agent-authored presentation).
+    """
+    raw = f"{REPLY_CALLBACK_PREFIX}{value}"
+    if len(raw) <= _MAX_CALLBACK_LEN:
+        return raw
+    digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
+    return f"{REPLY_CALLBACK_PREFIX}{digest}"
 
 
 def _encode_select_callback(action_id: str, value: str) -> str:
