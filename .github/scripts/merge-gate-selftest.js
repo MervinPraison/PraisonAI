@@ -112,4 +112,15 @@ assert('sdk with tests ok', mg.missingTestsReason([
 // PR size
 assert('large PR blocked', mg.prSizeReasons([{ additions: 900 }]).length > 0);
 
+assert('internal PR link accepted', mg.isInternalPullRequestLink(
+  { base: { repo: { full_name: 'MervinPraison/PraisonAI' } } },
+  'MervinPraison',
+  'PraisonAI'
+));
+assert('fork sync PR link rejected', !mg.isInternalPullRequestLink(
+  { number: 21, base: { repo: { full_name: 'Milkmange/PraisonAI' } } },
+  'MervinPraison',
+  'PraisonAI'
+));
+
 process.exit(failed ? 1 : 0);

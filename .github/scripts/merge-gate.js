@@ -305,11 +305,36 @@ function isCiOnlyChange(files) {
   return files.every((f) => CI_ONLY_PATH_PREFIXES.some((p) => f.filename.startsWith(p)));
 }
 
-async function resolvePrNumberFromWorkflowRun(github, owner, repo, workflowRun) {
-  const linked = workflowRun.pull_requests || [];
-  if (linked.length > 0 && linked[0].number) return linked[0].number;
-  const branch = workflowRun.head_branch;
-  if (!branch) return null;
+function isInternalPullRequestLink(link, owner, repo) {
+  const baseFull = link?.base?.repo?.full_name || link?.base?.repo?.name;
+  if (baseFull === `${owner}/${repo}`) return true;
+  const baseUrl = link?.base?.repo?.url || '';
+  return baseUrl.endsWith(`/repos/${owner}/${repo}`);
+}
+
+async function resolvePrNumberFromLinkedPullRequests(github, owner, repo, linked) {
+  const repoFull = `${owner}/${repo}`;
+  const internal = (linked || []).filter((l) => isInternalPullRequestLink(l, owner, repo));
+  for (const link of internal) {
+    if (!link.number) continue;
+    try {
+      const { data } = await github.rest.pulls.get({
+        owner,
+        repo,
+        pull_number: link.number,
+      });
+      if (data.state === 'open' && data.base?.repo?.full_name === repoFull) {
+        return data.number;
+      }
+    } catch (err) {
+      if (err.status !== 404) throw err;
+    }
+  }
+  return null;
+}
+
+async function resolvePrNumberFromHeadBranch(github, owner, repo, branch) {
+  if (!branch || branch === 'main' || branch === 'master') return null;
   const { data } = await github.rest.pulls.list({
     owner,
     repo,
@@ -318,6 +343,20 @@ async function resolvePrNumberFromWorkflowRun(github, owner, repo, workflowRun) 
     per_page: 1,
   });
   return data[0]?.number || null;
+}
+
+async function resolvePrNumberFromWorkflowRun(github, owner, repo, workflowRun) {
+  const fromBranch = await resolvePrNumberFromHeadBranch(
+    github, owner, repo, workflowRun.head_branch
+  );
+  if (fromBranch) return fromBranch;
+
+  const fromLinked = await resolvePrNumberFromLinkedPullRequests(
+    github, owner, repo, workflowRun.pull_requests
+  );
+  if (fromLinked) return fromLinked;
+
+  return null;
 }
 
 async function listPullFiles(github, owner, repo, prNumber) {
@@ -679,6 +718,9 @@ module.exports = {
   claudeRunBlocksPr,
   hasBlockingClaudeRunForPr,
   isCiOnlyChange,
+  isInternalPullRequestLink,
+  resolvePrNumberFromLinkedPullRequests,
+  resolvePrNumberFromHeadBranch,
   resolvePrNumberFromWorkflowRun,
   WORKFLOW_ONLY_LABEL,
   getAgentPyChange,
