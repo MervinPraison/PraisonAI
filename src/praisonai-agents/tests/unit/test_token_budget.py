@@ -171,3 +171,84 @@ class TestBudgetNoneOverhead:
         )
         # 0.0 is falsy → budget check is skipped (intentional)
         assert not agent._max_budget
+
+
+class TestPreCallEstimate:
+    """Test _estimate_min_call_cost helper used by the pre-call guard."""
+
+    def test_estimate_zero_for_empty_messages(self):
+        from praisonaiagents import Agent
+        agent = Agent(name="test", instructions="test")
+        assert agent._estimate_min_call_cost([], None) == 0.0
+
+    def test_estimate_scales_with_input(self):
+        from praisonaiagents import Agent
+        agent = Agent(name="test", instructions="test", llm="gpt-4o")
+        small = agent._estimate_min_call_cost(
+            [{"role": "user", "content": "hi"}], None
+        )
+        large = agent._estimate_min_call_cost(
+            [{"role": "user", "content": "x" * 100_000}], None
+        )
+        assert large > small
+
+    def test_estimate_includes_output_reservation(self):
+        from praisonaiagents import Agent
+        agent = Agent(name="test", instructions="test", llm="gpt-4o")
+        msgs = [{"role": "user", "content": "hello world"}]
+        # A larger explicit max_tokens reservation costs more than a smaller one.
+        small_out = agent._estimate_min_call_cost(msgs, 100)
+        large_out = agent._estimate_min_call_cost(msgs, 5000)
+        assert large_out > small_out
+
+    def test_estimate_reserves_default_output_when_max_tokens_unset(self):
+        """Unset max_tokens must still reserve a non-zero output cost so a small
+        prompt with a large provider-default response cannot bypass the guard."""
+        from praisonaiagents import Agent
+        agent = Agent(name="test", instructions="test", llm="gpt-4o")
+        msgs = [{"role": "user", "content": "hi"}]
+        # Input alone (2 chars -> 0 tokens) would otherwise be ~free; the default
+        # output reservation guarantees a positive estimate.
+        assert agent._estimate_min_call_cost(msgs, None) > 0.0
+
+    def test_estimate_handles_list_content(self):
+        from praisonaiagents import Agent
+        agent = Agent(name="test", instructions="test", llm="gpt-4o")
+        msgs = [{"role": "user", "content": [{"type": "text", "text": "x" * 8000}]}]
+        assert agent._estimate_min_call_cost(msgs, None) > 0.0
+
+
+class TestPreCallGuard:
+    """Test that the pre-call guard blocks an over-budget call before dispatch."""
+
+    def test_guard_blocks_before_dispatch(self):
+        """A huge input that breaches the cap raises before the LLM is called."""
+        from praisonaiagents import Agent, ExecutionConfig, BudgetExceededError
+        agent = Agent(
+            name="test", instructions="test", llm="gpt-4o",
+            execution=ExecutionConfig(max_budget=0.0001),
+        )
+        # Make the retry path explode if it is ever reached.
+        agent._chat_completion_with_retry = MagicMock(
+            side_effect=AssertionError("LLM dispatched despite budget guard")
+        )
+        messages = [{"role": "user", "content": "x" * 200_000}]
+        with pytest.raises(BudgetExceededError):
+            agent._chat_completion(messages)
+        agent._chat_completion_with_retry.assert_not_called()
+        # No spend recorded for the blocked call.
+        assert agent._total_cost == 0.0
+
+    def test_guard_skips_when_warn_mode(self):
+        """warn mode keeps reactive-only behaviour (no pre-call block)."""
+        from praisonaiagents import Agent, ExecutionConfig
+        agent = Agent(
+            name="test", instructions="test", llm="gpt-4o",
+            execution=ExecutionConfig(max_budget=0.0001, on_budget_exceeded="warn"),
+        )
+        est = agent._estimate_min_call_cost(
+            [{"role": "user", "content": "x" * 200_000}], None
+        )
+        # Estimate alone would exceed the cap, but warn mode must not pre-block.
+        assert est >= agent._max_budget
+        assert agent._on_budget_exceeded == "warn"
