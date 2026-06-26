@@ -126,6 +126,13 @@ class BotSessionManager:
         self._pending_tool_policies: Dict[int, Any] = {}
         # Session reset policy for automatic lifecycle management
         self._reset_policy = reset_policy or SessionResetPolicy(mode="none")
+        # Per-user last agent-emitted presentation. ``chat()`` keeps the return
+        # type ``str`` for backward compatibility; when an agent (or hook)
+        # returns a MessagePresentation/AgentReply, the portable presentation is
+        # captured here so channel adapters can render interactive UI via the
+        # existing per-channel renderers (text fallback otherwise). Keyed by
+        # storage_key and consumed via ``pop_last_presentation``.
+        self._last_presentation: Dict[str, Any] = {}
         # Track storage keys we've already fired SESSION_START for, so the
         # hook fires exactly once per session lifetime (until reset).
         self._seen_sessions: set = set()
@@ -801,6 +808,28 @@ class BotSessionManager:
                         None, self._save_history, user_id, updated_history
                     )
 
+                    # Normalise an agent-emitted presentation (if any) into
+                    # (text, presentation). Agents/hooks may return a plain str
+                    # (unchanged), a MessagePresentation, or an AgentReply. The
+                    # portable presentation is captured per-user so channel
+                    # adapters can render interactive UI; the text is returned as
+                    # before so the str contract and text fallback are preserved.
+                    try:
+                        from praisonaiagents.bots.agent_reply import extract_presentation
+                        storage_key = self._storage_key(user_id)
+                        text, presentation = extract_presentation(response)
+                        # Always normalise to plain text so chat() never leaks a
+                        # non-str (e.g. AgentReply) past its str contract.
+                        response = text
+                        if presentation is not None:
+                            self._last_presentation[storage_key] = presentation
+                        else:
+                            # Clear any stale UI from an earlier turn so a later
+                            # plain-text turn cannot reuse it via run-control.
+                            self._last_presentation.pop(storage_key, None)
+                    except Exception as e:  # pragma: no cover — defensive
+                        logger.debug("presentation extraction skipped: %s", e)
+
                     # Store response to return after cleanup
                     result = response
                     
@@ -979,6 +1008,12 @@ class BotSessionManager:
         if pending_processed:
             metadata["pending_processed"] = pending_processed
 
+        # Surface any agent-emitted presentation captured during the run(s) so
+        # run-control callers can render interactive UI alongside the text reply.
+        presentation = self.pop_last_presentation(user_id)
+        if presentation is not None:
+            metadata["presentation"] = presentation
+
         return {"response": last_response, "metadata": metadata}
 
     def reap_stale(self, max_age_seconds: int) -> int:
@@ -1076,6 +1111,17 @@ class BotSessionManager:
             except Exception as e:
                 logger.warning("Failed to clear session in store: %s", e)
     
+    def pop_last_presentation(self, user_id: str) -> Optional[Any]:
+        """Return and clear the last agent-emitted presentation for *user_id*.
+
+        Channel adapters call this immediately after ``chat()`` to check whether
+        the agent attached interactive UI to its reply. Returns the portable
+        ``MessagePresentation`` (which the adapter renders via the per-channel
+        renderer) or ``None`` when the reply was plain text. Consuming clears it
+        so a later text-only turn never re-renders stale buttons.
+        """
+        return self._last_presentation.pop(self._storage_key(user_id), None)
+
     def reset(self, user_id: str) -> bool:
         """Clear a user's session history.  Returns True if it existed."""
         storage_key = self._storage_key(user_id)
