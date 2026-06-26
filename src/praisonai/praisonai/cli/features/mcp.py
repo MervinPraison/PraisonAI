@@ -71,6 +71,46 @@ class MCPHandler(FlagHandler):
         except ImportError:
             return False, "praisonaiagents not installed. Install with: pip install praisonaiagents"
     
+    @staticmethod
+    def _validate_mcp_executable(cmd: str, args: List[str]) -> None:
+        """Validate an MCP executable + its args against the security policy.
+
+        Enforces the same rules for every entry point (ad-hoc ``--mcp`` string
+        and structured config servers):
+
+        1. the executable basename must be in :data:`ALLOWED_MCP_COMMANDS`;
+        2. inline code-execution flags (``python -c``, ``node -e``,
+           ``deno eval``, ``bun -e``, ...) are rejected.
+
+        Args:
+            cmd: The executable (may include a path).
+            args: The argument list passed to the executable.
+
+        Raises:
+            ValueError: If the command is not allowed or uses an inline-exec flag.
+        """
+        basename = os.path.basename(cmd)
+        if basename not in ALLOWED_MCP_COMMANDS:
+            raise ValueError(
+                f"Command '{cmd}' is not in the allowed MCP executables list. "
+                f"Allowed: {', '.join(sorted(ALLOWED_MCP_COMMANDS - {c for c in ALLOWED_MCP_COMMANDS if '.' in c}))}"
+            )
+
+        # Reject inline-eval flags that allow arbitrary code execution for
+        # interpreters (python -c, node -e, deno eval, bun -e, ...).
+        base_key = basename.lower()
+        for suffix in (".exe", ".cmd"):
+            if base_key.endswith(suffix):
+                base_key = base_key[: -len(suffix)]
+        forbidden = _INLINE_EXEC_ARGS.get(base_key)
+        if forbidden:
+            for arg in args:
+                if arg in forbidden:
+                    raise ValueError(
+                        f"Argument '{arg}' is not allowed for '{basename}' "
+                        "(inline code execution is blocked in MCP commands)."
+                    )
+
     def parse_mcp_command(self, command: str, env_vars: str = None) -> Tuple[str, List[str], Dict[str, str]]:
         """
         Parse MCP command string into command, args, and environment.
@@ -93,28 +133,8 @@ class MCPHandler(FlagHandler):
         cmd = parts[0]
         args = parts[1:] if len(parts) > 1 else []
         
-        # Validate executable against allowlist
-        basename = os.path.basename(cmd)
-        if basename not in ALLOWED_MCP_COMMANDS:
-            raise ValueError(
-                f"Command '{cmd}' is not in the allowed MCP executables list. "
-                f"Allowed: {', '.join(sorted(ALLOWED_MCP_COMMANDS - {c for c in ALLOWED_MCP_COMMANDS if '.' in c}))}"
-            )
-
-        # Reject inline-eval flags that allow arbitrary code execution for
-        # interpreters (python -c, node -e, deno eval, bun -e, ...).
-        base_key = basename.lower()
-        for suffix in (".exe", ".cmd"):
-            if base_key.endswith(suffix):
-                base_key = base_key[: -len(suffix)]
-        forbidden = _INLINE_EXEC_ARGS.get(base_key)
-        if forbidden:
-            for arg in args:
-                if arg in forbidden:
-                    raise ValueError(
-                        f"Argument '{arg}' is not allowed for '{basename}' "
-                        "(inline code execution is blocked in MCP commands)."
-                    )
+        # Validate executable against allowlist + reject inline-eval flags.
+        self._validate_mcp_executable(cmd, args)
         
         # Parse environment variables
         env = {}
@@ -215,7 +235,18 @@ class MCPHandler(FlagHandler):
                 kwargs: Dict[str, Any] = {"timeout": timeout}
                 headers = server.get("headers")
                 if isinstance(headers, dict) and headers:
-                    kwargs["headers"] = headers
+                    # Legacy SSE URLs (".../sse") use the SDK's SSEMCPClient,
+                    # which does not forward custom headers. Warn so an
+                    # authenticated SSE server doesn't silently connect without
+                    # its authorization header.
+                    if isinstance(url, str) and url.rstrip("/").endswith("/sse"):
+                        self.print_status(
+                            "Custom 'headers' are not supported for legacy SSE "
+                            f"MCP URLs and will be ignored: {url}",
+                            "warning",
+                        )
+                    else:
+                        kwargs["headers"] = headers
                 mcp = MCP(url, **kwargs)
                 self.print_status(f"🔌 MCP server connected: {url}", "success")
                 return mcp
@@ -238,12 +269,13 @@ class MCPHandler(FlagHandler):
                 self.print_status("Invalid MCP command", "error")
                 return None
 
-            basename = os.path.basename(cmd)
-            if basename not in ALLOWED_MCP_COMMANDS:
-                self.print_status(
-                    f"Command '{cmd}' is not in the allowed MCP executables list.",
-                    "error",
-                )
+            # Mirror parse_mcp_command: enforce the allowlist AND block inline
+            # code-execution flags (python -c, node -e, deno eval, bun -e, ...)
+            # so config-declared local servers can't bypass the run-path guard.
+            try:
+                self._validate_mcp_executable(cmd, args)
+            except ValueError as e:
+                self.print_status(str(e), "error")
                 return None
 
             env = server.get("env") or {}

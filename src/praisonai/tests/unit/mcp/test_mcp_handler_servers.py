@@ -85,6 +85,38 @@ class TestCreateMCPFromServer:
         assert result is None
         mock_mcp.assert_not_called()
 
+    def test_inline_code_execution_rejected(self):
+        """An allowed interpreter with an inline-eval flag must be rejected,
+        matching the ad-hoc ``--mcp`` string path (no config bypass)."""
+        handler = self._patched_handler()
+        for server in (
+            {"command": ["python", "-c", "print(1)"]},
+            {"command": "python -c 'print(1)'"},
+            {"command": ["node", "-e", "1"]},
+            {"command": ["deno", "eval", "1"]},
+        ):
+            with patch("praisonaiagents.MCP") as mock_mcp:
+                result = handler.create_mcp_from_server(server)
+            assert result is None
+            mock_mcp.assert_not_called()
+
+    def test_sse_url_headers_dropped_with_warning(self):
+        """Legacy SSE URLs cannot forward headers (SDK limitation), so headers
+        must be omitted rather than silently passed to a transport that ignores
+        them."""
+        handler = self._patched_handler()
+        with patch("praisonaiagents.MCP") as mock_mcp:
+            mock_mcp.return_value = object()
+            result = handler.create_mcp_from_server(
+                {
+                    "url": "http://localhost:8080/sse",
+                    "headers": {"Authorization": "Bearer xyz"},
+                }
+            )
+        assert result is not None
+        _, kwargs = mock_mcp.call_args
+        assert "headers" not in kwargs
+
     def test_timeout_milliseconds_converted_to_seconds(self):
         handler = self._patched_handler()
         with patch("praisonaiagents.MCP") as mock_mcp:

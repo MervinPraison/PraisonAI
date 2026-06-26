@@ -4649,20 +4649,15 @@ Do NOT add any explanations or formatting."""
                 mcp_command = getattr(self.args, 'mcp', None)
                 mcp_servers = getattr(self.args, 'mcp_servers', None) or []
                 if mcp_command or mcp_servers:
-                    from .features.mcp import MCPHandler
-                    mcp_handler = MCPHandler(verbose=getattr(self.args, 'verbose', False))
-                    aggregated_mcp_tools = []
-                    if mcp_command:
-                        mcp_tools = mcp_handler.create_mcp_tools(
-                            mcp_command,
-                            getattr(self.args, 'mcp_env', None)
-                        )
-                        if mcp_tools:
-                            aggregated_mcp_tools.extend(list(mcp_tools))
-                    for server in mcp_servers:
-                        mcp_tools = mcp_handler.create_mcp_from_server(server)
-                        if mcp_tools:
-                            aggregated_mcp_tools.extend(list(mcp_tools))
+                    # Single source of truth for MCP tool aggregation, shared
+                    # with the actions-mode run path (commands/run.py).
+                    from .commands.run import _build_mcp_tools
+                    aggregated_mcp_tools = _build_mcp_tools(
+                        mcp_command,
+                        getattr(self.args, 'mcp_env', None),
+                        mcp_servers,
+                        verbose=getattr(self.args, 'verbose', False),
+                    )
                     if aggregated_mcp_tools:
                         existing_tools = agent_config.get('tools', [])
                         if isinstance(existing_tools, list):
