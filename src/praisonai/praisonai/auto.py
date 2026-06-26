@@ -47,8 +47,6 @@ def _yaml_safe_load(stream):
     return yaml.safe_load(stream)
 
 
-
-
 # OpenAI client creation removed - create per-call instead of global cache
 
 
@@ -440,15 +438,27 @@ class BaseAutoGenerator:
         
         # Try LiteLLM first (preferred - supports 100+ providers)
         if is_available("litellm"):
-            litellm = _get_litellm()
-            response = litellm.completion(
-                model=model_name,
-                messages=messages,
-                response_format=response_model,
-                **kwargs
-            )
-            content = response.choices[0].message.content
-            return response_model.model_validate_json(content)
+            try:
+                litellm = _get_litellm()
+                response = litellm.completion(
+                    model=model_name,
+                    messages=messages,
+                    response_format=response_model,
+                    **kwargs
+                )
+                content = response.choices[0].message.content
+                return response_model.model_validate_json(content)
+            except Exception as e:
+                # Graceful execution-level fallback: if LiteLLM fails at runtime
+                # (auth error, network timeout, unsupported model, or a provider
+                # that ignores response_format and returns no content), fall
+                # through to the OpenAI SDK path below instead of propagating.
+                if not is_available("openai"):
+                    raise
+                logger.warning(
+                    "LiteLLM structured completion failed (%s); "
+                    "falling back to OpenAI SDK.", e
+                )
         
         # Fallback to OpenAI SDK (uses beta.chat.completions.parse)
         if is_available("openai"):
@@ -490,15 +500,24 @@ class BaseAutoGenerator:
         
         # Try LiteLLM async first (preferred - supports 100+ providers)
         if is_available("litellm"):
-            litellm = _get_litellm()
-            response = await litellm.acompletion(
-                model=model_name,
-                messages=messages,
-                response_format=response_model,
-                **kwargs
-            )
-            content = response.choices[0].message.content
-            return response_model.model_validate_json(content)
+            try:
+                litellm = _get_litellm()
+                response = await litellm.acompletion(
+                    model=model_name,
+                    messages=messages,
+                    response_format=response_model,
+                    **kwargs
+                )
+                content = response.choices[0].message.content
+                return response_model.model_validate_json(content)
+            except Exception as e:
+                # Graceful execution-level fallback (see _structured_completion).
+                if not is_available("openai"):
+                    raise
+                logger.warning(
+                    "LiteLLM async structured completion failed (%s); "
+                    "falling back to OpenAI SDK.", e
+                )
         
         # Fallback to OpenAI AsyncSDK (uses beta.chat.completions.parse)
         if is_available("openai"):
@@ -618,14 +637,15 @@ class BaseAutoGenerator:
 
 def _get_team_models():
     """Get team structure models, creating them on first use."""
+
     def _create_team_models():
         from pydantic import BaseModel
-        
+
         class TaskDetails(BaseModel):
             """Details for a single task."""
             description: str
             expected_output: str
-        
+
         class RoleDetails(BaseModel):
             """Details for a single role/agent."""
             role: str
@@ -633,11 +653,11 @@ def _get_team_models():
             backstory: str
             tasks: Dict[str, TaskDetails]
             tools: List[str]
-        
+
         class TeamStructure(BaseModel):
             """Structure for multi-agent team."""
             roles: Dict[str, RoleDetails]
-        
+
         class SingleAgentStructure(BaseModel):
             """Structure for single-agent generation (Anthropic's 'start simple' principle)."""
             name: str
@@ -648,29 +668,30 @@ def _get_team_models():
             tools: List[str] = []
             task_description: str
             expected_output: str
-        
+
         class PatternRecommendation(BaseModel):
             """LLM-based pattern recommendation with reasoning."""
             pattern: str  # sequential, parallel, routing, orchestrator-workers, evaluator-optimizer
             reasoning: str  # Why this pattern was chosen
             confidence: float  # 0.0 to 1.0 confidence score
-        
+
         class ValidationGate(BaseModel):
             """Validation gate for prompt chaining workflows."""
             criteria: str  # What to validate
             pass_action: str  # Action if validation passes (e.g., "continue", "next_step")
             fail_action: str  # Action if validation fails (e.g., "retry", "escalate", "abort")
-        
+
         return {
-            'TaskDetails': TaskDetails,
-            'RoleDetails': RoleDetails,
-            'TeamStructure': TeamStructure,
-            'SingleAgentStructure': SingleAgentStructure,
-            'PatternRecommendation': PatternRecommendation,
-            'ValidationGate': ValidationGate
+            "TaskDetails": TaskDetails,
+            "RoleDetails": RoleDetails,
+            "TeamStructure": TeamStructure,
+            "SingleAgentStructure": SingleAgentStructure,
+            "PatternRecommendation": PatternRecommendation,
+            "ValidationGate": ValidationGate,
         }
-    
-    return lazy_get('team_models', _create_team_models)
+
+    return lazy_get("team_models", _create_team_models)
+
 
 class AutoGenerator(BaseAutoGenerator):
     """
@@ -1033,23 +1054,23 @@ def _get_workflow_models():
             return _models_cache['workflow_models']
         
         from pydantic import BaseModel
-        
+
         class WorkflowStepDetails(BaseModel):
             """Details for a workflow step."""
             agent: str
             action: str
             expected_output: Optional[str] = None
-        
+
         class WorkflowRouteDetails(BaseModel):
             """Details for a route step."""
             name: str
             route: Dict[str, List[str]]
-        
+
         class WorkflowParallelDetails(BaseModel):
             """Details for a parallel step."""
             name: str
             parallel: List[WorkflowStepDetails]
-        
+
         class WorkflowAgentDetails(BaseModel):
             """Details for a workflow agent."""
             name: str
@@ -1057,7 +1078,7 @@ def _get_workflow_models():
             goal: str
             instructions: str
             tools: Optional[List[str]] = None
-        
+
         class WorkflowStructure(BaseModel):
             """Structure for auto-generated workflow."""
             name: str
@@ -1065,7 +1086,7 @@ def _get_workflow_models():
             agents: Dict[str, WorkflowAgentDetails]
             steps: List[Dict]  # Can be agent steps, route, parallel, etc.
             gates: Optional[List[Any]] = None  # Optional validation gates, ValidationGate type resolved at runtime
-        
+
         _models_cache['workflow_models'] = {
             'WorkflowStepDetails': WorkflowStepDetails,
             'WorkflowRouteDetails': WorkflowRouteDetails,
@@ -1074,6 +1095,35 @@ def _get_workflow_models():
             'WorkflowStructure': WorkflowStructure
         }
         return _models_cache['workflow_models']
+
+
+# Names exposed lazily via module __getattr__ (PEP 562) so that
+# `from praisonai.auto import PatternRecommendation` keeps working without
+# importing pydantic at module load time. Each maps to its lazy factory.
+_LAZY_MODEL_EXPORTS = {
+    "PatternRecommendation": ("_get_team_models", "PatternRecommendation"),
+    "SingleAgentStructure": ("_get_team_models", "SingleAgentStructure"),
+    "ValidationGate": ("_get_team_models", "ValidationGate"),
+    "TeamStructure": ("_get_team_models", "TeamStructure"),
+    "WorkflowStructure": ("_get_workflow_models", "WorkflowStructure"),
+    "WorkflowStepDetails": ("_get_workflow_models", "WorkflowStepDetails"),
+    "WorkflowRouteDetails": ("_get_workflow_models", "WorkflowRouteDetails"),
+    "WorkflowParallelDetails": ("_get_workflow_models", "WorkflowParallelDetails"),
+    "WorkflowAgentDetails": ("_get_workflow_models", "WorkflowAgentDetails"),
+}
+
+
+def __getattr__(name: str):
+    """Lazily resolve structured-output Pydantic models (PEP 562).
+
+    Preserves the module's FULL LAZY LOADING contract: pydantic is only
+    imported when one of these models is first accessed.
+    """
+    export = _LAZY_MODEL_EXPORTS.get(name)
+    if export is not None:
+        factory_name, key = export
+        return globals()[factory_name]()[key]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 class WorkflowAutoGenerator(BaseAutoGenerator):
