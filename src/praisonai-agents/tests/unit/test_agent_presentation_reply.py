@@ -78,8 +78,38 @@ def test_adapt_reply_callback_respects_length_cap():
     ])
     adapted = adapt_presentation(p, PresentationLimits.telegram())
     val = adapted.blocks[0].buttons[0].action.value
-    assert len(val) <= 64
+    # Cap is a byte limit, and the truncated value stays routable (a prefix of
+    # the original) rather than an opaque digest.
+    assert len(val.encode("utf-8")) <= 64
     assert val.startswith("reply:")
+    assert val[len("reply:"):] == "x" * (len(val) - len("reply:"))
+
+
+def test_adapt_reply_callback_byte_cap_with_non_ascii():
+    # Non-ASCII values can stay under 64 *chars* yet exceed 64 *bytes*; the
+    # cap must be enforced in UTF-8 bytes and never split a codepoint.
+    value = "é" * 40  # 40 chars, 80 bytes
+    p = MessagePresentation([
+        PresentationBlock.make_buttons([
+            PresentationButton(label="L", action=PresentationAction.reply(value)),
+        ])
+    ])
+    adapted = adapt_presentation(p, PresentationLimits.telegram())
+    val = adapted.blocks[0].buttons[0].action.value
+    assert len(val.encode("utf-8")) <= 64
+    # Decodes cleanly (no split multi-byte sequence) and stays a value prefix.
+    assert val.startswith("reply:")
+    assert "é".startswith(val[len("reply:"):len("reply:") + 1]) or val[len("reply:"):] == ""
+
+
+def test_encode_empty_string_reply_preserved():
+    # PresentationAction.reply("") is a valid choice; the encoder must keep the
+    # reserved reply: prefix instead of falling back to the caller namespace.
+    enc = encode_action("ns", PresentationAction.reply(""))
+    assert enc == "reply:"
+    namespace, payload = decode_callback(enc)
+    assert namespace == REPLY_NAMESPACE
+    assert payload["value"] == ""
 
 
 def test_extract_presentation_plain_str():

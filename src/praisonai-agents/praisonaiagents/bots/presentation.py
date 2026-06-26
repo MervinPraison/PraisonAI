@@ -560,21 +560,38 @@ def _adapt_button(button: PresentationButton, limits: PresentationLimits) -> Pre
 REPLY_CALLBACK_PREFIX = "reply:"
 
 
+def _truncate_utf8(value: str, max_bytes: int) -> str:
+    """Truncate *value* so its UTF-8 encoding fits within *max_bytes*.
+
+    Trims on a character boundary (never splitting a multi-byte codepoint) so
+    the result stays a valid, decodable string.
+    """
+    if max_bytes <= 0:
+        return ""
+    encoded = value.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return value
+    truncated = encoded[:max_bytes]
+    # Drop any trailing partial multi-byte sequence.
+    return truncated.decode("utf-8", "ignore")
+
+
 def _encode_reply_callback(value: str) -> str:
     """Build a channel-safe callback payload for a ``reply`` action.
 
     Produces ``reply:<value>`` so the inbound interactive registry can route
-    the chosen value back into the next agent turn. When the raw form exceeds
-    ``_MAX_CALLBACK_LEN`` (e.g. Telegram's 64-byte cap), the value is replaced
-    with a short, collision-resistant hash; channels then resolve the hash back
-    to the original value via the presentation's reply map (the wrapper keeps
-    that mapping when it renders an agent-authored presentation).
+    the chosen value back into the next agent turn. The size check is measured
+    in UTF-8 bytes because channel callback caps (e.g. Telegram's 64-byte cap)
+    are byte limits, not character limits. When the raw form exceeds
+    ``_MAX_CALLBACK_LEN`` the value is truncated to fit (on a character
+    boundary) so the routed value stays human/agent-readable rather than an
+    opaque digest the next turn cannot interpret.
     """
     raw = f"{REPLY_CALLBACK_PREFIX}{value}"
-    if len(raw) <= _MAX_CALLBACK_LEN:
+    if len(raw.encode("utf-8")) <= _MAX_CALLBACK_LEN:
         return raw
-    digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
-    return f"{REPLY_CALLBACK_PREFIX}{digest}"
+    budget = _MAX_CALLBACK_LEN - len(REPLY_CALLBACK_PREFIX.encode("utf-8"))
+    return f"{REPLY_CALLBACK_PREFIX}{_truncate_utf8(value, budget)}"
 
 
 def _encode_select_callback(action_id: str, value: str) -> str:
@@ -587,7 +604,7 @@ def _encode_select_callback(action_id: str, value: str) -> str:
     collision-resistant hash so distinct options stay distinct after truncation.
     """
     raw = f"select:{action_id}:{value}"
-    if len(raw) <= _MAX_CALLBACK_LEN:
+    if len(raw.encode("utf-8")) <= _MAX_CALLBACK_LEN:
         return raw
     digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
     prefix = f"select:{action_id}:"

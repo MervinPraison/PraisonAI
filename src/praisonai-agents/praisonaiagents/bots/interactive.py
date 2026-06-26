@@ -104,6 +104,8 @@ def encode_action(namespace: str, action: "PresentationAction") -> str:
     if action.type == ActionType.REPLY:
         # Reply actions route the chosen value back into the next agent turn.
         # The ``reply:`` namespace is reserved for this; the value is the input.
+        # Only ``None`` falls back to the caller namespace — an explicit empty
+        # string is a valid reply value (``make_reply_handler`` accepts it).
         if action.value is not None:
             return f"reply:{action.value}"
         return namespace

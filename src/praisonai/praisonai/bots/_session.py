@@ -788,10 +788,17 @@ class BotSessionManager:
                     # before so the str contract and text fallback are preserved.
                     try:
                         from praisonaiagents.bots.agent_reply import extract_presentation
+                        storage_key = self._storage_key(user_id)
                         text, presentation = extract_presentation(response)
+                        # Always normalise to plain text so chat() never leaks a
+                        # non-str (e.g. AgentReply) past its str contract.
+                        response = text
                         if presentation is not None:
-                            self._last_presentation[self._storage_key(user_id)] = presentation
-                            response = text
+                            self._last_presentation[storage_key] = presentation
+                        else:
+                            # Clear any stale UI from an earlier turn so a later
+                            # plain-text turn cannot reuse it via run-control.
+                            self._last_presentation.pop(storage_key, None)
                     except Exception as e:  # pragma: no cover — defensive
                         logger.debug("presentation extraction skipped: %s", e)
 
