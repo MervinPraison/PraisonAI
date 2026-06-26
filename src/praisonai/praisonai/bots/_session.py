@@ -476,6 +476,7 @@ class BotSessionManager:
         account: str = "",
         stream_callback: Optional[Any] = None,
         tool_policy: Optional[Any] = None,
+        correlation_id: str = "",
     ) -> str:
         """Run ``agent.chat(prompt)`` with *user_id*-scoped history.
 
@@ -519,6 +520,24 @@ class BotSessionManager:
         if tool_policy is None:
             tool_policy = staged_policy
 
+        # Mint/adopt an end-to-end correlation id and bind it for this turn so
+        # ingress, the agent run, and outbound delivery share one stable id in
+        # structured logs. Adopts an explicit correlation_id, else the platform
+        # message_id, else a fresh id. No-op import failure is non-fatal.
+        cid = None
+        cid_token = None
+        try:
+            from ._correlation import correlation_id_from, set_correlation_id
+            cid = correlation_id_from(
+                {"correlation_id": correlation_id, "message_id": message_id}
+            )
+            cid_token = set_correlation_id(cid)
+            logger.debug(
+                "bot turn start", extra={"correlation_id": cid, "platform": self._platform}
+            )
+        except Exception:  # pragma: no cover — defensive
+            cid = correlation_id or message_id or None
+
         # Handle ingress journaling for durable message processing
         journal_key = None
         if self._ingress_journal is not None and message_id:
@@ -528,6 +547,7 @@ class BotSessionManager:
                 "chat_id": chat_id,
                 "thread_id": thread_id,
                 "user_name": user_name,
+                "correlation_id": cid,
             }
             journal_key = self._ingress_journal.receive(
                 platform=self._platform or "unknown",
@@ -799,6 +819,14 @@ class BotSessionManager:
                     _clear_ctx(ctx_token)
                 except Exception as e:
                     logger.debug("Failed to clear task-local session context for ctx_token=%r: %s", ctx_token, e)
+            # Restore the previous correlation id so the contextvar never leaks
+            # the id of this turn into an unrelated subsequent call.
+            if cid_token is not None:
+                try:
+                    from ._correlation import reset_correlation_id
+                    reset_correlation_id(cid_token)
+                except Exception as e:  # pragma: no cover — defensive
+                    logger.debug("Failed to reset correlation id: %s", e)
 
     async def chat_with_run_control(
         self,

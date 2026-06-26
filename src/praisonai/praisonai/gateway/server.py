@@ -661,6 +661,14 @@ class WebSocketGateway:
         self._channel_supervisor = ChannelSupervisor()
         self._health_config = None  # Will be set from config if provided
 
+        # Message-flow metrics surface (served at GET /metrics). Lazily built so
+        # the gateway carries no metrics overhead when the module is unused.
+        try:
+            from ..bots._metrics import GatewayMetrics
+            self._metrics = GatewayMetrics()
+        except Exception:  # pragma: no cover — defensive, keep gateway usable
+            self._metrics = None
+
         # Inbound trigger hooks (Issue #2281): declarative POST /hooks/<path>
         # surfaces that start an agent run from an external event. Routes are
         # mounted dynamically when the server starts.
@@ -794,6 +802,23 @@ class WebSocketGateway:
             ok = await self._event_loop_responsive()
             return JSONResponse(
                 {"alive": ok}, status_code=200 if ok else 503,
+            )
+
+        async def metrics(request):
+            """GET /metrics — message-flow metrics in Prometheus text format.
+
+            Exposes inbound/dispatched/duplicate/outbound counters plus live
+            gauges (outbox depth, approval pending, active sessions) so a live
+            bot fleet can be monitored without grepping logs. Returns 404 when
+            the metrics surface is unavailable.
+            """
+            self._refresh_metric_gauges()
+            if self._metrics is None:
+                return JSONResponse({"error": "metrics unavailable"}, status_code=404)
+            from starlette.responses import PlainTextResponse
+            return PlainTextResponse(
+                self._metrics.render_prometheus(),
+                media_type="text/plain; version=0.0.4; charset=utf-8",
             )
         
         def _check_auth(request) -> Optional[JSONResponse]:
@@ -1419,6 +1444,7 @@ class WebSocketGateway:
             Route("/health", health, methods=["GET"]),
             Route("/ready", ready, methods=["GET"]),
             Route("/live", live, methods=["GET"]),
+            Route("/metrics", metrics, methods=["GET"]),
             Route("/info", info, methods=["GET"]),
             Route("/api/approval/pending", approval_pending, methods=["GET"]),
             Route("/api/approval/resolve", approval_resolve, methods=["POST"]),
@@ -2808,6 +2834,58 @@ class WebSocketGateway:
         for client_id in slow:
             await self._evict_slow_consumer(client_id)
     
+    # ── Message-flow metrics ──────────────────────────────────────────
+    def record_metric(
+        self,
+        name: str,
+        amount: float = 1.0,
+        labels: Optional[Dict[str, str]] = None,
+    ) -> None:
+        """Increment a message-flow counter (no-op when metrics unavailable).
+
+        Public hook so bot adapters / supervision can emit flow counters such
+        as ``messages_inbound_total`` or ``outbound_failed_total`` that surface
+        on ``GET /metrics``. Safe to call from any thread.
+        """
+        if self._metrics is None:
+            return
+        try:
+            self._metrics.inc(name, amount, labels=labels)
+        except Exception as e:  # pragma: no cover — metrics must never break flow
+            logger.debug("record_metric failed for %s: %s", name, e)
+
+    def _refresh_metric_gauges(self) -> None:
+        """Sample live gauges (sessions, supervision error/restart counts).
+
+        Called lazily on each ``/metrics`` scrape so derived gauges/counters
+        reflect current state without a polling loop. Best-effort: any failure
+        is swallowed so a scrape never errors the gateway.
+        """
+        if self._metrics is None:
+            return
+        try:
+            self._metrics.set_gauge("active_sessions", float(len(self._sessions)))
+        except Exception as e:  # pragma: no cover — defensive
+            logger.debug("metric gauge refresh failed: %s", e)
+        # Mirror supervision counters so per-channel error/restart rates are
+        # visible even though supervision tracks them on its own status objects.
+        try:
+            for name, status in self._channel_supervisor.get_all_status().items():
+                recoveries = getattr(status, "total_recoveries", 0) or 0
+                self._metrics.set_gauge(
+                    "channel_recoveries", float(recoveries),
+                    labels={"channel": name},
+                )
+        except Exception as e:  # pragma: no cover — defensive
+            logger.debug("supervision metric mirror failed: %s", e)
+
+    def metrics_snapshot(self) -> Dict[str, Any]:
+        """Return a plain-dict snapshot of current metrics (for JSON/tests)."""
+        if self._metrics is None:
+            return {}
+        self._refresh_metric_gauges()
+        return self._metrics.snapshot()
+
     def health(self) -> Dict[str, Any]:
         """Get gateway health status including per-channel bot status and supervision state."""
         uptime = time.time() - self._started_at if self._started_at else 0
