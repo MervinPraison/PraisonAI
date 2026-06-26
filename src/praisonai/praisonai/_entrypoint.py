@@ -10,16 +10,8 @@ from typing import Any
 
 def _build_config_list() -> list[dict[str, Any]]:
     """Reuse the same env/keyfile resolution the CLI already performs."""
-    # Import LLM endpoint resolution from the same path the CLI uses
-    from praisonai.llm.env import resolve_llm_endpoint
-    ep = resolve_llm_endpoint()
-    
-    return [{
-        'model': ep.model,
-        'base_url': ep.base_url,
-        'api_key': ep.api_key,
-        'api_type': 'openai'        # AutoGen expects this field
-    }]
+    from praisonai.llm.config import build_config_list
+    return build_config_list()
 
 
 def run(agent_file: str,

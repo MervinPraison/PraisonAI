@@ -252,17 +252,8 @@ class PraisonAI:
         self._interactive_mode = False  # Flag for interactive TUI mode
         # Create config_list with AutoGen compatibility
         # Resolve LLM endpoint configuration from environment variables
-        from praisonai.llm.env import resolve_llm_endpoint
-        ep = resolve_llm_endpoint()
-        
-        self.config_list = [
-            {
-                'model': ep.model,
-                'base_url': ep.base_url,
-                'api_key': ep.api_key,
-                'api_type': 'openai'        # AutoGen expects this field
-            }
-        ]
+        from praisonai.llm.config import build_config_list
+        self.config_list = build_config_list()
         self.agent_file = agent_file
         self.framework = framework
         

@@ -384,16 +384,8 @@ class BaseAutoGenerator:
             config_list: Optional LLM configuration list
         """
         # Resolve LLM endpoint configuration from environment variables
-        from praisonai.llm.env import resolve_llm_endpoint
-        ep = resolve_llm_endpoint()
-        
-        self.config_list = config_list or [
-            {
-                'model': ep.model,
-                'base_url': ep.base_url,
-                'api_key': ep.api_key
-            }
-        ]
+        from praisonai.llm.config import build_config_list
+        self.config_list = config_list or build_config_list(include_api_type=False)
         self._openai_client = None  # lazy, per-instance
         self._async_openai_client = None  # lazy, per-instance async client
         self._client_lock = threading.Lock()
