@@ -6902,14 +6902,6 @@ Provide a concise summary (max 200 words):"""
         execution_queue = session_state['execution_queue']
         execution_queue.put({'prompt': prompt})
     
-    def _process_interactive_prompt_async(self, prompt, tools_list, console, session_state=None):
-        """
-        DEPRECATED: This method is kept for backward compatibility.
-        Use _submit_prompt_to_worker instead for true non-blocking behavior.
-        """
-        # Just submit to worker queue - non-blocking
-        self._submit_prompt_to_worker(prompt, session_state)
-    
     def _process_interactive_prompt(self, prompt, tools_list, console, show_profiling=False, session_state=None):
         """Process a prompt in interactive mode with streaming."""
         from rich.live import Live
