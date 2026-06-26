@@ -613,6 +613,8 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Trigger CodeRabbit and Qodo reviews
         uses: actions/github-script@v7

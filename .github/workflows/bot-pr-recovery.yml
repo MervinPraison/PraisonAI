@@ -21,9 +21,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Find and kick stalled bot PRs
         uses: actions/github-script@v7
+        env:
+          PR_NUMBER_INPUT: ${{ github.event.inputs.pr_number }}
         with:
           github-token: ${{ secrets.GH_TOKEN }}
           script: |
@@ -31,7 +35,7 @@ jobs:
             const chain = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/bot-pr-review-chain.js'));
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const manual = '${{ github.event.inputs.pr_number }}'.trim();
+            const manual = (process.env.PR_NUMBER_INPUT || '').trim();
             const prNumber = manual ? parseInt(manual, 10) : null;
             if (manual && Number.isNaN(prNumber)) {
               throw new Error(`Invalid pr_number: ${manual}`);
