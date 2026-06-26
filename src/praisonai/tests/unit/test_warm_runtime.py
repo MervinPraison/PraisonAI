@@ -120,6 +120,98 @@ def test_run_evicts_agent_on_failure():
     assert _FlakyAgent.created == 2
 
 
+def test_run_clears_chat_history_between_successful_runs():
+    """Successful runs must not leak prior conversation into the next /run call."""
+    from praisonai.runtime.server import WarmRuntime
+
+    class _StatefulAgent:
+        def __init__(self, *args, **kwargs):
+            self.chat_history = []
+
+        def start(self, prompt):
+            self.chat_history.append({"role": "user", "content": prompt})
+            self.chat_history.append({"role": "assistant", "content": f"echo: {prompt}"})
+            return f"echo: {prompt}"
+
+        def _replace_chat_history(self, history):
+            self.chat_history = list(history)
+
+    runtime = WarmRuntime()
+
+    def _fake_get_agent(key):
+        with runtime._lock:
+            agent = runtime._agents.get(key)
+            if agent is None:
+                agent = _StatefulAgent()
+                runtime._agents[key] = agent
+            return agent
+
+    runtime._get_agent = _fake_get_agent  # type: ignore[assignment]
+
+    assert runtime.run("first") == "echo: first"
+    agent = runtime._agents["__default__"]
+    assert len(agent.chat_history) == 0
+
+    assert runtime.run("second") == "echo: second"
+    assert len(agent.chat_history) == 0
+
+
+def test_run_skips_warm_runtime_when_auto_save_enabled(monkeypatch):
+    """Default runs auto-save sessions; the warm path must not bypass that."""
+    import importlib
+
+    attach_calls = []
+
+    def _fake_attach(*args, **kwargs):
+        attach_calls.append(True)
+        return False
+
+    monkeypatch.setattr("praisonai.cli.commands.run._try_attach_runtime", _fake_attach)
+
+    mock_praison = type("P", (), {"config_list": [{}], "handle_direct_prompt": lambda self, p: "ok"})()
+    main_mod = importlib.import_module("praisonai.cli.main")
+    monkeypatch.setattr(main_mod, "PraisonAI", lambda: mock_praison)
+
+    mock_output = type("O", (), {
+        "is_json_mode": False,
+        "emit_result": lambda *a, **k: None,
+    })()
+    monkeypatch.setattr("praisonai.cli.commands.run.get_output_controller", lambda: mock_output)
+
+    from praisonai.cli.commands.run import _run_prompt
+
+    _run_prompt("hello", no_save=False)
+    assert attach_calls == []
+
+
+def test_run_attaches_warm_runtime_when_no_save(monkeypatch):
+    """With --no-save, the warm path may attach when no other flags block it."""
+    import importlib
+
+    attach_calls = []
+
+    def _fake_attach(*args, **kwargs):
+        attach_calls.append(True)
+        return False
+
+    monkeypatch.setattr("praisonai.cli.commands.run._try_attach_runtime", _fake_attach)
+
+    mock_praison = type("P", (), {"config_list": [{}], "handle_direct_prompt": lambda self, p: "ok"})()
+    main_mod = importlib.import_module("praisonai.cli.main")
+    monkeypatch.setattr(main_mod, "PraisonAI", lambda: mock_praison)
+
+    mock_output = type("O", (), {
+        "is_json_mode": False,
+        "emit_result": lambda *a, **k: None,
+    })()
+    monkeypatch.setattr("praisonai.cli.commands.run.get_output_controller", lambda: mock_output)
+
+    from praisonai.cli.commands.run import _run_prompt
+
+    _run_prompt("hello", no_save=True)
+    assert len(attach_calls) == 1
+
+
 def test_server_roundtrip(monkeypatch):
     """Boot the real stdlib server with a stubbed agent and round-trip a prompt."""
     from praisonai.runtime import server as server_mod
