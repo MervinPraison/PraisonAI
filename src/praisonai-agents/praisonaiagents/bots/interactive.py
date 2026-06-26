@@ -45,6 +45,12 @@ class InteractiveContext:
 
 InteractiveHandler = Callable[[InteractiveContext], Awaitable[Optional[str]]]
 
+# An authorizer decides whether the resolving actor (context.user_id) is
+# permitted to act on a given interactive callback. Returning False rejects
+# the callback before the handler runs, so unauthorized clicks never resolve
+# privileged actions (e.g. tool approvals).
+InteractiveAuthorizer = Callable[[InteractiveContext], bool]
+
 
 def encode_action(namespace: str, action: "PresentationAction") -> str:
     """Encode an action with namespace for callback data.
@@ -111,22 +117,35 @@ class InteractiveRegistry:
     def __init__(self):
         """Initialize the registry."""
         self._handlers: Dict[str, InteractiveHandler] = {}
+        self._authorizers: Dict[str, "InteractiveAuthorizer"] = {}
         self._fallback_handler: Optional[InteractiveHandler] = None
     
     def register(
         self,
         namespace: str,
-        handler: InteractiveHandler
+        handler: InteractiveHandler,
+        authorize: Optional["InteractiveAuthorizer"] = None,
     ) -> None:
         """Register a handler for a namespace.
         
         Args:
             namespace: The namespace to handle (e.g., "approval", "menu")
             handler: Async function to handle callbacks in this namespace
+            authorize: Optional callable that receives the InteractiveContext
+                and returns True if the resolving actor (``context.user_id``)
+                is permitted to act on this callback. When provided, an
+                unauthorized click is rejected before the handler runs, so it
+                never resolves the underlying action. When omitted, behaviour
+                is unchanged (any clicker is allowed) for backward
+                compatibility.
         """
         if namespace in self._handlers:
             logger.warning(f"Overwriting existing handler for namespace: {namespace}")
         self._handlers[namespace] = handler
+        if authorize is not None:
+            self._authorizers[namespace] = authorize
+        else:
+            self._authorizers.pop(namespace, None)
         logger.debug(f"Registered handler for namespace: {namespace}")
     
     def unregister(self, namespace: str) -> None:
@@ -137,6 +156,7 @@ class InteractiveRegistry:
         """
         if namespace in self._handlers:
             del self._handlers[namespace]
+            self._authorizers.pop(namespace, None)
             logger.debug(f"Unregistered handler for namespace: {namespace}")
     
     def set_fallback(self, handler: InteractiveHandler) -> None:
@@ -162,6 +182,28 @@ class InteractiveRegistry:
         handler = self._handlers.get(namespace)
         
         if handler:
+            # Enforce actor authorization before resolving the action.
+            # This is the security boundary: an unauthorized clicker must
+            # never resolve a privileged callback (e.g. a tool approval).
+            authorizer = self._authorizers.get(namespace)
+            if authorizer is not None:
+                try:
+                    allowed = authorizer(context)
+                except Exception as e:
+                    logger.error(
+                        f"Authorizer for namespace '{namespace}' raised; "
+                        f"denying callback: {e}"
+                    )
+                    allowed = False
+                if not allowed:
+                    logger.warning(
+                        f"Unauthorized interactive callback: actor "
+                        f"'{context.user_id}' rejected for namespace "
+                        f"'{namespace}'"
+                    )
+                    context.platform_data["authorized"] = False
+                    return False
+
             try:
                 # Add decoded payload to context
                 context.platform_data["decoded_namespace"] = namespace
