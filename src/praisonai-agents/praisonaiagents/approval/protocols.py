@@ -144,7 +144,7 @@ class ApprovalStoreProtocol(Protocol):
         class MyStore:
             async def persist(self, approval_id, request, *, expires_at):
                 ...
-            async def load_pending(self):
+            async def list_pending(self):
                 return []
             async def resolve(self, approval_id, decision):
                 ...
@@ -160,10 +160,16 @@ class ApprovalStoreProtocol(Protocol):
         """Durably store a pending approval keyed by ``approval_id``."""
         ...
 
-    async def load_pending(self) -> List[Tuple[str, ApprovalRequest]]:
+    async def list_pending(self) -> List[Tuple[str, ApprovalRequest]]:
         """Return outstanding (un-resolved, un-expired) pending approvals."""
         ...
 
     async def resolve(self, approval_id: str, decision: ApprovalDecision) -> None:
-        """Record a final decision for ``approval_id`` as an audit trail."""
+        """Record a final decision for ``approval_id`` as an audit trail.
+
+        ``decision.metadata['terminal']`` may carry an explicit terminal state
+        (``"approved"``, ``"denied"`` or ``"expired"``) so the timeout path can
+        be recorded distinctly from a user denial.  When absent the state is
+        derived from ``decision.approved``.
+        """
         ...

@@ -108,7 +108,7 @@ class ApprovalStore:
         await store.persist(req.approval_id, req, expires_at=time.time() + 60)
 
         # On startup:
-        for approval_id, request in await store.load_pending():
+        for approval_id, request in await store.list_pending():
             rebind_channel_callback(approval_id, request)
     """
 
@@ -178,6 +178,20 @@ class ApprovalStore:
     ) -> None:
         with self._lock, closing(self._connect()) as conn:
             self._evict_expired_locked(conn)
+            existing = conn.execute(
+                "SELECT status FROM pending_approvals WHERE approval_id = ?",
+                (approval_id,),
+            ).fetchone()
+            if existing is not None and existing[0] != "pending":
+                # Never clobber a resolved/expired row — that would destroy the
+                # durable audit trail. A collision on a full UUID is effectively
+                # impossible; if it ever happens we keep the prior decision.
+                logger.warning(
+                    "Refusing to persist approval %s over resolved status %r",
+                    approval_id,
+                    existing[0],
+                )
+                return
             conn.execute(
                 """
                 INSERT OR REPLACE INTO pending_approvals
@@ -193,10 +207,15 @@ class ApprovalStore:
             )
             conn.commit()
 
-    async def load_pending(self) -> List[Tuple[str, ApprovalRequest]]:
+    async def list_pending(self) -> List[Tuple[str, ApprovalRequest]]:
         """Return outstanding (un-resolved, un-expired) pending approvals."""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._sync_load_pending)
+
+    # Backward-compatible alias (pre-rename callers).
+    async def load_pending(self) -> List[Tuple[str, ApprovalRequest]]:
+        """Deprecated alias for :meth:`list_pending`."""
+        return await self.list_pending()
 
     def _sync_load_pending(self) -> List[Tuple[str, ApprovalRequest]]:
         now = time.time()
@@ -217,15 +236,30 @@ class ApprovalStore:
                 logger.exception("Failed to deserialize approval %s", approval_id)
         return result
 
-    async def resolve(self, approval_id: str, decision: ApprovalDecision) -> None:
-        """Record a final decision for ``approval_id`` as an audit trail."""
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, self._sync_resolve, approval_id, decision)
+    async def resolve(self, approval_id: str, decision: ApprovalDecision) -> bool:
+        """Record a final decision for ``approval_id`` as an audit trail.
 
-    def _sync_resolve(self, approval_id: str, decision: ApprovalDecision) -> None:
-        status = "approved" if decision.approved else "denied"
+        Returns ``True`` only when a still-pending row was updated, so a stale
+        or duplicate resolve (the row already expired/resolved) is reported as
+        ``False`` instead of silently appearing successful.
+
+        An explicit terminal state may be supplied via
+        ``decision.metadata['terminal']`` (``"approved"`` / ``"denied"`` /
+        ``"expired"``); otherwise it is derived from ``decision.approved``.
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, self._sync_resolve, approval_id, decision
+        )
+
+    def _sync_resolve(self, approval_id: str, decision: ApprovalDecision) -> bool:
+        terminal = (decision.metadata or {}).get("terminal")
+        if terminal in ("approved", "denied", "expired"):
+            status = terminal
+        else:
+            status = "approved" if decision.approved else "denied"
         with self._lock, closing(self._connect()) as conn:
-            conn.execute(
+            cur = conn.execute(
                 """
                 UPDATE pending_approvals
                 SET status = ?, decision = ?, approver = ?, resolved_at = ?
@@ -240,6 +274,14 @@ class ApprovalStore:
                 ),
             )
             conn.commit()
+            updated = int(cur.rowcount or 0) > 0
+        if not updated:
+            logger.warning(
+                "resolve() matched no pending approval %s (already resolved or "
+                "expired)",
+                approval_id,
+            )
+        return updated
 
     # ── Maintenance / introspection ─────────────────────────────────
     async def expire_overdue(self) -> int:

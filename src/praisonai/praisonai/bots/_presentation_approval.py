@@ -89,6 +89,8 @@ class PresentationApprovalHandler:
         timeout: float = 60.0,
         allowed_actors: Optional[Iterable[str]] = None,
         approval_id: Optional[str] = None,
+        agent_name: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Request approval for a tool execution using buttons.
         
@@ -108,15 +110,20 @@ class PresentationApprovalHandler:
             approval_id: Optional stable correlation id (auto-generated when
                          omitted) used to match an inbound callback after a
                          restart.
+            agent_name: Optional agent that triggered the call (persisted for
+                        restart-safe audit).
+            session_id: Optional session identifier (persisted for restart-safe
+                        audit).
 
         Returns:
             Dict with 'approved' (bool), 'reason' (str), and 'modified_args' (dict)
         """
         from praisonaiagents.bots.presentation import MessagePresentation
         
-        # Generate unique approval ID (stable correlation id)
+        # Generate unique approval ID (stable correlation id). Use the full
+        # UUID hex — truncating risks collisions in the durable store.
         if approval_id is None:
-            approval_id = str(uuid.uuid4())[:8]
+            approval_id = uuid.uuid4().hex
         
         # Normalize the authorized actor set (str-typed for cross-platform IDs)
         normalized_actors: Optional[Set[str]] = (
@@ -138,7 +145,8 @@ class PresentationApprovalHandler:
 
         # Persist pending approval durably (survives restart) if a store exists
         await self._persist_pending(
-            approval_id, tool_name, arguments, risk_level, target, timeout
+            approval_id, tool_name, arguments, risk_level, target, timeout,
+            agent_name=agent_name, session_id=session_id,
         )
 
         # Create approval presentation
@@ -146,7 +154,9 @@ class PresentationApprovalHandler:
             approval_id, tool_name, arguments, risk_level
         )
         
-        # Send presentation if channel function provided
+        # Send presentation if channel function provided. If delivery fails the
+        # caller can never resolve, so fail fast instead of waiting out the
+        # timeout on an approval no user ever saw — and clear the durable row.
         if channel_send_func and target:
             try:
                 await channel_send_func(target, presentation)
@@ -154,6 +164,17 @@ class PresentationApprovalHandler:
                 raise
             except Exception:
                 logger.exception("Failed to send approval presentation")
+                self._pending_approvals.pop(approval_id, None)
+                self._approval_futures.pop(approval_id, None)
+                result = {
+                    "approved": False,
+                    "reason": "Failed to deliver approval request",
+                    "modified_args": {},
+                }
+                await self._record_decision(
+                    approval_id, result, approver="system", terminal="expired"
+                )
+                return result
         
         # Wait for approval decision with timeout
         try:
@@ -179,7 +200,10 @@ class PresentationApprovalHandler:
                 "reason": f"Approval timed out after {timeout} seconds",
                 "modified_args": {},
             }
-            await self._record_decision(approval_id, result, approver="system")
+            # Record as an explicit 'expired' terminal state (not 'denied').
+            await self._record_decision(
+                approval_id, result, approver="system", terminal="expired"
+            )
             return result
 
     async def _persist_pending(
@@ -190,6 +214,8 @@ class PresentationApprovalHandler:
         risk_level: str,
         target: Optional[str],
         timeout: float,
+        agent_name: Optional[str] = None,
+        session_id: Optional[str] = None,
     ) -> None:
         """Persist a pending approval to the durable store, if configured."""
         if self._store is None:
@@ -201,6 +227,8 @@ class PresentationApprovalHandler:
                 tool_name=tool_name,
                 arguments=arguments,
                 risk_level=risk_level,
+                agent_name=agent_name,
+                session_id=session_id,
                 context={"target": target} if target else {},
                 approval_id=approval_id,
             )
@@ -217,18 +245,26 @@ class PresentationApprovalHandler:
         approval_id: str,
         result: Dict[str, Any],
         approver: Optional[str] = None,
+        terminal: Optional[str] = None,
     ) -> None:
-        """Record a resolved decision to the durable store, if configured."""
+        """Record a resolved decision to the durable store, if configured.
+
+        ``terminal`` optionally pins the durable status (``"approved"`` /
+        ``"denied"`` / ``"expired"``) so a timeout is audited distinctly from a
+        user denial.
+        """
         if self._store is None:
             return
         try:
             from praisonaiagents.approval import ApprovalDecision
 
+            metadata = {"terminal": terminal} if terminal else {}
             decision = ApprovalDecision(
                 approved=bool(result.get("approved")),
                 reason=result.get("reason", ""),
                 modified_args=result.get("modified_args", {}),
                 approver=approver,
+                metadata=metadata,
             )
             await self._store.resolve(approval_id, decision)
         except asyncio.CancelledError:
@@ -250,7 +286,8 @@ class PresentationApprovalHandler:
             return 0
         count = 0
         try:
-            pending = await self._store.load_pending()
+            lister = getattr(self._store, "list_pending", None) or self._store.load_pending
+            pending = await lister()
         except Exception:
             logger.exception("Failed to load pending approvals from store")
             return 0
