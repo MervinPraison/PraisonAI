@@ -92,6 +92,12 @@ class LearnManager:
         self._stores: Dict[str, Any] = {}
         self._custom_stores = custom_stores or {}
         
+        # Retention policy (0 = unbounded; backward-compatible default)
+        retention = {
+            "max_entries": getattr(self.config, "max_entries", 0),
+            "retention_days": getattr(self.config, "retention_days", 0),
+        }
+        
         # Built-in stores are added first, custom stores can override them
         if self.config.persona and "persona" not in self._custom_stores:
             self._stores["persona"] = PersonaStore(
@@ -99,6 +105,7 @@ class LearnManager:
                 user_id=self.user_id,
                 scope=scope,
                 backend=self._backend,
+                **retention,
             )
         
         if self.config.insights and "insights" not in self._custom_stores:
@@ -107,6 +114,7 @@ class LearnManager:
                 user_id=self.user_id,
                 scope=scope,
                 backend=self._backend,
+                **retention,
             )
         
         if self.config.thread and "threads" not in self._custom_stores:
@@ -115,6 +123,7 @@ class LearnManager:
                 user_id=self.user_id,
                 scope=scope,
                 backend=self._backend,
+                **retention,
             )
         
         if self.config.patterns and "patterns" not in self._custom_stores:
@@ -123,6 +132,7 @@ class LearnManager:
                 user_id=self.user_id,
                 scope=scope,
                 backend=self._backend,
+                **retention,
             )
         
         if self.config.decisions and "decisions" not in self._custom_stores:
@@ -131,6 +141,7 @@ class LearnManager:
                 user_id=self.user_id,
                 scope=scope,
                 backend=self._backend,
+                **retention,
             )
         
         if self.config.feedback and "feedback" not in self._custom_stores:
@@ -139,6 +150,7 @@ class LearnManager:
                 user_id=self.user_id,
                 scope=scope,
                 backend=self._backend,
+                **retention,
             )
         
         if self.config.improvements and "improvements" not in self._custom_stores:
@@ -147,6 +159,7 @@ class LearnManager:
                 user_id=self.user_id,
                 scope=scope,
                 backend=self._backend,
+                **retention,
             )
         
         # Add custom stores last (they override built-in stores)
@@ -314,6 +327,27 @@ class LearnManager:
             store_name: len(store._entries)
             for store_name, store in self._stores.items()
         }
+    
+    def prune(self) -> Dict[str, int]:
+        """Archive stale/excess entries across all stores (lifecycle governance).
+        
+        Deterministic, usage-driven retention: entries unused beyond
+        ``retention_days`` and least-used/oldest entries beyond ``max_entries``
+        are moved to a recoverable archive. No-op for stores without limits.
+        
+        Returns:
+            Dict mapping store name to number of entries archived.
+        """
+        pruned = {}
+        for store_name, store in self._stores.items():
+            prune_fn = getattr(store, "prune", None)
+            if callable(prune_fn):
+                try:
+                    pruned[store_name] = prune_fn()
+                except Exception as e:
+                    logging.warning(f"Failed to prune store '{store_name}': {e}")
+                    pruned[store_name] = 0
+        return pruned
     
     @property
     def pending_learnings(self) -> List[LearnEntry]:
