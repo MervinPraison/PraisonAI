@@ -75,14 +75,53 @@ function hasRecentClaudeTrigger(comments, minutes = 35) {
   });
 }
 
-function hasRecentConflictComment(comments) {
+function isConflictRebaseTriggerComment(c) {
+  if (!AUTO_ACTORS.includes(c.user.login)) return false;
+  const body = (c.body || '').toLowerCase();
+  return body.includes('@claude') && body.includes('merge conflict');
+}
+
+function isConflictRebaseCompletionComment(c) {
+  const login = (c.user?.login || '').toLowerCase();
+  if (!login.includes('praisonai-triage') && !login.includes('github-actions')) return false;
+  const body = (c.body || '').toLowerCase();
+  return (
+    body.includes('rebase complete') ||
+    body.includes('rebase onto') ||
+    (body.includes('conflict') && body.includes('resolved'))
+  );
+}
+
+function conflictRebaseQuiescent(comments, headPushedAt) {
+  const conflictTriggers = comments.filter(isConflictRebaseTriggerComment);
+  if (conflictTriggers.length === 0) return true;
+
+  const latestConflict = conflictTriggers.reduce((a, b) =>
+    new Date(a.created_at) > new Date(b.created_at) ? a : b
+  );
+  const conflictTime = new Date(latestConflict.created_at).getTime();
+
+  const rebaseDone = comments.some(
+    (c) =>
+      new Date(c.created_at).getTime() > conflictTime && isConflictRebaseCompletionComment(c)
+  );
+  if (!rebaseDone) return false;
+
+  return finalClaudeCompletedOnSha(comments, headPushedAt);
+}
+
+function hasRecentConflictComment(comments, headPushedAt = null) {
   const cutoff = Date.now() - CONFLICT_COOLDOWN_MS;
-  return comments.some((c) => {
-    if (!AUTO_ACTORS.includes(c.user.login)) return false;
-    const body = (c.body || '').toLowerCase();
-    if (!body.includes('@claude') || !body.includes('merge conflict')) return false;
+  const hasRecentTrigger = comments.some((c) => {
+    if (!isConflictRebaseTriggerComment(c)) return false;
     return new Date(c.created_at).getTime() > cutoff;
   });
+  if (!hasRecentTrigger) return false;
+
+  if (headPushedAt && conflictRebaseQuiescent(comments, headPushedAt)) {
+    return false;
+  }
+  return true;
 }
 
 function isBotReviewer(login, userType) {
@@ -522,7 +561,9 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
     reasons.push('fork PR');
   }
 
-  if (hasRecentConflictComment(ctx.comments)) reasons.push('recent merge-conflict @claude');
+  if (hasRecentConflictComment(ctx.comments, ctx.headPushedAt)) {
+    reasons.push('recent merge-conflict @claude');
+  }
   if (!skipRecentClaudeCooldown && hasRecentClaudeTrigger(ctx.comments, 35)) {
     reasons.push('recent @claude within 35min');
   }
@@ -625,6 +666,9 @@ module.exports = {
   isClaudeTriggerNoise,
   hasRecentClaudeTrigger,
   hasRecentConflictComment,
+  isConflictRebaseTriggerComment,
+  isConflictRebaseCompletionComment,
+  conflictRebaseQuiescent,
   hasHumanChangesRequested,
   hasAnyChangesRequested,
   hasFinalClaudeReviewTrigger,

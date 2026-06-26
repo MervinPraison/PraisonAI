@@ -77,6 +77,31 @@ assert('issues event never blocks', !mg.hasBlockingClaudeRunForPr(
   'my-branch'
 ));
 
+// Conflict rebase clears after bot completion + FINAL on HEAD
+const conflictTrigger = {
+  user: { login: 'MervinPraison' },
+  body: '@claude this PR has merge conflicts with main. Please rebase',
+  created_at: '2026-06-26T10:30:38Z',
+};
+const rebaseDone = {
+  user: { login: 'praisonai-triage-agent[bot]' },
+  body: 'Rebase complete — PR #2308 onto latest main',
+  created_at: '2026-06-26T10:30:55Z',
+};
+const finalAfterRebase = {
+  user: { login: 'MervinPraison' },
+  body: '@claude You are the FINAL architecture reviewer.',
+  created_at: '2026-06-26T10:39:43Z',
+};
+const headAfterRebase = '2026-06-26T10:39:25Z';
+const rebaseComments = [conflictTrigger, rebaseDone, finalAfterRebase];
+assert('conflict blocks before rebase done', mg.hasRecentConflictComment([conflictTrigger], headAfterRebase));
+assert('conflict clears after rebase + FINAL on HEAD', !mg.hasRecentConflictComment(rebaseComments, headAfterRebase));
+assert('conflict still blocks without FINAL on HEAD', mg.hasRecentConflictComment(
+  [conflictTrigger, rebaseDone],
+  headAfterRebase
+));
+
 // Tests heuristic
 assert('sdk without tests', mg.missingTestsReason([{ filename: 'src/praisonai-agents/a/b.py', additions: 3 }]) !== null);
 assert('sdk with tests ok', mg.missingTestsReason([

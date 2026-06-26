@@ -27,14 +27,18 @@ on:
       - Core Tests
     types:
       - completed
+  repository_dispatch:
+    types:
+      - claude-merge-gate
 
 concurrency:
-  group: claude-merge-gate-${{ github.repository }}-${{ github.event.inputs.pr_number || github.event.workflow_run.id || 'scan' }}
+  group: claude-merge-gate-${{ github.repository }}-${{ github.event.inputs.pr_number || github.event.client_payload.pr_number || github.event.workflow_run.id || 'scan' }}
   cancel-in-progress: true
 
 env:
   GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}
   MAX_CANDIDATES: 5
+  DISPATCH_PR_NUMBER: ${{ github.event.inputs.pr_number || github.event.client_payload.pr_number || '' }}
 
 permissions:
   contents: read
@@ -56,14 +60,21 @@ jobs:
 
       - name: Dispatch merge gate when PR pipeline is ready
         uses: actions/github-script@v7
+        env:
+          PAT: ${{ secrets.GH_TOKEN }}
         with:
-          github-token: ${{ env.GH_TOKEN }}
+          github-token: ${{ secrets.GH_TOKEN }}
           script: |
             const path = require('path');
             const mergeGate = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/merge-gate.js'));
             const wr = context.payload.workflow_run;
             const owner = context.repo.owner;
             const repo = context.repo.repo;
+
+            if (!process.env.PAT) {
+              core.setFailed('GH_TOKEN secret is required for merge gate auto-dispatch (needs repo + workflow scope).');
+              return;
+            }
 
             if (wr.conclusion !== 'success') {
               core.info(`Skip dispatch: ${wr.name} conclusion=${wr.conclusion}`);
@@ -93,12 +104,11 @@ jobs:
               return;
             }
 
-            await github.rest.actions.createWorkflowDispatch({
+            await github.rest.repos.createDispatchEvent({
               owner,
               repo,
-              workflow_id: 'claude-merge-gate.yml',
-              ref: 'main',
-              inputs: { pr_number: String(prNumber) },
+              event_type: 'claude-merge-gate',
+              client_payload: { pr_number: prNumber },
             });
             core.info(`Dispatched merge gate for PR #${prNumber} after ${wr.name}`);
 
@@ -127,7 +137,7 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const maxCandidates = parseInt(process.env.MAX_CANDIDATES || '5', 10);
-            const inputPr = '${{ github.event.inputs.pr_number }}'.trim();
+            const inputPr = String(process.env.DISPATCH_PR_NUMBER || '').trim();
 
             const candidates = [];
             const skipped = [];
