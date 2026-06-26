@@ -410,6 +410,190 @@ class TestPostEditDiagnostics:
         assert "Diagnostics" in result
 
 
+class TestLSPDiagnostics:
+    """The post-edit diagnostics hook is wired to the existing LSP client."""
+
+    def test_off_mode_skips_lsp(self, tmp_path, monkeypatch):
+        # ``off`` short-circuits before any LSP attempt (zero overhead).
+        editor = EditTools(post_edit_diagnostics="off")
+        called = {"n": 0}
+
+        def _spy(self, safe_path, display_path):
+            called["n"] += 1
+            return None
+
+        monkeypatch.setattr(EditTools, "_try_lsp_diagnostics", _spy)
+        p = tmp_path / "x.py"
+        _write(p, "x = 1\n")
+        result = editor.edit_file(str(p), "x = 1", "x = 2")
+        assert "Diagnostics" not in result
+        assert called["n"] == 0
+
+    def test_no_server_falls_back_to_checker(self, tmp_path):
+        # With no language server installed for the extension, LSP returns None
+        # and the legacy per-language checker still surfaces syntax errors.
+        editor = EditTools(post_edit_diagnostics="auto")
+        # No server is configured for an unknown extension -> None.
+        assert editor._try_lsp_diagnostics(str(tmp_path / "f.unknownext"), "f") is None
+        p = tmp_path / "broken.py"
+        _write(p, "x = 1\n")
+        result = editor.edit_file(str(p), "x = 1", "def (:")
+        assert "Success" in result
+        assert "Diagnostics" in result
+
+    def test_lsp_block_used_when_available(self, tmp_path, monkeypatch):
+        # When the LSP path returns a formatted block, it is used verbatim and
+        # the legacy checker is not consulted.
+        editor = EditTools(post_edit_diagnostics="auto")
+
+        def _fake_lsp(self, safe_path, display_path):
+            return f"\n\nDiagnostics (lsp:typescript):\n{display_path}:1:1: error: oops"
+
+        def _boom(self, safe_path):
+            raise AssertionError("checker fallback should not run when LSP returns a block")
+
+        monkeypatch.setattr(EditTools, "_try_lsp_diagnostics", _fake_lsp)
+        monkeypatch.setattr(EditTools, "_diagnostics_command", staticmethod(_boom))
+        p = tmp_path / "a.ts"
+        _write(p, "const x = 1;\n")
+        result = editor.edit_file(str(p), "const x = 1;", "const y = 2;")
+        assert "Success" in result
+        assert "Diagnostics (lsp:typescript)" in result
+
+    def test_lsp_no_problems_auto_is_silent(self, tmp_path, monkeypatch):
+        # An LSP run with no diagnostics in ``auto`` mode appends nothing.
+        editor = EditTools(post_edit_diagnostics="auto")
+        monkeypatch.setattr(
+            EditTools, "_try_lsp_diagnostics",
+            lambda self, safe_path, display_path: "",
+        )
+        p = tmp_path / "a.ts"
+        _write(p, "const x = 1;\n")
+        result = editor.edit_file(str(p), "const x = 1;", "const y = 2;")
+        assert "Success" in result
+        assert "Diagnostics" not in result
+
+    def test_lsp_failure_falls_back_to_checker(self, tmp_path, monkeypatch):
+        # A raising LSP attempt must not break the edit; the checker fallback
+        # still runs and surfaces the Python syntax error.
+        editor = EditTools(post_edit_diagnostics="auto")
+
+        def _raise(self, safe_path, display_path):
+            raise RuntimeError("server crashed")
+
+        monkeypatch.setattr(EditTools, "_try_lsp_diagnostics", _raise)
+        p = tmp_path / "broken.py"
+        _write(p, "x = 1\n")
+        result = editor.edit_file(str(p), "x = 1", "def (:")
+        assert "Success" in result
+        assert "Diagnostics" in result
+
+    def test_lsp_unpublished_falls_back_to_checker(self, tmp_path, monkeypatch):
+        # Regression: when an installed server starts/opens but never publishes
+        # diagnostics within the budget (still indexing, debounced, or URI
+        # mismatch), the LSP path must return None (not "") so the legacy
+        # checker still runs and surfaces a real syntax error rather than
+        # reporting a false all-clear.
+        import asyncio
+        from praisonaiagents.tools import edit_tools as et
+
+        editor = EditTools(post_edit_diagnostics="auto")
+
+        class _FakeClient:
+            def __init__(self, *a, **k):
+                self.config = type("C", (), {"timeout": 5})()
+                self._diagnostics = {}  # server never publishes
+
+            async def start(self):
+                return True
+
+            async def open_document(self, path):
+                return True
+
+            async def get_diagnostics(self, path):
+                return []
+
+            async def close_document(self, path):
+                return None
+
+            async def stop(self):
+                return None
+
+        monkeypatch.setattr(et, "_DIAGNOSTICS_TIMEOUT", 0.3, raising=False)
+        import shutil
+        monkeypatch.setattr(shutil, "which",
+                            lambda cmd: "/usr/bin/" + cmd, raising=False)
+        monkeypatch.setattr(
+            "praisonaiagents.lsp.config.DEFAULT_SERVERS",
+            {"python": {"command": "pyright-langserver", "args": []}},
+            raising=False,
+        )
+        monkeypatch.setattr(
+            "praisonaiagents.lsp.client.LSPClient", _FakeClient, raising=False
+        )
+
+        # No running loop -> the sync path uses asyncio.run; force fresh loop.
+        try:
+            asyncio.get_running_loop()
+            pytest.skip("running loop present; sync LSP path not exercised")
+        except RuntimeError:
+            pass
+
+        block = editor._try_lsp_diagnostics(str(tmp_path / "broken.py"), "broken.py")
+        assert block is None  # unpublished -> fall back, not a false all-clear
+
+    def test_lsp_clean_publish_is_authoritative(self, tmp_path, monkeypatch):
+        # A genuine clean publish ([]) returns "" in auto mode and does NOT
+        # redundantly run the subprocess checker.
+        import asyncio
+        from praisonaiagents.tools import edit_tools as et
+
+        editor = EditTools(post_edit_diagnostics="auto")
+        uri_holder = {}
+
+        class _FakeClient:
+            def __init__(self, *a, **k):
+                self.config = type("C", (), {"timeout": 5})()
+                self._diagnostics = uri_holder
+
+            async def start(self):
+                return True
+
+            async def open_document(self, path):
+                uri_holder[f"file://{os.path.abspath(path)}"] = []
+                return True
+
+            async def get_diagnostics(self, path):
+                return []
+
+            async def close_document(self, path):
+                return None
+
+            async def stop(self):
+                return None
+
+        import shutil
+        monkeypatch.setattr(shutil, "which",
+                            lambda cmd: "/usr/bin/" + cmd, raising=False)
+        monkeypatch.setattr(
+            "praisonaiagents.lsp.config.DEFAULT_SERVERS",
+            {"python": {"command": "pyright-langserver", "args": []}},
+            raising=False,
+        )
+        monkeypatch.setattr(
+            "praisonaiagents.lsp.client.LSPClient", _FakeClient, raising=False
+        )
+
+        try:
+            asyncio.get_running_loop()
+            pytest.skip("running loop present; sync LSP path not exercised")
+        except RuntimeError:
+            pass
+
+        block = editor._try_lsp_diagnostics(str(tmp_path / "ok.py"), "ok.py")
+        assert block == ""  # published-and-clean -> authoritative all-clear
+
+
 class TestAutomaticStaleness:
     def test_edit_aborts_when_changed_after_read(self, tools, tmp_path):
         p = tmp_path / "a.py"
