@@ -134,6 +134,7 @@ jobs:
           script: |
             const path = require('path');
             const mergeGate = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/merge-gate.js'));
+            const ps = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/pipeline-status.js'));
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const maxCandidates = parseInt(process.env.MAX_CANDIDATES || '5', 10);
@@ -193,6 +194,8 @@ jobs:
                 body: '**Merge gate scan** — eligible for assessment. Claude merge gate will assess and may auto-merge if `MERGE_GATE_VERDICT: APPROVE`.',
               });
             }
+
+            await ps.syncOpenPullRequests(github, owner, repo, { maxPrs: 20 }, core);
 
   claude-assess:
     needs: scan-candidates

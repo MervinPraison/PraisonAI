@@ -352,3 +352,44 @@ jobs:
             await chain.kickReviewChainForIssue(
               github, context.repo.owner, context.repo.repo, issueNumber, core
             );
+
+      - name: Sync pipeline status labels for PR
+        if: steps.check_fork.outputs.is_pr == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            const path = require('path');
+            const ps = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/pipeline-status.js'));
+            const prNumber = parseInt('${{ steps.check_fork.outputs.pr_number }}', 10);
+            await ps.ensurePipelineLabels(github, context.repo.owner, context.repo.repo, core);
+            await ps.syncPipelineLabels(github, context.repo.owner, context.repo.repo, prNumber, core);
+
+      - name: Dispatch merge gate when PR pipeline ready
+        if: steps.check_fork.outputs.is_pr == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            const path = require('path');
+            const mergeGate = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/merge-gate.js'));
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = parseInt('${{ steps.check_fork.outputs.pr_number }}', 10);
+            const check = await mergeGate.evaluatePipelineQuiescent(
+              github, owner, repo, prNumber, core, {
+                skipGlobalClaudeRunCheck: true,
+                skipRecentClaudeCooldown: true,
+              }
+            );
+            if (!check.ready) {
+              core.info(`PR #${prNumber} not ready for merge gate: ${check.reasons.join(', ')}`);
+              return;
+            }
+            await github.rest.repos.createDispatchEvent({
+              owner,
+              repo,
+              event_type: 'claude-merge-gate',
+              client_payload: { pr_number: prNumber },
+            });
+            core.info(`Dispatched merge gate for PR #${prNumber}`);
