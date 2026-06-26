@@ -1,0 +1,39 @@
+name: Bot PR Recovery
+
+# Belt-and-braces: kick CodeRabbit/Qodo when pull_request:opened never fired for bot PRs.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Specific PR number to kick (optional)'
+        required: false
+        type: string
+
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find and kick stalled bot PRs
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            const path = require('path');
+            const chain = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/bot-pr-review-chain.js'));
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const manual = '${{ github.event.inputs.pr_number }}'.trim();
+            const prNumber = manual ? parseInt(manual, 10) : null;
+            if (manual && Number.isNaN(prNumber)) {
+              throw new Error(`Invalid pr_number: ${manual}`);
+            }
+            await chain.recoverStalledBotPrs(github, owner, repo, { prNumber }, core);

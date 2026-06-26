@@ -612,37 +612,14 @@ jobs:
     permissions:
       pull-requests: write
     steps:
+      - uses: actions/checkout@v4
+
       - name: Trigger CodeRabbit and Qodo reviews
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GH_TOKEN }}
           script: |
+            const path = require('path');
+            const chain = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/bot-pr-review-chain.js'));
             const pr = context.payload.pull_request.number;
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-
-            // 1. Trigger CodeRabbit review
-            await github.rest.issues.createComment({
-              issue_number: pr, owner, repo,
-              body: '@coderabbitai review'
-            });
-            console.log(`Triggered CodeRabbit for bot PR #${pr}`);
-
-            // 2. Trigger Qodo review
-            await github.rest.issues.createComment({
-              issue_number: pr, owner, repo,
-              body: '/review'
-            });
-            console.log(`Triggered Qodo for bot PR #${pr}`);
-
-            // 3. Trigger Gemini review (commented out)
-            // await github.rest.issues.createComment({
-            //   issue_number: pr, owner, repo,
-            //   body: '@gemini review this PR'
-            // });
-            // console.log(`Triggered Gemini for bot PR #${pr}`);
-
-            // NOTE: @copilot is NOT triggered here.
-            // It will be triggered by copilot-after-coderabbit or copilot-after-qodo
-            // once those bots finish, ensuring Copilot always reviews LAST.
-            console.log('Copilot will be triggered after CodeRabbit/Qodo complete.');
+            await chain.kickReviewChain(github, context.repo.owner, context.repo.repo, pr, core);
