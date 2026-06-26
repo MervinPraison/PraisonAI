@@ -112,6 +112,58 @@ def _get_agents_generator():
     from praisonai.agents_generator import AgentsGenerator
     return AgentsGenerator
 
+
+def _provider_preflight_message():
+    """Return a guidance message if no LLM provider credential is configured.
+
+    PraisonAI is provider-agnostic (OpenAI, Anthropic, Google/Gemini, Groq,
+    Cohere, Ollama, OpenRouter, plus 100+ via LiteLLM). Flows that call an LLM
+    immediately — such as ``praisonai --init`` — should fail with clear,
+    actionable guidance (pointing at ``praisonai setup``) instead of a raw stack
+    trace when the user has not configured any provider yet.
+
+    Returns:
+        A user-facing message string when no provider is configured, or ``None``
+        when a provider credential is available (so the caller proceeds). The
+        check itself never raises; on any unexpected error it returns ``None``
+        so it can never block a properly configured user.
+    """
+    try:
+        from praisonai.llm.credentials import (
+            inject_credentials_into_env,
+            is_configured,
+        )
+
+        # Mirror the runtime credential resolution so the gate cannot disagree
+        # with what generation actually does:
+        #   1. AutoGenerator resolves via env-only resolve_llm_endpoint(), so a
+        #      key stored via `praisonai setup` must be exported into the env
+        #      first or it never reaches the LLM call.
+        #   2. The runtime model honours MODEL_NAME / OPENAI_MODEL_NAME, so gate
+        #      on that exact model (not the inferred provider default) — a stale
+        #      OpenAI model override with only a non-OpenAI key must still be
+        #      caught here instead of failing later with a raw auth error.
+        inject_credentials_into_env()
+        import os as _os
+        runtime_model = _os.environ.get("MODEL_NAME") or _os.environ.get(
+            "OPENAI_MODEL_NAME"
+        )
+        if is_configured(model=runtime_model):
+            return None
+    except Exception:
+        return None  # never block on the check itself
+    return (
+        "No LLM provider is configured.\n\n"
+        "PraisonAI supports OpenAI, Anthropic, Google/Gemini, Groq, "
+        "Cohere, Ollama, OpenRouter and 100+ models via LiteLLM.\n\n"
+        "Easiest setup (interactive, no shell 'export' needed):\n"
+        "    praisonai setup\n\n"
+        "Or set a provider API key, for example:\n"
+        "    export OPENAI_API_KEY=...        # OpenAI\n"
+        "    export ANTHROPIC_API_KEY=...     # Anthropic Claude\n"
+        "    export GEMINI_API_KEY=...        # Google Gemini\n"
+    )
+
 # Use centralized availability detection
 from .._framework_availability import is_available
 
@@ -733,6 +785,16 @@ class PraisonAI:
             self.topic = temp_topic
 
             self.agent_file = "agents.yaml"
+
+            # Pre-flight: ensure an LLM provider credential is configured before
+            # calling the LLM. Without this, a user with no API key (or a
+            # non-OpenAI key for an OpenAI-default model) gets a raw stack trace
+            # instead of clear, actionable guidance.
+            preflight = _provider_preflight_message()
+            if preflight:
+                print(preflight)
+                return preflight
+
             AutoGenerator = _get_auto_generator()
             generator = AutoGenerator(topic=self.topic, framework=self.framework, agent_file=self.agent_file)
             self.agent_file = generator.generate(merge=getattr(args, 'merge', False))
