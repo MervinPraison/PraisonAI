@@ -174,14 +174,15 @@ jobs:
       - name: Claude merge gate assessment (read-only)
         id: assess
         continue-on-error: true
-        uses: anthropics/claude-code-action@beta
+        uses: ./.github/actions/claude-code-action
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          CLAUDE_CODE_SUBAGENT_MODEL: inherit
+          ANTHROPIC_DEFAULT_SONNET_MODEL: claude-sonnet-4-6
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ steps.app-token.outputs.token }}
           model: claude-opus-4-8
-          mode: agent
           trigger_phrase: '@claude-merge-gate-internal'
           direct_prompt: |
             You are the MERGE GATE reviewer for PraisonAI PR #${{ matrix.pr_number }}.
@@ -217,10 +218,48 @@ jobs:
             GlobTool
             GrepTool
             Read
-            mcp__github__get_issue
-            mcp__github__get_issue_comments
-            mcp__github__create_comment
           timeout_minutes: 15
+
+      - name: Post fallback verdict if Claude did not comment
+        id: fallback_verdict
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ env.GH_TOKEN }}
+          script: |
+            const mergeGate = require('/tmp/merge-gate.js');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = ${{ matrix.pr_number }};
+
+            const ctx = await mergeGate.loadPrContext(github, owner, repo, prNumber);
+            const minCreatedAt = new Date(Date.now() - 25 * 60 * 1000).toISOString();
+            const existing = mergeGate.findMergeGateVerdict(ctx.comments, minCreatedAt, ctx.headPushedAt);
+            if (existing) {
+              core.info(`Verdict already posted: ${existing}`);
+              core.setOutput('verdict', existing);
+              return;
+            }
+
+            const check = await mergeGate.evaluatePipelineQuiescent(
+              github, owner, repo, prNumber, core, { forMergeStep: true }
+            );
+            const verdict = check.ready ? 'APPROVE' : 'BLOCK';
+            const lines = [
+              `MERGE_GATE_VERDICT: ${verdict}`,
+              '',
+              'Automated fallback — Claude assess did not post a verdict comment (e.g. GitHub MCP unavailable).',
+            ];
+            if (check.ready) {
+              lines.push('All deterministic merge gates passed.');
+            } else {
+              lines.push('Blockers:', ...check.reasons.map((r) => `- ${r}`));
+            }
+            await github.rest.issues.createComment({
+              owner, repo, issue_number: prNumber,
+              body: lines.join('\n'),
+            });
+            core.info(`Posted fallback verdict: ${verdict}`);
+            core.setOutput('verdict', verdict);
 
       - name: Verify verdict posted
         id: verdict

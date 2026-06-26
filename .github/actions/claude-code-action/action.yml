@@ -261,15 +261,23 @@ runs:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude_code_oauth_token }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
+        INPUT_MODEL: ${{ inputs.model }}
         INPUT_MAX_TURNS: ${{ inputs.max_turns }}
         INPUT_ALLOWED_TOOLS: ${{ inputs.allowed_tools }}
         INPUT_DISALLOWED_TOOLS: ${{ inputs.disallowed_tools }}
         INPUT_TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
+        CLAUDE_CODE_SUBAGENT_MODEL: inherit
+        ANTHROPIC_DEFAULT_SONNET_MODEL: claude-sonnet-4-6
       run: |
         echo "🚀 Running Claude Code with GitHub context..."
         
         # Build command arguments
         CMD_ARGS=("-p" "--verbose" "--output-format" "stream-json")
+        
+        if [[ -n "$INPUT_MODEL" ]]; then
+          CMD_ARGS+=("--model" "$INPUT_MODEL")
+          export ANTHROPIC_MODEL="$INPUT_MODEL"
+        fi
         
         # Add max turns if specified
         if [[ -n "$INPUT_MAX_TURNS" ]]; then
