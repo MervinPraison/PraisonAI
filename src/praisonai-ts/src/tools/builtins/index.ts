@@ -11,6 +11,7 @@ export { EXA_METADATA } from './exa';
 export { PERPLEXITY_METADATA } from './perplexity';
 export { PARALLEL_METADATA } from './parallel';
 export { FIRECRAWL_METADATA } from './firecrawl';
+export { CRW_METADATA } from './crw';
 export { SUPERAGENT_METADATA } from './superagent';
 export { VALYU_METADATA } from './valyu';
 export { BEDROCK_AGENTCORE_METADATA } from './bedrock-agentcore';
@@ -40,6 +41,10 @@ export type { ParallelSearchConfig, ParallelSearchInput, ParallelSearchResult } 
 // Firecrawl
 export { firecrawlScrape, firecrawlCrawl, createFirecrawlScrapeTool, createFirecrawlCrawlTool } from './firecrawl';
 export type { FirecrawlScrapeConfig, FirecrawlScrapeInput, FirecrawlScrapeResult, FirecrawlCrawlConfig, FirecrawlCrawlInput, FirecrawlCrawlResult } from './firecrawl';
+
+// fastCRW
+export { crwScrape, crwCrawl, createCrwScrapeTool, createCrwCrawlTool } from './crw';
+export type { CrwScrapeConfig, CrwScrapeInput, CrwScrapeResult, CrwCrawlConfig, CrwCrawlInput, CrwCrawlResult } from './crw';
 
 // Superagent
 export { superagentGuard, superagentRedact, superagentVerify, createSuperagentGuardTool, createSuperagentRedactTool, createSuperagentVerifyTool } from './superagent';
@@ -90,6 +95,7 @@ export async function getAllBuiltinMetadata() {
   const { PERPLEXITY_METADATA } = await import('./perplexity');
   const { PARALLEL_METADATA } = await import('./parallel');
   const { FIRECRAWL_METADATA } = await import('./firecrawl');
+  const { CRW_METADATA } = await import('./crw');
   const { SUPERAGENT_METADATA } = await import('./superagent');
   const { VALYU_METADATA } = await import('./valyu');
   const { BEDROCK_AGENTCORE_METADATA } = await import('./bedrock-agentcore');
@@ -103,6 +109,7 @@ export async function getAllBuiltinMetadata() {
     PERPLEXITY_METADATA,
     PARALLEL_METADATA,
     FIRECRAWL_METADATA,
+    CRW_METADATA,
     SUPERAGENT_METADATA,
     VALYU_METADATA,
     BEDROCK_AGENTCORE_METADATA,
