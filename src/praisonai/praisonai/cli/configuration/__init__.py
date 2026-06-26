@@ -6,7 +6,13 @@ Provides configuration management with TOML support and precedence handling.
 
 from .loader import ConfigLoader, get_config
 from .schema import ConfigSchema
-from .paths import get_config_paths, get_user_config_path, get_project_config_path
+from .paths import (
+    get_config_paths,
+    get_user_config_path,
+    get_project_config_path,
+    get_project_config_dir,
+    find_project_root,
+)
 
 __all__ = [
     'ConfigLoader',
@@ -15,4 +21,6 @@ __all__ = [
     'get_config_paths',
     'get_user_config_path',
     'get_project_config_path',
+    'get_project_config_dir',
+    'find_project_root',
 ]
