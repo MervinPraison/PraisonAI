@@ -137,6 +137,15 @@ Final rule: conclude only when evidence shows missing = 0.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 PUBLISH WORKFLOW (reference)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GitHub Actions (recommended):
+  Manual: Actions → PyPI Release → Run workflow on main (bump defaults to patch)
+  Nightly: `.github/workflows/nightly-release-gate.yml` runs at 00:00 UTC (midnight) when:
+    - changes exist in src/praisonai or src/praisonai-agents since last v* tag
+    - Core Tests succeeded on current main HEAD
+    → dispatches pypi-release.yml with bump=patch, source=nightly
+    → still requires pypi environment approval before publish
+  Ad-hoc minor/major: manual PyPI Release only (explicit bump selection)
+
 Step 1 — Publish praisonaiagents (Core SDK):
   cd /Users/praison/praisonai-package/src/praisonai-agents
   praisonai publish pypi

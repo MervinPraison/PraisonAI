@@ -40,6 +40,14 @@ on:
         required: false
         default: ''
         type: string
+      source:
+        description: 'Trigger source (audit trail)'
+        required: false
+        default: manual
+        type: choice
+        options:
+          - manual
+          - nightly
 
 permissions:
   contents: write
@@ -77,6 +85,12 @@ jobs:
           git config user.name "MervinPraison"
           git config user.email "454862+MervinPraison@users.noreply.github.com"
           gh auth setup-git
+
+      - name: Release summary
+        run: |
+          echo "Source: ${{ inputs.source }}"
+          echo "Bump:   ${{ inputs.bump }}"
+          echo "Dry run: ${{ inputs.dry_run }}"
 
       - name: Compute release versions
         id: versions

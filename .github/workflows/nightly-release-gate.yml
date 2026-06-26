@@ -1,0 +1,126 @@
+name: Nightly Release Gate
+
+# Preflight checks before dispatching PyPI Release (patch bump).
+# Runs nightly at 00:00 UTC (midnight).
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run preflight only; do not dispatch pypi-release.yml'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: nightly-release-gate
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Preflight — path changes and CI green
+        id: preflight
+        run: |
+          set -euo pipefail
+
+          git fetch --tags origin
+
+          LAST_TAG=$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null || true)
+          if [ -z "$LAST_TAG" ]; then
+            echo "No v* tag found — skip automated release (first release must be manual)"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "reason=no_tag" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CHANGED=$(git diff --name-only "${LAST_TAG}" HEAD -- \
+            src/praisonai \
+            src/praisonai-agents || true)
+
+          if [ -z "$CHANGED" ]; then
+            echo "No changes in src/praisonai or src/praisonai-agents since ${LAST_TAG} — skip"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "reason=no_path_changes" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Changes since ${LAST_TAG}:"
+          echo "$CHANGED"
+
+          HEAD_SHA=$(git rev-parse HEAD)
+          echo "main HEAD: ${HEAD_SHA}"
+
+          GREEN_SHA=$(gh run list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --workflow "Core Tests" \
+            --branch main \
+            --status success \
+            --json headSha \
+            --jq '.[0].headSha // empty')
+
+          if [ "$GREEN_SHA" != "$HEAD_SHA" ]; then
+            echo "main@${HEAD_SHA} is not covered by a green Core Tests run (last green: ${GREEN_SHA:-none}) — skip"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "reason=ci_not_green" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          IN_PROGRESS=$(gh run list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --workflow "Core Tests" \
+            --branch main \
+            --json headSha,status \
+            --jq "[.[] | select(.headSha == \"${HEAD_SHA}\" and .status == \"in_progress\")] | length")
+
+          if [ "${IN_PROGRESS:-0}" != "0" ]; then
+            echo "Core Tests still in progress on ${HEAD_SHA} — skip"
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "reason=ci_in_progress" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Preflight passed — ready to dispatch patch release"
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+          echo "reason=ready" >> "$GITHUB_OUTPUT"
+          echo "last_tag=${LAST_TAG}" >> "$GITHUB_OUTPUT"
+          echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Dry run summary
+        if: inputs.dry_run == true
+        run: |
+          echo "Dry run — preflight only, no pypi-release dispatch."
+          echo "should_release=${{ steps.preflight.outputs.should_release }}"
+          echo "reason=${{ steps.preflight.outputs.reason }}"
+          if [ "${{ steps.preflight.outputs.should_release }}" = "true" ]; then
+            echo "Would dispatch: pypi-release.yml bump=patch source=nightly"
+          fi
+
+      - name: Dispatch PyPI Release (patch)
+        if: steps.preflight.outputs.should_release == 'true' && inputs.dry_run != true
+        run: |
+          set -euo pipefail
+          gh workflow run pypi-release.yml \
+            --repo "${GITHUB_REPOSITORY}" \
+            --ref main \
+            -f bump=patch \
+            -f source=nightly \
+            -f dry_run=false
+          echo "Dispatched pypi-release.yml (patch, source=nightly)"
+          echo "Approve the pypi environment when prompted."
