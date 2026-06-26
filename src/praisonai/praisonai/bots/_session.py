@@ -384,6 +384,56 @@ class BotSessionManager:
             except Exception as e:
                 logger.warning("Failed to persist session to store: %s", e)
 
+    @staticmethod
+    def _apply_tool_policy(
+        agent: "Agent", tool_policy: Optional[Any]
+    ) -> Optional[Any]:
+        """Scope ``agent.tools`` per ``tool_policy`` for one turn (Issue #2298).
+
+        Returns a zero-arg callable that restores the agent's original tools,
+        or ``None`` when no scoping was applied (no policy, no tools, or the
+        policy removed nothing). The apply/restore mirrors the scheduler's
+        proven ``_apply_toolset_scope`` so attended/trusted uses of the same
+        shared agent are never affected.
+        """
+        if tool_policy is None:
+            return None
+        filter_tools = getattr(tool_policy, "filter_tools", None)
+        if not callable(filter_tools):
+            return None
+        original = getattr(agent, "tools", None)
+        if not original:
+            return None
+        try:
+            filtered = filter_tools(list(original))
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning("Tool policy could not scope agent tools: %s", e)
+            return None
+        if len(filtered) == len(original):
+            return None
+        try:
+            agent.tools = filtered
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning("Tool policy could not assign scoped tools: %s", e)
+            return None
+
+        removed = len(original) - len(filtered)
+        logger.info(
+            "Route tool policy scoped agent tools for inbound turn: "
+            "%d -> %d (%d removed)",
+            len(original),
+            len(filtered),
+            removed,
+        )
+
+        def _restore() -> None:
+            try:
+                agent.tools = original
+            except Exception as e:  # pragma: no cover - defensive
+                logger.warning("Tool policy could not restore agent tools: %s", e)
+
+        return _restore
+
     async def chat(
         self,
         agent: "Agent",
@@ -395,6 +445,7 @@ class BotSessionManager:
         message_id: str = "",
         account: str = "",
         stream_callback: Optional[Any] = None,
+        tool_policy: Optional[Any] = None,
     ) -> str:
         """Run ``agent.chat(prompt)`` with *user_id*-scoped history.
 
@@ -407,6 +458,14 @@ class BotSessionManager:
         Args:
             stream_callback: Optional async callback for streaming events.
                             When provided, events are bridged via agent.stream_emitter.
+            tool_policy: Optional per-route toolset scope (Issue #2298). When
+                            supplied, the agent's tools are filtered to the
+                            policy-allowed subset for the duration of this turn
+                            and restored afterwards, so an untrusted inbound
+                            route never advertises dangerous tools to the model
+                            while attended/trusted uses of the same shared agent
+                            stay unaffected. Anything exposing ``filter_tools``
+                            is accepted (e.g. ``ToolPolicy`` / ``RunPolicy``).
 
         N4 — Inbound DLQ: if a ``dlq`` was passed to ``__init__`` and
         ``agent.chat()`` raises, the failing message is persisted to
@@ -531,6 +590,14 @@ class BotSessionManager:
                         saved_history = agent.chat_history
                         agent.chat_history = user_history
 
+                        # Per-route toolset scope (Issue #2298): swap the
+                        # agent's tools to the policy-allowed subset for this
+                        # turn so untrusted inbound routes never advertise
+                        # dangerous tools to the model. Restored in the finally
+                        # below alongside chat_history/model, so a shared Agent
+                        # instance never leaks a scoped toolset to another turn.
+                        _restore_tools = self._apply_tool_policy(agent, tool_policy)
+
                         # Apply a per-user model override (set via the /model
                         # command) for the duration of this turn only. The swap
                         # happens inside the per-agent lock and is restored in
@@ -647,6 +714,10 @@ class BotSessionManager:
                             raise
                         finally:
                             agent.chat_history = saved_history
+                            # Restore the agent's original toolset if a
+                            # per-route policy scoped it for this turn.
+                            if _restore_tools is not None:
+                                _restore_tools()
                             # Restore the agent's original model if we applied a
                             # per-user override for this turn.
                             if _model_overridden:

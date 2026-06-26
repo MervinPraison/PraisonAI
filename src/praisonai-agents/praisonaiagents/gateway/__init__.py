@@ -38,6 +38,10 @@ from .protocols import (
     RouteFacts,
     RouteMatch,
     resolve_route,
+    # Per-route, trust-tiered toolset scoping (Issue #2298)
+    ToolPolicy,
+    UNTRUSTED_DENY_SUBSTRINGS,
+    TRUST_TIERS,
     # Outbound send-policy guard (Issue #2226)
     SendDecision,
     SendPolicyProtocol,
@@ -138,6 +142,10 @@ __all__ = [
     "RouteFacts",
     "RouteMatch",
     "resolve_route",
+    # Per-route, trust-tiered toolset scoping (Issue #2298)
+    "ToolPolicy",
+    "UNTRUSTED_DENY_SUBSTRINGS",
+    "TRUST_TIERS",
     # Outbound send-policy guard (Issue #2226)
     "SendDecision",
     "SendPolicyProtocol",
