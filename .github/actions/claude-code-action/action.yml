@@ -261,15 +261,23 @@ runs:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic_api_key }}
         CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.claude_code_oauth_token }}
         GITHUB_TOKEN: ${{ inputs.github_token }}
+        INPUT_MODEL: ${{ inputs.model }}
         INPUT_MAX_TURNS: ${{ inputs.max_turns }}
         INPUT_ALLOWED_TOOLS: ${{ inputs.allowed_tools }}
         INPUT_DISALLOWED_TOOLS: ${{ inputs.disallowed_tools }}
         INPUT_TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
+        CLAUDE_CODE_SUBAGENT_MODEL: inherit
+        ANTHROPIC_DEFAULT_SONNET_MODEL: claude-sonnet-4-6
       run: |
         echo "🚀 Running Claude Code with GitHub context..."
         
         # Build command arguments
         CMD_ARGS=("-p" "--verbose" "--output-format" "stream-json")
+        
+        if [[ -n "$INPUT_MODEL" ]]; then
+          CMD_ARGS+=("--model" "$INPUT_MODEL")
+          export ANTHROPIC_MODEL="$INPUT_MODEL"
+        fi
         
         # Add max turns if specified
         if [[ -n "$INPUT_MAX_TURNS" ]]; then
@@ -281,11 +289,36 @@ runs:
         if [[ -n "$INPUT_ALLOWED_TOOLS" ]]; then
           TOOLS="$TOOLS,$INPUT_ALLOWED_TOOLS"
         fi
+        
+        # Remove any explicitly disallowed tools from the effective allow-list so
+        # the read-only contract is enforced deterministically (no reliance on CLI
+        # precedence between --allowedTools and --disallowedTools).
+        if [[ -n "$INPUT_DISALLOWED_TOOLS" ]]; then
+          DISALLOWED_CSV=$(echo "$INPUT_DISALLOWED_TOOLS" | tr ',\n' '  ' | xargs)
+          FILTERED=""
+          IFS=',' read -ra TOOL_ARR <<< "$TOOLS"
+          for tool in "${TOOL_ARR[@]}"; do
+            tool=$(echo "$tool" | xargs)
+            [[ -z "$tool" ]] && continue
+            skip="false"
+            for bad in $DISALLOWED_CSV; do
+              if [[ "$tool" == "$bad" ]]; then
+                skip="true"
+                break
+              fi
+            done
+            if [[ "$skip" == "false" ]]; then
+              FILTERED="${FILTERED:+$FILTERED,}$tool"
+            fi
+          done
+          TOOLS="$FILTERED"
+        fi
         CMD_ARGS+=("--allowedTools" "$TOOLS")
         
         # Add disallowed tools
         if [[ -n "$INPUT_DISALLOWED_TOOLS" ]]; then
-          CMD_ARGS+=("--disallowedTools" "$INPUT_DISALLOWED_TOOLS")
+          DISALLOWED_FLAG=$(echo "$INPUT_DISALLOWED_TOOLS" | tr '\n' ',' | sed 's/,*$//')
+          CMD_ARGS+=("--disallowedTools" "$DISALLOWED_FLAG")
         fi
         
         echo "📝 Executing Claude Code with prompt from file..."
