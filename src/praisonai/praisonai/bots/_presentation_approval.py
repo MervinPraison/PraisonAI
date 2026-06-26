@@ -246,15 +246,23 @@ class PresentationApprovalHandler:
         result: Dict[str, Any],
         approver: Optional[str] = None,
         terminal: Optional[str] = None,
-    ) -> None:
+    ) -> Optional[bool]:
         """Record a resolved decision to the durable store, if configured.
 
         ``terminal`` optionally pins the durable status (``"approved"`` /
         ``"denied"`` / ``"expired"``) so a timeout is audited distinctly from a
         user denial.
+
+        Returns:
+            ``None`` when no store is configured (nothing to record).
+            Otherwise the store's ``resolve()`` result: ``True`` when a still
+            -pending durable row was updated, ``False`` when the row was already
+            resolved/expired (a stale callback). A persistence error also yields
+            ``False`` so callers can detect that the decision was not durably
+            recorded.
         """
         if self._store is None:
-            return
+            return None
         try:
             from praisonaiagents.approval import ApprovalDecision
 
@@ -266,11 +274,12 @@ class PresentationApprovalHandler:
                 approver=approver,
                 metadata=metadata,
             )
-            await self._store.resolve(approval_id, decision)
+            return bool(await self._store.resolve(approval_id, decision))
         except asyncio.CancelledError:
             raise
         except Exception:
             logger.exception("Failed to record approval decision %s", approval_id)
+            return False
 
     async def rehydrate(self) -> int:
         """Re-hydrate outstanding pending approvals from the durable store.
@@ -300,6 +309,10 @@ class PresentationApprovalHandler:
                 "arguments": request.arguments,
                 "risk_level": request.risk_level,
                 "target": (request.context or {}).get("target"),
+                # Flag so handle_approval_command treats the durable store as
+                # the source of truth and ignores a stale tap on an already
+                # expired/resolved row.
+                "rehydrated": True,
             }
             self._approval_futures[approval_id] = loop.create_future()
             count += 1
@@ -460,22 +473,49 @@ class PresentationApprovalHandler:
             })
             return False
         
-        # Get approval context (single-use from here on)
-        context = self._pending_approvals.pop(approval_id)
-        future = self._approval_futures.pop(approval_id, None)
-        self._mark_resolved(approval_id)
-        
+        # Peek at context without committing to resolution yet. A rehydrated
+        # approval may already be expired/resolved in the durable store, in
+        # which case this is a stale tap and must not look handled.
+        context = self._pending_approvals[approval_id]
+        is_rehydrated = self._approval_futures.get(approval_id) is None or context.get(
+            "rehydrated", False
+        )
+
         # Create result
         result = {
             "approved": decision in ("allow", "always"),
             "reason": f"User clicked {decision} button",
             "modified_args": modified_args or {},
         }
-        
+
         # Add always-allow flag if applicable
         if decision == "always":
             result["always_allow"] = True
             result["reason"] = "User granted permanent approval for this tool"
+
+        # Record the decision durably (audit trail + survives the waiter).
+        # Default the durable approver to the resolving actor when not given.
+        recorded = await self._record_decision(
+            approval_id, result, approver=approver or actor
+        )
+
+        # For a rehydrated approval (no original waiter), the durable store is
+        # the source of truth. If resolve() matched no pending row (already
+        # expired/resolved), this is a stale tap: do not mark it handled, and
+        # leave state untouched so the audit trail stays accurate.
+        if recorded is False and is_rehydrated:
+            logger.warning(
+                "Ignoring stale callback for approval %s from actor '%s' "
+                "(durable row already resolved or expired)",
+                approval_id,
+                actor,
+            )
+            return False
+
+        # Commit the resolution (single-use from here on).
+        self._pending_approvals.pop(approval_id, None)
+        future = self._approval_futures.pop(approval_id, None)
+        self._mark_resolved(approval_id)
 
         # Record the resolution for audit (who/what/when/decision)
         self._audit_log.append({
@@ -487,12 +527,6 @@ class PresentationApprovalHandler:
             "authorized": True,
             "timestamp": time.time(),
         })
-
-        # Record the decision durably (audit trail + survives the waiter).
-        # Default the durable approver to the resolving actor when not given.
-        await self._record_decision(
-            approval_id, result, approver=approver or actor
-        )
 
         # Complete the future (may be absent after a restart re-hydration)
         if future is not None and not future.done():

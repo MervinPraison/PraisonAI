@@ -179,22 +179,37 @@ class ApprovalStore:
         with self._lock, closing(self._connect()) as conn:
             self._evict_expired_locked(conn)
             existing = conn.execute(
-                "SELECT status FROM pending_approvals WHERE approval_id = ?",
+                "SELECT status, request FROM pending_approvals WHERE approval_id = ?",
                 (approval_id,),
             ).fetchone()
-            if existing is not None and existing[0] != "pending":
-                # Never clobber a resolved/expired row — that would destroy the
-                # durable audit trail. A collision on a full UUID is effectively
-                # impossible; if it ever happens we keep the prior decision.
+            if existing is not None:
+                if existing[0] != "pending":
+                    # Never clobber a resolved/expired row — that would destroy
+                    # the durable audit trail. A collision on a full UUID is
+                    # effectively impossible; if it ever happens we keep the
+                    # prior decision.
+                    logger.warning(
+                        "Refusing to persist approval %s over resolved status %r",
+                        approval_id,
+                        existing[0],
+                    )
+                    return
+                # An active pending row already exists for this id. Treat an
+                # identical re-persist as idempotent (no-op), but refuse to
+                # overwrite a *different* request — replacing the original
+                # request/timestamp/expiry would let a reused id hijack the
+                # active prompt's window. Keep the original pending row intact.
+                if existing[1] == _serialize_request(request):
+                    return
                 logger.warning(
-                    "Refusing to persist approval %s over resolved status %r",
+                    "Refusing to overwrite active pending approval %s with a "
+                    "different request (duplicate/reused approval_id)",
                     approval_id,
-                    existing[0],
                 )
                 return
             conn.execute(
                 """
-                INSERT OR REPLACE INTO pending_approvals
+                INSERT INTO pending_approvals
                     (approval_id, ts, expires_at, request, status)
                 VALUES (?, ?, ?, ?, 'pending')
                 """,
