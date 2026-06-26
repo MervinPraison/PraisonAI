@@ -8,8 +8,14 @@ explicit inheritance (structural subtyping).
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, List, Optional, Protocol, Tuple, runtime_checkable
+
+
+def _new_approval_id() -> str:
+    """Generate a stable correlation id for an approval request."""
+    return uuid.uuid4().hex
 
 
 @dataclass
@@ -17,12 +23,15 @@ class ApprovalRequest:
     """Immutable request for tool-execution approval.
 
     Attributes:
-        tool_name:  Name of the tool requesting approval.
-        arguments:  Arguments the tool will be called with.
-        risk_level: Risk classification (critical / high / medium / low).
-        agent_name: Name of the agent that triggered the call (optional).
-        session_id: Session identifier for tracking (optional).
-        context:    Arbitrary context dict for backend-specific data.
+        tool_name:   Name of the tool requesting approval.
+        arguments:   Arguments the tool will be called with.
+        risk_level:  Risk classification (critical / high / medium / low).
+        agent_name:  Name of the agent that triggered the call (optional).
+        session_id:  Session identifier for tracking (optional).
+        context:     Arbitrary context dict for backend-specific data.
+        approval_id: Stable correlation id that survives a process restart
+                     and can be matched to an inbound channel callback.
+                     Auto-generated when not supplied.
     """
 
     tool_name: str
@@ -31,6 +40,7 @@ class ApprovalRequest:
     agent_name: Optional[str] = None
     session_id: Optional[str] = None
     context: Dict[str, Any] = field(default_factory=dict)
+    approval_id: str = field(default_factory=_new_approval_id)
 
 
 @dataclass
@@ -113,4 +123,47 @@ class ApprovalProtocol(Protocol):
         Returns:
             ApprovalDecision indicating whether execution is approved.
         """
+        ...
+
+
+@runtime_checkable
+class ApprovalStoreProtocol(Protocol):
+    """Protocol for durable persistence of pending approvals.
+
+    A store lets pending approvals survive a process restart: requests are
+    persisted with a stable ``approval_id``, outstanding ones are re-hydrated
+    on startup, and decisions are recorded as a durable audit trail.
+
+    Behaviour is unchanged when no store is configured — in-memory remains the
+    zero-dependency default.  Heavy backends (e.g. SQLite) live in the wrapper
+    package; this contract lives in core so any backend and any channel can
+    interoperate.
+
+    Example::
+
+        class MyStore:
+            async def persist(self, approval_id, request, *, expires_at):
+                ...
+            async def load_pending(self):
+                return []
+            async def resolve(self, approval_id, decision):
+                ...
+    """
+
+    async def persist(
+        self,
+        approval_id: str,
+        request: ApprovalRequest,
+        *,
+        expires_at: float,
+    ) -> None:
+        """Durably store a pending approval keyed by ``approval_id``."""
+        ...
+
+    async def load_pending(self) -> List[Tuple[str, ApprovalRequest]]:
+        """Return outstanding (un-resolved, un-expired) pending approvals."""
+        ...
+
+    async def resolve(self, approval_id: str, decision: ApprovalDecision) -> None:
+        """Record a final decision for ``approval_id`` as an audit trail."""
         ...

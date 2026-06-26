@@ -16,6 +16,7 @@ from typing import Any, Deque, Dict, Iterable, List, Optional, Set, TYPE_CHECKIN
 
 if TYPE_CHECKING:
     from praisonaiagents.bots.presentation import MessagePresentation
+    from praisonaiagents.approval import ApprovalStoreProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +26,25 @@ _DEFAULT_HISTORY_LIMIT = 1000
 
 
 class PresentationApprovalHandler:
-    """Handles tool approvals using interactive presentations."""
-    
-    def __init__(self, history_limit: int = _DEFAULT_HISTORY_LIMIT):
+    """Handles tool approvals using interactive presentations.
+
+    When an optional :class:`ApprovalStoreProtocol` backend is supplied, pending
+    approvals are persisted durably so they survive a process restart: a late
+    "Allow"/"Deny" tap that arrives after the restart still resolves, and every
+    decision is recorded as an audit trail.  Without a store the handler keeps
+    the original in-memory, zero-dependency behaviour.
+    """
+
+    def __init__(
+        self,
+        store: Optional["ApprovalStoreProtocol"] = None,
+        history_limit: int = _DEFAULT_HISTORY_LIMIT,
+    ):
         """Initialize the approval handler.
 
         Args:
+            store: Optional durable store implementing ``ApprovalStoreProtocol``.
+                   When ``None`` (default) pending approvals are in-memory only.
             history_limit: Maximum number of resolved approval ids and audit
                 entries to retain. Bounds memory for long-running bots; the
                 oldest entries are evicted once the limit is exceeded. Replay
@@ -39,6 +53,7 @@ class PresentationApprovalHandler:
         """
         self._pending_approvals: Dict[str, Dict[str, Any]] = {}
         self._approval_futures: Dict[str, asyncio.Future] = {}
+        self._store = store
         # Audit trail of resolved approvals for replay protection and
         # accountability. Records who resolved each approval, the decision,
         # and when. A resolved id is single-use: subsequent callbacks for it
@@ -63,7 +78,7 @@ class PresentationApprovalHandler:
         while len(self._resolved_order) > self._history_limit:
             oldest = self._resolved_order.popleft()
             self._resolved_ids.discard(oldest)
-    
+
     async def request_approval(
         self,
         tool_name: str,
@@ -73,6 +88,7 @@ class PresentationApprovalHandler:
         target: Optional[str] = None,
         timeout: float = 60.0,
         allowed_actors: Optional[Iterable[str]] = None,
+        approval_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Request approval for a tool execution using buttons.
         
@@ -89,14 +105,18 @@ class PresentationApprovalHandler:
                 only these actors may approve/deny; any other clicker is
                 rejected. When ``None``, any actor may resolve (legacy
                 behaviour, backward compatible).
-            
+            approval_id: Optional stable correlation id (auto-generated when
+                         omitted) used to match an inbound callback after a
+                         restart.
+
         Returns:
             Dict with 'approved' (bool), 'reason' (str), and 'modified_args' (dict)
         """
         from praisonaiagents.bots.presentation import MessagePresentation
         
-        # Generate unique approval ID
-        approval_id = str(uuid.uuid4())[:8]
+        # Generate unique approval ID (stable correlation id)
+        if approval_id is None:
+            approval_id = str(uuid.uuid4())[:8]
         
         # Normalize the authorized actor set (str-typed for cross-platform IDs)
         normalized_actors: Optional[Set[str]] = (
@@ -109,12 +129,18 @@ class PresentationApprovalHandler:
             "arguments": arguments,
             "risk_level": risk_level,
             "allowed_actors": normalized_actors,
+            "target": target,
         }
         
         # Create approval future
         future = asyncio.get_running_loop().create_future()
         self._approval_futures[approval_id] = future
-        
+
+        # Persist pending approval durably (survives restart) if a store exists
+        await self._persist_pending(
+            approval_id, tool_name, arguments, risk_level, target, timeout
+        )
+
         # Create approval presentation
         presentation = self._create_approval_presentation(
             approval_id, tool_name, arguments, risk_level
@@ -147,12 +173,100 @@ class PresentationApprovalHandler:
                 "approved": False,
                 "timestamp": time.time(),
             })
-            
-            return {
+
+            result = {
                 "approved": False,
                 "reason": f"Approval timed out after {timeout} seconds",
                 "modified_args": {},
             }
+            await self._record_decision(approval_id, result, approver="system")
+            return result
+
+    async def _persist_pending(
+        self,
+        approval_id: str,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        risk_level: str,
+        target: Optional[str],
+        timeout: float,
+    ) -> None:
+        """Persist a pending approval to the durable store, if configured."""
+        if self._store is None:
+            return
+        try:
+            from praisonaiagents.approval import ApprovalRequest
+
+            request = ApprovalRequest(
+                tool_name=tool_name,
+                arguments=arguments,
+                risk_level=risk_level,
+                context={"target": target} if target else {},
+                approval_id=approval_id,
+            )
+            await self._store.persist(
+                approval_id, request, expires_at=time.time() + timeout
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Failed to persist pending approval %s", approval_id)
+
+    async def _record_decision(
+        self,
+        approval_id: str,
+        result: Dict[str, Any],
+        approver: Optional[str] = None,
+    ) -> None:
+        """Record a resolved decision to the durable store, if configured."""
+        if self._store is None:
+            return
+        try:
+            from praisonaiagents.approval import ApprovalDecision
+
+            decision = ApprovalDecision(
+                approved=bool(result.get("approved")),
+                reason=result.get("reason", ""),
+                modified_args=result.get("modified_args", {}),
+                approver=approver,
+            )
+            await self._store.resolve(approval_id, decision)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Failed to record approval decision %s", approval_id)
+
+    async def rehydrate(self) -> int:
+        """Re-hydrate outstanding pending approvals from the durable store.
+
+        Called on startup so a late "Allow"/"Deny" tap that arrives after a
+        restart can still be resolved by :meth:`handle_approval_command`.
+
+        Returns:
+            Number of pending approvals re-hydrated.  ``0`` when no store is
+            configured.
+        """
+        if self._store is None:
+            return 0
+        count = 0
+        try:
+            pending = await self._store.load_pending()
+        except Exception:
+            logger.exception("Failed to load pending approvals from store")
+            return 0
+        loop = asyncio.get_running_loop()
+        for approval_id, request in pending:
+            if approval_id in self._pending_approvals:
+                continue
+            self._pending_approvals[approval_id] = {
+                "tool_name": request.tool_name,
+                "arguments": request.arguments,
+                "risk_level": request.risk_level,
+                "target": (request.context or {}).get("target"),
+            }
+            self._approval_futures[approval_id] = loop.create_future()
+            count += 1
+        return count
     
     def _create_approval_presentation(
         self,
@@ -259,6 +373,7 @@ class PresentationApprovalHandler:
         decision: str,
         modified_args: Optional[Dict[str, Any]] = None,
         actor: Optional[str] = None,
+        approver: Optional[str] = None,
     ) -> bool:
         """Handle an approval command from a button click.
         
@@ -270,6 +385,8 @@ class PresentationApprovalHandler:
                 was created with ``allowed_actors``, the actor must be a member
                 of that set or the callback is rejected (and the pending
                 approval is left intact for an authorized actor to resolve).
+            approver: Optional identity of who approved (for the durable audit
+                trail). Defaults to ``actor`` when omitted.
             
         Returns:
             True if handled, False if the approval is unknown, already
@@ -311,9 +428,6 @@ class PresentationApprovalHandler:
         future = self._approval_futures.pop(approval_id, None)
         self._mark_resolved(approval_id)
         
-        if not future:
-            return False
-        
         # Create result
         result = {
             "approved": decision in ("allow", "always"),
@@ -325,7 +439,7 @@ class PresentationApprovalHandler:
         if decision == "always":
             result["always_allow"] = True
             result["reason"] = "User granted permanent approval for this tool"
-        
+
         # Record the resolution for audit (who/what/when/decision)
         self._audit_log.append({
             "approval_id": approval_id,
@@ -336,9 +450,15 @@ class PresentationApprovalHandler:
             "authorized": True,
             "timestamp": time.time(),
         })
-        
-        # Complete the future
-        if not future.done():
+
+        # Record the decision durably (audit trail + survives the waiter).
+        # Default the durable approver to the resolving actor when not given.
+        await self._record_decision(
+            approval_id, result, approver=approver or actor
+        )
+
+        # Complete the future (may be absent after a restart re-hydration)
+        if future is not None and not future.done():
             future.set_result(result)
         
         return True
@@ -383,7 +503,12 @@ class PresentationApprovalHandler:
         return None
     
     def cleanup(self) -> None:
-        """Clean up pending approvals."""
+        """Clean up in-memory pending approvals.
+
+        In-memory futures are cancelled, but when a durable store is configured
+        the persisted pending rows remain on disk so a late tap after a restart
+        is still resolvable via :meth:`rehydrate`.
+        """
         # Cancel all pending futures
         for future in self._approval_futures.values():
             if not future.done():
@@ -397,9 +522,18 @@ class PresentationApprovalHandler:
 _global_handler = None
 
 
-def get_approval_handler() -> PresentationApprovalHandler:
-    """Get the global approval handler instance."""
+def get_approval_handler(
+    store: Optional["ApprovalStoreProtocol"] = None,
+) -> PresentationApprovalHandler:
+    """Get the global approval handler instance.
+
+    Args:
+        store: Optional durable store. Applied to the global handler when it is
+               first created, or attached to an existing handler that has none.
+    """
     global _global_handler
     if _global_handler is None:
-        _global_handler = PresentationApprovalHandler()
+        _global_handler = PresentationApprovalHandler(store=store)
+    elif store is not None and _global_handler._store is None:
+        _global_handler._store = store
     return _global_handler
