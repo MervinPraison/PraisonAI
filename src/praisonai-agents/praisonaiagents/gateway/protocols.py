@@ -1693,6 +1693,150 @@ class SendPolicy:
 
 
 # ---------------------------------------------------------------------------
+# Gateway idle-dormancy / scale-to-zero (Issue #2332)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class IdleDecision:
+    """Result of an idle/quiesce evaluation.
+
+    Attributes:
+        idle: Whether the gateway is currently quiescent.
+        reason: Optional human-readable explanation (logged on quiesce).
+    """
+
+    idle: bool
+    reason: str = ""
+
+
+@runtime_checkable
+class GatewayIdlePolicy(Protocol):
+    """Protocol for gateway-process idle/scale-to-zero decisions.
+
+    Pure, import-free decision contract consumed by the wrapper's
+    ``BotOS`` run-loop. The wrapper supplies live facts (running turns,
+    last inbound timestamp, background-work flag) and the policy decides
+    whether the whole gateway may safely stand down. Concrete drivers
+    (suspend the compute host, stand transports down, register a wake
+    URL) live in the wrapper; this contract keeps the *decision* testable
+    in isolation without a live gateway.
+
+    A config-driven default (:class:`ScaleToZeroPolicy`) is provided for
+    the common "idle for N minutes with nothing in flight" case.
+    """
+
+    def should_arm(
+        self,
+        *,
+        transports_quiescable: bool,
+        wake_registered: bool,
+    ) -> bool:
+        """Return whether dormancy may be armed at all.
+
+        Implementations gate on whether transports can be cleanly stood
+        down and a wake path exists, so a gateway never quiesces into a
+        state it cannot resume from.
+        """
+        ...
+
+    def is_idle(
+        self,
+        *,
+        running_turns: int,
+        last_inbound_ts: float,
+        has_background_work: bool,
+        now: float,
+    ) -> IdleDecision:
+        """Return an :class:`IdleDecision` for the supplied facts."""
+        ...
+
+
+class ScaleToZeroPolicy:
+    """Config-driven idle policy for safe scale-to-zero.
+
+    The default referenced by ``scale_to_zero:`` blocks in ``gateway.yaml``
+    and the ``BotOS(..., idle_policy=...)`` Python surface. It is
+    intentionally minimal and dependency-free so the decision lives in
+    core and is provable in isolation; the wrapper owns the side effects
+    (suspend host, stand transports down, wake endpoint).
+
+    The gateway is considered idle only when *all* guards pass:
+
+    * no in-flight agent turn (``running_turns == 0``),
+    * no live background work (scheduled jobs, delegated subagents,
+      durable outbox drains — ``has_background_work`` is ``False``),
+    * no inbound message for at least ``idle_timeout_minutes``.
+
+    Example::
+
+        ScaleToZeroPolicy(idle_timeout_minutes=5,
+                          wake_url="https://my-bot.fly.dev/_wake")
+    """
+
+    def __init__(
+        self,
+        idle_timeout_minutes: float = 5.0,
+        wake_url: Optional[str] = None,
+        enabled: bool = True,
+    ):
+        if idle_timeout_minutes <= 0:
+            raise ValueError(
+                f"idle_timeout_minutes must be > 0, got {idle_timeout_minutes!r}"
+            )
+        self.idle_timeout_minutes = float(idle_timeout_minutes)
+        self.wake_url = wake_url
+        self.enabled = bool(enabled)
+
+    @property
+    def idle_timeout_seconds(self) -> float:
+        return self.idle_timeout_minutes * 60.0
+
+    def should_arm(
+        self,
+        *,
+        transports_quiescable: bool,
+        wake_registered: bool,
+    ) -> bool:
+        if not self.enabled:
+            return False
+        # Never arm into a state we cannot resume from.
+        return bool(transports_quiescable and wake_registered)
+
+    def is_idle(
+        self,
+        *,
+        running_turns: int,
+        last_inbound_ts: float,
+        has_background_work: bool,
+        now: float,
+    ) -> IdleDecision:
+        if not self.enabled:
+            return IdleDecision(idle=False, reason="scale_to_zero disabled")
+        if running_turns > 0:
+            return IdleDecision(
+                idle=False,
+                reason=f"{running_turns} agent turn(s) in flight",
+            )
+        if has_background_work:
+            return IdleDecision(
+                idle=False,
+                reason="background work in progress",
+            )
+        elapsed = now - last_inbound_ts
+        if elapsed < self.idle_timeout_seconds:
+            remaining = self.idle_timeout_seconds - elapsed
+            return IdleDecision(
+                idle=False,
+                reason=f"last inbound {elapsed:.0f}s ago; {remaining:.0f}s to idle",
+            )
+        return IdleDecision(
+            idle=True,
+            reason=f"idle for {elapsed:.0f}s with nothing in flight",
+        )
+
+
+# ---------------------------------------------------------------------------
 # Protocol Version Negotiation (Issue #2130)
 # ---------------------------------------------------------------------------
 

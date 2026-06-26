@@ -77,10 +77,18 @@ class BotOS:
         identity_resolver: Optional[Any] = None,
         health_monitor: Optional[HealthMonitorConfig] = None,
         enable_supervision: bool = True,
+        idle_policy: Optional[Any] = None,
     ):
         self._bots: Dict[str, Bot] = {}
         self._is_running = False
         self._config = config
+        # Issue #2332: opt-in idle-dormancy / scale-to-zero. Default off —
+        # when None the gateway behaves exactly as before (always-on).
+        self._idle_policy = idle_policy
+        self._last_inbound_ts: float = time.time()
+        self._running_turns: int = 0
+        self._is_dormant: bool = False
+        self._on_quiesce = None  # optional callable(): host-suspend driver
         # W1: shared identity resolver applied to every managed bot —
         # gives cross-platform unified-user sessions out of the box.
         self._identity_resolver = identity_resolver
@@ -219,6 +227,15 @@ class BotOS:
         )
         self._tasks.append(schedule_task)
 
+        # Issue #2332: opt-in idle-dormancy loop. Only scheduled when an
+        # idle_policy is configured, so always-on gateways pay zero cost.
+        if self._idle_policy is not None:
+            idle_task = asyncio.create_task(
+                self._run_idle_loop(),
+                name="botos-idle",
+            )
+            self._tasks.append(idle_task)
+
         try:
             await asyncio.gather(*self._tasks, return_exceptions=True)
         except asyncio.CancelledError:
@@ -246,6 +263,127 @@ class BotOS:
                 await bot.start()
             except Exception as e:
                 logger.error(f"BotOS: {platform} failed: {e}")
+
+    # ── Idle-dormancy / scale-to-zero (Issue #2332) ─────────────────
+
+    def notify_inbound(self) -> None:
+        """Record an inbound message for idle tracking.
+
+        Resets the process-wide idle timer. Safe to call always — it is a
+        cheap timestamp write whether or not an idle policy is configured.
+        """
+        self._last_inbound_ts = time.time()
+
+    def turn_started(self) -> None:
+        """Mark an agent turn as in-flight (blocks dormancy)."""
+        self._running_turns += 1
+        self._last_inbound_ts = time.time()
+
+    def turn_finished(self) -> None:
+        """Mark an agent turn as complete."""
+        if self._running_turns > 0:
+            self._running_turns -= 1
+
+    def _has_background_work(self) -> bool:
+        """Whether live background work should block dormancy.
+
+        Conservative: any due scheduled job keeps the gateway awake so a
+        cron turn is never dropped by suspending mid-run.
+        """
+        try:
+            from praisonaiagents.tools.schedule_tools import _get_store
+            from praisonaiagents.scheduler import ScheduleRunner
+        except ImportError:
+            return False
+        try:
+            runner = ScheduleRunner(_get_store())
+            return bool(runner.get_due_jobs())
+        except Exception:
+            return False
+
+    async def wake(self) -> None:
+        """Resume the gateway from dormancy and reconnect transports.
+
+        Idempotent: a no-op when not dormant. Reuses ``HookAction.WAKE``
+        semantics — an inbound poke revives the process and reconnects
+        the messaging transports with session state preserved.
+        """
+        if not self._is_dormant:
+            return
+        logger.info("BotOS: waking from dormancy")
+        self._is_dormant = False
+        self.notify_inbound()
+        for platform, bot in self._bots.items():
+            try:
+                start = getattr(bot, "start", None)
+                if start is not None:
+                    task = asyncio.create_task(
+                        self._run_bot(platform, bot),
+                        name=f"botos-{platform}",
+                    )
+                    self._tasks.append(task)
+            except Exception as e:
+                logger.warning(f"BotOS: error waking {platform}: {e}")
+
+    async def _quiesce(self, reason: str) -> None:
+        """Stand transports down and signal the compute host to suspend."""
+        if self._is_dormant:
+            return
+        logger.info(f"BotOS: quiescing (scale-to-zero): {reason}")
+        self._is_dormant = True
+        for platform, bot in self._bots.items():
+            try:
+                stop = getattr(bot, "stop", None)
+                if stop is not None:
+                    await bot.stop()
+            except Exception as e:
+                logger.warning(f"BotOS: error quiescing {platform}: {e}")
+        # Drive the optional compute-host suspend (Fly/Modal/Daytona) only
+        # after transports are cleanly down, so no inbound is dropped.
+        if self._on_quiesce is not None:
+            try:
+                result = self._on_quiesce()
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception as e:
+                logger.warning(f"BotOS: on_quiesce driver error: {e}")
+
+    async def _run_idle_loop(self) -> None:
+        """Evaluate the idle policy and quiesce when fully idle.
+
+        Only scheduled when an ``idle_policy`` is configured. The policy
+        decision is a pure, core-side predicate; this loop supplies live
+        facts and owns the side effects.
+        """
+        policy = self._idle_policy
+        wake_url = getattr(policy, "wake_url", None)
+        # Arm gating: never quiesce into a state we cannot resume from.
+        if hasattr(policy, "should_arm"):
+            if not policy.should_arm(
+                transports_quiescable=True,
+                wake_registered=wake_url is not None,
+            ):
+                logger.info(
+                    "BotOS: idle policy not armed (no wake path); staying always-on"
+                )
+                return
+        logger.info("BotOS: idle-dormancy armed (scale-to-zero)")
+        while self._is_running:
+            await asyncio.sleep(30)
+            if self._is_dormant:
+                continue
+            try:
+                decision = policy.is_idle(
+                    running_turns=self._running_turns,
+                    last_inbound_ts=self._last_inbound_ts,
+                    has_background_work=self._has_background_work(),
+                    now=time.time(),
+                )
+            except Exception as e:
+                logger.debug(f"BotOS: idle evaluation error: {e}")
+                continue
+            if getattr(decision, "idle", False):
+                await self._quiesce(getattr(decision, "reason", ""))
 
     async def _run_schedule_loop(self) -> None:
         """Poll for due scheduled jobs and execute them.
