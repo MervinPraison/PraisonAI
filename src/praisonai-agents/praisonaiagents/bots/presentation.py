@@ -559,21 +559,13 @@ def _adapt_button(button: PresentationButton, limits: PresentationLimits) -> Pre
 
 REPLY_CALLBACK_PREFIX = "reply:"
 
-
-def _truncate_utf8(value: str, max_bytes: int) -> str:
-    """Truncate *value* so its UTF-8 encoding fits within *max_bytes*.
-
-    Trims on a character boundary (never splitting a multi-byte codepoint) so
-    the result stays a valid, decodable string.
-    """
-    if max_bytes <= 0:
-        return ""
-    encoded = value.encode("utf-8")
-    if len(encoded) <= max_bytes:
-        return value
-    truncated = encoded[:max_bytes]
-    # Drop any trailing partial multi-byte sequence.
-    return truncated.decode("utf-8", "ignore")
+# Marker prefixing a hashed (non-routable) reply payload. A reply value that
+# does not fit the channel callback byte-cap is encoded as
+# ``reply:#<digest>``. The ``#`` marker lets the inbound reply handler detect a
+# lossy payload and refuse to feed a corrupted/colliding value into the next
+# agent turn (see ``make_reply_handler``), rather than silently routing a
+# truncated prefix that two distinct choices could share.
+REPLY_HASH_MARKER = "#"
 
 
 def _encode_reply_callback(value: str) -> str:
@@ -582,16 +574,21 @@ def _encode_reply_callback(value: str) -> str:
     Produces ``reply:<value>`` so the inbound interactive registry can route
     the chosen value back into the next agent turn. The size check is measured
     in UTF-8 bytes because channel callback caps (e.g. Telegram's 64-byte cap)
-    are byte limits, not character limits. When the raw form exceeds
-    ``_MAX_CALLBACK_LEN`` the value is truncated to fit (on a character
-    boundary) so the routed value stays human/agent-readable rather than an
-    opaque digest the next turn cannot interpret.
+    are byte limits, not character limits.
+
+    When the raw form exceeds ``_MAX_CALLBACK_LEN`` the value is replaced with a
+    short, collision-resistant hash marked with ``#`` (``reply:#<digest>``).
+    Truncating to a prefix was unsafe: two long choices sharing a prefix would
+    collapse to the same payload, and the agent would receive a value it never
+    authored. The hash keeps distinct choices distinct; the marker lets the
+    reply handler recognise that the original value could not be carried inline
+    and avoid routing a lossy value into the turn.
     """
     raw = f"{REPLY_CALLBACK_PREFIX}{value}"
     if len(raw.encode("utf-8")) <= _MAX_CALLBACK_LEN:
         return raw
-    budget = _MAX_CALLBACK_LEN - len(REPLY_CALLBACK_PREFIX.encode("utf-8"))
-    return f"{REPLY_CALLBACK_PREFIX}{_truncate_utf8(value, budget)}"
+    digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
+    return f"{REPLY_CALLBACK_PREFIX}{REPLY_HASH_MARKER}{digest}"
 
 
 def _encode_select_callback(action_id: str, value: str) -> str:

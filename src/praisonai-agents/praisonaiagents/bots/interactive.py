@@ -53,6 +53,14 @@ InteractiveAuthorizer = Callable[[InteractiveContext], bool]
 
 REPLY_NAMESPACE = "reply"
 
+# Marker prefixing a hashed (non-routable) reply value. Mirrors
+# ``presentation.REPLY_HASH_MARKER``; kept local so the inbound handler does not
+# import the (heavier) render module. When an agent reply value is too long for
+# the channel callback byte-cap, the encoder emits ``reply:#<digest>`` instead
+# of a lossy prefix; the handler detects this marker and declines to route a
+# value the agent never authored.
+_REPLY_HASH_MARKER = "#"
+
 
 def make_reply_handler(
     continue_turn: Callable[[str, "InteractiveContext"], Awaitable[Optional[str]]],
@@ -83,6 +91,15 @@ def make_reply_handler(
             if data.startswith(f"{REPLY_NAMESPACE}:"):
                 value = data[len(REPLY_NAMESPACE) + 1:]
         if value is None:
+            return None
+        if value.startswith(_REPLY_HASH_MARKER):
+            # The original value was too long for the channel callback byte-cap
+            # and was hashed for transport. Feeding the digest into the turn
+            # would route a value the agent never authored, so decline instead.
+            logger.warning(
+                "Reply value exceeded the channel callback limit and could not "
+                "be routed; keep quick-reply values short enough to fit the cap."
+            )
             return None
         return await continue_turn(value, context)
 

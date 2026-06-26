@@ -78,16 +78,32 @@ def test_adapt_reply_callback_respects_length_cap():
     ])
     adapted = adapt_presentation(p, PresentationLimits.telegram())
     val = adapted.blocks[0].buttons[0].action.value
-    # Cap is a byte limit, and the truncated value stays routable (a prefix of
-    # the original) rather than an opaque digest.
+    # Cap is a byte limit; an over-cap value becomes a collision-resistant hash
+    # marked with ``#`` (not a lossy prefix) so distinct choices stay distinct.
     assert len(val.encode("utf-8")) <= 64
-    assert val.startswith("reply:")
-    assert val[len("reply:"):] == "x" * (len(val) - len("reply:"))
+    assert val.startswith("reply:#")
+
+
+def test_adapt_long_replies_do_not_collide():
+    # Two distinct long values that share a prefix must NOT collapse to the same
+    # callback payload (the prefix-truncation bug). Hashing keeps them distinct.
+    a = "shared-prefix-" + "a" * 200
+    b = "shared-prefix-" + "b" * 200
+    p = MessagePresentation([
+        PresentationBlock.make_buttons([
+            PresentationButton(label="A", action=PresentationAction.reply(a)),
+            PresentationButton(label="B", action=PresentationAction.reply(b)),
+        ])
+    ])
+    adapted = adapt_presentation(p, PresentationLimits.telegram())
+    va = adapted.blocks[0].buttons[0].action.value
+    vb = adapted.blocks[0].buttons[1].action.value
+    assert va != vb
 
 
 def test_adapt_reply_callback_byte_cap_with_non_ascii():
     # Non-ASCII values can stay under 64 *chars* yet exceed 64 *bytes*; the
-    # cap must be enforced in UTF-8 bytes and never split a codepoint.
+    # cap must be enforced in UTF-8 bytes.
     value = "é" * 40  # 40 chars, 80 bytes
     p = MessagePresentation([
         PresentationBlock.make_buttons([
@@ -97,9 +113,25 @@ def test_adapt_reply_callback_byte_cap_with_non_ascii():
     adapted = adapt_presentation(p, PresentationLimits.telegram())
     val = adapted.blocks[0].buttons[0].action.value
     assert len(val.encode("utf-8")) <= 64
-    # Decodes cleanly (no split multi-byte sequence) and stays a value prefix.
-    assert val.startswith("reply:")
-    assert "é".startswith(val[len("reply:"):len("reply:") + 1]) or val[len("reply:"):] == ""
+    # Over-cap -> hashed marker form, which is pure ASCII (no split codepoint).
+    assert val.startswith("reply:#")
+
+
+def test_reply_handler_declines_hashed_value():
+    # A hashed (non-routable) reply value must NOT be fed into the turn — the
+    # agent never authored the digest. The handler declines instead.
+    called = {"hit": False}
+
+    async def continue_turn(value, context):
+        called["hit"] = True
+        return "should not run"
+
+    registry = create_registry()
+    registry.register(REPLY_NAMESPACE, make_reply_handler(continue_turn))
+    ctx = InteractiveContext(callback_data="reply:#deadbeefdeadbeef", user_id="u1")
+    handled = asyncio.run(registry.dispatch(ctx))
+    assert handled is False
+    assert called["hit"] is False
 
 
 def test_encode_empty_string_reply_preserved():
