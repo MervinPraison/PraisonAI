@@ -488,6 +488,111 @@ class TestLSPDiagnostics:
         assert "Success" in result
         assert "Diagnostics" in result
 
+    def test_lsp_unpublished_falls_back_to_checker(self, tmp_path, monkeypatch):
+        # Regression: when an installed server starts/opens but never publishes
+        # diagnostics within the budget (still indexing, debounced, or URI
+        # mismatch), the LSP path must return None (not "") so the legacy
+        # checker still runs and surfaces a real syntax error rather than
+        # reporting a false all-clear.
+        import asyncio
+        from praisonaiagents.tools import edit_tools as et
+
+        editor = EditTools(post_edit_diagnostics="auto")
+
+        class _FakeClient:
+            def __init__(self, *a, **k):
+                self.config = type("C", (), {"timeout": 5})()
+                self._diagnostics = {}  # server never publishes
+
+            async def start(self):
+                return True
+
+            async def open_document(self, path):
+                return True
+
+            async def get_diagnostics(self, path):
+                return []
+
+            async def close_document(self, path):
+                return None
+
+            async def stop(self):
+                return None
+
+        monkeypatch.setattr(et, "_DIAGNOSTICS_TIMEOUT", 0.3, raising=False)
+        import shutil
+        monkeypatch.setattr(shutil, "which",
+                            lambda cmd: "/usr/bin/" + cmd, raising=False)
+        monkeypatch.setattr(
+            "praisonaiagents.lsp.config.DEFAULT_SERVERS",
+            {"python": {"command": "pyright-langserver", "args": []}},
+            raising=False,
+        )
+        monkeypatch.setattr(
+            "praisonaiagents.lsp.client.LSPClient", _FakeClient, raising=False
+        )
+
+        # No running loop -> the sync path uses asyncio.run; force fresh loop.
+        try:
+            asyncio.get_running_loop()
+            pytest.skip("running loop present; sync LSP path not exercised")
+        except RuntimeError:
+            pass
+
+        block = editor._try_lsp_diagnostics(str(tmp_path / "broken.py"), "broken.py")
+        assert block is None  # unpublished -> fall back, not a false all-clear
+
+    def test_lsp_clean_publish_is_authoritative(self, tmp_path, monkeypatch):
+        # A genuine clean publish ([]) returns "" in auto mode and does NOT
+        # redundantly run the subprocess checker.
+        import asyncio
+        from praisonaiagents.tools import edit_tools as et
+
+        editor = EditTools(post_edit_diagnostics="auto")
+        uri_holder = {}
+
+        class _FakeClient:
+            def __init__(self, *a, **k):
+                self.config = type("C", (), {"timeout": 5})()
+                self._diagnostics = uri_holder
+
+            async def start(self):
+                return True
+
+            async def open_document(self, path):
+                uri_holder[f"file://{os.path.abspath(path)}"] = []
+                return True
+
+            async def get_diagnostics(self, path):
+                return []
+
+            async def close_document(self, path):
+                return None
+
+            async def stop(self):
+                return None
+
+        import shutil
+        monkeypatch.setattr(shutil, "which",
+                            lambda cmd: "/usr/bin/" + cmd, raising=False)
+        monkeypatch.setattr(
+            "praisonaiagents.lsp.config.DEFAULT_SERVERS",
+            {"python": {"command": "pyright-langserver", "args": []}},
+            raising=False,
+        )
+        monkeypatch.setattr(
+            "praisonaiagents.lsp.client.LSPClient", _FakeClient, raising=False
+        )
+
+        try:
+            asyncio.get_running_loop()
+            pytest.skip("running loop present; sync LSP path not exercised")
+        except RuntimeError:
+            pass
+
+        block = editor._try_lsp_diagnostics(str(tmp_path / "ok.py"), "ok.py")
+        assert block == ""  # published-and-clean -> authoritative all-clear
+
 
 class TestAutomaticStaleness:
     def test_edit_aborts_when_changed_after_read(self, tools, tmp_path):

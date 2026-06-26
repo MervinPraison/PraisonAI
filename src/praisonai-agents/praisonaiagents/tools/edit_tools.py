@@ -287,12 +287,23 @@ class EditTools:
                     return None
                 # Diagnostics arrive asynchronously via publishDiagnostics; poll
                 # briefly within the timeout budget for the server to report.
-                deadline = asyncio.get_event_loop().time() + _DIAGNOSTICS_TIMEOUT
-                diags: list = []
-                while asyncio.get_event_loop().time() < deadline:
+                # ``get_diagnostics`` returns ``[]`` both before any publish and
+                # after a clean publish, so also watch the client's diagnostics
+                # store keyed by URI to tell "not reported yet" from "reported,
+                # no problems" — that lets a clean file return promptly instead
+                # of sleeping the full timeout, and distinguishes a real
+                # all-clear (``[]``) from "never published" (``None``) so the
+                # caller can fall back to the legacy checker only in the latter.
+                loop = asyncio.get_event_loop()
+                uri = f"file://{os.path.abspath(safe_path)}"
+                published = getattr(client, "_diagnostics", None)
+                deadline = loop.time() + _DIAGNOSTICS_TIMEOUT
+                diags: Optional[list] = None
+                while loop.time() < deadline:
                     diags = await client.get_diagnostics(safe_path)
-                    if diags:
+                    if diags or (isinstance(published, dict) and uri in published):
                         break
+                    diags = None
                     await asyncio.sleep(0.2)
                 return diags
             finally:
