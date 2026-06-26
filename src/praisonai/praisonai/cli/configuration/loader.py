@@ -236,6 +236,11 @@ class ConfigLoader:
     """
     
     def __init__(self, project_root: Optional[Path] = None):
+        # Remember whether the caller pinned an explicit root. When they did,
+        # config resolution stays anchored to that single root; otherwise we
+        # let get_config_paths() walk the cwd→project-root ancestor chain so
+        # nested .praison/config.toml files are merged (nearest wins).
+        self._explicit_root = project_root
         self.project_root = project_root or find_project_root() or Path.cwd()
         self._config: Optional[ConfigSchema] = None
         self._raw_config: Dict[str, Any] = {}
@@ -249,7 +254,7 @@ class ConfigLoader:
         merged = DEFAULT_CONFIG.to_dict()
         
         # Load config files in reverse precedence order
-        config_paths = get_config_paths(self.project_root)
+        config_paths = get_config_paths(self._explicit_root)
         for path in reversed(config_paths):
             try:
                 file_config = _load_toml(path)

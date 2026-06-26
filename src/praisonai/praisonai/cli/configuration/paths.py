@@ -10,9 +10,26 @@ from typing import List, Optional
 
 
 # Directory markers that identify a PraisonAI project root.
+# Order matters: the first existing marker is used as the config directory
+# so that detection and config read/write stay aligned.
 _PROJECT_MARKERS = (".praison", ".praisonai")
+# Default config directory name used when no marker exists yet.
+_DEFAULT_CONFIG_DIRNAME = ".praison"
 # VCS markers used as a fallback when no project config dir is present.
 _VCS_MARKERS = (".git",)
+
+
+def _config_dirname_for(root: Path) -> str:
+    """Return the config directory name to use under ``root``.
+
+    Prefers an existing project marker directory so that a repo created with
+    ``.praisonai`` reads and writes config from the same directory it was
+    detected by, rather than silently switching to ``.praison``.
+    """
+    for marker in _PROJECT_MARKERS:
+        if (root / marker).is_dir():
+            return marker
+    return _DEFAULT_CONFIG_DIRNAME
 
 
 def find_project_root(start: Optional[Path] = None) -> Optional[Path]:
@@ -31,7 +48,15 @@ def find_project_root(start: Optional[Path] = None) -> Optional[Path]:
     """
     override = os.environ.get("PRAISONAI_PROJECT")
     if override:
-        return Path(override).expanduser().resolve()
+        try:
+            override_path = Path(override).expanduser().resolve()
+        except (OSError, ValueError):
+            override_path = None
+        # Only honour an override that points to an existing directory;
+        # an invalid value falls through to normal discovery rather than
+        # aborting or anchoring config writes to a bogus path.
+        if override_path is not None and override_path.is_dir():
+            return override_path
 
     try:
         cur = (start or Path.cwd()).resolve()
@@ -65,7 +90,7 @@ def get_project_config_dir(project_root: Optional[Path] = None) -> Path:
     project marker is present.
     """
     root = project_root or find_project_root() or Path.cwd()
-    return root / ".praison"
+    return root / _config_dirname_for(root)
 
 
 def get_project_config_path(project_root: Optional[Path] = None) -> Path:
@@ -119,9 +144,11 @@ def get_config_paths(project_root: Optional[Path] = None) -> List[Path]:
 
     # Project configs (highest precedence), nearest-to-cwd first.
     for root in roots:
-        project_config = (root / ".praison" / "config.toml")
-        resolved = project_config.resolve() if project_config.exists() else None
-        if resolved and resolved not in seen and project_config.exists():
+        project_config = (root / _config_dirname_for(root) / "config.toml")
+        if not project_config.exists():
+            continue
+        resolved = project_config.resolve()
+        if resolved not in seen:
             seen.add(resolved)
             paths.append(project_config)
 
@@ -141,11 +168,21 @@ def _project_config_search_roots() -> List[Path]:
         return []
 
     project_root = find_project_root(cur)
+    # No project marker anywhere above cwd: don't walk to the filesystem
+    # root, otherwise an unrelated ancestor's .praison/config.toml would be
+    # picked up with higher precedence than the user config.
+    if project_root is None:
+        return [cur]
+
     roots: List[Path] = []
     for d in (cur, *cur.parents):
         roots.append(d)
-        if project_root is not None and d == project_root:
+        if d == project_root:
             break
+    else:
+        # project_root is outside the cwd ancestry (e.g. PRAISONAI_PROJECT
+        # override pointing elsewhere): honour it explicitly.
+        roots.append(project_root)
     return roots
 
 
