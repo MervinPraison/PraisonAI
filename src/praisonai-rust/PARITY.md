@@ -1,16 +1,16 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 388 | **Rust Features:** 667 | **Parity:** 74.2%
+> **Python Features:** 392 | **Rust Features:** 667 | **Parity:** 73.5%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 388 |
+| Python Core Features | 392 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **100** |
+| **Actual Gap Count** | **104** |
 | Language Limitations (N/A) | 5 |
-| **Parity** | **74.2%** |
+| **Parity** | **73.5%** |
 
 ## Implemented Features
 
@@ -698,6 +698,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `AGGRESSIVE_POLICY`
 - ❌ `AgentMessageEvent`
 - ❌ `AgentRunOutcome`
+- ❌ `AgentRuntimeProtocol`
 - ❌ `AsyncLearnProtocol`
 - ❌ `AutoApproveBackend`
 - ❌ `AutoMemory`
@@ -780,13 +781,16 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `if_`
 - ❌ `include`
 - ❌ `list_memory_adapters`
+- ❌ `list_runtimes`
 - ❌ `list_toolsets`
 - ❌ `load_skill`
 - ❌ `parallel_handoffs`
 - ❌ `register_memory_adapter`
 - ❌ `register_memory_factory`
+- ❌ `register_runtime`
 - ❌ `register_tool`
 - ❌ `register_toolset`
+- ❌ `resolve_runtime`
 - ❌ `resolve_toolset`
 - ❌ `resolve_toolsets`
 - ❌ `unregister_toolset`

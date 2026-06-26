@@ -7,14 +7,14 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 388 |
+| Python Core Features | 392 |
 | Python Wrapper Features | 100 |
 | TypeScript Features | 1190 |
-| **Gap Count** | **95** |
+| **Gap Count** | **99** |
 | P0 (Critical) | 2 |
 | P1 (High) | 5 |
 | P2 (Medium) | 6 |
-| P3 (Low) | 82 |
+| P3 (Low) | 86 |
 
 ## Gap Matrix
 
@@ -159,7 +159,7 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (180 done, 82 todo)
+### P3_Advanced (180 done, 86 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -167,6 +167,7 @@
 | `AGGRESSIVE\_POLICY` | ✅ | ❌ | low | ⏳ TODO |
 | `AgentMessageEvent` | ✅ | ❌ | high | ⏳ TODO |
 | `AgentRunOutcome` | ✅ | ❌ | high | ⏳ TODO |
+| `AgentRuntimeProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `AsyncLearnProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `AutoApproveBackend` | ✅ | ❌ | high | ⏳ TODO |
 | `BALANCED\_POLICY` | ✅ | ❌ | low | ⏳ TODO |
@@ -237,10 +238,13 @@
 | `has\_memory\_adapter` | ✅ | ❌ | low | ⏳ TODO |
 | `has\_toolset` | ✅ | ❌ | low | ⏳ TODO |
 | `list\_memory\_adapters` | ✅ | ❌ | low | ⏳ TODO |
+| `list\_runtimes` | ✅ | ❌ | low | ⏳ TODO |
 | `list\_toolsets` | ✅ | ❌ | low | ⏳ TODO |
 | `register\_memory\_adapter` | ✅ | ❌ | low | ⏳ TODO |
 | `register\_memory\_factory` | ✅ | ❌ | low | ⏳ TODO |
+| `register\_runtime` | ✅ | ❌ | low | ⏳ TODO |
 | `register\_toolset` | ✅ | ❌ | low | ⏳ TODO |
+| `resolve\_runtime` | ✅ | ❌ | low | ⏳ TODO |
 | `resolve\_toolset` | ✅ | ❌ | low | ⏳ TODO |
 | `resolve\_toolsets` | ✅ | ❌ | low | ⏳ TODO |
 | `unregister\_toolset` | ✅ | ❌ | low | ⏳ TODO |
@@ -584,10 +588,10 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (87 exports)</summary>
+<summary><strong>other</strong> (91 exports)</summary>
 
 ```python
-from praisonaiagents import AGGRESSIVE_POLICY, AgentMessageEvent, AgentRunOutcome, Agents, AsyncLearnProtocol, AutoMemory, AutonomyConfig, BALANCED_POLICY, BackendNotAvailableError, BudgetExceededError...
+from praisonaiagents import AGGRESSIVE_POLICY, AgentMessageEvent, AgentRunOutcome, AgentRuntimeProtocol, Agents, AsyncLearnProtocol, AutoMemory, AutonomyConfig, BALANCED_POLICY, BackendNotAvailableError...
 ```
 
 </details>

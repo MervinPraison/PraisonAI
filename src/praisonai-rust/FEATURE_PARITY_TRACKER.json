@@ -5,10 +5,10 @@
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 388,
+    "pythonCoreFeatures": 392,
     "rustFeatures": 667,
-    "gapCount": 106,
-    "parityPercentage": 171.9
+    "gapCount": 110,
+    "parityPercentage": 170.2
   },
   "pythonCoreSDK": {
     "exports": [
@@ -27,6 +27,7 @@
       "AgentOSProtocol",
       "AgentPluginProtocol",
       "AgentRunOutcome",
+      "AgentRuntimeProtocol",
       "AgentTeam",
       "Agents",
       "ApprovalCallback",
@@ -350,6 +351,7 @@
       "is_path_like",
       "is_policy_string",
       "list_memory_adapters",
+      "list_runtimes",
       "list_toolsets",
       "load_plugin",
       "load_skill",
@@ -364,6 +366,7 @@
       "register_display_callback",
       "register_memory_adapter",
       "register_memory_factory",
+      "register_runtime",
       "register_tool",
       "register_toolset",
       "repeat",
@@ -381,6 +384,7 @@
       "resolve_planning",
       "resolve_reflection",
       "resolve_routing",
+      "resolve_runtime",
       "resolve_skills",
       "resolve_toolset",
       "resolve_toolsets",
@@ -3090,6 +3094,15 @@
         "category": "other"
       },
       {
+        "feature": "AgentRuntimeProtocol",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "medium",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "AgentTeam",
         "python": true,
         "rust": true,
@@ -4998,6 +5011,15 @@
         "category": "other"
       },
       {
+        "feature": "list_runtimes",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "list_toolsets",
         "python": true,
         "rust": false,
@@ -5071,6 +5093,15 @@
       },
       {
         "feature": "register_memory_factory",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
+        "feature": "register_runtime",
         "python": true,
         "rust": false,
         "priority": "P3",
@@ -5212,6 +5243,15 @@
         "effort": "low",
         "status": "DONE",
         "category": "config"
+      },
+      {
+        "feature": "resolve_runtime",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "low",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "resolve_skills",
