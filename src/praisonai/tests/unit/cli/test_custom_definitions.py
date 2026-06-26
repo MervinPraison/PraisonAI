@@ -245,6 +245,22 @@ class TestShellSubstitution:
         with pytest.raises(ShellSubstitutionError):
             TemplateInterpolator.interpolate(template, allow_shell=True)
 
+    def test_shell_output_capped_at_max_bytes(self):
+        """Large stdout is bounded to SHELL_SUBSTITUTION_MAX_BYTES while reading."""
+        from praisonai.cli.features.custom_definitions import (
+            SHELL_SUBSTITUTION_MAX_BYTES,
+        )
+
+        # Emit far more than the cap; the command would buffer unbounded memory
+        # if the limit were only applied after the process completes.
+        template = (
+            "!`yes A | head -c "
+            f"{SHELL_SUBSTITUTION_MAX_BYTES * 4}`"
+        )
+        result = TemplateInterpolator.interpolate(template, allow_shell=True)
+        assert len(result.encode("utf-8")) <= SHELL_SUBSTITUTION_MAX_BYTES
+        assert result  # non-empty: some output was captured
+
     def test_dollar_substitution_still_escaped_when_shell_enabled(self):
         """$(...) is still escaped even with allow_shell=True (only !`cmd` runs)."""
         template = "Run: $(rm -rf /) and !`echo ok`"

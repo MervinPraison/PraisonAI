@@ -14,6 +14,7 @@ import os
 import re
 import secrets
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -547,40 +548,99 @@ class TemplateInterpolator:
 
     @staticmethod
     def _run_shell_command(command: str, cwd: Optional[str]) -> str:
-        """Run a single ``!`cmd``` and return its bounded stdout."""
+        """Run a single ``!`cmd``` and return its bounded stdout.
+
+        stdout is read incrementally and capped at
+        ``SHELL_SUBSTITUTION_MAX_BYTES`` *while* reading, so a noisy command
+        cannot buffer unbounded output in memory before the cap is applied.
+        The process is killed once the cap is reached and a wall-clock timeout
+        still bounds total runtime.
+        """
         try:
-            completed = subprocess.run(
+            process = subprocess.Popen(
                 command,
                 shell=True,
                 cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=SHELL_SUBSTITUTION_TIMEOUT,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
             )
-        except subprocess.TimeoutExpired as exc:
-            raise ShellSubstitutionError(
-                f"Shell substitution timed out after "
-                f"{SHELL_SUBSTITUTION_TIMEOUT}s: {command!r}"
-            ) from exc
         except OSError as exc:
             raise ShellSubstitutionError(
                 f"Failed to run shell substitution {command!r}: {exc}"
             ) from exc
 
-        if completed.returncode != 0:
-            stderr = (completed.stderr or "").strip()
+        deadline = time.monotonic() + SHELL_SUBSTITUTION_TIMEOUT
+        collected = bytearray()
+        capped = False
+        assert process.stdout is not None
+        try:
+            os.set_blocking(process.stdout.fileno(), False)
+            while True:
+                if time.monotonic() > deadline:
+                    TemplateInterpolator._kill_process(process)
+                    raise ShellSubstitutionError(
+                        f"Shell substitution timed out after "
+                        f"{SHELL_SUBSTITUTION_TIMEOUT}s: {command!r}"
+                    )
+
+                chunk = process.stdout.read(8192)
+                if chunk:
+                    remaining = SHELL_SUBSTITUTION_MAX_BYTES - len(collected)
+                    collected.extend(chunk[:remaining])
+                    if len(collected) >= SHELL_SUBSTITUTION_MAX_BYTES:
+                        # Cap reached: stop reading and terminate the producer.
+                        # Treat this as success-with-truncation rather than a
+                        # failure, since the kill is our own doing.
+                        capped = True
+                        TemplateInterpolator._kill_process(process)
+                        break
+                elif process.poll() is not None:
+                    # No data and process exited: drain any final bytes.
+                    tail = process.stdout.read()
+                    if tail:
+                        remaining = SHELL_SUBSTITUTION_MAX_BYTES - len(collected)
+                        collected.extend(tail[:remaining])
+                        if len(collected) >= SHELL_SUBSTITUTION_MAX_BYTES:
+                            capped = True
+                    break
+                else:
+                    time.sleep(0.01)
+        finally:
+            try:
+                process.stdout.close()
+            except OSError:
+                pass
+
+        returncode = process.wait()
+        if returncode != 0 and not capped:
+            try:
+                stderr = (process.stderr.read() or b"").decode(
+                    "utf-8", errors="replace"
+                ).strip()
+            except (OSError, AttributeError):
+                stderr = ""
+            finally:
+                if process.stderr is not None:
+                    process.stderr.close()
             raise ShellSubstitutionError(
                 f"Shell substitution {command!r} exited with "
-                f"{completed.returncode}: {stderr}"
+                f"{returncode}: {stderr}"
             )
 
-        output = completed.stdout or ""
-        encoded = output.encode("utf-8", errors="replace")
-        if len(encoded) > SHELL_SUBSTITUTION_MAX_BYTES:
-            output = encoded[:SHELL_SUBSTITUTION_MAX_BYTES].decode(
-                "utf-8", errors="replace"
-            )
+        if process.stderr is not None:
+            process.stderr.close()
+
+        output = bytes(collected).decode("utf-8", errors="replace")
         return output.rstrip("\n")
+
+    @staticmethod
+    def _kill_process(process: "subprocess.Popen") -> None:
+        """Terminate a runaway shell-substitution process, best-effort."""
+        try:
+            process.kill()
+            process.wait(timeout=5)
+        except Exception:
+            pass
 
     @staticmethod
     def _extract_shell(
