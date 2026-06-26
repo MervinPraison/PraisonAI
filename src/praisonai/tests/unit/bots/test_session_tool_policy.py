@@ -86,6 +86,86 @@ async def test_trusted_route_gets_full_toolset():
 
 
 @pytest.mark.asyncio
+async def test_staged_policy_scopes_when_chat_arg_absent():
+    # Discord/Slack routed handlers can't thread tool_policy through the
+    # adapter's own chat() call, so they stage it on the session instead.
+    tools = [_named("run_shell"), _named("web_search"), _named("delete_file")]
+    agent = FakeAgent(tools)
+    original = list(agent.tools)
+
+    policy = RouteBinding(agent="a", trust="untrusted").tool_policy()
+    mgr = BotSessionManager(platform="discord")
+    mgr.set_pending_tool_policy(agent, policy)
+
+    # No explicit tool_policy arg — the staged policy must apply.
+    await mgr.chat(agent, "stranger", "hello")
+
+    seen = [t.__name__ for t in agent.tools_seen_during_chat]
+    assert "web_search" in seen
+    assert "run_shell" not in seen
+    assert "delete_file" not in seen
+    assert agent.tools == original
+
+
+@pytest.mark.asyncio
+async def test_staged_policy_consumed_once_then_cleared():
+    tools = [_named("run_shell"), _named("web_search")]
+    agent = FakeAgent(tools)
+
+    policy = RouteBinding(agent="a", trust="untrusted").tool_policy()
+    mgr = BotSessionManager(platform="discord")
+    mgr.set_pending_tool_policy(agent, policy)
+
+    # First turn: staged untrusted scope applies.
+    await mgr.chat(agent, "stranger", "hi")
+    assert "run_shell" not in [t.__name__ for t in agent.tools_seen_during_chat]
+
+    # Second turn with nothing staged: full toolset, no stale leak.
+    await mgr.chat(agent, "stranger", "again")
+    assert "run_shell" in [t.__name__ for t in agent.tools_seen_during_chat]
+
+
+@pytest.mark.asyncio
+async def test_explicit_policy_wins_over_staged_policy():
+    # An explicit (non-None) tool_policy argument takes precedence over a
+    # staged one; the staged policy is still consumed so it can't leak later.
+    tools = [_named("run_shell"), _named("web_search"), _named("delete_file")]
+    agent = FakeAgent(tools)
+
+    # Stage an allow-only "web_search" policy, but pass an explicit untrusted
+    # one — the explicit argument must win for this turn.
+    staged = RouteBinding(agent="a", allow_tools=["web_search"]).tool_policy()
+    explicit = RouteBinding(agent="a", trust="untrusted").tool_policy()
+    mgr = BotSessionManager(platform="discord")
+    mgr.set_pending_tool_policy(agent, staged)
+
+    await mgr.chat(agent, "operator", "do it", tool_policy=explicit)
+    seen = [t.__name__ for t in agent.tools_seen_during_chat]
+    # Explicit untrusted scope removed run_shell/delete_file but kept web_search.
+    assert seen == ["web_search"]
+
+    # Staged policy was consumed (not left dangling), so a later unstaged turn
+    # with no explicit policy is the full toolset.
+    await mgr.chat(agent, "operator", "more")
+    assert "run_shell" in [t.__name__ for t in agent.tools_seen_during_chat]
+
+
+@pytest.mark.asyncio
+async def test_staged_untrusted_not_bypassed_by_implicit_none():
+    # Fail-closed: a routed turn that stages an untrusted policy must NOT fall
+    # through to the full toolset just because no explicit policy is passed.
+    tools = [_named("run_shell"), _named("web_search")]
+    agent = FakeAgent(tools)
+
+    untrusted = RouteBinding(agent="a", trust="untrusted").tool_policy()
+    mgr = BotSessionManager(platform="discord")
+    mgr.set_pending_tool_policy(agent, untrusted)
+
+    await mgr.chat(agent, "stranger", "do it")
+    assert "run_shell" not in [t.__name__ for t in agent.tools_seen_during_chat]
+
+
+@pytest.mark.asyncio
 async def test_tools_restored_even_when_chat_raises():
     class BoomAgent(FakeAgent):
         def chat(self, prompt):
