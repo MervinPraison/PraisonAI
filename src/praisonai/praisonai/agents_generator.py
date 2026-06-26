@@ -4,6 +4,7 @@ import sys
 import os
 import inspect
 import logging
+import threading
 import re
 import keyword
 import difflib
@@ -17,6 +18,8 @@ from .version import __version__
 # Import new architecture components
 from .framework_adapters.base import FrameworkAdapter
 from .framework_adapters.registry import FrameworkAdapterRegistry, get_default_registry
+
+logger = logging.getLogger("praisonai.agents_generator")
 
 
 def _rich_print(*args, **kwargs):
@@ -77,14 +80,72 @@ def __dir__():
 
 
 
+_TOOL_TIMEOUT_EXECUTOR = None
+# Eagerly initialised so concurrent first-callers always share one lock (and
+# therefore one executor); a lazily-created lock would itself race.
+_TOOL_TIMEOUT_EXECUTOR_LOCK = threading.Lock()
+_DEFAULT_TOOL_TIMEOUT_WORKERS = 32
+
+
+def _resolve_tool_timeout_workers():
+    """Resolve the timeout worker count, tolerating a bad env value.
+
+    A typo or non-positive ``PRAISONAI_TOOL_TIMEOUT_WORKERS`` must not crash
+    every timed tool call; we warn and fall back to the safe default instead.
+    """
+    raw = os.environ.get("PRAISONAI_TOOL_TIMEOUT_WORKERS")
+    if raw is None:
+        return _DEFAULT_TOOL_TIMEOUT_WORKERS
+    try:
+        workers = int(raw)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid PRAISONAI_TOOL_TIMEOUT_WORKERS=%r; using default of %d.",
+            raw, _DEFAULT_TOOL_TIMEOUT_WORKERS,
+        )
+        return _DEFAULT_TOOL_TIMEOUT_WORKERS
+    if workers < 1:
+        logger.warning(
+            "PRAISONAI_TOOL_TIMEOUT_WORKERS must be >= 1 (got %d); using default of %d.",
+            workers, _DEFAULT_TOOL_TIMEOUT_WORKERS,
+        )
+        return _DEFAULT_TOOL_TIMEOUT_WORKERS
+    return workers
+
+
+def _get_tool_timeout_executor():
+    """Lazily create a bounded, observable thread pool for sync tool timeouts.
+
+    Using a bounded pool (instead of unbounded bare daemon threads) means any
+    background work left running after a timeout is at least capped and named,
+    so operators can enumerate it rather than accumulating phantom threads.
+    """
+    global _TOOL_TIMEOUT_EXECUTOR
+    import concurrent.futures
+
+    with _TOOL_TIMEOUT_EXECUTOR_LOCK:
+        if _TOOL_TIMEOUT_EXECUTOR is None:
+            _TOOL_TIMEOUT_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+                max_workers=_resolve_tool_timeout_workers(),
+                thread_name_prefix="praisonai-tool-timeout",
+            )
+    return _TOOL_TIMEOUT_EXECUTOR
+
+
 def _wrap_with_timeout(tool, timeout_seconds: float):
-    """Enforce per-call timeout on a tool, sync or async, without
-    leaking the worker thread/task on timeout.
+    """Enforce a per-call timeout on a tool, sync or async.
+
+    For async tools the underlying task is cancelled on timeout. For sync tools
+    the call runs in a bounded thread pool; on timeout we best-effort cancel the
+    future and log a warning. Note: a synchronous call that has already started
+    cannot be forcibly interrupted, so background work may continue executing —
+    the returned payload flags this with ``background_work_may_continue``.
     """
     if timeout_seconds is None or timeout_seconds <= 0 or not callable(tool):
         return tool
     
     import asyncio
+    import concurrent.futures
     import functools
     import inspect
     import json
@@ -104,43 +165,27 @@ def _wrap_with_timeout(tool, timeout_seconds: float):
 
     @functools.wraps(tool)
     def _sync_wrapped(*args, **kwargs):
-        import queue
-        import threading
-
-        result_queue: queue.Queue[tuple[bool, object]] = queue.Queue(maxsize=1)
-
-        def _runner():
-            try:
-                result_queue.put((True, tool(*args, **kwargs)))
-            except BaseException as exc:
-                result_queue.put((False, exc))
-
-        # Daemon thread avoids blocking process shutdown if the tool call hangs.
-        worker = threading.Thread(target=_runner, daemon=True)
-        worker.start()
-        worker.join(timeout_seconds)
-
-        if worker.is_alive():
+        executor = _get_tool_timeout_executor()
+        future = executor.submit(tool, *args, **kwargs)
+        try:
+            return future.result(timeout=timeout_seconds)
+        except concurrent.futures.TimeoutError:
+            # Best-effort cancel; only effective if the future has not started.
+            # A started sync call cannot be interrupted, so warn operators that
+            # the worker may keep running (and its side effects may still occur).
+            cancelled = future.cancel()
+            logger.warning(
+                "Tool %r exceeded %.1fs (cancel=%s); worker may continue "
+                "executing in the background.",
+                getattr(tool, "__name__", repr(tool)),
+                timeout_seconds, cancelled,
+            )
             return json.dumps({
                 "error": "tool_timeout",
                 "tool": getattr(tool, "__name__", repr(tool)),
                 "timeout_seconds": timeout_seconds,
+                "background_work_may_continue": not cancelled,
             })
-
-        try:
-            success, payload = result_queue.get_nowait()
-        except queue.Empty:
-            # Defensive fallback: if the worker exits without publishing a result,
-            # avoid blocking indefinitely and surface an execution failure.
-            return json.dumps({
-                "error": "tool_execution_error",
-                "tool": getattr(tool, "__name__", repr(tool)),
-                "detail": "worker_exited_without_result",
-            })
-
-        if success:
-            return payload
-        raise payload
     return _sync_wrapped
 
 

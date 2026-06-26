@@ -47,6 +47,44 @@ def _yaml_safe_load(stream):
     return yaml.safe_load(stream)
 
 
+def _atomic_write_text(path, content_writer):
+    """Atomically write text to ``path`` via a sibling temp file + rename.
+
+    ``content_writer(file_obj)`` is called with an open text file in the target
+    directory, so the rename stays on the same filesystem (required for atomicity).
+    This prevents zero-byte / half-written config files if the process crashes,
+    the disk fills, or the user interrupts mid-write.
+    """
+    import tempfile
+
+    target_dir = os.path.dirname(os.path.abspath(path)) or "."
+    fd, tmp_path = tempfile.mkstemp(prefix=".tmp_", suffix=".yaml", dir=target_dir)
+    try:
+        # Preserve the existing file's permission bits so a replaced, shared or
+        # deployment-managed config does not silently become unreadable to the
+        # process that later loads it (mkstemp creates 0600 by default).
+        try:
+            existing_mode = os.stat(path).st_mode
+        except OSError:
+            existing_mode = None
+        with os.fdopen(fd, "w") as f:
+            content_writer(f)
+            f.flush()
+            os.fsync(f.fileno())  # durability before rename
+        if existing_mode is not None:
+            try:
+                os.chmod(tmp_path, existing_mode)
+            except OSError:
+                pass  # best-effort; do not block the write on a chmod failure
+        os.replace(tmp_path, path)  # atomic on POSIX + Windows
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
 # OpenAI client creation removed - create per-call instead of global cache
 
 
@@ -361,44 +399,59 @@ class BaseAutoGenerator:
         self._client_lock = threading.Lock()
         
     def _get_openai_client(self):
-        """Get or create the OpenAI client for this instance."""
-        if self._openai_client is None:
-            with self._client_lock:
-                if self._openai_client is None:
-                    try:
-                        from openai import OpenAI
-                    except ImportError as e:
-                        raise ImportError("Install with: pip install openai") from e
-                    cfg = self.config_list[0]
-                    self._openai_client = OpenAI(
-                        api_key=cfg.get("api_key") or os.environ.get("OPENAI_API_KEY"),
-                        base_url=cfg.get("base_url"),
-                    )
-        return self._openai_client
+        """Get or create the OpenAI client for this instance.
+
+        Lazy-init AND snapshot the client under the same lock so the returned
+        local reference survives a concurrent close() that nulls the attribute,
+        closing the shutdown-during-request race (mirrors the async path).
+        """
+        with self._client_lock:
+            client = self._openai_client
+            if client is None:
+                try:
+                    from openai import OpenAI
+                except ImportError as e:
+                    raise ImportError("Install with: pip install openai") from e
+                cfg = self.config_list[0]
+                client = self._openai_client = OpenAI(
+                    api_key=cfg.get("api_key") or os.environ.get("OPENAI_API_KEY"),
+                    base_url=cfg.get("base_url"),
+                )
+            return client
 
     def close(self):
         """Close the sync OpenAI client if it exists."""
         if not hasattr(self, '_client_lock'):
             return  # Object was never fully initialized
+        # Snapshot under the lock, close OUTSIDE it, and only null the attribute
+        # after a successful close so a failed close can be retried.
         with self._client_lock:
             client = getattr(self, '_openai_client', None)
-            self._openai_client = None
         if client is not None:
             client.close()
+        with self._client_lock:
+            if getattr(self, '_openai_client', None) is client:
+                self._openai_client = None
     
     async def aclose(self):
         """Close both sync and async OpenAI clients if they exist."""
         if not hasattr(self, '_client_lock'):
             return  # Object was never fully initialized
+        # Snapshot under the lock, close OUTSIDE it, and only null each attribute
+        # after its successful close so a failed close can be retried.
         with self._client_lock:
             sync_client = getattr(self, '_openai_client', None)
-            self._openai_client = None
             async_client = getattr(self, '_async_openai_client', None)
-            self._async_openai_client = None
         if sync_client is not None:
             await asyncio.to_thread(sync_client.close)
+            with self._client_lock:
+                if getattr(self, '_openai_client', None) is sync_client:
+                    self._openai_client = None
         if async_client is not None:
             await async_client.close()
+            with self._client_lock:
+                if getattr(self, '_async_openai_client', None) is async_client:
+                    self._async_openai_client = None
     
     def __enter__(self):
         return self
@@ -521,20 +574,23 @@ class BaseAutoGenerator:
         
         # Fallback to OpenAI AsyncSDK (uses beta.chat.completions.parse)
         if is_available("openai"):
-            if self._async_openai_client is None:
-                with self._client_lock:
-                    if self._async_openai_client is None:
-                        try:
-                            from openai import AsyncOpenAI
-                        except ImportError as e:
-                            raise ImportError("Install with: pip install openai") from e
-                        cfg = self.config_list[0]
-                        self._async_openai_client = AsyncOpenAI(
-                            api_key=cfg.get("api_key") or os.environ.get("OPENAI_API_KEY"),
-                            base_url=cfg.get("base_url"),
-                        )
+            # Lazy-init AND snapshot the client under the same lock. The local
+            # reference survives a concurrent aclose() that nulls the attribute,
+            # closing the shutdown-during-request race.
+            with self._client_lock:
+                if self._async_openai_client is None:
+                    try:
+                        from openai import AsyncOpenAI
+                    except ImportError as e:
+                        raise ImportError("Install with: pip install openai") from e
+                    cfg = self.config_list[0]
+                    self._async_openai_client = AsyncOpenAI(
+                        api_key=cfg.get("api_key") or os.environ.get("OPENAI_API_KEY"),
+                        base_url=cfg.get("base_url"),
+                    )
+                client = self._async_openai_client
             
-            response = await self._async_openai_client.beta.chat.completions.parse(
+            response = await client.beta.chat.completions.parse(
                 model=model_name,
                 messages=messages,
                 response_format=response_model,
@@ -839,9 +895,11 @@ class AutoGenerator(BaseAutoGenerator):
                 for task_id, task_details in role_details['tasks'].items():
                     yaml_data['roles'][role_id]['tasks'][task_id] = self._format_task(task_details)
 
-        # Save to YAML file, maintaining the order
-        with open(self.agent_file, 'w') as f:
-            _yaml_dump(yaml_data, f, allow_unicode=True, sort_keys=False)
+        # Save to YAML file atomically, maintaining the order
+        _atomic_write_text(
+            self.agent_file,
+            lambda f: _yaml_dump(yaml_data, f, allow_unicode=True, sort_keys=False),
+        )
 
     def merge_with_existing_agents(self, new_json_data):
         """
@@ -1479,10 +1537,12 @@ Example structure:
             if agent_data.get('tools'):
                 workflow_yaml['agents'][agent_id]['tools'] = agent_data['tools']
         
-        # Write to file
+        # Write to file atomically
         full_path = os.path.abspath(self.workflow_file)
-        with open(full_path, 'w') as f:
-            _yaml_dump(workflow_yaml, f, default_flow_style=False, sort_keys=False)
+        _atomic_write_text(
+            full_path,
+            lambda f: _yaml_dump(workflow_yaml, f, default_flow_style=False, sort_keys=False),
+        )
         
         return full_path
 
@@ -1682,9 +1742,11 @@ Generate a workflow for: {self.topic}
             
             workflow_yaml['steps'].append(step_dict)
         
-        # Write to file
+        # Write to file atomically
         full_path = os.path.abspath(self.workflow_file)
-        with open(full_path, 'w') as f:
-            _yaml_dump(workflow_yaml, f, default_flow_style=False, sort_keys=False)
+        _atomic_write_text(
+            full_path,
+            lambda f: _yaml_dump(workflow_yaml, f, default_flow_style=False, sort_keys=False),
+        )
         
         return full_path
