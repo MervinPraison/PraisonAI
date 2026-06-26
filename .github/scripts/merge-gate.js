@@ -306,8 +306,7 @@ function isCiOnlyChange(files) {
 }
 
 function isInternalPullRequestLink(link, owner, repo) {
-  const baseFull = link?.base?.repo?.full_name || link?.base?.repo?.name;
-  if (baseFull === `${owner}/${repo}`) return true;
+  if (link?.base?.repo?.full_name === `${owner}/${repo}`) return true;
   const baseUrl = link?.base?.repo?.url || '';
   return baseUrl.endsWith(`/repos/${owner}/${repo}`);
 }
@@ -346,15 +345,15 @@ async function resolvePrNumberFromHeadBranch(github, owner, repo, branch) {
 }
 
 async function resolvePrNumberFromWorkflowRun(github, owner, repo, workflowRun) {
-  const fromBranch = await resolvePrNumberFromHeadBranch(
-    github, owner, repo, workflowRun.head_branch
-  );
-  if (fromBranch) return fromBranch;
-
   const fromLinked = await resolvePrNumberFromLinkedPullRequests(
     github, owner, repo, workflowRun.pull_requests
   );
   if (fromLinked) return fromLinked;
+
+  const fromBranch = await resolvePrNumberFromHeadBranch(
+    github, owner, repo, workflowRun.head_branch
+  );
+  if (fromBranch) return fromBranch;
 
   return null;
 }

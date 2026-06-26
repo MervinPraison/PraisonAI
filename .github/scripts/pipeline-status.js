@@ -91,22 +91,36 @@ function computePipelineLabels(comments, evalResult) {
 }
 
 async function ensurePipelineLabels(github, owner, repo, core) {
-  const { data: existing } = await github.rest.issues.listLabelsForRepo({
-    owner,
-    repo,
-    per_page: 100,
-  });
+  let existing;
+  if (typeof github.paginate === 'function') {
+    existing = await github.paginate(github.rest.issues.listLabelsForRepo, {
+      owner,
+      repo,
+      per_page: 100,
+    });
+  } else {
+    ({ data: existing } = await github.rest.issues.listLabelsForRepo({
+      owner,
+      repo,
+      per_page: 100,
+    }));
+  }
   const names = new Set(existing.map((l) => l.name));
   for (const spec of LABEL_SPECS) {
     if (names.has(spec.name)) continue;
-    await github.rest.issues.createLabel({
-      owner,
-      repo,
-      name: spec.name,
-      color: spec.color,
-      description: spec.description,
-    });
-    core?.info?.(`Created label ${spec.name}`);
+    try {
+      await github.rest.issues.createLabel({
+        owner,
+        repo,
+        name: spec.name,
+        color: spec.color,
+        description: spec.description,
+      });
+      core?.info?.(`Created label ${spec.name}`);
+    } catch (err) {
+      if (err.status !== 422) throw err;
+      core?.info?.(`Label ${spec.name} already exists`);
+    }
   }
 }
 
@@ -147,12 +161,22 @@ async function syncPipelineLabels(github, owner, repo, prNumber, core) {
 async function syncOpenPullRequests(github, owner, repo, options, core) {
   const { maxPrs = 20 } = options || {};
   await ensurePipelineLabels(github, owner, repo, core);
-  const prs = await github.paginate(github.rest.pulls.list, {
-    owner,
-    repo,
-    state: 'open',
-    per_page: 100,
-  });
+  let prs;
+  if (maxPrs <= 100) {
+    ({ data: prs } = await github.rest.pulls.list({
+      owner,
+      repo,
+      state: 'open',
+      per_page: 100,
+    }));
+  } else {
+    prs = await github.paginate(github.rest.pulls.list, {
+      owner,
+      repo,
+      state: 'open',
+      per_page: 100,
+    });
+  }
   let synced = 0;
   for (const pr of prs) {
     if (synced >= maxPrs) break;
