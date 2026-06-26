@@ -15,6 +15,7 @@ from .paths import (
     get_project_config_path,
     get_env_prefix,
     ensure_config_dirs,
+    find_project_root,
 )
 from .schema import ConfigSchema, DEFAULT_CONFIG
 
@@ -235,7 +236,7 @@ class ConfigLoader:
     """
     
     def __init__(self, project_root: Optional[Path] = None):
-        self.project_root = project_root or Path.cwd()
+        self.project_root = project_root or find_project_root() or Path.cwd()
         self._config: Optional[ConfigSchema] = None
         self._raw_config: Dict[str, Any] = {}
     

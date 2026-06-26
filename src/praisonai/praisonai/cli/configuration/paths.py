@@ -9,6 +9,43 @@ from pathlib import Path
 from typing import List, Optional
 
 
+# Directory markers that identify a PraisonAI project root.
+_PROJECT_MARKERS = (".praison", ".praisonai")
+# VCS markers used as a fallback when no project config dir is present.
+_VCS_MARKERS = (".git",)
+
+
+def find_project_root(start: Optional[Path] = None) -> Optional[Path]:
+    """Walk upward from ``start`` (or cwd) to locate the project root.
+
+    The project root is the nearest ancestor (including ``start`` itself)
+    that contains a project marker directory (``.praison``/``.praisonai``)
+    or a VCS root (``.git``). This lets the CLI behave identically from any
+    sub-directory of a project tree.
+
+    An explicit override may be supplied via the ``PRAISONAI_PROJECT``
+    environment variable, in which case that path is returned directly.
+
+    Returns:
+        The resolved project root, or ``None`` if no marker is found.
+    """
+    override = os.environ.get("PRAISONAI_PROJECT")
+    if override:
+        return Path(override).expanduser().resolve()
+
+    try:
+        cur = (start or Path.cwd()).resolve()
+    except (OSError, ValueError):
+        return None
+
+    for d in (cur, *cur.parents):
+        if any((d / m).is_dir() for m in _PROJECT_MARKERS):
+            return d
+        if any((d / m).exists() for m in _VCS_MARKERS):
+            return d
+    return None
+
+
 def get_user_config_dir() -> Path:
     """Get user configuration directory (~/.praison/)."""
     return Path.home() / ".praison"
@@ -20,8 +57,14 @@ def get_user_config_path() -> Path:
 
 
 def get_project_config_dir(project_root: Optional[Path] = None) -> Path:
-    """Get project configuration directory (.praison/)."""
-    root = project_root or Path.cwd()
+    """Get project configuration directory (.praison/).
+
+    When no ``project_root`` is given, the root is discovered by walking up
+    from the current working directory via :func:`find_project_root`, so the
+    project config is found from any sub-directory. Falls back to cwd when no
+    project marker is present.
+    """
+    root = project_root or find_project_root() or Path.cwd()
     return root / ".praison"
 
 
@@ -54,26 +97,56 @@ def get_config_paths(project_root: Optional[Path] = None) -> List[Path]:
     """
     Get all configuration file paths in precedence order (highest first).
     
-    Precedence:
-    1. Project config: .praison/config.toml
+    Precedence (highest first):
+    1. Project configs along the ancestor chain (nearest cwd wins, then
+       farther ancestors up to the project root): .praison/config.toml
     2. User config: ~/.praison/config.toml
-    
+
+    When no ``project_root`` is supplied, the chain is collected by walking
+    up from cwd to the detected project root so the CLI behaves identically
+    from any sub-directory.
+
     Returns:
         List of paths in precedence order
     """
-    paths = []
-    
-    # Project config (highest precedence)
-    project_config = get_project_config_path(project_root)
-    if project_config.exists():
-        paths.append(project_config)
-    
+    paths: List[Path] = []
+    seen: set = set()
+
+    if project_root is not None:
+        roots = [project_root]
+    else:
+        roots = _project_config_search_roots()
+
+    # Project configs (highest precedence), nearest-to-cwd first.
+    for root in roots:
+        project_config = (root / ".praison" / "config.toml")
+        resolved = project_config.resolve() if project_config.exists() else None
+        if resolved and resolved not in seen and project_config.exists():
+            seen.add(resolved)
+            paths.append(project_config)
+
     # User config
     user_config = get_user_config_path()
-    if user_config.exists():
+    if user_config.exists() and user_config.resolve() not in seen:
         paths.append(user_config)
-    
+
     return paths
+
+
+def _project_config_search_roots() -> List[Path]:
+    """Return candidate roots from cwd up to the project root (nearest first)."""
+    try:
+        cur = Path.cwd().resolve()
+    except (OSError, ValueError):
+        return []
+
+    project_root = find_project_root(cur)
+    roots: List[Path] = []
+    for d in (cur, *cur.parents):
+        roots.append(d)
+        if project_root is not None and d == project_root:
+            break
+    return roots
 
 
 def ensure_config_dirs() -> None:
