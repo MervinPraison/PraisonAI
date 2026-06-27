@@ -131,6 +131,105 @@ class TestSubagentTool:
         # Permission mode should be passed through
         assert result.get("permission_mode") == "plan"
 
+    def test_subagent_synchronous_default_unchanged(self):
+        """Background defaults to False; synchronous return shape is unchanged."""
+        tool = create_subagent_tool()
+        func = tool["function"]
+
+        result = func(task="Analyze the code")
+
+        # No job_id leaks into the synchronous path.
+        assert "job_id" not in result
+        assert result["success"] is True
+        assert "output" in result
+
+    def test_subagent_background_returns_job_id(self):
+        """background=True returns immediately with a job handle."""
+        tool = create_subagent_tool()
+        func = tool["function"]
+
+        result = func(task="run the full test suite", background=True)
+
+        assert result["success"] is True
+        assert result["status"] == "running"
+        assert "job_id" in result
+        assert result["job_id"]
+
+    def test_subagent_result_tool_exposed(self):
+        """The companion subagent_result tool is exposed on the tool dict."""
+        tool = create_subagent_tool()
+
+        assert "result_tool" in tool
+        assert tool["result_tool"]["name"] == "subagent_result"
+        assert callable(tool["result_tool"]["function"])
+
+    def test_subagent_background_result_collected(self):
+        """A backgrounded subagent's result is collectable via subagent_result(wait=True)."""
+        class MockAgent:
+            def __init__(self, name, tools=None, llm=None):
+                self.name = name
+
+            def chat(self, prompt):
+                return f"Executed: {prompt}"
+
+        tool = create_subagent_tool(
+            agent_factory=lambda **kwargs: MockAgent(**kwargs)
+        )
+        spawn = tool["function"]
+        collect = tool["result_tool"]["function"]
+
+        handle = spawn(task="Background task", background=True)
+        assert "job_id" in handle
+
+        final = collect(handle["job_id"], wait=True)
+        assert final["success"] is True
+        assert final["status"] == "completed"
+        assert final["result"]["success"] is True
+        assert "Executed" in final["result"]["output"]
+
+    def test_subagent_result_unknown_job(self):
+        """Unknown job_id returns a clean error rather than raising."""
+        tool = create_subagent_tool()
+        collect = tool["result_tool"]["function"]
+
+        result = collect("nonexistent-job-id")
+
+        assert result["success"] is False
+        assert "not found" in result["error"]
+
+    def test_subagent_background_preserves_scoping(self):
+        """Background subagents honour permission_mode/tools/llm scoping."""
+        captured = {}
+
+        class MockAgent:
+            def __init__(self, name, tools=None, llm=None):
+                captured["tools"] = tools
+                captured["llm"] = llm
+
+            def chat(self, prompt):
+                return "ok"
+
+        tool = create_subagent_tool(
+            agent_factory=lambda **kwargs: MockAgent(**kwargs)
+        )
+        spawn = tool["function"]
+        collect = tool["result_tool"]["function"]
+
+        handle = spawn(
+            task="restricted task",
+            tools=["read_file"],
+            llm="gpt-4o-mini",
+            permission_mode="plan",
+            background=True,
+        )
+        final = collect(handle["job_id"], wait=True)
+
+        assert final["success"] is True
+        assert final["result"]["permission_mode"] == "plan"
+        assert final["result"]["llm"] == "gpt-4o-mini"
+        assert captured["tools"] == ["read_file"]
+        assert captured["llm"] == "gpt-4o-mini"
+
 
 class TestBatchTool:
     """Tests for the batch tool."""
