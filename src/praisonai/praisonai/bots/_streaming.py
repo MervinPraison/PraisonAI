@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -18,6 +19,39 @@ if TYPE_CHECKING:
     from praisonaiagents.streaming.events import StreamEvent
 
 logger = logging.getLogger(__name__)
+
+
+# Matches <think>...</think> and <reasoning>...</reasoning> spans (case-insensitive,
+# spanning newlines). Also strips a trailing unclosed opening tag so partial
+# reasoning never leaks while a block is still streaming.
+_REASONING_TAG_RE = re.compile(
+    r"<(?:think|reasoning)\b[^>]*>.*?</(?:think|reasoning)>",
+    re.IGNORECASE | re.DOTALL,
+)
+_REASONING_OPEN_RE = re.compile(
+    r"<(?:think|reasoning)\b[^>]*>.*\Z",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def strip_reasoning_tags(text: str) -> str:
+    """Remove ``<think>``/``<reasoning>`` spans from streamed content.
+
+    Complete blocks are removed entirely. A trailing *unclosed* opening tag
+    (still being streamed) is also dropped so internal reasoning is never
+    surfaced mid-stream.
+
+    Args:
+        text: Raw buffered content.
+
+    Returns:
+        Content with reasoning spans removed.
+    """
+    if not text:
+        return text
+    cleaned = _REASONING_TAG_RE.sub("", text)
+    cleaned = _REASONING_OPEN_RE.sub("", cleaned)
+    return cleaned
 
 
 class StreamingMode(Enum):
@@ -37,6 +71,11 @@ class StreamingConfig:
     min_delta: int = 120           # Minimum characters before triggering edit
     placeholder_text: str = "🤔 Thinking..."
     progress_prefix: str = "🤔 "
+    # Flood-control / resilience for progressive edits
+    disable_progressive_edits_after: int = 3  # Consecutive edit failures before giving up
+    flood_backoff_factor: float = 2.0         # Multiply interval on each flood/429
+    max_interval: float = 30.0                # Cap for the adaptively-widened interval
+    strip_reasoning_tags: bool = True         # Strip <think>/<reasoning> from output
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "StreamingConfig":
@@ -54,6 +93,10 @@ class StreamingConfig:
             min_delta=data.get("min_delta", 120),
             placeholder_text=data.get("placeholder_text", "🤔 Thinking..."),
             progress_prefix=data.get("progress_prefix", "🤔 "),
+            disable_progressive_edits_after=data.get("disable_progressive_edits_after", 3),
+            flood_backoff_factor=data.get("flood_backoff_factor", 2.0),
+            max_interval=data.get("max_interval", 30.0),
+            strip_reasoning_tags=data.get("strip_reasoning_tags", True),
         )
 
 
@@ -107,11 +150,13 @@ class DraftStreamer:
         channel_id: str,
         config: StreamingConfig,
         rate_limiter: Optional[Any] = None,
+        platform: str = "",
     ):
         self._adapter = adapter
         self._channel_id = channel_id
         self._config = config
         self._rate_limiter = rate_limiter
+        self._platform = platform
         
         # State
         self._message_id: Optional[str] = None
@@ -122,6 +167,10 @@ class DraftStreamer:
         self._is_finalized = False
         self._update_task: Optional[asyncio.Task] = None
         self._pending_update = False
+        
+        # Flood-control state for progressive edits
+        self._fail_streak = 0
+        self._progressive = True  # When False, fall back to a single final send
         
         # Check capabilities and degrade gracefully
         caps = getattr(adapter, 'capabilities', {})
@@ -208,6 +257,8 @@ class DraftStreamer:
     
     async def _schedule_update(self) -> None:
         """Schedule a throttled update if conditions are met."""
+        if not self._progressive:
+            return  # Progressive edits disabled after repeated flood failures
         if self._pending_update:
             return  # Update already scheduled
             
@@ -246,9 +297,38 @@ class DraftStreamer:
         # Schedule new update task
         self._update_task = asyncio.create_task(_delayed_update())
     
+    def _render_content(self) -> Optional[str]:
+        """Render the buffer for the current mode, applying reasoning stripping."""
+        buffer = self._content_buffer
+        if buffer and self._config.strip_reasoning_tags:
+            buffer = strip_reasoning_tags(buffer)
+        
+        # Prepare content based on mode
+        if self._config.mode == StreamingMode.DRAFT:
+            content = buffer or self._config.placeholder_text
+        elif self._config.mode == StreamingMode.PROGRESS:
+            if self._current_tool:
+                content = f"{self._config.progress_prefix}Running {self._current_tool}..."
+            elif buffer:
+                content = buffer
+            else:
+                content = self._config.placeholder_text
+        else:
+            return None  # Should not happen
+        
+        # Apply text limit if configured
+        if self._text_limit > 0 and len(content) > self._text_limit:
+            content = content[:self._text_limit - 3] + "..."
+        
+        return content
+    
     async def _perform_update(self) -> None:
-        """Perform the actual message edit."""
-        if not self._message_id or self._is_finalized:
+        """Perform the actual message edit with flood-control handling."""
+        if not self._message_id or self._is_finalized or not self._progressive:
+            return
+        
+        content = self._render_content()
+        if content is None:
             return
         
         try:
@@ -256,27 +336,11 @@ class DraftStreamer:
             if self._rate_limiter:
                 await self._rate_limiter.acquire(self._channel_id)
             
-            # Prepare content based on mode
-            if self._config.mode == StreamingMode.DRAFT:
-                content = self._content_buffer or self._config.placeholder_text
-            elif self._config.mode == StreamingMode.PROGRESS:
-                if self._current_tool:
-                    content = f"{self._config.progress_prefix}Running {self._current_tool}..."
-                elif self._content_buffer:
-                    content = self._content_buffer
-                else:
-                    content = self._config.placeholder_text
-            else:
-                return  # Should not happen
-            
-            # Apply text limit if configured
-            if self._text_limit > 0 and len(content) > self._text_limit:
-                content = content[:self._text_limit - 3] + "..."
-            
             # Perform edit
             await self._adapter.edit_message(self._channel_id, self._message_id, content)
             
-            # Update state
+            # Success - reset failure streak and update state
+            self._fail_streak = 0
             self._last_edit_time = time.monotonic()
             self._last_content_length = len(self._content_buffer)
             
@@ -286,7 +350,40 @@ class DraftStreamer:
             )
             
         except Exception as e:
-            logger.warning("DraftStreamer update failed: %s", e)
+            self._handle_edit_failure(e)
+    
+    def _handle_edit_failure(self, err: Exception) -> None:
+        """Adaptively back off on recoverable edit failures.
+        
+        On flood/429/transient errors, widen the edit interval (capped) and
+        track consecutive failures. After ``disable_progressive_edits_after``
+        strikes, stop progressive editing so ``finalize`` delivers the full
+        answer as a single final send.
+        """
+        from praisonai.bots._resilience import is_recoverable_error
+        
+        # Mark the time so we don't immediately retry-flood
+        self._last_edit_time = time.monotonic()
+        
+        if is_recoverable_error(err, self._platform):
+            self._fail_streak += 1
+            self._config.min_interval = min(
+                self._config.min_interval * self._config.flood_backoff_factor,
+                self._config.max_interval,
+            )
+            logger.warning(
+                "DraftStreamer edit flood (streak=%d), widening interval to %.1fs: %s",
+                self._fail_streak, self._config.min_interval, err,
+            )
+            if self._fail_streak >= self._config.disable_progressive_edits_after:
+                self._progressive = False
+                logger.info(
+                    "DraftStreamer disabling progressive edits after %d failures; "
+                    "falling back to final send only",
+                    self._fail_streak,
+                )
+        else:
+            logger.warning("DraftStreamer update failed (non-recoverable): %s", err)
     
     async def finalize(self, final_content: str) -> None:
         """Finalize with the complete response content."""
@@ -303,21 +400,39 @@ class DraftStreamer:
             except asyncio.CancelledError:
                 pass
         
+        # Strip reasoning tags from the final answer too
+        if final_content and self._config.strip_reasoning_tags:
+            final_content = strip_reasoning_tags(final_content)
+        
         try:
             # Apply rate limiting
             if self._rate_limiter:
                 await self._rate_limiter.acquire(self._channel_id)
             
-            # Final edit with complete content
-            await self._adapter.edit_message(self._channel_id, self._message_id, final_content)
+            if self._progressive:
+                # Final edit with complete content
+                await self._adapter.edit_message(self._channel_id, self._message_id, final_content)
+            else:
+                # Progressive edits were disabled by flooding: deliver the full
+                # answer as a fresh final send so the user always gets it.
+                await self._adapter.send_message(self._channel_id, final_content)
             
             logger.debug(
-                "DraftStreamer finalized message %s, final_length=%d", 
-                self._message_id, len(final_content)
+                "DraftStreamer finalized message %s, final_length=%d, progressive=%s", 
+                self._message_id, len(final_content), self._progressive
             )
             
         except Exception as e:
             logger.warning("DraftStreamer finalization failed: %s", e)
+            # Last-resort fallback: if the edit failed, try a plain send so the
+            # user still receives the completed answer.
+            if self._progressive:
+                try:
+                    await self._adapter.send_message(self._channel_id, final_content)
+                except Exception as send_exc:
+                    logger.warning(
+                        "DraftStreamer final send fallback also failed: %s", send_exc
+                    )
     
     @property
     def is_streaming(self) -> bool:
