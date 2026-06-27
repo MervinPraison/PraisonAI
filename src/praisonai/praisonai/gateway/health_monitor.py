@@ -28,7 +28,8 @@ class HealthMonitorConfig:
     
     interval: float = 300.0  # 5 minutes default
     startup_grace: float = 60.0  # 1 minute grace period for startup
-    stale_after: float = 120.0  # 2 minutes without activity = stale
+    stale_after: float = 120.0  # 2 minutes without inbound activity = stale
+    stuck_after: float = 900.0  # 15 minutes busy with no progress = stuck
     max_restarts_per_hour: int = 10  # Rate limit for restarts
     enabled: bool = True  # Whether monitoring is enabled
     
@@ -39,6 +40,7 @@ class HealthMonitorConfig:
             interval=float(data.get("interval", 300.0)),
             startup_grace=float(data.get("startup_grace", 60.0)),
             stale_after=float(data.get("stale_after", 120.0)),
+            stuck_after=float(data.get("stuck_after", 900.0)),
             max_restarts_per_hour=int(data.get("max_restarts_per_hour", 10)),
             enabled=bool(data.get("enabled", True)),
         )
@@ -255,6 +257,7 @@ class ChannelHealthMonitor:
             health,
             startup_grace_seconds=self._config.startup_grace,
             stale_after_seconds=self._config.stale_after,
+            stuck_after_seconds=self._config.stuck_after,
             current_time=current_time,
         )
         
