@@ -3,7 +3,10 @@
 import json
 from pathlib import Path
 
-from praisonai.cli.features.config_hierarchy import HierarchicalConfig
+from praisonai.cli.features.config_hierarchy import (
+    HierarchicalConfig,
+    _MAX_WALK_UP_DEPTH,
+)
 
 
 def _write_project_config(directory: Path, data: dict) -> Path:
@@ -84,6 +87,26 @@ def test_walk_up_finds_config_at_git_root(tmp_path: Path):
     merged = config.load()
 
     assert merged.get("model") == "root-model"
+
+
+def test_walk_up_capped_without_git_boundary(tmp_path: Path):
+    """Without a .git boundary the walk is capped and distant ancestors don't leak."""
+    _write_project_config(tmp_path, {"model": "distant-ancestor"})
+
+    # Build a chain deeper than the cap so the ancestor config is out of reach.
+    nested = tmp_path
+    for i in range(_MAX_WALK_UP_DEPTH + 2):
+        nested = nested / f"d{i}"
+    nested.mkdir(parents=True)
+
+    config = HierarchicalConfig(
+        project_dir=str(nested),
+        user_config=str(tmp_path / "no-user.json"),
+        global_config=str(tmp_path / "no-global.json"),
+    )
+    merged = config.load()
+
+    assert "model" not in merged
 
 
 def test_nearest_config_wins_over_ancestor(tmp_path: Path):
