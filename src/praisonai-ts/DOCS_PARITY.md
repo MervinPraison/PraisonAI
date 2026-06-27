@@ -1,6 +1,6 @@
 # Documentation Parity Tracker (TypeScript/JavaScript)
 
-> **Categories:** 75 | **Documented:** 67 | **Parity:** 89.3%
+> **Categories:** 75 | **Documented:** 68 | **Parity:** 90.7%
 
 This report compares **TypeScript/JavaScript SDK feature categories** against **TypeScript/JavaScript documentation** (docs/js/).
 
@@ -9,9 +9,9 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | Metric | Count |
 |--------|-------|
 | Feature Categories | 75 |
-| **Documented Categories** | **67** |
-| **Undocumented Categories** | **8** |
-| **Parity** | **89.3%** |
+| **Documented Categories** | **68** |
+| **Undocumented Categories** | **7** |
+| **Parity** | **90.7%** |
 
 ## Documented Categories
 
@@ -25,6 +25,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Auto Generation | 14 | 3 | 508 |
 | ✅ Autonomy | 5 | 1 | 160 |
 | ✅ Bots | 5 | 1 | 181 |
+| ✅ Budget | 1 | 1 | 194 |
 | ✅ CLI | 2 | 1 | 112 |
 | ✅ Caching | 2 | 1 | 208 |
 | ✅ Chunking | 2 | 2 | 204 |
@@ -48,10 +49,10 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Handoffs | 12 | 1 | 179 |
 | ✅ Hooks | 8 | 3 | 499 |
 | ✅ Image | 4 | 2 | 203 |
-| ✅ Knowledge | 3 | 3 | 458 |
-| ✅ LLM | 6 | 4 | 559 |
+| ✅ Knowledge | 3 | 4 | 696 |
+| ✅ LLM | 6 | 4 | 545 |
 | ✅ Loops | 11 | 1 | 182 |
-| ✅ MCP | 17 | 4 | 564 |
+| ✅ MCP | 17 | 4 | 687 |
 | ✅ Memory | 17 | 4 | 620 |
 | ✅ OCR | 2 | 1 | 164 |
 | ✅ Observability | 6 | 28 | 1658 |
@@ -90,7 +91,6 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | Category | Features |
 |----------|----------|
 | ❌ AI SDK | 38 |
-| ❌ Budget | 1 |
 | ❌ Jobs | 8 |
 | ❌ Middleware | 2 |
 | ❌ Scheduler | 2 |

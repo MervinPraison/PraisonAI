@@ -31,7 +31,7 @@ This report compares **Rust SDK feature categories** against **Rust documentatio
 | ✅ Code Execution | 5 | 1 | 104 |
 | ✅ Conditions | 1 | 1 | 132 |
 | ✅ Configuration | 2 | 1 | 130 |
-| ✅ Context Management | 21 | 2 | 150 |
+| ✅ Context Management | 21 | 2 | 272 |
 | ✅ Criteria | 4 | 1 | 70 |
 | ✅ Database | 2 | 1 | 198 |
 | ✅ Display | 12 | 1 | 64 |
@@ -48,7 +48,7 @@ This report compares **Rust SDK feature categories** against **Rust documentatio
 | ✅ Handoffs | 13 | 1 | 276 |
 | ✅ Hooks | 12 | 2 | 517 |
 | ✅ Image | 4 | 1 | 85 |
-| ✅ Knowledge | 12 | 2 | 214 |
+| ✅ Knowledge | 12 | 2 | 368 |
 | ✅ LLM | 10 | 2 | 279 |
 | ✅ Loops | 7 | 1 | 134 |
 | ✅ MCP | 11 | 1 | 196 |
