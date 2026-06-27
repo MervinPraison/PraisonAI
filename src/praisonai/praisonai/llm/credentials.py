@@ -30,7 +30,14 @@ def _credential_lookup(provider: str) -> Optional[Dict[str, Any]]:
         store = CredentialStore()
         credential = store.get_credential(provider)
         if credential:
-            return asdict(credential)
+            data = asdict(credential)
+            # For OAuth, surface a freshly-refreshed token through ``api_key``
+            # so the resolver injects a valid secret transparently.
+            if credential.is_oauth():
+                token = store.get_valid_token(provider)
+                if token:
+                    data["api_key"] = token
+            return data
     except Exception:
         # Ignore errors in credential lookup to avoid breaking LLM resolution
         pass
@@ -101,8 +108,14 @@ def inject_credentials_into_env() -> bool:
                 continue
                 
             credential = store.get_credential(provider)
-            if credential and credential.api_key:
-                os.environ[env_var] = credential.api_key
+            if not credential:
+                continue
+
+            # For OAuth credentials, fetch a fresh (refreshed if expired) token;
+            # for API keys this returns the stored key unchanged.
+            token = store.get_valid_token(provider) or credential.api_key
+            if token:
+                os.environ[env_var] = token
                 injected = True
                 
                 # Also set base URL if provided

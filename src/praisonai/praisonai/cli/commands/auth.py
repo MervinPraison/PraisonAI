@@ -21,6 +21,22 @@ from ..configuration.credentials import CredentialStore, redact_key, validate_ap
 app = typer.Typer(help="Manage API credentials")
 
 
+def _format_expiry(cred) -> str:
+    """Format an OAuth credential's expiry for display ('(n/a)' for keys)."""
+    if not getattr(cred, "auth_method", "apikey") == "oauth":
+        return "(n/a)"
+    if not cred.expires_at:
+        return "(no expiry)"
+    import time as _time
+    remaining = cred.expires_at - _time.time()
+    if remaining <= 0:
+        return "expired"
+    mins = int(remaining // 60)
+    if mins >= 60:
+        return f"{mins // 60}h {mins % 60}m"
+    return f"{mins}m" if mins else "<1m"
+
+
 def _validate_with_live_call(provider: str, api_key: str, base_url: Optional[str] = None) -> tuple[bool, str]:
     """
     Validate API key with a cheap live call to the provider.
@@ -64,14 +80,72 @@ def _validate_with_live_call(provider: str, api_key: str, base_url: Optional[str
         return False, f"API key invalid: {str(e)}"
 
 
+def _run_oauth_login(provider: str, output, base_url, model, no_browser: bool) -> None:
+    """Run the browser/device-code OAuth flow and store the resulting tokens."""
+    from ..configuration.oauth import run_oauth_login
+
+    def _on_prompt(uri: Optional[str], user_code: Optional[str]) -> None:
+        if user_code:
+            output.print_info(
+                f"To sign in, visit {uri} and enter code: {user_code}"
+            )
+        elif uri:
+            output.print_info(f"Opening browser to authorize... If it doesn't open, visit:\n{uri}")
+
+    try:
+        config, tokens = run_oauth_login(
+            provider,
+            open_browser=not no_browser,
+            on_prompt=_on_prompt,
+        )
+    except ValueError as e:
+        output.print_error(str(e))
+        raise typer.Exit(1)
+    except Exception as e:
+        output.print_error(f"OAuth login failed: {e}")
+        raise typer.Exit(1)
+
+    if not tokens.get("access_token"):
+        output.print_error("OAuth flow did not return an access token")
+        raise typer.Exit(1)
+
+    try:
+        store = CredentialStore()
+        store.store_oauth_credential(
+            provider=provider,
+            access_token=tokens["access_token"],
+            refresh_token=tokens.get("refresh_token"),
+            expires_at=tokens.get("expires_at"),
+            token_url=config.token_url,
+            client_id=config.client_id,
+            scope=tokens.get("scope") or config.scope,
+            base_url=base_url,
+            model=model,
+        )
+    except Exception as e:
+        output.print_error(f"Failed to store credentials: {e}")
+        raise typer.Exit(1)
+
+    output.print_success(f"Signed in to {provider} via OAuth")
+    if output.is_json_mode:
+        output.print_json({
+            "provider": provider,
+            "status": "stored",
+            "auth_method": "oauth",
+            "expires_at": tokens.get("expires_at"),
+        })
+
+
 @app.command("login")
 def auth_login(
     provider: str = typer.Argument(help="Provider name (e.g., openai, anthropic)"),
+    method: str = typer.Option("auto", "--method", help="Auth method: auto, apikey, or oauth"),
     key: Optional[str] = typer.Option(None, "--key", help="API key (will prompt if not provided)"),
     key_stdin: bool = typer.Option(False, "--key-stdin", help="Read API key from stdin"),
     base_url: Optional[str] = typer.Option(None, "--base-url", help="Custom base URL"),
     model: Optional[str] = typer.Option(None, "--model", help="Default model for this provider"),
     skip_validation: bool = typer.Option(False, "--skip-validation", help="Skip API key validation"),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Do not auto-open the browser for OAuth"),
 ):
     """
     Store API credentials for a provider.
@@ -80,9 +154,27 @@ def auth_login(
         praisonai auth login openai
         praisonai auth login openai --key sk-...
         echo "sk-..." | praisonai auth login openai --key-stdin
+        praisonai auth login openai --method oauth
     """
     output = get_output_controller()
-    
+
+    # Decide between OAuth and API-key login. ``auto`` selects OAuth only when
+    # the provider has an OAuth config AND no key was supplied; otherwise it
+    # falls back to the API-key path (unchanged behaviour).
+    method = (method or "auto").lower()
+    if method == "oauth":
+        _run_oauth_login(provider, output, base_url, model, no_browser)
+        return
+    if method == "auto" and not key and not key_stdin:
+        try:
+            from ..configuration.oauth import provider_supports_oauth
+            if provider_supports_oauth(provider):
+                _run_oauth_login(provider, output, base_url, model, no_browser)
+                return
+        except Exception:
+            # Fall through to API-key login on any OAuth detection error.
+            pass
+
     # Get API key
     api_key = None
     
@@ -237,9 +329,12 @@ def auth_list():
             if cred:
                 info = {
                     "provider": provider_name,
+                    "auth_method": cred.auth_method,
                     "key_redacted": redact_key(cred.api_key),
                     "base_url": cred.base_url,
                     "model": cred.model,
+                    "expires_at": cred.expires_at,
+                    "expires": _format_expiry(cred),
                 }
                 provider_info.append(info)
         
@@ -247,12 +342,14 @@ def auth_list():
             output.print_json({"providers": provider_info})
         else:
             # Create table
-            headers = ["Provider", "API Key", "Base URL", "Model"]
+            headers = ["Provider", "Method", "Secret", "Expires", "Base URL", "Model"]
             rows = []
             for info in provider_info:
                 rows.append([
                     info["provider"],
+                    info["auth_method"],
                     info["key_redacted"],
+                    info["expires"],
                     info["base_url"] or "(default)",
                     info["model"] or "(none)"
                 ])
@@ -294,17 +391,23 @@ def auth_status(
                     })
                 raise typer.Exit(1)
             
-            # Basic format validation
-            format_valid, format_msg = validate_api_key(provider, cred.api_key)
+            # Basic format validation (OAuth tokens have no static format)
+            if cred.is_oauth():
+                format_valid, format_msg = True, "OAuth token"
+            else:
+                format_valid, format_msg = validate_api_key(provider, cred.api_key)
             
             status_info = {
                 "provider": provider,
                 "status": "found",
+                "auth_method": cred.auth_method,
                 "key_redacted": redact_key(cred.api_key),
                 "format_valid": format_valid,
                 "format_message": format_msg,
                 "base_url": cred.base_url,
                 "model": cred.model,
+                "expires_at": cred.expires_at,
+                "expires": _format_expiry(cred),
             }
             
             # Live validation if requested
@@ -318,7 +421,9 @@ def auth_status(
             else:
                 output.print_panel(
                     f"Provider: {provider}\n"
-                    f"API Key: {redact_key(cred.api_key)}\n"
+                    f"Method: {cred.auth_method}\n"
+                    f"Secret: {redact_key(cred.api_key)}\n"
+                    + (f"Expires: {_format_expiry(cred)}\n" if cred.is_oauth() else "") +
                     f"Format: {'✅' if format_valid else '❌'} {format_msg}\n"
                     + (f"Live Test: {'✅' if status_info.get('live_valid') else '❌'} {status_info.get('live_message', 'Not tested')}\n" if validate else "") +
                     f"Base URL: {cred.base_url or '(default)'}\n"
@@ -340,13 +445,18 @@ def auth_status(
             for provider_name in providers:
                 cred = store.get_credential(provider_name)
                 if cred:
-                    format_valid, format_msg = validate_api_key(provider_name, cred.api_key)
+                    if cred.is_oauth():
+                        format_valid, format_msg = True, "OAuth token"
+                    else:
+                        format_valid, format_msg = validate_api_key(provider_name, cred.api_key)
                     
                     status = {
                         "provider": provider_name,
+                        "auth_method": cred.auth_method,
                         "key_redacted": redact_key(cred.api_key),
                         "format_valid": format_valid,
                         "format_message": format_msg,
+                        "expires": _format_expiry(cred),
                     }
                     
                     if validate:
@@ -360,7 +470,7 @@ def auth_status(
                 output.print_json({"providers": all_status})
             else:
                 # Create table
-                headers = ["Provider", "API Key", "Format"]
+                headers = ["Provider", "Method", "Secret", "Expires", "Format"]
                 if validate:
                     headers.append("Live Test")
                 
@@ -368,7 +478,9 @@ def auth_status(
                 for status in all_status:
                     row = [
                         status["provider"],
+                        status["auth_method"],
                         status["key_redacted"],
+                        status["expires"],
                         "✅" if status["format_valid"] else "❌"
                     ]
                     if validate:
