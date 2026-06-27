@@ -1200,17 +1200,28 @@ class ToolExecutionMixin:
         trust_level = tool_registry.get_trust_level(tool_name)
         
         if backend is not None:
+            # Also honour approval requirements registered through the public
+            # registry (e.g. a plugin/startup hook marking a custom destructive
+            # tool as requiring approval). Without this, the backend path would
+            # only gate the built-in DEFAULT_DANGEROUS_TOOLS and silently skip
+            # registry-required tools.
+            approval_registry = get_approval_registry()
+            registry_required = approval_registry.is_required(tool_name)
             # Check if tool needs approval based on multiple criteria
             needs_approval = (
                 approve_all 
                 or tool_name in DEFAULT_DANGEROUS_TOOLS
+                or registry_required
                 or (trust_level == "external")  # External tools need approval
             )
             if needs_approval:
                 request = ApprovalRequest(
                     tool_name=tool_name,
                     arguments=tool_args,
-                    risk_level=DEFAULT_DANGEROUS_TOOLS.get(tool_name, "medium"),
+                    risk_level=(
+                        approval_registry.get_risk_level(tool_name)
+                        or DEFAULT_DANGEROUS_TOOLS.get(tool_name, "medium")
+                    ),
                     agent_name=getattr(self, 'name', None),
                 )
                 

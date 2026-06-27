@@ -36,6 +36,8 @@ DEFAULT_DANGEROUS_TOOLS: Dict[str, str] = {
     "execute_code": "critical",
     "acp_execute_command": "critical",
     "write_file": "high",
+    "edit_file": "high",
+    "apply_patch": "high",
     "delete_file": "high",
     "move_file": "high",
     "copy_file": "high",

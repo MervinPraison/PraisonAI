@@ -104,6 +104,120 @@ def test_unknown_env_value_falls_back_to_default_preset(monkeypatch):
     assert "read_file" not in a._perm_deny
 
 
+def test_interactive_session_attaches_console_backend(monkeypatch):
+    """Safe-by-default ask: an un-flagged agent on an interactive TTY routes
+    dangerous tools through an approval backend instead of hard-denying them."""
+    monkeypatch.delenv("PRAISONAI_TOOL_SAFETY", raising=False)
+    from praisonaiagents.agent.agent import Agent
+    from praisonaiagents.approval.backends import ConsoleBackend
+    monkeypatch.setattr(Agent, "_is_interactive_session", staticmethod(lambda: True))
+    a = _make_agent()
+    assert isinstance(a._approval_backend, ConsoleBackend)
+    # _perm_deny stays empty so dangerous tools reach the backend (ask),
+    # rather than being hard-denied before the prompt.
+    assert a._perm_deny == frozenset()
+
+
+def test_non_interactive_keeps_deny_by_default(monkeypatch):
+    """Non-interactive (pipe/CI) keeps deny-by-default; no prompt backend."""
+    monkeypatch.delenv("PRAISONAI_TOOL_SAFETY", raising=False)
+    from praisonaiagents.agent.agent import Agent
+    monkeypatch.setattr(Agent, "_is_interactive_session", staticmethod(lambda: False))
+    a = _make_agent()
+    assert a._approval_backend is None
+    assert "execute_command" in a._perm_deny
+
+
+def test_interactive_bypass_env_off_no_backend(monkeypatch):
+    """PRAISONAI_TOOL_SAFETY=off bypasses the ask path even on a TTY."""
+    monkeypatch.setenv("PRAISONAI_TOOL_SAFETY", "off")
+    from praisonaiagents.agent.agent import Agent
+    monkeypatch.setattr(Agent, "_is_interactive_session", staticmethod(lambda: True))
+    a = _make_agent()
+    assert a._approval_backend is None
+    assert a._perm_deny == frozenset()
+
+
+def test_explicit_approval_false_no_prompt_on_tty(monkeypatch):
+    """Explicit approval=False opts out of prompting: keep deny-by-default,
+    never attach an interactive backend even on a TTY."""
+    monkeypatch.delenv("PRAISONAI_TOOL_SAFETY", raising=False)
+    from praisonaiagents.agent.agent import Agent
+    monkeypatch.setattr(Agent, "_is_interactive_session", staticmethod(lambda: True))
+    a = _make_agent(approval=False)
+    assert a._approval_backend is None
+    assert "execute_command" in a._perm_deny
+
+
+def test_interactive_read_only_tool_not_gated(monkeypatch):
+    """Read-only built-in tools stay ungated under safe-by-default ask."""
+    monkeypatch.delenv("PRAISONAI_TOOL_SAFETY", raising=False)
+    from praisonaiagents.agent.agent import Agent
+    monkeypatch.setattr(Agent, "_is_interactive_session", staticmethod(lambda: True))
+    a = _make_agent()
+    decision = a._resolve_approval_decision("read_file", {"path": "/tmp/x"}, is_async=False)
+    assert decision.approved is True
+
+
+def test_patch_and_edit_tools_are_classified_dangerous():
+    """apply_patch / edit_file create, update or delete files and must be
+    gated by default — they belong in DEFAULT_DANGEROUS_TOOLS."""
+    from praisonaiagents.approval.registry import DEFAULT_DANGEROUS_TOOLS
+    assert "apply_patch" in DEFAULT_DANGEROUS_TOOLS
+    assert "edit_file" in DEFAULT_DANGEROUS_TOOLS
+
+
+def test_interactive_apply_patch_is_gated(monkeypatch):
+    """A default interactive agent must route apply_patch through the backend
+    (ask), not run it ungated. Regression for the missing patch-tool gap."""
+    monkeypatch.delenv("PRAISONAI_TOOL_SAFETY", raising=False)
+    from praisonaiagents.agent.agent import Agent
+    from praisonaiagents.approval.protocols import ApprovalDecision
+    monkeypatch.setattr(Agent, "_is_interactive_session", staticmethod(lambda: True))
+    a = _make_agent()
+    seen = {}
+
+    def _record(request):
+        seen["tool"] = request.tool_name
+        return ApprovalDecision(approved=False, reason="denied")
+
+    monkeypatch.setattr(a._approval_backend, "request_approval_sync", _record)
+    decision = a._resolve_approval_decision("apply_patch", {"patch": "x"}, is_async=False)
+    assert seen.get("tool") == "apply_patch", "apply_patch must reach the approval backend"
+    assert decision.approved is False
+
+
+def test_interactive_registry_required_tool_is_gated(monkeypatch):
+    """A custom tool marked as requiring approval through the public registry
+    must still be gated on the interactive backend path."""
+    monkeypatch.delenv("PRAISONAI_TOOL_SAFETY", raising=False)
+    from praisonaiagents.agent.agent import Agent
+    from praisonaiagents.approval import get_approval_registry
+    from praisonaiagents.approval.protocols import ApprovalDecision
+    monkeypatch.setattr(Agent, "_is_interactive_session", staticmethod(lambda: True))
+
+    registry = get_approval_registry()
+    registry.add_requirement("custom_destructive_tool", risk_level="high")
+    try:
+        a = _make_agent()
+        seen = {}
+
+        def _record(request):
+            seen["tool"] = request.tool_name
+            return ApprovalDecision(approved=False, reason="denied")
+
+        monkeypatch.setattr(a._approval_backend, "request_approval_sync", _record)
+        decision = a._resolve_approval_decision(
+            "custom_destructive_tool", {"x": 1}, is_async=False
+        )
+        assert seen.get("tool") == "custom_destructive_tool", (
+            "registry-required tool must reach the approval backend"
+        )
+        assert decision.approved is False
+    finally:
+        registry.remove_requirement("custom_destructive_tool")
+
+
 def test_no_new_agent_kwarg_was_added():
     """Guard-rail: the feature must not add any new Agent() kwarg.
 
