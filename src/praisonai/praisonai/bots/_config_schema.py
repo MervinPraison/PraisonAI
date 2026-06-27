@@ -205,6 +205,11 @@ class ChannelConfigSchema(BaseModel):
     outbound_resilience: Optional[OutboundResilienceSchema] = None
     session: Optional[SessionConfigSchema] = None
     max_history: Optional[int] = None  # Backward compatibility
+    # Inbound media (Issue #2350): when a user sends a photo/document/video,
+    # adapters download and validate it (SSRF-safe, magic-byte checked) and
+    # forward the cached path to the agent's vision capability. Set to 0 to
+    # disable inbound media handling.
+    max_inbound_media_bytes: int = 20 * 1024 * 1024
     
     # Platform-specific fields
     phone_number_id: Optional[str] = None  # WhatsApp

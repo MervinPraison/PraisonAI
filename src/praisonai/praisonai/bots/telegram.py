@@ -454,6 +454,9 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 user_name = (
                     update.message.from_user.username or update.message.from_user.first_name or ""
                 ) if update.message.from_user else ""
+                # Download/validate any inbound photo or document so the agent's
+                # vision capability can act on it (Issue #2350).
+                attachments = await self._cache_inbound_telegram_media(update)
                 try:
                     message_text = await self._debouncer.debounce(user_id, message.content)
                     
@@ -484,6 +487,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                                 message_id=str(update.message.message_id),
                                 account=self.config.get("account", "default"),
                                 stream_callback=streamer.on_event,
+                                attachments=attachments or None,
                             )
                             
                             # Apply message hooks to final response (same as non-streaming path)
@@ -562,6 +566,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                                     user_name=user_name,
                                     message_id=str(update.message.message_id),
                                     account=self.config.get("account", "default"),
+                                    attachments=attachments or None,
                                 )
                             )
                         else:
@@ -571,6 +576,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                                 user_name=user_name,
                                 message_id=str(update.message.message_id),
                                 account=self.config.get("account", "default"),
+                                attachments=attachments or None,
                             )
                         
                         # Normal send flow for non-streaming
@@ -930,6 +936,15 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._application.add_handler(
             MessageHandler(filters.VOICE | filters.AUDIO, handle_voice)
         )
+
+        # Add photo/document handlers (Issue #2350): route inbound media to the
+        # agent's vision capability via the same message pipeline.
+        self._application.add_handler(
+            MessageHandler(
+                (filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND,
+                handle_message,
+            )
+        )
         
         self._is_running = True
         logger.info(f"Telegram bot started: @{self._bot_user.username}")
@@ -1121,6 +1136,55 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     }
                 )
     
+    async def _cache_inbound_telegram_media(self, update) -> List[str]:
+        """Download and validate inbound photo/document for the agent (Issue #2350).
+
+        Returns a list of cached local file paths the agent's vision capability
+        can act on. Empty when media handling is disabled or no media present.
+        """
+        max_bytes = getattr(self.config, "max_inbound_media_bytes", 0)
+        if not max_bytes or max_bytes <= 0:
+            return []
+        if not getattr(update, "message", None):
+            return []
+
+        paths: List[str] = []
+        try:
+            from ._media import cache_inbound_media
+        except Exception as e:  # pragma: no cover — defensive
+            logger.warning("Inbound media helper unavailable: %s", e)
+            return []
+
+        async def _fetch(file_obj, kind: str, filename: Optional[str] = None):
+            try:
+                tg_file = await file_obj.get_file()
+                data = bytes(await tg_file.download_as_bytearray())
+                path = cache_inbound_media(
+                    data, kind=kind, max_bytes=max_bytes, filename=filename
+                )
+                paths.append(path)
+            except Exception as e:
+                logger.warning("Failed to cache inbound %s: %s", kind, e)
+
+        # Photos arrive as a list of sizes; the last entry is the largest.
+        if update.message.photo:
+            await _fetch(update.message.photo[-1], "image")
+
+        doc = update.message.document
+        if doc is not None:
+            mime = (getattr(doc, "mime_type", "") or "").lower()
+            if mime.startswith("image/"):
+                kind = "image"
+            elif mime.startswith("video/"):
+                kind = "video"
+            elif mime.startswith("audio/"):
+                kind = "audio"
+            else:
+                kind = "document"
+            await _fetch(doc, kind, filename=getattr(doc, "file_name", None))
+
+        return paths
+
     async def _transcribe_audio(self, update) -> Optional[str]:
         """Download and transcribe voice/audio message."""
         if not self._stt_enabled:
@@ -1547,7 +1611,13 @@ async def process_inbound_telegram_message(
         message_text = await bot._transcribe_audio(update)
     elif update.message.text:
         message_text = update.message.text
-    
+    elif update.message.photo or update.message.document:
+        # Inbound photo/document (Issue #2350): use the caption as the prompt
+        # so the message still flows through the security pipeline. The media
+        # itself is downloaded and forwarded to the agent's vision capability
+        # by the caller via TelegramBot._cache_inbound_telegram_media().
+        message_text = update.message.caption or "[Media received]"
+
     if not message_text:
         return None
     
