@@ -33,7 +33,7 @@ Provider -> backend resolution is delegated to the ``ManagedBackendRegistry``
 work without editing this file.
 """
 
-from typing import AsyncIterator, Optional, Any
+from typing import Optional, Any
 from .managed_agents import AnthropicManagedAgent, ManagedConfig
 
 
@@ -59,10 +59,19 @@ class HostedAgent(AnthropicManagedAgent):
     
     Raises:
         ValueError: If the specified provider is not available as a managed runtime.
+
+    Note:
+        For non-Anthropic providers registered via the
+        ``praisonai.managed_backends`` entry point, ``HostedAgent(provider=...)``
+        acts as a **factory**: it returns the resolved backend instance directly
+        (via ``__new__``) rather than an ``AnthropicManagedAgent`` subclass
+        instance. This guarantees the foreign backend's own methods are used and
+        no ``AnthropicManagedAgent``-inherited member can run against
+        uninitialised Anthropic state.
     """
-    
-    def __init__(
-        self,
+
+    def __new__(
+        cls,
         provider: str = "anthropic",
         config: Optional[Any] = None,
         **kwargs,
@@ -73,70 +82,34 @@ class HostedAgent(AnthropicManagedAgent):
 
         registry = get_backend_registry()
         if not registry.is_available(provider):
-            raise ValueError(self._unavailable_provider_message(provider))
+            raise ValueError(cls._unavailable_provider_message(provider))
 
-        # Anthropic — and any backend that is a subclass of this class' own
-        # base (AnthropicManagedAgent) — is initialised in-place via
-        # ``super().__init__`` so all inherited methods operate on fully
-        # initialised state. Because ``HostedAgent`` IS-A ``AnthropicManagedAgent``
-        # and subclasses share its constructor contract, this keeps the
-        # Anthropic-compatible path fully functional.
         backend_cls = registry.resolve(provider)
+
+        # Anthropic — and any AnthropicManagedAgent subclass — shares this
+        # class' constructor contract, so we build a HostedAgent instance and
+        # let __init__ run super().__init__ in-place. All inherited methods then
+        # operate on fully initialised state.
         if issubclass(backend_cls, AnthropicManagedAgent):
-            super().__init__(provider=provider, config=config, **kwargs)
-        else:  # pragma: no cover - exercised once non-anthropic backends exist
-            # A foreign backend (not an AnthropicManagedAgent) cannot share our
-            # inherited execute()/stream()/session methods, so we fully delegate
-            # to it. Inherited attribute access is forwarded via __getattr__
-            # below, ensuring no method ever runs against uninitialised state.
-            self._delegate = backend_cls(provider=provider, config=config, **kwargs)
-            self.provider = provider
+            return super().__new__(cls)
 
-    # --- ManagedBackendProtocol forwarding ----------------------------------
-    # When HostedAgent delegates to a foreign backend, the methods it INHERITS
-    # from AnthropicManagedAgent would otherwise shadow the delegate and run
-    # against uninitialised state (no super().__init__ ran). These thin
-    # overrides forward the protocol surface to the delegate when present, and
-    # fall through to the inherited Anthropic implementation otherwise.
+        # A foreign backend cannot share AnthropicManagedAgent's inherited
+        # execute()/stream()/session surface. Returning its instance DIRECTLY
+        # (Python skips __init__ when __new__ returns a non-cls instance) makes
+        # HostedAgent a true factory: callers get the real backend, so no
+        # inherited member can ever shadow it or read uninitialised state.
+        return backend_cls(provider=provider, config=config, **kwargs)
 
-    async def execute(self, prompt: str, **kwargs) -> str:
-        delegate = self.__dict__.get("_delegate")
-        if delegate is not None:
-            return await delegate.execute(prompt, **kwargs)
-        return await super().execute(prompt, **kwargs)
-
-    async def stream(self, prompt: str, **kwargs) -> AsyncIterator[str]:
-        delegate = self.__dict__.get("_delegate")
-        if delegate is not None:
-            async for chunk in delegate.stream(prompt, **kwargs):
-                yield chunk
-            return
-        async for chunk in super().stream(prompt, **kwargs):
-            yield chunk
-
-    def reset_session(self) -> None:
-        delegate = self.__dict__.get("_delegate")
-        if delegate is not None:
-            return delegate.reset_session()
-        return super().reset_session()
-
-    def reset_all(self) -> None:
-        delegate = self.__dict__.get("_delegate")
-        if delegate is not None:
-            return delegate.reset_all()
-        return super().reset_all()
-
-    def __getattr__(self, item: str) -> Any:
-        # Only reached for attributes NOT found on the instance/class. When a
-        # foreign backend was delegated to, forward any remaining attribute
-        # access to it so HostedAgent acts as a transparent proxy rather than
-        # exposing uninitialised inherited state.
-        if item == "_delegate":
-            raise AttributeError(item)
-        delegate = self.__dict__.get("_delegate")
-        if delegate is not None:
-            return getattr(delegate, item)
-        raise AttributeError(item)
+    def __init__(
+        self,
+        provider: str = "anthropic",
+        config: Optional[Any] = None,
+        **kwargs,
+    ):
+        # Only runs for the Anthropic path: __new__ returns a foreign backend
+        # instance (not a HostedAgent) for other providers, so Python skips
+        # __init__ entirely in that case.
+        super().__init__(provider=provider, config=config, **kwargs)
 
     @staticmethod
     def _unavailable_provider_message(provider: str) -> str:
