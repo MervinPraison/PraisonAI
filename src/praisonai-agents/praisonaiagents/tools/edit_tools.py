@@ -45,7 +45,8 @@ _LSP_LANGUAGE_BY_EXT = {
 class EditTools:
     """Tools for file editing and patching operations."""
     
-    def __init__(self, workspace=None, post_edit_diagnostics: str = "auto"):
+    def __init__(self, workspace=None, post_edit_diagnostics: str = "auto",
+                 post_edit_format: str = "off", formatters: Optional[dict] = None):
         """Initialize EditTools with optional workspace containment.
         
         Args:
@@ -62,6 +63,24 @@ class EditTools:
                 - ``"off"``: never run diagnostics (zero overhead).
                 Checkers are auto-detected by file type and silently skipped
                 when unavailable; a missing linter never fails the edit.
+            post_edit_format: When to run a configured, language-appropriate
+                formatter on a file after a successful edit/patch, then persist
+                the formatted result. Mirrors ``post_edit_diagnostics``. One of:
+                - ``"off"`` (default): never run a formatter (zero overhead;
+                  byte-for-byte identical to the pre-existing behaviour).
+                - ``"auto"`` / ``"on"``: run a formatter if one is detected for
+                  the file type, otherwise silently skip.
+                Formatters are auto-detected by file type and silently skipped
+                when unavailable; a missing or failing formatter never fails the
+                edit (the edit still succeeds, just unformatted).
+            formatters: Optional mapping of lowercase file extension (e.g.
+                ``".py"``) to a ``(tool_name, argv_template)`` formatter, where
+                ``argv_template`` is a list whose entries may include the literal
+                placeholder ``"{path}"`` (replaced with the file path) — or whose
+                final element is the path when no placeholder is given. Lets a
+                project pin its own formatter (e.g. ``black`` instead of
+                ``ruff format``). Unspecified extensions fall back to the
+                built-in defaults.
         """
         self._workspace = workspace
         self._file_cache = {}  # Cache for staleness checking
@@ -71,6 +90,14 @@ class EditTools:
         if mode not in ("auto", "on", "off"):
             mode = "auto"
         self._post_edit_diagnostics = mode
+
+        fmt_mode = (post_edit_format or "off")
+        if isinstance(fmt_mode, str):
+            fmt_mode = fmt_mode.lower()
+        if fmt_mode not in ("auto", "on", "off"):
+            fmt_mode = "off"
+        self._post_edit_format = fmt_mode
+        self._formatters = formatters or {}
     
     def _validate_path(self, filepath: str) -> str:
         """Validate and resolve a file path within workspace constraints."""
@@ -424,6 +451,121 @@ class EditTools:
             return ""
 
     # ------------------------------------------------------------------
+    # Post-edit formatting
+    #
+    # Symmetric to the post-edit diagnostics hook: after a successful mutation
+    # we optionally run a configured, language-appropriate formatter on the
+    # single modified file and persist the formatted result.  All imports are
+    # deferred and any failure is swallowed: a missing or broken formatter must
+    # never turn a successful edit into a failure (the edit succeeds, just
+    # unformatted).
+    # ------------------------------------------------------------------
+
+    def _format_command(self, safe_path: str) -> Optional[Tuple[str, List[str]]]:
+        """Resolve a (tool_name, argv) formatter for ``safe_path`` by extension.
+
+        Honours any caller-supplied ``formatters`` override first, then falls
+        back to built-in defaults.  Returns ``None`` when no formatter is
+        configured for the file type or the executable is not installed, so the
+        caller can silently skip.  Lazy-imports ``shutil``.
+        """
+        import shutil
+
+        ext = os.path.splitext(safe_path)[1].lower()
+
+        def _materialise(argv_template: List[str]) -> List[str]:
+            # Substitute the literal ``{path}`` placeholder where present; if no
+            # entry references it, append the path so a bare formatter command
+            # still receives the file to format.
+            if any("{path}" in part for part in argv_template):
+                return [part.replace("{path}", safe_path) for part in argv_template]
+            return list(argv_template) + [safe_path]
+
+        # Caller override takes precedence and pins the project's formatter.
+        override = self._formatters.get(ext)
+        if override:
+            tool_name, argv_template = override
+            argv = _materialise(list(argv_template))
+            exe = argv[0]
+            if os.path.isabs(exe) or shutil.which(exe):
+                return tool_name, argv
+            return None
+
+        candidates: List[Tuple[str, List[str]]] = []
+        if ext in (".py", ".pyi"):
+            if shutil.which("ruff"):
+                candidates.append((
+                    "ruff", ["ruff", "format", "--quiet", "--no-cache", safe_path],
+                ))
+            if shutil.which("black"):
+                candidates.append(("black", ["black", "--quiet", safe_path]))
+        elif ext in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json",
+                     ".css", ".scss", ".less", ".html", ".md", ".yaml", ".yml"):
+            if shutil.which("prettier"):
+                candidates.append((
+                    "prettier", ["prettier", "--write", "--log-level", "warn", safe_path],
+                ))
+        elif ext == ".go":
+            if shutil.which("gofmt"):
+                candidates.append(("gofmt", ["gofmt", "-w", safe_path]))
+        elif ext == ".rs":
+            if shutil.which("rustfmt"):
+                candidates.append(("rustfmt", ["rustfmt", "--quiet", safe_path]))
+
+        for tool_name, argv in candidates:
+            exe = argv[0]
+            if os.path.isabs(exe) or shutil.which(exe):
+                return tool_name, argv
+        return None
+
+    def _apply_post_edit_format(self, safe_path: str) -> None:
+        """Run a configured formatter on ``safe_path`` in place.
+
+        Does nothing when formatting is disabled or no formatter is available.
+        Any failure (missing binary, timeout, non-zero exit) is logged at debug
+        level and swallowed: a formatter must never fail an edit.
+        """
+        if self._post_edit_format == "off":
+            return
+        try:
+            resolved = self._format_command(safe_path)
+            if resolved is None:
+                return
+            _tool_name, argv = resolved
+
+            import subprocess
+            subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                timeout=_DIAGNOSTICS_TIMEOUT,
+                cwd=os.path.dirname(safe_path) or None,
+            )
+        except Exception as e:  # never let formatting break a successful edit
+            logger.debug("Formatter skipped/failed for %s: %s", safe_path, e)
+
+    def _refresh_hash_after_format(self, safe_path: str) -> None:
+        """Re-record the on-disk hash after an in-place format.
+
+        A formatter may rewrite the file, so the hash recorded right after the
+        edit can become stale.  Re-hash the current on-disk content (BOM
+        stripped, exactly as ``read_file`` would) so a follow-up edit in the
+        same session is not falsely flagged as stale.  Best-effort: any failure
+        is swallowed so it cannot break a successful edit.
+        """
+        try:
+            with open(safe_path, 'rb') as f:
+                raw_bytes = f.read()
+            if raw_bytes.startswith(b'\xef\xbb\xbf'):
+                raw_bytes = raw_bytes[3:]
+            content = raw_bytes.decode('utf-8')
+            new_hash = self._compute_content_hash(content)
+            self._file_cache[safe_path] = new_hash
+            _file_locks.record_read_hash(safe_path, new_hash)
+        except Exception as e:
+            logger.debug("Hash refresh skipped after format for %s: %s", safe_path, e)
+
+    # ------------------------------------------------------------------
     # Fuzzy matching ladder
     #
     # Each strategy receives the full file ``content`` and the target
@@ -708,7 +850,13 @@ class EditTools:
                 new_hash = self._compute_content_hash(new_content)
                 self._file_cache[safe_path] = new_hash
                 _file_locks.record_read_hash(safe_path, new_hash)
-                
+
+                # Optionally format the touched file in place, then refresh the
+                # recorded hash so a follow-up edit is not flagged as stale.
+                if self._post_edit_format != "off":
+                    self._apply_post_edit_format(safe_path)
+                    self._refresh_hash_after_format(safe_path)
+
                 result = f"Success: Made {replacements} replacement(s) in {filepath}\n\nDiff:\n{diff}"
                 return result + self._run_diagnostics(safe_path, filepath)
             
@@ -968,6 +1116,11 @@ class EditTools:
                         applied.append(("write", safe_path, backup))
                         self._file_cache[safe_path] = content_hash
                         _file_locks.record_read_hash(safe_path, content_hash)
+                        # Optionally format the touched file in place before
+                        # diagnostics run, refreshing the recorded hash.
+                        if self._post_edit_format != "off":
+                            self._apply_post_edit_format(safe_path)
+                            self._refresh_hash_after_format(safe_path)
                         verb = "Added" if kind == "add" else "Updated"
                         diagnostics = self._run_diagnostics(safe_path, display)
                         messages.append(f"{verb} {display}\n{diff}{diagnostics}")
@@ -1179,15 +1332,23 @@ def search_files(directory: str, pattern: str,
     return _edit_tools.search_files(directory, pattern, file_pattern)
 
 
-def create_edit_tools(workspace=None, post_edit_diagnostics: str = "auto") -> EditTools:
+def create_edit_tools(workspace=None, post_edit_diagnostics: str = "auto",
+                      post_edit_format: str = "off",
+                      formatters: Optional[dict] = None) -> EditTools:
     """Create EditTools instance with optional workspace containment.
     
     Args:
         workspace: Optional Workspace instance for path containment
         post_edit_diagnostics: Diagnostics mode ("auto"|"on"|"off"); see
             ``EditTools.__init__`` for details.
+        post_edit_format: Formatter mode ("off"|"auto"|"on"); see
+            ``EditTools.__init__`` for details. Defaults to ``"off"`` for
+            backward compatibility.
+        formatters: Optional ext -> ``(tool_name, argv_template)`` override map;
+            see ``EditTools.__init__`` for details.
         
     Returns:
         EditTools instance configured with workspace
     """
-    return EditTools(workspace=workspace, post_edit_diagnostics=post_edit_diagnostics)
+    return EditTools(workspace=workspace, post_edit_diagnostics=post_edit_diagnostics,
+                     post_edit_format=post_edit_format, formatters=formatters)
