@@ -100,13 +100,19 @@ def resolve_default_model(
 ) -> str:
     """Resolve the default model for a zero-config run.
 
-    Precedence: ``explicit`` > recent (persisted) > provider-aware best >
-    ``gpt-4o-mini``.
+    Precedence: ``explicit`` > recent (persisted) > ``MODEL_NAME`` /
+    ``OPENAI_MODEL_NAME`` > provider-aware best > ``gpt-4o-mini``.
+
+    Only *user-chosen* models (``explicit`` and the env overrides) are
+    persisted as the recent model. Provider-*inferred* defaults and the
+    ``gpt-4o-mini`` fallback are intentionally **not** persisted: persisting
+    them would let a stale inferred default short-circuit credential-based
+    inference on a later run after the user's available providers have changed.
 
     Args:
         explicit: An explicitly configured model (``--model``/config/YAML).
             When given it wins and is persisted as the recent model.
-        persist: Whether to remember the resolved model for next time.
+        persist: Whether to remember user-chosen models for next time.
         notify: Whether to emit a one-line transparency notice the first time a
             provider-aware default is inferred (no explicit, no recent model).
 
@@ -147,6 +153,9 @@ def resolve_default_model(
             except Exception:
                 pass
 
-    if persist:
-        set_recent_model(model)
+    # NOTE: provider-inferred defaults and the gpt-4o-mini fallback are
+    # deliberately NOT persisted. Persisting them would let a stale inferred
+    # default win over fresh credential-based inference on a later run when the
+    # user's available providers have changed, re-introducing the very
+    # zero-config failure this resolver exists to prevent.
     return model
