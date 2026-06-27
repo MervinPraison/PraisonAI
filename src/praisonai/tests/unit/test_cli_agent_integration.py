@@ -210,6 +210,46 @@ class TestBarePositionalPrompt:
         mock_prompt.assert_not_called()
         assert instance.agent_file == str(f)
 
+    def _parse_real(self, command, *, isfile=False):
+        """Drive the real parse_args() disambiguation as production would.
+
+        parse_args() short-circuits under pytest, so temporarily mask the
+        test-environment signals and feed a realistic ``sys.argv`` to exercise
+        the actual positional-vs-prompt routing logic.
+        """
+        from unittest.mock import patch
+        from praisonai.cli.main import PraisonAI
+
+        instance = PraisonAI()
+        clean_env = {k: v for k, v in os.environ.items() if k != "PYTEST_CURRENT_TEST"}
+        with patch.object(sys, "argv", ["praisonai", command]), \
+             patch.dict(os.environ, clean_env, clear=True), \
+             patch("os.path.isfile", return_value=isfile):
+            result = instance.parse_args()
+        args = result[0] if isinstance(result, tuple) else result
+        return args
+
+    def test_real_parse_bare_prompt_becomes_direct_prompt(self):
+        """Real parse_args routes a bare prompt to direct_prompt."""
+        args = self._parse_real("summarise this folder")
+        assert args.command is None
+        assert args.direct_prompt == "summarise this folder"
+
+    def test_real_parse_uppercase_yaml_kept_as_command(self):
+        """Real parse_args keeps an uppercase .YAML path as the agent file."""
+        args = self._parse_real("Agents.YAML")
+        assert args.command == "Agents.YAML"
+
+    def test_real_parse_yml_path_kept_as_command(self):
+        """Real parse_args keeps a .yml path as the agent file."""
+        args = self._parse_real("workflow.yml")
+        assert args.command == "workflow.yml"
+
+    def test_real_parse_existing_file_kept_as_command(self):
+        """Real parse_args keeps an existing non-YAML file as the agent file."""
+        args = self._parse_real("custom_agents.txt", isfile=True)
+        assert args.command == "custom_agents.txt"
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
