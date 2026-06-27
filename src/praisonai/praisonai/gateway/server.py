@@ -4679,12 +4679,18 @@ class WebSocketGateway:
                 self._cleanup_task.cancel()
             # Issue #2375: drain in-flight agent turns (channel bots) and
             # websocket sessions before final teardown when a drain timeout
-            # is configured. No-op when unset (today's behaviour).
+            # is configured. The configured timeout bounds the *total*
+            # shutdown drain: track elapsed across both phases so channel
+            # bots + websocket sessions don't sum to 2 * drain_timeout.
+            # No-op when unset (today's behaviour).
+            drain_overall_start = time.monotonic()
             await self.stop_channels(drain_timeout=drain_timeout_cfg)
             if drain_timeout_cfg and drain_timeout_cfg > 0:
-                try:
-                    await self._drain_active_sessions(
-                        reason="shutdown", timeout=float(drain_timeout_cfg)
-                    )
-                except Exception as e:
-                    logger.warning("Error draining websocket sessions: %s", e)
+                remaining = drain_timeout_cfg - (time.monotonic() - drain_overall_start)
+                if remaining > 0:
+                    try:
+                        await self._drain_active_sessions(
+                            reason="shutdown", timeout=float(remaining)
+                        )
+                    except Exception as e:
+                        logger.warning("Error draining websocket sessions: %s", e)
