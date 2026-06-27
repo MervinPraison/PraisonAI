@@ -20,6 +20,7 @@ import logging
 import time
 import weakref
 from datetime import datetime
+from functools import partial
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from .._lockmap import LockMap
 from ._reset_policy import SessionResetPolicy
@@ -81,6 +82,8 @@ class BotSessionManager:
         inject_session_context: bool = True,
         compaction: Optional[Any] = None,
         delivery_router: Optional[Any] = None,
+        session_scope: str = "per_user",
+        attribution: str = "[{sender}] ",
     ) -> None:
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
         self._locks = LockMap()
@@ -147,6 +150,23 @@ class BotSessionManager:
         # storage_key: (HookRunner, agent_name). Lets any clear path emit
         # SESSION_END with the *correct* runner/agent — never another user's.
         self._session_hook_context: Dict[str, Any] = {}
+        # Group/channel session scope (Issue #2376). ``per_user`` (default)
+        # preserves today's per-sender isolation. ``per_chat`` routes a
+        # group/channel chat to a single shared session keyed by
+        # ``(platform, chat_id, thread_id)`` so the agent sees one coherent
+        # multi-party transcript, and prefixes each turn with the sender so
+        # statements can be attributed. DMs always stay per_user even when
+        # ``per_chat`` is set, so private conversations never collide.
+        scope = (session_scope or "per_user").strip().lower()
+        if scope not in ("per_user", "per_chat"):
+            logger.warning(
+                "Unknown session_scope %r; falling back to 'per_user'", session_scope
+            )
+            scope = "per_user"
+        self._session_scope = scope
+        # Attribution template applied to each turn's content in per_chat mode.
+        # Supports ``{sender}`` and ``{time}`` placeholders. Empty disables it.
+        self._attribution = attribution if attribution is not None else "[{sender}] "
         # Optional history compaction. When configured, older turns are
         # summarised (instead of hard-truncated) once history exceeds the
         # configured budget, so long-lived conversations retain context.
@@ -225,12 +245,61 @@ class BotSessionManager:
             logger.warning("Failed to build ContextCompactor: %s", e)
             return None
 
-    def _storage_key(self, user_id: str) -> str:
+    def _attribute(self, prompt: str, sender: str) -> str:
+        """Prefix *prompt* with the sender per the attribution template.
+
+        Used in ``per_chat`` scope so a multi-party transcript records who
+        said what (Issue #2376). The template supports ``{sender}`` and
+        ``{time}`` placeholders; an empty template or missing sender leaves
+        the prompt unchanged. Best-effort — any formatting error falls back
+        to the original prompt so a malformed template never breaks chat.
+        """
+        if not self._attribution or not sender:
+            return prompt
+        try:
+            prefix = self._attribution.format(
+                sender=sender,
+                time=datetime.now().strftime("%H:%M"),
+            )
+        except (KeyError, IndexError, ValueError) as e:  # pragma: no cover — defensive
+            logger.warning("Invalid attribution template %r: %s", self._attribution, e)
+            return prompt
+        return f"{prefix}{prompt}"
+
+    def _scope_for(self, chat_type: str = "") -> str:
+        """Resolve the effective session scope for a given chat type.
+
+        ``per_chat`` only applies to multi-party chat types (group/channel).
+        Direct messages always stay ``per_user`` so private conversations are
+        never merged into a shared transcript.
+        """
+        if self._session_scope != "per_chat":
+            return "per_user"
+        if chat_type and chat_type.lower() in ("direct", "dm", "private"):
+            return "per_user"
+        return "per_chat"
+
+    def _storage_key(
+        self,
+        user_id: str,
+        *,
+        chat_id: str = "",
+        thread_id: str = "",
+        chat_type: str = "",
+    ) -> str:
         """Resolve a raw platform user id to the in-memory/store key.
 
         With an identity resolver this is the unified user id; without
         one, behaviour is unchanged (raw ``user_id``).
+
+        When ``session_scope='per_chat'`` and the message arrives in a
+        group/channel (``chat_id`` present, not a DM), the key is shared
+        across participants — ``{platform}:chat:{chat_id}:{thread_id}`` —
+        so the agent sees one coherent multi-party transcript (Issue #2376).
         """
+        if self._scope_for(chat_type) == "per_chat" and chat_id:
+            prefix = self._platform or "bot"
+            return f"{prefix}:chat:{chat_id}:{thread_id}"
         if self._identity_resolver is not None and self._platform:
             try:
                 return self._identity_resolver.resolve(self._platform, user_id)
@@ -250,13 +319,18 @@ class BotSessionManager:
         prefix = f"bot_{self._platform}" if self._platform else "bot"
         return f"{prefix}_{storage_key}"
 
-    def _session_key(self, user_id: str) -> str:
-        """Persistent-store key for a raw platform user id (back-compat API)."""
-        return self._persist_key(self._storage_key(user_id))
+    def _session_key(self, user_id: str, **route: str) -> str:
+        """Persistent-store key for a raw platform user id (back-compat API).
 
-    def _get_lock(self, user_id: str) -> asyncio.Lock:
+        Accepts optional ``chat_id``/``thread_id``/``chat_type`` so per_chat
+        scope persists to a shared key (Issue #2376); without them behaviour
+        is unchanged.
+        """
+        return self._persist_key(self._storage_key(user_id, **route))
+
+    def _get_lock(self, user_id: str, **route: str) -> asyncio.Lock:
         """Get or create an asyncio.Lock for *user_id* (storage-keyed)."""
-        key = self._storage_key(user_id)
+        key = self._storage_key(user_id, **route)
         return self._locks.get(key)
 
     def _get_agent_lock(self, agent: "Agent") -> asyncio.Lock:
@@ -267,9 +341,9 @@ class BotSessionManager:
             self._agent_locks[agent] = lock
         return lock
 
-    def _maybe_fire_session_start(self, agent: "Agent", user_id: str) -> None:
+    def _maybe_fire_session_start(self, agent: "Agent", user_id: str, **route: str) -> None:
         """Fire SESSION_START once per session lifetime (no-op without hooks)."""
-        storage_key = self._storage_key(user_id)
+        storage_key = self._storage_key(user_id, **route)
         if storage_key in self._seen_sessions:
             return
         self._seen_sessions.add(storage_key)
@@ -315,17 +389,17 @@ class BotSessionManager:
         except Exception as e:
             logger.debug("SESSION_END emit error (non-fatal): %s", e)
 
-    def _load_history(self, user_id: str) -> List[Dict[str, Any]]:
+    def _load_history(self, user_id: str, **route: str) -> List[Dict[str, Any]]:
         """Load user history from store (if available) or in-memory cache.
         
         Checks reset policy and clears history if a reset is needed.
         """
-        storage_key = self._storage_key(user_id)
+        storage_key = self._storage_key(user_id, **route)
         
         # Check if session should be reset based on policy
         if self._should_reset_session(storage_key):
             logger.info("Auto-resetting session for user %s based on policy", user_id)
-            self._clear_session_data(storage_key, user_id)
+            self._clear_session_data(storage_key, self._persist_key(storage_key))
             # End the expiring session so the next message re-opens a fresh one
             # (otherwise lifecycle hooks would go permanently silent for this user).
             self._fire_session_end(storage_key, reason="policy")
@@ -334,7 +408,7 @@ class BotSessionManager:
             return []
         
         if self._store is not None:
-            key = self._session_key(user_id)
+            key = self._session_key(user_id, **route)
             try:
                 history = self._store.get_chat_history(key)
                 if history:
@@ -344,7 +418,7 @@ class BotSessionManager:
         return list(self._histories.get(storage_key, []))
 
     def _save_history(
-        self, user_id: str, history: List[Dict[str, Any]]
+        self, user_id: str, history: List[Dict[str, Any]], **route: str
     ) -> None:
         """Save user history to store (if available) and in-memory cache.
 
@@ -388,10 +462,10 @@ class BotSessionManager:
             history = history[-self._max_history:]
 
         # Always update in-memory cache (keyed by storage key)
-        self._histories[self._storage_key(user_id)] = history
+        self._histories[self._storage_key(user_id, **route)] = history
 
         if self._store is not None:
-            key = self._session_key(user_id)
+            key = self._session_key(user_id, **route)
             try:
                 if hasattr(self._store, "set_chat_history"):
                     self._store.set_chat_history(key, history)
@@ -588,7 +662,31 @@ class BotSessionManager:
                         logger.debug("Failed to reset correlation id: %s", e)
                 return ""
                 
-        user_lock = self._get_lock(user_id)
+        # Resolve the routing context once so per_chat scope (Issue #2376)
+        # keys the session and locks by the shared chat — not the sender —
+        # for group/channel chats, while DMs and per_user stay sender-keyed.
+        # ``route`` is empty in per_user mode so every keyed helper behaves
+        # exactly as before (full back-compat).
+        chat_type = ""
+        route: Dict[str, str] = {}
+        if self._session_scope == "per_chat":
+            try:
+                from .delivery import detect_chat_type
+                chat_type = detect_chat_type(self._platform, chat_id)
+            except Exception:  # pragma: no cover — defensive
+                chat_type = ""
+            if self._scope_for(chat_type) == "per_chat" and chat_id:
+                route = {
+                    "chat_id": chat_id,
+                    "thread_id": thread_id,
+                    "chat_type": chat_type,
+                }
+                # Attribute each turn to its sender so the agent can follow a
+                # multi-party thread ("who said what"). Only applied in the
+                # shared per_chat session; per_user content is untouched.
+                prompt = self._attribute(prompt, user_name or user_id)
+
+        user_lock = self._get_lock(user_id, **route)
         agent_lock = self._get_agent_lock(agent)
 
         # W1: set task-local session context so any tool the agent
@@ -693,17 +791,17 @@ class BotSessionManager:
                     # Load history (may hit disk via run_in_executor for async safety)
                     loop = asyncio.get_running_loop()
                     user_history = await loop.run_in_executor(
-                        None, self._load_history, user_id
+                        None, partial(self._load_history, user_id, **route)
                     )
                     
                     # Update last active timestamp AFTER history load and reset check
-                    self._last_active[self._storage_key(user_id)] = time.monotonic()
+                    self._last_active[self._storage_key(user_id, **route)] = time.monotonic()
 
                     # Fire SESSION_START once per session lifetime (no-op when
                     # no hooks registered).  BEFORE_AGENT / AFTER_AGENT are
                     # emitted by ``agent.chat()`` itself, so we deliberately do
                     # NOT re-fire them here to avoid double-dispatch.
-                    self._maybe_fire_session_start(agent, user_id)
+                    self._maybe_fire_session_start(agent, user_id, **route)
 
                     # W1 robustness: hold ``agent_lock`` across the FULL LLM call
                     # (not only the history swap) so concurrent users on a shared
@@ -801,7 +899,6 @@ class BotSessionManager:
                                 # Legacy non-streaming path: use agent.chat() in executor with cancel_token and timeout
                                 import contextvars
                                 import inspect
-                                from functools import partial
                                 _ctx = contextvars.copy_context()
                                 
                                 # Create agent.chat call with cancel_token if supported
@@ -873,10 +970,12 @@ class BotSessionManager:
                             if controller:
                                 self._active_runs.pop(storage_key, None)
 
-                    # Persist outside the agent_lock — it's per-user and the agent
-                    # is no longer touched.
+                    # Persist outside the agent_lock — it's session-scoped and
+                    # the agent is no longer touched. ``route`` keys the shared
+                    # per_chat session when active (empty otherwise).
                     await loop.run_in_executor(
-                        None, self._save_history, user_id, updated_history
+                        None,
+                        partial(self._save_history, user_id, updated_history, **route),
                     )
 
                     # Normalise an agent-emitted presentation (if any) into
@@ -1171,19 +1270,20 @@ class BotSessionManager:
             current_datetime=datetime.now()
         )
     
-    def _clear_session_data(self, storage_key: str, user_id: str) -> None:
-        """Clear session data for a user.
-        
+    def _clear_session_data(self, storage_key: str, persist_key: str) -> None:
+        """Clear session data for a session.
+
         Args:
-            storage_key: The storage key for the user
-            user_id: The raw user ID
+            storage_key: The in-memory storage key for the session
+            persist_key: The persistent-store key for the session (already
+                derived via ``_session_key``/``_persist_key`` so per_chat
+                scope clears the shared key, not a re-derived per_user one).
         """
         self._histories.pop(storage_key, None)
         # Don't clear last_active as we still need it for idle tracking
         # Don't drop lock here as it may still be held by caller
         
         if self._store is not None:
-            persist_key = self._session_key(user_id)
             try:
                 self._store.clear_session(persist_key)
             except Exception as e:
@@ -1200,12 +1300,17 @@ class BotSessionManager:
         """
         return self._last_presentation.pop(self._storage_key(user_id), None)
 
-    def reset(self, user_id: str) -> bool:
-        """Clear a user's session history.  Returns True if it existed."""
-        storage_key = self._storage_key(user_id)
+    def reset(self, user_id: str, **route: str) -> bool:
+        """Clear a session's history.  Returns True if it existed.
+
+        Accepts optional ``chat_id``/``thread_id``/``chat_type`` so a ``/new``
+        command issued in a group/channel clears the shared per_chat session
+        (Issue #2376); without them behaviour is unchanged (per_user).
+        """
+        storage_key = self._storage_key(user_id, **route)
         existed = storage_key in self._histories
         
-        self._clear_session_data(storage_key, user_id)
+        self._clear_session_data(storage_key, self._persist_key(storage_key))
         self._last_active.pop(storage_key, None)
         self._last_reset[storage_key] = time.monotonic()
 
@@ -1469,6 +1574,16 @@ def build_session_manager(config, platform: str, *, run_control=None) -> BotSess
     compaction = None
     if getattr(config, "session", None) and getattr(config.session, "compaction", None):
         compaction = config.session.compaction
+
+    # Extract group/channel session scope + attribution (Issue #2376).
+    # Defaults preserve per_user isolation when unset.
+    session_scope = "per_user"
+    attribution = "[{sender}] "
+    if getattr(config, "session", None):
+        session_scope = getattr(config.session, "session_scope", None) or session_scope
+        _attr = getattr(config.session, "attribution", None)
+        if _attr is not None:
+            attribution = _attr
     
     # Support backward compatibility with max_history at channel level
     max_history = 100
@@ -1492,4 +1607,6 @@ def build_session_manager(config, platform: str, *, run_control=None) -> BotSess
         compaction=compaction,
         ingress_journal=ingress_journal,
         dlq=dlq,
+        session_scope=session_scope,
+        attribution=attribution,
     )
