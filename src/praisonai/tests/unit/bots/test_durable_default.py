@@ -25,8 +25,10 @@ def test_durable_on_by_default(tmp_path, monkeypatch):
 
     assert mgr._ingress_journal is not None
     assert mgr._dlq is not None
-    # Both durable stores share one canonical per-agent directory.
-    assert (tmp_path / "state" / "ingress.sqlite").parent.exists()
+    # Durable stores live under a canonical, per-platform directory.
+    expected = tmp_path / "state" / "telegram"
+    assert mgr._ingress_journal.path == expected / "ingress.sqlite"
+    assert mgr._dlq.path == expected / "inbound_dlq.sqlite"
 
 
 def test_durable_can_be_disabled(tmp_path, monkeypatch):
@@ -51,8 +53,9 @@ def test_durable_store_override(tmp_path, monkeypatch):
     mgr = build_session_manager(_make_config(delivery), platform="discord")
 
     assert mgr._ingress_journal is not None
-    assert custom.exists()
-    assert (custom / "ingress.sqlite").exists() or custom.exists()
+    assert mgr._dlq is not None
+    assert mgr._ingress_journal.path == custom / "ingress.sqlite"
+    assert mgr._dlq.path == custom / "inbound_dlq.sqlite"
 
 
 def test_resolve_durable_store_dir_uses_canonical_path(tmp_path, monkeypatch):
@@ -60,8 +63,14 @@ def test_resolve_durable_store_dir_uses_canonical_path(tmp_path, monkeypatch):
     from praisonai.bots._session import resolve_durable_store_dir
 
     store_dir = resolve_durable_store_dir("telegram")
-    assert store_dir == tmp_path / "state"
+    # Scoped per-platform to isolate journal + DLQ across adapters.
+    assert store_dir == tmp_path / "state" / "telegram"
     assert store_dir.exists()
+
+    # Different platforms resolve to isolated directories.
+    other = resolve_durable_store_dir("discord")
+    assert other == tmp_path / "state" / "discord"
+    assert other != store_dir
 
 
 @pytest.mark.asyncio

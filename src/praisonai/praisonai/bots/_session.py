@@ -1268,20 +1268,32 @@ class BotSessionManager:
         return list(self._histories.keys())
 
 
-def resolve_durable_store_dir(platform: str = "") -> "Path":
-    """Resolve the canonical per-agent SQLite store directory for durability.
+def resolve_durable_store_dir(platform: str = ""):
+    """Resolve the canonical per-platform SQLite store directory for durability.
 
-    Returns ``~/.praisonai/state/`` (created if missing), the single location
-    where the inbound journal, inbound DLQ and outbound queue databases live so
-    all durable components share one canonical store instead of three ad-hoc
-    file paths. ``PRAISONAI_HOME`` overrides the base directory when set.
+    Returns ``~/.praisonai/state/<platform>/`` (created if missing), where the
+    inbound journal, inbound DLQ and outbound queue databases for a given
+    platform live so all durable components share one canonical store instead of
+    three ad-hoc file paths. ``PRAISONAI_HOME`` overrides the base directory when
+    set.
+
+    The store is scoped by ``platform`` so that bots on different platforms
+    (telegram, discord, slack, ...) running under the same ``PRAISONAI_HOME`` do
+    not share a journal/DLQ. This prevents one platform's DLQ replay from
+    consuming another platform's failed inbound events and avoids dedup-tuple
+    collisions across platforms.
     """
     from pathlib import Path
     import os as _os
+    import re as _re
 
     base = _os.environ.get("PRAISONAI_HOME")
     root = Path(base).expanduser() if base else Path.home() / ".praisonai"
     store_dir = root / "state"
+    # Scope by platform so each adapter gets an isolated journal + DLQ.
+    safe_platform = _re.sub(r"[^A-Za-z0-9_.-]", "_", platform).strip("_") if platform else ""
+    if safe_platform:
+        store_dir = store_dir / safe_platform
     store_dir.mkdir(parents=True, exist_ok=True)
     return store_dir
 
