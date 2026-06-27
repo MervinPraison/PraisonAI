@@ -522,12 +522,90 @@ class TestPostEditFormat:
         _name, argv = cmd
         assert argv[-1] == str(tmp_path / "a.py")
 
-    def test_override_missing_binary_returns_none(self, tmp_path):
+    def test_override_missing_binary_returns_none(self, tmp_path, monkeypatch):
+        # Deterministic: stub the binary lookup so the result never depends on
+        # host PATH state.
+        import shutil
+        monkeypatch.setattr(shutil, "which", lambda _name: None)
         editor = EditTools(
             post_edit_format="auto",
             formatters={".py": ("nope", ["this-binary-does-not-exist-xyz"])},
         )
         assert editor._format_command(str(tmp_path / "a.py")) is None
+
+    def test_relative_override_resolves_from_file_dir(self, tmp_path, monkeypatch):
+        # A project-local relative command (e.g. ./node_modules/.bin/prettier)
+        # that exists next to the edited file should resolve, not be skipped.
+        import shutil
+        monkeypatch.setattr(shutil, "which", lambda _name: None)
+        bindir = tmp_path / "node_modules" / ".bin"
+        bindir.mkdir(parents=True)
+        exe = bindir / "prettier"
+        exe.write_text("#!/bin/sh\n")
+        exe.chmod(0o755)
+        editor = EditTools(
+            post_edit_format="auto",
+            formatters={".py": ("local", ["./node_modules/.bin/prettier"])},
+        )
+        cmd = editor._format_command(str(tmp_path / "a.py"))
+        assert cmd is not None
+        assert cmd[0] == "local"
+
+    def test_failing_formatter_does_not_corrupt_baseline(self, tmp_path, monkeypatch):
+        # A non-zero formatter exit (possibly leaving partial output) must NOT
+        # be adopted as the clean baseline: a follow-up edit must still match
+        # the known-good post-edit content rather than fail with stale-content.
+        editor = EditTools(post_edit_format="auto", post_edit_diagnostics="off")
+        monkeypatch.setattr(EditTools, "_format_command",
+                            lambda self, p: ("stub", ["stub", p]))
+
+        def _run(argv, **kwargs):
+            # Simulate a formatter that writes garbage then exits non-zero.
+            with open(argv[-1], "w", encoding="utf-8") as f:
+                f.write("PARTIAL_GARBAGE")
+            class _P:
+                returncode = 1
+                stdout = ""
+                stderr = "boom"
+            return _P()
+
+        import subprocess
+        monkeypatch.setattr(subprocess, "run", _run)
+        p = tmp_path / "a.py"
+        _write(p, "x=1\n")
+        result = editor.edit_file(str(p), "x=1", "x=2")
+        assert "Success" in result
+        # The recorded baseline must still be the known-good post-edit content,
+        # not the formatter's partial garbage, so a follow-up edit keyed on the
+        # cached hash is unaffected by the failed formatter.
+        assert editor._file_cache[str(p)] == editor._compute_content_hash("x=2\n")
+
+    def test_hash_refreshed_after_successful_format(self, tmp_path, monkeypatch):
+        # After a successful format, the cached hash matches the formatted
+        # on-disk content so a subsequent edit is not falsely flagged as stale.
+        editor = EditTools(post_edit_format="auto", post_edit_diagnostics="off")
+        monkeypatch.setattr(EditTools, "_format_command",
+                            lambda self, p: ("stub", ["stub", p]))
+
+        def _run(argv, **kwargs):
+            with open(argv[-1], "w", encoding="utf-8") as f:
+                f.write("x = 2\n")
+            class _P:
+                returncode = 0
+                stdout = ""
+                stderr = ""
+            return _P()
+
+        import subprocess
+        monkeypatch.setattr(subprocess, "run", _run)
+        p = tmp_path / "a.py"
+        _write(p, "x=1\n")
+        first = editor.edit_file(str(p), "x=1", "x=2")
+        assert "Success" in first
+        assert editor._file_cache[str(p)] == editor._compute_content_hash("x = 2\n")
+        # Follow-up edit against the formatted content still succeeds.
+        second = editor.edit_file(str(p), "x = 2", "x = 3")
+        assert "Success" in second
 
     def test_format_then_diagnostics_keep_edit_successful(self, tmp_path, monkeypatch):
         # Apply-patch path also formats the touched file without failing.

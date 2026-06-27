@@ -481,13 +481,23 @@ class EditTools:
                 return [part.replace("{path}", safe_path) for part in argv_template]
             return list(argv_template) + [safe_path]
 
+        def _resolvable(exe: str) -> bool:
+            # Accept an absolute path, a binary on PATH, or a project-local
+            # relative command (e.g. ``./node_modules/.bin/prettier``) that
+            # exists relative to the edited file's directory.
+            if os.path.isabs(exe) or shutil.which(exe):
+                return True
+            if os.sep in exe or (os.altsep and os.altsep in exe):
+                candidate = os.path.join(os.path.dirname(safe_path), exe)
+                return os.path.isfile(candidate) and os.access(candidate, os.X_OK)
+            return False
+
         # Caller override takes precedence and pins the project's formatter.
         override = self._formatters.get(ext)
         if override:
             tool_name, argv_template = override
             argv = _materialise(list(argv_template))
-            exe = argv[0]
-            if os.path.isabs(exe) or shutil.which(exe):
+            if _resolvable(argv[0]):
                 return tool_name, argv
             return None
 
@@ -502,8 +512,13 @@ class EditTools:
         elif ext in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json",
                      ".css", ".scss", ".less", ".html", ".md", ".yaml", ".yml"):
             if shutil.which("prettier"):
+                # Run prettier without discovering workspace config or
+                # EditorConfig files so we never execute repository-controlled
+                # JS/TS config code from the edited project.
                 candidates.append((
-                    "prettier", ["prettier", "--write", "--log-level", "warn", safe_path],
+                    "prettier",
+                    ["prettier", "--write", "--no-config", "--no-editorconfig",
+                     "--log-level", "warn", safe_path],
                 ))
         elif ext == ".go":
             if shutil.which("gofmt"):
@@ -513,36 +528,51 @@ class EditTools:
                 candidates.append(("rustfmt", ["rustfmt", "--quiet", safe_path]))
 
         for tool_name, argv in candidates:
-            exe = argv[0]
-            if os.path.isabs(exe) or shutil.which(exe):
+            if _resolvable(argv[0]):
                 return tool_name, argv
         return None
 
-    def _apply_post_edit_format(self, safe_path: str) -> None:
+    def _apply_post_edit_format(self, safe_path: str) -> bool:
         """Run a configured formatter on ``safe_path`` in place.
 
         Does nothing when formatting is disabled or no formatter is available.
         Any failure (missing binary, timeout, non-zero exit) is logged at debug
         level and swallowed: a formatter must never fail an edit.
+
+        Returns ``True`` only when a formatter ran to completion with a zero
+        exit code (so the on-disk content is trustworthy and the cached hash
+        should be refreshed).  Returns ``False`` when no formatter ran or it
+        failed, so the caller keeps the known-good post-edit hash and does not
+        adopt partial/corrupt formatter output as the new baseline.
         """
         if self._post_edit_format == "off":
-            return
+            return False
         try:
             resolved = self._format_command(safe_path)
             if resolved is None:
-                return
+                return False
             _tool_name, argv = resolved
 
             import subprocess
-            subprocess.run(
+            proc = subprocess.run(
                 argv,
                 capture_output=True,
                 text=True,
                 timeout=_DIAGNOSTICS_TIMEOUT,
                 cwd=os.path.dirname(safe_path) or None,
             )
+            if proc.returncode != 0:
+                output = ((proc.stdout or "") + (proc.stderr or "")).strip()
+                suffix = f": {self._bound_output(output)}" if output else ""
+                logger.debug(
+                    "Formatter %s failed for %s with exit code %s%s",
+                    _tool_name, safe_path, proc.returncode, suffix,
+                )
+                return False
+            return True
         except Exception as e:  # never let formatting break a successful edit
             logger.debug("Formatter skipped/failed for %s: %s", safe_path, e)
+            return False
 
     def _refresh_hash_after_format(self, safe_path: str) -> None:
         """Re-record the on-disk hash after an in-place format.
@@ -853,9 +883,12 @@ class EditTools:
 
                 # Optionally format the touched file in place, then refresh the
                 # recorded hash so a follow-up edit is not flagged as stale.
+                # Only adopt the on-disk content as the new baseline when the
+                # formatter succeeded; on failure we keep the known-good
+                # post-edit hash rather than trusting partial output.
                 if self._post_edit_format != "off":
-                    self._apply_post_edit_format(safe_path)
-                    self._refresh_hash_after_format(safe_path)
+                    if self._apply_post_edit_format(safe_path):
+                        self._refresh_hash_after_format(safe_path)
 
                 result = f"Success: Made {replacements} replacement(s) in {filepath}\n\nDiff:\n{diff}"
                 return result + self._run_diagnostics(safe_path, filepath)
@@ -1117,10 +1150,12 @@ class EditTools:
                         self._file_cache[safe_path] = content_hash
                         _file_locks.record_read_hash(safe_path, content_hash)
                         # Optionally format the touched file in place before
-                        # diagnostics run, refreshing the recorded hash.
+                        # diagnostics run, refreshing the recorded hash only
+                        # when the formatter succeeded so partial/corrupt output
+                        # is never adopted as the new baseline.
                         if self._post_edit_format != "off":
-                            self._apply_post_edit_format(safe_path)
-                            self._refresh_hash_after_format(safe_path)
+                            if self._apply_post_edit_format(safe_path):
+                                self._refresh_hash_after_format(safe_path)
                         verb = "Added" if kind == "add" else "Updated"
                         diagnostics = self._run_diagnostics(safe_path, display)
                         messages.append(f"{verb} {display}\n{diff}{diagnostics}")
