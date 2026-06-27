@@ -167,27 +167,54 @@ def _provider_preflight_message():
 # Use centralized availability detection
 from .._framework_availability import is_available
 
-# Define real module-level constants for internal use (prevents NameError)
-# These are evaluated on-demand for dynamic behavior
-GRADIO_AVAILABLE = is_available("gradio")
-CREWAI_AVAILABLE = is_available("crewai")
-AUTOGEN_AVAILABLE = is_available("autogen")
-PRAISONAI_AVAILABLE = is_available("praisonaiagents")
-TRAIN_AVAILABLE = is_available("unsloth")
+# Optional-dependency availability flags are resolved lazily so that merely
+# importing this module (e.g. for `praisonai --help`) does not walk the
+# meta-path with find_spec() for every optional dependency on every cold start.
+#
+# Maps the public flag name -> the framework key understood by is_available().
+_AVAILABILITY_FLAGS = {
+    "GRADIO_AVAILABLE": "gradio",
+    "CREWAI_AVAILABLE": "crewai",
+    "AUTOGEN_AVAILABLE": "autogen",
+    "PRAISONAI_AVAILABLE": "praisonaiagents",
+    "TRAIN_AVAILABLE": "unsloth",
+}
 
-# Handle CALL_MODULE_AVAILABLE with exception guard
-try:
-    import importlib.util
-    CALL_MODULE_AVAILABLE = importlib.util.find_spec("praisonai.api.call") is not None
-except (ModuleNotFoundError, AttributeError):
-    CALL_MODULE_AVAILABLE = False
 
-# Module-level __getattr__ for backward compatibility with external access
+def _compute_availability_flag(name):
+    """Compute a single availability flag without caching into globals()."""
+    if name in _AVAILABILITY_FLAGS:
+        return is_available(_AVAILABILITY_FLAGS[name])
+    if name == "CALL_MODULE_AVAILABLE":
+        try:
+            import importlib.util
+            return importlib.util.find_spec("praisonai.api.call") is not None
+        except (ModuleNotFoundError, AttributeError):
+            return False
+    raise AttributeError(name)
+
+
+def _ensure_availability_flags():
+    """Populate the module-level availability flags on first use.
+
+    Internal code references these as bare names (e.g. ``if CREWAI_AVAILABLE``)
+    which cannot trigger PEP 562 ``__getattr__``; calling this at the start of
+    command execution binds them into globals() so those references resolve
+    while keeping plain ``import`` cheap.
+    """
+    g = globals()
+    for flag in (*_AVAILABILITY_FLAGS, "CALL_MODULE_AVAILABLE"):
+        if flag not in g:
+            g[flag] = _compute_availability_flag(flag)
+
+
+# Module-level __getattr__ for backward compatibility with external access.
+# This lazily computes the flag on first attribute access and caches it.
 def __getattr__(name):
-    # For external backward compatibility, return the actual module-level values
-    if name in {"GRADIO_AVAILABLE", "CREWAI_AVAILABLE", "AUTOGEN_AVAILABLE",
-                "PRAISONAI_AVAILABLE", "TRAIN_AVAILABLE", "CALL_MODULE_AVAILABLE"}:
-        return globals()[name]
+    if name in _AVAILABILITY_FLAGS or name == "CALL_MODULE_AVAILABLE":
+        value = _compute_availability_flag(name)
+        globals()[name] = value  # cache so subsequent bare-name refs resolve
+        return value
     raise AttributeError(name)
 
 # Lazy import helpers for optional dependencies (defined after availability flags)
@@ -211,7 +238,7 @@ def _get_gradio():
     Raises:
         ImportError: If gradio is not installed
     """
-    if not GRADIO_AVAILABLE:
+    if not _compute_availability_flag("GRADIO_AVAILABLE"):
         raise ImportError(
             "Gradio is not installed. Install with: pip install gradio"
         )
@@ -373,7 +400,12 @@ class PraisonAI:
         """
         # Load environment variables from .env file
         _load_env_once()
-        
+
+        # Bind optional-dependency availability flags into module globals so the
+        # bare-name references used throughout command handling resolve. This is
+        # deferred to command execution to keep plain `import` cheap.
+        _ensure_availability_flags()
+
         # Warning filters now installed via Typer callback for CLI-only usage
         
         # Telemetry defaults now handled in PraisonAI.__init__ with Langfuse awareness
@@ -930,6 +962,11 @@ class PraisonAI:
         """
         Parse the command-line arguments for the PraisonAI CLI.
         """
+        # Seed availability flags so bare-name reads resolve even when this
+        # method is reached directly (e.g. tests, library callers) rather than
+        # through main(). Idempotent and cheap after the first call.
+        _ensure_availability_flags()
+
         # Check if we're running in a test environment
         in_test_env = (
             'pytest' in sys.argv[0] or 
@@ -4322,6 +4359,10 @@ Do NOT add any explanations or formatting."""
         - @rule:name - Include specific rule
         - @url:https://... - Fetch URL content
         """
+        # Seed availability flags so bare-name reads resolve when invoked
+        # directly (e.g. `praison run` -> handle_direct_prompt) without main().
+        _ensure_availability_flags()
+
         # Check for profiling mode - use unified profiler
         if hasattr(self, 'args') and getattr(self.args, 'profile', False):
             return self._handle_profiled_prompt(prompt)
@@ -5565,6 +5606,9 @@ Now, {final_instruction.lower()}:"""
         """
         Create a Gradio interface for generating agents and performing tasks.
         """
+        # Seed availability flags so bare-name reads resolve when invoked
+        # directly rather than through main().
+        _ensure_availability_flags()
         if GRADIO_AVAILABLE:
             # Lazy import gradio only when needed
             gr = _get_gradio()

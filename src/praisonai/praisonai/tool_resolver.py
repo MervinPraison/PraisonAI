@@ -28,9 +28,22 @@ import importlib.util
 import inspect
 import threading
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Protocol,
+    TYPE_CHECKING,
+    Union,
+)
 from types import MappingProxyType
 from ._safe_loader import load_user_module
+
+if TYPE_CHECKING:  # imported only for type annotations to avoid a runtime cycle
+    from .tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -55,9 +68,31 @@ class ToolSource(Protocol):
         """Name identifying this source for debugging."""
         ...
     
-    def lookup(self, name: str) -> Optional[Callable]:
-        """Look up a tool by name, returning None if not found."""
+    def lookup(self, name: str) -> "Union[Optional[Callable], _ResolveResult]":
+        """Look up a tool by name, returning None if not found.
+
+        May also return a :class:`_ResolveResult` to signal whether a negative
+        (None) result is safe to cache. Returning a bare callable (or None) is
+        treated as a cacheable result.
+        """
         ...
+
+
+class _CallableSource:
+    """Adapts a bound ``_resolve_from_*`` method into a :class:`ToolSource`.
+
+    The wrapped callable may return either a plain callable / None, or a
+    :class:`_ResolveResult`. Either is forwarded unchanged so the existing
+    cacheable / non-cacheable semantics are preserved.
+    """
+    __slots__ = ("name", "_fn")
+
+    def __init__(self, name: str, fn: Callable[[str], Any]):
+        self.name = name
+        self._fn = fn
+
+    def lookup(self, name: str):
+        return self._fn(name)
 
 
 class ToolResolver:
@@ -97,13 +132,23 @@ class ToolResolver:
         self._local_tools_lock = threading.Lock()
         self._registry = registry
         
-        # Initialize sources (future extension point)
+        # Resolution chain as an ordered list of ToolSource objects. When a
+        # caller supplies sources= they fully control resolution order; this is
+        # the documented extension point. Otherwise we build the default chain
+        # equivalent to the historical hardcoded order.
         if sources is not None:
-            self._sources = sources
+            self._sources: List[ToolSource] = list(sources)
         else:
-            # Keep backward compatible sources inline for now
-            # TODO: Will be refactored to separate classes and integrated in resolve() in future
-            self._sources = None
+            self._sources = self.default_sources(registry)
+
+        # Auto-wire cache invalidation so register_function() on the registry
+        # invalidates this resolver's cache without the caller having to
+        # remember registry.set_resolver(resolver).
+        if registry is not None:
+            try:
+                registry.set_resolver(self)
+            except Exception:  # pragma: no cover - defensive, registry is duck-typed
+                logger.debug("Could not auto-wire resolver into registry", exc_info=True)
         
         # Cache for resolved tools to avoid repeated resolution
         self._resolve_cache: Dict[str, Optional[Callable]] = {}
@@ -112,7 +157,42 @@ class ToolResolver:
         # resolve() (which runs source lookups OUTSIDE the lock) can detect a
         # concurrent invalidation and skip writing a now-stale result.
         self._resolve_cache_epoch = 0
-    
+
+    def default_sources(self, registry: Optional["ToolRegistry"] = None) -> List[ToolSource]:
+        """Build the default resolution chain as a list of ToolSource objects.
+
+        Equivalent to the historical hardcoded order:
+
+        1. Local ``tools.py`` (highest priority)
+        2. Wrapper ``ToolRegistry`` (register_function API)
+        3. ``praisonaiagents.tools`` (built-in SDK tools)
+        4. ``praisonai-tools`` package (external, optional)
+        5. Core SDK tool registry (plugins)
+
+        Exposed so callers can compose around the defaults, e.g.::
+
+            ToolResolver(sources=[*custom, *resolver.default_sources(registry)])
+        """
+        def _local_lookup(name: str):
+            local_tools = self._load_local_tools()
+            tool = local_tools.get(name)
+            return _ResolveResult(tool) if tool is not None else None
+
+        # Dispatch through ``self`` at call time (rather than binding the method
+        # object now) so that patching / subclassing of the individual
+        # ``_resolve_from_*`` methods is still honoured after construction.
+        return [
+            _CallableSource("local-tools.py", _local_lookup),
+            _CallableSource("wrapper-registry",
+                            lambda n: self._resolve_from_wrapper_registry(n)),
+            _CallableSource("praisonaiagents",
+                            lambda n: self._resolve_from_praisonaiagents(n)),
+            _CallableSource("praisonai-tools",
+                            lambda n: self._resolve_from_praisonai_tools(n)),
+            _CallableSource("core-registry",
+                            lambda n: self._resolve_from_registry(n)),
+        ]
+
     def _load_local_tools(self) -> Mapping[str, Callable]:
         """Load tools from local tools.py file.
         
@@ -342,32 +422,43 @@ class ToolResolver:
         cacheable = True       # whether a positive result may be cached
         allow_none_cache = True  # whether a negative (None) result may be cached
 
-        # 1. Check local tools.py first (highest priority)
-        local_tools = self._load_local_tools()
-        if name in local_tools:
-            logger.debug(f"Resolved '{name}' from local tools.py")
-            tool = local_tools[name]
-        else:
-            # 2. Check wrapper ToolRegistry (ahead of SDK paths)
-            tool = self._resolve_from_wrapper_registry(name)
+        # Walk the configured source chain. Each source may return a plain
+        # callable / None, or a _ResolveResult to control cacheability. The
+        # first source that yields a non-None tool wins.
+        for source in self._sources:
+            try:
+                result = source.lookup(name)
+            except Exception as e:  # a misbehaving custom source must not break resolution
+                logger.debug(
+                    "Source %r raised while resolving %r: %s",
+                    getattr(source, "name", source), name, e,
+                )
+                # A raising source is a transient/unknown failure (import error,
+                # registry hiccup). Do NOT let it harden into a cached miss — a
+                # later call (after the dependency installs / registry recovers)
+                # must be free to resolve the tool.
+                allow_none_cache = False
+                continue
 
-            # 3. Check praisonaiagents.tools
-            if tool is None:
-                result = self._resolve_from_praisonaiagents(name)
+            if isinstance(result, _ResolveResult):
                 if result.tool is not None:
                     tool = result.tool
                     cacheable = result.cacheable
+                    logger.debug(
+                        "Resolved '%s' from source %r", name,
+                        getattr(source, "name", source),
+                    )
+                    break
                 elif not result.cacheable:
-                    # Track that a non-cacheable failure occurred
+                    # A transient failure (e.g. dependency may install later)
                     allow_none_cache = False
-
-            # 4. Check praisonai-tools package
-            if tool is None:
-                tool = self._resolve_from_praisonai_tools(name)
-
-            # 5. Check core SDK tool registry
-            if tool is None:
-                tool = self._resolve_from_registry(name)
+            elif result is not None:
+                tool = result
+                logger.debug(
+                    "Resolved '%s' from source %r", name,
+                    getattr(source, "name", source),
+                )
+                break
 
         # Insert: re-check under the lock, then write (positive or negative cache).
         with self._resolve_cache_lock:
