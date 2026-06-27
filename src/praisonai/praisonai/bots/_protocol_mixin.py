@@ -128,6 +128,42 @@ class MessageHookMixin:
         """
         self._last_inbound_activity = time.time()
 
+    def _note_run_progress(self) -> None:
+        """Record in-run progress (tool/stream/token/heartbeat) for liveness.
+
+        Inbound activity (``_note_inbound``) only fires when a *new* message
+        arrives, so it never advances during a single long agent turn. Channel
+        health would therefore mistake an actively-streaming 30-minute run for a
+        hung one once its wall-clock crosses ``stuck_after`` and restart it
+        mid-run. Refreshing this timestamp on real run progress lets the health
+        evaluator keep such a run BUSY (never restarted) while still flagging a
+        genuinely-wedged run that emits nothing for ``stuck_after`` as STUCK.
+        """
+        self._last_run_progress = time.time()
+
+    def _resolve_run_progress(self) -> Optional[float]:
+        """Best-effort latest in-run progress timestamp for this adapter.
+
+        Prefers an adapter-local ``_last_run_progress`` (set by
+        ``_note_run_progress``) and falls back to the session's own
+        ``last_run_progress`` so adapters that drive runs purely through
+        ``BotSessionManager`` still report in-run liveness without extra wiring.
+        Returns ``None`` when no progress has been recorded.
+        """
+        candidates = [getattr(self, '_last_run_progress', None)]
+        session = getattr(self, '_session', None)
+        if session is None:
+            session = getattr(self, '_session_mgr', None)
+        if session is not None:
+            getter = getattr(session, 'last_run_progress', None)
+            if callable(getter):
+                try:
+                    candidates.append(getter())
+                except Exception:  # noqa: BLE001 — health must never raise
+                    pass
+        ts = [c for c in candidates if c is not None]
+        return max(ts) if ts else None
+
     def _active_run_count(self) -> int:
         """Best-effort count of in-flight agent turns for this adapter.
 
@@ -188,6 +224,7 @@ class MessageHookMixin:
             sessions=session_count,
             error=probe_result.error if not probe_result.ok else None,
             last_activity=last_inbound,
+            last_run_progress=self._resolve_run_progress(),
             active_runs=self._active_run_count(),
         )
 

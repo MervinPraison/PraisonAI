@@ -1140,5 +1140,6 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
             probe=probe_result, sessions=session_count,
             error=probe_result.error if not probe_result.ok else None,
             last_activity=last_inbound,
+            last_run_progress=self._resolve_run_progress(),
             active_runs=self._active_run_count(),
         )

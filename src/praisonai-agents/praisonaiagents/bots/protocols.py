@@ -525,6 +525,15 @@ def evaluate_channel_health(
     - busy but no progress beyond ``stuck_after_seconds`` -> ``STUCK``;
     - idle and inbound stale beyond ``stale_after_seconds`` -> ``STALE_SOCKET``.
 
+    For the busy branch, "progress" is the most recent of inbound transport
+    activity (``health.last_activity``) and *in-run* progress
+    (``health.last_run_progress`` — tool calls, streamed draft edits, token
+    output, or a periodic heartbeat). A single long agent run that streams
+    output or emits tool events the whole time therefore stays ``BUSY``
+    indefinitely instead of being torn down mid-run once its wall-clock
+    crosses ``stuck_after_seconds``; only a run that emits nothing for
+    ``stuck_after_seconds`` is flagged ``STUCK``.
+
     Args:
         health: The health result to evaluate
         startup_grace_seconds: Grace period for startup
@@ -556,13 +565,20 @@ def evaluate_channel_health(
         return HealthReason.DISCONNECTED
     
     # Run-aware liveness: a busy channel is never killed mid-run unless it has
-    # made no inbound progress for an extended period (stuck). When inbound
-    # activity was never recorded, fall back to uptime so a hung run with no
-    # inbound timestamp can still be detected as STUCK rather than staying BUSY
+    # made no progress for an extended period (stuck). "Progress" is the most
+    # recent of inbound transport activity (``last_activity``) and *in-run*
+    # progress (``last_run_progress`` — tool/stream/token/heartbeat events),
+    # so a long run that is actively streaming or calling tools stays BUSY even
+    # though no new inbound message arrives during the turn. When neither
+    # timestamp was recorded, fall back to uptime so a hung run with no
+    # progress signal can still be detected as STUCK rather than staying BUSY
     # (non-recoverable) forever.
     if health.active_runs > 0:
-        progress_at = health.last_activity
-        if progress_at is None:
+        progress_at = max(
+            health.last_activity or 0.0,
+            health.last_run_progress or 0.0,
+        )
+        if progress_at <= 0.0:
             progress_at = current_time - (health.uptime_seconds or 0.0)
         idle = current_time - progress_at
         if idle > stuck_after_seconds:
@@ -597,6 +613,10 @@ class HealthResult:
         details: Additional platform-specific health details
         reason: Health status reason (optional)
         last_activity: Last INBOUND transport activity timestamp (optional)
+        last_run_progress: Last IN-RUN progress timestamp (optional) — refreshed
+            on real run progress (tool calls, streamed draft edits, token output,
+            or a periodic heartbeat) so a long, actively-progressing run keeps the
+            channel BUSY instead of tripping STUCK on wall-clock alone.
         active_runs: Number of in-flight agent turns (busy count)
     """
     
@@ -610,6 +630,7 @@ class HealthResult:
     details: Dict[str, Any] = field(default_factory=dict)
     reason: Optional[HealthReason] = None
     last_activity: Optional[float] = None
+    last_run_progress: Optional[float] = None
     active_runs: int = 0
     
     def to_dict(self) -> Dict[str, Any]:
@@ -625,6 +646,7 @@ class HealthResult:
             "details": self.details,
             "reason": self.reason.value if self.reason else None,
             "last_activity": self.last_activity,
+            "last_run_progress": self.last_run_progress,
             "active_runs": self.active_runs,
         }
 
