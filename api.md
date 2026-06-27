@@ -18,6 +18,7 @@ Methods:
 * <code title="class HandoffResult">HandoffResult.<a href="./src/praisonai-agents/praisonaiagents/agent/handoff.py">from_outcome</a>(outcome: AgentRunOutcome, target_agent: Optional[str] = None, source_agent: Optional[str] = None, handoff_depth: int = 0) -> 'HandoffResult'</code>
 * <code title="class TaskOutput">TaskOutput.<a href="./src/praisonai-agents/praisonaiagents/main.py">json</a>() -> Optional[str]</code>
 * <code title="class TaskOutput">TaskOutput.<a href="./src/praisonai-agents/praisonaiagents/main.py">to_dict</a>() -> dict</code>
+* <code title="class ToolResult">ToolResult.<a href="./src/praisonai-agents/praisonaiagents/tools/base.py">is_multimodal</a>() -> bool</code>
 * <code title="class ToolResult">ToolResult.<a href="./src/praisonai-agents/praisonaiagents/tools/base.py">to_dict</a>() -> Dict[str, Any]</code>
 
 # Agents
