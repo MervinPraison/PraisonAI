@@ -923,6 +923,97 @@ Respond with ONLY a valid JSON tool call in this format:
         self._cached_subscription_creds = provider.refresh()
         return self._cached_subscription_creds
 
+    def _handle_retry_exception(self, e, attempt, kwargs):
+        """Decide retry vs raise from a failover decision. No I/O, no sleep.
+
+        Shared, side-effect-free (no sleeping/awaiting) decision logic used by
+        both the sync (`_call_with_retry`) and async (`_call_with_retry_async`)
+        retry loops. Performs failover bookkeeping (auth-refresh, profile
+        rotation, legacy failover kwargs update) but never sleeps or awaits, so
+        it is identical for both paths.
+
+        Args:
+            e: The exception raised by the wrapped call.
+            attempt: Zero-based attempt index for the current iteration.
+            kwargs: Keyword arguments for the wrapped call (may be updated).
+
+        Returns:
+            Tuple of (should_raise, category, retry_delay, error_str, kwargs):
+                should_raise: Whether the caller should re-raise immediately.
+                category: The error category/reason from the decision.
+                retry_delay: Seconds to wait before the next attempt.
+                error_str: String form of the exception.
+                kwargs: The (possibly updated) keyword arguments.
+        """
+        # Use new typed failover decision instead of old classification
+        decision = self.resolve_failover_decision(e, {"attempt": attempt + 1, "max_retries": self._max_retries})
+
+        error_str = str(e)
+
+        # Map decision to old variables for compatibility with existing logic
+        category = decision.reason
+        can_retry = decision.is_retryable
+        retry_delay = decision.backoff_ms / 1000.0  # Convert ms to seconds
+
+        # Check for auth errors and try refreshing subscription credentials
+        if category == "auth" and self._auth_provider_id and attempt == 0:
+            try:
+                logging.info("Authentication error detected - attempting credential refresh")
+                refreshed_creds = self._refresh_subscription_creds()
+                if refreshed_creds:
+                    # Update parameters with refreshed credentials (don't clear cache)
+                    kwargs = self._build_completion_params(**kwargs)
+                    # Retry immediately with refreshed credentials
+                    can_retry = True
+                    retry_delay = 0.0
+                    logging.info("Subscription credentials refreshed, retrying...")
+            except Exception as refresh_error:
+                logging.warning(f"Failed to refresh subscription credentials: {refresh_error}")
+
+        # Handle different failover decision actions
+        if decision.action == "rotate_profile" and self._failover_manager:
+            if self._current_profile:
+                is_rate_limit = (category == "rate_limit")
+                self._failover_manager.mark_failure(
+                    self._current_profile, error_str, is_rate_limit=is_rate_limit
+                )
+            next_profile = self._failover_manager.get_next_profile()
+            if next_profile and next_profile != self._current_profile:
+                self._switch_to_profile(next_profile)
+                self._current_profile = next_profile
+                # Update the kwargs with new profile values for the next retry
+                if "api_key" in kwargs:
+                    kwargs["api_key"] = self.api_key
+                if "base_url" in kwargs:
+                    kwargs["base_url"] = self.base_url
+                if "model" in kwargs:
+                    kwargs["model"] = self.model
+                logging.info(f"Failover: switched to profile '{next_profile.name}'")
+        # Legacy failover for compatibility (when decision is retry but failover is configured)
+        elif self._failover_manager and self._current_profile and decision.action == "retry":
+            is_rate_limit = (category == "rate_limit")
+            self._failover_manager.mark_failure(
+                self._current_profile, error_str, is_rate_limit=is_rate_limit
+            )
+            next_profile = self._failover_manager.get_next_profile()
+            if next_profile and next_profile != self._current_profile:
+                self._switch_to_profile(next_profile)
+                self._current_profile = next_profile
+                # Update the kwargs with new profile values for the next retry
+                if "api_key" in kwargs:
+                    kwargs["api_key"] = self.api_key
+                if "base_url" in kwargs:
+                    kwargs["base_url"] = self.base_url
+                if "model" in kwargs:
+                    kwargs["model"] = self.model
+                # Enable retry for profile switch even if originally non-retryable
+                can_retry = True
+                retry_delay = 0.0
+                logging.info(f"Failover: switched to profile '{next_profile.name}'")
+
+        should_raise = decision.action == "surface_error" or not can_retry
+        return should_raise, category, retry_delay, error_str, kwargs
+
     def _call_with_retry(self, func, *args, **kwargs):
         """Call a function with automatic retry on rate limit errors and failover support.
 
@@ -957,74 +1048,13 @@ Respond with ONLY a valid JSON tool call in this format:
                 return result
 
             except Exception as e:
-                # Use new typed failover decision instead of old classification
-                decision = self.resolve_failover_decision(e, {"attempt": attempt + 1, "max_retries": self._max_retries})
-                
                 last_error = e
-                error_str = str(e)
-                
-                # Map decision to old variables for compatibility with existing logic
-                category = decision.reason
-                can_retry = decision.is_retryable
-                retry_delay = decision.backoff_ms / 1000.0  # Convert ms to seconds
 
-                # Check for auth errors and try refreshing subscription credentials
-                if category == "auth" and self._auth_provider_id and attempt == 0:
-                    try:
-                        logging.info("Authentication error detected - attempting credential refresh")
-                        refreshed_creds = self._refresh_subscription_creds()
-                        if refreshed_creds:
-                            # Update parameters with refreshed credentials (don't clear cache)
-                            kwargs = self._build_completion_params(**kwargs)
-                            # Retry immediately with refreshed credentials
-                            can_retry = True
-                            retry_delay = 0.0
-                            logging.info("Subscription credentials refreshed, retrying...")
-                    except Exception as refresh_error:
-                        logging.warning(f"Failed to refresh subscription credentials: {refresh_error}")
+                should_raise, category, retry_delay, error_str, kwargs = (
+                    self._handle_retry_exception(e, attempt, kwargs)
+                )
 
-                # Handle different failover decision actions
-                if decision.action == "rotate_profile" and self._failover_manager:
-                    if self._current_profile:
-                        is_rate_limit = (category == "rate_limit")
-                        self._failover_manager.mark_failure(
-                            self._current_profile, error_str, is_rate_limit=is_rate_limit
-                        )
-                    next_profile = self._failover_manager.get_next_profile()
-                    if next_profile and next_profile != self._current_profile:
-                        self._switch_to_profile(next_profile)
-                        self._current_profile = next_profile
-                        # Update the kwargs with new profile values for the next retry
-                        if "api_key" in kwargs:
-                            kwargs["api_key"] = self.api_key
-                        if "base_url" in kwargs:
-                            kwargs["base_url"] = self.base_url
-                        if "model" in kwargs:
-                            kwargs["model"] = self.model
-                        logging.info(f"Failover: switched to profile '{next_profile.name}'")
-                # Legacy failover for compatibility (when decision is retry but failover is configured)
-                elif self._failover_manager and self._current_profile and decision.action == "retry":
-                    is_rate_limit = (category == "rate_limit")
-                    self._failover_manager.mark_failure(
-                        self._current_profile, error_str, is_rate_limit=is_rate_limit
-                    )
-                    next_profile = self._failover_manager.get_next_profile()
-                    if next_profile and next_profile != self._current_profile:
-                        self._switch_to_profile(next_profile)
-                        self._current_profile = next_profile
-                        # Update the kwargs with new profile values for the next retry
-                        if "api_key" in kwargs:
-                            kwargs["api_key"] = self.api_key
-                        if "base_url" in kwargs:
-                            kwargs["base_url"] = self.base_url
-                        if "model" in kwargs:
-                            kwargs["model"] = self.model
-                        # Enable retry for profile switch even if originally non-retryable
-                        can_retry = True
-                        retry_delay = 0.0
-                        logging.info(f"Failover: switched to profile '{next_profile.name}'")
-                
-                if decision.action == "surface_error" or not can_retry:
+                if should_raise:
                     raise
 
                 if attempt < self._max_retries:
@@ -1089,74 +1119,13 @@ Respond with ONLY a valid JSON tool call in this format:
                 return result
 
             except Exception as e:
-                # Use new typed failover decision instead of old classification
-                decision = self.resolve_failover_decision(e, {"attempt": attempt + 1, "max_retries": self._max_retries})
-                
                 last_error = e
-                error_str = str(e)
-                
-                # Map decision to old variables for compatibility with existing logic
-                category = decision.reason
-                can_retry = decision.is_retryable
-                retry_delay = decision.backoff_ms / 1000.0  # Convert ms to seconds
 
-                # Check for auth errors and try refreshing subscription credentials
-                if category == "auth" and self._auth_provider_id and attempt == 0:
-                    try:
-                        logging.info("Authentication error detected - attempting credential refresh")
-                        refreshed_creds = self._refresh_subscription_creds()
-                        if refreshed_creds:
-                            # Update parameters with refreshed credentials (don't clear cache)
-                            kwargs = self._build_completion_params(**kwargs)
-                            # Retry immediately with refreshed credentials
-                            can_retry = True
-                            retry_delay = 0.0
-                            logging.info("Subscription credentials refreshed, retrying...")
-                    except Exception as refresh_error:
-                        logging.warning(f"Failed to refresh subscription credentials: {refresh_error}")
+                should_raise, category, retry_delay, error_str, kwargs = (
+                    self._handle_retry_exception(e, attempt, kwargs)
+                )
 
-                # Handle different failover decision actions
-                if decision.action == "rotate_profile" and self._failover_manager:
-                    if self._current_profile:
-                        is_rate_limit = (category == "rate_limit")
-                        self._failover_manager.mark_failure(
-                            self._current_profile, error_str, is_rate_limit=is_rate_limit
-                        )
-                    next_profile = self._failover_manager.get_next_profile()
-                    if next_profile and next_profile != self._current_profile:
-                        self._switch_to_profile(next_profile)
-                        self._current_profile = next_profile
-                        # Update the kwargs with new profile values for the next retry
-                        if "api_key" in kwargs:
-                            kwargs["api_key"] = self.api_key
-                        if "base_url" in kwargs:
-                            kwargs["base_url"] = self.base_url
-                        if "model" in kwargs:
-                            kwargs["model"] = self.model
-                        logging.info(f"Failover: switched to profile '{next_profile.name}'")
-                # Legacy failover for compatibility (when decision is retry but failover is configured)
-                elif self._failover_manager and self._current_profile and decision.action == "retry":
-                    is_rate_limit = (category == "rate_limit")
-                    self._failover_manager.mark_failure(
-                        self._current_profile, error_str, is_rate_limit=is_rate_limit
-                    )
-                    next_profile = self._failover_manager.get_next_profile()
-                    if next_profile and next_profile != self._current_profile:
-                        self._switch_to_profile(next_profile)
-                        self._current_profile = next_profile
-                        # Update the kwargs with new profile values for the next retry
-                        if "api_key" in kwargs:
-                            kwargs["api_key"] = self.api_key
-                        if "base_url" in kwargs:
-                            kwargs["base_url"] = self.base_url
-                        if "model" in kwargs:
-                            kwargs["model"] = self.model
-                        # Enable retry for profile switch even if originally non-retryable
-                        can_retry = True
-                        retry_delay = 0.0
-                        logging.info(f"Failover: switched to profile '{next_profile.name}'")
-                
-                if decision.action == "surface_error" or not can_retry:
+                if should_raise:
                     raise
 
                 if attempt < self._max_retries:
@@ -1164,6 +1133,18 @@ Respond with ONLY a valid JSON tool call in this format:
                         f"{category} error hit (attempt {attempt + 1}/{self._max_retries + 1}), "
                         f"waiting {retry_delay:.1f}s before retry..."
                     )
+
+                    # P5: Emit retry callback for CLI visibility
+                    try:
+                        from ..main import execute_sync_callback
+                        execute_sync_callback('retry',
+                            attempt=attempt + 1,
+                            max_attempts=self._max_retries + 1,
+                            error=error_str[:200],
+                            retry_in_seconds=retry_delay
+                        )
+                    except ImportError:
+                        pass
 
                     if self._rate_limiter is not None:
                         await self._rate_limiter.wait_for_retry_async(retry_delay)
