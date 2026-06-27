@@ -35,13 +35,37 @@ class HealthMonitorConfig:
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "HealthMonitorConfig":
-        """Create config from dictionary."""
+        """Create config from dictionary.
+
+        Numeric thresholds are parsed defensively: unresolved env placeholders
+        (e.g. ``"${STUCK_AFTER}"``), empty strings, or non-numeric values fall
+        back to the default instead of raising during config load, and values
+        are clamped to a sane lower bound so a negative threshold can never
+        cause healthy long-running turns to be restarted immediately.
+        """
+        defaults = cls()
+
+        def _num(key: str, default: float, *, minimum: float, cast=float):
+            raw = data.get(key, default)
+            try:
+                value = cast(raw)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Invalid health config value for %r (%r); using default %r",
+                    key, raw, default,
+                )
+                return default
+            return max(value, minimum)
+
         return cls(
-            interval=float(data.get("interval", 300.0)),
-            startup_grace=float(data.get("startup_grace", 60.0)),
-            stale_after=float(data.get("stale_after", 120.0)),
-            stuck_after=float(data.get("stuck_after", 900.0)),
-            max_restarts_per_hour=int(data.get("max_restarts_per_hour", 10)),
+            interval=_num("interval", defaults.interval, minimum=1.0),
+            startup_grace=_num("startup_grace", defaults.startup_grace, minimum=0.0),
+            stale_after=_num("stale_after", defaults.stale_after, minimum=1.0),
+            stuck_after=_num("stuck_after", defaults.stuck_after, minimum=1.0),
+            max_restarts_per_hour=int(
+                _num("max_restarts_per_hour", defaults.max_restarts_per_hour,
+                     minimum=0, cast=int)
+            ),
             enabled=bool(data.get("enabled", True)),
         )
 

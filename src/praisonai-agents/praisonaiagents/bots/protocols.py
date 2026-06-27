@@ -556,9 +556,15 @@ def evaluate_channel_health(
         return HealthReason.DISCONNECTED
     
     # Run-aware liveness: a busy channel is never killed mid-run unless it has
-    # made no inbound progress for an extended period (stuck).
+    # made no inbound progress for an extended period (stuck). When inbound
+    # activity was never recorded, fall back to uptime so a hung run with no
+    # inbound timestamp can still be detected as STUCK rather than staying BUSY
+    # (non-recoverable) forever.
     if health.active_runs > 0:
-        idle = current_time - (health.last_activity or current_time)
+        progress_at = health.last_activity
+        if progress_at is None:
+            progress_at = current_time - (health.uptime_seconds or 0.0)
+        idle = current_time - progress_at
         if idle > stuck_after_seconds:
             return HealthReason.STUCK
         return HealthReason.BUSY

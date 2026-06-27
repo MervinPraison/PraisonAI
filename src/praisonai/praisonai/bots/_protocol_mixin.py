@@ -165,6 +165,13 @@ class MessageHookMixin:
         else:
             session_count = 0
         is_running = getattr(self, '_is_running', False)
+        # Seed inbound liveness from start time so a reachable-but-deaf channel
+        # that never received an inbound message is still subject to the
+        # stale-socket check (rather than reported HEALTHY forever). Subsequent
+        # inbound traffic refreshes this via ``_note_inbound``.
+        last_inbound = getattr(self, '_last_inbound_activity', None)
+        if last_inbound is None:
+            last_inbound = started_at
         return HealthResult(
             ok=is_running and probe_result.ok,
             platform=self.platform,  # type: ignore[attr-defined]
@@ -173,7 +180,7 @@ class MessageHookMixin:
             probe=probe_result,
             sessions=session_count,
             error=probe_result.error if not probe_result.ok else None,
-            last_activity=getattr(self, '_last_inbound_activity', None),
+            last_activity=last_inbound,
             active_runs=self._active_run_count(),
         )
 
