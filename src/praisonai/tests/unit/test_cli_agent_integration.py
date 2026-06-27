@@ -162,5 +162,94 @@ class TestAgentConfigApplication:
         assert complex_model in ['gpt-4-turbo', 'claude-3-opus', 'o1-preview', 'gpt-4o', 'claude-3-sonnet', 'gemini-1.5-pro']
 
 
+class TestBarePositionalPrompt:
+    """Tests for treating a bare positional argument as a one-shot prompt."""
+
+    def _run_with_command(self, command):
+        from unittest.mock import patch, MagicMock
+        from praisonai.cli.main import PraisonAI
+
+        instance = PraisonAI()
+        instance.agent_file = "agents.yaml"
+
+        mock_generator = MagicMock()
+        mock_generator.generate_crew_and_kickoff.return_value = "AGENT_FILE_RUN"
+
+        # Build a fully-populated args namespace (all CLI defaults) and set the
+        # positional command, then feed it to main() via a patched parse_args.
+        base_args = instance.parse_args()
+        if isinstance(base_args, tuple):
+            base_args = base_args[0]
+        base_args.command = command
+
+        with patch.object(PraisonAI, "parse_args", return_value=(base_args, [])), \
+             patch.object(PraisonAI, "read_stdin_if_available", return_value=None), \
+             patch.object(PraisonAI, "read_file_if_provided", return_value=None), \
+             patch("praisonai.cli.main._get_agents_generator", return_value=lambda *a, **k: mock_generator), \
+             patch.object(PraisonAI, "handle_direct_prompt", return_value="OK") as mock_prompt:
+            result = instance.run()
+        return instance, mock_prompt, result, mock_generator
+
+    def test_bare_prompt_routes_to_direct_prompt(self):
+        """A non-file, non-YAML positional is run as a one-shot prompt."""
+        instance, mock_prompt, result, _ = self._run_with_command("summarise this folder")
+        mock_prompt.assert_called_once_with("summarise this folder")
+        assert result == "OK"
+
+    def test_yaml_path_kept_as_agent_file(self):
+        """A .yaml positional is preserved as the agent file (not a prompt)."""
+        instance, mock_prompt, _, mock_generator = self._run_with_command("agents.yaml")
+        mock_prompt.assert_not_called()
+        assert instance.agent_file == "agents.yaml"
+
+    def test_existing_file_kept_as_agent_file(self, tmp_path):
+        """An existing file path is preserved as the agent file."""
+        f = tmp_path / "custom_agents.txt"
+        f.write_text("framework: praisonai")
+        instance, mock_prompt, _, _ = self._run_with_command(str(f))
+        mock_prompt.assert_not_called()
+        assert instance.agent_file == str(f)
+
+    def _parse_real(self, command, *, isfile=False):
+        """Drive the real parse_args() disambiguation as production would.
+
+        parse_args() short-circuits under pytest, so temporarily mask the
+        test-environment signals and feed a realistic ``sys.argv`` to exercise
+        the actual positional-vs-prompt routing logic.
+        """
+        from unittest.mock import patch
+        from praisonai.cli.main import PraisonAI
+
+        instance = PraisonAI()
+        clean_env = {k: v for k, v in os.environ.items() if k != "PYTEST_CURRENT_TEST"}
+        with patch.object(sys, "argv", ["praisonai", command]), \
+             patch.dict(os.environ, clean_env, clear=True), \
+             patch("os.path.isfile", return_value=isfile):
+            result = instance.parse_args()
+        args = result[0] if isinstance(result, tuple) else result
+        return args
+
+    def test_real_parse_bare_prompt_becomes_direct_prompt(self):
+        """Real parse_args routes a bare prompt to direct_prompt."""
+        args = self._parse_real("summarise this folder")
+        assert args.command is None
+        assert args.direct_prompt == "summarise this folder"
+
+    def test_real_parse_uppercase_yaml_kept_as_command(self):
+        """Real parse_args keeps an uppercase .YAML path as the agent file."""
+        args = self._parse_real("Agents.YAML")
+        assert args.command == "Agents.YAML"
+
+    def test_real_parse_yml_path_kept_as_command(self):
+        """Real parse_args keeps a .yml path as the agent file."""
+        args = self._parse_real("workflow.yml")
+        assert args.command == "workflow.yml"
+
+    def test_real_parse_existing_file_kept_as_command(self):
+        """Real parse_args keeps an existing non-YAML file as the agent file."""
+        args = self._parse_real("custom_agents.txt", isfile=True)
+        assert args.command == "custom_agents.txt"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

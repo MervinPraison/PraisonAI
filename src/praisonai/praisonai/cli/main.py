@@ -498,8 +498,14 @@ class PraisonAI:
                     result = self.handle_direct_prompt(combined_prompt)
                     # Result already printed by handle_direct_prompt, don't print again
                     return result
-                else:
+                elif os.path.isfile(args.command) or args.command.lower().endswith((".yaml", ".yml")):
+                    # Treat as an agent file when it is an existing file or a YAML path
                     self.agent_file = args.command
+                else:
+                    # Bare positional that isn't a file/YAML path: run it as a one-shot prompt
+                    result = self.handle_direct_prompt(args.command)
+                    # Result already printed by handle_direct_prompt, don't print again
+                    return result
         elif hasattr(args, 'direct_prompt') and args.direct_prompt:
             # Only handle direct prompt if agent_file wasn't explicitly set in constructor
             if original_agent_file == "agents.yaml":  # Default value, so safe to use direct prompt
@@ -973,7 +979,7 @@ class PraisonAI:
         parser.add_argument("--ui", choices=["chainlit", "gradio"], help="Specify the UI framework (gradio or chainlit).")
         parser.add_argument("--auto", nargs=argparse.REMAINDER, help="Enable auto mode and pass arguments for it")
         parser.add_argument("--init", nargs=argparse.REMAINDER, help="Initialize agents with optional topic")
-        parser.add_argument("command", nargs="?", help="Command to run or direct prompt")
+        parser.add_argument("command", nargs="?", help="Agent YAML file, subcommand, or a direct natural-language prompt to run as a one-shot task")
         parser.add_argument("--deploy", action="store_true", help="Deploy the application")
         parser.add_argument("--schedule", type=str, help="Schedule deployment (e.g., 'daily', 'hourly', '*/6h', '3600')")
         parser.add_argument("--schedule-config", type=str, help="Path to scheduling configuration file")
@@ -1975,7 +1981,15 @@ class PraisonAI:
 
         # Handle direct prompt if command is not a special command or file
         # Skip this during testing to avoid pytest arguments interfering
-        if not in_test_env and args.command and not args.command.endswith('.yaml') and args.command not in special_commands:
+        # A bare positional is treated as a one-shot prompt unless it is an
+        # existing file or a YAML agent-file path (case-insensitive .yaml/.yml).
+        if (
+            not in_test_env
+            and args.command
+            and args.command not in special_commands
+            and not os.path.isfile(args.command)
+            and not args.command.lower().endswith((".yaml", ".yml"))
+        ):
             args.direct_prompt = args.command
             args.command = None
 
