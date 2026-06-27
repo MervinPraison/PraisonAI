@@ -431,6 +431,79 @@ class TestInteractiveCoreTools:
         assert not any("lsp_" in name for name in tool_names)
 
 
+class TestInteractiveCoreProjectContext:
+    """Tests for AGENTS.md-style project context auto-loading."""
+
+    def test_loads_context_from_workspace(self, tmp_path):
+        """Project context (AGENTS.md) should be auto-discovered from workspace."""
+        from praisonai.cli.interactive.core import InteractiveCore
+        from praisonai.cli.interactive.config import InteractiveConfig
+
+        (tmp_path / "AGENTS.md").write_text("Always use tabs.")
+
+        config = InteractiveConfig(workspace=str(tmp_path))
+        core = InteractiveCore(config=config)
+
+        context = core._load_project_context()
+
+        assert "Always use tabs." in context
+
+    def test_no_context_flag_disables_loading(self, tmp_path):
+        """--no-context (no_context=True) should skip context discovery."""
+        from praisonai.cli.interactive.core import InteractiveCore
+        from praisonai.cli.interactive.config import InteractiveConfig
+
+        (tmp_path / "AGENTS.md").write_text("Always use tabs.")
+
+        config = InteractiveConfig(workspace=str(tmp_path), no_context=True)
+        core = InteractiveCore(config=config)
+
+        assert core._load_project_context() == ""
+
+    def test_context_is_cached(self, tmp_path):
+        """Discovery should run once and be cached for the session."""
+        from praisonai.cli.interactive.core import InteractiveCore
+        from praisonai.cli.interactive.config import InteractiveConfig
+
+        (tmp_path / "AGENTS.md").write_text("Rule A")
+
+        config = InteractiveConfig(workspace=str(tmp_path))
+        core = InteractiveCore(config=config)
+
+        first = core._load_project_context()
+        # Change the file; cached result should be returned unchanged.
+        (tmp_path / "AGENTS.md").write_text("Rule B")
+        second = core._load_project_context()
+
+        assert first == second
+        assert "Rule A" in second
+
+    def test_context_respects_token_budget(self, tmp_path):
+        """Large context files should be truncated to the configured budget."""
+        from praisonai.cli.interactive.core import InteractiveCore
+        from praisonai.cli.interactive.config import InteractiveConfig
+
+        (tmp_path / "AGENTS.md").write_text("x" * 5000)
+
+        config = InteractiveConfig(workspace=str(tmp_path), context_token_budget=100)
+        core = InteractiveCore(config=config)
+
+        context = core._load_project_context()
+
+        assert "[project context truncated]" in context
+        assert len(context) < 5000
+
+    def test_no_context_files_returns_empty(self, tmp_path):
+        """Empty workspace with no instruction files returns empty string."""
+        from praisonai.cli.interactive.core import InteractiveCore
+        from praisonai.cli.interactive.config import InteractiveConfig
+
+        config = InteractiveConfig(workspace=str(tmp_path))
+        core = InteractiveCore(config=config)
+
+        assert core._load_project_context() == ""
+
+
 class TestInteractiveCoreExportImport:
     """Tests for session export/import."""
     

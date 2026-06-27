@@ -303,11 +303,16 @@ class InteractiveCore:
         # Reuse agent instance across prompts to preserve autonomy state
         # (doom loop tracker, action history) and avoid per-prompt overhead
         if not hasattr(self, '_agent') or self._agent is None:
+            backstory = "You are a helpful AI assistant"
+            project_context = self._load_project_context()
+            if project_context:
+                backstory = f"{backstory}\n\n# Project Context\n{project_context}"
+
             agent_config = {
                 "name": "InteractiveAgent",
                 "role": "Assistant",
                 "goal": "Help the user with their request",
-                "backstory": "You are a helpful AI assistant",
+                "backstory": backstory,
                 "tools": self.get_tools(),
             }
             
@@ -367,7 +372,42 @@ class InteractiveCore:
         if context_parts:
             return "<attached_files>\n" + "\n".join(context_parts) + "\n</attached_files>"
         return ""
-    
+
+    def _load_project_context(self) -> str:
+        """Auto-discover AGENTS.md-style project context for the system prompt.
+
+        Walks up from the workspace to the git/project root collecting
+        instruction files (AGENTS.md, CLAUDE.md, ...) and layers the
+        user-global ``~/.praisonai/AGENTS.md``. Bounded by the configured
+        token budget and skipped when ``--no-context`` is set. Result is
+        cached so the discovery only runs once per session.
+        """
+        if getattr(self.config, "no_context", False):
+            return ""
+
+        if hasattr(self, "_project_context"):
+            return self._project_context
+
+        context = ""
+        try:
+            from praisonai.integration.context_files import load_context_files
+
+            context = load_context_files(
+                cwd=Path(self.config.workspace), walk_up=True
+            )
+        except ImportError:
+            context = ""  # Context files helper is optional
+        except Exception as e:
+            logger.warning(f"Could not load project context files: {e}")
+            context = ""
+
+        budget = getattr(self.config, "context_token_budget", 0) or 0
+        if budget and len(context) > budget:
+            context = context[:budget] + "\n... [project context truncated]"
+
+        self._project_context = context
+        return context
+
     # ========== Tool Management ==========
     
     def get_tools(self) -> List:
