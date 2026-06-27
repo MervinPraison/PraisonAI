@@ -139,6 +139,7 @@ all = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["praisonaiagents*"]
+exclude = ["praisonaiagents*.tests", "praisonaiagents*.tests.*"]
 
 [project.entry-points."praisonai.runtimes"]
 praisonai = "praisonaiagents.runtime.builtin:PraisonAIRuntime"

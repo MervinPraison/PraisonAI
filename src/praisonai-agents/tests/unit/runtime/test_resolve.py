@@ -14,7 +14,7 @@ import asyncio
 from unittest.mock import Mock, patch, MagicMock
 from typing import Any, Dict
 
-from .resolve import (
+from praisonaiagents.runtime.resolve import (
     resolve_runtime, 
     SessionContext,
     RuntimeProtocol,
