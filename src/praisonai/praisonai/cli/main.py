@@ -5826,6 +5826,33 @@ Now, {final_instruction.lower()}:"""
             print(f"[red]ERROR: Research failed: {e}[/red]")
             sys.exit(1)
 
+    def _load_cli_project_context(self, budget: int = 8000) -> str:
+        """Auto-discover AGENTS.md/CLAUDE.md project context for the system prompt.
+
+        Walks up from the current working directory to the project root,
+        bounded by ``budget`` characters and cached for the process. Returns
+        an empty string when the optional helper is unavailable or no context
+        files are found.
+        """
+        cached = getattr(self, "_cli_project_context", None)
+        if cached is not None:
+            return cached
+
+        context = ""
+        try:
+            from praisonai.integration.context_files import load_context_files
+            context = load_context_files(walk_up=True) or ""
+        except ImportError:
+            context = ""  # Context files helper is optional
+        except Exception:
+            context = ""
+
+        if budget and len(context) > budget:
+            context = context[:budget] + "\n... [project context truncated]"
+
+        self._cli_project_context = context
+        return context
+
     def _start_interactive_mode(self, args):
         """
         Start interactive TUI mode with streaming responses and tool support.
@@ -6866,6 +6893,13 @@ Provide a concise summary (max 200 words):"""
                             
                             # Build backstory with context
                             backstory = "You are a helpful AI assistant with access to tools for file operations, code intelligence, and shell commands."
+
+                            # Auto-load AGENTS.md/CLAUDE.md project context (unless --no-context)
+                            if not getattr(args, 'no_context', False):
+                                project_context = self._load_cli_project_context()
+                                if project_context:
+                                    backstory += "\n\n# Project Context\n" + project_context
+
                             if conversation_history:
                                 recent = conversation_history[-10:]
                                 context_lines = []

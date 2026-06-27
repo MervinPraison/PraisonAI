@@ -91,6 +91,9 @@ def configure_host(
     modules: Optional[Sequence[str]] = None,
     style: str = "dashboard",
     context_paths: Optional[Sequence[str]] = None,
+    no_context: bool = False,
+    context_cwd: Optional[str] = None,
+    context_token_budget: int = 8000,
     **kwargs: Any,
 ) -> None:
     """Apply PraisonAIUI host settings and wire L1 backends (unless legacy mode)."""
@@ -151,15 +154,24 @@ def configure_host(
                 # otherwise auto-discover AGENTS.md-style project context by
                 # walking up to the project root (unless opted out).
                 instructions = kwargs.pop("instructions", "You are a helpful assistant.")
-                no_context = kwargs.pop("no_context", False)
-                if not no_context:
+                # Honour both the first-class ``no_context`` param and a value
+                # threaded through ``agent_kwargs`` for backward compatibility.
+                opt_out = no_context or bool(kwargs.pop("no_context", False))
+                if not opt_out:
                     try:
+                        from pathlib import Path
                         from praisonai.integration.context_files import load_context_files
-                        if context_paths:
+                        if context_paths is not None:
+                            # Explicit list (including empty) is authoritative:
+                            # an empty list means "load nothing", not "discover".
                             context = load_context_files(list(context_paths))
                         else:
-                            context = load_context_files(walk_up=True)
+                            cwd = Path(context_cwd) if context_cwd else None
+                            context = load_context_files(cwd=cwd, walk_up=True)
                         if context:
+                            budget = context_token_budget or 0
+                            if budget and len(context) > budget:
+                                context = context[:budget] + "\n... [project context truncated]"
                             instructions = f"{instructions}\n\nContext:\n{context}"
                     except ImportError:
                         pass  # Context files helper is optional
