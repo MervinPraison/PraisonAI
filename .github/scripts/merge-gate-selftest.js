@@ -51,6 +51,18 @@ assert('verdict after head accepted', mg.findMergeGateVerdict(
 const noise = [{ user: { login: 'MervinPraison' }, body: '**Merge gate scan** — wait for `@claude`', created_at: new Date().toISOString() }];
 assert('diagnostic comment not a trigger', !mg.hasRecentClaudeTrigger(noise, 35));
 
+const recentFinalOnHead = [
+  {
+    user: { login: 'MervinPraison' },
+    body: '@claude You are the FINAL architecture reviewer.',
+    created_at: '2026-06-27T10:00:00Z',
+  },
+];
+assert(
+  'final on head skips cooldown gate',
+  mg.finalClaudeCompletedOnSha(recentFinalOnHead, '2026-06-27T09:55:00Z')
+);
+
 // Sensitive + secrets
 assert('workflow path sensitive', mg.sensitivePathReasons([{ filename: '.github/workflows/foo.yml' }]).length === 1);
 assert('ci-only label exempts workflows', mg.sensitivePathReasons(

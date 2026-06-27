@@ -5,7 +5,8 @@ name: Claude PR Merge Gate
 
 on:
   schedule:
-    - cron: '0 2,8,14,20 * * *'
+    # Scan for merge-ready PRs every 10 minutes (assess runs only when candidates exist).
+    - cron: '*/10 * * * *'
   workflow_dispatch:
     inputs:
       pr_number:
@@ -33,7 +34,7 @@ on:
 
 concurrency:
   group: claude-merge-gate-${{ github.repository }}-${{ github.event.inputs.pr_number || github.event.client_payload.pr_number || github.event.workflow_run.id || 'scan' }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   GH_TOKEN: ${{ secrets.GH_TOKEN || github.token }}

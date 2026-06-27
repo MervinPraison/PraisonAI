@@ -603,7 +603,8 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
     reasons.push('recent merge-conflict @claude');
   }
   if (!skipRecentClaudeCooldown && hasRecentClaudeTrigger(ctx.comments, 35)) {
-    reasons.push('recent @claude within 35min');
+    const finalDone = finalClaudeCompletedOnSha(ctx.comments, ctx.headPushedAt);
+    if (!finalDone) reasons.push('recent @claude within 35min');
   }
 
   if (!skipGlobalClaudeRunCheck && (await hasInProgressClaudeAssistant(github, owner, repo, prNumber))) {
