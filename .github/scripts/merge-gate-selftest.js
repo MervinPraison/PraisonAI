@@ -51,6 +51,7 @@ assert('verdict after head accepted', mg.findMergeGateVerdict(
 const noise = [{ user: { login: 'MervinPraison' }, body: '**Merge gate scan** — wait for `@claude`', created_at: new Date().toISOString() }];
 assert('diagnostic comment not a trigger', !mg.hasRecentClaudeTrigger(noise, 35));
 
+// Cooldown skip requires an actual verdict on HEAD, not just a FINAL trigger comment
 const recentFinalOnHead = [
   {
     user: { login: 'MervinPraison' },
@@ -59,8 +60,20 @@ const recentFinalOnHead = [
   },
 ];
 assert(
-  'final on head skips cooldown gate',
-  mg.finalClaudeCompletedOnSha(recentFinalOnHead, '2026-06-27T09:55:00Z')
+  'final trigger alone does not count as verdict on head',
+  mg.findMergeGateVerdict(recentFinalOnHead, null, '2026-06-27T09:55:00Z') === null
+);
+const recentVerdictOnHead = [
+  ...recentFinalOnHead,
+  {
+    user: { login: 'github-actions[bot]' },
+    body: 'MERGE_GATE_VERDICT: APPROVE',
+    created_at: '2026-06-27T10:05:00Z',
+  },
+];
+assert(
+  'verdict on head skips cooldown gate',
+  mg.findMergeGateVerdict(recentVerdictOnHead, null, '2026-06-27T09:55:00Z') === 'APPROVE'
 );
 
 // Sensitive + secrets
