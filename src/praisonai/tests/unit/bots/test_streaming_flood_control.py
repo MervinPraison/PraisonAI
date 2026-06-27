@@ -99,21 +99,47 @@ async def test_edit_flood_widens_interval_and_disables_progressive():
     await streamer.start()
     streamer._content_buffer = "some content"
 
-    # Three failing edits -> progressive disabled, interval widened (capped)
+    # Three failing edits -> progressive disabled, interval widened (capped).
+    # Backoff mutates per-stream runtime state, NOT the shared config.
     await streamer._perform_update()
     assert streamer._fail_streak == 1
-    assert cfg.min_interval == pytest.approx(2.0)
+    assert streamer._current_min_interval == pytest.approx(2.0)
+    assert cfg.min_interval == pytest.approx(1.0)  # shared config untouched
     assert streamer._progressive is True
 
     await streamer._perform_update()
     assert streamer._fail_streak == 2
-    assert cfg.min_interval == pytest.approx(4.0)
+    assert streamer._current_min_interval == pytest.approx(4.0)
 
     await streamer._perform_update()
     assert streamer._fail_streak == 3
     assert streamer._progressive is False
     # capped at max_interval
-    assert cfg.min_interval == pytest.approx(8.0)
+    assert streamer._current_min_interval == pytest.approx(8.0)
+    assert cfg.min_interval == pytest.approx(1.0)  # shared config untouched
+
+
+@pytest.mark.asyncio
+async def test_backoff_does_not_leak_across_streams():
+    """A flood in one stream must not slow a fresh stream sharing the config."""
+    cfg = StreamingConfig(
+        mode=StreamingMode.DRAFT,
+        min_interval=1.0,
+        flood_backoff_factor=2.0,
+        max_interval=8.0,
+        disable_progressive_edits_after=3,
+    )
+
+    flooded_adapter = _make_adapter(edit_side_effect=FloodError())
+    flooded = DraftStreamer(flooded_adapter, "chan", cfg, platform="telegram")
+    await flooded.start()
+    flooded._content_buffer = "content"
+    await flooded._perform_update()
+    assert flooded._current_min_interval == pytest.approx(2.0)
+
+    # A new stream built from the SAME config starts fresh at the base interval.
+    healthy = DraftStreamer(_make_adapter(), "chan2", cfg, platform="telegram")
+    assert healthy._current_min_interval == pytest.approx(1.0)
 
 
 @pytest.mark.asyncio
@@ -128,7 +154,36 @@ async def test_finalize_falls_back_to_send_when_progressive_disabled():
     assert streamer._progressive is False
 
     await streamer.finalize("the complete answer")
-    # finalize should send a fresh message, not edit
+    # Edits keep flooding, so finalize falls back to a fresh send. The user
+    # always receives the full answer.
+    adapter.send_message.assert_awaited_with("chan", "the complete answer")
+
+
+@pytest.mark.asyncio
+async def test_finalize_reuses_placeholder_when_edit_succeeds():
+    """When the final edit succeeds, no stale draft and no duplicate send."""
+    adapter = _make_adapter()  # edits succeed
+    cfg = StreamingConfig(mode=StreamingMode.DRAFT, disable_progressive_edits_after=1)
+    streamer = DraftStreamer(adapter, "chan", cfg, platform="telegram")
+    await streamer.start()
+    # Simulate progressive having been disabled previously.
+    streamer._progressive = False
+
+    await streamer.finalize("the complete answer")
+    # Placeholder is edited in place; no extra fresh send is issued.
+    adapter.edit_message.assert_awaited_with("chan", "m1", "the complete answer")
+    adapter.send_message.assert_awaited_once()  # only the start() placeholder
+
+
+@pytest.mark.asyncio
+async def test_finalize_falls_back_to_send_when_edit_fails():
+    """A failing final edit must still deliver the answer via a fresh send."""
+    adapter = _make_adapter(edit_side_effect=FloodError())
+    cfg = StreamingConfig(mode=StreamingMode.DRAFT)
+    streamer = DraftStreamer(adapter, "chan", cfg, platform="telegram")
+    await streamer.start()
+
+    await streamer.finalize("the complete answer")
     adapter.send_message.assert_awaited_with("chan", "the complete answer")
 
 

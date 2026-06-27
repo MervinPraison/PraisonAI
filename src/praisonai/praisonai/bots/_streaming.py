@@ -178,9 +178,13 @@ class DraftStreamer:
         self._text_limit = caps.get('text_limit', 0) or 0  # 0 = unlimited
         self._edit_rate_limit = caps.get('edit_rate_limit', 0) or 0
         
+        # Per-stream runtime interval. Adaptive backoff mutates this, NOT the
+        # shared config, so a flood in one stream never leaks into others.
+        self._current_min_interval = self._config.min_interval
+        
         # Use the more restrictive rate limit between channel capability and config
         if self._edit_rate_limit > 0:
-            self._config.min_interval = max(self._config.min_interval, self._edit_rate_limit)
+            self._current_min_interval = max(self._current_min_interval, self._edit_rate_limit)
         
         # Override config if channel doesn't support editing
         if not self._can_edit and self._config.mode != StreamingMode.OFF:
@@ -192,7 +196,7 @@ class DraftStreamer:
         
         logger.debug(
             "DraftStreamer initialized for channel %s, mode=%s, can_edit=%s, min_interval=%s",
-            channel_id, self._config.mode, self._can_edit, self._config.min_interval
+            channel_id, self._config.mode, self._can_edit, self._current_min_interval
         )
     
     async def start(self) -> str:
@@ -268,7 +272,7 @@ class DraftStreamer:
         
         # Check if we should update based on time and content thresholds
         should_update = (
-            elapsed >= self._config.min_interval and
+            elapsed >= self._current_min_interval and
             content_delta >= self._config.min_delta
         ) or (
             # Always update for progress mode when tool changes
@@ -281,7 +285,7 @@ class DraftStreamer:
         self._pending_update = True
         
         # Calculate delay to respect min_interval
-        delay = max(0, self._config.min_interval - elapsed)
+        delay = max(0, self._current_min_interval - elapsed)
         
         # Schedule update as background task to avoid blocking token stream
         async def _delayed_update():
@@ -349,7 +353,7 @@ class DraftStreamer:
                 self._message_id, len(content)
             )
             
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - adapter boundary; classify & back off
             self._handle_edit_failure(e)
     
     def _handle_edit_failure(self, err: Exception) -> None:
@@ -367,13 +371,13 @@ class DraftStreamer:
         
         if is_recoverable_error(err, self._platform):
             self._fail_streak += 1
-            self._config.min_interval = min(
-                self._config.min_interval * self._config.flood_backoff_factor,
+            self._current_min_interval = min(
+                self._current_min_interval * self._config.flood_backoff_factor,
                 self._config.max_interval,
             )
             logger.warning(
                 "DraftStreamer edit flood (streak=%d), widening interval to %.1fs: %s",
-                self._fail_streak, self._config.min_interval, err,
+                self._fail_streak, self._current_min_interval, err,
             )
             if self._fail_streak >= self._config.disable_progressive_edits_after:
                 self._progressive = False
@@ -404,35 +408,37 @@ class DraftStreamer:
         if final_content and self._config.strip_reasoning_tags:
             final_content = strip_reasoning_tags(final_content)
         
+        if self._rate_limiter:
+            await self._rate_limiter.acquire(self._channel_id)
+        
+        # Primary delivery: when progressive edits are still healthy, edit the
+        # existing placeholder in place. When they were disabled by flooding, a
+        # fresh edit is likely to fail too, so try the placeholder edit first
+        # (to avoid leaving a stale "🤔 Thinking..." draft) and fall back to a
+        # new send below.
+        delivered = False
         try:
-            # Apply rate limiting
-            if self._rate_limiter:
-                await self._rate_limiter.acquire(self._channel_id)
-            
-            if self._progressive:
-                # Final edit with complete content
-                await self._adapter.edit_message(self._channel_id, self._message_id, final_content)
-            else:
-                # Progressive edits were disabled by flooding: deliver the full
-                # answer as a fresh final send so the user always gets it.
+            await self._adapter.edit_message(self._channel_id, self._message_id, final_content)
+            delivered = True
+        except Exception as e:  # noqa: BLE001 - adapter boundary; preserve final delivery
+            logger.warning("DraftStreamer final edit failed: %s", e)
+        
+        # Fallback: if the edit failed (or progressive editing was disabled by
+        # flooding), deliver the full answer as a fresh send so the user ALWAYS
+        # receives the completed answer regardless of the progressive path taken.
+        if not delivered:
+            try:
                 await self._adapter.send_message(self._channel_id, final_content)
-            
-            logger.debug(
-                "DraftStreamer finalized message %s, final_length=%d, progressive=%s", 
-                self._message_id, len(final_content), self._progressive
-            )
-            
-        except Exception as e:
-            logger.warning("DraftStreamer finalization failed: %s", e)
-            # Last-resort fallback: if the edit failed, try a plain send so the
-            # user still receives the completed answer.
-            if self._progressive:
-                try:
-                    await self._adapter.send_message(self._channel_id, final_content)
-                except Exception as send_exc:
-                    logger.warning(
-                        "DraftStreamer final send fallback also failed: %s", send_exc
-                    )
+                delivered = True
+            except Exception as send_exc:  # noqa: BLE001 - last-resort delivery fallback
+                logger.warning(
+                    "DraftStreamer final send fallback also failed: %s", send_exc
+                )
+        
+        logger.debug(
+            "DraftStreamer finalized message %s, final_length=%d, progressive=%s, delivered=%s",
+            self._message_id, len(final_content), self._progressive, delivered
+        )
     
     @property
     def is_streaming(self) -> bool:

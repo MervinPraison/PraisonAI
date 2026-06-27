@@ -129,6 +129,11 @@ class StreamingConfigSchema(BaseModel):
     min_delta: int = 120  # Minimum character delta before edit
     placeholder_text: str = "🤔 Thinking..."
     progress_prefix: str = "🤔 "
+    # Flood-control / resilience for progressive edits
+    disable_progressive_edits_after: int = 3  # Consecutive edit failures before giving up
+    flood_backoff_factor: float = 2.0  # Multiply interval on each flood/429
+    max_interval: float = 30.0  # Cap for the adaptively-widened interval
+    strip_reasoning_tags: bool = True  # Strip <think>/<reasoning> from output
     
     @field_validator("mode")
     @classmethod
