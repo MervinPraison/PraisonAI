@@ -51,6 +51,31 @@ assert('verdict after head accepted', mg.findMergeGateVerdict(
 const noise = [{ user: { login: 'MervinPraison' }, body: '**Merge gate scan** — wait for `@claude`', created_at: new Date().toISOString() }];
 assert('diagnostic comment not a trigger', !mg.hasRecentClaudeTrigger(noise, 35));
 
+// Cooldown skip requires an actual verdict on HEAD, not just a FINAL trigger comment
+const recentFinalOnHead = [
+  {
+    user: { login: 'MervinPraison' },
+    body: '@claude You are the FINAL architecture reviewer.',
+    created_at: '2026-06-27T10:00:00Z',
+  },
+];
+assert(
+  'final trigger alone does not count as verdict on head',
+  mg.findMergeGateVerdict(recentFinalOnHead, null, '2026-06-27T09:55:00Z') === null
+);
+const recentVerdictOnHead = [
+  ...recentFinalOnHead,
+  {
+    user: { login: 'github-actions[bot]' },
+    body: 'MERGE_GATE_VERDICT: APPROVE',
+    created_at: '2026-06-27T10:05:00Z',
+  },
+];
+assert(
+  'verdict on head skips cooldown gate',
+  mg.findMergeGateVerdict(recentVerdictOnHead, null, '2026-06-27T09:55:00Z') === 'APPROVE'
+);
+
 // Sensitive + secrets
 assert('workflow path sensitive', mg.sensitivePathReasons([{ filename: '.github/workflows/foo.yml' }]).length === 1);
 assert('ci-only label exempts workflows', mg.sensitivePathReasons(

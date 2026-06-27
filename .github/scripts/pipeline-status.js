@@ -155,11 +155,39 @@ async function syncPipelineLabels(github, owner, repo, prNumber, core) {
   }
 
   core?.info?.(`PR #${prNumber}: stage=${stage} blockers=[${blockers.join(', ')}]`);
-  return { synced: true, stage, blockers, ready: evalResult.ready, reasons: evalResult.reasons };
+  return {
+    synced: true,
+    stage,
+    blockers,
+    ready: evalResult.ready,
+    reasons: evalResult.reasons,
+    labels: ctx.labels,
+    createdAt: new Date(ctx.pr.created_at).getTime(),
+  };
+}
+
+async function dispatchMergeGateForOldestReady(github, owner, repo, readyCandidates, core) {
+  if (!readyCandidates.length) return 0;
+  readyCandidates.sort((a, b) => a.createdAt - b.createdAt);
+  for (const cand of readyCandidates) {
+    if ((cand.labels || []).includes('claude-merge-gate-active')) {
+      core?.info?.(`Skip dispatch PR #${cand.prNumber}: merge gate already active`);
+      continue;
+    }
+    await github.rest.repos.createDispatchEvent({
+      owner,
+      repo,
+      event_type: 'claude-merge-gate',
+      client_payload: { pr_number: cand.prNumber },
+    });
+    core?.info?.(`Dispatched merge gate for ready PR #${cand.prNumber}`);
+    return cand.prNumber;
+  }
+  return 0;
 }
 
 async function syncOpenPullRequests(github, owner, repo, options, core) {
-  const { maxPrs = 20 } = options || {};
+  const { maxPrs = 20, dispatchMergeGate = true } = options || {};
   await ensurePipelineLabels(github, owner, repo, core);
   let prs;
   if (maxPrs <= 100) {
@@ -178,14 +206,28 @@ async function syncOpenPullRequests(github, owner, repo, options, core) {
     });
   }
   let synced = 0;
+  const readyCandidates = [];
   for (const pr of prs) {
     if (synced >= maxPrs) break;
     if (pr.draft) continue;
     if (pr.head?.repo?.full_name && pr.head.repo.full_name !== `${owner}/${repo}`) continue;
-    await syncPipelineLabels(github, owner, repo, pr.number, core);
+    const result = await syncPipelineLabels(github, owner, repo, pr.number, core);
+    if (result.ready) {
+      readyCandidates.push({
+        prNumber: pr.number,
+        createdAt: result.createdAt || new Date(pr.created_at).getTime(),
+        labels: result.labels || [],
+      });
+    }
     synced += 1;
   }
-  core?.info?.(`Pipeline label sync complete (${synced} PR(s))`);
+  let dispatched = 0;
+  if (dispatchMergeGate && readyCandidates.length) {
+    dispatched = await dispatchMergeGateForOldestReady(
+      github, owner, repo, readyCandidates, core
+    );
+  }
+  core?.info?.(`Pipeline label sync complete (${synced} PR(s), dispatched=${dispatched || 'none'})`);
   return synced;
 }
 
@@ -199,4 +241,5 @@ module.exports = {
   ensurePipelineLabels,
   syncPipelineLabels,
   syncOpenPullRequests,
+  dispatchMergeGateForOldestReady,
 };

@@ -4,12 +4,13 @@ name: Pipeline Status Sync
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/10 * * * *'
   workflow_dispatch:
 
 permissions:
   pull-requests: read
   issues: write
+  actions: write
 
 jobs:
   sync:
@@ -27,5 +28,6 @@ jobs:
             const path = require('path');
             const ps = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/pipeline-status.js'));
             await ps.syncOpenPullRequests(
-              github, context.repo.owner, context.repo.repo, { maxPrs: 30 }, core
+              github, context.repo.owner, context.repo.repo,
+              { maxPrs: 30, dispatchMergeGate: true }, core
             );
