@@ -26,6 +26,11 @@ Architecture:
     - Runtime provider axis: anthropic (only supported today), e2b, modal, flyio (future)
     - Agent loop runs entirely in the cloud provider's managed runtime
     - Tools are co-located with the provider infrastructure
+
+Provider -> backend resolution is delegated to the ``ManagedBackendRegistry``
+(see :mod:`backend_registry`), so a third-party package can register a
+``praisonai.managed_backends`` entry point and make ``HostedAgent(provider=...)``
+work without editing this file.
 """
 
 from typing import Optional, Any
@@ -62,32 +67,51 @@ class HostedAgent(AnthropicManagedAgent):
         config: Optional[Any] = None,
         **kwargs,
     ):
-        if provider != "anthropic":
-            # Provide differentiated guidance based on provider type
-            _llm_hints = {"openai", "gemini", "ollama", "local"}
-            _compute_hints = {"e2b", "modal", "flyio", "daytona", "docker"}
-            
-            if provider in _llm_hints:
-                hint = (
-                    f"For local agent loops with this LLM, use: "
-                    f"LocalAgent(config=LocalAgentConfig(model='...')) "
-                    f"(e.g. 'gpt-4o-mini', 'gemini/gemini-2.0-flash', 'ollama/llama3')."
-                )
-            elif provider in _compute_hints:
-                hint = (
-                    f"For local execution with cloud compute, use: "
-                    f"LocalAgent(compute='{provider}', config=LocalAgentConfig(...))"
-                )
-            else:
-                hint = (
-                    "Use LocalAgent(config=LocalAgentConfig(model='...')) for local loops, "
-                    "or LocalAgent(compute='e2b'|'modal'|'docker'|...) for cloud-sandboxed tools."
-                )
-            
-            raise ValueError(
-                f"Managed runtime for provider '{provider}' is not yet available. "
-                f"Currently supported: 'anthropic'. {hint}"
+        # Consult the managed-backend registry so entry-point plugins can add
+        # providers without editing this file. "anthropic" is the only builtin.
+        from .backend_registry import get_backend_registry
+
+        registry = get_backend_registry()
+        if not registry.is_available(provider):
+            raise ValueError(self._unavailable_provider_message(provider))
+
+        # Anthropic (and any backend that is this class' own base) runs through
+        # the existing implementation. Other registered backends are constructed
+        # via their own class so third-party runtimes are honoured.
+        backend_cls = registry.resolve(provider)
+        if issubclass(type(self), backend_cls) or backend_cls is AnthropicManagedAgent:
+            super().__init__(provider=provider, config=config, **kwargs)
+        else:  # pragma: no cover - exercised once non-anthropic backends exist
+            self._delegate = backend_cls(provider=provider, config=config, **kwargs)
+            self.provider = provider
+
+    @staticmethod
+    def _unavailable_provider_message(provider: str) -> str:
+        """Build the actionable error message for an unsupported provider."""
+        from .backend_registry import get_backend_registry
+
+        _llm_hints = {"openai", "gemini", "ollama", "local"}
+        _compute_hints = {"e2b", "modal", "flyio", "daytona", "docker"}
+
+        if provider in _llm_hints:
+            hint = (
+                "For local agent loops with this LLM, use: "
+                "LocalAgent(config=LocalAgentConfig(model='...')) "
+                "(e.g. 'gpt-4o-mini', 'gemini/gemini-2.0-flash', 'ollama/llama3')."
             )
-        
-        # Pass through to the existing Anthropic implementation
-        super().__init__(provider=provider, config=config, **kwargs)
+        elif provider in _compute_hints:
+            hint = (
+                f"For local execution with cloud compute, use: "
+                f"LocalAgent(compute='{provider}', config=LocalAgentConfig(...))"
+            )
+        else:
+            hint = (
+                "Use LocalAgent(config=LocalAgentConfig(model='...')) for local loops, "
+                "or LocalAgent(compute='e2b'|'modal'|'docker'|...) for cloud-sandboxed tools."
+            )
+
+        available = sorted(get_backend_registry().list_all_names())
+        return (
+            f"Managed runtime for provider '{provider}' is not yet available. "
+            f"Currently supported: {available}. {hint}"
+        )

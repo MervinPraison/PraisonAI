@@ -62,11 +62,56 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
     Uses dependency injection pattern instead of singleton.
     """
 
+    # Default selection priority used when no framework is requested
+    # explicitly. Entry-point plugins registered under the
+    # ``praisonai.framework_adapters`` group are consulted after this list,
+    # so a third-party adapter can become the default once the built-ins are
+    # unavailable.
+    DEFAULT_PRIORITY: tuple[str, ...] = ("crewai", "praisonai", "autogen", "ag2")
+
     def __init__(self) -> None:
         """Initialize the registry with built-in adapters."""
         super().__init__(
             entry_point_group="praisonai.framework_adapters",
             builtins=_BUILTIN_ADAPTERS
+        )
+
+    def pick_default(self) -> str:
+        """Return the name of the default framework to use.
+
+        Resolution policy (single source of truth for default selection):
+
+        1. Walk ``DEFAULT_PRIORITY`` and return the first available adapter.
+        2. Fall back to any other registered adapter (e.g. entry-point
+           plugins) that reports availability.
+
+        Returns:
+            str: Name of the first available framework adapter.
+
+        Raises:
+            RuntimeError: If no registered adapter is available.
+        """
+        for name in self.DEFAULT_PRIORITY:
+            try:
+                if self.is_available(name):
+                    return name
+            except (ValueError, TypeError):
+                continue
+
+        # Entry-point / runtime-registered adapters get a chance to be the
+        # default once none of the built-in priorities are installed.
+        for name in self.list_names():
+            if name in self.DEFAULT_PRIORITY:
+                continue
+            try:
+                if self.is_available(name):
+                    return name
+            except (ValueError, TypeError):
+                continue
+
+        raise RuntimeError(
+            "No supported framework installed. Available adapters: "
+            f"{self.list_all_names()}"
         )
     
     def _validate_adapter(self, name: str, adapter) -> None:
