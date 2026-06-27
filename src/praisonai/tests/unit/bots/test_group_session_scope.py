@@ -284,3 +284,24 @@ class TestInvalidScope:
     def test_unknown_scope_falls_back(self):
         mgr = BotSessionManager(platform="telegram", session_scope="bogus")
         assert mgr._session_scope == "per_user"
+
+
+class TestAdapterAccountResolution:
+    """Adapter /new handlers must resolve ``account`` without crashing.
+
+    ``BotConfig`` is a dataclass with no ``.get()`` method and no ``account``
+    field, so the previous ``self._config.get("account", ...)`` /
+    ``self.config.get("account", ...)`` patterns raised ``AttributeError`` the
+    moment a Slack/Discord ``/new`` ran (Greptile P1). The fix uses
+    ``getattr(self.config, "account", "default")`` (matching whatsapp), which
+    must stay crash-free and default cleanly.
+    """
+
+    def test_botconfig_account_getattr_does_not_crash(self):
+        from praisonaiagents.bots.config import BotConfig
+
+        config = BotConfig(token="x")
+        # The pattern used by every adapter's account resolution.
+        assert getattr(config, "account", "default") == "default"
+        # The broken pattern would have raised here.
+        assert not hasattr(config, "get")
