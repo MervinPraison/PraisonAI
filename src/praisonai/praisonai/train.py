@@ -353,7 +353,7 @@ class TrainModel:
     Cutting Knowledge Date: December 2023
     {{ if .System }}{{ .System }}
     {{- end }}
-    {{- if .Tools }}When you receive a tool call response, use the output to format an answer to the orginal user question.
+    {{- if .Tools }}When you receive a tool call response, use the output to format an answer to the original user question.
     You are a helpful assistant with tool calling capabilities.
     {{- end }}<|eot_id|>
     {{- range $i, $_ := .Messages }}
