@@ -1905,7 +1905,8 @@ Your Goal: {self.goal}
             # export PRAISONAI_TOOL_SAFETY=off. This adds zero Agent kwargs.
             _raw_safety_env = os.environ.get("PRAISONAI_TOOL_SAFETY")
             _safety_env = (_raw_safety_env or "").strip().lower()
-            if _safety_env not in ("off", "full", "none", "0", "false"):
+            _bypass_safety = _safety_env in ("off", "full", "none", "0", "false")
+            if not _bypass_safety:
                 from ..approval.registry import PERMISSION_PRESETS
                 _resolved_safety_env = _safety_env or "default"
                 _preset_deny = PERMISSION_PRESETS.get(_resolved_safety_env)
@@ -1920,7 +1921,27 @@ Your Goal: {self.goal}
                     )
                     _resolved_safety_env = "default"
                     _preset_deny = PERMISSION_PRESETS.get(_resolved_safety_env)
-                if _preset_deny is not None:
+
+                # Safe-by-default ask: when no approval kwarg was supplied
+                # (``approval is None``) and we are attached to an interactive
+                # terminal, route dangerous built-in tools (shell exec, file
+                # writes, etc.) through an interactive approval prompt instead
+                # of silently hard-denying them. This makes a fresh, un-flagged
+                # agent safe *and* usable — the user is asked once per dangerous
+                # call and can allow/deny.
+                #
+                # In non-interactive contexts (pipes, CI) — or when the user
+                # explicitly passed ``approval=False`` to opt out of prompting —
+                # we keep the existing deny-by-default preset so dangerous tools
+                # never execute unattended without an explicit policy. The full
+                # bypass remains ``PRAISONAI_TOOL_SAFETY=off`` / ``approval="bypass"``.
+                if approval is None and self._is_interactive_session():
+                    from ..approval.backends import ConsoleBackend
+                    self._approval_backend = ConsoleBackend()
+                    # Leave _perm_deny empty so dangerous tools reach the backend
+                    # (which classifies them via DEFAULT_DANGEROUS_TOOLS) and the
+                    # user is prompted to allow/deny rather than auto-denied.
+                elif _preset_deny is not None:
                     self._perm_deny = _preset_deny
         elif isinstance(approval, ApprovalConfig):
             self._approval_backend = approval.backend
@@ -5051,6 +5072,22 @@ Answer:"""
                 self.knowledge.store(knowledge_item, user_id=self.user_id, agent_id=self.agent_id)
         except Exception as e:
             logging.error(f"Error processing knowledge item: {knowledge_item}, error: {e}")
+
+    @staticmethod
+    def _is_interactive_session() -> bool:
+        """Return True when running attached to an interactive terminal.
+
+        Used to decide whether dangerous built-in tools should be routed
+        through an interactive approval prompt (safe-by-default ``ask``) or
+        hard-denied (non-interactive deny-by-default). A session counts as
+        interactive only when both stdin and stdout are TTYs, so pipes, CI
+        runners and redirected I/O fall back to the deny-by-default policy.
+        """
+        try:
+            import sys
+            return bool(sys.stdin.isatty() and sys.stdout.isatty())
+        except Exception:
+            return False
 
     def _setup_guardrail(self):
         """Setup the guardrail function based on the provided guardrail parameter."""

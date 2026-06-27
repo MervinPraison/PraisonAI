@@ -23,7 +23,8 @@ def code_main(
     file: Optional[List[str]] = typer.Option(None, "--file", "-f", help="Attach file(s) to context"),
     no_acp: bool = typer.Option(False, "--no-acp", help="Disable ACP tools (file operations)"),
     no_lsp: bool = typer.Option(False, "--no-lsp", help="Disable LSP tools (code intelligence)"),
-    safe_mode: bool = typer.Option(False, "--safe", help="Safe mode: require approval for file writes and commands"),
+    safe_mode: bool = typer.Option(True, "--safe/--no-safe", help="Safe mode (default ON): require approval for file writes and commands"),
+    dangerously_skip_approval: bool = typer.Option(False, "--dangerously-skip-approval", help="Skip all approval prompts and run dangerous tools unguarded (restores legacy behaviour)"),
     session_id: Optional[str] = typer.Option(None, "--session", "-s", help="Session ID to resume"),
     continue_session: bool = typer.Option(False, "--continue", "-c", help="Continue last session"),
     autonomy: bool = typer.Option(True, "--autonomy/--no-autonomy", help="Enable agent autonomy for complex tasks"),
@@ -55,11 +56,17 @@ def code_main(
     # Enable code-specific environment
     os.environ["PRAISONAI_CODE_MODE"] = "true"
     
-    # Set approval mode based on --safe flag
-    if safe_mode:
-        os.environ["PRAISON_APPROVAL_MODE"] = "prompt"
-    else:
+    # Set approval mode based on --safe flag.
+    # Safe-by-default: dangerous tools (shell exec, file writes) are gated
+    # behind an interactive approval prompt unless the user explicitly opts
+    # out with --no-safe or --dangerously-skip-approval. The latter also sets
+    # PRAISONAI_TOOL_SAFETY=off so the core runtime skips its safe-by-default
+    # ask path (see Agent.__init__ approval handling).
+    if dangerously_skip_approval or not safe_mode:
         os.environ["PRAISON_APPROVAL_MODE"] = "auto"
+        os.environ["PRAISONAI_TOOL_SAFETY"] = "off"
+    else:
+        os.environ["PRAISON_APPROVAL_MODE"] = "prompt"
     
     # Handle profiling for single prompt mode
     if prompt and (profile or profile_deep):

@@ -104,6 +104,61 @@ def test_unknown_env_value_falls_back_to_default_preset(monkeypatch):
     assert "read_file" not in a._perm_deny
 
 
+def test_interactive_session_attaches_console_backend(monkeypatch):
+    """Safe-by-default ask: an un-flagged agent on an interactive TTY routes
+    dangerous tools through an approval backend instead of hard-denying them."""
+    monkeypatch.delenv("PRAISONAI_TOOL_SAFETY", raising=False)
+    from praisonaiagents.agent.agent import Agent
+    from praisonaiagents.approval.backends import ConsoleBackend
+    monkeypatch.setattr(Agent, "_is_interactive_session", staticmethod(lambda: True))
+    a = _make_agent()
+    assert isinstance(a._approval_backend, ConsoleBackend)
+    # _perm_deny stays empty so dangerous tools reach the backend (ask),
+    # rather than being hard-denied before the prompt.
+    assert a._perm_deny == frozenset()
+
+
+def test_non_interactive_keeps_deny_by_default(monkeypatch):
+    """Non-interactive (pipe/CI) keeps deny-by-default; no prompt backend."""
+    monkeypatch.delenv("PRAISONAI_TOOL_SAFETY", raising=False)
+    from praisonaiagents.agent.agent import Agent
+    monkeypatch.setattr(Agent, "_is_interactive_session", staticmethod(lambda: False))
+    a = _make_agent()
+    assert a._approval_backend is None
+    assert "execute_command" in a._perm_deny
+
+
+def test_interactive_bypass_env_off_no_backend(monkeypatch):
+    """PRAISONAI_TOOL_SAFETY=off bypasses the ask path even on a TTY."""
+    monkeypatch.setenv("PRAISONAI_TOOL_SAFETY", "off")
+    from praisonaiagents.agent.agent import Agent
+    monkeypatch.setattr(Agent, "_is_interactive_session", staticmethod(lambda: True))
+    a = _make_agent()
+    assert a._approval_backend is None
+    assert a._perm_deny == frozenset()
+
+
+def test_explicit_approval_false_no_prompt_on_tty(monkeypatch):
+    """Explicit approval=False opts out of prompting: keep deny-by-default,
+    never attach an interactive backend even on a TTY."""
+    monkeypatch.delenv("PRAISONAI_TOOL_SAFETY", raising=False)
+    from praisonaiagents.agent.agent import Agent
+    monkeypatch.setattr(Agent, "_is_interactive_session", staticmethod(lambda: True))
+    a = _make_agent(approval=False)
+    assert a._approval_backend is None
+    assert "execute_command" in a._perm_deny
+
+
+def test_interactive_read_only_tool_not_gated(monkeypatch):
+    """Read-only built-in tools stay ungated under safe-by-default ask."""
+    monkeypatch.delenv("PRAISONAI_TOOL_SAFETY", raising=False)
+    from praisonaiagents.agent.agent import Agent
+    monkeypatch.setattr(Agent, "_is_interactive_session", staticmethod(lambda: True))
+    a = _make_agent()
+    decision = a._resolve_approval_decision("read_file", {"path": "/tmp/x"}, is_async=False)
+    assert decision.approved is True
+
+
 def test_no_new_agent_kwarg_was_added():
     """Guard-rail: the feature must not add any new Agent() kwarg.
 
