@@ -454,6 +454,8 @@ def run_main(
     # Custom definitions
     agent: Optional[str] = typer.Option(None, "--agent", "-a", help="Use a named custom agent"),
     command: Optional[str] = typer.Option(None, "--command", help="Execute a named custom command"),
+    # Reasoning effort
+    thinking: Optional[str] = typer.Option(None, "--thinking", help="Reasoning effort (off, minimal, low, medium, high)"),
     # Checkpoint / rewind
     no_checkpoint: bool = typer.Option(False, "--no-checkpoint", help="Disable automatic file checkpoint before the run"),
     restore: Optional[str] = typer.Option(None, "--restore", help="Restore the workspace to a checkpoint id (or 'last') and exit"),
@@ -479,6 +481,16 @@ def run_main(
     if restore:
         _restore_checkpoint(restore)
         return
+
+    # Validate --thinking and resolve it to the core thinking_budget up front so
+    # an unknown value fails closed before any execution (consistent with the
+    # `code` command and MODE_RULES validation on custom agents).
+    from ..features.thinking import thinking_to_budget
+    try:
+        thinking_budget = thinking_to_budget(thinking)
+    except ValueError as exc:
+        output.print_error(str(exc))
+        raise typer.Exit(1)
 
     # Early credential check before any processing
     if target:  # Only check if we actually have something to run
@@ -586,6 +598,7 @@ def run_main(
             session=session,
             fork=fork,
             no_save=no_save,
+            thinking_budget=thinking_budget,
         )
         return
     
@@ -1024,6 +1037,10 @@ def _run_prompt(
                     agent_config["tools"] = list(agent_config.get("tools", [])) + mcp_tools
 
             agent = Agent(**agent_config)
+            # Reasoning effort applied via the property setter (not a
+            # constructor kwarg) so defaults are unchanged when omitted.
+            if thinking_budget is not None:
+                agent.thinking_budget = thinking_budget
             if session_id or auto_save_name:
                 apply_cli_session_continuity(agent, session_id or auto_save_name, auto_save=auto_save_name)
 
@@ -1101,6 +1118,7 @@ def _run_prompt(
         args.expand_tools = None
         args.no_tools = False
         args.approval = approval
+        args.thinking_budget = thinking_budget
         
         praison.args = args
         
@@ -1244,6 +1262,7 @@ def _run_custom_agent(
     session: Optional[str] = None,
     fork: bool = False,
     no_save: bool = False,
+    thinking_budget: Optional[int] = None,
 ):
     """Run a custom agent definition."""
     output = get_output_controller()
@@ -1336,6 +1355,10 @@ def _run_custom_agent(
         
         # Create and run agent
         agent = Agent(**agent_config)
+        # Reasoning effort applied via the property setter (not a constructor
+        # kwarg) so defaults are unchanged when --thinking is omitted.
+        if thinking_budget is not None:
+            agent.thinking_budget = thinking_budget
 
         # Bridge per-step agent events into the structured output stream.
         from ..output.event_bridge import attach_bridge, detach_bridge

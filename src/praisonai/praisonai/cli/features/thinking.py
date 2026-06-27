@@ -11,7 +11,45 @@ Commands:
 
 import os
 import json
-from typing import Dict, Any
+from typing import Any, Dict, Optional
+
+
+# Canonical reasoning-effort levels shared across CLI surfaces (code, run, bot).
+THINKING_LEVELS = ("off", "minimal", "low", "medium", "high")
+
+# Map reasoning-effort levels to extended-thinking token budgets. Mirrors the
+# token allocation used by `praisonai thinking set` so the flag and the
+# subcommand stay consistent. `off` disables extended thinking (None budget).
+THINKING_BUDGET_MAP: Dict[str, Optional[int]] = {
+    "off": None,
+    "minimal": 2000,
+    "low": 4000,
+    "medium": 8000,
+    "high": 16000,
+}
+
+
+def thinking_to_budget(level: Optional[str]) -> Optional[int]:
+    """Resolve a reasoning-effort level to an extended-thinking token budget.
+
+    Args:
+        level: One of off, minimal, low, medium, high (case-insensitive).
+
+    Returns:
+        Token budget int for the level, or None when level is None/``off``.
+
+    Raises:
+        ValueError: When an unknown level is supplied (fail closed).
+    """
+    if level is None:
+        return None
+    normalized = level.strip().lower()
+    if normalized not in THINKING_BUDGET_MAP:
+        raise ValueError(
+            f"Invalid thinking level: {level}. "
+            f"Valid levels: {', '.join(THINKING_LEVELS)}"
+        )
+    return THINKING_BUDGET_MAP[normalized]
 
 
 class ThinkingHandler:
