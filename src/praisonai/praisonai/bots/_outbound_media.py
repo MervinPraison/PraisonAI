@@ -64,10 +64,48 @@ _DENY_HOME_SUBDIRS: List[str] = [
     ".docker",
     ".netrc",
     ".git-credentials",
+    ".npmrc",
+    ".pypirc",
+    ".env",
+    ".git",
     ".praisonai/state",
     ".praisonai/secrets",
     ".praisonai/pairing",
 ]
+
+# Basenames denied wherever they appear in the resolved path — these are the
+# canonical "drop a secret next to the project" files a prompt injection might
+# name from an arbitrary working directory (not just under ``~``).
+_DENY_BASENAMES: List[str] = [
+    ".env",
+    ".npmrc",
+    ".pypirc",
+    ".netrc",
+    ".git-credentials",
+    "id_rsa",
+    "id_ed25519",
+    "credentials",
+]
+
+
+def _as_bool(value: Any, default: bool) -> bool:
+    """Interpret a config flag, honouring quoted YAML/env-style strings.
+
+    ``bool("false")`` is ``True`` in Python, so a config of ``strict: "false"``
+    would silently stay enabled. This coerces the common truthy/falsey string
+    spellings explicitly and falls back to ``default`` when the key is absent.
+    """
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off", ""}:
+            return False
+    return bool(value)
 
 
 class MediaDeliveryError(Exception):
@@ -116,8 +154,8 @@ class OutboundMediaPolicy:
         except TypeError:
             roots = []
         return cls(
-            enabled=bool(data.get("enabled", True)),
-            strict=bool(data.get("strict", False)),
+            enabled=_as_bool(data.get("enabled"), True),
+            strict=_as_bool(data.get("strict"), False),
             allow_roots=roots,
             max_bytes=int(data.get("max_bytes", 20 * 1024 * 1024)),
             recent_mtime_seconds=int(data.get("recent_mtime_seconds", 3600)),
@@ -195,6 +233,15 @@ def validate_media_delivery_path(
                 f"Refusing to deliver from protected location: ~/{sub}"
             )
 
+    # Deny well-known credential basenames regardless of directory (e.g. a
+    # project-local ``.env`` or an SSH key sitting outside ``~/.ssh``).
+    name_lower = resolved.name.lower()
+    for denied in _DENY_BASENAMES:
+        if name_lower == denied or name_lower.startswith(denied + "."):
+            raise MediaDeliveryError(
+                f"Refusing to deliver protected file: {resolved.name}"
+            )
+
     if not resolved.exists():
         raise MediaDeliveryError(f"Media path not found: {path!r}")
     if not resolved.is_file():
@@ -251,6 +298,32 @@ def _is_image(path: str) -> bool:
     return os.path.splitext(path.lower())[1] in _IMAGE_EXTS
 
 
+def _accepts_caption(func: Any) -> bool:
+    """Return True if ``func`` accepts a ``caption`` keyword (or **kwargs)."""
+    try:
+        import inspect
+
+        sig = inspect.signature(func)
+    except (TypeError, ValueError):
+        return True
+    params = sig.parameters
+    if "caption" in params:
+        return True
+    return any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+
+
+def _telegram_chat_id(channel_id: str) -> Any:
+    """Coerce numeric Telegram IDs to int; pass ``@channelusername`` strings.
+
+    ``Bot.send_photo``/``send_document`` accept ``int | str`` for ``chat_id``,
+    so a public channel username must not be force-cast through ``int()``.
+    """
+    s = str(channel_id)
+    return int(s) if s.lstrip("-").isdigit() else s
+
+
 async def deliver_media_to_adapter(
     adapter: Any,
     channel_id: str,
@@ -273,14 +346,16 @@ async def deliver_media_to_adapter(
     delivery rather than misleading the model).
     """
     # 1) Adapter-native hook (future adapters / tests can implement this).
+    #    Inspect the signature up front rather than catching a generic
+    #    ``TypeError`` (which could mask a real bug or, worse, retry a partial
+    #    upload). The hook is called exactly once.
     send_media = getattr(adapter, "send_media", None)
     if callable(send_media):
-        try:
+        if _accepts_caption(send_media):
             await send_media(channel_id, path, caption=caption)
-            return True
-        except TypeError:
+        else:
             await send_media(channel_id, path)
-            return True
+        return True
 
     platform = (getattr(adapter, "platform", "") or "").lower()
     filename = os.path.basename(path)
@@ -289,14 +364,15 @@ async def deliver_media_to_adapter(
     application = getattr(adapter, "_application", None)
     if application is not None and getattr(application, "bot", None) is not None:
         bot = application.bot
+        chat_id = _telegram_chat_id(channel_id)
         with open(path, "rb") as fh:
             if _is_image(path) and hasattr(bot, "send_photo"):
                 await bot.send_photo(
-                    chat_id=int(channel_id), photo=fh, caption=caption or None
+                    chat_id=chat_id, photo=fh, caption=caption or None
                 )
             else:
                 await bot.send_document(
-                    chat_id=int(channel_id), document=fh, caption=caption or None
+                    chat_id=chat_id, document=fh, caption=caption or None
                 )
         return True
 

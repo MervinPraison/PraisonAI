@@ -521,10 +521,23 @@ class DeliveryRouter:
                 )
                 return False
 
-            from ._outbound_media import deliver_media_to_adapter
+            from ._outbound_media import (
+                deliver_media_to_adapter,
+                validate_media_delivery_path,
+            )
+
+            # Final trusted boundary: re-run the baseline path guard here so a
+            # direct caller of this public router method cannot bypass the
+            # denylist (strict-mode policy is applied by the caller).
+            safe_path = validate_media_delivery_path(path)
+
+            # ``get_bot`` returns the user-facing ``Bot`` wrapper; the native
+            # upload primitives (``_application``/``_client``) live on the
+            # underlying adapter, so unwrap it before dispatch.
+            media_target = getattr(bot, "adapter", None) or bot
 
             ok = await deliver_media_to_adapter(
-                bot, channel_id, path, caption=caption
+                media_target, channel_id, safe_path, caption=caption
             )
             if ok:
                 logger.info(

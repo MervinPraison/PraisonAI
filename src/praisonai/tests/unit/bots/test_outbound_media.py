@@ -152,3 +152,58 @@ def test_deliver_returns_false_when_no_primitive(tmp_path):
 
     ok = asyncio.run(deliver_media_to_adapter(Adapter(), "1", str(f)))
     assert ok is False
+
+
+def test_dotenv_basename_denied(tmp_path):
+    # A project-local .env outside ~ must still be rejected (exfil guard).
+    f = tmp_path / ".env"
+    f.write_text("API_KEY=secret")
+    with pytest.raises(MediaDeliveryError, match="protected file"):
+        validate_media_delivery_path(str(f))
+
+
+def test_ssh_key_basename_denied(tmp_path):
+    f = tmp_path / "id_rsa"
+    f.write_text("PRIVATE KEY")
+    with pytest.raises(MediaDeliveryError, match="protected file"):
+        validate_media_delivery_path(str(f))
+
+
+def test_policy_from_dict_quoted_false_disables():
+    # bool("false") is True in Python; quoted config must still disable.
+    p = OutboundMediaPolicy.from_dict({"enabled": "false", "strict": "no"})
+    assert p.enabled is False
+    assert p.strict is False
+
+
+def test_policy_from_dict_quoted_true_enables():
+    p = OutboundMediaPolicy.from_dict({"enabled": "true", "strict": "on"})
+    assert p.enabled is True
+    assert p.strict is True
+
+
+def test_send_media_hook_without_caption_param(tmp_path):
+    # An adapter hook lacking ``caption`` is called once, positionally.
+    f = tmp_path / "a.png"
+    f.write_bytes(b"\x89PNG\r\n\x1a\n")
+    calls = []
+
+    class Adapter:
+        platform = "telegram"
+
+        async def send_media(self, channel_id, path):
+            calls.append((channel_id, path))
+
+    ok = asyncio.run(
+        deliver_media_to_adapter(Adapter(), "42", str(f), caption="hi")
+    )
+    assert ok is True
+    assert calls == [("42", str(f))]
+
+
+def test_telegram_chat_id_preserves_username():
+    from praisonai.bots._outbound_media import _telegram_chat_id
+
+    assert _telegram_chat_id("123") == 123
+    assert _telegram_chat_id("-100123") == -100123
+    assert _telegram_chat_id("@channelusername") == "@channelusername"

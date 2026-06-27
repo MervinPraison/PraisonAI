@@ -116,8 +116,12 @@ class BotOutboundMessenger:
         detail = None
         summary = f"Sent to {resolved}."
         if media:
+            # The body text was already delivered above; passing it again as the
+            # first attachment caption would duplicate it on platforms that show
+            # captions (and can blow Telegram's caption length limit). Send the
+            # attachments without re-captioning the full text.
             sent, skipped, notes = await self._deliver_media(
-                target, media, caption=text
+                target, media, caption=None
             )
             detail = "; ".join(notes) if notes else None
             if sent:

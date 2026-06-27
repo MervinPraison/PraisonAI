@@ -96,15 +96,16 @@ def test_send_unresolvable_target_fails_cleanly():
     assert sent == []
 
 
-def test_send_with_missing_media_delivers_text_and_notes_skip():
+def test_send_with_missing_media_delivers_text_and_notes_skip(tmp_path):
     router, sent = _make_router()
     origin = SessionSource(platform="telegram", channel_id="123")
     messenger = BotOutboundMessenger(router, origin=origin)
 
     # A non-existent path is rejected by the delivery-path guard; text still
     # delivers and the skip is reported truthfully.
+    missing = tmp_path / "does-not-exist-xyz.pdf"
     result = asyncio.run(
-        messenger.send("origin", "Report", media=["/tmp/does-not-exist-xyz.pdf"])
+        messenger.send("origin", "Report", media=[str(missing)])
     )
 
     assert result.ok is True
@@ -152,7 +153,57 @@ def test_send_with_valid_media_uploads_via_adapter(tmp_path):
 
     assert result.ok is True
     assert len(uploaded) == 1
-    assert uploaded[0] == ("123", str(f), "Here is your chart")
+    # The body text is delivered once via send_message; the attachment is sent
+    # without re-captioning the full text (caption is None) to avoid duplicates.
+    assert uploaded[0] == ("123", str(f), None)
+    assert "1 attachment(s) delivered" in result.summary
+
+
+def test_send_media_unwraps_bot_wrapper_to_adapter(tmp_path):
+    # get_bot returns the Bot wrapper; the upload primitive lives on the
+    # underlying adapter. The router must unwrap via ``.adapter`` so real
+    # Telegram/Slack/Discord attachments are not silently skipped.
+    uploaded = []
+
+    class FakeAdapter:
+        platform = "telegram"
+
+        async def send_media(self, channel_id, path, caption=None):
+            uploaded.append((channel_id, path, caption))
+
+    class FakeWrapper:
+        # Mirrors praisonai.bots.bot.Bot: exposes text send + `.adapter`.
+        adapter = FakeAdapter()
+
+        async def send_message(self, channel_id, text):
+            pass
+
+    wrapper = FakeWrapper()
+
+    class FakeBotOS:
+        def get_bot(self, platform):
+            return wrapper if platform == "telegram" else None
+
+        def list_bots(self):
+            return ["telegram"]
+
+    router = DeliveryRouter(FakeBotOS())
+    router.directory._home_channels = {}
+    router.directory._aliases = {}
+    router.directory._observed = {}
+
+    f = tmp_path / "chart.png"
+    f.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 32)
+
+    origin = SessionSource(platform="telegram", channel_id="123")
+    messenger = BotOutboundMessenger(router, origin=origin)
+
+    result = asyncio.run(
+        messenger.send("origin", "Here is your chart", media=[str(f)])
+    )
+
+    assert result.ok is True
+    assert uploaded == [("123", str(f), None)]
     assert "1 attachment(s) delivered" in result.summary
 
 
