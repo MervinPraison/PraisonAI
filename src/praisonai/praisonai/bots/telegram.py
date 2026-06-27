@@ -601,6 +601,14 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     logger.error(f"Agent error: {safe_log_message(e)}")
                     user_error = extract_root_cause_from_error(str(e))
                     await update.message.reply_text(f"Error: {safe_error_message(user_error)}")
+                finally:
+                    # Inbound media is cached to temp files for this turn only;
+                    # remove them so media-heavy bots don't fill the temp volume.
+                    for _path in attachments:
+                        try:
+                            os.remove(_path)
+                        except OSError:
+                            pass
         
         async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             """Handle voice messages."""
@@ -941,7 +949,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         # agent's vision capability via the same message pipeline.
         self._application.add_handler(
             MessageHandler(
-                (filters.PHOTO | filters.Document.ALL) & ~filters.COMMAND,
+                (filters.PHOTO | filters.VIDEO | filters.Document.ALL) & ~filters.COMMAND,
                 handle_message,
             )
         )
@@ -1142,22 +1150,39 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         Returns a list of cached local file paths the agent's vision capability
         can act on. Empty when media handling is disabled or no media present.
         """
-        max_bytes = getattr(self.config, "max_inbound_media_bytes", 0)
+        try:
+            from ._media import cache_inbound_media, DEFAULT_MAX_INBOUND_MEDIA_BYTES
+        except Exception as e:  # pragma: no cover — defensive
+            logger.warning("Inbound media helper unavailable: %s", e)
+            return []
+
+        # Core BotConfig has no media field; default to the shared cap so
+        # inbound media is enabled by default (Issue #2350). Set the schema's
+        # max_inbound_media_bytes to 0 to disable.
+        max_bytes = getattr(
+            self.config, "max_inbound_media_bytes", DEFAULT_MAX_INBOUND_MEDIA_BYTES
+        )
         if not max_bytes or max_bytes <= 0:
             return []
         if not getattr(update, "message", None):
             return []
 
         paths: List[str] = []
-        try:
-            from ._media import cache_inbound_media
-        except Exception as e:  # pragma: no cover — defensive
-            logger.warning("Inbound media helper unavailable: %s", e)
-            return []
 
         async def _fetch(file_obj, kind: str, filename: Optional[str] = None):
             try:
                 tg_file = await file_obj.get_file()
+                # Reject oversized files before buffering them in memory when
+                # Telegram declares the size.
+                file_size = getattr(tg_file, "file_size", None) or getattr(
+                    file_obj, "file_size", None
+                )
+                if file_size and file_size > max_bytes:
+                    logger.warning(
+                        "Inbound %s exceeds %s bytes (declared %s); skipping",
+                        kind, max_bytes, file_size,
+                    )
+                    return
                 data = bytes(await tg_file.download_as_bytearray())
                 path = cache_inbound_media(
                     data, kind=kind, max_bytes=max_bytes, filename=filename
@@ -1169,6 +1194,11 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         # Photos arrive as a list of sizes; the last entry is the largest.
         if update.message.photo:
             await _fetch(update.message.photo[-1], "image")
+
+        # Native videos (sent as a video, not a document attachment).
+        video = getattr(update.message, "video", None)
+        if video is not None:
+            await _fetch(video, "video", filename=getattr(video, "file_name", None))
 
         doc = update.message.document
         if doc is not None:

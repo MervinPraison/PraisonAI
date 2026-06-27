@@ -786,7 +786,7 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
                     chat_id=sender_id,
                     user_name=sender.display_name or "",
                     message_id=msg_id,
-                    account=self._config.get("account", "default"),
+                    account=getattr(self.config, "account", "default"),
                     attachments=attachments or None,
                 )
                 if response:
@@ -800,6 +800,14 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
             except Exception as e:
                 logger.error(f"Agent chat error: {e}")
                 await self.send_message(sender_id, "Sorry, I encountered an error processing your message.")
+            finally:
+                # Inbound media is cached to temp files for this turn only;
+                # remove them so media-heavy bots don't fill the temp volume.
+                for _path in attachments:
+                    try:
+                        os.remove(_path)
+                    except OSError:
+                        pass
 
     # ── Sending messages ────────────────────────────────────────────
 
@@ -871,11 +879,17 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
         disabled, the id is missing, or download/validation fails. The agent's
         vision capability acts on the returned path (Issue #2350).
         """
-        max_bytes = getattr(self.config, "max_inbound_media_bytes", 0)
+        from ._media import DEFAULT_MAX_INBOUND_MEDIA_BYTES
+        # Core BotConfig has no media field; default to the shared cap so
+        # inbound media is enabled by default (Issue #2350). Set the schema's
+        # max_inbound_media_bytes to 0 to disable.
+        max_bytes = getattr(
+            self.config, "max_inbound_media_bytes", DEFAULT_MAX_INBOUND_MEDIA_BYTES
+        )
         if not media_id or not max_bytes or max_bytes <= 0:
             return None
         try:
-            data = await self._download_media(media_id)
+            data = await self._download_media(media_id, max_bytes=max_bytes)
         except Exception as e:
             logger.warning("Failed to download WhatsApp media %s: %s", media_id, e)
             return None
@@ -890,8 +904,15 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
             logger.warning("Inbound media validation failed (%s): %s", kind, e)
             return None
 
-    async def _download_media(self, media_id: str) -> Optional[bytes]:
-        """Resolve a WhatsApp media id to a download URL and fetch its bytes."""
+    async def _download_media(
+        self, media_id: str, max_bytes: Optional[int] = None
+    ) -> Optional[bytes]:
+        """Resolve a WhatsApp media id to a download URL and fetch its bytes.
+
+        ``max_bytes``, when set, bounds both the declared media size and the
+        actual read so an oversized attachment is rejected before the full
+        payload is buffered in memory.
+        """
         try:
             import aiohttp
         except ImportError:
@@ -902,16 +923,51 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
         async with self._http_session.get(
             meta_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)
         ) as resp:
+            if resp.status != 200:
+                # A non-200 body is a Graph error (auth/expiry/etc.), not media
+                # metadata. Don't treat it as a download descriptor.
+                logger.warning(
+                    "WhatsApp media %s metadata request failed: HTTP %s",
+                    media_id, resp.status,
+                )
+                return None
             meta = await resp.json()
         download_url = meta.get("url")
         if not download_url:
             logger.warning("WhatsApp media %s has no download url", media_id)
             return None
+        # Reject up front when the metadata already declares an oversized file.
+        if max_bytes and max_bytes > 0:
+            declared = meta.get("file_size")
+            try:
+                if declared is not None and int(declared) > max_bytes:
+                    logger.warning(
+                        "WhatsApp media %s exceeds %s bytes (declared %s)",
+                        media_id, max_bytes, declared,
+                    )
+                    return None
+            except (TypeError, ValueError):
+                pass
         # Step 2: fetch the media bytes (Graph download URLs require the token).
         async with self._http_session.get(
             download_url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)
         ) as resp:
-            return await resp.read()
+            if resp.status != 200:
+                logger.warning(
+                    "WhatsApp media %s download failed: HTTP %s", media_id, resp.status
+                )
+                return None
+            if not max_bytes or max_bytes <= 0:
+                return await resp.read()
+            # Bounded read: stop one byte past the cap so an oversized stream
+            # is rejected without buffering the whole payload.
+            data = await resp.content.read(max_bytes + 1)
+            if len(data) > max_bytes:
+                logger.warning(
+                    "WhatsApp media %s exceeds %s bytes", media_id, max_bytes
+                )
+                return None
+            return data
 
     async def send_template(
         self,

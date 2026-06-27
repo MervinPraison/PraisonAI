@@ -209,7 +209,7 @@ class ChannelConfigSchema(BaseModel):
     # adapters download and validate it (SSRF-safe, magic-byte checked) and
     # forward the cached path to the agent's vision capability. Set to 0 to
     # disable inbound media handling.
-    max_inbound_media_bytes: int = 20 * 1024 * 1024
+    max_inbound_media_bytes: int = Field(default=20 * 1024 * 1024, ge=0)
     
     # Platform-specific fields
     phone_number_id: Optional[str] = None  # WhatsApp

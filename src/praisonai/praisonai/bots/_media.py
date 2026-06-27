@@ -41,6 +41,10 @@ DEFAULT_MAX_INBOUND_MEDIA_BYTES = 20 * 1024 * 1024
 
 # Magic-byte signatures keyed by media kind. Each entry is a list of
 # (offset, signature_bytes) tuples; a match on any tuple validates the kind.
+# RIFF-based formats (WEBP/AVI/WAVE) share the leading ``RIFF`` magic, so a
+# bare ``RIFF`` would let a WAV pass the image validator and be cached as
+# ``.jpg``. They are validated separately in :func:`_matches_kind` by also
+# checking the container tag at offset 8 (see ``_RIFF_TAG``).
 _MAGIC = {
     "image": [
         (0, b"\xff\xd8\xff"),          # JPEG
@@ -48,14 +52,12 @@ _MAGIC = {
         (0, b"GIF87a"),                # GIF
         (0, b"GIF89a"),                # GIF
         (0, b"BM"),                    # BMP
-        (0, b"RIFF"),                  # WEBP (RIFF container; WEBP at offset 8)
         (4, b"ftypheic"),              # HEIC
         (4, b"ftypheif"),              # HEIF
     ],
     "video": [
         (4, b"ftyp"),                  # MP4 / MOV / M4V family
         (0, b"\x1a\x45\xdf\xa3"),     # Matroska / WEBM
-        (0, b"RIFF"),                  # AVI (RIFF container)
         (0, b"FLV"),                   # FLV
     ],
     "audio": [
@@ -64,10 +66,18 @@ _MAGIC = {
         (0, b"\xff\xf3"),             # MP3 frame
         (0, b"\xff\xf2"),             # MP3 frame
         (0, b"OggS"),                  # OGG / OPUS
-        (0, b"RIFF"),                  # WAV (RIFF container)
         (4, b"ftyp"),                  # M4A / AAC in MP4 container
         (0, b"fLaC"),                  # FLAC
     ],
+}
+
+# RIFF container tags (bytes 8-12) accepted per kind. A bare ``RIFF`` header
+# is ambiguous across WEBP/AVI/WAVE; requiring the tag keeps each kind from
+# accepting another's payload.
+_RIFF_TAG = {
+    "image": b"WEBP",
+    "video": b"AVI ",
+    "audio": b"WAVE",
 }
 
 # Default file extensions per kind, used when writing the cached file so the
@@ -93,6 +103,11 @@ def _matches_kind(data: bytes, kind: str) -> bool:
     for offset, sig in signatures:
         if data[offset:offset + len(sig)] == sig:
             return True
+    # RIFF families (WEBP/AVI/WAVE) share the leading magic; require the
+    # container tag at offset 8 so a WAV cannot pass as an image, etc.
+    riff_tag = _RIFF_TAG.get(kind)
+    if riff_tag is not None and data[0:4] == b"RIFF" and data[8:12] == riff_tag:
+        return True
     return False
 
 
@@ -134,14 +149,36 @@ def _is_safe_url(url: str) -> bool:
     return True
 
 
+class _SafeRedirectHandler:
+    """Re-validate every redirect target so SSRF cannot be reached via 3xx."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not _is_safe_url(newurl):
+            raise InboundMediaError(
+                f"Refusing to follow inbound media redirect to unsafe URL: {newurl!r}"
+            )
+        import urllib.request
+        return urllib.request.HTTPRedirectHandler.redirect_request(
+            self, req, fp, code, msg, headers, newurl
+        )
+
+
 def _fetch_url(url: str, max_bytes: int) -> bytes:
-    """Fetch ``url`` with an SSRF guard and hard size cap. Returns bytes."""
+    """Fetch ``url`` with an SSRF guard and hard size cap. Returns bytes.
+
+    The initial URL is vetted by :func:`_is_safe_url`, and every redirect
+    target is re-vetted so a public URL cannot bounce to a private host.
+    """
     if not _is_safe_url(url):
         raise InboundMediaError(f"Refusing to fetch unsafe inbound media URL: {url!r}")
     import urllib.request
 
+    class _Handler(_SafeRedirectHandler, urllib.request.HTTPRedirectHandler):
+        pass
+
+    opener = urllib.request.build_opener(_Handler())
     req = urllib.request.Request(url, headers={"User-Agent": "PraisonAI-Bot"})
-    with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310 - guarded above
+    with opener.open(req, timeout=30) as resp:  # noqa: S310 - guarded above
         # Reject oversize up front when the server declares a length.
         declared = resp.headers.get("Content-Length")
         if declared is not None:

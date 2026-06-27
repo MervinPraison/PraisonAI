@@ -54,6 +54,25 @@ def test_ssrf_guard_blocks_private_and_non_http():
     assert not _is_safe_url("http://169.254.169.254/latest/meta-data")
 
 
+def test_riff_wav_does_not_pass_image_validator():
+    # A WAV is a RIFF container (tag "WAVE"); it must not be cached as an image.
+    wav = b"RIFF" + b"\x00\x00\x00\x00" + b"WAVE" + b"\x00" * 16
+    with pytest.raises(InboundMediaError):
+        cache_inbound_media(wav, kind="image")
+    # ...but it should validate as audio.
+    path = cache_inbound_media(wav, kind="audio")
+    try:
+        assert os.path.exists(path)
+    finally:
+        os.remove(path)
+
+
+def test_negative_inbound_media_limit_rejected():
+    from praisonai.bots._config_schema import ChannelConfigSchema
+    with pytest.raises(Exception):
+        ChannelConfigSchema(platform="telegram", max_inbound_media_bytes=-1)
+
+
 class _FakeVisionAgent:
     def __init__(self):
         self.chat_history = []

@@ -727,8 +727,19 @@ class BotSessionManager:
                                 astart_kwargs = {"stream": True}
                                 if controller:
                                     astart_kwargs["cancel_token"] = controller
+                                # Thread inbound media to the agent's vision path
+                                # only when astart() accepts it (Issue #2350), so
+                                # agents without an attachments param keep working.
                                 if attachments:
-                                    astart_kwargs["attachments"] = attachments
+                                    import inspect as _inspect
+                                    try:
+                                        _astart_params = _inspect.signature(agent.astart).parameters
+                                    except (ValueError, TypeError):
+                                        _astart_params = {}
+                                    if "attachments" in _astart_params or any(
+                                        p.kind == p.VAR_KEYWORD for p in _astart_params.values()
+                                    ):
+                                        astart_kwargs["attachments"] = attachments
 
                                 try:
                                     response = await asyncio.wait_for(
