@@ -252,3 +252,68 @@ class TestPreCallGuard:
         # Estimate alone would exceed the cap, but warn mode must not pre-block.
         assert est >= agent._max_budget
         assert agent._on_budget_exceeded == "warn"
+
+
+class TestPostCallBudgetOnStreamingAutoDetect:
+    """stream=None auto-detect must still record spend after a streaming success."""
+
+    def _mock_response(self, cost_usd=0.08):
+        usage = MagicMock(prompt_tokens=100, completion_tokens=50)
+        response = MagicMock(usage=usage, choices=[])
+        return response
+
+    def test_streaming_autodetect_records_cost(self):
+        from praisonaiagents import Agent, ExecutionConfig
+        agent = Agent(
+            name="test", instructions="test", llm="gpt-4o",
+            execution=ExecutionConfig(max_budget=1.0),
+        )
+        mock_response = self._mock_response()
+        with patch.object(
+            agent, "_chat_completion_with_retry", return_value=mock_response
+        ), patch.object(
+            agent, "_calculate_llm_cost", return_value=0.08
+        ), patch.object(
+            agent, "_extract_llm_response_content", return_value="ok"
+        ), patch(
+            "praisonaiagents.trace.context_events.get_context_emitter"
+        ) as get_emitter, patch.object(
+            agent._hook_runner, "execute_sync"
+        ):
+            get_emitter.return_value = MagicMock()
+            agent._chat_completion(
+                [{"role": "user", "content": "hello"}],
+                stream=None,
+            )
+
+        assert agent._total_cost == pytest.approx(0.08)
+        assert agent._llm_call_count == 1
+
+    def test_streaming_autodetect_enforces_cumulative_budget(self):
+        from praisonaiagents import Agent, ExecutionConfig, BudgetExceededError
+        agent = Agent(
+            name="test", instructions="test", llm="gpt-4o",
+            execution=ExecutionConfig(max_budget=0.10),
+        )
+        mock_response = self._mock_response()
+        with patch.object(
+            agent, "_chat_completion_with_retry", return_value=mock_response
+        ), patch.object(
+            agent, "_calculate_llm_cost", return_value=0.08
+        ), patch.object(
+            agent, "_extract_llm_response_content", return_value="ok"
+        ), patch(
+            "praisonaiagents.trace.context_events.get_context_emitter"
+        ) as get_emitter, patch.object(
+            agent._hook_runner, "execute_sync"
+        ):
+            get_emitter.return_value = MagicMock()
+            agent._chat_completion(
+                [{"role": "user", "content": "first"}],
+                stream=None,
+            )
+            with pytest.raises(BudgetExceededError):
+                agent._chat_completion(
+                    [{"role": "user", "content": "second"}],
+                    stream=None,
+                )
