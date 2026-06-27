@@ -194,6 +194,68 @@ class TestResetPerChat:
         assert existed is True
         assert not any(":chat:" in k for k in mgr._histories)
 
+    @pytest.mark.asyncio
+    async def test_reset_with_only_chat_id_clears_shared_session(self):
+        # A /new handler that supplies only chat_id (no chat_type) must still
+        # clear the shared per_chat session — _storage_key derives the type.
+        agent = FakeAgent()
+        mgr = BotSessionManager(platform="telegram", session_scope="per_chat")
+
+        await mgr.chat(agent, "alice_id", "hi", chat_id="-100123",
+                       user_name="Alice")
+        assert any(":chat:" in k for k in mgr._histories)
+
+        existed = mgr.reset("bob_id", chat_id="-100123")
+        assert existed is True
+        assert not any(":chat:" in k for k in mgr._histories)
+
+    @pytest.mark.asyncio
+    async def test_dm_reset_with_chat_id_does_not_touch_shared_key(self):
+        # reset() for a DM (positive telegram chat_id) must resolve to the
+        # sender key, never a per_chat key, even without chat_type.
+        agent = FakeAgent()
+        mgr = BotSessionManager(platform="telegram", session_scope="per_chat")
+
+        await mgr.chat(agent, "alice_id", "private hi", chat_id="555",
+                       user_name="Alice")
+        assert "alice_id" in mgr._histories
+
+        existed = mgr.reset("alice_id", chat_id="555")
+        assert existed is True
+        assert "alice_id" not in mgr._histories
+        assert not any(":chat:" in k for k in mgr._histories)
+
+
+class TestAccountNamespacing:
+    """Shared per_chat keys are namespaced per gateway account (no collisions)."""
+
+    @pytest.mark.asyncio
+    async def test_same_chat_id_different_accounts_isolated(self):
+        agent = FakeAgent()
+        mgr = BotSessionManager(platform="telegram", session_scope="per_chat")
+
+        await mgr.chat(agent, "alice_id", "acct A msg", chat_id="-100123",
+                       user_name="Alice", account="acctA")
+        await mgr.chat(agent, "bob_id", "acct B msg", chat_id="-100123",
+                       user_name="Bob", account="acctB")
+
+        # Two distinct shared sessions despite identical chat_id.
+        chat_keys = [k for k in mgr._histories if ":chat:" in k]
+        assert len(chat_keys) == 2
+        assert any("acctA" in k for k in chat_keys)
+        assert any("acctB" in k for k in chat_keys)
+
+    @pytest.mark.asyncio
+    async def test_missing_account_uses_default_namespace(self):
+        agent = FakeAgent()
+        mgr = BotSessionManager(platform="telegram", session_scope="per_chat")
+
+        await mgr.chat(agent, "alice_id", "hi", chat_id="-100123",
+                       user_name="Alice")
+        chat_keys = [k for k in mgr._histories if ":chat:" in k]
+        assert len(chat_keys) == 1
+        assert ":acct:default:" in chat_keys[0]
+
 
 class TestInvalidScope:
     """Unknown scope falls back to per_user."""

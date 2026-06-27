@@ -262,7 +262,12 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                     return
                 elif command == "new":
                     user_id = str(message.author.id)
-                    self._session.reset(user_id)
+                    # Pass the chat route so a /new in a channel clears the
+                    # shared per_chat session (Issue #2376); no-op for per_user.
+                    self._session.reset(
+                        user_id,
+                        chat_id=str(message.channel.id),
+                    )
                     await message.reply("Session reset. Starting fresh conversation.")
                     return
                 elif command == "help":

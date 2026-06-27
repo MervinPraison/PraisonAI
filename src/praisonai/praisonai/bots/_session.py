@@ -269,9 +269,15 @@ class BotSessionManager:
     def _scope_for(self, chat_type: str = "") -> str:
         """Resolve the effective session scope for a given chat type.
 
-        ``per_chat`` only applies to multi-party chat types (group/channel).
-        Direct messages always stay ``per_user`` so private conversations are
-        never merged into a shared transcript.
+        ``per_chat`` only applies to multi-party chat types (group/channel,
+        or an undisambiguated ``unknown`` group on platforms like Telegram
+        supergroups). Direct messages always stay ``per_user`` so private
+        conversations are never merged into a shared transcript.
+
+        Callers that only have a ``chat_id`` (e.g. ``reset()`` from a ``/new``
+        handler) should derive ``chat_type`` via :func:`detect_chat_type`
+        before calling so a DM never falls through to ``per_chat`` — see
+        ``_storage_key``, which does this automatically.
         """
         if self._session_scope != "per_chat":
             return "per_user"
@@ -283,6 +289,7 @@ class BotSessionManager:
         self,
         user_id: str,
         *,
+        account: str = "",
         chat_id: str = "",
         thread_id: str = "",
         chat_type: str = "",
@@ -294,12 +301,30 @@ class BotSessionManager:
 
         When ``session_scope='per_chat'`` and the message arrives in a
         group/channel (``chat_id`` present, not a DM), the key is shared
-        across participants — ``{platform}:chat:{chat_id}:{thread_id}`` —
+        across participants — ``{platform}:acct:{account}:chat:{chat_id}:{thread_id}`` —
         so the agent sees one coherent multi-party transcript (Issue #2376).
+        ``account`` namespaces the key so two gateway accounts on the same
+        platform that happen to reuse a chat/thread id never collide.
+
+        ``chat_type`` is derived from ``chat_id`` when omitted (e.g. a
+        ``reset()`` call from a ``/new`` handler that only has the chat id)
+        so a DM never accidentally resolves to a shared per_chat key.
         """
-        if self._scope_for(chat_type) == "per_chat" and chat_id:
+        effective_chat_type = chat_type
+        if (
+            not effective_chat_type
+            and chat_id
+            and self._session_scope == "per_chat"
+        ):
+            try:
+                from .delivery import detect_chat_type
+                effective_chat_type = detect_chat_type(self._platform, chat_id)
+            except Exception:  # pragma: no cover — defensive
+                effective_chat_type = ""
+        if self._scope_for(effective_chat_type) == "per_chat" and chat_id:
             prefix = self._platform or "bot"
-            return f"{prefix}:chat:{chat_id}:{thread_id}"
+            account_key = account or "default"
+            return f"{prefix}:acct:{account_key}:chat:{chat_id}:{thread_id}"
         if self._identity_resolver is not None and self._platform:
             try:
                 return self._identity_resolver.resolve(self._platform, user_id)
@@ -677,6 +702,7 @@ class BotSessionManager:
                 chat_type = ""
             if self._scope_for(chat_type) == "per_chat" and chat_id:
                 route = {
+                    "account": account,
                     "chat_id": chat_id,
                     "thread_id": thread_id,
                     "chat_type": chat_type,

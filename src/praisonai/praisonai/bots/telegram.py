@@ -667,7 +667,12 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             if not self._command_policy.can_run(user_id, "new"):
                 await update.message.reply_text("⛔ You are not permitted to run /new")
                 return
-            self._session.reset(user_id)
+            # Pass the chat route so a /new in a group/channel clears the
+            # shared per_chat session (Issue #2376); a no-op for per_user.
+            self._session.reset(
+                user_id,
+                chat_id=str(update.message.chat_id) if update.message.chat_id else "",
+            )
             await update.message.reply_text("Session reset. Starting fresh conversation.")
         
         async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
