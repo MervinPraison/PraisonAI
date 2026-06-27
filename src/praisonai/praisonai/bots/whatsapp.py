@@ -467,7 +467,7 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
                             chat_id=chat_jid,
                             user_name=sender_name or "",
                             message_id=msg_id,
-                            account=self._config.get("account", "default"),
+                            account=getattr(self.config, "account", "default"),
                         )
                         if response:
                             send_result = self.fire_message_sending(chat_jid, str(response))
@@ -678,21 +678,47 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
         # Extract message content
         content = ""
         bot_message_type = MessageType.TEXT
+        # Inbound media paths threaded to the agent's vision capability (Issue #2350).
+        attachments: List[str] = []
 
         if msg_type == "text":
             content = msg.get("text", {}).get("body", "")
         elif msg_type == "image":
-            content = msg.get("image", {}).get("caption", "[Image received]")
+            content = msg.get("image", {}).get("caption", "")
             bot_message_type = MessageType.IMAGE
+            path = await self._cache_inbound_media(msg.get("image", {}).get("id"), "image")
+            if path:
+                attachments.append(path)
+            elif not content:
+                content = "[Image received]"
         elif msg_type == "audio":
-            content = "[Audio received]"
+            content = ""
             bot_message_type = MessageType.AUDIO
+            path = await self._cache_inbound_media(msg.get("audio", {}).get("id"), "audio")
+            if path:
+                attachments.append(path)
+            else:
+                content = "[Audio received]"
         elif msg_type == "video":
-            content = msg.get("video", {}).get("caption", "[Video received]")
+            content = msg.get("video", {}).get("caption", "")
             bot_message_type = MessageType.VIDEO
+            path = await self._cache_inbound_media(msg.get("video", {}).get("id"), "video")
+            if path:
+                attachments.append(path)
+            elif not content:
+                content = "[Video received]"
         elif msg_type == "document":
-            content = msg.get("document", {}).get("caption", "[Document received]")
+            content = msg.get("document", {}).get("caption", "")
             bot_message_type = MessageType.FILE
+            path = await self._cache_inbound_media(
+                msg.get("document", {}).get("id"),
+                "document",
+                filename=msg.get("document", {}).get("filename"),
+            )
+            if path:
+                attachments.append(path)
+            elif not content:
+                content = "[Document received]"
         elif msg_type == "location":
             loc = msg.get("location", {})
             content = f"Location: {loc.get('latitude', 0)}, {loc.get('longitude', 0)}"
@@ -737,7 +763,7 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
                 return
 
         # Route to agent
-        if self._agent and content:
+        if self._agent and (content or attachments):
             # Ack reaction - show processing indicator
             ack_ctx = None
             if self._ack.enabled:
@@ -758,9 +784,10 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
                 response = await self._session_mgr.chat(
                     self._agent, sender_id, content,
                     chat_id=sender_id,
-                    user_name=sender_name or "",
+                    user_name=sender.display_name or "",
                     message_id=msg_id,
-                    account=self._config.get("account", "default"),
+                    account=getattr(self.config, "account", "default"),
+                    attachments=attachments or None,
                 )
                 if response:
                     send_result = self.fire_message_sending(sender_id, str(response))
@@ -773,6 +800,14 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
             except Exception as e:
                 logger.error(f"Agent chat error: {e}")
                 await self.send_message(sender_id, "Sorry, I encountered an error processing your message.")
+            finally:
+                # Inbound media is cached to temp files for this turn only;
+                # remove them so media-heavy bots don't fill the temp volume.
+                for _path in attachments:
+                    try:
+                        os.remove(_path)
+                    except OSError:
+                        pass
 
     # ── Sending messages ────────────────────────────────────────────
 
@@ -834,6 +869,104 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
                 logger.error(f"Failed to send WhatsApp message: {e}")
 
         return sent_msg or BotMessage(content=text)
+
+    async def _cache_inbound_media(
+        self, media_id: Optional[str], kind: str, filename: Optional[str] = None
+    ) -> Optional[str]:
+        """Download WhatsApp media by id and cache a validated local path.
+
+        Returns the cached file path, or ``None`` when media handling is
+        disabled, the id is missing, or download/validation fails. The agent's
+        vision capability acts on the returned path (Issue #2350).
+        """
+        from ._media import resolve_max_inbound_media_bytes
+        # Core BotConfig has no media field; the operator's
+        # max_inbound_media_bytes (including 0 to disable) is carried through
+        # config.metadata. Defaults to the shared cap so inbound media is
+        # enabled by default (Issue #2350).
+        max_bytes = resolve_max_inbound_media_bytes(self.config)
+        if not media_id or not max_bytes or max_bytes <= 0:
+            return None
+        try:
+            data = await self._download_media(media_id, max_bytes=max_bytes)
+        except Exception as e:
+            logger.warning("Failed to download WhatsApp media %s: %s", media_id, e)
+            return None
+        if not data:
+            return None
+        try:
+            from ._media import cache_inbound_media
+            return cache_inbound_media(
+                data, kind=kind, max_bytes=max_bytes, filename=filename
+            )
+        except Exception as e:
+            logger.warning("Inbound media validation failed (%s): %s", kind, e)
+            return None
+
+    async def _download_media(
+        self, media_id: str, max_bytes: Optional[int] = None
+    ) -> Optional[bytes]:
+        """Resolve a WhatsApp media id to a download URL and fetch its bytes.
+
+        ``max_bytes``, when set, bounds both the declared media size and the
+        actual read so an oversized attachment is rejected before the full
+        payload is buffered in memory.
+        """
+        try:
+            import aiohttp
+        except ImportError:
+            raise ImportError("aiohttp is required for WhatsApp bot")
+        headers = {"Authorization": f"Bearer {self._token}"}
+        # Step 1: resolve the media id to a temporary download URL.
+        meta_url = f"{GRAPH_API_BASE}/{media_id}"
+        async with self._http_session.get(
+            meta_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)
+        ) as resp:
+            if resp.status != 200:
+                # A non-200 body is a Graph error (auth/expiry/etc.), not media
+                # metadata. Don't treat it as a download descriptor.
+                logger.warning(
+                    "WhatsApp media %s metadata request failed: HTTP %s",
+                    media_id, resp.status,
+                )
+                return None
+            meta = await resp.json()
+        download_url = meta.get("url")
+        if not download_url:
+            logger.warning("WhatsApp media %s has no download url", media_id)
+            return None
+        # Reject up front when the metadata already declares an oversized file.
+        if max_bytes and max_bytes > 0:
+            declared = meta.get("file_size")
+            try:
+                if declared is not None and int(declared) > max_bytes:
+                    logger.warning(
+                        "WhatsApp media %s exceeds %s bytes (declared %s)",
+                        media_id, max_bytes, declared,
+                    )
+                    return None
+            except (TypeError, ValueError):
+                pass
+        # Step 2: fetch the media bytes (Graph download URLs require the token).
+        async with self._http_session.get(
+            download_url, headers=headers, timeout=aiohttp.ClientTimeout(total=30)
+        ) as resp:
+            if resp.status != 200:
+                logger.warning(
+                    "WhatsApp media %s download failed: HTTP %s", media_id, resp.status
+                )
+                return None
+            if not max_bytes or max_bytes <= 0:
+                return await resp.read()
+            # Bounded read: stop one byte past the cap so an oversized stream
+            # is rejected without buffering the whole payload.
+            data = await resp.content.read(max_bytes + 1)
+            if len(data) > max_bytes:
+                logger.warning(
+                    "WhatsApp media %s exceeds %s bytes", media_id, max_bytes
+                )
+                return None
+            return data
 
     async def send_template(
         self,

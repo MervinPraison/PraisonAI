@@ -484,6 +484,7 @@ class BotSessionManager:
         stream_callback: Optional[Any] = None,
         tool_policy: Optional[Any] = None,
         correlation_id: str = "",
+        attachments: Optional[List[str]] = None,
     ) -> str:
         """Run ``agent.chat(prompt)`` with *user_id*-scoped history.
 
@@ -504,6 +505,11 @@ class BotSessionManager:
                             while attended/trusted uses of the same shared agent
                             stay unaffected. Anything exposing ``filter_tools``
                             is accepted (e.g. ``ToolPolicy`` / ``RunPolicy``).
+            attachments: Optional list of local file paths for inbound media
+                            (images/documents) sent by the user (Issue #2350).
+                            Forwarded to ``agent.chat(prompt, attachments=...)``
+                            so the agent's existing vision capability can act on
+                            them. Ephemeral per-turn (never persisted to history).
 
         N4 — Inbound DLQ: if a ``dlq`` was passed to ``__init__`` and
         ``agent.chat()`` raises, the failing message is persisted to
@@ -721,6 +727,19 @@ class BotSessionManager:
                                 astart_kwargs = {"stream": True}
                                 if controller:
                                     astart_kwargs["cancel_token"] = controller
+                                # Thread inbound media to the agent's vision path
+                                # only when astart() accepts it (Issue #2350), so
+                                # agents without an attachments param keep working.
+                                if attachments:
+                                    import inspect as _inspect
+                                    try:
+                                        _astart_params = _inspect.signature(agent.astart).parameters
+                                    except (ValueError, TypeError):
+                                        _astart_params = {}
+                                    if "attachments" in _astart_params or any(
+                                        p.kind == p.VAR_KEYWORD for p in _astart_params.values()
+                                    ):
+                                        astart_kwargs["attachments"] = attachments
 
                                 try:
                                     response = await asyncio.wait_for(
@@ -747,11 +766,23 @@ class BotSessionManager:
                                 
                                 # Create agent.chat call with cancel_token if supported
                                 # Use inspect.signature for safer parameter checking
-                                _chat_params = inspect.signature(agent.chat).parameters if (controller and hasattr(agent, 'chat')) else {}
+                                _chat_params = inspect.signature(agent.chat).parameters if hasattr(agent, 'chat') else {}
+                                _chat_kwargs = {}
                                 if controller and 'cancel_token' in _chat_params:
-                                    chat_call = partial(agent.chat, prompt, cancel_token=controller)
-                                else:
-                                    chat_call = partial(agent.chat, prompt)
+                                    _chat_kwargs['cancel_token'] = controller
+                                # Thread inbound media to the agent's vision path
+                                # when the agent supports it (Issue #2350). Honor
+                                # wrappers that forward **kwargs to a vision-capable
+                                # agent, matching the streaming (astart) path.
+                                if attachments and (
+                                    'attachments' in _chat_params
+                                    or any(
+                                        p.kind == p.VAR_KEYWORD
+                                        for p in _chat_params.values()
+                                    )
+                                ):
+                                    _chat_kwargs['attachments'] = attachments
+                                chat_call = partial(agent.chat, prompt, **_chat_kwargs)
                                 
                                 # Run with timeout and interruption support
                                 try:
