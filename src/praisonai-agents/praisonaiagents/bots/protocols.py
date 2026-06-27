@@ -98,6 +98,10 @@ class PlatformCapabilities:
             re-dispatch, upgrading delivery from at-least-once to
             effectively-once. When False, delivery remains at-least-once and a
             crash mid-send may re-send the message.
+        supports_media: Whether the adapter can attach/upload media files on
+            outbound sends (photos, documents). When False, the gateway's
+            delivery router degrades gracefully and reports media as not
+            attached rather than silently dropping it.
         supports_idempotency_token: Whether the transport accepts a
             provider-level idempotency token so the platform itself
             de-duplicates a retried send. This is an informational capability
@@ -120,6 +124,7 @@ class PlatformCapabilities:
     verifies_webhook_signature: bool = False
     reconciles_unknown_send: bool = False
     supports_idempotency_token: bool = False
+    supports_media: bool = False
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -138,6 +143,7 @@ class PlatformCapabilities:
             "verifies_webhook_signature": self.verifies_webhook_signature,
             "reconciles_unknown_send": self.reconciles_unknown_send,
             "supports_idempotency_token": self.supports_idempotency_token,
+            "supports_media": self.supports_media,
         }
     
     @classmethod
@@ -158,6 +164,7 @@ class PlatformCapabilities:
             verifies_webhook_signature=data.get("verifies_webhook_signature", False),
             reconciles_unknown_send=data.get("reconciles_unknown_send", False),
             supports_idempotency_token=data.get("supports_idempotency_token", False),
+            supports_media=data.get("supports_media", False),
         )
 
 
