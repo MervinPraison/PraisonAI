@@ -27,6 +27,8 @@ def code_main(
     dangerously_skip_approval: bool = typer.Option(False, "--dangerously-skip-approval", help="Skip all approval prompts and run dangerous tools unguarded (restores legacy behaviour)"),
     session_id: Optional[str] = typer.Option(None, "--session", "-s", help="Session ID to resume"),
     continue_session: bool = typer.Option(False, "--continue", "-c", help="Continue last session"),
+    agent: Optional[str] = typer.Option(None, "--agent", "-a", help="Use a named custom agent profile (applies its tools and permission/mode scope)"),
+    thinking: Optional[str] = typer.Option(None, "--thinking", help="Reasoning effort (off, minimal, low, medium, high)"),
     autonomy: bool = typer.Option(True, "--autonomy/--no-autonomy", help="Enable agent autonomy for complex tasks"),
     profile: bool = typer.Option(False, "--profile", help="Enable CLI profiling (timing breakdown)"),
     profile_deep: bool = typer.Option(False, "--profile-deep", help="Enable deep profiling (cProfile stats, higher overhead)"),
@@ -49,6 +51,27 @@ def code_main(
     import os
     import argparse
     
+    # Validate --thinking up front so an unknown value fails closed before any
+    # work is done (consistent with MODE_RULES validation on custom agents).
+    from ..features.thinking import thinking_to_budget
+    try:
+        thinking_budget = thinking_to_budget(thinking)
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1)
+
+    # Resolve a named agent profile (tools + permission/mode scope). The profile
+    # reuses the same custom-definitions loader as `praisonai run --agent`, so a
+    # profile defined once in .praisonai/agents/<name>.md behaves identically
+    # across `code`, `run`, and the Python Agent(...) constructor.
+    agent_profile = None
+    if agent:
+        from ..features.custom_definitions import load_agent_from_name
+        agent_profile = load_agent_from_name(agent)
+        if not agent_profile:
+            typer.echo(f"Error: Agent '{agent}' not found", err=True)
+            raise typer.Exit(1)
+
     # Set workspace if provided
     if workspace:
         os.environ["PRAISONAI_WORKSPACE"] = workspace
@@ -79,6 +102,7 @@ def code_main(
             model=model,
             verbose=verbose,
             profile_deep=profile_deep,
+            thinking_budget=thinking_budget,
         )
         return
     
@@ -95,6 +119,31 @@ def code_main(
     args.no_acp = no_acp
     args.no_lsp = no_lsp
     args.resume_session = session_id if session_id else ('last' if continue_session else None)
+    # Reasoning effort (mapped to the core thinking_budget) and named agent
+    # profile (tools + permission/mode scope), consumed when the agent is built.
+    args.thinking_budget = thinking_budget
+    args.agent_profile = agent_profile
+
+    # Resolve the named profile's permission/mode scope into an approval config
+    # so the code session runs least-privilege (e.g. `--agent plan` is rejected
+    # for write/edit/shell). Reuses the same engine as `praisonai run --agent`.
+    args.agent_approval = None
+    if agent_profile:
+        permission_config = agent_profile.get("permissions")
+        if permission_config:
+            from ..features.approval import resolve_approval_config
+            has_ask_rules = any(
+                str(action).strip().lower() == "ask"
+                for action in permission_config.values()
+            )
+            args.agent_approval = resolve_approval_config(
+                "console",
+                non_interactive=not has_ask_rules,
+                permissions_config=permission_config,
+            )
+        # Apply the profile's model unless the user overrode it with --model.
+        if not model and agent_profile.get("llm"):
+            args.llm = agent_profile["llm"]
     
     # Import and run the terminal-native interactive mode
     from praisonai.cli.main import PraisonAI
@@ -114,6 +163,7 @@ def _run_profiled_code(
     model: Optional[str] = None,
     verbose: bool = False,
     profile_deep: bool = False,
+    thinking_budget: Optional[int] = None,
 ):
     """Run code assistant with profiling enabled."""
     from praisonai.cli.features.cli_profiler import (
@@ -150,6 +200,10 @@ def _run_profiled_code(
         agent_config["llm"] = model
     
     agent = Agent(**agent_config)
+    # thinking_budget is set post-construction via the property setter (the
+    # Agent constructor does not accept it as a keyword argument).
+    if thinking_budget is not None:
+        agent.thinking_budget = thinking_budget
     profiler.mark_init_end()
     
     # Execution phase

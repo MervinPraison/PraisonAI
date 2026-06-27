@@ -4936,6 +4936,14 @@ Do NOT add any explanations or formatting."""
             
             agent = PraisonAgent(**agent_config)
 
+            # Reasoning effort (mapped from --thinking on `run`/`code`) → core
+            # extended-thinking budget, applied via the property setter. Default
+            # is unchanged when the flag is omitted.
+            if hasattr(self, 'args'):
+                _thinking_budget = getattr(self.args, 'thinking_budget', None)
+                if _thinking_budget is not None:
+                    agent.thinking_budget = _thinking_budget
+
             if hasattr(self, 'args') and getattr(self.args, 'cli_project_sessions', False):
                 session_id = getattr(self.args, 'resume_session', None) or getattr(self.args, 'auto_save', None)
                 auto_save = getattr(self.args, 'auto_save', None)
@@ -5931,6 +5939,13 @@ Now, {final_instruction.lower()}:"""
             
             console = Console()
             
+            # Persist the caller's args (e.g. from `praisonai code`) so the
+            # agent-creation path can read the named-agent profile, approval
+            # config, and reasoning effort via self.args. Without this the
+            # --agent/--thinking flags resolved in code.py are silently dropped.
+            if args is not None:
+                self.args = args
+            
             # Set interactive mode flag
             self._interactive_mode = True
             
@@ -6837,6 +6852,12 @@ Provide a concise summary (max 200 words):"""
         from rich.console import Console
         
         console = Console()
+        # Persist the caller's args (e.g. from `praisonai code`) so the
+        # agent-creation path can read the named-agent profile, approval config,
+        # and reasoning effort via self.args. Without this the --agent/--thinking
+        # flags resolved in code.py are silently dropped.
+        if args is not None:
+            self.args = args
         self._interactive_mode = True  # Use interactive mode settings
         
         # Load tools
@@ -7099,6 +7120,19 @@ Provide a concise summary (max 200 words):"""
             elif hasattr(self, 'args') and getattr(self.args, 'llm', None):
                 model = self.args.llm
             
+            # Optional named-agent profile (tools + permission scope) and
+            # reasoning effort, surfaced by `praisonai code --agent/--thinking`.
+            agent_kwargs = {}
+            agent_profile = getattr(self.args, 'agent_profile', None) if hasattr(self, 'args') else None
+            if agent_profile and agent_profile.get('tools'):
+                # The profile's tools replace the default tool set so the
+                # least-privilege scope is honoured (e.g. read-only profiles).
+                tools_list = agent_profile['tools']
+            agent_approval = getattr(self.args, 'agent_approval', None) if hasattr(self, 'args') else None
+            if agent_approval is not None:
+                agent_kwargs['approval'] = agent_approval
+            thinking_budget = getattr(self.args, 'thinking_budget', None) if hasattr(self, 'args') else None
+
             # Show thinking indicator and create agent
             timings['agent_create_start'] = time.time()
             with Live(Spinner("dots", text="Thinking...", style="cyan"), console=console, refresh_per_second=10, transient=True):
@@ -7110,8 +7144,13 @@ Provide a concise summary (max 200 words):"""
                     backstory="You are a helpful AI assistant with access to tools for file operations, shell commands, and web search. Use tools when needed to complete tasks.",
                     tools=tools_list if tools_list else None,
                     output="minimal",  # Suppress verbose panels
-                    llm=model
+                    llm=model,
+                    **agent_kwargs,
                 )
+                # Reasoning effort is applied via the property setter (not a
+                # constructor kwarg) to keep defaults byte-for-byte when omitted.
+                if thinking_budget is not None:
+                    agent.thinking_budget = thinking_budget
             timings['agent_create_end'] = time.time()
             
             # Get response
