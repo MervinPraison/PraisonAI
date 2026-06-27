@@ -467,7 +467,7 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
                             chat_id=chat_jid,
                             user_name=sender_name or "",
                             message_id=msg_id,
-                            account=self._config.get("account", "default"),
+                            account=getattr(self.config, "account", "default"),
                         )
                         if response:
                             send_result = self.fire_message_sending(chat_jid, str(response))
