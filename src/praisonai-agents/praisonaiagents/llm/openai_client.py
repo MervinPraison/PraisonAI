@@ -42,17 +42,32 @@ def _get_openai_classes():
     return openai.OpenAI, openai.AsyncOpenAI
 
 
-def _try_append_multimodal_tool_result(messages, tool_result, tool_call_id) -> bool:
-    """Append multimodal (image/file) tool result messages if present.
+def _try_append_multimodal_tool_result(
+    messages, tool_result, tool_call_id, function_name=None, deferred_followups=None
+) -> bool:
+    """Append a multimodal (image/file) tool result if present.
 
-    Returns True if multimodal messages were appended (caller should skip its
-    default text-only tool message); False otherwise for the unchanged path.
+    The ``tool`` reply is appended in-place so all tool replies for the
+    assistant turn stay consecutive (provider contract). The media-bearing
+    ``user`` follow-up is collected into ``deferred_followups`` for the caller
+    to flush after the whole batch; if no collector is supplied it is appended
+    directly. External tool text parts are fenced via ``function_name``.
+
+    Returns True if the result was multimodal (caller should skip its default
+    text-only tool message); False otherwise for the unchanged path.
     """
     try:
-        from ..agent.tool_execution import format_tool_result_messages
-        mm_messages = format_tool_result_messages(tool_result, tool_call_id)
-        if mm_messages:
-            messages.extend(mm_messages)
+        from ..agent.tool_execution import build_tool_result_message_pair
+        pair = build_tool_result_message_pair(
+            tool_result, tool_call_id, function_name=function_name
+        )
+        if pair:
+            tool_message, followup_message = pair
+            messages.append(tool_message)
+            if deferred_followups is not None:
+                deferred_followups.append(followup_message)
+            else:
+                messages.append(followup_message)
             return True
     except Exception as e:
         logging.debug(f"Multimodal tool result formatting skipped: {e}")
@@ -1674,6 +1689,9 @@ class OpenAIClient:
                     "tool_calls": serializable_tool_calls
                 })
                 
+                # Collect media-bearing follow-ups to flush after all tool
+                # replies for this turn (keeps tool replies consecutive).
+                _deferred_media_followups = []
                 for tool_call in tool_calls:
                     # Handle both ToolCall dataclass and OpenAI object
                     if isinstance(tool_call, ToolCall):
@@ -1701,12 +1719,19 @@ class OpenAIClient:
                     )
                     
                     _tc_id = tool_call.id if hasattr(tool_call, 'id') else tool_call['id']
-                    if not _try_append_multimodal_tool_result(messages, tool_result, _tc_id):
+                    if not _try_append_multimodal_tool_result(
+                        messages, tool_result, _tc_id,
+                        function_name=function_name,
+                        deferred_followups=_deferred_media_followups,
+                    ):
                         messages.append({
                             "role": "tool",
                             "tool_call_id": _tc_id,
                             "content": results_str
                         })
+
+                if _deferred_media_followups:
+                    messages.extend(_deferred_media_followups)
                 
                 # Continue the loop to allow more tool calls
                 # The model will see tool results and can make additional tool calls
@@ -1878,6 +1903,9 @@ class OpenAIClient:
                     "tool_calls": serializable_tool_calls
                 })
                 
+                # Collect media-bearing follow-ups to flush after all tool
+                # replies for this turn (keeps tool replies consecutive).
+                _deferred_media_followups = []
                 for tool_call in tool_calls:
                     # Handle both ToolCall dataclass and OpenAI object
                     if isinstance(tool_call, ToolCall):
@@ -1912,12 +1940,19 @@ class OpenAIClient:
                     display_tool_call_fn(f"Function {function_name} returned: {results_str[:200]}{'...' if len(results_str) > 200 else ''}", console=console if verbose else None)
                     
                     _tc_id = tool_call.id if hasattr(tool_call, 'id') else tool_call['id']
-                    if not _try_append_multimodal_tool_result(messages, tool_result, _tc_id):
+                    if not _try_append_multimodal_tool_result(
+                        messages, tool_result, _tc_id,
+                        function_name=function_name,
+                        deferred_followups=_deferred_media_followups,
+                    ):
                         messages.append({
                             "role": "tool",
                             "tool_call_id": _tc_id,
                             "content": results_str
                         })
+
+                if _deferred_media_followups:
+                    messages.extend(_deferred_media_followups)
                 
                 # Continue the loop to allow more tool calls
                 # The model will see tool results and can make additional tool calls
@@ -2067,6 +2102,9 @@ class OpenAIClient:
                         "tool_calls": serializable_tool_calls
                     })
                     
+                    # Collect media-bearing follow-ups to flush after all tool
+                    # replies for this turn (keeps tool replies consecutive).
+                    _deferred_media_followups = []
                     for tool_call in tool_calls:
                         # Handle both ToolCall dataclass and OpenAI object
                         try:
@@ -2106,12 +2144,19 @@ class OpenAIClient:
                         
                         _tc_id = tool_call.id if hasattr(tool_call, 'id') else tool_call['id']
                         _tool_result_for_mm = locals().get('tool_result')
-                        if not _try_append_multimodal_tool_result(messages, _tool_result_for_mm, _tc_id):
+                        if not _try_append_multimodal_tool_result(
+                            messages, _tool_result_for_mm, _tc_id,
+                            function_name=function_name,
+                            deferred_followups=_deferred_media_followups,
+                        ):
                             messages.append({
                                 "role": "tool",
                                 "tool_call_id": _tc_id,
                                 "content": results_str
                             })
+
+                    if _deferred_media_followups:
+                        messages.extend(_deferred_media_followups)
                     
                     # Continue the loop to allow more tool calls
                     iteration_count += 1

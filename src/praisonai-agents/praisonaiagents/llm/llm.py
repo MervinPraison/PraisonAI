@@ -1465,18 +1465,36 @@ Now provide your final answer using this result. Summarize the information natur
             }
 
     def _try_append_multimodal_tool_result(
-        self, messages: List[Dict[str, Any]], tool_result: Any, tool_call_id: str
+        self,
+        messages: List[Dict[str, Any]],
+        tool_result: Any,
+        tool_call_id: str,
+        function_name: Optional[str] = None,
+        deferred_followups: Optional[List[Dict[str, Any]]] = None,
     ) -> bool:
-        """Append multimodal tool result messages if the result carries media.
+        """Append a multimodal tool result if the result carries media.
 
-        Returns True if multimodal messages were appended (caller should skip
-        its default text-only tool message), False otherwise (no regression).
+        The ``tool`` reply is appended in-place so all tool replies for the
+        assistant turn stay consecutive (provider contract). The media-bearing
+        ``user`` follow-up message is collected into ``deferred_followups`` for
+        the caller to flush *after* the whole tool_calls batch is processed; if
+        no collector is supplied it is appended directly (single-call paths).
+
+        Returns True if the result was multimodal (caller should skip its
+        default text-only tool message), False otherwise (no regression).
         """
         try:
-            from ..agent.tool_execution import format_tool_result_messages
-            mm_messages = format_tool_result_messages(tool_result, tool_call_id)
-            if mm_messages:
-                messages.extend(mm_messages)
+            from ..agent.tool_execution import build_tool_result_message_pair
+            pair = build_tool_result_message_pair(
+                tool_result, tool_call_id, function_name=function_name
+            )
+            if pair:
+                tool_message, followup_message = pair
+                messages.append(tool_message)
+                if deferred_followups is not None:
+                    deferred_followups.append(followup_message)
+                else:
+                    messages.append(followup_message)
                 return True
         except Exception as e:
             logging.debug(f"Multimodal tool result formatting skipped: {e}")
@@ -3018,6 +3036,10 @@ Now provide your final answer using this result. Summarize the information natur
                             tool_calls = tool_calls[:remaining_calls]
                             logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
                         
+                        # Collect media-bearing follow-up messages so they are
+                        # flushed only AFTER every tool reply for this assistant
+                        # turn, keeping all tool replies consecutive (provider contract).
+                        _deferred_media_followups: List[Dict[str, Any]] = []
                         for tool_call in tool_calls:
                             # Handle both object and dict access patterns
                             is_ollama = self._is_ollama_provider()
@@ -3082,7 +3104,11 @@ Now provide your final answer using this result. Summarize the information natur
                             if self._is_ollama_provider():
                                 # For Ollama, use user role and format as natural language
                                 messages.append(self._format_ollama_tool_result_message(function_name, tool_result))
-                            elif self._try_append_multimodal_tool_result(messages, tool_result, tool_call_id):
+                            elif self._try_append_multimodal_tool_result(
+                                messages, tool_result, tool_call_id,
+                                function_name=function_name,
+                                deferred_followups=_deferred_media_followups,
+                            ):
                                 # Multimodal result (image/file) emitted as model-visible parts
                                 pass
                             else:
@@ -3106,7 +3132,12 @@ Now provide your final answer using this result. Summarize the information natur
                             # This mimics the logic from agent.py lines 1004-1007
                             if function_name == "sequentialthinking" and arguments.get("nextThoughtNeeded", False):
                                 should_continue = True
-                        
+
+                        # Flush deferred media follow-ups after all tool replies
+                        # for this turn have been appended (provider contract).
+                        if _deferred_media_followups:
+                            messages.extend(_deferred_media_followups)
+
                         # If we should continue, increment iteration and continue loop
                         if should_continue:
                             iteration_count += 1
@@ -4275,6 +4306,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
                     
                     tool_results = []  # Store current iteration tool results
+                    # Collect media-bearing follow-up messages so they are
+                    # flushed only AFTER every tool reply for this assistant
+                    # turn, keeping all tool replies consecutive (provider contract).
+                    _deferred_media_followups: List[Dict[str, Any]] = []
                     for tool_call in tool_calls:
                         # Handle both object and dict access patterns
                         is_ollama = self._is_ollama_provider()
@@ -4300,7 +4335,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if self._is_ollama_provider():
                             # For Ollama, use user role and format as natural language
                             messages.append(self._format_ollama_tool_result_message(function_name, tool_result))
-                        elif self._try_append_multimodal_tool_result(messages, tool_result, tool_call_id):
+                        elif self._try_append_multimodal_tool_result(
+                            messages, tool_result, tool_call_id,
+                            function_name=function_name,
+                            deferred_followups=_deferred_media_followups,
+                        ):
                             # Multimodal result (image/file) emitted as model-visible parts
                             pass
                         else:
@@ -4319,6 +4358,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 "tool_call_id": tool_call_id,
                                 "content": content
                             })
+
+                    # Flush deferred media follow-ups after all tool replies
+                    # for this turn have been appended (provider contract).
+                    if _deferred_media_followups:
+                        messages.extend(_deferred_media_followups)
 
                     # For Ollama, add explicit prompt if we need a final answer
                     if self._is_ollama_provider() and iteration_count > 0:

@@ -3610,7 +3610,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             ]
                         self._append_to_chat_history(assistant_message)
                         
-                        # Execute tool calls and add results to chat history
+                        # Execute tool calls and add results to chat history.
+                        # Media-bearing follow-up messages are deferred until all
+                        # tool replies for this turn are appended, keeping the
+                        # tool replies consecutive (provider contract).
+                        _deferred_media_followups = []
                         for tool_call in tool_calls_data:
                             if tool_call['id'] and tool_call['function']['name']:
                                 try:
@@ -3627,11 +3631,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         tool_call_id=tool_call.get('id')
                                     )
                                     # Add tool result to chat history (multimodal-aware)
-                                    from .tool_execution import format_tool_result_messages
-                                    _mm_messages = format_tool_result_messages(tool_result, tool_call['id'])
-                                    if _mm_messages:
-                                        for _m in _mm_messages:
-                                            self._append_to_chat_history(_m)
+                                    from .tool_execution import build_tool_result_message_pair
+                                    _pair = build_tool_result_message_pair(
+                                        tool_result, tool_call['id'],
+                                        function_name=tool_call['function']['name'],
+                                    )
+                                    if _pair:
+                                        _tool_msg, _followup_msg = _pair
+                                        self._append_to_chat_history(_tool_msg)
+                                        _deferred_media_followups.append(_followup_msg)
                                     else:
                                         self._append_to_chat_history({
                                             "role": "tool",
@@ -3646,6 +3654,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         "tool_call_id": tool_call['id'],
                                         "content": f"Error: {str(tool_error)}"
                                     })
+
+                        # Flush deferred media follow-ups after all tool replies.
+                        for _m in _deferred_media_followups:
+                            self._append_to_chat_history(_m)
                     else:
                         # Add complete response to chat history (text-only response)
                         if response_text:

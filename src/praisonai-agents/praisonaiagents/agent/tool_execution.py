@@ -181,6 +181,7 @@ def format_tool_result_messages(
     result: Any,
     tool_call_id: str,
     text_fallback: Optional[str] = None,
+    function_name: Optional[str] = None,
 ) -> Optional[List[Dict[str, Any]]]:
     """Build LLM messages from a (possibly multimodal) tool result.
 
@@ -192,10 +193,47 @@ def format_tool_result_messages(
 
     Most providers do not accept ``image_url`` parts inside a ``tool`` role
     message, so images are delivered via a follow-up ``user`` message.
+
+    When ``function_name`` belongs to an external/untrusted tool, any text
+    parts are wrapped in the same prompt-injection fence used by the text path
+    (``wrap_if_external``) so external instructions cannot reach the model as
+    unfenced content.
+    """
+    pair = build_tool_result_message_pair(
+        result, tool_call_id, text_fallback=text_fallback, function_name=function_name
+    )
+    if pair is None:
+        return None
+    tool_message, followup_message = pair
+    return [tool_message, followup_message]
+
+
+def build_tool_result_message_pair(
+    result: Any,
+    tool_call_id: str,
+    text_fallback: Optional[str] = None,
+    function_name: Optional[str] = None,
+) -> Optional[tuple]:
+    """Return ``(tool_message, followup_user_message)`` for a multimodal result.
+
+    Separating the ``tool`` reply from the ``user`` media follow-up lets callers
+    that process multiple tool calls in one assistant turn keep all ``tool``
+    replies consecutive (the provider contract) and append the media
+    ``user`` message(s) only after the whole batch is handled.
+
+    Returns ``None`` for plain text/JSON results (existing path, no regression).
     """
     parts = _normalize_multimodal_result(result)
     if not parts:
         return None
+
+    is_external = False
+    if function_name:
+        try:
+            from ..tools.trust import is_external_tool
+            is_external = is_external_tool(function_name)
+        except Exception:
+            is_external = False
 
     visible_parts: List[Dict[str, Any]] = []
     text_summary_chunks: List[str] = []
@@ -208,7 +246,11 @@ def format_tool_result_messages(
             has_media = True
             visible_parts.append(formatted)
         else:
-            text_summary_chunks.append(formatted.get("text", ""))
+            text_value = formatted.get("text", "")
+            if is_external and text_value:
+                text_value = _fence_external_text(function_name, text_value)
+                formatted = {"type": "text", "text": text_value}
+            text_summary_chunks.append(text_value)
             visible_parts.append(formatted)
 
     if not visible_parts or not has_media:
@@ -218,18 +260,25 @@ def format_tool_result_messages(
     text_summary = "\n".join(c for c in text_summary_chunks if c).strip()
     tool_text = text_fallback or text_summary or "[tool returned media; see attached content]"
 
-    messages: List[Dict[str, Any]] = [
-        {
-            "role": "tool",
-            "tool_call_id": tool_call_id,
-            "content": tool_text,
-        },
-        {
-            "role": "user",
-            "content": visible_parts,
-        },
-    ]
-    return messages
+    tool_message = {
+        "role": "tool",
+        "tool_call_id": tool_call_id,
+        "content": tool_text,
+    }
+    followup_message = {
+        "role": "user",
+        "content": visible_parts,
+    }
+    return tool_message, followup_message
+
+
+def _fence_external_text(function_name: str, text: str) -> str:
+    """Apply the external-content prompt-injection fence to a text string."""
+    try:
+        wrapped = wrap_if_external(function_name, text)
+        return wrapped if isinstance(wrapped, str) else text
+    except Exception:
+        return text
 
 
 class ToolExecutionMixin:
