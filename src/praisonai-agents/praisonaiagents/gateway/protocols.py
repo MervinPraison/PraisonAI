@@ -2180,9 +2180,12 @@ def current_epoch() -> str:
     epoch does not match the current one.
 
     Returns:
-        A non-secret, opaque epoch token (``"<boot_id>:<pid1_start>"`` when
-        both are available), or an empty string when nothing durable could be
-        read.
+        A non-secret, opaque epoch token (``"<boot_id>:<pid1_start>"``) when
+        *both* signals are available, or an empty string otherwise. Requiring
+        both keeps the contract fail-closed: a partial epoch (e.g. ``boot_id``
+        alone, which is unchanged across same-host container restarts) could
+        let a durable stale marker match a fresh instance, so it is never
+        emitted.
     """
     boot_id = ""
     try:
@@ -2207,9 +2210,10 @@ def current_epoch() -> str:
 
     if boot_id and pid1_start:
         return f"{boot_id}:{pid1_start}"
-    if boot_id:
-        return boot_id
-    return pid1_start
+    # Fail closed: a partial epoch cannot reliably distinguish a restart, so an
+    # empty epoch is returned and DrainMarkerPolicy treats every marker as
+    # foreign (ignored) unless ``require_epoch=False`` is set explicitly.
+    return ""
 
 
 class DrainMarkerPolicy:
@@ -2286,7 +2290,10 @@ class DrainMarkerPolicy:
             return False
 
         action = marker.get("action", "drain")
-        if isinstance(action, str) and action.strip().lower() not in ("", "drain"):
+        if not isinstance(action, str):
+            # A non-string action is a malformed marker; fail closed.
+            return False
+        if action.strip().lower() not in ("", "drain"):
             return False
         return True
 

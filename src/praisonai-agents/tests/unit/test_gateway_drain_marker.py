@@ -54,6 +54,13 @@ def test_unknown_action_is_ignored():
     assert policy.drain_requested(marker, "epoch-1", 0.0) is False
 
 
+def test_non_string_action_is_ignored():
+    policy = DrainMarkerPolicy()
+    # A malformed marker with a non-string action must fail closed.
+    marker = {"epoch": "epoch-1", "action": 1}
+    assert policy.drain_requested(marker, "epoch-1", 0.0) is False
+
+
 def test_last_handled_epoch_dedupes_request():
     policy = DrainMarkerPolicy()
     marker = {"epoch": "epoch-1", "action": "drain"}
