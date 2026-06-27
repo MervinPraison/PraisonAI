@@ -23,6 +23,11 @@ CONFIG_FILES = [
 USER_CONFIG_PATH = "~/.config/praison/praison.json"
 GLOBAL_CONFIG_PATH = "/etc/praison/praison.json"
 
+# When no git root is found, cap the upward walk to avoid scanning arbitrary
+# parent directories up to the filesystem root (e.g. picking up ~/.praison.json).
+# Mirrors the cap used by integration/context_files.py for consistency.
+_MAX_WALK_UP_DEPTH = 10
+
 
 class ConfigValidationError(Exception):
     """Raised when config validation fails."""
@@ -171,10 +176,12 @@ class HierarchicalConfig:
         project_dir: Optional[str] = None,
         user_config: Optional[str] = None,
         global_config: Optional[str] = None,
+        walk_up: bool = True,
     ):
         self.project_dir = project_dir or os.getcwd()
         self.user_config = os.path.expanduser(user_config or USER_CONFIG_PATH)
         self.global_config = global_config or GLOBAL_CONFIG_PATH
+        self.walk_up = walk_up
         self._sources: List[ConfigSource] = []
         self._merged: Dict[str, Any] = {}
     
@@ -184,12 +191,53 @@ class HierarchicalConfig:
         return ["project", "user", "global"]
     
     def _find_project_config(self) -> Optional[str]:
-        """Find project-level config file."""
-        for filename in CONFIG_FILES:
-            path = os.path.join(self.project_dir, filename)
-            if os.path.exists(path):
-                return path
-        return None
+        """
+        Find the project-level config file.
+
+        When ``walk_up`` is enabled (default), the search starts in
+        ``project_dir`` and walks upward through parent directories until a
+        config file is found or the filesystem root is reached. This mirrors
+        the git-root project scoping used by session storage, so running the
+        CLI from a subdirectory still discovers the project's config at its
+        root. The walk stops at a directory containing a ``.git`` marker
+        (inclusive) so configuration never leaks across project boundaries.
+        When no ``.git`` boundary exists, the walk is capped at
+        ``_MAX_WALK_UP_DEPTH`` levels to avoid picking up unrelated ancestor
+        configs (e.g. ``~/.praison.json``).
+        """
+        start = Path(self.project_dir).resolve()
+
+        if not self.walk_up:
+            for filename in CONFIG_FILES:
+                path = start / filename
+                if path.exists():
+                    return str(path)
+            return None
+
+        current = start
+        depth = 0
+        while True:
+            for filename in CONFIG_FILES:
+                path = current / filename
+                if path.exists():
+                    return str(path)
+
+            # Stop at the project boundary (git root) to avoid leaking config
+            # from unrelated parent projects.
+            if (current / ".git").exists():
+                return None
+
+            parent = current.parent
+            if parent == current:  # Reached filesystem root.
+                return None
+
+            # No git boundary found yet: cap the walk to avoid scanning
+            # arbitrary parent directories up to the filesystem root.
+            if depth >= _MAX_WALK_UP_DEPTH:
+                return None
+
+            current = parent
+            depth += 1
     
     def _load_json(self, path: str) -> Optional[Dict[str, Any]]:
         """Load JSON file, return None if not found or invalid."""
