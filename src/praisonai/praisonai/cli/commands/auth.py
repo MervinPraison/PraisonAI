@@ -126,14 +126,16 @@ def _run_oauth_login(provider: str, output, base_url, model, no_browser: bool) -
         output.print_error(f"Failed to store credentials: {e}")
         raise typer.Exit(1)
 
-    output.print_success(f"Signed in to {provider} via OAuth")
     if output.is_json_mode:
+        # Emit a single JSON document; ``print_success`` would emit a second.
         output.print_json({
             "provider": provider,
             "status": "stored",
             "auth_method": "oauth",
             "expires_at": tokens.get("expires_at"),
         })
+    else:
+        output.print_success(f"Signed in to {provider} via OAuth")
 
 
 @app.command("login")
@@ -162,6 +164,9 @@ def auth_login(
     # the provider has an OAuth config AND no key was supplied; otherwise it
     # falls back to the API-key path (unchanged behaviour).
     method = (method or "auto").lower()
+    if method not in {"auto", "apikey", "oauth"}:
+        output.print_error("Invalid auth method. Use: auto, apikey, or oauth")
+        raise typer.Exit(1)
     if method == "oauth":
         _run_oauth_login(provider, output, base_url, model, no_browser)
         return
@@ -412,7 +417,10 @@ def auth_status(
             
             # Live validation if requested
             if validate:
-                live_valid, live_msg = _validate_with_live_call(provider, cred.api_key, cred.base_url)
+                # Use a freshly-refreshed token for OAuth so we don't validate a
+                # stale mirrored access token.
+                live_secret = store.get_valid_token(provider) if cred.is_oauth() else cred.api_key
+                live_valid, live_msg = _validate_with_live_call(provider, live_secret, cred.base_url)
                 status_info["live_valid"] = live_valid
                 status_info["live_message"] = live_msg
             
@@ -456,11 +464,17 @@ def auth_status(
                         "key_redacted": redact_key(cred.api_key),
                         "format_valid": format_valid,
                         "format_message": format_msg,
+                        "expires_at": cred.expires_at,
                         "expires": _format_expiry(cred),
                     }
                     
                     if validate:
-                        live_valid, live_msg = _validate_with_live_call(provider_name, cred.api_key, cred.base_url)
+                        live_secret = (
+                            store.get_valid_token(provider_name)
+                            if cred.is_oauth()
+                            else cred.api_key
+                        )
+                        live_valid, live_msg = _validate_with_live_call(provider_name, live_secret, cred.base_url)
                         status["live_valid"] = live_valid
                         status["live_message"] = live_msg
                     

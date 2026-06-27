@@ -155,6 +155,19 @@ def test_run_oauth_login_rejects_unconfigured_provider():
         run_oauth_login("totally-unknown-provider")
 
 
+def test_expired_token_not_returned_on_refresh_failure():
+    """An expired OAuth token must not be surfaced when refresh is impossible."""
+    with tempfile.TemporaryDirectory() as tmp:
+        store = _store(tmp)
+        # No refresh_token/token_url -> refresh cannot run.
+        store.store_oauth_credential(
+            provider="acme",
+            access_token="at-stale",
+            expires_at=time.time() - 10,
+        )
+        assert store.get_valid_token("acme") is None
+
+
 def test_credential_lookup_uses_fresh_oauth_token(monkeypatch):
     """The LLM credential lookup should surface a valid OAuth token as api_key."""
     from praisonai.cli.configuration.credentials import CredentialStore
@@ -176,6 +189,59 @@ def test_credential_lookup_uses_fresh_oauth_token(monkeypatch):
         data = llm_creds._credential_lookup("openai")
         assert data is not None
         assert data["api_key"] == "at-live"
+
+
+def test_credential_lookup_does_not_leak_oauth_internals(monkeypatch):
+    """OAuth internals must not cross the LLM resolver boundary."""
+    from praisonai.cli.configuration.credentials import CredentialStore
+    import praisonai.llm.credentials as llm_creds
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "creds.json"
+        store = CredentialStore(path)
+        store.store_oauth_credential(
+            provider="openai",
+            access_token="at-live",
+            refresh_token="rt-secret",
+            expires_at=time.time() + 3600,
+            token_url="https://h/token",
+            client_id="cid",
+        )
+
+        monkeypatch.setattr(
+            llm_creds, "CredentialStore", lambda: CredentialStore(path)
+        )
+
+        data = llm_creds._credential_lookup("openai")
+        assert data is not None
+        for leaked in ("refresh_token", "access_token", "token_url", "client_id"):
+            assert leaked not in data
+
+
+def test_callback_server_unblocks_handler():
+    """The local callback server must forward (state, code) to the handler."""
+    import urllib.request
+
+    from praisonaiagents.mcp.mcp_oauth_callback import (
+        OAuthCallbackHandler,
+        OAUTH_CALLBACK_PATH,
+    )
+    from praisonai.cli.configuration.oauth import _start_callback_server
+
+    handler = OAuthCallbackHandler()
+    # Use an ephemeral-ish high port to avoid clashing with a real server.
+    port = 19899
+    server = _start_callback_server(handler, port, OAUTH_CALLBACK_PATH)
+    try:
+        url = (
+            f"http://127.0.0.1:{port}{OAUTH_CALLBACK_PATH}"
+            "?state=st-1&code=cd-1"
+        )
+        urllib.request.urlopen(url, timeout=5).read()
+        assert handler.wait_for_callback("st-1", timeout=5) == "cd-1"
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 if __name__ == "__main__":

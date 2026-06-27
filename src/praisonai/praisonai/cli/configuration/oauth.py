@@ -128,7 +128,13 @@ def run_device_code_flow(
     Raises:
         RuntimeError: On request failure or timeout.
     """
-    import requests
+    try:
+        import requests
+    except ImportError as exc:
+        raise RuntimeError(
+            "OAuth login requires the optional 'requests' package. "
+            "Install it with: pip install requests"
+        ) from exc
 
     if not config.device_authorization_url:
         raise RuntimeError("Provider does not define a device authorization endpoint")
@@ -203,10 +209,18 @@ def run_authcode_flow(
     Raises:
         RuntimeError: On request failure or timeout.
     """
-    import requests
+    try:
+        import requests
+    except ImportError as exc:
+        raise RuntimeError(
+            "OAuth login requires the optional 'requests' package. "
+            "Install it with: pip install requests"
+        ) from exc
 
     from praisonaiagents.mcp.mcp_oauth_callback import (
         OAuthCallbackHandler,
+        OAUTH_CALLBACK_PORT,
+        OAUTH_CALLBACK_PATH,
         generate_state,
         generate_code_verifier,
         generate_code_challenge,
@@ -221,6 +235,12 @@ def run_authcode_flow(
     verifier = generate_code_verifier()
     challenge = generate_code_challenge(verifier)
     redirect_uri = get_redirect_url()
+
+    # ``OAuthCallbackHandler`` only holds in-memory state; it does not listen on
+    # the redirect URI. Start a short-lived local HTTP server that receives the
+    # provider redirect and forwards (state, code) into the handler so that
+    # ``wait_for_callback`` can unblock.
+    server = _start_callback_server(handler, OAUTH_CALLBACK_PORT, OAUTH_CALLBACK_PATH)
 
     params = {
         "response_type": "code",
@@ -248,8 +268,12 @@ def run_authcode_flow(
         except Exception:
             pass
 
-    code = handler.wait_for_callback(state, timeout=callback_timeout)
-    handler.clear_state(state)
+    try:
+        code = handler.wait_for_callback(state, timeout=callback_timeout)
+    finally:
+        handler.clear_state(state)
+        server.shutdown()
+        server.server_close()
 
     token_data = {
         "grant_type": "authorization_code",
@@ -264,6 +288,64 @@ def run_authcode_flow(
     if not payload.get("access_token"):
         raise RuntimeError("Token endpoint did not return an access token")
     return _tokens_to_credential_kwargs(payload)
+
+
+def _start_callback_server(handler, port: int, path: str):
+    """
+    Start a short-lived local HTTP server to receive the OAuth redirect.
+
+    The provider redirects the browser to ``http://127.0.0.1:<port><path>?...``;
+    this server parses the ``state``/``code`` (or ``error``) query parameters,
+    forwards them into ``handler.receive_callback`` so a blocked
+    ``wait_for_callback`` can unblock, and shows a minimal browser confirmation.
+
+    Args:
+        handler: An ``OAuthCallbackHandler`` to receive (state, code) pairs.
+        port: Localhost port to listen on (matches the registered redirect URI).
+        path: Expected callback path.
+
+    Returns:
+        A running ``http.server.HTTPServer`` whose ``serve_forever`` loop runs on
+        a daemon thread. Callers must ``shutdown()`` + ``server_close()`` it.
+    """
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from urllib.parse import urlparse, parse_qs
+
+    class _CallbackRequestHandler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802 (stdlib-mandated name)
+            parsed = urlparse(self.path)
+            if parsed.path != path:
+                self.send_response(404)
+                self.end_headers()
+                return
+
+            params = parse_qs(parsed.query)
+            state = (params.get("state") or [None])[0]
+            code = (params.get("code") or [None])[0]
+            error = (params.get("error") or [None])[0]
+
+            if state and code:
+                handler.receive_callback(state, code)
+                body = b"Sign-in complete. You can close this tab."
+            else:
+                body = (
+                    f"Sign-in failed: {error or 'missing code'}. "
+                    "You can close this tab."
+                ).encode()
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):  # silence default stderr logging
+            return
+
+    server = HTTPServer(("127.0.0.1", port), _CallbackRequestHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server
 
 
 def run_oauth_login(

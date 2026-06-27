@@ -333,8 +333,10 @@ class CredentialStore:
         refreshed = self._refresh_oauth_token(cred)
         if refreshed:
             return refreshed
-        # Refresh failed; return the (possibly stale) token as a last resort.
-        return cred.access_token or cred.api_key
+        # Refresh failed/unavailable: do NOT surface a known-expired token.
+        # Returning None forces callers to re-authenticate instead of injecting
+        # a stale bearer token that would fail authentication downstream.
+        return None
 
     def _refresh_oauth_token(self, cred: ProviderCredential) -> Optional[str]:
         """

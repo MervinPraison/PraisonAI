@@ -6,7 +6,6 @@ seamless credential fallback when environment variables are not set.
 """
 
 from typing import Optional, Dict, Any
-from dataclasses import asdict
 
 from ..cli.configuration.credentials import CredentialStore
 from .env import (
@@ -30,13 +29,20 @@ def _credential_lookup(provider: str) -> Optional[Dict[str, Any]]:
         store = CredentialStore()
         credential = store.get_credential(provider)
         if credential:
-            data = asdict(credential)
+            # Return only the minimal fields the LLM resolver needs. We avoid
+            # ``asdict(credential)`` so OAuth internals (refresh_token,
+            # access_token, token_url, client_id) never cross this boundary.
+            data: Dict[str, Any] = {
+                "provider": credential.provider,
+                "api_key": credential.api_key,
+                "base_url": credential.base_url,
+                "model": credential.model,
+                "metadata": credential.metadata,
+            }
             # For OAuth, surface a freshly-refreshed token through ``api_key``
             # so the resolver injects a valid secret transparently.
             if credential.is_oauth():
-                token = store.get_valid_token(provider)
-                if token:
-                    data["api_key"] = token
+                data["api_key"] = store.get_valid_token(provider)
             return data
     except Exception:
         # Ignore errors in credential lookup to avoid breaking LLM resolution
@@ -111,9 +117,14 @@ def inject_credentials_into_env() -> bool:
             if not credential:
                 continue
 
-            # For OAuth credentials, fetch a fresh (refreshed if expired) token;
-            # for API keys this returns the stored key unchanged.
-            token = store.get_valid_token(provider) or credential.api_key
+            # For OAuth credentials, rely solely on the refreshed token from the
+            # store (which returns None when expired and refresh fails) so a
+            # stale mirrored token is never injected. API keys fall back to the
+            # stored key unchanged.
+            if credential.is_oauth():
+                token = store.get_valid_token(provider)
+            else:
+                token = credential.api_key
             if token:
                 os.environ[env_var] = token
                 injected = True
