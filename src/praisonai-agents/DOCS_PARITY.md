@@ -27,10 +27,10 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Autonomy | 3 | 5 | 1919 |
 | ✅ Bots | 7 | 24 | 8215 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 110 | 27711 |
+| ✅ CLI | 5 | 110 | 27757 |
 | ✅ Chunking | 2 | 2 | 288 |
 | ✅ Citations | 2 | 1 | 202 |
-| ✅ Code Execution | 2 | 13 | 3607 |
+| ✅ Code Execution | 2 | 13 | 3627 |
 | ✅ Conditions | 1 | 3 | 1085 |
 | ✅ Configuration | 3 | 7 | 2261 |
 | ✅ Context Management | 16 | 33 | 10534 |
@@ -42,9 +42,9 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Events | 1 | 2 | 705 |
 | ✅ Execution | 3 | 3 | 1180 |
 | ✅ Failover | 2 | 1 | 394 |
-| ✅ Files | 2 | 6 | 1632 |
+| ✅ Files | 2 | 6 | 1718 |
 | ✅ Flow | 1 | 2 | 435 |
-| ✅ Gateway | 7 | 23 | 8276 |
+| ✅ Gateway | 7 | 23 | 8447 |
 | ✅ Guardrails | 4 | 4 | 1619 |
 | ✅ Handoffs | 11 | 6 | 2529 |
 | ✅ Hooks | 2 | 8 | 3160 |
