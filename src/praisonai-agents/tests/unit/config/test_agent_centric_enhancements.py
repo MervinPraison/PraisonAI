@@ -334,6 +334,20 @@ class TestKnowledgePresets:
         )
         assert isinstance(result, MockKnowledgeConfig)
         assert "docs/" in result.sources
+
+    def test_knowledge_windows_path_string(self):
+        """Windows-style directory paths should be treated as sources."""
+        from praisonaiagents.config.param_resolver import resolve
+
+        for value in ("C:\\knowledge", "\\knowledge", "~\\knowledge", "knowledge\\docs"):
+            result = resolve(
+                value=value,
+                param_name="knowledge",
+                config_class=MockKnowledgeConfig,
+                string_mode="path_as_source",
+            )
+            assert isinstance(result, MockKnowledgeConfig)
+            assert result.sources == [value]
     
     def test_knowledge_array_sources(self):
         """Array of paths should be sources list."""
