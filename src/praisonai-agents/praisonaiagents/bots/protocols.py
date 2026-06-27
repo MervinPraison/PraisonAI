@@ -508,6 +508,7 @@ def evaluate_channel_health(
     health: HealthResult,
     startup_grace_seconds: float = 60.0,
     stale_after_seconds: float = 120.0,
+    stuck_after_seconds: float = 900.0,
     current_time: Optional[float] = None,
 ) -> HealthReason:
     """Evaluate channel health and return a reason.
@@ -515,10 +516,21 @@ def evaluate_channel_health(
     Pure function that evaluates a HealthResult and determines
     the health reason based on various criteria.
     
+    Liveness is driven by passive *inbound* transport activity
+    (``health.last_activity``) rather than only an outbound probe, and the
+    evaluator is aware of in-flight agent runs (``health.active_runs``) so a
+    busy channel is never mistaken for a dead socket:
+
+    - busy with recent inbound progress -> ``BUSY`` (never restarted);
+    - busy but no progress beyond ``stuck_after_seconds`` -> ``STUCK``;
+    - idle and inbound stale beyond ``stale_after_seconds`` -> ``STALE_SOCKET``.
+
     Args:
         health: The health result to evaluate
         startup_grace_seconds: Grace period for startup
-        stale_after_seconds: Time after which no activity is considered stale
+        stale_after_seconds: Time after which no inbound activity is stale
+        stuck_after_seconds: Time after which a busy channel with no progress
+            is considered stuck
         current_time: Current timestamp (for testing)
         
     Returns:
@@ -543,7 +555,21 @@ def evaluate_channel_health(
     if health.probe and not health.probe.ok:
         return HealthReason.DISCONNECTED
     
-    # Check for stale socket (no transport activity)
+    # Run-aware liveness: a busy channel is never killed mid-run unless it has
+    # made no inbound progress for an extended period (stuck). When inbound
+    # activity was never recorded, fall back to uptime so a hung run with no
+    # inbound timestamp can still be detected as STUCK rather than staying BUSY
+    # (non-recoverable) forever.
+    if health.active_runs > 0:
+        progress_at = health.last_activity
+        if progress_at is None:
+            progress_at = current_time - (health.uptime_seconds or 0.0)
+        idle = current_time - progress_at
+        if idle > stuck_after_seconds:
+            return HealthReason.STUCK
+        return HealthReason.BUSY
+    
+    # Check for stale socket (no inbound transport activity while idle)
     if health.last_activity is not None:
         time_since_activity = current_time - health.last_activity
         if time_since_activity > stale_after_seconds:
@@ -570,7 +596,8 @@ class HealthResult:
         error: Error message (if unhealthy)
         details: Additional platform-specific health details
         reason: Health status reason (optional)
-        last_activity: Last transport activity timestamp (optional)
+        last_activity: Last INBOUND transport activity timestamp (optional)
+        active_runs: Number of in-flight agent turns (busy count)
     """
     
     ok: bool
@@ -583,6 +610,7 @@ class HealthResult:
     details: Dict[str, Any] = field(default_factory=dict)
     reason: Optional[HealthReason] = None
     last_activity: Optional[float] = None
+    active_runs: int = 0
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -597,6 +625,7 @@ class HealthResult:
             "details": self.details,
             "reason": self.reason.value if self.reason else None,
             "last_activity": self.last_activity,
+            "active_runs": self.active_runs,
         }
 
 

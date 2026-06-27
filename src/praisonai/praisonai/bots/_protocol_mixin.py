@@ -118,6 +118,39 @@ class MessageHookMixin:
             return None
         return getattr(agent, '_hook_runner', None)
 
+    def _note_inbound(self) -> None:
+        """Record a passive inbound transport event.
+
+        Called on every inbound update/frame/poll batch so channel health can
+        be driven by whether messages are actually still flowing in, not only
+        by whether an outbound probe succeeds. Refreshing this timestamp keeps
+        a reachable-but-deaf channel from being reported HEALTHY forever.
+        """
+        self._last_inbound_activity = time.time()
+
+    def _active_run_count(self) -> int:
+        """Best-effort count of in-flight agent turns for this adapter.
+
+        Resolves the session from ``_session`` or ``_session_mgr`` so adapters
+        that name the attribute differently (e.g. WhatsApp/Linear use
+        ``_session_mgr``) all report active runs DRY-ly.
+        """
+        session = getattr(self, '_session', None)
+        if session is None:
+            session = getattr(self, '_session_mgr', None)
+        if session is None:
+            return 0
+        getter = getattr(session, 'get_active_runs', None)
+        if callable(getter):
+            try:
+                return len(getter())
+            except Exception:  # noqa: BLE001 — health must never raise
+                return 0
+        active = getattr(session, '_active_runs', None)
+        if isinstance(active, dict):
+            return len(active)
+        return 0
+
     async def _default_health(self) -> Any:
         """Build a :class:`HealthResult` shared by all bot adapters (DRY).
 
@@ -139,6 +172,13 @@ class MessageHookMixin:
         else:
             session_count = 0
         is_running = getattr(self, '_is_running', False)
+        # Seed inbound liveness from start time so a reachable-but-deaf channel
+        # that never received an inbound message is still subject to the
+        # stale-socket check (rather than reported HEALTHY forever). Subsequent
+        # inbound traffic refreshes this via ``_note_inbound``.
+        last_inbound = getattr(self, '_last_inbound_activity', None)
+        if last_inbound is None:
+            last_inbound = started_at
         return HealthResult(
             ok=is_running and probe_result.ok,
             platform=self.platform,  # type: ignore[attr-defined]
@@ -147,6 +187,8 @@ class MessageHookMixin:
             probe=probe_result,
             sessions=session_count,
             error=probe_result.error if not probe_result.ok else None,
+            last_activity=last_inbound,
+            active_runs=self._active_run_count(),
         )
 
     def fire_message_received(self, message: Any) -> None:
@@ -155,6 +197,10 @@ class MessageHookMixin:
         Args:
             message: A BotMessage instance.
         """
+        # Passive inbound liveness: refresh on every inbound message so the
+        # health monitor can detect a deaf-but-reachable channel even when the
+        # outbound probe keeps passing.
+        self._note_inbound()
         runner = self._get_hook_runner()
         if runner is None:
             return

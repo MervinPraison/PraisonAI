@@ -1127,9 +1127,18 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
         probe_result = await self.probe()
         uptime = (time.time() - self._started_at) if self._started_at else None
         session_count = len(self._session_mgr._histories) if hasattr(self._session_mgr, '_histories') else 0
+        # Surface passive inbound liveness + in-flight runs so a reachable-but-
+        # deaf WhatsApp receive path is subject to the stale-socket check rather
+        # than reported HEALTHY forever (seeded from start time until the first
+        # inbound message refreshes it via fire_message_received/_note_inbound).
+        last_inbound = getattr(self, '_last_inbound_activity', None)
+        if last_inbound is None:
+            last_inbound = self._started_at
         return HealthResult(
             ok=self._is_running and probe_result.ok, platform="whatsapp",
             is_running=self._is_running, uptime_seconds=uptime,
             probe=probe_result, sessions=session_count,
             error=probe_result.error if not probe_result.ok else None,
+            last_activity=last_inbound,
+            active_runs=self._active_run_count(),
         )
