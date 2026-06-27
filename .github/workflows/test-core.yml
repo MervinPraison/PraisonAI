@@ -53,16 +53,14 @@ jobs:
       run: |
         cd src/praisonai && python -m pytest tests/unit/ -v --tb=short --disable-warnings \
           --cov=praisonai --cov-report=xml --cov-branch \
-          --timeout=60 || echo "Some unit tests failed"
-      continue-on-error: true
+          --timeout=60
 
     - name: Run Integration Tests
       run: |
         cd src/praisonai && python -m pytest tests/integration/ -v --tb=short --disable-warnings \
           --timeout=60 \
           --ignore=tests/integration/test_tracker_complex_tasks.py \
-          --ignore=tests/integration/test_serve_integration.py \
-          || echo "Some integration tests failed"
+          --ignore=tests/integration/test_serve_integration.py
 
     - name: Upload coverage to Codecov
       if: always()

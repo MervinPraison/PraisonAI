@@ -1,7 +1,8 @@
 name: Nightly Release Gate
 
-# Preflight checks before dispatching PyPI Release (patch bump).
-# Runs nightly at 00:00 UTC (midnight).
+# Preflight before PyPI Release (patch bump).
+# Primary: Core Tests success on main (workflow_run).
+# Backstop: nightly cron at 00:00 UTC.
 
 on:
   schedule:
@@ -13,6 +14,13 @@ on:
         required: false
         default: false
         type: boolean
+  workflow_run:
+    workflows:
+      - Core Tests
+    types:
+      - completed
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -24,83 +32,81 @@ concurrency:
 
 jobs:
   preflight:
-    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      (
+        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.event == 'push'
+      )
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
     steps:
-      - name: Checkout main
+      - name: Resolve trigger context
+        id: ctx
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "checkout_sha=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+            echo "source=ci" >> "$GITHUB_OUTPUT"
+            echo "is_ci=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "checkout_sha=main" >> "$GITHUB_OUTPUT"
+            echo "source=nightly" >> "$GITHUB_OUTPUT"
+            echo "is_ci=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
-          ref: main
+          ref: ${{ steps.ctx.outputs.checkout_sha }}
           fetch-depth: 0
 
-      - name: Preflight — path changes and CI green
+      - name: Fetch main and tags
+        run: git fetch --tags origin main
+
+      - name: Preflight — path changes, CI SHA, dedupe
         id: preflight
-        run: |
-          set -euo pipefail
+        uses: actions/github-script@v7
+        env:
+          HEAD_SHA: ${{ steps.ctx.outputs.checkout_sha }}
+          IS_CI: ${{ steps.ctx.outputs.is_ci }}
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            const path = require('path');
+            const rg = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/release-gate.js'));
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const headSha = process.env.HEAD_SHA;
+            const isCi = process.env.IS_CI === 'true';
 
-          git fetch --tags origin
+            const result = await rg.evaluateReleasePreflight(
+              github, owner, repo,
+              { headSha, isCiTrigger: isCi, bump: 'patch' },
+              core
+            );
 
-          LAST_TAG=$(git describe --tags --match 'v*' --abbrev=0 2>/dev/null || true)
-          if [ -z "$LAST_TAG" ]; then
-            echo "No v* tag found — skip automated release (first release must be manual)"
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
-            echo "reason=no_tag" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+            core.setOutput('should_release', result.ready ? 'true' : 'false');
+            core.setOutput('reason', result.reasons.join('; '));
+            core.setOutput('head_sha', result.headSha || headSha);
+            core.setOutput('last_tag', result.lastTag || '');
+            core.setOutput('target_agents', result.targetAgents || '');
+            core.setOutput('target_wrapper', result.targetWrapper || '');
 
-          CHANGED=$(git diff --name-only "${LAST_TAG}" HEAD -- \
-            src/praisonai \
-            src/praisonai-agents || true)
+            core.summary.addRaw('## Release gate preflight\n');
+            core.summary.addRaw(`Ready: ${result.ready}\n`);
+            core.summary.addRaw(`Reason: ${result.reasons.join('; ')}\n`);
+            if (result.targetAgents) {
+              core.summary.addRaw(`Targets: praisonaiagents==${result.targetAgents}, praisonai==${result.targetWrapper}\n`);
+            }
+            await core.summary.write();
 
-          if [ -z "$CHANGED" ]; then
-            echo "No changes in src/praisonai or src/praisonai-agents since ${LAST_TAG} — skip"
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
-            echo "reason=no_path_changes" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "Changes since ${LAST_TAG}:"
-          echo "$CHANGED"
-
-          HEAD_SHA=$(git rev-parse HEAD)
-          echo "main HEAD: ${HEAD_SHA}"
-
-          GREEN_SHA=$(gh run list \
-            --repo "${GITHUB_REPOSITORY}" \
-            --workflow "Core Tests" \
-            --branch main \
-            --status success \
-            --json headSha \
-            --jq '.[0].headSha // empty')
-
-          if [ "$GREEN_SHA" != "$HEAD_SHA" ]; then
-            echo "main@${HEAD_SHA} is not covered by a green Core Tests run (last green: ${GREEN_SHA:-none}) — skip"
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
-            echo "reason=ci_not_green" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          IN_PROGRESS=$(gh run list \
-            --repo "${GITHUB_REPOSITORY}" \
-            --workflow "Core Tests" \
-            --branch main \
-            --json headSha,status \
-            --jq "[.[] | select(.headSha == \"${HEAD_SHA}\" and .status == \"in_progress\")] | length")
-
-          if [ "${IN_PROGRESS:-0}" != "0" ]; then
-            echo "Core Tests still in progress on ${HEAD_SHA} — skip"
-            echo "should_release=false" >> "$GITHUB_OUTPUT"
-            echo "reason=ci_in_progress" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "Preflight passed — ready to dispatch patch release"
-          echo "should_release=true" >> "$GITHUB_OUTPUT"
-          echo "reason=ready" >> "$GITHUB_OUTPUT"
-          echo "last_tag=${LAST_TAG}" >> "$GITHUB_OUTPUT"
-          echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+            if (!result.ready) {
+              core.info(`Skip release: ${result.reasons.join('; ')}`);
+            }
 
       - name: Dry run summary
         if: inputs.dry_run == true
@@ -108,9 +114,6 @@ jobs:
           echo "Dry run — preflight only, no pypi-release dispatch."
           echo "should_release=${{ steps.preflight.outputs.should_release }}"
           echo "reason=${{ steps.preflight.outputs.reason }}"
-          if [ "${{ steps.preflight.outputs.should_release }}" = "true" ]; then
-            echo "Would dispatch: pypi-release.yml bump=patch source=nightly"
-          fi
 
       - name: Dispatch PyPI Release (patch)
         if: steps.preflight.outputs.should_release == 'true' && inputs.dry_run != true
@@ -120,7 +123,12 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --ref main \
             -f bump=patch \
-            -f source=nightly \
+            -f source=${{ steps.ctx.outputs.source }} \
+            -f trigger_sha=${{ steps.preflight.outputs.head_sha }} \
             -f dry_run=false
-          echo "Dispatched pypi-release.yml (patch, source=nightly)"
-          echo "Approve the pypi environment when prompted."
+          echo "Dispatched pypi-release.yml (patch, source=${{ steps.ctx.outputs.source }})"
+          if [ "${{ steps.ctx.outputs.source }}" = "ci" ]; then
+            echo "Uses pypi-auto environment (no manual approval)."
+          else
+            echo "Uses pypi-auto environment for nightly patch releases."
+          fi

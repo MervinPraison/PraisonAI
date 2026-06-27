@@ -1,7 +1,8 @@
 name: PyPI Release
 
-# Requires a GitHub Environment named "pypi" (Settings → Environments → pypi)
-# with required reviewers before secrets are exposed to this job.
+# Environments (Settings → Environments):
+#   pypi-auto — patch releases from ci/nightly (no reviewers, main branch only)
+#   pypi      — manual workflow_dispatch and major/minor (required reviewers)
 
 on:
   workflow_dispatch:
@@ -48,6 +49,12 @@ on:
         options:
           - manual
           - nightly
+          - ci
+      trigger_sha:
+        description: 'Main commit SHA that passed release gate (audit/dedupe)'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
@@ -60,7 +67,12 @@ jobs:
   release:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: pypi
+    environment: >-
+      ${{
+        (inputs.source == 'ci' || inputs.source == 'nightly') &&
+        inputs.bump == 'patch' &&
+        'pypi-auto' || 'pypi'
+      }}
     env:
       UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN || secrets.PYPI_API_TOKEN }}
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
@@ -89,8 +101,10 @@ jobs:
       - name: Release summary
         run: |
           echo "Source: ${{ inputs.source }}"
+          echo "Trigger SHA: ${{ inputs.trigger_sha }}"
           echo "Bump:   ${{ inputs.bump }}"
           echo "Dry run: ${{ inputs.dry_run }}"
+          echo "Environment: ${{ (inputs.source == 'ci' || inputs.source == 'nightly') && inputs.bump == 'patch' && 'pypi-auto' || 'pypi' }}"
 
       - name: Compute release versions
         id: versions
@@ -179,6 +193,37 @@ jobs:
           print(f"Wrapper: {current_wrapper} -> {wrapper_version}")
           PY
 
+      - name: Detect existing PyPI versions
+        id: pypi_exists
+        if: inputs.dry_run != true
+        env:
+          AGENTS_VERSION: ${{ steps.versions.outputs.agents_version }}
+          WRAPPER_VERSION: ${{ steps.versions.outputs.wrapper_version }}
+          INPUT_SKIP_AGENTS: ${{ inputs.skip_agents }}
+          INPUT_SKIP_WRAPPER: ${{ inputs.skip_wrapper }}
+        run: |
+          set -euo pipefail
+          skip_agents="${INPUT_SKIP_AGENTS}"
+          skip_wrapper="${INPUT_SKIP_WRAPPER}"
+          if [ "$skip_agents" != "true" ]; then
+            curl -fsSL "https://pypi.org/pypi/praisonaiagents/${AGENTS_VERSION}/json" >/dev/null && skip_agents=true || true
+          fi
+          if [ "$skip_wrapper" != "true" ]; then
+            curl -fsSL "https://pypi.org/pypi/praisonai/${WRAPPER_VERSION}/json" >/dev/null && skip_wrapper=true || true
+          fi
+          echo "skip_agents=${skip_agents}" >> "$GITHUB_OUTPUT"
+          echo "skip_wrapper=${skip_wrapper}" >> "$GITHUB_OUTPUT"
+          if [ "$skip_agents" = "true" ] && [ "$skip_wrapper" = "true" ]; then
+            echo "Both target versions already on PyPI — nothing to publish."
+          fi
+
+      - name: Exit if already published
+        if: >-
+          inputs.dry_run != true &&
+          steps.pypi_exists.outputs.skip_agents == 'true' &&
+          steps.pypi_exists.outputs.skip_wrapper == 'true'
+        run: echo "Idempotent skip — target versions already on PyPI."
+
       - name: Dry run summary
         if: inputs.dry_run
         run: |
@@ -196,7 +241,10 @@ jobs:
           fi
 
       - name: Publish praisonaiagents
-        if: inputs.dry_run != true && inputs.skip_agents != true
+        if: >-
+          inputs.dry_run != true &&
+          inputs.skip_agents != true &&
+          steps.pypi_exists.outputs.skip_agents != 'true'
         working-directory: src/praisonai-agents
         env:
           NEW_VERSION: ${{ steps.versions.outputs.agents_version }}
@@ -219,7 +267,10 @@ jobs:
           uv publish
 
       - name: Wait for praisonaiagents on PyPI
-        if: inputs.dry_run != true && inputs.skip_agents != true
+        if: >-
+          inputs.dry_run != true &&
+          inputs.skip_agents != true &&
+          steps.pypi_exists.outputs.skip_agents != 'true'
         run: |
           set -euo pipefail
           PACKAGE="praisonaiagents"
@@ -243,7 +294,10 @@ jobs:
           done
 
       - name: Commit agents version bump
-        if: inputs.dry_run != true && inputs.skip_agents != true
+        if: >-
+          inputs.dry_run != true &&
+          inputs.skip_agents != true &&
+          steps.pypi_exists.outputs.skip_agents != 'true'
         run: |
           set -euo pipefail
           git add src/praisonai-agents/pyproject.toml src/praisonai-agents/uv.lock
@@ -253,7 +307,10 @@ jobs:
           git push origin main
 
       - name: Bump and release wrapper
-        if: inputs.dry_run != true && inputs.skip_wrapper != true
+        if: >-
+          inputs.dry_run != true &&
+          inputs.skip_wrapper != true &&
+          steps.pypi_exists.outputs.skip_wrapper != 'true'
         run: |
           set -euo pipefail
           python src/praisonai/scripts/bump_and_release.py "${{ steps.versions.outputs.wrapper_version }}" \
@@ -261,12 +318,18 @@ jobs:
             --wait --max-wait 600 --no-add-all
 
       - name: Publish praisonai wrapper to PyPI
-        if: inputs.dry_run != true && inputs.skip_wrapper != true
+        if: >-
+          inputs.dry_run != true &&
+          inputs.skip_wrapper != true &&
+          steps.pypi_exists.outputs.skip_wrapper != 'true'
         working-directory: src/praisonai
         run: uv publish
 
       - name: Wait for praisonai on PyPI
-        if: inputs.dry_run != true && inputs.skip_wrapper != true
+        if: >-
+          inputs.dry_run != true &&
+          inputs.skip_wrapper != true &&
+          steps.pypi_exists.outputs.skip_wrapper != 'true'
         run: |
           set -euo pipefail
           PACKAGE="praisonai"
