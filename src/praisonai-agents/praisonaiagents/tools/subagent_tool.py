@@ -6,6 +6,7 @@ enabling hierarchical task delegation and multi-agent coordination.
 """
 
 import logging
+import threading
 from praisonaiagents._logging import get_logger
 from typing import Any, Callable, Dict, List, Optional
 
@@ -35,8 +36,15 @@ def create_subagent_tool(
         Tool definition dictionary
     """
     
-    _current_depth = 0
-    
+    # Depth is tracked per-thread so that concurrent background subagents do
+    # not interfere with each other's depth budget. The parent depth is
+    # captured at call time and passed into ``_run_subagent`` so a background
+    # worker (running on a different thread) starts from the correct depth.
+    _depth_state = threading.local()
+
+    def _get_depth() -> int:
+        return getattr(_depth_state, "current_depth", 0)
+
     def _run_subagent(
         task: str,
         agent_name: Optional[str],
@@ -44,15 +52,19 @@ def create_subagent_tool(
         tools: Optional[List[str]],
         effective_llm: Optional[str],
         effective_permission_mode: Optional[str],
+        parent_depth: int = 0,
     ) -> Dict[str, Any]:
         """Execute the subagent synchronously and return the result dict.
 
         Depth tracking is handled here so that background jobs honour the
-        same ``max_depth`` scoping as synchronous calls.
+        same ``max_depth`` scoping as synchronous calls. ``parent_depth`` is
+        the depth captured by the caller; it is restored on this thread for
+        the duration of the execution so nested subagents see the correct
+        value even when running off the main thread.
         """
-        nonlocal _current_depth
+        previous_depth = _get_depth()
         try:
-            _current_depth += 1
+            _depth_state.current_depth = parent_depth + 1
 
             # If we have an agent factory, use it
             if agent_factory:
@@ -97,7 +109,7 @@ def create_subagent_tool(
                 "output": None,
             }
         finally:
-            _current_depth -= 1
+            _depth_state.current_depth = previous_depth
 
     def spawn_subagent(
         task: str,
@@ -127,8 +139,9 @@ def create_subagent_tool(
             ``{"success": True, "job_id": ..., "status": "running"}`` handle
             is returned instead; use ``subagent_result(job_id)`` to collect.
         """
-        # Check depth limit
-        if _current_depth >= max_depth:
+        # Check depth limit (per-thread; captured for background workers below)
+        parent_depth = _get_depth()
+        if parent_depth >= max_depth:
             return {
                 "success": False,
                 "error": f"Maximum subagent depth ({max_depth}) exceeded",
@@ -165,6 +178,7 @@ def create_subagent_tool(
                     tools=tools,
                     effective_llm=effective_llm,
                     effective_permission_mode=effective_permission_mode,
+                    parent_depth=parent_depth,
                 )
 
             job_id = job_manager.start_job(_job)
@@ -185,6 +199,7 @@ def create_subagent_tool(
             tools=tools,
             effective_llm=effective_llm,
             effective_permission_mode=effective_permission_mode,
+            parent_depth=parent_depth,
         )
 
     def subagent_result(job_id: str, wait: bool = False) -> Dict[str, Any]:
@@ -209,7 +224,24 @@ def create_subagent_tool(
         job_manager = get_job_manager()
         try:
             if wait:
-                result = job_manager.get_result(job_id)
+                try:
+                    result = job_manager.get_result(job_id)
+                except KeyError:
+                    return {
+                        "success": False,
+                        "job_id": job_id,
+                        "error": f"Job '{job_id}' not found",
+                    }
+                except Exception as e:
+                    # The worker failed or was cancelled. Surface the same
+                    # clean failure shape the non-blocking path returns
+                    # instead of re-raising to the caller.
+                    return {
+                        "success": False,
+                        "job_id": job_id,
+                        "status": JobStatus.FAILED.value,
+                        "error": str(e),
+                    }
                 return {
                     "success": True,
                     "job_id": job_id,

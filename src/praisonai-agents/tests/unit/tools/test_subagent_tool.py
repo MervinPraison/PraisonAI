@@ -197,6 +197,31 @@ class TestSubagentTool:
         assert result["success"] is False
         assert "not found" in result["error"]
 
+    def test_subagent_background_failed_job_wait(self):
+        """A failed background job returns a clean failure via wait=True (not a raise)."""
+        class ExplodingAgent:
+            def __init__(self, name, tools=None, llm=None):
+                pass
+
+            def chat(self, prompt):
+                raise RuntimeError("boom")
+
+        tool = create_subagent_tool(
+            agent_factory=lambda **kwargs: ExplodingAgent(**kwargs)
+        )
+        spawn = tool["function"]
+        collect = tool["result_tool"]["function"]
+
+        handle = spawn(task="will fail", background=True)
+        # _run_subagent catches the chat error and returns success=False, so
+        # the job itself completes; the inner result reflects the failure.
+        final = collect(handle["job_id"], wait=True)
+
+        assert final["success"] is True
+        assert final["status"] == "completed"
+        assert final["result"]["success"] is False
+        assert "boom" in final["result"]["error"]
+
     def test_subagent_background_preserves_scoping(self):
         """Background subagents honour permission_mode/tools/llm scoping."""
         captured = {}
