@@ -923,19 +923,56 @@ Respond with ONLY a valid JSON tool call in this format:
         self._cached_subscription_creds = provider.refresh()
         return self._cached_subscription_creds
 
-    def _handle_retry_exception(self, e, attempt, kwargs):
-        """Decide retry vs raise from a failover decision. No I/O, no sleep.
+    def _should_attempt_auth_refresh(self, e, attempt):
+        """Whether an auth-credential refresh should be attempted this attempt.
 
-        Shared, side-effect-free (no sleeping/awaiting) decision logic used by
-        both the sync (`_call_with_retry`) and async (`_call_with_retry_async`)
-        retry loops. Performs failover bookkeeping (auth-refresh, profile
-        rotation, legacy failover kwargs update) but never sleeps or awaits, so
-        it is identical for both paths.
+        Side-effect-free predicate shared by the sync and async retry loops so
+        the async loop can decide to offload the blocking refresh to a thread.
+        Re-uses the (I/O-free) failover classification; the resulting decision
+        is recomputed identically inside `_handle_retry_exception`.
+        """
+        if not (self._auth_provider_id and attempt == 0):
+            return False
+        decision = self.resolve_failover_decision(
+            e, {"attempt": attempt + 1, "max_retries": self._max_retries}
+        )
+        return decision.reason == "auth"
+
+    def _try_refresh_subscription_creds(self):
+        """Attempt a credential refresh, keeping failures non-fatal.
+
+        Wraps `_refresh_subscription_creds` so refresh errors never abort the
+        retry/failover flow. Returns the refreshed credentials or ``None``. This
+        is the blocking (network) step; the async loop runs it off the event
+        loop via ``asyncio.to_thread``.
+        """
+        try:
+            logging.info("Authentication error detected - attempting credential refresh")
+            return self._refresh_subscription_creds()
+        except Exception as refresh_error:  # noqa: BLE001 - refresh failures must stay non-fatal so retry/failover can continue
+            logging.warning(f"Failed to refresh subscription credentials: {refresh_error}")
+            return None
+
+    def _handle_retry_exception(self, e, attempt, kwargs, refreshed_creds=None):
+        """Decide retry vs raise from a failover decision. No sleep/await.
+
+        Shared decision logic used by both the sync (`_call_with_retry`) and
+        async (`_call_with_retry_async`) retry loops. Performs failover
+        bookkeeping (profile rotation, legacy failover kwargs update) but never
+        sleeps or awaits, so it is identical for both paths.
+
+        The blocking credential refresh itself is performed by the caller: the
+        sync loop calls `_try_refresh_subscription_creds()` inline, while the
+        async loop offloads it to a thread via ``asyncio.to_thread`` so it never
+        blocks the event loop. The already-refreshed credentials (if any) are
+        passed in via ``refreshed_creds``.
 
         Args:
             e: The exception raised by the wrapped call.
             attempt: Zero-based attempt index for the current iteration.
             kwargs: Keyword arguments for the wrapped call (may be updated).
+            refreshed_creds: Credentials already refreshed by the caller (off
+                the event loop for async), or ``None`` if no refresh was done.
 
         Returns:
             Tuple of (should_raise, category, retry_delay, error_str, kwargs):
@@ -955,22 +992,17 @@ Respond with ONLY a valid JSON tool call in this format:
         can_retry = decision.is_retryable
         retry_delay = decision.backoff_ms / 1000.0  # Convert ms to seconds
 
-        # Check for auth errors and try refreshing subscription credentials
+        # Apply refreshed subscription credentials (refresh I/O is done by the
+        # caller so the async loop can offload it off the event loop).
         refreshed_auth = False
-        if category == "auth" and self._auth_provider_id and attempt == 0:
-            try:
-                logging.info("Authentication error detected - attempting credential refresh")
-                refreshed_creds = self._refresh_subscription_creds()
-                if refreshed_creds:
-                    # Update parameters with refreshed credentials (don't clear cache)
-                    kwargs = self._build_completion_params(**kwargs)
-                    # Retry immediately with refreshed credentials
-                    can_retry = True
-                    retry_delay = 0.0
-                    refreshed_auth = True
-                    logging.info("Subscription credentials refreshed, retrying...")
-            except Exception as refresh_error:  # noqa: BLE001 - refresh failures must stay non-fatal so retry/failover can continue
-                logging.warning(f"Failed to refresh subscription credentials: {refresh_error}")
+        if category == "auth" and self._auth_provider_id and attempt == 0 and refreshed_creds:
+            # Update parameters with refreshed credentials (don't clear cache)
+            kwargs = self._build_completion_params(**kwargs)
+            # Retry immediately with refreshed credentials
+            can_retry = True
+            retry_delay = 0.0
+            refreshed_auth = True
+            logging.info("Subscription credentials refreshed, retrying...")
 
         # A successful credential refresh fully resolves the auth error: retry
         # immediately with fresh credentials and skip profile rotation so we
@@ -1062,8 +1094,13 @@ Respond with ONLY a valid JSON tool call in this format:
             except Exception as e:
                 last_error = e
 
+                # Blocking credential refresh runs inline in the sync path.
+                refreshed_creds = None
+                if self._should_attempt_auth_refresh(e, attempt):
+                    refreshed_creds = self._try_refresh_subscription_creds()
+
                 should_raise, category, retry_delay, error_str, kwargs = (
-                    self._handle_retry_exception(e, attempt, kwargs)
+                    self._handle_retry_exception(e, attempt, kwargs, refreshed_creds=refreshed_creds)
                 )
 
                 if should_raise:
@@ -1133,8 +1170,16 @@ Respond with ONLY a valid JSON tool call in this format:
             except Exception as e:
                 last_error = e
 
+                # Offload the blocking credential refresh to a thread so it
+                # never blocks the event loop in the async path.
+                refreshed_creds = None
+                if self._should_attempt_auth_refresh(e, attempt):
+                    refreshed_creds = await asyncio.to_thread(
+                        self._try_refresh_subscription_creds
+                    )
+
                 should_raise, category, retry_delay, error_str, kwargs = (
-                    self._handle_retry_exception(e, attempt, kwargs)
+                    self._handle_retry_exception(e, attempt, kwargs, refreshed_creds=refreshed_creds)
                 )
 
                 if should_raise:
