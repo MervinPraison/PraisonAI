@@ -129,8 +129,15 @@ class MessageHookMixin:
         self._last_inbound_activity = time.time()
 
     def _active_run_count(self) -> int:
-        """Best-effort count of in-flight agent turns for this adapter."""
+        """Best-effort count of in-flight agent turns for this adapter.
+
+        Resolves the session from ``_session`` or ``_session_mgr`` so adapters
+        that name the attribute differently (e.g. WhatsApp/Linear use
+        ``_session_mgr``) all report active runs DRY-ly.
+        """
         session = getattr(self, '_session', None)
+        if session is None:
+            session = getattr(self, '_session_mgr', None)
         if session is None:
             return 0
         getter = getattr(session, 'get_active_runs', None)

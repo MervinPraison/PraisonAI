@@ -358,6 +358,11 @@ class LinearBot(ChatCommandMixin, MessageHookMixin):
 
     async def _handle_agent_message(self, message: BotMessage) -> None:
         """Process message with the agent."""
+        # Passive inbound liveness: Linear routes webhook events straight to the
+        # session manager rather than through fire_message_received, so refresh
+        # the inbound timestamp here to keep the health monitor's stale-socket
+        # signal accurate for this adapter.
+        self._note_inbound()
         if not self._agent:
             logger.warning("No agent configured")
             return
