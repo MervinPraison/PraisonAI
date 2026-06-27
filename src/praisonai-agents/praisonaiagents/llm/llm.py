@@ -1146,10 +1146,13 @@ Respond with ONLY a valid JSON tool call in this format:
                         f"waiting {retry_delay:.1f}s before retry..."
                     )
 
-                    # P5: Emit retry callback for CLI visibility
+                    # P5: Emit retry callback for CLI visibility.
+                    # Use the async dispatcher so a sync callback runs in a
+                    # thread executor (never blocking the event loop) and any
+                    # async-registered 'retry' callback is also awaited.
                     try:
-                        from ..main import execute_sync_callback
-                        execute_sync_callback('retry',
+                        from ..main import execute_callback
+                        await execute_callback('retry',
                             attempt=attempt + 1,
                             max_attempts=self._max_retries + 1,
                             error=error_str[:200],
