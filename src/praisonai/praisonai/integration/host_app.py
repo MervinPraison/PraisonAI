@@ -147,12 +147,18 @@ def configure_host(
             if agents:
                 set_provider(PraisonAIProvider(agents=list(agents), **kwargs))
             else:
-                # Load context files if specified
+                # Load context files. When explicit paths are given, load those;
+                # otherwise auto-discover AGENTS.md-style project context by
+                # walking up to the project root (unless opted out).
                 instructions = kwargs.pop("instructions", "You are a helpful assistant.")
-                if context_paths:
+                no_context = kwargs.pop("no_context", False)
+                if not no_context:
                     try:
                         from praisonai.integration.context_files import load_context_files
-                        context = load_context_files(list(context_paths))
+                        if context_paths:
+                            context = load_context_files(list(context_paths))
+                        else:
+                            context = load_context_files(walk_up=True)
                         if context:
                             instructions = f"{instructions}\n\nContext:\n{context}"
                     except ImportError:

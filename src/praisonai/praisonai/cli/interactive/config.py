@@ -49,6 +49,10 @@ class InteractiveConfig:
     # Autonomy configuration (agent-centric)
     autonomy: bool = True  # Enable autonomy by default for complex tasks
     autonomy_config: Optional[dict] = None  # Custom autonomy config
+
+    # Project context (AGENTS.md-style) auto-loading
+    no_context: bool = False  # Opt out of auto-loading project context files
+    context_token_budget: int = 8000  # Max chars of project context to inject
     
     # Approval mode - default to "auto" for full privileges in interactive mode
     # Use "prompt" for safer mode that asks before each action
@@ -75,6 +79,7 @@ class InteractiveConfig:
             verbose=os.environ.get("PRAISON_VERBOSE", "").lower() == "true",
             memory=os.environ.get("PRAISON_MEMORY", "").lower() == "true",
             autonomy=os.environ.get("PRAISON_AUTONOMY", "true").lower() != "false",
+            no_context=os.environ.get("PRAISON_NO_CONTEXT", "").lower() == "true",
         )
     
     @classmethod
@@ -93,6 +98,7 @@ class InteractiveConfig:
             share=getattr(args, "share", False),
             variant=getattr(args, "variant", None),
             autonomy=getattr(args, "autonomy", True),
+            no_context=getattr(args, "no_context", False),
         )
     
     def merge(self, other: "InteractiveConfig") -> "InteractiveConfig":

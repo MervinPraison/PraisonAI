@@ -1003,6 +1003,7 @@ class PraisonAI:
         parser.add_argument("--no-tools", action="store_true", help="Disable default built-in tools (for models that don't support tool calling)")
         parser.add_argument("--no-acp", action="store_true", help="Disable ACP tools (agentic file operations with plan/approve/apply)")
         parser.add_argument("--no-lsp", action="store_true", help="Disable LSP tools (code intelligence: symbols, definitions, references)")
+        parser.add_argument("--no-context", action="store_true", help="Disable auto-loading of project context files (AGENTS.md/CLAUDE.md) into the system prompt")
         parser.add_argument("--save", "-s", action="store_true", help="Save research output to file (output/research/)")
         parser.add_argument("-v", "--verbose", action="count", default=0,
                           help="Increase verbosity (-v=verbose, -vv=debug)")
