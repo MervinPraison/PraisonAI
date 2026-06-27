@@ -201,9 +201,17 @@ def chat_main(
     
     # Use the async TUI (non-blocking, scrollable output)
     from praisonai.cli.interactive.async_tui import AsyncTUI, AsyncTUIConfig
-    
+
+    # Resolve a provider-aware default when no model was given:
+    # explicit --model > most-recently-used > provider credentials present.
+    try:
+        from praisonai.cli.configuration.model_resolver import resolve_default_model
+        resolved_model = resolve_default_model(model)
+    except Exception:
+        resolved_model = model or "gpt-4o-mini"
+
     tui_config = AsyncTUIConfig(
-        model=model or "gpt-4o-mini",
+        model=resolved_model,
         show_logo=not compact,
         show_status_bar=not compact,
         session_id=session_id,
