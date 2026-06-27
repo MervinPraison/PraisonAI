@@ -5939,6 +5939,13 @@ Now, {final_instruction.lower()}:"""
             
             console = Console()
             
+            # Persist the caller's args (e.g. from `praisonai code`) so the
+            # agent-creation path can read the named-agent profile, approval
+            # config, and reasoning effort via self.args. Without this the
+            # --agent/--thinking flags resolved in code.py are silently dropped.
+            if args is not None:
+                self.args = args
+            
             # Set interactive mode flag
             self._interactive_mode = True
             
@@ -6845,6 +6852,12 @@ Provide a concise summary (max 200 words):"""
         from rich.console import Console
         
         console = Console()
+        # Persist the caller's args (e.g. from `praisonai code`) so the
+        # agent-creation path can read the named-agent profile, approval config,
+        # and reasoning effort via self.args. Without this the --agent/--thinking
+        # flags resolved in code.py are silently dropped.
+        if args is not None:
+            self.args = args
         self._interactive_mode = True  # Use interactive mode settings
         
         # Load tools
