@@ -956,6 +956,7 @@ Respond with ONLY a valid JSON tool call in this format:
         retry_delay = decision.backoff_ms / 1000.0  # Convert ms to seconds
 
         # Check for auth errors and try refreshing subscription credentials
+        refreshed_auth = False
         if category == "auth" and self._auth_provider_id and attempt == 0:
             try:
                 logging.info("Authentication error detected - attempting credential refresh")
@@ -966,9 +967,16 @@ Respond with ONLY a valid JSON tool call in this format:
                     # Retry immediately with refreshed credentials
                     can_retry = True
                     retry_delay = 0.0
+                    refreshed_auth = True
                     logging.info("Subscription credentials refreshed, retrying...")
-            except Exception as refresh_error:
+            except Exception as refresh_error:  # noqa: BLE001 - refresh failures must stay non-fatal so retry/failover can continue
                 logging.warning(f"Failed to refresh subscription credentials: {refresh_error}")
+
+        # A successful credential refresh fully resolves the auth error: retry
+        # immediately with fresh credentials and skip profile rotation so we
+        # neither mark the current profile failed nor overwrite the new creds.
+        if refreshed_auth:
+            return False, category, retry_delay, error_str, kwargs
 
         # Handle different failover decision actions
         if decision.action == "rotate_profile" and self._failover_manager:
@@ -989,6 +997,10 @@ Respond with ONLY a valid JSON tool call in this format:
                 if "model" in kwargs:
                     kwargs["model"] = self.model
                 logging.info(f"Failover: switched to profile '{next_profile.name}'")
+            else:
+                # No alternate profile available - retrying would just hit the
+                # same failing profile, so surface the error instead.
+                can_retry = False
         # Legacy failover for compatibility (when decision is retry but failover is configured)
         elif self._failover_manager and self._current_profile and decision.action == "retry":
             is_rate_limit = (category == "rate_limit")
