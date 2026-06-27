@@ -7,7 +7,6 @@ const CLAUDE_TRIGGER_LOGINS = ['MervinPraison', 'github-actions[bot]'];
 const AUTO_ACTORS = CLAUDE_TRIGGER_LOGINS;
 const CONFLICT_COOLDOWN_MS = 12 * 60 * 60 * 1000;
 const CLAUDE_ACTIVE_MS = 35 * 60 * 1000;
-const POST_PUSH_BUFFER_MS = 5 * 60 * 1000;
 const ALLOWED_MERGE_STATES = new Set(['CLEAN', 'UNSTABLE']);
 const AGENT_PY_MAX_AUTO_LINES = 100;
 const PR_MAX_AUTO_ADDITIONS = 800;
@@ -611,8 +610,8 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
     reasons.push('claude.yml in progress');
   }
 
-  const headTime = new Date(ctx.headPushedAt).getTime();
-  if (Date.now() - headTime < POST_PUSH_BUFFER_MS) reasons.push('post-push buffer (<5min)');
+  const checksOk = await allChecksGreenOnSha(github, owner, repo, ctx.headSha, core);
+  if (!checksOk) reasons.push('CI not green on HEAD');
 
   if (!finalClaudeCompletedOnSha(ctx.comments, ctx.headPushedAt)) {
     if (!hasFinalClaudeReviewTrigger(ctx.comments)) {
@@ -646,9 +645,6 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
 
   const sdkCheckReason = await sdkTestChecksReason(github, owner, repo, ctx.headSha, pullFiles, core);
   if (sdkCheckReason) reasons.push(sdkCheckReason);
-
-  const checksOk = await allChecksGreenOnSha(github, owner, repo, ctx.headSha, core);
-  if (!checksOk) reasons.push('CI not green on HEAD');
 
   if (ctx.pr.mergeable === false) reasons.push('not mergeable');
 
