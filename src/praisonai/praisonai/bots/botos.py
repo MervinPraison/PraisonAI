@@ -78,10 +78,20 @@ class BotOS:
         health_monitor: Optional[HealthMonitorConfig] = None,
         enable_supervision: bool = True,
         idle_policy: Optional[Any] = None,
+        drain_timeout: Optional[float] = None,
     ):
         self._bots: Dict[str, Bot] = {}
         self._is_running = False
         self._config = config
+        # Issue #2375: opt-in graceful drain on shutdown. Default off —
+        # when None/0 the gateway behaves exactly as before (in-flight
+        # agent turns are cancelled immediately on stop()).
+        self._drain_timeout: Optional[float] = drain_timeout
+        # Whether ingress should keep dispatching new turns. Flipped to
+        # False at the start of a drain so current turns finish but no
+        # new ones begin.
+        self._accepting: bool = True
+        self._is_draining: bool = False
         # Issue #2332: opt-in idle-dormancy / scale-to-zero. Default off —
         # when None the gateway behaves exactly as before (always-on).
         self._idle_policy = idle_policy
@@ -676,10 +686,108 @@ class BotOS:
         """
         return await self._delivery_router.deliver(target, text, origin)
 
-    async def stop(self) -> None:
-        """Gracefully stop all running bots."""
+    @property
+    def is_draining(self) -> bool:
+        """Whether a graceful drain is currently in progress (#2375)."""
+        return self._is_draining
+
+    @property
+    def accepting(self) -> bool:
+        """Whether new inbound turns are still being dispatched (#2375).
+
+        Adapters/ingress may consult this to stop accepting new work once
+        a drain has begun, while letting in-flight turns finish.
+        """
+        return self._accepting
+
+    async def drain(self, timeout: Optional[float] = None) -> int:
+        """Stop accepting new inbound and wait for in-flight turns to finish.
+
+        Bounded, opt-in graceful-drain phase for planned shutdowns
+        (rolling deploy, auto-update, host restart). It (1) quiesces
+        ingress so no new turns start, (2) waits — up to ``timeout``
+        seconds — for ``running_turns`` to reach zero, and (3) flushes the
+        outbound queue when the delivery router supports it. It does *not*
+        tear anything down; callers (typically :meth:`stop`) perform the
+        teardown afterwards.
+
+        Args:
+            timeout: Maximum seconds to wait for in-flight turns. Falls
+                back to the construction-time ``drain_timeout``. A value of
+                ``0``/``None`` makes this a no-op (today's behaviour).
+
+        Returns:
+            The number of agent turns still running when the deadline hit
+            (``0`` when the drain completed cleanly).
+        """
+        timeout = self._drain_timeout if timeout is None else timeout
+        if not timeout or timeout <= 0:
+            return 0
+
+        self._is_draining = True
+        self._accepting = False
+        logger.info("BotOS: draining (graceful shutdown, timeout=%.0fs)", timeout)
+
+        from praisonaiagents.gateway.protocols import DrainTimeoutPolicy
+
+        policy = DrainTimeoutPolicy(drain_timeout_seconds=timeout)
+        start = time.monotonic()
+        running, _ = self._probe_activity()
+        decision = policy.should_keep_draining(
+            running_turns=running, seconds_elapsed=0.0
+        )
+        while decision.keep_draining:
+            await asyncio.sleep(0.5)
+            running, _ = self._probe_activity()
+            decision = policy.should_keep_draining(
+                running_turns=running,
+                seconds_elapsed=time.monotonic() - start,
+            )
+
+        # Flush any completed-but-undelivered replies before teardown.
+        flush = getattr(self._delivery_router, "flush", None)
+        if callable(flush):
+            try:
+                result = flush()
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception as e:
+                logger.warning("BotOS: outbox flush during drain failed: %s", e)
+
+        running, _ = self._probe_activity()
+        abandoned = max(0, running)
+        if abandoned:
+            logger.warning(
+                "BotOS: drain timeout — %d turn(s) abandoned: %s",
+                abandoned,
+                decision.reason,
+            )
+        else:
+            logger.info("BotOS: drain complete — no turns in flight")
+        return abandoned
+
+    async def stop(self, drain_timeout: Optional[float] = None) -> None:
+        """Gracefully stop all running bots.
+
+        Args:
+            drain_timeout: Optional override for the graceful-drain phase
+                (#2375). When set (or when the instance was constructed
+                with a ``drain_timeout``), shutdown first quiesces ingress
+                and waits for in-flight agent turns to finish before
+                cancelling tasks. ``0``/``None`` preserves today's
+                immediate-cancel behaviour.
+        """
         if not self._is_running:
             return
+
+        # Graceful drain phase (opt-in): let in-flight turns finish before
+        # we cancel tasks below. No-op when no drain timeout is configured.
+        effective_drain = self._drain_timeout if drain_timeout is None else drain_timeout
+        if effective_drain and effective_drain > 0:
+            try:
+                await self.drain(effective_drain)
+            except Exception as e:
+                logger.warning("BotOS: drain phase error (continuing teardown): %s", e)
 
         logger.info("BotOS stopping all bots...")
 
@@ -865,7 +973,18 @@ class BotOS:
         supervision_cfg = raw.get("supervision") or {}
         enable_supervision = supervision_cfg.get("enabled", True)
 
-        return cls(bots=bots, health_monitor=health_monitor, enable_supervision=enable_supervision)
+        # Issue #2375: graceful-drain timeout. Accept either a top-level
+        # ``drain_timeout`` or ``gateway.drain_timeout`` (seconds; 0/None
+        # disables). Default off — preserves today's behaviour.
+        gateway_cfg = raw.get("gateway") or {}
+        drain_timeout = raw.get("drain_timeout", gateway_cfg.get("drain_timeout"))
+
+        return cls(
+            bots=bots,
+            health_monitor=health_monitor,
+            enable_supervision=enable_supervision,
+            drain_timeout=drain_timeout,
+        )
 
     async def health(self) -> Dict[str, HealthResult]:
         """Get health status of all bots.

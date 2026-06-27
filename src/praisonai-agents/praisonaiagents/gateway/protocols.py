@@ -2032,6 +2032,108 @@ GatewayIdlePolicy = GatewayIdlePolicyProtocol
 
 
 # ---------------------------------------------------------------------------
+# Gateway graceful-drain on shutdown (Issue #2375)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class DrainDecision:
+    """Result of a drain-wait evaluation.
+
+    Attributes:
+        keep_draining: Whether to keep waiting for in-flight turns.
+        reason: Optional human-readable explanation (logged at drain end).
+    """
+
+    keep_draining: bool
+    reason: str = ""
+
+
+@runtime_checkable
+class GatewayDrainPolicyProtocol(Protocol):
+    """Protocol for graceful-drain decisions on gateway shutdown.
+
+    Pure, import-free decision contract consumed by the wrapper's
+    ``BotOS`` shutdown path. On ``SIGTERM``/``SIGINT`` (rolling deploy,
+    auto-update, host restart) the wrapper stops accepting new inbound
+    and then repeatedly asks this policy whether to keep waiting for
+    in-flight agent turns to finish, up to a bounded deadline. The
+    wrapper supplies live facts (running turns, seconds elapsed); the
+    policy decides whether the drain should continue. Concrete teardown
+    (cancel tasks, stop transports, flush outbox) lives in the wrapper;
+    this contract keeps the *wait condition* testable in isolation.
+
+    A config-driven default (:class:`DrainTimeoutPolicy`) is provided for
+    the common "wait for in-flight turns up to N seconds" case.
+    """
+
+    def should_keep_draining(
+        self,
+        *,
+        running_turns: int,
+        seconds_elapsed: float,
+    ) -> DrainDecision:
+        """Return a :class:`DrainDecision` for the supplied facts."""
+        ...
+
+
+class DrainTimeoutPolicy:
+    """Config-driven graceful-drain policy for safe shutdown.
+
+    The default referenced by ``drain_timeout`` in ``gateway.yaml`` and
+    the ``BotOS(..., drain_timeout=...)`` Python surface. It is
+    intentionally minimal and dependency-free so the decision lives in
+    core and is provable in isolation; the wrapper owns the side effects
+    (quiesce ingress, wait, flush outbox, then tear down).
+
+    Drain continues while *both* guards hold:
+
+    * at least one agent turn is still in flight (``running_turns > 0``),
+    * the elapsed wait is still within ``drain_timeout_seconds``.
+
+    A ``drain_timeout_seconds`` of ``0`` disables draining entirely
+    (today's behaviour: in-flight turns are cancelled immediately).
+
+    Example::
+
+        DrainTimeoutPolicy(drain_timeout_seconds=30)
+    """
+
+    def __init__(self, drain_timeout_seconds: float = 30.0):
+        if drain_timeout_seconds < 0:
+            raise ValueError(
+                f"drain_timeout_seconds must be >= 0, got {drain_timeout_seconds!r}"
+            )
+        self.drain_timeout_seconds = float(drain_timeout_seconds)
+
+    def should_keep_draining(
+        self,
+        *,
+        running_turns: int,
+        seconds_elapsed: float,
+    ) -> DrainDecision:
+        if self.drain_timeout_seconds <= 0:
+            return DrainDecision(keep_draining=False, reason="drain disabled")
+        if running_turns <= 0:
+            return DrainDecision(
+                keep_draining=False,
+                reason="no agent turns in flight",
+            )
+        if seconds_elapsed >= self.drain_timeout_seconds:
+            return DrainDecision(
+                keep_draining=False,
+                reason=(
+                    f"drain timeout: {running_turns} turn(s) still in flight "
+                    f"after {seconds_elapsed:.0f}s"
+                ),
+            )
+        return DrainDecision(
+            keep_draining=True,
+            reason=f"{running_turns} turn(s) in flight; draining",
+        )
+
+
+# ---------------------------------------------------------------------------
 # Protocol Version Negotiation (Issue #2130)
 # ---------------------------------------------------------------------------
 
