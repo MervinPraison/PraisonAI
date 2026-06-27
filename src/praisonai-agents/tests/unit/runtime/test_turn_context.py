@@ -10,7 +10,7 @@ import pytest
 from typing import List, Dict, Any
 from unittest.mock import Mock, patch
 
-from .turn_context import (
+from praisonaiagents.runtime.turn_context import (
     PreparedTurnContext,
     ModelReference,
     ToolSchema, 
@@ -23,7 +23,7 @@ from .turn_context import (
     create_default_delivery,
     create_session_correlation,
 )
-from .context_builder import DefaultTurnContextBuilder
+from praisonaiagents.runtime.context_builder import DefaultTurnContextBuilder
 
 
 class MockAgent:

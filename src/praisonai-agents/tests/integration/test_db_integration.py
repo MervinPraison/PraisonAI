@@ -28,12 +28,8 @@ def test_lazy_import_no_heavy_deps():
     heavy_libs = ['psycopg2', 'pymysql', 'redis']  # DB-specific libs
     loaded_heavy = [lib for lib in heavy_libs if lib in sys.modules]
     
-    if loaded_heavy:
-        print(f"  ❌ Heavy DB libs loaded by db module: {loaded_heavy}")
-        return False
-    
+    assert not loaded_heavy, f"Heavy DB libs loaded by db module: {loaded_heavy}"
     print("  ✅ No heavy DB libs loaded by praisonaiagents.db module")
-    return True
 
 
 def test_agent_accepts_db_parameter():
@@ -46,16 +42,9 @@ def test_agent_accepts_db_parameter():
     sig = inspect.signature(Agent.__init__)
     params = list(sig.parameters.keys())
     
-    if 'db' not in params:
-        print("  ❌ Agent does not accept 'db' parameter")
-        return False
-    
-    if 'session_id' not in params:
-        print("  ❌ Agent does not accept 'session_id' parameter")
-        return False
-    
+    assert 'db' in params, "Agent does not accept 'db' parameter"
+    assert 'session_id' in params, "Agent does not accept 'session_id' parameter"
     print("  ✅ Agent accepts db and session_id parameters")
-    return True
 
 
 class MockDbAdapter:
@@ -102,16 +91,9 @@ def test_db_hook_lifecycle():
     )
     
     # Verify db is stored
-    if agent._db is not mock_db:
-        print("  ❌ Agent did not store db adapter")
-        return False
-    
-    if agent._session_id != "test-session-001":
-        print("  ❌ Agent did not store session_id")
-        return False
-    
+    assert agent._db is mock_db, "Agent did not store db adapter"
+    assert agent._session_id == "test-session-001", "Agent did not store session_id"
     print("  ✅ Agent stores db and session_id correctly")
-    return True
 
 
 def test_db_none_unchanged_behavior():
@@ -127,19 +109,13 @@ def test_db_none_unchanged_behavior():
     )
     
     # Verify db is None
-    if agent._db is not None:
-        print("  ❌ Agent._db should be None when not provided")
-        return False
+    assert agent._db is None, "Agent._db should be None when not provided"
     
     # Verify _init_db_session does nothing when db is None
     agent._init_db_session()
     
-    if agent._db_initialized:
-        print("  ❌ _db_initialized should remain False when db is None")
-        return False
-    
+    assert not agent._db_initialized, "_db_initialized should remain False when db is None"
     print("  ✅ db=None behavior unchanged")
-    return True
 
 
 def test_session_id_auto_generation():
@@ -160,16 +136,11 @@ def test_session_id_auto_generation():
     # Trigger db initialization
     agent._init_db_session()
     
-    if agent._session_id is None:
-        print("  ❌ session_id should be auto-generated")
-        return False
-    
-    if not agent._session_id.startswith("session-"):
-        print(f"  ❌ session_id format unexpected: {agent._session_id}")
-        return False
-    
+    assert agent._session_id is not None, "session_id should be auto-generated"
+    assert agent._session_id.startswith("session-"), (
+        f"session_id format unexpected: {agent._session_id}"
+    )
     print(f"  ✅ session_id auto-generated: {agent._session_id}")
-    return True
 
 
 def test_protocol_compliance():
@@ -180,9 +151,7 @@ def test_protocol_compliance():
     
     # Check DbMessage fields
     msg = DbMessage(role="user", content="test")
-    if msg.role != "user" or msg.content != "test":
-        print("  ❌ DbMessage fields not working")
-        return False
+    assert msg.role == "user" and msg.content == "test", "DbMessage fields not working"
     
     # Check protocol methods
     required_methods = [
@@ -196,17 +165,11 @@ def test_protocol_compliance():
     
     mock = MockDbAdapter()
     for method in required_methods:
-        if not hasattr(mock, method):
-            print(f"  ❌ MockDbAdapter missing {method}")
-            return False
+        assert hasattr(mock, method), f"MockDbAdapter missing {method}"
     
     # Check protocol isinstance
-    if not isinstance(mock, DbAdapter):
-        print("  ❌ MockDbAdapter should implement DbAdapter protocol")
-        return False
-    
+    assert isinstance(mock, DbAdapter), "MockDbAdapter should implement DbAdapter protocol"
     print("  ✅ DbAdapter protocol properly defined")
-    return True
 
 
 def run_all_tests():
@@ -215,14 +178,23 @@ def run_all_tests():
     print("PraisonAI Agents DB Integration - TDD Tests")
     print("=" * 60)
     
+    tests = [
+        ("Lazy Import", test_lazy_import_no_heavy_deps),
+        ("Agent db Parameter", test_agent_accepts_db_parameter),
+        ("DB Hook Lifecycle", test_db_hook_lifecycle),
+        ("db=None Unchanged", test_db_none_unchanged_behavior),
+        ("Session ID Auto-Gen", test_session_id_auto_generation),
+        ("Protocol Compliance", test_protocol_compliance),
+    ]
+
     results = []
-    
-    results.append(("Lazy Import", test_lazy_import_no_heavy_deps()))
-    results.append(("Agent db Parameter", test_agent_accepts_db_parameter()))
-    results.append(("DB Hook Lifecycle", test_db_hook_lifecycle()))
-    results.append(("db=None Unchanged", test_db_none_unchanged_behavior()))
-    results.append(("Session ID Auto-Gen", test_session_id_auto_generation()))
-    results.append(("Protocol Compliance", test_protocol_compliance()))
+    for name, test_fn in tests:
+        try:
+            test_fn()
+            results.append((name, True))
+        except AssertionError as exc:
+            print(f"  ❌ {name}: {exc}")
+            results.append((name, False))
     
     print("\n" + "=" * 60)
     passed = sum(1 for _, r in results if r)

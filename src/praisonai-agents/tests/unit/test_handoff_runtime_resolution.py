@@ -10,7 +10,7 @@ import time
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 import asyncio
 
-from .handoff import Handoff, HandoffConfig, ContextPolicy, HandoffResult
+from praisonaiagents.agent.handoff import Handoff, HandoffConfig, ContextPolicy, HandoffResult
 
 
 class MockAgent:
