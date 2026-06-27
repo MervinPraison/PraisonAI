@@ -107,8 +107,8 @@ def is_path_like(value: str) -> bool:
     if not isinstance(value, str):
         return False
     
-    # Check for path indicators
-    if value.startswith(("./", "../", "/", "~/", ".\\", "..\\", "\\\\")):
+    # Check for path indicators (POSIX and Windows-style prefixes)
+    if value.startswith(("./", "../", "/", "~/", ".\\", "..\\", "\\\\", "\\", "~\\")):
         return True
 
     # Check for Windows drive paths like C:\data or C:/data
@@ -119,9 +119,14 @@ def is_path_like(value: str) -> bool:
         and value[2] in ("\\", "/")
     ):
         return True
-    
+
     # Check for directory indicator
     if value.endswith(("/", "\\")):
+        return True
+
+    # Check for embedded backslash separators (relative Windows path like "knowledge\docs").
+    # Backslash is not valid in normal config string values, so it is a strong path signal.
+    if "\\" in value:
         return True
     
     # Check for file extension (common ones)

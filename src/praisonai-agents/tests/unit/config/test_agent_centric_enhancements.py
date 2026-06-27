@@ -347,6 +347,16 @@ class TestKnowledgePresets:
         )
         assert isinstance(result, MockKnowledgeConfig)
         assert result.sources == ["C:\\knowledge"]
+
+        for windows_path in ("\\knowledge", "~\\knowledge", "knowledge\\docs"):
+            result = resolve(
+                value=windows_path,
+                param_name="knowledge",
+                config_class=MockKnowledgeConfig,
+                string_mode="path_as_source",
+            )
+            assert isinstance(result, MockKnowledgeConfig)
+            assert result.sources == [windows_path]
     
     def test_knowledge_array_sources(self):
         """Array of paths should be sources list."""
