@@ -56,6 +56,9 @@ from .protocols import (
     DrainDecision,
     GatewayDrainPolicyProtocol,
     DrainTimeoutPolicy,
+    # Port-less, restart-safe external drain trigger (Issue #2390)
+    current_epoch,
+    DrainMarkerPolicy,
     # Protocol version negotiation
     PROTOCOL_VERSION,
     MIN_PROTOCOL_VERSION,
@@ -169,6 +172,9 @@ __all__ = [
     "DrainDecision",
     "GatewayDrainPolicyProtocol",
     "DrainTimeoutPolicy",
+    # Port-less, restart-safe external drain trigger (Issue #2390)
+    "current_epoch",
+    "DrainMarkerPolicy",
     # Protocol version negotiation
     "PROTOCOL_VERSION",
     "MIN_PROTOCOL_VERSION",
