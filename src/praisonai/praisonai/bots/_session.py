@@ -120,6 +120,14 @@ class BotSessionManager:
         # Run timeout and active run tracking for cancellation support
         self._run_timeout = run_timeout
         self._active_runs: Dict[str, Any] = {}  # user_id -> InterruptController
+        # In-run progress liveness (Issue #2393): wall-clock timestamp of the
+        # most recent real run progress (run start, streamed token/draft edit,
+        # tool event). Channel health reads this via ``last_run_progress`` so a
+        # long, actively-progressing run keeps the channel BUSY instead of being
+        # restarted mid-run once its wall-clock crosses ``stuck_after``. A run
+        # that emits nothing for ``stuck_after`` leaves this frozen and is still
+        # correctly flagged STUCK.
+        self._last_run_progress: Optional[float] = None
         # Per-user model overrides set via the /model command. Applied per-turn
         # inside the agent lock in chat() and restored afterwards so a shared
         # Agent instance never leaks one user's model to another. Keyed by
@@ -869,7 +877,12 @@ class BotSessionManager:
                         storage_key = self._storage_key(user_id)
                         if controller:
                             self._active_runs[storage_key] = controller
-                        
+                        # In-run progress liveness (Issue #2393): mark progress
+                        # at run start so a fresh long run is never STUCK on a
+                        # stale inbound timestamp; streamed events refresh it
+                        # below while the turn executes.
+                        self.note_run_progress()
+
                         bridged_stream_callback = None
                         try:
                             # Choose streaming vs non-streaming path based on callback
@@ -879,6 +892,12 @@ class BotSessionManager:
                                 emitter = getattr(agent, "stream_emitter", None)
                                 if emitter is not None:
                                     def bridged_stream_callback(event):
+                                        # In-run progress liveness (Issue #2393):
+                                        # every streamed token/draft edit/tool
+                                        # event is real progress, so refresh the
+                                        # heartbeat to keep the channel BUSY for
+                                        # the full duration of a long stream.
+                                        self.note_run_progress()
                                         try:
                                             result = stream_callback(event)
                                             if asyncio.iscoroutine(result):
@@ -926,7 +945,24 @@ class BotSessionManager:
                                 import contextvars
                                 import inspect
                                 _ctx = contextvars.copy_context()
-                                
+
+                                # In-run progress liveness (Issue #2393): attach a
+                                # progress-only callback to the agent's event
+                                # emitter so internal tool/token events during a
+                                # non-streamed run still refresh the heartbeat,
+                                # keeping a long, actively-progressing run BUSY.
+                                # A genuinely-hung run emits nothing, leaving the
+                                # timestamp frozen so STUCK is still detectable.
+                                progress_emitter = getattr(agent, "stream_emitter", None)
+                                progress_callback = None
+                                if progress_emitter is not None and hasattr(progress_emitter, "add_callback"):
+                                    def progress_callback(_event):  # noqa: ANN001
+                                        self.note_run_progress()
+                                    try:
+                                        progress_emitter.add_callback(progress_callback)
+                                    except Exception:  # noqa: BLE001 — best-effort liveness
+                                        progress_callback = None
+
                                 # Create agent.chat call with cancel_token if supported
                                 # Use inspect.signature for safer parameter checking
                                 _chat_params = inspect.signature(agent.chat).parameters if hasattr(agent, 'chat') else {}
@@ -957,6 +993,12 @@ class BotSessionManager:
                                     if controller:
                                         controller.request("run timeout")
                                     raise BotRunTimeout(f"Agent run timed out after {self._run_timeout}s")
+                                finally:
+                                    if progress_emitter is not None and progress_callback is not None:
+                                        try:
+                                            progress_emitter.remove_callback(progress_callback)
+                                        except Exception:  # noqa: BLE001 — best-effort cleanup
+                                            pass
                             # Capture updated history before restoring caller's.
                             updated_history = agent.chat_history
                         except Exception as exc:
@@ -1366,6 +1408,27 @@ class BotSessionManager:
     def get_active_runs(self) -> List[str]:
         """Get list of user IDs with active runs."""
         return list(self._active_runs.keys())
+
+    def note_run_progress(self) -> None:
+        """Record in-run progress for channel-health liveness (Issue #2393).
+
+        Called when a run makes real progress (run start, a streamed
+        token/draft edit bridged through ``stream_callback``, or a tool event)
+        so the health monitor can tell an actively-progressing long run from a
+        genuinely-hung one. Best-effort and side-effect-free beyond the
+        timestamp; never raises.
+        """
+        self._last_run_progress = time.time()
+
+    def last_run_progress(self) -> Optional[float]:
+        """Return the most recent in-run progress timestamp (or ``None``).
+
+        Read by the bot adapter's health builder so the evaluator's busy branch
+        can use ``max(last_activity, last_run_progress)`` — keeping a streaming
+        or tool-calling run BUSY rather than mistaking its wall-clock for a
+        stuck socket.
+        """
+        return self._last_run_progress
 
     def _add_mirror_entry_sync(self, user_id: str, entry: dict) -> bool:
         """Thread-safe method to add a mirror entry to user's history.
