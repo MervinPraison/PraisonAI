@@ -241,8 +241,11 @@ class StreamEventEmitter:
         if self._collect_metrics and self._metrics:
             self._metrics.update_from_event(event)
         
-        # Call all sync callbacks
-        for callback in self._callbacks:
+        # Call all sync callbacks. Iterate over a snapshot so callbacks
+        # registered/removed concurrently (e.g. a run-progress probe added
+        # from the event loop while the agent emits from a worker thread)
+        # cannot corrupt iteration or raise "list changed size".
+        for callback in list(self._callbacks):
             try:
                 callback(event)
             except Exception as e:
@@ -259,8 +262,8 @@ class StreamEventEmitter:
         if self._collect_metrics and self._metrics:
             self._metrics.update_from_event(event)
         
-        # Call sync callbacks
-        for callback in self._callbacks:
+        # Call sync callbacks (snapshot — see emit() for rationale).
+        for callback in list(self._callbacks):
             try:
                 callback(event)
             except Exception as e:
@@ -268,7 +271,7 @@ class StreamEventEmitter:
                 logger.warning("Streaming sync callback failed in async context: %s", e, exc_info=True)
         
         # Call async callbacks
-        for callback in self._async_callbacks:
+        for callback in list(self._async_callbacks):
             try:
                 await callback(event)
             except Exception as e:
