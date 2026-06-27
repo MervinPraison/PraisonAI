@@ -928,15 +928,15 @@ Respond with ONLY a valid JSON tool call in this format:
 
         Side-effect-free predicate shared by the sync and async retry loops so
         the async loop can decide to offload the blocking refresh to a thread.
-        Re-uses the (I/O-free) failover classification; the resulting decision
-        is recomputed identically inside `_handle_retry_exception`.
+
+        Uses the pure ``classify_error_kind`` classifier directly rather than
+        ``resolve_failover_decision``: the latter mutates state (e.g. the idle
+        timeout circuit breaker) and is also called by ``_handle_retry_exception``
+        for the same exception, which would double-count those mutations.
         """
         if not (self._auth_provider_id and attempt == 0):
             return False
-        decision = self.resolve_failover_decision(
-            e, {"attempt": attempt + 1, "max_retries": self._max_retries}
-        )
-        return decision.reason == "auth"
+        return self.classify_error_kind(e) == "auth"
 
     def _try_refresh_subscription_creds(self):
         """Attempt a credential refresh, keeping failures non-fatal.
@@ -950,7 +950,12 @@ Respond with ONLY a valid JSON tool call in this format:
             logging.info("Authentication error detected - attempting credential refresh")
             return self._refresh_subscription_creds()
         except Exception as refresh_error:  # noqa: BLE001 - refresh failures must stay non-fatal so retry/failover can continue
-            logging.warning(f"Failed to refresh subscription credentials: {refresh_error}")
+            logging.warning(
+                "Failed to refresh subscription credentials for auth provider %r (%s). "
+                "Verify the provider login/configuration and retry or re-authenticate.",
+                self._auth_provider_id,
+                type(refresh_error).__name__,
+            )
             return None
 
     def _handle_retry_exception(self, e, attempt, kwargs, refreshed_creds=None):
@@ -996,8 +1001,18 @@ Respond with ONLY a valid JSON tool call in this format:
         # caller so the async loop can offload it off the event loop).
         refreshed_auth = False
         if category == "auth" and self._auth_provider_id and attempt == 0 and refreshed_creds:
-            # Update parameters with refreshed credentials (don't clear cache)
+            # Rebuild parameters (don't clear cache), then re-apply the refreshed
+            # credentials *after* the rebuild. _build_completion_params merges the
+            # incoming kwargs last, so the failed attempt's stale api_key/base_url
+            # would otherwise overwrite the freshly refreshed credentials.
             kwargs = self._build_completion_params(**kwargs)
+            kwargs["api_key"] = refreshed_creds.api_key
+            if refreshed_creds.base_url:
+                kwargs["base_url"] = refreshed_creds.base_url
+            if refreshed_creds.headers:
+                extra_headers = dict(kwargs.get("extra_headers") or {})
+                extra_headers.update(refreshed_creds.headers)
+                kwargs["extra_headers"] = extra_headers
             # Retry immediately with refreshed credentials
             can_retry = True
             retry_delay = 0.0
