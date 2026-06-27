@@ -106,6 +106,13 @@ autogen-v4 = [
 acp = [
     "agent-client-protocol>=0.7.0",
 ]
+flow = [
+    # Visual workflow builder powered by Langflow. Provides the
+    # `praisonai flow` CLI (start/import/export/list) with PraisonAI
+    # Agent + AgentTeam components pre-loaded. Heavy, opt-in only.
+    "langflow>=1.0.0",
+    "requests>=2.31.0",
+]
 lite = [
     # Minimal installation without TUI, litellm - just core agent functionality
     # Use: pip install praisonai[lite] for lightweight deployments
