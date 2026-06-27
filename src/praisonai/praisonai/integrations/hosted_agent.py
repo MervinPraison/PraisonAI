@@ -33,7 +33,7 @@ Provider -> backend resolution is delegated to the ``ManagedBackendRegistry``
 work without editing this file.
 """
 
-from typing import Optional, Any
+from typing import AsyncIterator, Optional, Any
 from .managed_agents import AnthropicManagedAgent, ManagedConfig
 
 
@@ -75,15 +75,68 @@ class HostedAgent(AnthropicManagedAgent):
         if not registry.is_available(provider):
             raise ValueError(self._unavailable_provider_message(provider))
 
-        # Anthropic (and any backend that is this class' own base) runs through
-        # the existing implementation. Other registered backends are constructed
-        # via their own class so third-party runtimes are honoured.
+        # Anthropic — and any backend that is a subclass of this class' own
+        # base (AnthropicManagedAgent) — is initialised in-place via
+        # ``super().__init__`` so all inherited methods operate on fully
+        # initialised state. Because ``HostedAgent`` IS-A ``AnthropicManagedAgent``
+        # and subclasses share its constructor contract, this keeps the
+        # Anthropic-compatible path fully functional.
         backend_cls = registry.resolve(provider)
-        if issubclass(type(self), backend_cls) or backend_cls is AnthropicManagedAgent:
+        if issubclass(backend_cls, AnthropicManagedAgent):
             super().__init__(provider=provider, config=config, **kwargs)
         else:  # pragma: no cover - exercised once non-anthropic backends exist
+            # A foreign backend (not an AnthropicManagedAgent) cannot share our
+            # inherited execute()/stream()/session methods, so we fully delegate
+            # to it. Inherited attribute access is forwarded via __getattr__
+            # below, ensuring no method ever runs against uninitialised state.
             self._delegate = backend_cls(provider=provider, config=config, **kwargs)
             self.provider = provider
+
+    # --- ManagedBackendProtocol forwarding ----------------------------------
+    # When HostedAgent delegates to a foreign backend, the methods it INHERITS
+    # from AnthropicManagedAgent would otherwise shadow the delegate and run
+    # against uninitialised state (no super().__init__ ran). These thin
+    # overrides forward the protocol surface to the delegate when present, and
+    # fall through to the inherited Anthropic implementation otherwise.
+
+    async def execute(self, prompt: str, **kwargs) -> str:
+        delegate = self.__dict__.get("_delegate")
+        if delegate is not None:
+            return await delegate.execute(prompt, **kwargs)
+        return await super().execute(prompt, **kwargs)
+
+    async def stream(self, prompt: str, **kwargs) -> AsyncIterator[str]:
+        delegate = self.__dict__.get("_delegate")
+        if delegate is not None:
+            async for chunk in delegate.stream(prompt, **kwargs):
+                yield chunk
+            return
+        async for chunk in super().stream(prompt, **kwargs):
+            yield chunk
+
+    def reset_session(self) -> None:
+        delegate = self.__dict__.get("_delegate")
+        if delegate is not None:
+            return delegate.reset_session()
+        return super().reset_session()
+
+    def reset_all(self) -> None:
+        delegate = self.__dict__.get("_delegate")
+        if delegate is not None:
+            return delegate.reset_all()
+        return super().reset_all()
+
+    def __getattr__(self, item: str) -> Any:
+        # Only reached for attributes NOT found on the instance/class. When a
+        # foreign backend was delegated to, forward any remaining attribute
+        # access to it so HostedAgent acts as a transparent proxy rather than
+        # exposing uninitialised inherited state.
+        if item == "_delegate":
+            raise AttributeError(item)
+        delegate = self.__dict__.get("_delegate")
+        if delegate is not None:
+            return getattr(delegate, item)
+        raise AttributeError(item)
 
     @staticmethod
     def _unavailable_provider_message(provider: str) -> str:

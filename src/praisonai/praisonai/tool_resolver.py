@@ -420,6 +420,11 @@ class ToolResolver:
                     "Source %r raised while resolving %r: %s",
                     getattr(source, "name", source), name, e,
                 )
+                # A raising source is a transient/unknown failure (import error,
+                # registry hiccup). Do NOT let it harden into a cached miss — a
+                # later call (after the dependency installs / registry recovers)
+                # must be free to resolve the tool.
+                allow_none_cache = False
                 continue
 
             if isinstance(result, _ResolveResult):
