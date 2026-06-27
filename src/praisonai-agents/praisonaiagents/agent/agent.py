@@ -261,13 +261,44 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
                     cls._env_output_checked = True
         return cls._env_output_mode
     
+    # Ordered (credential env-var, provider-appropriate default model). The
+    # first provider whose credential is present wins. OpenAI is first so
+    # existing OpenAI users keep their default; any other single configured
+    # provider yields a matching default instead of a failing OpenAI default.
+    _PROVIDER_DEFAULT_MODELS = (
+        ("OPENAI_API_KEY", "gpt-4o-mini"),
+        ("ANTHROPIC_API_KEY", "anthropic/claude-3-5-sonnet-latest"),
+        ("GEMINI_API_KEY", "gemini/gemini-1.5-flash"),
+        ("GOOGLE_API_KEY", "google/gemini-1.5-flash"),
+        ("GROQ_API_KEY", "groq/llama-3.3-70b-versatile"),
+        ("COHERE_API_KEY", "cohere/command-r"),
+        ("OLLAMA_HOST", "ollama/llama3.2"),
+    )
+
+    @classmethod
+    def _resolve_default_model(cls):
+        """Resolve a provider-aware default model from present credentials.
+
+        Precedence: ``OPENAI_MODEL_NAME`` (backward compatible) > first
+        provider whose credential env var is set > hardcoded ``gpt-4o-mini``.
+        Keeps core free of provider-detection policy beyond a simple env scan;
+        the wrapper layer owns recency state and first-run notices.
+        """
+        explicit = os.getenv('OPENAI_MODEL_NAME')
+        if explicit:
+            return explicit
+        for key_var, model in cls._PROVIDER_DEFAULT_MODELS:
+            if os.environ.get(key_var):
+                return model
+        return 'gpt-4o-mini'
+
     @classmethod
     def _get_default_model(cls):
-        """Get cached default model name from OPENAI_MODEL_NAME env var (thread-safe)."""
+        """Get cached provider-aware default model name (thread-safe)."""
         if not cls._default_model_checked:
             with cls._env_cache_lock:
                 if not cls._default_model_checked:
-                    cls._default_model = os.getenv('OPENAI_MODEL_NAME', 'gpt-4o-mini')
+                    cls._default_model = cls._resolve_default_model()
                     cls._default_model_checked = True
         return cls._default_model
     
