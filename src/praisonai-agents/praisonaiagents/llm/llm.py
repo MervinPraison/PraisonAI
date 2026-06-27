@@ -1464,6 +1464,24 @@ Result: {tool_result_str}
 Now provide your final answer using this result. Summarize the information naturally for the user."""
             }
 
+    def _try_append_multimodal_tool_result(
+        self, messages: List[Dict[str, Any]], tool_result: Any, tool_call_id: str
+    ) -> bool:
+        """Append multimodal tool result messages if the result carries media.
+
+        Returns True if multimodal messages were appended (caller should skip
+        its default text-only tool message), False otherwise (no regression).
+        """
+        try:
+            from ..agent.tool_execution import format_tool_result_messages
+            mm_messages = format_tool_result_messages(tool_result, tool_call_id)
+            if mm_messages:
+                messages.extend(mm_messages)
+                return True
+        except Exception as e:
+            logging.debug(f"Multimodal tool result formatting skipped: {e}")
+        return False
+
     def _get_tool_names_for_prompt(self, formatted_tools: Optional[List]) -> str:
         """Extract tool names from formatted tools for prompts."""
         if not formatted_tools:
@@ -3064,6 +3082,9 @@ Now provide your final answer using this result. Summarize the information natur
                             if self._is_ollama_provider():
                                 # For Ollama, use user role and format as natural language
                                 messages.append(self._format_ollama_tool_result_message(function_name, tool_result))
+                            elif self._try_append_multimodal_tool_result(messages, tool_result, tool_call_id):
+                                # Multimodal result (image/file) emitted as model-visible parts
+                                pass
                             else:
                                 # For other providers, use tool role with tool_call_id
                                 # Format error results more clearly
@@ -4279,6 +4300,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         if self._is_ollama_provider():
                             # For Ollama, use user role and format as natural language
                             messages.append(self._format_ollama_tool_result_message(function_name, tool_result))
+                        elif self._try_append_multimodal_tool_result(messages, tool_result, tool_call_id):
+                            # Multimodal result (image/file) emitted as model-visible parts
+                            pass
                         else:
                             # For other providers, use tool role with tool_call_id
                             # Format error results more clearly

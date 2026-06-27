@@ -3626,12 +3626,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         parsed_args,
                                         tool_call_id=tool_call.get('id')
                                     )
-                                    # Add tool result to chat history
-                                    self._append_to_chat_history({
-                                        "role": "tool",
-                                        "tool_call_id": tool_call['id'],
-                                        "content": str(tool_result)
-                                    })
+                                    # Add tool result to chat history (multimodal-aware)
+                                    from .tool_execution import format_tool_result_messages
+                                    _mm_messages = format_tool_result_messages(tool_result, tool_call['id'])
+                                    if _mm_messages:
+                                        for _m in _mm_messages:
+                                            self._append_to_chat_history(_m)
+                                    else:
+                                        self._append_to_chat_history({
+                                            "role": "tool",
+                                            "tool_call_id": tool_call['id'],
+                                            "content": str(tool_result)
+                                        })
                                 except Exception as tool_error:
                                     logging.error(f"Tool execution error in streaming: {tool_error}")
                                     # Add error result to chat history

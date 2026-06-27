@@ -30,35 +30,120 @@ class ToolValidationError(Exception):
 
 
 class ToolResult:
-    """Wrapper for tool execution results."""
-    
+    """Wrapper for tool execution results.
+
+    In addition to the text/JSON ``output`` channel, tools may return a
+    structured, multimodal ``content`` channel so that images/files produced by
+    a tool become model-visible message parts on the next turn (e.g. a
+    screenshot tool, chart renderer, or PDF rasteriser feeding a vision model).
+
+    ``content`` is an ordered list of content parts. Each part is a dict:
+
+    - ``{"type": "text", "text": "..."}``
+    - ``{"type": "image", "data": <base64-str-or-bytes>, "mime": "image/png",
+       "name": "shot.png"}``
+    - ``{"type": "image", "url": "https://... or data:..."}``
+    - ``{"type": "file", "data": ..., "mime": "application/pdf", "name": ...}``
+
+    Plain text/JSON tool returns behave exactly as before; multimodal is purely
+    additive and opt-in by the tool author.
+    """
+
     def __init__(
         self,
         output: Any,
         success: bool = True,
         error: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        content: Optional[List[Dict[str, Any]]] = None
     ):
         self.output = output
         self.success = success
         self.error = error
         self.metadata = metadata or {}
-    
+        self.content = content
+
+    @property
+    def is_multimodal(self) -> bool:
+        """True if this result carries structured (possibly image/file) parts."""
+        return bool(self.content)
+
     def __str__(self) -> str:
         if self.success:
+            if self.output is not None:
+                return str(self.output)
+            # Derive a text summary from structured content if no output set
+            if self.content:
+                texts = [p.get("text", "") for p in self.content
+                         if isinstance(p, dict) and p.get("type") == "text"]
+                if texts:
+                    return "\n".join(t for t in texts if t)
+                return "[multimodal tool result]"
             return str(self.output)
         return f"Error: {self.error}"
-    
+
     def __repr__(self) -> str:
         return f"ToolResult(success={self.success}, output={self.output!r})"
-    
+
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        data = {
             "output": self.output,
             "success": self.success,
             "error": self.error,
             "metadata": self.metadata
         }
+        if self.content:
+            data["content"] = self.content
+        return data
+
+
+def multimodal_content(*parts: Dict[str, Any], output: Any = None,
+                       success: bool = True) -> "ToolResult":
+    """Convenience factory for building a multimodal ToolResult.
+
+    Example::
+
+        from praisonaiagents.tools import multimodal_content, image_part, text_part
+
+        def screenshot() -> ToolResult:
+            png_bytes = capture()
+            return multimodal_content(
+                text_part("Here is the current screen:"),
+                image_part(png_bytes, mime="image/png", name="screen.png"),
+            )
+    """
+    return ToolResult(output=output, success=success, content=list(parts))
+
+
+def text_part(text: str) -> Dict[str, Any]:
+    """Build a text content part."""
+    return {"type": "text", "text": text}
+
+
+def image_part(data: Any = None, *, mime: str = "image/png",
+               name: Optional[str] = None, url: Optional[str] = None) -> Dict[str, Any]:
+    """Build an image content part from raw bytes/base64 or a URL/data URI."""
+    part: Dict[str, Any] = {"type": "image", "mime": mime}
+    if url is not None:
+        part["url"] = url
+    else:
+        part["data"] = data
+    if name:
+        part["name"] = name
+    return part
+
+
+def file_part(data: Any = None, *, mime: str = "application/octet-stream",
+              name: Optional[str] = None, url: Optional[str] = None) -> Dict[str, Any]:
+    """Build a generic file content part from raw bytes/base64 or a URL."""
+    part: Dict[str, Any] = {"type": "file", "mime": mime}
+    if url is not None:
+        part["url"] = url
+    else:
+        part["data"] = data
+    if name:
+        part["name"] = name
+    return part
 
 
 class BaseTool(ABC):

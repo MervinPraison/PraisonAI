@@ -5,7 +5,10 @@ from typing import Any
 # Note: actual lazy loading cache is implemented with _loaded_classes in __getattr__
 
 # Export core tool items for organized imports (lightweight)
-from .base import BaseTool, ToolResult, ToolValidationError, validate_tool
+from .base import (
+    BaseTool, ToolResult, ToolValidationError, validate_tool,
+    multimodal_content, text_part, image_part, file_part,
+)
 from .decorator import tool, FunctionTool
 from .registry import get_registry, register_tool, get_tool, add_tool, has_tool, remove_tool, list_tools, list_available_tools, list_tools_with_allowed_filter, list_tools_with_hermes_filter, ToolRegistry
 from .tools import Tools
@@ -387,6 +390,7 @@ def __getattr__(name: str) -> Any:
 __all__ = list(TOOL_MAPPINGS.keys()) + [
     'Injected', 'AgentState',
     'BaseTool', 'ToolResult', 'ToolValidationError', 'validate_tool',
+    'multimodal_content', 'text_part', 'image_part', 'file_part',
     'tool', 'FunctionTool',
     'get_registry', 'register_tool', 'get_tool', 'add_tool', 'has_tool', 'remove_tool', 
     'list_tools', 'list_available_tools', 'list_tools_with_allowed_filter', 'list_tools_with_hermes_filter', 'ToolRegistry',

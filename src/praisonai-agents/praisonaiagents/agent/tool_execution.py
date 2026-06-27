@@ -49,6 +49,189 @@ class BackoffPolicy:
         return base + jitter_amount
 
 
+# Cap on encoded image bytes injected back into the conversation to avoid
+# blowing up the context window. ~5MB of base64 (~3.75MB raw) by default.
+MULTIMODAL_IMAGE_BYTE_LIMIT = 5_000_000
+
+
+def _content_part_to_data_uri(part: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Convert a structured content part into an OpenAI-style message part.
+
+    Returns a ``{"type": "image_url", "image_url": {...}}`` part for images, a
+    ``{"type": "text", ...}`` part for text, or ``None`` if it cannot be
+    represented as a model-visible part (callers should fall back to text).
+    """
+    import base64
+
+    if not isinstance(part, dict):
+        return None
+
+    ptype = part.get("type")
+
+    if ptype == "text":
+        text = part.get("text")
+        if text is None:
+            return None
+        return {"type": "text", "text": str(text)}
+
+    if ptype in ("image", "image_url"):
+        # Already-formed OpenAI image_url part
+        if ptype == "image_url" and isinstance(part.get("image_url"), dict):
+            return {"type": "image_url", "image_url": part["image_url"]}
+
+        url = part.get("url")
+        if url:
+            return {"type": "image_url", "image_url": {"url": url}}
+
+        data = part.get("data")
+        if data is None:
+            return None
+
+        mime = part.get("mime") or "image/png"
+        if isinstance(data, (bytes, bytearray)):
+            if len(data) > MULTIMODAL_IMAGE_BYTE_LIMIT:
+                logging.warning(
+                    "Multimodal image part (%d bytes) exceeds limit %d; skipping",
+                    len(data), MULTIMODAL_IMAGE_BYTE_LIMIT,
+                )
+                return None
+            encoded = base64.b64encode(bytes(data)).decode("utf-8")
+        else:
+            # Assume already base64-encoded string (strip any data URI prefix)
+            encoded = str(data)
+            if encoded.startswith("data:"):
+                return {"type": "image_url", "image_url": {"url": encoded}}
+            if len(encoded) > MULTIMODAL_IMAGE_BYTE_LIMIT * 2:
+                logging.warning(
+                    "Multimodal image part (encoded %d chars) exceeds limit; skipping",
+                    len(encoded),
+                )
+                return None
+        return {
+            "type": "image_url",
+            "image_url": {"url": f"data:{mime};base64,{encoded}"},
+        }
+
+    # Files / other media are referenced as text (most providers cannot ingest
+    # arbitrary binaries inline). Surface name/mime so the model is aware.
+    if ptype == "file":
+        name = part.get("name") or "file"
+        mime = part.get("mime") or "application/octet-stream"
+        return {"type": "text", "text": f"[file: {name} ({mime})]"}
+
+    return None
+
+
+def _normalize_multimodal_result(result: Any) -> Optional[List[Dict[str, Any]]]:
+    """Detect a multimodal tool result and return its content parts.
+
+    Recognises:
+    - ``ToolResult`` with ``content`` parts
+    - a bare list of content-part dicts (``[{"type": "image"|"text"|...}]``)
+    - a single content-part dict
+    - MCP-style content blocks (``{"type": "image", "data": ..., "mimeType": ...}``)
+
+    Returns ``None`` for plain text/JSON results so the existing path is used.
+    """
+    # ToolResult carrying structured content
+    content = getattr(result, "content", None)
+    if content and isinstance(content, list):
+        return _coerce_parts(content)
+
+    if isinstance(result, dict):
+        parts = _coerce_parts([result])
+        if parts and any(p.get("type") in ("image", "file") for p in parts):
+            return parts
+        return None
+
+    if isinstance(result, list) and result:
+        if all(isinstance(p, dict) and p.get("type") for p in result):
+            parts = _coerce_parts(result)
+            if parts and any(p.get("type") in ("image", "file") for p in parts):
+                return parts
+    return None
+
+
+def _coerce_parts(raw_parts: List[Any]) -> List[Dict[str, Any]]:
+    """Normalize assorted part shapes (incl. MCP) into the canonical schema."""
+    parts: List[Dict[str, Any]] = []
+    for p in raw_parts:
+        if not isinstance(p, dict):
+            continue
+        ptype = p.get("type")
+        if ptype == "text":
+            parts.append({"type": "text", "text": p.get("text", "")})
+        elif ptype in ("image", "image_url"):
+            norm = dict(p)
+            norm["type"] = "image" if ptype == "image" else "image_url"
+            # MCP uses 'mimeType'; normalize to 'mime'
+            if "mimeType" in norm and "mime" not in norm:
+                norm["mime"] = norm.pop("mimeType")
+            parts.append(norm)
+        elif ptype in ("file", "blob", "resource"):
+            norm = dict(p)
+            norm["type"] = "file"
+            if "mimeType" in norm and "mime" not in norm:
+                norm["mime"] = norm.pop("mimeType")
+            parts.append(norm)
+    return parts
+
+
+def format_tool_result_messages(
+    result: Any,
+    tool_call_id: str,
+    text_fallback: Optional[str] = None,
+) -> Optional[List[Dict[str, Any]]]:
+    """Build LLM messages from a (possibly multimodal) tool result.
+
+    For a plain text/JSON result this returns ``None`` so callers keep their
+    existing single ``tool`` message behaviour (no regression). For a multimodal
+    result it returns a list of messages: a ``tool`` message (satisfying the
+    tool_call_id contract) followed by a ``user`` message carrying the
+    model-visible image/text parts.
+
+    Most providers do not accept ``image_url`` parts inside a ``tool`` role
+    message, so images are delivered via a follow-up ``user`` message.
+    """
+    parts = _normalize_multimodal_result(result)
+    if not parts:
+        return None
+
+    visible_parts: List[Dict[str, Any]] = []
+    text_summary_chunks: List[str] = []
+    has_media = False
+    for part in parts:
+        formatted = _content_part_to_data_uri(part)
+        if formatted is None:
+            continue
+        if formatted.get("type") == "image_url":
+            has_media = True
+            visible_parts.append(formatted)
+        else:
+            text_summary_chunks.append(formatted.get("text", ""))
+            visible_parts.append(formatted)
+
+    if not visible_parts or not has_media:
+        # Nothing model-visible beyond text -> let the text path handle it
+        return None
+
+    text_summary = "\n".join(c for c in text_summary_chunks if c).strip()
+    tool_text = text_fallback or text_summary or "[tool returned media; see attached content]"
+
+    messages: List[Dict[str, Any]] = [
+        {
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "content": tool_text,
+        },
+        {
+            "role": "user",
+            "content": visible_parts,
+        },
+    ]
+    return messages
+
+
 class ToolExecutionMixin:
     """Mixin providing toolexecution methods for the Agent class."""
     
@@ -499,13 +682,20 @@ class ToolExecutionMixin:
                     # Don't let middleware failures break tool execution
                     logger.warning(f"Runtime middleware failed for {runtime_id}: {e}")
             
+            # Detect multimodal tool results (images/files) BEFORE any trust
+            # wrapping or truncation mutates/stringifies them. Multimodal results
+            # are returned as-is so the message-building layer can emit
+            # model-visible image parts via format_tool_result_messages().
+            _is_multimodal_result = _normalize_multimodal_result(result) is not None
+
             # Apply prompt injection protection for external tools
             # Zero-cost for trusted tools, wraps external content in security markers
-            result = wrap_if_external(function_name, result)
+            if not _is_multimodal_result:
+                result = wrap_if_external(function_name, result)
             
             # Apply tool output truncation to prevent context overflow
             # Uses context manager budget if enabled, otherwise applies default limit
-            if result:
+            if result and not _is_multimodal_result:
                 try:
                     result_str = str(result)
                     

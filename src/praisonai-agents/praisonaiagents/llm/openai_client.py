@@ -41,6 +41,23 @@ def _get_openai_classes():
     openai = _get_openai()
     return openai.OpenAI, openai.AsyncOpenAI
 
+
+def _try_append_multimodal_tool_result(messages, tool_result, tool_call_id) -> bool:
+    """Append multimodal (image/file) tool result messages if present.
+
+    Returns True if multimodal messages were appended (caller should skip its
+    default text-only tool message); False otherwise for the unchanged path.
+    """
+    try:
+        from ..agent.tool_execution import format_tool_result_messages
+        mm_messages = format_tool_result_messages(tool_result, tool_call_id)
+        if mm_messages:
+            messages.extend(mm_messages)
+            return True
+    except Exception as e:
+        logging.debug(f"Multimodal tool result formatting skipped: {e}")
+    return False
+
 def _get_rich_console():
     """Lazy import rich Console."""
     global _rich_console
@@ -1683,11 +1700,13 @@ class OpenAIClient:
                         tool_output=results_str[:200] if results_str else None
                     )
                     
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id if hasattr(tool_call, 'id') else tool_call['id'],
-                        "content": results_str
-                    })
+                    _tc_id = tool_call.id if hasattr(tool_call, 'id') else tool_call['id']
+                    if not _try_append_multimodal_tool_result(messages, tool_result, _tc_id):
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": _tc_id,
+                            "content": results_str
+                        })
                 
                 # Continue the loop to allow more tool calls
                 # The model will see tool results and can make additional tool calls
@@ -1892,11 +1911,13 @@ class OpenAIClient:
                     # Trigger callback with result
                     display_tool_call_fn(f"Function {function_name} returned: {results_str[:200]}{'...' if len(results_str) > 200 else ''}", console=console if verbose else None)
                     
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id if hasattr(tool_call, 'id') else tool_call['id'],
-                        "content": results_str
-                    })
+                    _tc_id = tool_call.id if hasattr(tool_call, 'id') else tool_call['id']
+                    if not _try_append_multimodal_tool_result(messages, tool_result, _tc_id):
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": _tc_id,
+                            "content": results_str
+                        })
                 
                 # Continue the loop to allow more tool calls
                 # The model will see tool results and can make additional tool calls
@@ -2083,11 +2104,14 @@ class OpenAIClient:
                         if verbose:
                             yield f"\n[Function result: {results_str}]"
                         
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id if hasattr(tool_call, 'id') else tool_call['id'],
-                            "content": results_str
-                        })
+                        _tc_id = tool_call.id if hasattr(tool_call, 'id') else tool_call['id']
+                        _tool_result_for_mm = locals().get('tool_result')
+                        if not _try_append_multimodal_tool_result(messages, _tool_result_for_mm, _tc_id):
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": _tc_id,
+                                "content": results_str
+                            })
                     
                     # Continue the loop to allow more tool calls
                     iteration_count += 1
