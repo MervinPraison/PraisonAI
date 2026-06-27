@@ -93,7 +93,7 @@ class TestAsyncIODaemonStateUpdates:
         # Mock the _update_state_if_daemon method
         with patch.object(scheduler, '_update_state_if_daemon') as mock_update:
             with patch('asyncio.to_thread') as mock_to_thread:
-                future = asyncio.Future()
+                future = asyncio.get_running_loop().create_future()
                 future.set_result(None)
                 mock_to_thread.return_value = future
                 
@@ -112,7 +112,7 @@ class TestAsyncIODaemonStateUpdates:
         scheduler = AsyncAgentScheduler(mock_agent, "test task")
         
         with patch('asyncio.to_thread') as mock_to_thread:
-            future = asyncio.Future()
+            future = asyncio.get_running_loop().create_future()
             future.set_result(None)
             mock_to_thread.return_value = future
             
@@ -131,7 +131,7 @@ class TestAsyncIODaemonStateUpdates:
         scheduler = AsyncAgentScheduler(mock_agent, "test task")
         
         with patch('asyncio.to_thread') as mock_to_thread:
-            future = asyncio.Future()
+            future = asyncio.get_running_loop().create_future()
             future.set_result(None)
             mock_to_thread.return_value = future
             
@@ -345,7 +345,7 @@ class TestFrameworkAdapterDuplication:
         
         # Get all method names from the protocol
         import inspect
-        methods = [name for name, _ in inspect.getmembers(FrameworkAdapter, inspect.ismethod)
+        methods = [name for name, _ in inspect.getmembers(FrameworkAdapter, inspect.isfunction)
                   if not name.startswith('__')]
         
         # Count arun occurrences
