@@ -69,6 +69,7 @@ class GatewayHandler:
         port: int = 8765,
         agent_file: Optional[str] = None,
         config_file: Optional[str] = None,
+        drain_timeout: Optional[float] = None,
     ) -> None:
         """Start the gateway server.
         
@@ -77,6 +78,9 @@ class GatewayHandler:
             port: Port to listen on
             agent_file: Optional path to agent configuration file
             config_file: Optional path to gateway.yaml for multi-bot mode
+            drain_timeout: Optional graceful-drain window in seconds (#2375).
+                Overrides any ``gateway.drain_timeout`` in the YAML config.
+                ``0`` disables; ``None`` falls back to the config value.
         """
         # Ensure INFO-level logs surface to bot-stdout.log / bot-stderr.log
         # when running under launchd / systemd. Many key lifecycle events
@@ -112,13 +116,16 @@ class GatewayHandler:
         if config_file:
             config = GatewayConfig(host=host, port=port)
             self._gateway = WebSocketGateway(config=config)
+            # CLI --drain-timeout overrides gateway.drain_timeout in YAML (#2375)
+            if drain_timeout is not None:
+                self._gateway._drain_timeout_override = drain_timeout
             print(f"Loading gateway config from {config_file}")
             try:
                 asyncio.run(self._gateway.start_with_config(config_file))
             except KeyboardInterrupt:
                 print("\nStopping gateway...")
-                asyncio.run(self._gateway.stop_channels())
-                asyncio.run(self._gateway.stop())
+                asyncio.run(self._gateway.stop_channels(drain_timeout=drain_timeout))
+                asyncio.run(self._gateway.stop(drain_timeout=drain_timeout))
             except FileNotFoundError as e:
                 print(f"Error: {e}")
             except Exception as e:
@@ -426,6 +433,10 @@ def handle_gateway_command(args) -> int:
         start_parser.add_argument("--port", type=int, default=8765, help="Port to listen on (default: 8765)")
         start_parser.add_argument("--agents", help="Path to agent configuration file")
         start_parser.add_argument("--config", dest="config_file", help="Path to gateway.yaml for multi-bot mode")
+        start_parser.add_argument(
+            "--drain-timeout", dest="drain_timeout", type=float, default=None,
+            help="Seconds to wait for in-flight agent turns to finish on shutdown (0 disables; #2375)",
+        )
         
         # status subcommand
         status_parser = subparsers.add_parser("status", help="Check gateway status")
@@ -487,6 +498,7 @@ def handle_gateway_command(args) -> int:
             port=getattr(args, "port", 8765),
             agent_file=getattr(args, "agents", None),
             config_file=getattr(args, "config_file", None),
+            drain_timeout=getattr(args, "drain_timeout", None),
         )
     elif subcommand == "status":
         handler.status(

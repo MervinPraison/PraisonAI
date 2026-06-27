@@ -4024,8 +4024,41 @@ class WebSocketGateway:
             await app.shutdown()
             bot._is_running = False
 
-    async def stop_channels(self) -> None:
-        """Gracefully stop all running channel bots."""
+    async def stop_channels(self, drain_timeout: Optional[float] = None) -> None:
+        """Gracefully stop all running channel bots.
+
+        Args:
+            drain_timeout: Optional graceful-drain window (#2375). When set
+                and > 0, channel bots that support a ``drain`` coroutine
+                (e.g. ``BotOS``) are first asked to quiesce ingress and let
+                in-flight agent turns finish before their tasks are
+                cancelled. ``0``/``None`` preserves the prior
+                immediate-cancel behaviour.
+        """
+        # Issue #2375: opt-in graceful drain of in-flight agent turns before
+        # we cancel channel tasks. Best-effort and bounded; failures here
+        # never block teardown.
+        if drain_timeout and drain_timeout > 0:
+            # Bound the *total* drain to drain_timeout: track elapsed and
+            # pass only the remaining budget to each bot so N channel bots
+            # don't multiply the configured window (N * drain_timeout).
+            drain_start = time.monotonic()
+            for name, bot in list(self._channel_bots.items()):
+                drain = getattr(bot, "drain", None)
+                if callable(drain):
+                    remaining = drain_timeout - (time.monotonic() - drain_start)
+                    if remaining <= 0:
+                        break
+                    try:
+                        abandoned = await drain(remaining)
+                        if abandoned:
+                            logger.warning(
+                                "Drain timeout for bot '%s': %d turn(s) abandoned",
+                                name, abandoned,
+                            )
+                    except Exception as e:
+                        logger.warning("Error draining bot '%s': %s", name, e)
+
         # Stop health monitoring first
         await self._channel_supervisor.stop_health_monitoring()
         
@@ -4551,6 +4584,28 @@ class WebSocketGateway:
             self.config.max_buffered_bytes = int(gw_cfg["max_buffered_bytes"])
         if "max_queued_frames" in gw_cfg:
             self.config.max_queued_frames = int(gw_cfg["max_queued_frames"])
+        # Issue #2375: graceful-drain timeout on shutdown. When set, the
+        # shutdown path waits (bounded) for in-flight turns/sessions to
+        # finish before tearing down. 0/unset preserves prior behaviour.
+        # A CLI ``--drain-timeout`` override (set on the instance) wins
+        # over the YAML value.
+        drain_timeout_cfg = getattr(self, "_drain_timeout_override", None)
+        if drain_timeout_cfg is None:
+            drain_timeout_cfg = gw_cfg.get("drain_timeout")
+        # YAML/env-substituted values may arrive as strings (e.g. "30");
+        # coerce once so later ``> 0`` comparisons never raise TypeError.
+        if drain_timeout_cfg is not None:
+            try:
+                import math as _math
+                drain_timeout_cfg = float(drain_timeout_cfg)
+                if not _math.isfinite(drain_timeout_cfg) or drain_timeout_cfg < 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Invalid gateway.drain_timeout %r; disabling drain",
+                    drain_timeout_cfg,
+                )
+                drain_timeout_cfg = None
         
         # Parse health monitoring configuration
         health_cfg = gw_cfg.get("health")
@@ -4622,4 +4677,20 @@ class WebSocketGateway:
                 self._scheduler_task.cancel()
             if self._cleanup_task:
                 self._cleanup_task.cancel()
-            await self.stop_channels()
+            # Issue #2375: drain in-flight agent turns (channel bots) and
+            # websocket sessions before final teardown when a drain timeout
+            # is configured. The configured timeout bounds the *total*
+            # shutdown drain: track elapsed across both phases so channel
+            # bots + websocket sessions don't sum to 2 * drain_timeout.
+            # No-op when unset (today's behaviour).
+            drain_overall_start = time.monotonic()
+            await self.stop_channels(drain_timeout=drain_timeout_cfg)
+            if drain_timeout_cfg and drain_timeout_cfg > 0:
+                remaining = drain_timeout_cfg - (time.monotonic() - drain_overall_start)
+                if remaining > 0:
+                    try:
+                        await self._drain_active_sessions(
+                            reason="shutdown", timeout=float(remaining)
+                        )
+                    except Exception as e:
+                        logger.warning("Error draining websocket sessions: %s", e)
