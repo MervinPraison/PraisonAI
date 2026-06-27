@@ -1268,6 +1268,74 @@ class BotSessionManager:
         return list(self._histories.keys())
 
 
+def resolve_durable_store_dir(platform: str = "") -> "Path":
+    """Resolve the canonical per-agent SQLite store directory for durability.
+
+    Returns ``~/.praisonai/state/`` (created if missing), the single location
+    where the inbound journal, inbound DLQ and outbound queue databases live so
+    all durable components share one canonical store instead of three ad-hoc
+    file paths. ``PRAISONAI_HOME`` overrides the base directory when set.
+    """
+    from pathlib import Path
+    import os as _os
+
+    base = _os.environ.get("PRAISONAI_HOME")
+    root = Path(base).expanduser() if base else Path.home() / ".praisonai"
+    store_dir = root / "state"
+    store_dir.mkdir(parents=True, exist_ok=True)
+    return store_dir
+
+
+def _build_durable_components(config, platform: str):
+    """Default-construct the inbound journal + DLQ for durable delivery.
+
+    Durability is on by default for gateway/bot runs. Reads an optional
+    ``delivery`` config block (``durable`` flag + ``store`` override); when
+    durability is enabled, builds an :class:`InboundJournal` (dedup + crash
+    replay) and an :class:`InboundDLQ` (failed-inbound replay) against one
+    canonical per-agent SQLite store. Returns ``(ingress_journal, dlq)``;
+    either may be ``None`` if durability is disabled or construction fails
+    (in which case the manager safely falls back to in-memory behaviour).
+    """
+    delivery = getattr(config, "delivery", None) if config is not None else None
+    # Default ON: durability is the safe default unless explicitly disabled.
+    durable = True if delivery is None else getattr(delivery, "durable", True)
+    if not durable:
+        return None, None
+
+    try:
+        from pathlib import Path
+        store_override = getattr(delivery, "store", None) if delivery is not None else None
+        if store_override:
+            store_dir = Path(store_override).expanduser()
+            # Allow either a directory or an explicit file path. When a file is
+            # given, place sibling DBs next to it so all components share a dir.
+            if store_dir.suffix:
+                store_dir = store_dir.parent
+            store_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            store_dir = resolve_durable_store_dir(platform)
+
+        from ._ingress import InboundJournal
+        from ._dlq import InboundDLQ
+
+        ingress_journal = InboundJournal(path=str(store_dir / "ingress.sqlite"))
+        dlq = InboundDLQ(path=str(store_dir / "inbound_dlq.sqlite"))
+        logger.info(
+            "Durable delivery enabled for %s (store=%s)",
+            platform or "bot",
+            store_dir,
+        )
+        return ingress_journal, dlq
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.warning(
+            "Durable delivery requested but could not be initialised; "
+            "falling back to in-memory delivery: %s",
+            exc,
+        )
+        return None, None
+
+
 def build_session_manager(config, platform: str, *, run_control=None) -> BotSessionManager:
     """Build a BotSessionManager with standard configuration from a BotConfig.
     
@@ -1276,6 +1344,7 @@ def build_session_manager(config, platform: str, *, run_control=None) -> BotSess
     - Session store acquisition
     - Reset policy extraction
     - Backward-compatible max_history resolution
+    - Durable inbound delivery (journal + DLQ) wired by default
     
     Args:
         config: BotConfig instance with session configuration
@@ -1318,6 +1387,12 @@ def build_session_manager(config, platform: str, *, run_control=None) -> BotSess
     elif getattr(config, "session", None) and getattr(config.session, "max_history", None) is not None:
         max_history = config.session.max_history
     
+    # Durable inbound delivery (on by default for gateway/bot runs): wire a
+    # deduplicating inbound journal and an inbound DLQ against one canonical
+    # per-agent SQLite store so a crash mid-turn or a platform webhook
+    # redelivery never silently loses or double-processes a message.
+    ingress_journal, dlq = _build_durable_components(config, platform)
+
     return BotSessionManager(
         max_history=max_history,
         store=store,
@@ -1325,4 +1400,6 @@ def build_session_manager(config, platform: str, *, run_control=None) -> BotSess
         reset_policy=reset_policy,
         run_control=run_control,
         compaction=compaction,
+        ingress_journal=ingress_journal,
+        dlq=dlq,
     )
