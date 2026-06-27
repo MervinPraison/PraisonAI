@@ -12,7 +12,13 @@ import os
 
 import pytest
 
-from praisonai.bots._media import cache_inbound_media, InboundMediaError, _is_safe_url
+from praisonai.bots._media import (
+    cache_inbound_media,
+    InboundMediaError,
+    _is_safe_url,
+    resolve_max_inbound_media_bytes,
+    DEFAULT_MAX_INBOUND_MEDIA_BYTES,
+)
 from praisonai.bots._session import BotSessionManager
 
 
@@ -73,6 +79,29 @@ def test_negative_inbound_media_limit_rejected():
         ChannelConfigSchema(platform="telegram", max_inbound_media_bytes=-1)
 
 
+class _Cfg:
+    def __init__(self, metadata=None, attr=None):
+        self.metadata = metadata if metadata is not None else {}
+        if attr is not None:
+            self.max_inbound_media_bytes = attr
+
+
+def test_resolve_cap_defaults_when_unset():
+    # Core BotConfig has neither the attribute nor a metadata override.
+    assert resolve_max_inbound_media_bytes(_Cfg()) == DEFAULT_MAX_INBOUND_MEDIA_BYTES
+
+
+def test_resolve_cap_metadata_override_disables():
+    # Operator passthrough via config.metadata must reach the adapters,
+    # including 0 to disable inbound media.
+    assert resolve_max_inbound_media_bytes(_Cfg(metadata={"max_inbound_media_bytes": 0})) == 0
+    assert resolve_max_inbound_media_bytes(_Cfg(metadata={"max_inbound_media_bytes": 123})) == 123
+
+
+def test_resolve_cap_attribute_used_when_no_metadata():
+    assert resolve_max_inbound_media_bytes(_Cfg(attr=999)) == 999
+
+
 class _FakeVisionAgent:
     def __init__(self):
         self.chat_history = []
@@ -103,6 +132,32 @@ class _FakeNoVisionAgent:
     def chat(self, prompt):
         self.called = True
         return "ok"
+
+
+class _WrapperVisionAgent:
+    """A wrapper that forwards **kwargs (incl. attachments) to a vision agent."""
+
+    def __init__(self):
+        self.chat_history = []
+        self.seen_attachments = None
+
+    def chat(self, prompt, **kwargs):
+        self.seen_attachments = kwargs.get("attachments")
+        return "ok"
+
+
+@pytest.mark.asyncio
+async def test_chat_threads_attachments_to_kwargs_wrapper():
+    # A wrapper exposing chat(prompt, **kwargs) should still receive
+    # attachments rather than have them silently dropped (Issue #2350).
+    agent = _WrapperVisionAgent()
+    mgr = BotSessionManager(platform="telegram")
+    path = cache_inbound_media(PNG, kind="image")
+    try:
+        await mgr.chat(agent, "user", "what is this?", attachments=[path])
+    finally:
+        os.remove(path)
+    assert agent.seen_attachments == [path]
 
 
 @pytest.mark.asyncio

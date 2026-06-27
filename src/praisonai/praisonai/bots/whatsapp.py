@@ -879,13 +879,12 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
         disabled, the id is missing, or download/validation fails. The agent's
         vision capability acts on the returned path (Issue #2350).
         """
-        from ._media import DEFAULT_MAX_INBOUND_MEDIA_BYTES
-        # Core BotConfig has no media field; default to the shared cap so
-        # inbound media is enabled by default (Issue #2350). Set the schema's
-        # max_inbound_media_bytes to 0 to disable.
-        max_bytes = getattr(
-            self.config, "max_inbound_media_bytes", DEFAULT_MAX_INBOUND_MEDIA_BYTES
-        )
+        from ._media import resolve_max_inbound_media_bytes
+        # Core BotConfig has no media field; the operator's
+        # max_inbound_media_bytes (including 0 to disable) is carried through
+        # config.metadata. Defaults to the shared cap so inbound media is
+        # enabled by default (Issue #2350).
+        max_bytes = resolve_max_inbound_media_bytes(self.config)
         if not media_id or not max_bytes or max_bytes <= 0:
             return None
         try:

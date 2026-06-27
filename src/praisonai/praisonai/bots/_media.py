@@ -277,3 +277,33 @@ def cache_inbound_media(
             pass
         raise
     return path
+
+
+def resolve_max_inbound_media_bytes(config) -> int:
+    """Resolve the inbound-media size cap for a runtime bot config.
+
+    The core ``BotConfig`` dataclass has no ``max_inbound_media_bytes``
+    field, so an operator-supplied value (including ``0`` to disable) is
+    carried through its ``metadata`` passthrough dict. Resolution order:
+
+    1. ``config.metadata["max_inbound_media_bytes"]`` (operator override),
+    2. a direct ``config.max_inbound_media_bytes`` attribute (schema-backed
+       configs), then
+    3. :data:`DEFAULT_MAX_INBOUND_MEDIA_BYTES` (enabled-by-default).
+
+    Returns the resolved cap. ``0`` (or negative) means inbound media is
+    disabled and callers should skip download/caching.
+    """
+    metadata = getattr(config, "metadata", None)
+    if isinstance(metadata, dict) and "max_inbound_media_bytes" in metadata:
+        try:
+            return int(metadata["max_inbound_media_bytes"])
+        except (TypeError, ValueError):
+            pass
+    value = getattr(config, "max_inbound_media_bytes", None)
+    if value is None:
+        return DEFAULT_MAX_INBOUND_MEDIA_BYTES
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_MAX_INBOUND_MEDIA_BYTES

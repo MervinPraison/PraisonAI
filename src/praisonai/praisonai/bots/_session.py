@@ -771,8 +771,16 @@ class BotSessionManager:
                                 if controller and 'cancel_token' in _chat_params:
                                     _chat_kwargs['cancel_token'] = controller
                                 # Thread inbound media to the agent's vision path
-                                # when the agent supports it (Issue #2350).
-                                if attachments and 'attachments' in _chat_params:
+                                # when the agent supports it (Issue #2350). Honor
+                                # wrappers that forward **kwargs to a vision-capable
+                                # agent, matching the streaming (astart) path.
+                                if attachments and (
+                                    'attachments' in _chat_params
+                                    or any(
+                                        p.kind == p.VAR_KEYWORD
+                                        for p in _chat_params.values()
+                                    )
+                                ):
                                     _chat_kwargs['attachments'] = attachments
                                 chat_call = partial(agent.chat, prompt, **_chat_kwargs)
                                 

@@ -1151,17 +1151,16 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         can act on. Empty when media handling is disabled or no media present.
         """
         try:
-            from ._media import cache_inbound_media, DEFAULT_MAX_INBOUND_MEDIA_BYTES
+            from ._media import cache_inbound_media, resolve_max_inbound_media_bytes
         except Exception as e:  # pragma: no cover — defensive
             logger.warning("Inbound media helper unavailable: %s", e)
             return []
 
-        # Core BotConfig has no media field; default to the shared cap so
-        # inbound media is enabled by default (Issue #2350). Set the schema's
-        # max_inbound_media_bytes to 0 to disable.
-        max_bytes = getattr(
-            self.config, "max_inbound_media_bytes", DEFAULT_MAX_INBOUND_MEDIA_BYTES
-        )
+        # Core BotConfig has no media field; the operator's
+        # max_inbound_media_bytes (including 0 to disable) is carried through
+        # config.metadata. Defaults to the shared cap so inbound media is
+        # enabled by default (Issue #2350).
+        max_bytes = resolve_max_inbound_media_bytes(self.config)
         if not max_bytes or max_bytes <= 0:
             return []
         if not getattr(update, "message", None):
@@ -1183,10 +1182,38 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                         kind, max_bytes, file_size,
                     )
                     return
-                data = bytes(await tg_file.download_as_bytearray())
-                path = cache_inbound_media(
-                    data, kind=kind, max_bytes=max_bytes, filename=filename
-                )
+                if file_size:
+                    # Size is declared and within cap: in-memory download is safe.
+                    data = bytes(await tg_file.download_as_bytearray())
+                    path = cache_inbound_media(
+                        data, kind=kind, max_bytes=max_bytes, filename=filename
+                    )
+                else:
+                    # Unknown size: stream to disk first so the path-based cap
+                    # (os.path.getsize) rejects oversized media before it is
+                    # read into memory. Falls back to in-memory if the streaming
+                    # download API is unavailable.
+                    download_to_drive = getattr(tg_file, "download_to_drive", None)
+                    if download_to_drive is not None:
+                        tmp = tempfile.mkstemp(prefix="inbound_tg_")
+                        os.close(tmp[0])
+                        tmp_path = tmp[1]
+                        try:
+                            await download_to_drive(custom_path=tmp_path)
+                            path = cache_inbound_media(
+                                tmp_path, kind=kind, max_bytes=max_bytes,
+                                filename=filename,
+                            )
+                        finally:
+                            try:
+                                os.remove(tmp_path)
+                            except OSError:
+                                pass
+                    else:  # pragma: no cover — older PTB without download_to_drive
+                        data = bytes(await tg_file.download_as_bytearray())
+                        path = cache_inbound_media(
+                            data, kind=kind, max_bytes=max_bytes, filename=filename
+                        )
                 paths.append(path)
             except Exception as e:
                 logger.warning("Failed to cache inbound %s: %s", kind, e)
