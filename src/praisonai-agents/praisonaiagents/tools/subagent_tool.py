@@ -6,6 +6,7 @@ enabling hierarchical task delegation and multi-agent coordination.
 """
 
 import logging
+import threading
 from praisonaiagents._logging import get_logger
 from typing import Any, Callable, Dict, List, Optional
 
@@ -35,56 +36,36 @@ def create_subagent_tool(
         Tool definition dictionary
     """
     
-    _current_depth = 0
-    
-    def spawn_subagent(
+    # Depth is tracked per-thread so that concurrent background subagents do
+    # not interfere with each other's depth budget. The parent depth is
+    # captured at call time and passed into ``_run_subagent`` so a background
+    # worker (running on a different thread) starts from the correct depth.
+    _depth_state = threading.local()
+
+    def _get_depth() -> int:
+        return getattr(_depth_state, "current_depth", 0)
+
+    def _run_subagent(
         task: str,
-        agent_name: Optional[str] = None,
-        context: Optional[str] = None,
-        tools: Optional[List[str]] = None,
-        llm: Optional[str] = None,
-        permission_mode: Optional[str] = None,
+        agent_name: Optional[str],
+        context: Optional[str],
+        tools: Optional[List[str]],
+        effective_llm: Optional[str],
+        effective_permission_mode: Optional[str],
+        parent_depth: int = 0,
     ) -> Dict[str, Any]:
+        """Execute the subagent synchronously and return the result dict.
+
+        Depth tracking is handled here so that background jobs honour the
+        same ``max_depth`` scoping as synchronous calls. ``parent_depth`` is
+        the depth captured by the caller; it is restored on this thread for
+        the duration of the execution so nested subagents see the correct
+        value even when running off the main thread.
         """
-        Spawn a subagent to handle a specific task.
-        
-        Args:
-            task: The task description for the subagent
-            agent_name: Optional specific agent to use
-            context: Optional additional context
-            tools: Optional list of tools to give the subagent
-            llm: Optional LLM model override (Claude Code parity)
-            permission_mode: Optional permission mode (Claude Code parity)
-            
-        Returns:
-            Result from the subagent execution
-        """
-        nonlocal _current_depth
-        
-        # Check depth limit
-        if _current_depth >= max_depth:
-            return {
-                "success": False,
-                "error": f"Maximum subagent depth ({max_depth}) exceeded",
-                "output": None,
-            }
-        
-        # Check allowed agents
-        if allowed_agents and agent_name and agent_name not in allowed_agents:
-            return {
-                "success": False,
-                "error": f"Agent '{agent_name}' not in allowed list",
-                "output": None,
-            }
-        
+        previous_depth = _get_depth()
         try:
-            _current_depth += 1
-            
-            # Resolve LLM (parameter > default > None)
-            effective_llm = llm or default_llm
-            # Resolve permission mode (parameter > default > None)
-            effective_permission_mode = permission_mode or default_permission_mode
-            
+            _depth_state.current_depth = parent_depth + 1
+
             # If we have an agent factory, use it
             if agent_factory:
                 subagent = agent_factory(
@@ -92,15 +73,15 @@ def create_subagent_tool(
                     tools=tools,
                     llm=effective_llm,
                 )
-                
+
                 # Build prompt with context
                 prompt = task
                 if context:
                     prompt = f"Context: {context}\n\nTask: {task}"
-                
+
                 # Execute the subagent
                 result = subagent.chat(prompt)
-                
+
                 return {
                     "success": True,
                     "output": result,
@@ -120,7 +101,6 @@ def create_subagent_tool(
                     "permission_mode": effective_permission_mode,
                     "note": "No agent factory provided - simulation mode",
                 }
-                
         except Exception as e:
             logger.error(f"Subagent execution failed: {e}")
             return {
@@ -129,8 +109,176 @@ def create_subagent_tool(
                 "output": None,
             }
         finally:
-            _current_depth -= 1
-    
+            _depth_state.current_depth = previous_depth
+
+    def spawn_subagent(
+        task: str,
+        agent_name: Optional[str] = None,
+        context: Optional[str] = None,
+        tools: Optional[List[str]] = None,
+        llm: Optional[str] = None,
+        permission_mode: Optional[str] = None,
+        background: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Spawn a subagent to handle a specific task.
+        
+        Args:
+            task: The task description for the subagent
+            agent_name: Optional specific agent to use
+            context: Optional additional context
+            tools: Optional list of tools to give the subagent
+            llm: Optional LLM model override (Claude Code parity)
+            permission_mode: Optional permission mode (Claude Code parity)
+            background: When True, run the subagent on the background job
+                runner and return immediately with a ``job_id`` instead of
+                blocking until completion. Defaults to False (synchronous).
+            
+        Returns:
+            Result from the subagent execution. When ``background=True`` a
+            ``{"success": True, "job_id": ..., "status": "running"}`` handle
+            is returned instead; use ``subagent_result(job_id)`` to collect.
+        """
+        # Check depth limit (per-thread; captured for background workers below)
+        parent_depth = _get_depth()
+        if parent_depth >= max_depth:
+            return {
+                "success": False,
+                "error": f"Maximum subagent depth ({max_depth}) exceeded",
+                "output": None,
+            }
+        
+        # Check allowed agents
+        if allowed_agents and agent_name and agent_name not in allowed_agents:
+            return {
+                "success": False,
+                "error": f"Agent '{agent_name}' not in allowed list",
+                "output": None,
+            }
+
+        # Resolve LLM (parameter > default > None)
+        effective_llm = llm or default_llm
+        # Resolve permission mode (parameter > default > None)
+        effective_permission_mode = permission_mode or default_permission_mode
+
+        if background:
+            # Enqueue on the existing background job runner. Depth and
+            # permission/tool scoping are captured in the closure below so
+            # the backgrounded subagent runs under exactly the same
+            # constraints as a synchronous one.
+            from praisonaiagents.background.job_manager import get_job_manager
+
+            job_manager = get_job_manager()
+
+            def _job() -> Dict[str, Any]:
+                return _run_subagent(
+                    task=task,
+                    agent_name=agent_name,
+                    context=context,
+                    tools=tools,
+                    effective_llm=effective_llm,
+                    effective_permission_mode=effective_permission_mode,
+                    parent_depth=parent_depth,
+                )
+
+            job_id = job_manager.start_job(_job)
+            return {
+                "success": True,
+                "job_id": job_id,
+                "status": "running",
+                "agent_name": agent_name or "subagent",
+                "task": task,
+                "llm": effective_llm,
+                "permission_mode": effective_permission_mode,
+            }
+
+        return _run_subagent(
+            task=task,
+            agent_name=agent_name,
+            context=context,
+            tools=tools,
+            effective_llm=effective_llm,
+            effective_permission_mode=effective_permission_mode,
+            parent_depth=parent_depth,
+        )
+
+    def subagent_result(job_id: str, wait: bool = False) -> Dict[str, Any]:
+        """
+        Fetch the status/result of a backgrounded subagent.
+
+        Args:
+            job_id: The job ID returned by ``spawn_subagent(background=True)``.
+            wait: When True, block until the job completes before returning.
+
+        Returns:
+            A dict describing the job. While running:
+            ``{"success": True, "job_id": ..., "status": "running"}``.
+            On completion the subagent's result dict is returned under
+            ``"result"`` along with ``"status": "completed"``.
+        """
+        from praisonaiagents.background.job_manager import (
+            get_job_manager,
+            JobStatus,
+        )
+
+        job_manager = get_job_manager()
+        try:
+            if wait:
+                try:
+                    result = job_manager.get_result(job_id)
+                except KeyError:
+                    return {
+                        "success": False,
+                        "job_id": job_id,
+                        "error": f"Job '{job_id}' not found",
+                    }
+                except Exception as e:
+                    # The worker failed or was cancelled. Surface the same
+                    # clean failure shape the non-blocking path returns
+                    # instead of re-raising to the caller.
+                    return {
+                        "success": False,
+                        "job_id": job_id,
+                        "status": JobStatus.FAILED.value,
+                        "error": str(e),
+                    }
+                return {
+                    "success": True,
+                    "job_id": job_id,
+                    "status": JobStatus.COMPLETED.value,
+                    "result": result,
+                }
+
+            info = job_manager.get_job_info(job_id)
+        except KeyError:
+            return {
+                "success": False,
+                "job_id": job_id,
+                "error": f"Job '{job_id}' not found",
+            }
+
+        if info.status == JobStatus.COMPLETED:
+            return {
+                "success": True,
+                "job_id": job_id,
+                "status": info.status.value,
+                "result": info.result,
+            }
+        if info.status == JobStatus.FAILED:
+            return {
+                "success": False,
+                "job_id": job_id,
+                "status": info.status.value,
+                "error": info.error,
+            }
+        return {
+            "success": True,
+            "job_id": job_id,
+            "status": info.status.value,
+        }
+
+    spawn_subagent._subagent_result = subagent_result  # type: ignore[attr-defined]
+
     return {
         "name": "spawn_subagent",
         "description": (
@@ -169,8 +317,38 @@ def create_subagent_tool(
                     "enum": ["default", "accept_edits", "dont_ask", "bypass_permissions", "plan"],
                     "description": "Optional permission mode for the subagent (default, accept_edits, dont_ask, bypass_permissions, plan)",
                 },
+                "background": {
+                    "type": "boolean",
+                    "description": "When true, run the subagent in the background (fire-and-forget) and return a job_id immediately instead of blocking. Use subagent_result to collect the result.",
+                    "default": False,
+                },
             },
             "required": ["task"],
+        },
+        "result_tool": {
+            "name": "subagent_result",
+            "description": (
+                "Fetch the status or result of a backgrounded subagent "
+                "launched via spawn_subagent(background=true). Pass the "
+                "job_id returned by spawn_subagent. Set wait=true to block "
+                "until the subagent completes."
+            ),
+            "function": subagent_result,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_id": {
+                        "type": "string",
+                        "description": "The job ID returned by spawn_subagent(background=true)",
+                    },
+                    "wait": {
+                        "type": "boolean",
+                        "description": "When true, block until the subagent completes before returning",
+                        "default": False,
+                    },
+                },
+                "required": ["job_id"],
+            },
         },
     }
 
