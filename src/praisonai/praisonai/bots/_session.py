@@ -80,6 +80,7 @@ class BotSessionManager:
         channel_directory: Optional[Any] = None,
         inject_session_context: bool = True,
         compaction: Optional[Any] = None,
+        delivery_router: Optional[Any] = None,
     ) -> None:
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
         self._locks = LockMap()
@@ -104,6 +105,12 @@ class BotSessionManager:
         # Platform awareness: channel directory and injection flag
         self._channel_directory = channel_directory
         self._inject_session_context = inject_session_context
+        # Issue #2372: the running gateway's DeliveryRouter. When set, each
+        # agent turn registers a concrete ``BotOutboundMessenger`` into the
+        # per-turn context so the built-in core ``send_message`` tool can
+        # proactively reach the user mid-task. ``None`` preserves legacy
+        # behaviour (the tool returns its "no gateway available" message).
+        self._delivery_router = delivery_router
         self._last_journal_key = None  # Store key for delayed completion
         # Run control for in-flight message handling
         self._run_control = run_control
@@ -632,6 +639,39 @@ class BotSessionManager:
         except Exception:  # pragma: no cover — defensive
             _clear_ctx = None  # type: ignore[assignment]
 
+        # Issue #2372: register a concrete outbound messenger for this turn so
+        # the built-in core ``send_message`` tool can proactively reach the
+        # user. Bound to the running gateway's DeliveryRouter and this turn's
+        # origin so ``send_message("origin", ...)`` replies on the channel the
+        # message came from. Cleared in the finally below so it never leaks
+        # into an unrelated turn. No router -> no-op (legacy behaviour).
+        messenger_token = None
+        _clear_messenger = None
+        if self._delivery_router is not None:
+            try:
+                from ._outbound_messenger import BotOutboundMessenger
+                from .delivery import SessionSource
+                from praisonaiagents.session.context import (
+                    register_outbound_messenger as _register_messenger,
+                    clear_outbound_messenger as _clear_messenger,
+                )
+
+                origin_source = None
+                if self._platform and chat_id:
+                    origin_source = SessionSource(
+                        platform=self._platform,
+                        channel_id=chat_id,
+                        user_id=user_id,
+                        thread_id=thread_id,
+                    )
+                messenger = BotOutboundMessenger(
+                    self._delivery_router, origin=origin_source
+                )
+                messenger_token = _register_messenger(messenger)
+            except Exception as e:  # pragma: no cover — defensive
+                logger.debug("Failed to register outbound messenger: %s", e)
+                _clear_messenger = None  # type: ignore[assignment]
+
         # Initialize result variable
         result: Optional[str] = None
         claim_ctx = None
@@ -856,6 +896,13 @@ class BotSessionManager:
                     _clear_ctx(ctx_token)
                 except Exception as e:
                     logger.debug("Failed to clear task-local session context for ctx_token=%r: %s", ctx_token, e)
+            # Issue #2372: clear the per-turn outbound messenger so it never
+            # leaks into an unrelated subsequent call sharing the same task.
+            if messenger_token is not None and _clear_messenger is not None:
+                try:
+                    _clear_messenger(messenger_token)
+                except Exception as e:  # pragma: no cover — defensive
+                    logger.debug("Failed to clear outbound messenger: %s", e)
             # Restore the previous correlation id so the contextvar never leaks
             # the id of this turn into an unrelated subsequent call.
             if cid_token is not None:
