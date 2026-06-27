@@ -125,7 +125,7 @@ class GatewayHandler:
             except KeyboardInterrupt:
                 print("\nStopping gateway...")
                 asyncio.run(self._gateway.stop_channels(drain_timeout=drain_timeout))
-                asyncio.run(self._gateway.stop(drain_timeout=drain_timeout or 10.0))
+                asyncio.run(self._gateway.stop(drain_timeout=drain_timeout))
             except FileNotFoundError as e:
                 print(f"Error: {e}")
             except Exception as e:

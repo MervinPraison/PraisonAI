@@ -11,7 +11,7 @@ import pytest
 
 try:
     from praisonai.bots.botos import BotOS
-except Exception:  # pragma: no cover - optional deps not installed
+except ImportError:  # pragma: no cover - optional deps not installed
     BotOS = None
 
 pytestmark = pytest.mark.skipif(BotOS is None, reason="praisonai bots not importable")

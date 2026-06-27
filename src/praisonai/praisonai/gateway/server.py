@@ -4039,11 +4039,18 @@ class WebSocketGateway:
         # we cancel channel tasks. Best-effort and bounded; failures here
         # never block teardown.
         if drain_timeout and drain_timeout > 0:
+            # Bound the *total* drain to drain_timeout: track elapsed and
+            # pass only the remaining budget to each bot so N channel bots
+            # don't multiply the configured window (N * drain_timeout).
+            drain_start = time.monotonic()
             for name, bot in list(self._channel_bots.items()):
                 drain = getattr(bot, "drain", None)
                 if callable(drain):
+                    remaining = drain_timeout - (time.monotonic() - drain_start)
+                    if remaining <= 0:
+                        break
                     try:
-                        abandoned = await drain(drain_timeout)
+                        abandoned = await drain(remaining)
                         if abandoned:
                             logger.warning(
                                 "Drain timeout for bot '%s': %d turn(s) abandoned",
@@ -4585,6 +4592,20 @@ class WebSocketGateway:
         drain_timeout_cfg = getattr(self, "_drain_timeout_override", None)
         if drain_timeout_cfg is None:
             drain_timeout_cfg = gw_cfg.get("drain_timeout")
+        # YAML/env-substituted values may arrive as strings (e.g. "30");
+        # coerce once so later ``> 0`` comparisons never raise TypeError.
+        if drain_timeout_cfg is not None:
+            try:
+                import math as _math
+                drain_timeout_cfg = float(drain_timeout_cfg)
+                if not _math.isfinite(drain_timeout_cfg) or drain_timeout_cfg < 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Invalid gateway.drain_timeout %r; disabling drain",
+                    drain_timeout_cfg,
+                )
+                drain_timeout_cfg = None
         
         # Parse health monitoring configuration
         health_cfg = gw_cfg.get("health")

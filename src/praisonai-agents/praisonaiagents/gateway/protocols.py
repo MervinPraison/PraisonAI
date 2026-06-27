@@ -2100,11 +2100,20 @@ class DrainTimeoutPolicy:
     """
 
     def __init__(self, drain_timeout_seconds: float = 30.0):
-        if drain_timeout_seconds < 0:
+        import math
+
+        try:
+            seconds = float(drain_timeout_seconds)
+        except (TypeError, ValueError):
             raise ValueError(
-                f"drain_timeout_seconds must be >= 0, got {drain_timeout_seconds!r}"
+                f"drain_timeout_seconds must be a number, got {drain_timeout_seconds!r}"
             )
-        self.drain_timeout_seconds = float(drain_timeout_seconds)
+        if not math.isfinite(seconds) or seconds < 0:
+            raise ValueError(
+                f"drain_timeout_seconds must be a finite value >= 0, "
+                f"got {drain_timeout_seconds!r}"
+            )
+        self.drain_timeout_seconds = seconds
 
     def should_keep_draining(
         self,

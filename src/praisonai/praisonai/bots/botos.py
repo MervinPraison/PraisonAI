@@ -54,6 +54,26 @@ from .delivery import DeliveryRouter, SessionSource
 logger = logging.getLogger(__name__)
 
 
+def _coerce_drain_timeout(value: Optional[Any]) -> Optional[float]:
+    """Coerce a drain-timeout config value to a finite float (or None).
+
+    YAML/env-substituted values (#2375) can reach the shutdown path as
+    quoted strings (e.g. ``"30"``); coercing here keeps later numeric
+    comparisons (``> 0``) safe. ``None`` passes through (disabled).
+    """
+    if value is None:
+        return None
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"drain_timeout must be a number, got {value!r}")
+    import math
+
+    if not math.isfinite(timeout) or timeout < 0:
+        raise ValueError(f"drain_timeout must be a finite value >= 0, got {value!r}")
+    return timeout
+
+
 class BotOS:
     """Multi-platform bot orchestrator.
 
@@ -86,7 +106,7 @@ class BotOS:
         # Issue #2375: opt-in graceful drain on shutdown. Default off —
         # when None/0 the gateway behaves exactly as before (in-flight
         # agent turns are cancelled immediately on stop()).
-        self._drain_timeout: Optional[float] = drain_timeout
+        self._drain_timeout: Optional[float] = _coerce_drain_timeout(drain_timeout)
         # Whether ingress should keep dispatching new turns. Flipped to
         # False at the start of a drain so current turns finish but no
         # new ones begin.
@@ -720,7 +740,7 @@ class BotOS:
             The number of agent turns still running when the deadline hit
             (``0`` when the drain completed cleanly).
         """
-        timeout = self._drain_timeout if timeout is None else timeout
+        timeout = self._drain_timeout if timeout is None else _coerce_drain_timeout(timeout)
         if not timeout or timeout <= 0:
             return 0
 
@@ -737,7 +757,8 @@ class BotOS:
             running_turns=running, seconds_elapsed=0.0
         )
         while decision.keep_draining:
-            await asyncio.sleep(0.5)
+            remaining = max(0.0, timeout - (time.monotonic() - start))
+            await asyncio.sleep(min(0.5, remaining))
             running, _ = self._probe_activity()
             decision = policy.should_keep_draining(
                 running_turns=running,
@@ -782,7 +803,11 @@ class BotOS:
 
         # Graceful drain phase (opt-in): let in-flight turns finish before
         # we cancel tasks below. No-op when no drain timeout is configured.
-        effective_drain = self._drain_timeout if drain_timeout is None else drain_timeout
+        effective_drain = (
+            self._drain_timeout
+            if drain_timeout is None
+            else _coerce_drain_timeout(drain_timeout)
+        )
         if effective_drain and effective_drain > 0:
             try:
                 await self.drain(effective_drain)
