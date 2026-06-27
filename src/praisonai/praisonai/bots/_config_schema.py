@@ -185,6 +185,20 @@ class OutboundResilienceSchema(BaseModel):
         return v
 
 
+class DeliveryConfigSchema(BaseModel):
+    """Schema for durable inbound/outbound delivery configuration.
+
+    Durability is **on by default** for long-running gateway/bot runs: a
+    deduplicating inbound journal and an inbound dead-letter queue are wired
+    against a single canonical per-agent SQLite store so a crash mid-turn or a
+    platform webhook redelivery never silently loses or double-processes a
+    message. Advanced operators can override the store location or disable
+    durability entirely.
+    """
+    durable: bool = True  # default on for gateway/bot runs
+    store: Optional[str] = None  # optional canonical SQLite store override
+
+
 class ChannelConfigSchema(BaseModel):
     """Schema for a single channel configuration."""
     platform: Optional[str] = None
@@ -208,6 +222,7 @@ class ChannelConfigSchema(BaseModel):
     home_channel: Optional[str] = None  # Default channel for this platform
     aliases: Dict[str, str] = Field(default_factory=dict)  # Friendly name -> channel_id mapping
     outbound_resilience: Optional[OutboundResilienceSchema] = None
+    delivery: Optional[DeliveryConfigSchema] = None  # Durable inbound/outbound delivery
     session: Optional[SessionConfigSchema] = None
     max_history: Optional[int] = None  # Backward compatibility
     # Inbound media (Issue #2350): when a user sends a photo/document/video,
