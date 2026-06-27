@@ -470,6 +470,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                             channel_id=str(update.message.chat_id),
                             config=self._streaming_config,
                             rate_limiter=self._rate_limiter,
+                            platform="telegram",
                         )
                         
                         # Start streaming (send placeholder)
