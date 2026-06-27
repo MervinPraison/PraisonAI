@@ -266,6 +266,7 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                     # shared per_chat session (Issue #2376); no-op for per_user.
                     self._session.reset(
                         user_id,
+                        account=self._config.get("account", "default"),
                         chat_id=str(message.channel.id),
                     )
                     await message.reply("Session reset. Starting fresh conversation.")

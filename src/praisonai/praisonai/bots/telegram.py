@@ -671,6 +671,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             # shared per_chat session (Issue #2376); a no-op for per_user.
             self._session.reset(
                 user_id,
+                account=self.config.get("account", "default"),
                 chat_id=str(update.message.chat_id) if update.message.chat_id else "",
             )
             await update.message.reply_text("Session reset. Starting fresh conversation.")

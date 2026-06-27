@@ -256,6 +256,27 @@ class TestAccountNamespacing:
         assert len(chat_keys) == 1
         assert ":acct:default:" in chat_keys[0]
 
+    @pytest.mark.asyncio
+    async def test_reset_must_match_account_to_clear_shared_session(self):
+        # A /new in a multi-account gateway must forward the same account it
+        # chatted under, otherwise the shared session stays active. The
+        # adapter /new handlers now pass account, so the matching reset clears
+        # the session and a mismatched account is a no-op.
+        agent = FakeAgent()
+        mgr = BotSessionManager(platform="telegram", session_scope="per_chat")
+
+        await mgr.chat(agent, "alice_id", "hi", chat_id="-100123",
+                       user_name="Alice", account="acctA")
+        assert any(":acct:acctA:" in k for k in mgr._histories)
+
+        # Wrong account → no-op, shared session survives.
+        assert mgr.reset("bob_id", chat_id="-100123", account="acctB") is False
+        assert any(":acct:acctA:" in k for k in mgr._histories)
+
+        # Matching account → shared session cleared.
+        assert mgr.reset("bob_id", chat_id="-100123", account="acctA") is True
+        assert not any(":chat:" in k for k in mgr._histories)
+
 
 class TestInvalidScope:
     """Unknown scope falls back to per_user."""
