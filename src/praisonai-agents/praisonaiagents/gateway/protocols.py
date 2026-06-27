@@ -2143,6 +2143,162 @@ class DrainTimeoutPolicy:
 
 
 # ---------------------------------------------------------------------------
+# Port-less, restart-safe external drain trigger (Issue #2390)
+#
+# Hosted/containerised deployments (Docker, Fly, Kubernetes) need to ask a
+# *running* gateway to drain — finish active turns, stop accepting new ones,
+# then exit — without exposing an inbound control port (a port is attack
+# surface the gateway deliberately avoids). The mechanism is a presence-based
+# marker file (e.g. ``~/.praisonai/gateway/.drain_request.json``) that a
+# background watcher in the wrapper reads. The marker is stamped with an
+# *instantiation epoch* (kernel boot id + PID-1 start time); a marker left
+# over from a prior instantiation on a durable volume is treated as stale and
+# ignored, so a rebooted instance never wedges in "draining" forever.
+#
+# The epoch/staleness check is a pure, testable predicate and belongs in core
+# beside ``ScaleToZeroPolicy``/``DrainTimeoutPolicy``; the watcher wiring and
+# the ``praisonai gateway drain`` CLI live in the wrapper.
+# ---------------------------------------------------------------------------
+
+
+def current_epoch() -> str:
+    """Return a stable identifier for the current OS *instantiation*.
+
+    The epoch combines the most durable, restart-distinguishing signals
+    available so a drain marker can be tied to the instantiation that wrote
+    it. It is derived from (best-effort, in order of preference):
+
+    * the kernel boot id (Linux ``/proc/sys/kernel/random/boot_id``), which
+      changes on every reboot, and
+    * the start time of PID 1 (the init process), which also changes on every
+      boot / container (re)start.
+
+    On platforms where neither is available the function degrades gracefully
+    to an empty string; callers that cannot determine an epoch should treat
+    *every* marker as foreign (fail-safe: ignore stale-looking requests) by
+    pairing this with :class:`DrainMarkerPolicy`, which ignores markers whose
+    epoch does not match the current one.
+
+    Returns:
+        A non-secret, opaque epoch token (``"<boot_id>:<pid1_start>"``) when
+        *both* signals are available, or an empty string otherwise. Requiring
+        both keeps the contract fail-closed: a partial epoch (e.g. ``boot_id``
+        alone, which is unchanged across same-host container restarts) could
+        let a durable stale marker match a fresh instance, so it is never
+        emitted.
+    """
+    boot_id = ""
+    try:
+        with open("/proc/sys/kernel/random/boot_id", "r") as fh:
+            boot_id = fh.read().strip()
+    except (OSError, ValueError):
+        boot_id = ""
+
+    pid1_start = ""
+    try:
+        # field 22 of /proc/1/stat is the process start time in clock ticks
+        # since boot. Names can contain spaces/parens, so split on the final
+        # ')' to reach the stable numeric tail.
+        with open("/proc/1/stat", "r") as fh:
+            raw = fh.read()
+        tail = raw.rsplit(")", 1)[-1].split()
+        # tail[0] is 'state'; field 22 overall == index 19 of the tail.
+        if len(tail) > 19:
+            pid1_start = tail[19]
+    except (OSError, ValueError, IndexError):
+        pid1_start = ""
+
+    if boot_id and pid1_start:
+        return f"{boot_id}:{pid1_start}"
+    # Fail closed: a partial epoch cannot reliably distinguish a restart, so an
+    # empty epoch is returned and DrainMarkerPolicy treats every marker as
+    # foreign (ignored) unless ``require_epoch=False`` is set explicitly.
+    return ""
+
+
+class DrainMarkerPolicy:
+    """Pure predicate deciding whether an external drain marker is actionable.
+
+    A drain marker is a small JSON object written by an operator / deploy step
+    (via ``praisonai gateway drain``) into a well-known path. A background
+    watcher in the wrapper reads it and asks this policy whether the running
+    gateway should react. The decision is intentionally side-effect free so it
+    is provable in isolation without a live gateway or filesystem.
+
+    A marker is honoured only when it requests a drain *for the current
+    instantiation*:
+
+    * a missing marker (``None``) is never a drain request;
+    * a marker carrying no ``epoch`` is treated as foreign and ignored, so a
+      hand-rolled or legacy file cannot wedge a process;
+    * a marker whose ``epoch`` differs from ``current_epoch`` is stale — it
+      survived a reboot/restart on a durable volume — and is ignored;
+    * a current-epoch marker is honoured (subject to an optional
+      already-handled de-duplication via ``last_handled_epoch``).
+
+    Example::
+
+        policy = DrainMarkerPolicy()
+        if policy.drain_requested(read_marker(), current_epoch(), monotonic()):
+            await gateway.stop(drain_timeout=cfg.gateway.drain_timeout)
+    """
+
+    def __init__(self, *, require_epoch: bool = True):
+        self.require_epoch = bool(require_epoch)
+
+    def drain_requested(
+        self,
+        marker: Optional[Dict[str, Any]],
+        current_epoch: str,
+        now: float,
+        *,
+        last_handled_epoch: Optional[str] = None,
+    ) -> bool:
+        """Return whether ``marker`` is a live drain request for this instance.
+
+        Args:
+            marker: Parsed marker contents, or ``None`` when no marker file is
+                present.
+            current_epoch: The current instantiation epoch (see
+                :func:`current_epoch`).
+            now: A monotonic timestamp (unused by the default policy; accepted
+                so subclasses can implement TTL/debounce without changing the
+                call site).
+            last_handled_epoch: If supplied and equal to the marker's epoch,
+                the request is treated as already handled and ignored, so a
+                watcher polling repeatedly only fires once per instantiation.
+
+        Returns:
+            ``True`` only for a non-stale, current-epoch drain request that has
+            not already been handled.
+        """
+        if not isinstance(marker, dict):
+            return False
+
+        marker_epoch = marker.get("epoch")
+        if not isinstance(marker_epoch, str) or not marker_epoch:
+            # No epoch stamp: cannot prove it belongs to this instantiation.
+            # Fail safe by ignoring it unless epochs are explicitly optional.
+            if self.require_epoch:
+                return False
+        elif marker_epoch != current_epoch:
+            # A marker from a prior instantiation (e.g. survived a reboot on a
+            # durable volume). Ignore it so a fresh instance never wedges.
+            return False
+        elif last_handled_epoch is not None and marker_epoch == last_handled_epoch:
+            # Already acted on this instantiation's request.
+            return False
+
+        action = marker.get("action", "drain")
+        if not isinstance(action, str):
+            # A non-string action is a malformed marker; fail closed.
+            return False
+        if action.strip().lower() not in ("", "drain"):
+            return False
+        return True
+
+
+# ---------------------------------------------------------------------------
 # Protocol Version Negotiation (Issue #2130)
 # ---------------------------------------------------------------------------
 
