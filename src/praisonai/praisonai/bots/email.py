@@ -411,7 +411,7 @@ class EmailBot(ChatCommandMixin, MessageHookMixin):
                     chat_id=message.sender.user_id,
                     user_name=message.sender.display_name or "",
                     message_id=message.message_id,
-                    account=self._config.get("account", "default"),
+                    account=getattr(self.config, "account", "default"),
                 )
                 
                 if response:
