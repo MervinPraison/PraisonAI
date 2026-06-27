@@ -93,8 +93,10 @@ class TestAsyncIODaemonStateUpdates:
         # Mock the _update_state_if_daemon method
         with patch.object(scheduler, '_update_state_if_daemon') as mock_update:
             with patch('asyncio.to_thread') as mock_to_thread:
-                mock_to_thread.return_value = asyncio.create_future()
-                mock_to_thread.return_value.set_result(None)
+                future = asyncio.get_running_loop().create_future()
+                future.set_result(None)
+                mock_to_thread.return_value = future
+                
                 
                 # Execute with retry - should call _update_state_if_daemon via asyncio.to_thread
                 await scheduler._execute_with_retry(max_retries=1)
@@ -110,8 +112,10 @@ class TestAsyncIODaemonStateUpdates:
         scheduler = AsyncAgentScheduler(mock_agent, "test task")
         
         with patch('asyncio.to_thread') as mock_to_thread:
-            mock_to_thread.return_value = asyncio.create_future()
-            mock_to_thread.return_value.set_result(None)
+            future = asyncio.get_running_loop().create_future()
+            future.set_result(None)
+            mock_to_thread.return_value = future
+            
             
             await scheduler._execute_with_retry(max_retries=1)
             
@@ -127,9 +131,11 @@ class TestAsyncIODaemonStateUpdates:
         scheduler = AsyncAgentScheduler(mock_agent, "test task")
         
         with patch('asyncio.to_thread') as mock_to_thread:
-            mock_to_thread.return_value = asyncio.create_future()
-            mock_to_thread.return_value.set_result(None)
+            future = asyncio.get_running_loop().create_future()
+            future.set_result(None)
+            mock_to_thread.return_value = future
             
+
             await scheduler._execute_with_retry(max_retries=1)
             
             # Should be called once on failure path
@@ -271,12 +277,12 @@ class TestCLIToolResolverIntegration:
 
     def test_cli_load_tools_uses_resolver(self):
         """Test that _load_tools uses ToolResolver.resolve instead of direct TOOL_MAPPINGS."""
-        from praisonai.praisonai.cli.main import PraisonCLI
+        from praisonai.cli.main import PraisonAI
         
-        cli = PraisonCLI()
+        cli = PraisonAI()
         
         # Mock ToolResolver
-        with patch('praisonai.praisonai.cli.main.ToolResolver') as MockResolver:
+        with patch("praisonai.tool_resolver.ToolResolver") as MockResolver:
             mock_resolver_instance = Mock()
             MockResolver.return_value = mock_resolver_instance
             mock_resolver_instance.resolve.return_value = Mock()  # Mock tool
@@ -294,11 +300,11 @@ class TestCLIToolResolverIntegration:
 
     def test_cli_load_tools_handles_empty_strings(self):
         """Test that _load_tools filters out empty strings from tool names."""
-        from praisonai.praisonai.cli.main import PraisonCLI
+        from praisonai.cli.main import PraisonAI
         
-        cli = PraisonCLI()
+        cli = PraisonAI()
         
-        with patch('praisonai.praisonai.cli.main.ToolResolver') as MockResolver:
+        with patch("praisonai.tool_resolver.ToolResolver") as MockResolver:
             mock_resolver_instance = Mock()
             MockResolver.return_value = mock_resolver_instance
             mock_resolver_instance.resolve.return_value = Mock()
@@ -313,11 +319,11 @@ class TestCLIToolResolverIntegration:
 
     def test_cli_load_tools_error_handling(self):
         """Test that _load_tools handles resolution errors gracefully."""
-        from praisonai.praisonai.cli.main import PraisonCLI
+        from praisonai.cli.main import PraisonAI
         
-        cli = PraisonCLI()
+        cli = PraisonAI()
         
-        with patch('praisonai.praisonai.cli.main.ToolResolver') as MockResolver:
+        with patch("praisonai.tool_resolver.ToolResolver") as MockResolver:
             mock_resolver_instance = Mock()
             MockResolver.return_value = mock_resolver_instance
             # Simulate tool resolution failure
@@ -335,11 +341,11 @@ class TestFrameworkAdapterDuplication:
 
     def test_no_duplicate_arun_in_protocol(self):
         """Test that FrameworkAdapter protocol has single arun method."""
-        from praisonai.praisonai.framework_adapters.base import FrameworkAdapter
+        from praisonai.framework_adapters.base import FrameworkAdapter
         
         # Get all method names from the protocol
         import inspect
-        methods = [name for name, _ in inspect.getmembers(FrameworkAdapter, inspect.ismethod)
+        methods = [name for name, _ in inspect.getmembers(FrameworkAdapter, inspect.isfunction)
                   if not name.startswith('__')]
         
         # Count arun occurrences
@@ -348,7 +354,7 @@ class TestFrameworkAdapterDuplication:
 
     def test_framework_adapter_has_cleanup_method(self):
         """Test that FrameworkAdapter protocol includes cleanup method."""
-        from praisonai.praisonai.framework_adapters.base import FrameworkAdapter
+        from praisonai.framework_adapters.base import FrameworkAdapter
         
         # Check that cleanup method is defined in the protocol
         import inspect
