@@ -988,12 +988,13 @@ Your Goal: {self.goal}"""
         formatted_tools = self._format_tools_for_completion(tools)
 
         # Smart fallback for streaming: try streaming first, fall back to non-streaming if unsupported
+        streaming_response = None
         if stream is None:
             # Auto-detect: prefer streaming for better UX, fallback if adapter doesn't support it
             try:
                 # First attempt: try with streaming enabled for better user experience
                 stream_callback = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
-                final_response = self._chat_completion_with_retry(
+                streaming_response = self._chat_completion_with_retry(
                     messages=messages,
                     temperature=temperature,
                     tools=formatted_tools,
@@ -1006,7 +1007,6 @@ Your Goal: {self.goal}"""
                     stream_callback=stream_callback,
                     emit_events=True
                 )
-                return final_response
             except ValueError as e:
                 if "Streaming is not supported" in str(e):
                     # Fallback: retry with non-streaming for sync adapters
@@ -1029,19 +1029,22 @@ Your Goal: {self.goal}"""
             # UNIFIED: Single protocol-driven dispatch path (fixes DRY violation)
             # All LLM providers now go through unified dispatcher for consistency and maintainability
             stream_callback = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
-            final_response = self._chat_completion_with_retry(
-                messages=messages,
-                temperature=temperature,
-                tools=formatted_tools,
-                stream=stream,
-                reasoning_steps=reasoning_steps,
-                task_name=task_name,
-                task_description=task_description,
-                task_id=task_id,
-                response_format=response_format,
-                stream_callback=stream_callback,
-                emit_events=True,
-            )
+            if streaming_response is not None:
+                final_response = streaming_response
+            else:
+                final_response = self._chat_completion_with_retry(
+                    messages=messages,
+                    temperature=temperature,
+                    tools=formatted_tools,
+                    stream=stream,
+                    reasoning_steps=reasoning_steps,
+                    task_name=task_name,
+                    task_description=task_description,
+                    task_id=task_id,
+                    response_format=response_format,
+                    stream_callback=stream_callback,
+                    emit_events=True,
+                )
 
             # Emit LLM response trace event with token usage
             _duration_ms = (time.time() - start_time) * 1000
