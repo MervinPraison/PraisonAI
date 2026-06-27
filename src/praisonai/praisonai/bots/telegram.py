@@ -486,7 +486,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                                 chat_id=str(update.message.chat_id) if update.message.chat_id else "",
                                 user_name=user_name,
                                 message_id=str(update.message.message_id),
-                                account=self.config.get("account", "default"),
+                                account=getattr(self.config, "account", "default"),
                                 stream_callback=streamer.on_event,
                                 attachments=attachments or None,
                             )
@@ -566,7 +566,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                                     chat_id=str(update.message.chat_id) if update.message.chat_id else "",
                                     user_name=user_name,
                                     message_id=str(update.message.message_id),
-                                    account=self.config.get("account", "default"),
+                                    account=getattr(self.config, "account", "default"),
                                     attachments=attachments or None,
                                 )
                             )
@@ -576,7 +576,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                                 chat_id=str(update.message.chat_id) if update.message.chat_id else "",
                                 user_name=user_name,
                                 message_id=str(update.message.message_id),
-                                account=self.config.get("account", "default"),
+                                account=getattr(self.config, "account", "default"),
                                 attachments=attachments or None,
                             )
                         
@@ -667,7 +667,13 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             if not self._command_policy.can_run(user_id, "new"):
                 await update.message.reply_text("⛔ You are not permitted to run /new")
                 return
-            self._session.reset(user_id)
+            # Pass the chat route so a /new in a group/channel clears the
+            # shared per_chat session (Issue #2376); a no-op for per_user.
+            self._session.reset(
+                user_id,
+                account=getattr(self.config, "account", "default"),
+                chat_id=str(update.message.chat_id) if update.message.chat_id else "",
+            )
             await update.message.reply_text("Session reset. Starting fresh conversation.")
         
         async def handle_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -852,7 +858,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     chat_id=str(update.message.chat_id) if update.message.chat_id else "",
                     user_name=user_name,
                     message_id=str(update.message.message_id),
-                    account=self.config.get("account", "default"),
+                    account=getattr(self.config, "account", "default"),
                 )
                 await update.message.reply_text(response)
             except Exception as e:  # noqa: BLE001 - surface a friendly message

@@ -262,7 +262,13 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                     return
                 elif command == "new":
                     user_id = str(message.author.id)
-                    self._session.reset(user_id)
+                    # Pass the chat route so a /new in a channel clears the
+                    # shared per_chat session (Issue #2376); no-op for per_user.
+                    self._session.reset(
+                        user_id,
+                        account=getattr(self.config, "account", "default"),
+                        chat_id=str(message.channel.id),
+                    )
                     await message.reply("Session reset. Starting fresh conversation.")
                     return
                 elif command == "help":
@@ -337,7 +343,7 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                             chat_id=str(message.channel.id),
                             user_name=str(getattr(message.author, "name", "")),
                             message_id=str(message.id),
-                            account=self._config.get("account", "default"),
+                            account=getattr(self.config, "account", "default"),
                         )
                         await message.reply(response)
                     except Exception as e:  # noqa: BLE001 - surface a friendly message
@@ -401,7 +407,7 @@ class DiscordBot(ChatCommandMixin, MessageHookMixin):
                             chat_id=str(message.channel.id),
                             user_name=str(getattr(message.author, "name", "")),
                             message_id=str(message.id),
-                            account=self._config.get("account", "default"),
+                            account=getattr(self.config, "account", "default"),
                         )
                         send_result = self.fire_message_sending(
                             str(message.channel.id), str(response),

@@ -688,7 +688,7 @@ class AgentMailBot(ChatCommandMixin, MessageHookMixin):
                     chat_id=sender_id,
                     user_name=message.sender.display_name if message.sender else "",
                     message_id=message.message_id,
-                    account=self._config.get("account", "default"),
+                    account=getattr(self.config, "account", "default"),
                 )
                 
                 if response:

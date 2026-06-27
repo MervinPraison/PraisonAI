@@ -257,7 +257,14 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                 return
             elif text == "/new":
                 user_id = event.get("user", "unknown")
-                self._session.reset(user_id)
+                # Pass the chat route so a /new in a channel/group clears the
+                # shared per_chat session (Issue #2376); a no-op for per_user.
+                self._session.reset(
+                    user_id,
+                    account=getattr(self.config, "account", "default"),
+                    chat_id=str(event.get("channel", "")),
+                    thread_id=event.get("thread_ts", "") or "",
+                )
                 await say(text="Session reset. Starting fresh conversation.", thread_ts=event.get("ts"))
                 return
             elif text == "/help":
@@ -330,7 +337,7 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                         chat_id=str(event.get("channel", "")),
                         thread_id=event.get("thread_ts", "") or "",
                         message_id=event.get("ts", ""),
-                        account=self._config.get("account", "default"),
+                        account=getattr(self.config, "account", "default"),
                     )
                     await say(text=response, thread_ts=event.get("ts"))
                 except Exception as e:  # noqa: BLE001 - surface a friendly message
@@ -403,7 +410,7 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                         chat_id=str(channel_id) if channel_id else "",
                         thread_id=event.get("thread_ts", "") or "",
                         message_id=event.get("ts", ""),
-                        account=self._config.get("account", "default"),
+                        account=getattr(self.config, "account", "default"),
                     )
                     logger.info(f"Response sent: {response[:100]}...")
                     
@@ -467,7 +474,7 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
                         chat_id=str(event.get("channel", "")),
                         thread_id=event.get("thread_ts", "") or "",
                         message_id=event.get("ts", ""),
-                        account=self._config.get("account", "default"),
+                        account=getattr(self.config, "account", "default"),
                     )
                     logger.info(f"Response sent: {response[:100]}...")
                     

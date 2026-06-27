@@ -120,6 +120,23 @@ class SessionConfigSchema(BaseModel):
     max_history: int = 100
     reset: Optional[SessionResetConfigSchema] = None
     compaction: Optional[SessionCompactionConfigSchema] = None
+    # Group/channel session scope (Issue #2376). ``per_user`` (default) keeps
+    # today's per-sender isolation; ``per_chat`` routes group/channel messages
+    # to a single shared session so the agent follows one multi-party thread.
+    session_scope: str = "per_user"
+    # Sender-attribution template applied to each turn in per_chat scope.
+    # Supports ``{sender}`` and ``{time}`` placeholders.
+    attribution: str = "[{sender}] "
+
+    @field_validator("session_scope")
+    @classmethod
+    def validate_session_scope(cls, v: str) -> str:
+        allowed = {"per_user", "per_chat"}
+        if v not in allowed:
+            raise ValueError(
+                f"Invalid session_scope '{v}'. Must be one of: {', '.join(sorted(allowed))}"
+            )
+        return v
 
 
 class StreamingConfigSchema(BaseModel):
