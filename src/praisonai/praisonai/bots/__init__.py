@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from ._approval_store import ApprovalStore
     from ._delivery import DurableDelivery, deliver_with_retry
     from ._durable_adapter import DurableAdapterMixin
+    from ._outbound_messenger import BotOutboundMessenger
     from ._correlation import (
         correlation_id_from,
         current_correlation_id,
@@ -139,6 +140,9 @@ def __getattr__(name: str):
     if name == "DurableAdapterMixin":
         from ._durable_adapter import DurableAdapterMixin
         return DurableAdapterMixin
+    if name == "BotOutboundMessenger":
+        from ._outbound_messenger import BotOutboundMessenger
+        return BotOutboundMessenger
     # End-to-end correlation IDs (inbound -> run -> outbound)
     if name == "correlation_id_from":
         from ._correlation import correlation_id_from
@@ -169,6 +173,7 @@ __all__ = [
     "ApprovalStore",
     "DurableDelivery", "deliver_with_retry", "deliver_chunked",
     "DurableAdapterMixin",
+    "BotOutboundMessenger",
     # Correlation + metrics (gateway message-flow observability)
     "correlation_id_from", "current_correlation_id", "new_correlation_id",
     "use_correlation_id", "GatewayMetrics",

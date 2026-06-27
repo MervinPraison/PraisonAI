@@ -207,6 +207,12 @@ class BotOS:
         # Configure delivery router from bot configurations
         self._configure_delivery_from_bots()
 
+        # Issue #2372: give every bot's session manager a handle to the
+        # delivery router so each agent turn can register a concrete
+        # ``BotOutboundMessenger``, making the built-in core ``send_message``
+        # tool actually deliver instead of returning "no gateway available".
+        self._wire_outbound_messenger()
+
         # Start health monitoring if enabled
         if self._enable_supervision and self._supervisor:
             await self._supervisor.start_health_monitoring()
@@ -597,6 +603,50 @@ class BotOS:
         logger.info(f"BotOS: executed schedule job '{job.name}'")
         return (result_str, delivered)
     
+    @staticmethod
+    def _find_session_manager(bot: Bot) -> Optional[Any]:
+        """Locate a bot's ``BotSessionManager`` across the adapter variants.
+
+        Adapters expose their session manager under different attribute names
+        (``_session``, ``_session_mgr``) and sometimes behind an inner
+        ``_adapter``. Mirrors the discovery in :meth:`_probe_activity` so the
+        outbound-messenger wiring reaches every shipped transport.
+        """
+        for holder in (bot, getattr(bot, "_adapter", None)):
+            if holder is None:
+                continue
+            for attr in ("_session", "_session_mgr"):
+                session = getattr(holder, attr, None)
+                if session is not None:
+                    return session
+        return None
+
+    def _wire_outbound_messenger(self) -> None:
+        """Hand the delivery router to every bot's session manager (#2372).
+
+        Lets each agent turn register a concrete ``BotOutboundMessenger`` so
+        the built-in core ``send_message`` tool can proactively reach the user.
+
+        Adapters build their session lazily inside ``start()``, so we also stamp
+        the router onto the ``Bot`` itself; ``Bot._build_adapter`` then splices
+        it into the freshly-built session. Already-built sessions (e.g. an
+        adapter constructed directly) are wired in place too. Best-effort: a bot
+        exposing neither is skipped, preserving prior behaviour.
+        """
+        for platform, bot in self._bots.items():
+            try:
+                # Pre-start: applied when the adapter is lazily built.
+                if hasattr(bot, "_delivery_router"):
+                    bot._delivery_router = self._delivery_router
+                # Post-start / direct adapter: wire any existing session now.
+                session = self._find_session_manager(bot)
+                if session is not None and hasattr(session, "_delivery_router"):
+                    session._delivery_router = self._delivery_router
+            except Exception as e:  # pragma: no cover — defensive
+                logger.debug(
+                    "Failed to wire outbound messenger for %s: %s", platform, e
+                )
+
     def _configure_delivery_from_bots(self) -> None:
         """Configure delivery router from bot configurations."""
         for platform, bot in self._bots.items():

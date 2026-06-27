@@ -101,6 +101,13 @@ class Bot:
         self._identity_resolver = identity_resolver
         self._kwargs = kwargs
 
+        # Issue #2372: optional delivery router, set by the owning BotOS so the
+        # adapter's ``_session`` can register a concrete ``BotOutboundMessenger``
+        # per turn, making the built-in core ``send_message`` tool deliver.
+        # Spliced into the adapter session in ``_build_adapter`` (same duck-typed
+        # post-construction pattern as ``identity_resolver``).
+        self._delivery_router: Optional[Any] = None
+
         self._adapter: Optional[Any] = None
         self._is_running = False
 
@@ -202,6 +209,18 @@ class Bot:
                     "_session; identity_resolver ignored.",
                     self._platform,
                 )
+
+        # Issue #2372: splice the delivery router into the adapter's session so
+        # each agent turn can register a concrete ``BotOutboundMessenger`` for
+        # the built-in ``send_message`` tool. Same duck-typed post-construction
+        # wire-up as the identity resolver above; adapters expose the session
+        # under ``_session`` or ``_session_mgr``.
+        if self._delivery_router is not None:
+            session = getattr(adapter, "_session", None) or getattr(
+                adapter, "_session_mgr", None
+            )
+            if session is not None and hasattr(session, "_delivery_router"):
+                session._delivery_router = self._delivery_router
 
         return adapter
 
