@@ -162,5 +162,54 @@ class TestAgentConfigApplication:
         assert complex_model in ['gpt-4-turbo', 'claude-3-opus', 'o1-preview', 'gpt-4o', 'claude-3-sonnet', 'gemini-1.5-pro']
 
 
+class TestBarePositionalPrompt:
+    """Tests for treating a bare positional argument as a one-shot prompt."""
+
+    def _run_with_command(self, command):
+        from unittest.mock import patch, MagicMock
+        from praisonai.cli.main import PraisonAI
+
+        instance = PraisonAI()
+        instance.agent_file = "agents.yaml"
+
+        mock_generator = MagicMock()
+        mock_generator.generate_crew_and_kickoff.return_value = "AGENT_FILE_RUN"
+
+        # Build a fully-populated args namespace (all CLI defaults) and set the
+        # positional command, then feed it to main() via a patched parse_args.
+        base_args = instance.parse_args()
+        if isinstance(base_args, tuple):
+            base_args = base_args[0]
+        base_args.command = command
+
+        with patch.object(PraisonAI, "parse_args", return_value=(base_args, [])), \
+             patch.object(PraisonAI, "read_stdin_if_available", return_value=None), \
+             patch.object(PraisonAI, "read_file_if_provided", return_value=None), \
+             patch("praisonai.cli.main._get_agents_generator", return_value=lambda *a, **k: mock_generator), \
+             patch.object(PraisonAI, "handle_direct_prompt", return_value="OK") as mock_prompt:
+            result = instance.run()
+        return instance, mock_prompt, result, mock_generator
+
+    def test_bare_prompt_routes_to_direct_prompt(self):
+        """A non-file, non-YAML positional is run as a one-shot prompt."""
+        instance, mock_prompt, result, _ = self._run_with_command("summarise this folder")
+        mock_prompt.assert_called_once_with("summarise this folder")
+        assert result == "OK"
+
+    def test_yaml_path_kept_as_agent_file(self):
+        """A .yaml positional is preserved as the agent file (not a prompt)."""
+        instance, mock_prompt, _, mock_generator = self._run_with_command("agents.yaml")
+        mock_prompt.assert_not_called()
+        assert instance.agent_file == "agents.yaml"
+
+    def test_existing_file_kept_as_agent_file(self, tmp_path):
+        """An existing file path is preserved as the agent file."""
+        f = tmp_path / "custom_agents.txt"
+        f.write_text("framework: praisonai")
+        instance, mock_prompt, _, _ = self._run_with_command(str(f))
+        mock_prompt.assert_not_called()
+        assert instance.agent_file == str(f)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])
