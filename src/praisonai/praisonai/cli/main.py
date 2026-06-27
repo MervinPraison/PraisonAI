@@ -956,6 +956,11 @@ class PraisonAI:
         """
         Parse the command-line arguments for the PraisonAI CLI.
         """
+        # Seed availability flags so bare-name reads resolve even when this
+        # method is reached directly (e.g. tests, library callers) rather than
+        # through main(). Idempotent and cheap after the first call.
+        _ensure_availability_flags()
+
         # Check if we're running in a test environment
         in_test_env = (
             'pytest' in sys.argv[0] or 
@@ -4340,6 +4345,10 @@ Do NOT add any explanations or formatting."""
         - @rule:name - Include specific rule
         - @url:https://... - Fetch URL content
         """
+        # Seed availability flags so bare-name reads resolve when invoked
+        # directly (e.g. `praison run` -> handle_direct_prompt) without main().
+        _ensure_availability_flags()
+
         # Check for profiling mode - use unified profiler
         if hasattr(self, 'args') and getattr(self.args, 'profile', False):
             return self._handle_profiled_prompt(prompt)
@@ -5583,6 +5592,9 @@ Now, {final_instruction.lower()}:"""
         """
         Create a Gradio interface for generating agents and performing tasks.
         """
+        # Seed availability flags so bare-name reads resolve when invoked
+        # directly rather than through main().
+        _ensure_availability_flags()
         if GRADIO_AVAILABLE:
             # Lazy import gradio only when needed
             gr = _get_gradio()

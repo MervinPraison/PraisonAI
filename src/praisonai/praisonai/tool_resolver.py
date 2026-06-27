@@ -28,9 +28,22 @@ import importlib.util
 import inspect
 import threading
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional, Protocol
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Protocol,
+    TYPE_CHECKING,
+    Union,
+)
 from types import MappingProxyType
 from ._safe_loader import load_user_module
+
+if TYPE_CHECKING:  # imported only for type annotations to avoid a runtime cycle
+    from .tool_registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +68,7 @@ class ToolSource(Protocol):
         """Name identifying this source for debugging."""
         ...
     
-    def lookup(self, name: str) -> Optional[Callable]:
+    def lookup(self, name: str) -> "Union[Optional[Callable], _ResolveResult]":
         """Look up a tool by name, returning None if not found.
 
         May also return a :class:`_ResolveResult` to signal whether a negative
