@@ -67,6 +67,10 @@ def code_main(
         os.environ["PRAISONAI_TOOL_SAFETY"] = "off"
     else:
         os.environ["PRAISON_APPROVAL_MODE"] = "prompt"
+        # Clear any stale bypass from a previous --no-safe run in the same
+        # process (REPL/worker/test). Leaving PRAISONAI_TOOL_SAFETY=off would
+        # silently keep later safe-default agents unguarded.
+        os.environ.pop("PRAISONAI_TOOL_SAFETY", None)
     
     # Handle profiling for single prompt mode
     if prompt and (profile or profile_deep):
