@@ -339,14 +339,15 @@ class TestKnowledgePresets:
         """Windows-style directory paths should be treated as sources."""
         from praisonaiagents.config.param_resolver import resolve
 
-        result = resolve(
-            value="C:\\knowledge",
-            param_name="knowledge",
-            config_class=MockKnowledgeConfig,
-            string_mode="path_as_source",
-        )
-        assert isinstance(result, MockKnowledgeConfig)
-        assert result.sources == ["C:\\knowledge"]
+        for value in ("C:\\knowledge", "\\knowledge", "~\\knowledge", "knowledge\\docs"):
+            result = resolve(
+                value=value,
+                param_name="knowledge",
+                config_class=MockKnowledgeConfig,
+                string_mode="path_as_source",
+            )
+            assert isinstance(result, MockKnowledgeConfig)
+            assert result.sources == [value]
     
     def test_knowledge_array_sources(self):
         """Array of paths should be sources list."""

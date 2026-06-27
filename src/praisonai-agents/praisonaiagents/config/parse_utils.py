@@ -108,7 +108,7 @@ def is_path_like(value: str) -> bool:
         return False
     
     # Check for path indicators
-    if value.startswith(("./", "../", "/", "~/", ".\\", "..\\", "\\\\")):
+    if value.startswith(("./", "../", "/", "~/", ".\\", "..\\", "\\\\", "\\", "~\\")):
         return True
 
     # Check for Windows drive paths like C:\data or C:/data
@@ -122,6 +122,9 @@ def is_path_like(value: str) -> bool:
     
     # Check for directory indicator
     if value.endswith(("/", "\\")):
+        return True
+
+    if "\\" in value:
         return True
     
     # Check for file extension (common ones)
