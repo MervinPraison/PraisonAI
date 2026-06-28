@@ -263,6 +263,7 @@ class AutoGenFamilyAdapter(BaseFrameworkAdapter):
     """
 
     name = "autogen"
+    install_hint = 'pip install "praisonai-frameworks[autogen]"'
     is_router = True
     
     def is_available(self) -> bool:

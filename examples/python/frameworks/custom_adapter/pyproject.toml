@@ -7,5 +7,8 @@ name = "my-framework-bridge"
 version = "0.0.1"
 dependencies = ["praisonaiagents"]
 
+[tool.setuptools]
+py-modules = ["my_framework_adapter"]
+
 [project.entry-points."praisonai.framework_adapters"]
 my_framework = "my_framework_adapter:MyFrameworkAdapter"

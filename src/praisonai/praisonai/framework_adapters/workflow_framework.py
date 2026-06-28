@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def validate_workflow_framework(
@@ -11,7 +14,7 @@ def validate_workflow_framework(
     source: str = "workflow YAML",
 ) -> None:
     """
-    Fail fast when a workflow file declares a non-native framework.
+    Warn then fail when a workflow file declares a non-native framework.
 
     Multi-framework workflow dispatch is not implemented; only agents.yaml
     via AgentsGenerator supports framework != praisonai today.
@@ -29,12 +32,14 @@ def validate_workflow_framework(
     except Exception:
         pass
 
-    raise ValueError(
+    message = (
         f"framework='{framework}' in {source} is not supported for workflow execution. "
         "Native PraisonAI Workflow engine only supports framework='praisonai'. "
         "Use a non-workflow agents.yaml with a supported registered framework, "
         f"or set framework: praisonai.{supported}"
     )
+    logger.warning(message)
+    raise ValueError(message)
 
 
 def framework_from_config(config: Dict[str, Any]) -> str:

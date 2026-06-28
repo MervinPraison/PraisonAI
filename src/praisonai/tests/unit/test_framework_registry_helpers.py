@@ -10,11 +10,25 @@ def test_list_framework_choices_includes_praisonai():
     assert "praisonai" in choices
 
 
+def test_list_available_frameworks_module_helper():
+    from praisonai.framework_adapters.registry import list_available_frameworks
+
+    available = list_available_frameworks()
+    assert "praisonai" in available
+
+
 def test_get_install_hint_fallback():
     from praisonai.framework_adapters.registry import get_install_hint
 
     hint = get_install_hint("unknown_framework_xyz")
     assert "unknown_framework_xyz" in hint
+
+
+def test_get_install_hint_autogen_v4_extra():
+    from praisonai.framework_adapters.registry import get_install_hint
+
+    hint = get_install_hint("autogen_v4")
+    assert "autogen-v4" in hint
 
 
 def test_autogen_family_is_router_skips_run_validation():

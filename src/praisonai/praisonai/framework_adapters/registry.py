@@ -190,6 +190,11 @@ def list_framework_choices(*, include_unavailable: bool = False) -> list[str]:
     return registry.list_available_frameworks()
 
 
+def list_available_frameworks() -> list[str]:
+    """Return registered framework names that report availability."""
+    return get_default_registry().list_available_frameworks()
+
+
 def get_install_hint(name: str) -> str:
     """Return install hint for a framework, consulting the adapter when registered."""
     registry = get_default_registry()
@@ -200,4 +205,19 @@ def get_install_hint(name: str) -> str:
             return hint
     except (ValueError, TypeError):
         pass
-    return f"pip install praisonai-frameworks[{name}]  # or: pip install 'praisonai[{name}]'"
+    extra_name = {"autogen_v4": "autogen-v4"}.get(name, name)
+    return (
+        f"pip install 'praisonai-frameworks[{extra_name}]'  "
+        f"# or: pip install 'praisonai[{extra_name}]'"
+    )
+
+
+def framework_option_help() -> str:
+    """Help text for CLI --framework options (registry-driven)."""
+    try:
+        names = list_framework_choices(include_unavailable=True)
+        if names:
+            return "Framework: " + ", ".join(names)
+    except Exception:
+        pass
+    return "Framework: praisonai, crewai, autogen"
