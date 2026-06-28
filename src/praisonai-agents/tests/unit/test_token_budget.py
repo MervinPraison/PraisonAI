@@ -365,3 +365,4 @@ class TestAsyncBudgetEnforcement:
             assert agent._total_cost == 0.08
             with pytest.raises(BudgetExceededError):
                 await agent._execute_unified_achat_completion(messages)
+        mock_dispatcher.achat_completion.assert_awaited_once()
