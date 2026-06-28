@@ -195,7 +195,10 @@ def test_resilience_deliver_honours_retry_after(monkeypatch):
 def test_delivery_deliver_with_retry_penalises_lane(monkeypatch):
     from praisonai.bots import _delivery
 
+    slept = []
+
     async def fake_sleep_with_abort(seconds, abort_signal=None):
+        slept.append(seconds)
         return True
 
     monkeypatch.setattr(_delivery, "sleep_with_abort", fake_sleep_with_abort)
@@ -221,10 +224,54 @@ def test_delivery_deliver_with_retry_penalises_lane(monkeypatch):
             rate_limiter=limiter,
         )
 
-    success, err = asyncio.run(run())
+    success, _err = asyncio.run(run())
     assert success is True
+    # deliver_with_retry honoured the server Retry-After: 5 over generic backoff.
+    assert slept == [pytest.approx(5.0, abs=0.01)]
     # The lane should have been penalised by ~5s.
     assert limiter._channel_penalty_until.get("chanX", 0) > 0
+
+
+# ── OutboundQueue.drain gates the next retry by the stored hint ─────
+
+def test_outbox_drain_gates_next_retry_by_server_hint(tmp_path):
+    from praisonai.bots._outbox import OutboundQueue
+
+    queue = OutboundQueue(path=str(tmp_path / "outbox.sqlite"))
+
+    async def run():
+        await queue.enqueue("k1", "discord:chanX", {"content": "hi"})
+
+        async def failing_sender(target, payload):
+            # Raise a 429 carrying a server Retry-After: 50 the first drain.
+            raise HTTPRateLimit("50")
+
+        succeeded, failed = await queue.drain(failing_sender)
+        assert (succeeded, failed) == (0, 1)
+
+    asyncio.run(run())
+
+    # The stored error must carry a recoverable retry_after hint so the gate
+    # honours the server throttle on the next drain rather than retrying early.
+    entry = queue._get_pending_entries()[0]
+    assert entry.error is not None
+    assert server_retry_after(Exception(entry.error)) == 50.0
+
+    # A second immediate drain must NOT re-send: the gate holds the entry until
+    # the 50s server window elapses (far longer than generic backoff).
+    async def run2():
+        sent = {"n": 0}
+
+        async def ok_sender(target, payload):
+            sent["n"] += 1
+            return True
+
+        succeeded, failed = await queue.drain(ok_sender)
+        return sent["n"], succeeded, failed
+
+    n, succeeded, failed = asyncio.run(run2())
+    assert n == 0  # gated; not retried early
+    assert (succeeded, failed) == (0, 0)
 
 
 if __name__ == "__main__":

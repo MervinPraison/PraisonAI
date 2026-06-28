@@ -31,6 +31,16 @@ logger = logging.getLogger(__name__)
 PERMANENT_ERROR_PREFIX = "Permanent error:"
 
 
+class _TransientDeliveryError(Exception):
+    """Recoverable delivery failure carrying the underlying error text.
+
+    Raised by the durable drain sender so the outbox persists the real error
+    (and any server Retry-After hint embedded in it) instead of a generic
+    "Delivery returned false". Always classified recoverable so the entry is
+    retried rather than marked a permanent failure.
+    """
+
+
 class MessageSender(Protocol):
     """Protocol for message sending implementations."""
     
@@ -357,8 +367,10 @@ async def deliver_with_retry(
             delay = mandated if mandated is not None else compute_backoff(backoff, attempt)
             
             # Widen this channel's lane so the next send does not immediately
-            # re-trip the platform limit.
-            if rate_limiter is not None and delay > 0:
+            # re-trip the platform limit. Only penalise on a server-mandated
+            # wait — a generic backoff after an ordinary transient error must
+            # not synthetically throttle later sends to this channel.
+            if mandated is not None and rate_limiter is not None and delay > 0:
                 try:
                     await rate_limiter.penalise(channel_id, delay)
                 except Exception:
@@ -615,6 +627,13 @@ class DurableDelivery:
             # Preserve permanent failure information
             if not success and error and error.startswith(PERMANENT_ERROR_PREFIX):
                 raise RuntimeError(error)
+            
+            # Surface a transient failure (with its underlying error text) so the
+            # outbox records it and its retry gate can honour any server
+            # Retry-After hint carried in that text. Returning False would store
+            # a generic "Delivery returned false" and lose the hint.
+            if not success and error:
+                raise _TransientDeliveryError(error)
             
             return success
         

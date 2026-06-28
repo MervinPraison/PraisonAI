@@ -407,7 +407,16 @@ class OutboundQueue:
             except Exception as e:
                 # Check if error is permanent
                 permanent = not is_recoverable_error(e)
-                await self.mark_failed(key, str(e), permanent=permanent)
+                # Persist any server-mandated wait from the *live* exception
+                # (structured Telegram parameters / HTTP Retry-After headers are
+                # lost once only str(e) is stored). Append it in a form the
+                # text fallback in server_retry_after() recovers on the next
+                # drain so the gate honours the platform's throttle.
+                error_text = str(e)
+                mandated = server_retry_after(e)
+                if mandated is not None and "retry_after" not in error_text.lower():
+                    error_text = f"{error_text} [retry_after: {mandated:g}]"
+                await self.mark_failed(key, error_text, permanent=permanent)
                 failed += 1
                 
                 if permanent:

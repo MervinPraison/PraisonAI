@@ -116,8 +116,12 @@ class RateLimiter:
             self._tokens -= 1.0
             
             # Honour any active global penalty window (e.g. a platform-wide 429).
+            # Anchor the refill clock to the penalty's end so queued callers
+            # still reserve staggered token slots and don't all fire together
+            # the instant the hold-off expires.
             if self._global_penalty_until > now + global_wait:
                 global_wait = self._global_penalty_until - now
+                self._last_refill = max(self._last_refill, now + global_wait)
             
             channel_wait = 0.0
             if channel_id:

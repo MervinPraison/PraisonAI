@@ -89,6 +89,7 @@ _RECOVERABLE_PATTERNS: Set[str] = {
     "dns resolution",
     "ssl",
     "certificate",
+    "transientdeliveryerror",
 }
 
 # Telegram-specific patterns
