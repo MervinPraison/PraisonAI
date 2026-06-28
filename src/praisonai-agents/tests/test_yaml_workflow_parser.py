@@ -1528,6 +1528,30 @@ steps:
         workflow = self._build_workflow("PraisonAI")
         workflow._validate_framework()
 
+    def test_empty_framework_passes_validation(self):
+        """An empty framework string is treated like unset and must not raise."""
+        workflow = self._build_workflow("")
+        workflow._validate_framework()
+
+    def test_error_message_includes_workflow_name(self):
+        """The error must name the offending workflow for traceability."""
+        workflow = self._build_workflow("crewai")
+        with pytest.raises(ValueError) as exc_info:
+            workflow.run(input="test")
+        assert "Framework Execution Test" in str(exc_info.value)
+
+    def test_manager_execute_rejects_non_praisonai_framework(self):
+        """WorkflowManager.execute() must also fail fast (no run() bypass)."""
+        from praisonaiagents.workflows import WorkflowManager
+
+        workflow = self._build_workflow("crewai")
+        manager = WorkflowManager()
+        manager._workflows = {workflow.name.lower(): workflow}
+        manager._loaded = True
+        with pytest.raises(ValueError) as exc_info:
+            manager.execute(workflow.name)
+        assert "crewai" in str(exc_info.value)
+
 
 class TestWorkflowBackstoryAlias:
     """Tests for backstory as alias for instructions."""

@@ -1012,8 +1012,18 @@ class AgentFlow:
             return
         if str(framework).strip().lower() in ("", "praisonai"):
             return
+        # Include workflow identity (name/file) so included-recipe failures
+        # can be traced back to the exact YAML that triggered them.
+        identity_parts = []
+        name = getattr(self, 'name', None)
+        if name:
+            identity_parts.append(f"workflow '{name}'")
+        file_path = getattr(self, 'file_path', None)
+        if file_path:
+            identity_parts.append(f"file '{file_path}'")
+        identity = f" ({', '.join(identity_parts)})" if identity_parts else ""
         raise ValueError(
-            f"Unsupported workflow framework: '{framework}'. "
+            f"Unsupported workflow framework: '{framework}'{identity}. "
             "Workflow YAML execution only supports the native PraisonAI "
             "engine (framework: praisonai). Remove the 'framework' field or "
             "set it to 'praisonai'."
@@ -3793,6 +3803,11 @@ class WorkflowManager:
                 "results": []
             }
         
+        # Fail fast on unsupported frameworks. This path iterates steps
+        # directly instead of calling Workflow.run(), so re-apply the same
+        # guard here to avoid silently ignoring framework: <non-praisonai>.
+        workflow._validate_framework()
+        
         # Merge variables
         all_variables = {**workflow.variables}
         if variables:
@@ -4171,6 +4186,11 @@ class WorkflowManager:
                 "error": f"Workflow '{workflow_name}' not found",
                 "results": []
             }
+        
+        # Fail fast on unsupported frameworks. This path iterates steps
+        # directly instead of calling Workflow.run(), so re-apply the same
+        # guard here to avoid silently ignoring framework: <non-praisonai>.
+        workflow._validate_framework()
         
         # Merge variables
         all_variables = {**workflow.variables}
