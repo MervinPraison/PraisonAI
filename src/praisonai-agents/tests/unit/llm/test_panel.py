@@ -71,6 +71,48 @@ def test_recursion_guard_reference():
         )
 
 
+def test_resolve_panel_config_rejects_non_string_references():
+    with pytest.raises(ValueError, match="references"):
+        resolve_panel_config(
+            {"provider": "panel", "references": [{"model": "x"}], "aggregator": "c"}
+        )
+
+
+def test_resolve_panel_config_rejects_non_bool_enabled():
+    with pytest.raises(ValueError, match="enabled"):
+        resolve_panel_config(
+            {"provider": "panel", "references": ["a"], "aggregator": "c", "enabled": "false"}
+        )
+
+
+def test_create_panel_llm_forwards_extra_descriptor_options(monkeypatch):
+    import praisonaiagents.llm.panel as panel_mod
+
+    captured = {}
+
+    def fake_init(self, model=None, **kwargs):
+        captured["model"] = model
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr("praisonaiagents.llm.llm.LLM.__init__", fake_init)
+
+    panel_mod.create_panel_llm(
+        {
+            "provider": "panel",
+            "references": ["a"],
+            "aggregator": "c",
+            "base_url": "http://localhost:11434/v1",
+            "api_key": "k",
+        }
+    )
+    assert captured["model"] == "c"
+    assert captured["kwargs"]["base_url"] == "http://localhost:11434/v1"
+    assert captured["kwargs"]["api_key"] == "k"
+    # Panel-only keys must not leak into the aggregator LLM kwargs.
+    for key in ("references", "aggregator", "enabled", "provider"):
+        assert key not in captured["kwargs"]
+
+
 def _make_panel(monkeypatch, references, enabled=True):
     """Create a PanelLLM without invoking LLM.__init__ (no litellm needed)."""
     panel = PanelLLM.__new__(PanelLLM)
@@ -78,7 +120,9 @@ def _make_panel(monkeypatch, references, enabled=True):
     panel._panel_references = list(references)
     panel._panel_enabled = enabled
     panel._panel_reference_temperature = 0.0
-    panel._panel_ref_cache = {}
+    from collections import OrderedDict
+    panel._panel_ref_cache = OrderedDict()
+    panel._panel_ref_cache_max = 128
     panel._panel_ref_llms = {}
     return panel
 
@@ -186,3 +230,5 @@ def test_partial_failure_tolerance(monkeypatch):
     )
     assert "good perspective" in guidance
     assert "unavailable" in guidance  # bad reference folded in as a note
+    # Raw provider exception text must not be injected into the prompt.
+    assert "network down" not in guidance

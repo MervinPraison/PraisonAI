@@ -309,7 +309,16 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
         if self._panel_descriptor is not None:
             try:
                 from ..llm.panel import create_panel_llm
-                self._llm_instance = create_panel_llm(self._panel_descriptor)
+                # Forward Agent-level connection settings so the aggregator uses
+                # the same endpoint/credentials as a normal model selection.
+                panel_kwargs = {}
+                if getattr(self, "base_url", None):
+                    panel_kwargs["base_url"] = self.base_url
+                if getattr(self, "api_key", None):
+                    panel_kwargs["api_key"] = self.api_key
+                self._llm_instance = create_panel_llm(
+                    self._panel_descriptor, **panel_kwargs
+                )
             except ImportError as e:
                 raise ImportError(
                     "LLM features requested but dependencies not installed. "
@@ -1658,8 +1667,12 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
 
         # Panel (multi-model) descriptor: "panel:<name>" or {"provider": "panel"}.
         # Resolved lazily into a PanelLLM; composes with the normal tool loop.
-        from ..llm.panel import is_panel_descriptor
-        if is_panel_descriptor(llm):
+        # Detected inline (no heavy import) to keep Agent() construction lazy.
+        _is_panel = (
+            (isinstance(llm, str) and llm.startswith("panel:"))
+            or (isinstance(llm, dict) and llm.get("provider") == "panel")
+        )
+        if _is_panel:
             self._panel_descriptor = llm
             self._using_custom_llm = True
             self.llm = llm if isinstance(llm, str) else "panel"

@@ -11,15 +11,22 @@ hooks, session) from :class:`~praisonaiagents.llm.llm.LLM`.
 
 Selectable exactly like any other model::
 
-    Agent(llm="panel:deep")
+    # Inline dict descriptor (no registration needed):
     Agent(llm={"provider": "panel", "references": [...], "aggregator": "..."})
 
-YAML / CLI / bot ``/model`` paths flow the ``panel:<name>`` string through
-unchanged because resolution happens in core model resolution.
+    # Named preset (register it first):
+    register_panel_preset("deep", {"references": [...], "aggregator": "..."})
+    Agent(llm="panel:deep")
+
+No presets are bundled by the core SDK; ``panel:<name>`` strings resolve against
+presets registered via :func:`register_panel_preset` (e.g. by the wrapper, CLI,
+or YAML layer). YAML / CLI / bot ``/model`` paths flow the ``panel:<name>``
+string through unchanged because resolution happens in core model resolution.
 """
 
 import hashlib
 import logging
+from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Union
 
 from .llm import LLM
@@ -89,10 +96,14 @@ def resolve_panel_config(llm: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
     aggregator = config.get("aggregator")
     enabled = config.get("enabled", True)
 
-    if not aggregator:
-        raise ValueError("Panel config requires an 'aggregator' model.")
+    if not isinstance(aggregator, str) or not aggregator:
+        raise ValueError("Panel config requires a non-empty 'aggregator' model string.")
     if not isinstance(references, (list, tuple)):
         raise ValueError("Panel 'references' must be a list of model strings.")
+    if not all(isinstance(ref, str) and ref for ref in references):
+        raise ValueError("Panel 'references' must contain only non-empty model strings.")
+    if not isinstance(enabled, bool):
+        raise ValueError("Panel 'enabled' must be a boolean.")
 
     # Recursion guard: a panel preset cannot reference another panel preset.
     if is_panel_descriptor(aggregator):
@@ -137,7 +148,9 @@ class PanelLLM(LLM):
         self._panel_enabled = bool(enabled)
         self._panel_reference_temperature = reference_temperature
         # Per-turn cache: signature(trimmed view) -> joined reference guidance.
-        self._panel_ref_cache: Dict[str, str] = {}
+        # Bounded (FIFO) so long-lived agents with many unique turns do not leak.
+        self._panel_ref_cache: "OrderedDict[str, str]" = OrderedDict()
+        self._panel_ref_cache_max = 128
         # Lazily-created reference LLM instances, keyed by model string.
         self._panel_ref_llms: Dict[str, LLM] = {}
 
@@ -179,6 +192,14 @@ class PanelLLM(LLM):
                 if isinstance(part, dict) and isinstance(part.get("text"), str):
                     view.append({"role": "user", "content": part["text"]})
         return view
+
+    def _cache_guidance(self, sig: str, guidance: str) -> None:
+        """Store guidance under ``sig`` with a bounded FIFO eviction policy."""
+        cache = self._panel_ref_cache
+        cache[sig] = guidance
+        cache.move_to_end(sig)
+        while len(cache) > self._panel_ref_cache_max:
+            cache.popitem(last=False)
 
     def _get_reference_llm(self, model: str) -> LLM:
         if model not in self._panel_ref_llms:
@@ -225,8 +246,10 @@ class PanelLLM(LLM):
                 )
                 results.append((label, text if isinstance(text, str) else str(text)))
             except Exception as e:  # partial-failure tolerance
-                logger.warning(f"Panel reference '{model}' failed: {e}")
-                results.append((label, f"(unavailable: {e})"))
+                logger.warning(
+                    "Panel reference '%s' failed: %s", model, type(e).__name__
+                )
+                results.append((label, "(unavailable: reference call failed)"))
         return self._format_reference_guidance(results)
 
     async def _run_references_async(self, view: List[Dict[str, str]]) -> str:
@@ -247,8 +270,10 @@ class PanelLLM(LLM):
                 )
                 return (label, text if isinstance(text, str) else str(text))
             except Exception as e:  # partial-failure tolerance
-                logger.warning(f"Panel reference '{model}' failed: {e}")
-                return (label, f"(unavailable: {e})")
+                logger.warning(
+                    "Panel reference '%s' failed: %s", model, type(e).__name__
+                )
+                return (label, "(unavailable: reference call failed)")
 
         results = await asyncio.gather(*[_one(m) for m in self._panel_references])
         return self._format_reference_guidance(list(results))
@@ -262,7 +287,7 @@ class PanelLLM(LLM):
             guidance = self._panel_ref_cache.get(sig)
             if guidance is None:
                 guidance = self._run_references_sync(view)
-                self._panel_ref_cache[sig] = guidance
+                self._cache_guidance(sig, guidance)
             prompt = self._inject_into_prompt(prompt, guidance)
         return super().get_response(
             prompt=prompt, system_prompt=system_prompt, chat_history=chat_history, **kwargs
@@ -275,7 +300,7 @@ class PanelLLM(LLM):
             guidance = self._panel_ref_cache.get(sig)
             if guidance is None:
                 guidance = await self._run_references_async(view)
-                self._panel_ref_cache[sig] = guidance
+                self._cache_guidance(sig, guidance)
             prompt = self._inject_into_prompt(prompt, guidance)
         return await super().get_response_async(
             prompt=prompt, system_prompt=system_prompt, chat_history=chat_history, **kwargs
@@ -288,11 +313,17 @@ def create_panel_llm(descriptor: Union[str, Dict[str, Any]], **llm_kwargs: Any) 
     Strips panel-only keys before forwarding remaining kwargs to ``LLM``.
     """
     config = resolve_panel_config(descriptor)
+    # Preserve extra provider options (e.g. base_url, api_key, temperature)
+    # supplied inside a dict descriptor so they reach the aggregator LLM.
+    descriptor_kwargs: Dict[str, Any] = {}
+    if isinstance(descriptor, dict):
+        descriptor_kwargs = dict(descriptor)
+    descriptor_kwargs.update(llm_kwargs)
     for key in ("references", "aggregator", "enabled", "provider", "model"):
-        llm_kwargs.pop(key, None)
+        descriptor_kwargs.pop(key, None)
     return PanelLLM(
         aggregator=config["aggregator"],
         references=config["references"],
         enabled=config["enabled"],
-        **llm_kwargs,
+        **descriptor_kwargs,
     )
