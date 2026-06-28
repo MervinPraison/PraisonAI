@@ -382,11 +382,10 @@ def tool_progress_channel(sink: Optional[StreamCallback]):
 
     The agent's tool-execution loop wraps each tool invocation with this so that
     ``emit_tool_progress`` calls made by the tool are forwarded to ``sink``.
-    Passing ``None`` keeps the channel inactive (zero overhead).
+    Passing ``None`` explicitly clears any inherited sink for the duration of the
+    context, so nested no-callback execution never leaks progress into a parent
+    channel.
     """
-    if sink is None:
-        yield
-        return
     token = _tool_progress_sink.set(sink)
     try:
         yield

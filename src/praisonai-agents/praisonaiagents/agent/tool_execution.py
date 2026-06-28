@@ -14,6 +14,7 @@ import asyncio
 import inspect
 import contextvars
 import concurrent.futures
+import threading
 import random
 from typing import List, Optional, Any, Dict, Union, TYPE_CHECKING
 from ..errors import ToolExecutionError
@@ -594,9 +595,22 @@ class ToolExecutionMixin:
                         # P8/G11: Apply tool timeout if configured
                         tool_timeout = getattr(self, '_tool_timeout', None)
                         if tool_timeout and tool_timeout > 0:
+                            # Guard the sink so a tool that keeps running after a
+                            # timeout (future.cancel() cannot stop a started thread)
+                            # can no longer emit progress once the result is decided.
+                            _attempt_sink = _progress_sink
+                            _progress_active = None
+                            if _progress_sink is not None:
+                                _progress_active = threading.Event()
+                                _progress_active.set()
+
+                                def _attempt_sink(_event, _src=_progress_sink, _flag=_progress_active):  # noqa: ANN001
+                                    if _flag.is_set():
+                                        _src(_event)
+
                             # Activate the progress channel BEFORE copy_context so the
                             # sink propagates into the executor thread via contextvars.
-                            with tool_progress_channel(_progress_sink):
+                            with tool_progress_channel(_attempt_sink):
                                 # Use copy_context to preserve injection context in executor thread
                                 ctx = contextvars.copy_context()
 
@@ -614,6 +628,8 @@ class ToolExecutionMixin:
                                 try:
                                     result = future.result(timeout=tool_timeout)
                                 except concurrent.futures.TimeoutError:
+                                    if _progress_active is not None:
+                                        _progress_active.clear()
                                     future.cancel()
                                     logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
                                     result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True}

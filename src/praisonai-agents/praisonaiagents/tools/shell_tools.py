@@ -177,8 +177,12 @@ class ShellTools:
         except Exception:  # streaming module unavailable — no streaming
             _sink = None
 
+        # Stop forwarding progress once the tool has returned (e.g. on timeout),
+        # so a still-draining reader thread can never emit after the result.
+        stop_emitting = threading.Event()
+
         def _emit(line, stream_name):
-            if _sink is None:
+            if _sink is None or stop_emitting.is_set():
                 return
             try:
                 _sink(_stream_events.StreamEvent(
@@ -186,11 +190,12 @@ class ShellTools:
                     content=line,
                     metadata={"stream": stream_name},
                 ))
-            except Exception:
-                pass
+            except Exception as exc:  # never break command execution on a progress failure
+                logging.debug("Tool progress emission failed: %s", exc, exc_info=True)
 
         stdout_chunks: List[str] = []
         stderr_chunks: List[str] = []
+        read_errors: List[BaseException] = []
 
         def _pump(stream, sink_list, stream_name):
             if stream is None:
@@ -201,11 +206,17 @@ class ShellTools:
                         break
                     sink_list.append(line)
                     _emit(line, stream_name)
+            except Exception as exc:
+                # Surface a failed read (e.g. UnicodeDecodeError) so the caller's
+                # error path reports it instead of silently returning a partial
+                # prefix as if the command had succeeded.
+                read_errors.append(exc)
+                logging.debug("Error reading %s stream: %s", stream_name, exc, exc_info=True)
             finally:
                 try:
                     stream.close()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logging.debug("Failed to close %s stream: %s", stream_name, exc, exc_info=True)
 
         t_out = threading.Thread(target=_pump, args=(process.stdout, stdout_chunks, "stdout"), daemon=True)
         t_err = threading.Thread(target=_pump, args=(process.stderr, stderr_chunks, "stderr"), daemon=True)
@@ -215,10 +226,19 @@ class ShellTools:
         try:
             process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
+            # Disable any further emission before the caller kills the process so
+            # no progress is surfaced after the tool has already returned.
+            stop_emitting.set()
             raise
 
-        t_out.join(timeout=1)
-        t_err.join(timeout=1)
+        # Wait for the readers to fully drain the pipe buffers before returning,
+        # preserving subprocess.communicate()'s "all captured output" semantics.
+        t_out.join()
+        t_err.join()
+
+        if read_errors:
+            raise read_errors[0]
+
         return "".join(stdout_chunks), "".join(stderr_chunks)
 
     def list_processes(self) -> List[Dict[str, Union[int, str, float]]]:

@@ -50,6 +50,17 @@ class TestToolProgressChannel:
         with tool_progress_channel(None):
             assert emit_tool_progress("x") is False
 
+    def test_none_sink_clears_inherited_sink(self):
+        outer = []
+        with tool_progress_channel(outer.append):
+            assert emit_tool_progress("outer") is True
+            # A nested no-callback channel must NOT leak into the parent sink.
+            with tool_progress_channel(None):
+                assert emit_tool_progress("inner") is False
+            # Parent sink is restored after the nested context exits.
+            assert emit_tool_progress("outer-again") is True
+        assert [e.content for e in outer] == ["outer", "outer-again"]
+
 
 class TestShellStreaming:
     def test_communicate_streaming_emits_and_buffers(self):
@@ -72,6 +83,25 @@ class TestShellStreaming:
         assert contents == ["a", "b", "c"]
         assert all(e.type == StreamEventType.TOOL_PROGRESS for e in events)
         assert all(e.metadata["stream"] == "stdout" for e in events)
+
+    def test_communicate_streaming_emits_stderr(self):
+        from praisonaiagents.tools.shell_tools import ShellTools
+
+        st = ShellTools()
+        proc = subprocess.Popen(
+            [sys.executable, "-c", "import sys; print('err', file=sys.stderr)"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        events = []
+        with tool_progress_channel(events.append):
+            out, err = st._communicate_streaming(proc, timeout=10)
+
+        assert out == ""
+        assert err == "err\n"
+        assert [e.content.strip() for e in events] == ["err"]
+        assert all(e.metadata["stream"] == "stderr" for e in events)
 
     def test_communicate_streaming_without_sink(self):
         from praisonaiagents.tools.shell_tools import ShellTools
