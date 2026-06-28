@@ -59,6 +59,22 @@ class RuntimeCompatibilityChecker:
             from praisonai._framework_availability import is_available
         except ImportError:
             is_available = lambda x: False
+
+        # Adapter-aware availability: a runtime is only "usable" if its adapter
+        # is both installed AND implemented/registered. This keeps `doctor` in
+        # sync with the registry-backed `--framework` choices so it never
+        # reports a runtime as available when the matching framework cannot run
+        # (e.g. unimplemented AutoGen v0.4 / AG2 entry-point placeholders).
+        def _runtime_usable(framework_name: str, package_name: str) -> bool:
+            try:
+                from praisonai.framework_adapters.registry import get_default_registry
+                registry = get_default_registry()
+                if framework_name in registry.list_names():
+                    return registry.is_available(framework_name)
+            except Exception:
+                pass
+            # Fallback to raw package probe when the registry is unavailable.
+            return is_available(package_name)
         
         # PraisonAI Agents runtime
         runtimes['praisonai'] = RuntimeInfo(
@@ -109,7 +125,7 @@ class RuntimeCompatibilityChecker:
         runtimes['autogen_v4'] = RuntimeInfo(
             id='autogen_v4',
             name='AutoGen v0.4',
-            available=is_available('autogen_v4'),
+            available=_runtime_usable('autogen_v4', 'autogen_v4'),
             capabilities=[
                 RuntimeCapability('agent_creation', 'Create and manage agents'),
                 RuntimeCapability('tool_execution', 'Execute tools and functions'),
@@ -123,7 +139,7 @@ class RuntimeCompatibilityChecker:
         runtimes['ag2'] = RuntimeInfo(
             id='ag2',
             name='AG2 (AutoGen Next)',
-            available=is_available('ag2'),
+            available=_runtime_usable('ag2', 'ag2'),
             capabilities=[
                 RuntimeCapability('agent_creation', 'Create and manage agents'),
                 RuntimeCapability('tool_execution', 'Execute tools and functions'),
