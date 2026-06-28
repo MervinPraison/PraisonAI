@@ -1476,6 +1476,59 @@ steps:
         assert hasattr(workflow, 'framework') or hasattr(workflow, '_yaml_framework')
 
 
+class TestWorkflowFrameworkExecution:
+    """Tests for fail-fast framework validation at execution time."""
+
+    def _build_workflow(self, framework):
+        from praisonaiagents.workflows import YAMLWorkflowParser
+
+        framework_line = f"framework: {framework}\n" if framework is not None else ""
+        yaml_content = f"""
+name: Framework Execution Test
+{framework_line}agents:
+  researcher:
+    name: Researcher
+    role: Research Analyst
+    goal: Research topics
+    instructions: "Provide research findings"
+
+steps:
+  - agent: researcher
+    action: "Research AI trends"
+"""
+        parser = YAMLWorkflowParser()
+        return parser.parse_string(yaml_content)
+
+    def test_non_praisonai_framework_raises_on_run(self):
+        """Workflow.run() must fail fast for non-praisonai frameworks."""
+        workflow = self._build_workflow("crewai")
+        with pytest.raises(ValueError) as exc_info:
+            workflow.run(input="test")
+        assert "crewai" in str(exc_info.value)
+        assert "praisonai" in str(exc_info.value)
+
+    def test_autogen_framework_raises_on_run(self):
+        """A different non-praisonai framework also fails fast."""
+        workflow = self._build_workflow("autogen")
+        with pytest.raises(ValueError):
+            workflow.run(input="test")
+
+    def test_praisonai_framework_passes_validation(self):
+        """Explicit framework: praisonai must not raise during validation."""
+        workflow = self._build_workflow("praisonai")
+        workflow._validate_framework()
+
+    def test_missing_framework_passes_validation(self):
+        """Unset framework defaults to native engine and must not raise."""
+        workflow = self._build_workflow(None)
+        workflow._validate_framework()
+
+    def test_framework_validation_case_insensitive(self):
+        """framework: PraisonAI (any case) must pass validation."""
+        workflow = self._build_workflow("PraisonAI")
+        workflow._validate_framework()
+
+
 class TestWorkflowBackstoryAlias:
     """Tests for backstory as alias for instructions."""
     
