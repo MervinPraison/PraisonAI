@@ -2670,26 +2670,37 @@ Summary:"""
             self._skill_manager = SkillManager()
 
             # Discover bundles so '@bundle' selectors in self._skills can be
-            # expanded into their member skill names before injection.
+            # expanded into their member skill names before injection. Honour
+            # the configured discovery scope: only fall back to default skill
+            # dirs when auto_discover is enabled or no explicit dirs are set.
             try:
                 self._skill_manager.discover_bundles(
                     self._skills_dirs,
-                    include_defaults=True,
+                    include_defaults=auto_discover or not self._skills_dirs,
                 )
             except Exception as e:  # noqa: BLE001 - bundles are optional
                 logging.debug("Bundle discovery skipped: %s", e)
 
             # Add explicit skill selectors. '@bundle' entries expand to their
             # member skill names (resolved by name against discovered skills);
-            # plain paths pass through unchanged and load directly.
+            # plain paths pass through unchanged and load directly. Member
+            # discovery honours the configured scope (only fall back to default
+            # skill dirs when auto_discover is on), and a missing member is
+            # logged so a typo'd bundle entry is not silently dropped.
             if self._skills:
                 from ..skills.bundles import is_bundle_selector
                 for selector in self._skills:
                     if is_bundle_selector(selector):
                         for member in self._skill_manager.resolve([selector]):
-                            self._skill_manager.add_skill_by_name(
-                                member, self._skills_dirs, include_defaults=True,
+                            loaded = self._skill_manager.add_skill_by_name(
+                                member, self._skills_dirs,
+                                include_defaults=auto_discover,
                             )
+                            if loaded is None:
+                                logging.warning(
+                                    "Skill bundle member '%s' (from '%s') not "
+                                    "found; skipping.", member, selector,
+                                )
                     else:
                         self._skill_manager.add_skill(selector)
 

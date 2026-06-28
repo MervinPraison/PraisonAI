@@ -171,6 +171,46 @@ class TestSkillManagerBundles:
         mgr.add_bundle(BundleManifest(name="b2", skills=["y", "z"]))
         assert mgr.resolve(["@b1", "@b2"]) == ["x", "y", "z"]
 
+    def test_resolve_nested_bundle(self):
+        from praisonaiagents.skills import SkillManager
+        from praisonaiagents.skills.bundles import BundleManifest
+
+        mgr = SkillManager()
+        mgr.add_bundle(BundleManifest(name="common", skills=["log", "cfg"]))
+        mgr.add_bundle(BundleManifest(name="backend", skills=["@common", "api"]))
+        assert mgr.resolve(["@backend"]) == ["log", "cfg", "api"]
+
+    def test_resolve_cycle_is_safe(self):
+        from praisonaiagents.skills import SkillManager
+        from praisonaiagents.skills.bundles import BundleManifest
+
+        mgr = SkillManager()
+        mgr.add_bundle(BundleManifest(name="a", skills=["@b", "sa"]))
+        mgr.add_bundle(BundleManifest(name="b", skills=["@a", "sb"]))
+        # No infinite recursion; each plain member appears once.
+        assert mgr.resolve(["@a"]) == ["sb", "sa"]
+
+    def test_bundle_instruction_in_prompt(self):
+        from praisonaiagents.skills import SkillManager
+        from praisonaiagents.skills.bundles import BundleManifest
+
+        mgr = SkillManager()
+        mgr.add_bundle(BundleManifest(
+            name="backend", skills=["x"],
+            instruction="Prefer small commits.",
+        ))
+        mgr.resolve(["@backend"])
+        xml = mgr.to_prompt()
+        assert "Prefer small commits." in xml
+        assert "<bundle_instructions>" in xml
+
+    def test_no_bundle_instruction_no_block(self):
+        from praisonaiagents.skills import SkillManager
+
+        mgr = SkillManager()
+        xml = mgr.to_prompt()
+        assert "<bundle_instructions>" not in xml
+
     def test_discover_bundles_registers(self):
         from praisonaiagents.skills import SkillManager
 

@@ -51,6 +51,7 @@ class SkillManager:
         """
         self._skills: Dict[str, LoadedSkill] = {}
         self._bundles: Dict[str, "BundleManifest"] = {}
+        self._selected_bundles: List[str] = []
         self._loader = SkillLoader()
         self._discovered = False
         self._validation_cache: Dict[str, ValidationResult] = {}
@@ -161,7 +162,9 @@ class SkillManager:
 
         Plain skill names/paths pass through unchanged. A ``@bundle`` selector
         expands to its member skill names (forgiving: a missing/unknown bundle
-        is logged, not fatal). Duplicates are removed while preserving order.
+        is logged, not fatal). Nested ``@bundle`` members are expanded
+        recursively, with cycle protection. Duplicates are removed while
+        preserving order.
         """
         from .bundles import is_bundle_selector, strip_bundle_marker
 
@@ -173,22 +176,43 @@ class SkillManager:
                 seen.add(item)
                 resolved.append(item)
 
-        for selector in selectors or []:
-            if is_bundle_selector(selector):
-                name = strip_bundle_marker(selector)
-                manifest = self._bundles.get(name)
-                if manifest is None:
-                    logger.warning(
-                        "Unknown skill bundle '@%s'; skipping (no such bundle).",
-                        name,
-                    )
-                    continue
-                for member in manifest.skills:
-                    _add(member)
-            else:
+        def _expand(selector: str, stack: tuple) -> None:
+            if not is_bundle_selector(selector):
                 _add(selector)
+                return
+            name = strip_bundle_marker(selector)
+            if name in stack:
+                logger.warning(
+                    "Skill bundle cycle detected at '@%s'; skipping.", name,
+                )
+                return
+            manifest = self._bundles.get(name)
+            if manifest is None:
+                logger.warning(
+                    "Unknown skill bundle '@%s'; skipping (no such bundle).",
+                    name,
+                )
+                return
+            # Record top-level selected bundles so their bundle-level
+            # 'instruction' can be surfaced in the prompt.
+            if not stack and name not in self._selected_bundles:
+                self._selected_bundles.append(name)
+            for member in manifest.skills:
+                _expand(member, stack + (name,))
+
+        for selector in selectors or []:
+            _expand(selector, ())
 
         return resolved
+
+    def get_bundle_instructions(self) -> List[str]:
+        """Return bundle-level instructions for selected bundles, in order."""
+        out: List[str] = []
+        for name in self._selected_bundles:
+            manifest = self._bundles.get(name)
+            if manifest is not None and manifest.instruction:
+                out.append(manifest.instruction)
+        return out
 
     def add_skill(self, skill_path: str) -> Optional[LoadedSkill]:
         """Add a single skill from a directory path.
@@ -358,11 +382,26 @@ class SkillManager:
     def to_prompt(self) -> str:
         """Generate XML prompt for available skills.
 
+        When one or more ``@bundle`` selectors carried a bundle-level
+        ``instruction``, those are prepended in a ``<bundle_instructions>``
+        block so the documented bundle guidance actually reaches the prompt.
+
         Returns:
             XML string with <available_skills> block
         """
         metadata_list = self.get_available_skills()
-        return generate_skills_xml(metadata_list)
+        skills_xml = generate_skills_xml(metadata_list)
+
+        instructions = self.get_bundle_instructions()
+        if not instructions:
+            return skills_xml
+
+        import html
+        lines = ["<bundle_instructions>"]
+        for text in instructions:
+            lines.append(f"  <instruction>{html.escape(text)}</instruction>")
+        lines.append("</bundle_instructions>")
+        return "\n".join(lines) + "\n" + skills_xml
 
     def get_instructions(self, name: str) -> Optional[str]:
         """Get instructions for a skill, activating if needed.
@@ -1418,6 +1457,7 @@ version: 1.0.0
         """Clear all loaded skills."""
         self._skills.clear()
         self._bundles.clear()
+        self._selected_bundles.clear()
         self._validation_cache.clear()
         self._validator.clear_cache()
         self._discovered = False
