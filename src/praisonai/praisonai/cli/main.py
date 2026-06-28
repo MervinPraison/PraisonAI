@@ -6046,7 +6046,33 @@ Now, {final_instruction.lower()}:"""
                 'output_reserve': getattr(args, 'context_output_reserve', 8000),
             }
             session_state['context_config'] = context_config
-            
+
+            # Wire turn-aware workspace checkpointing into the session lifecycle.
+            # Reuses the core CheckpointService via CheckpointsHandler; default
+            # safe (disabled unless checkpoints.auto in config or
+            # PRAISONAI_CHECKPOINTS=on), so there is zero overhead when off.
+            try:
+                from praisonai.cli.features.session_checkpoints import (
+                    SessionCheckpointManager,
+                )
+                checkpoint_config = None
+                try:
+                    from praisonai.cli.configuration.resolver import resolve_config
+                    checkpoint_config = resolve_config().extra
+                except Exception:
+                    checkpoint_config = None
+                session_checkpoints = SessionCheckpointManager.from_config(
+                    workspace_dir=os.environ.get("PRAISONAI_WORKSPACE") or os.getcwd(),
+                    config=checkpoint_config,
+                    verbose=verbose_mode,
+                )
+                if session_checkpoints.enabled:
+                    # Baseline checkpoint at session start.
+                    session_checkpoints.checkpoint_turn("session start")
+            except Exception:
+                session_checkpoints = None
+            session_state['session_checkpoints'] = session_checkpoints
+
             # Start the execution worker thread (TRUE ASYNC - runs in background)
             worker_thread = self._start_execution_worker(tools_list, console, session_state)
             
@@ -6059,7 +6085,7 @@ Now, {final_instruction.lower()}:"""
                 from praisonai.cli.features.at_mentions import CombinedCompleter
                 
                 # Create combined completer for / commands and @ mentions
-                commands = ['help', 'exit', 'quit', 'clear', 'tools', 'profile', 'model', 'stats', 'compact', 'undo', 'queue', 'q']
+                commands = ['help', 'exit', 'quit', 'clear', 'tools', 'profile', 'model', 'stats', 'compact', 'undo', 'revert', 'queue', 'q']
                 combined_completer = CombinedCompleter(
                     commands=commands,
                     root_dir=os.getcwd()
@@ -6299,6 +6325,9 @@ Now, {final_instruction.lower()}:"""
                         elif cmd == "undo":
                             self._handle_undo_command(console, session_state)
                             continue
+                        elif cmd == "revert":
+                            self._handle_revert_command(console, cmd_args, session_state)
+                            continue
                         elif cmd == "queue":
                             self._handle_queue_command(console, cmd_args, session_state)
                             continue
@@ -6357,6 +6386,13 @@ Now, {final_instruction.lower()}:"""
                     # Process @file mentions before sending to LLM
                     processed_input = self._process_at_mentions(user_input, console)
                     
+                    # Auto-checkpoint the workspace before a turn that may
+                    # mutate files, so /undo and /revert can roll it back.
+                    # Best-effort: never blocks or breaks the turn.
+                    _ckpt = session_state.get('session_checkpoints')
+                    if _ckpt is not None and getattr(_ckpt, 'enabled', False):
+                        _ckpt.checkpoint_turn(processed_input[:60])
+
                     # Create task with unique ID and full context
                     task_counter['value'] += 1
                     task_id = task_counter['value']
@@ -6505,7 +6541,8 @@ Now, {final_instruction.lower()}:"""
         console.print("  /model [name]  - Show or change current model")
         console.print("  /stats         - Show session statistics (tokens, cost)")
         console.print("  /compact       - Compress conversation history")
-        console.print("  /undo          - Undo last response")
+        console.print("  /undo          - Undo last response (and workspace files if checkpointing on)")
+        console.print("  /revert [n]    - Roll workspace back n turns (needs checkpoints.auto)")
         console.print("  /queue         - Show queued messages")
         console.print("  /queue clear   - Clear message queue")
         console.print("\n[bold]Session Commands:[/bold]")
@@ -6787,8 +6824,67 @@ Provide a concise summary (max 200 words):"""
             
             console.print("[green]✓ Undone last turn[/green]")
             console.print(f"[dim]Removed: {str(removed_user.get('content', ''))[:50]}...[/dim]")
+
+            # If auto-checkpointing is active, also roll the workspace files
+            # back to the pre-turn checkpoint so /undo is a true safety net,
+            # not just a conversation-history edit.
+            ckpt = session_state.get('session_checkpoints')
+            if ckpt is not None and getattr(ckpt, 'enabled', False) and ckpt.turns:
+                console.print("[dim]Reverting workspace files to the previous checkpoint...[/dim]")
+                ckpt.preview(1)
+                restored = ckpt.revert(1)
+                if restored:
+                    console.print(f"[green]✓ Workspace restored to {restored.short_id}[/green]")
+                else:
+                    console.print("[yellow]No workspace checkpoint to restore[/yellow]")
         else:
             console.print("[yellow]Not enough history to undo[/yellow]")
+
+    def _handle_revert_command(self, console, args, session_state):
+        """
+        Handle /revert [n] - roll the workspace back n turns (default 1).
+
+        Shows the diff that would be undone, then restores the files via the
+        session checkpoint timeline. Requires auto-checkpointing to be active
+        (checkpoints.auto in config or PRAISONAI_CHECKPOINTS=on).
+        """
+        ckpt = session_state.get('session_checkpoints')
+        if ckpt is None or not getattr(ckpt, 'enabled', False):
+            console.print(
+                "[yellow]Workspace checkpointing is disabled.[/yellow] "
+                "Enable it with [cyan]checkpoints.auto: true[/cyan] in config "
+                "or [cyan]PRAISONAI_CHECKPOINTS=on[/cyan]."
+            )
+            return
+
+        if not ckpt.turns:
+            console.print("[yellow]No checkpoints to revert to[/yellow]")
+            return
+
+        n = 1
+        if args:
+            try:
+                n = int(str(args).strip())
+            except ValueError:
+                console.print("[yellow]Usage: /revert [n][/yellow]")
+                return
+
+        if n < 1 or n > len(ckpt.turns):
+            console.print(
+                f"[yellow]Can only revert 1..{len(ckpt.turns)} turn(s)[/yellow]"
+            )
+            return
+
+        console.print(f"[dim]Changes that will be undone (last {n} turn(s)):[/dim]")
+        ckpt.preview(n)
+        restored = ckpt.revert(n)
+        if restored:
+            console.print(
+                f"[green]✓ Workspace reverted to {restored.short_id}[/green] "
+                f"[dim]({restored.message})[/dim]"
+            )
+        else:
+            console.print("[yellow]Failed to revert workspace[/yellow]")
     
     def _handle_queue_command(self, console, args, session_state):
         """
