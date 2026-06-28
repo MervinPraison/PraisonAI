@@ -100,9 +100,11 @@ class ShellTools:
             )
             
             try:
-                # Wait for process with timeout
-                stdout, stderr = process.communicate(timeout=timeout)
-                
+                # Read stdout/stderr incrementally so a progress channel (when
+                # active) can surface output live while the command runs. Falls
+                # back to fully-buffered behaviour when no sink is listening.
+                stdout, stderr = self._communicate_streaming(process, timeout)
+
                 # Truncate output if too large (use smart format)
                 if len(stdout) > max_output_size:
                     tail_size = min(max_output_size // 5, 500)
@@ -151,6 +153,74 @@ class ShellTools:
                 'execution_time': 0
             }
     
+    def _communicate_streaming(self, process, timeout):
+        """Read stdout/stderr line-buffered, emitting live progress.
+
+        Reads both streams concurrently in background threads so a line on
+        either stream is surfaced via ``emit_tool_progress`` as soon as it
+        arrives. Preserves ``subprocess.communicate`` semantics: returns the
+        full ``(stdout, stderr)`` strings and raises ``TimeoutExpired`` on
+        timeout. When no progress sink is active, this still buffers the full
+        output identically to the previous behaviour (the emit call is a cheap
+        no-op).
+        """
+        import threading
+
+        # Capture the active progress sink (set by the agent's tool-execution
+        # loop via a contextvar) in THIS thread, then emit to it directly from
+        # the reader threads. Capturing the sink up-front avoids relying on
+        # contextvar propagation into the spawned threads.
+        _sink = None
+        try:
+            from ..streaming import events as _stream_events
+            _sink = _stream_events._tool_progress_sink.get()
+        except Exception:  # streaming module unavailable — no streaming
+            _sink = None
+
+        def _emit(line, stream_name):
+            if _sink is None:
+                return
+            try:
+                _sink(_stream_events.StreamEvent(
+                    type=_stream_events.StreamEventType.TOOL_PROGRESS,
+                    content=line,
+                    metadata={"stream": stream_name},
+                ))
+            except Exception:
+                pass
+
+        stdout_chunks: List[str] = []
+        stderr_chunks: List[str] = []
+
+        def _pump(stream, sink_list, stream_name):
+            if stream is None:
+                return
+            try:
+                for line in iter(stream.readline, ''):
+                    if line == '':
+                        break
+                    sink_list.append(line)
+                    _emit(line, stream_name)
+            finally:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+
+        t_out = threading.Thread(target=_pump, args=(process.stdout, stdout_chunks, "stdout"), daemon=True)
+        t_err = threading.Thread(target=_pump, args=(process.stderr, stderr_chunks, "stderr"), daemon=True)
+        t_out.start()
+        t_err.start()
+
+        try:
+            process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            raise
+
+        t_out.join(timeout=1)
+        t_err.join(timeout=1)
+        return "".join(stdout_chunks), "".join(stderr_chunks)
+
     def list_processes(self) -> List[Dict[str, Union[int, str, float]]]:
         """List running processes with their details.
         

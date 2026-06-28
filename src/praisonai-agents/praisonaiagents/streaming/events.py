@@ -30,6 +30,7 @@ class StreamEventType(Enum):
     DELTA_TOOL_CALL = "delta_tool_call"  # Tool call delta (function name, args chunk)
     TOOL_CALL_END = "tool_call_end"      # Tool call complete (stream end marker)
     TOOL_CALL_START = "tool_call_start"  # Tool execution starting (complete parsed args)
+    TOOL_PROGRESS = "tool_progress"      # Incremental progress/output while a tool is running
     TOOL_CALL_RESULT = "tool_call_result"  # Tool execution completed (with result)
     LAST_TOKEN = "last_token"            # Final content delta
     STREAM_END = "stream_end"            # Stream completed successfully
@@ -317,3 +318,77 @@ def create_metrics_callback(metrics: StreamMetrics) -> StreamCallback:
         metrics.update_from_event(event)
     
     return updater
+
+
+# ---------------------------------------------------------------------------
+# Tool-progress channel
+#
+# A thread-local channel that lets a running tool push incremental progress
+# (stdout/stderr lines, percentage, status text) while it executes, without
+# having to change the tool's signature. The agent's tool-execution loop
+# activates a sink around each tool call; the tool calls ``emit_tool_progress``
+# to surface partial output. Zero overhead when no sink is active.
+# ---------------------------------------------------------------------------
+
+import contextlib as _contextlib
+import contextvars as _contextvars
+
+_tool_progress_sink: "_contextvars.ContextVar[Optional[StreamCallback]]" = (
+    _contextvars.ContextVar("praisonai_tool_progress_sink", default=None)
+)
+
+
+def emit_tool_progress(
+    output: Optional[str] = None,
+    *,
+    progress: Optional[float] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """Emit incremental progress from inside a running tool.
+
+    Tools (or wrappers around long-running work) call this to surface partial
+    output while they execute. If no sink is active (the common case outside an
+    agent run) this is a cheap no-op that returns ``False``.
+
+    Args:
+        output: Partial text/output chunk (e.g. a line of stdout).
+        progress: Optional completion fraction in the range 0.0–1.0.
+        metadata: Optional structured metadata (e.g. ``{"stream": "stderr"}``).
+
+    Returns:
+        ``True`` if the progress was forwarded to an active sink, else ``False``.
+    """
+    sink = _tool_progress_sink.get()
+    if sink is None:
+        return False
+    md: Dict[str, Any] = dict(metadata) if metadata else {}
+    if progress is not None:
+        md["progress"] = progress
+    try:
+        sink(StreamEvent(
+            type=StreamEventType.TOOL_PROGRESS,
+            content=output,
+            metadata=md or None,
+        ))
+    except Exception as e:  # never break tool execution on a progress failure
+        logger.debug("emit_tool_progress sink failed: %s", e)
+        return False
+    return True
+
+
+@_contextlib.contextmanager
+def tool_progress_channel(sink: Optional[StreamCallback]):
+    """Activate a progress sink for the duration of a tool call.
+
+    The agent's tool-execution loop wraps each tool invocation with this so that
+    ``emit_tool_progress`` calls made by the tool are forwarded to ``sink``.
+    Passing ``None`` keeps the channel inactive (zero overhead).
+    """
+    if sink is None:
+        yield
+        return
+    token = _tool_progress_sink.set(sink)
+    try:
+        yield
+    finally:
+        _tool_progress_sink.reset(token)
