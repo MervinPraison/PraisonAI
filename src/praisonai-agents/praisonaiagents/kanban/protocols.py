@@ -43,10 +43,11 @@ class KanbanTaskProtocol(TypedDict, total=False):
     created_at: float
     updated_at: float
     # Claim lease / reclamation fields (optional; populated while running).
+    # Timestamps are serialized as ISO 8601 strings by Task.to_dict().
     claim_lock: str | None
-    claim_expires: float | None
+    claim_expires: str | None
     worker_pid: int | None
-    last_heartbeat_at: float | None
+    last_heartbeat_at: str | None
 
 
 @runtime_checkable

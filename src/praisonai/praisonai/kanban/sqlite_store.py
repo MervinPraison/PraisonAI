@@ -736,10 +736,16 @@ class SQLiteKanbanStore:
         with self._get_connection() as conn:
             # Release claim and increment version for optimistic locking
             from datetime import timezone
+            # Only revert to 'ready' when the task is still 'running'. A task
+            # that already moved on (e.g. 'done'/'blocked' after completion)
+            # must not be requeued if a later cleanup step releases the claim,
+            # so we scope the status reset to running tasks only.
             result = conn.execute("""
                 UPDATE tasks 
                 SET claim_lock = NULL, claim_expires = NULL, worker_pid = NULL,
-                    updated_at = ?, status = 'ready', version = version + 1
+                    last_heartbeat_at = NULL, updated_at = ?,
+                    status = CASE WHEN status = 'running' THEN 'ready' ELSE status END,
+                    version = version + 1
                 WHERE id = ? AND claim_lock = ?
             """, (datetime.now(timezone.utc).isoformat(), task_id, worker_id))
             
@@ -803,7 +809,7 @@ class SQLiteKanbanStore:
 
         with self._get_connection() as conn:
             cursor = conn.execute("""
-                SELECT id, claim_lock, claim_expires, worker_pid, last_heartbeat_at
+                SELECT id, claim_lock, claim_expires, worker_pid, last_heartbeat_at, version
                 FROM tasks
                 WHERE status = 'running' AND claim_lock IS NOT NULL AND claim_lock != ''
             """)
@@ -829,12 +835,18 @@ class SQLiteKanbanStore:
                 if worker_alive and heartbeat_fresh:
                     continue
 
+                # Guard against a heartbeat/claim landing between the SELECT and
+                # this UPDATE: only reclaim if the row is still on the same
+                # version we evaluated. A live worker's heartbeat bumps version,
+                # so a raced update will simply skip this row (rowcount == 0).
                 result = conn.execute("""
                     UPDATE tasks
                     SET claim_lock = NULL, claim_expires = NULL, worker_pid = NULL,
+                        last_heartbeat_at = NULL,
                         updated_at = ?, status = 'ready', version = version + 1
                     WHERE id = ? AND status = 'running' AND claim_lock = ?
-                """, (now.isoformat(), row['id'], row['claim_lock']))
+                          AND version = ?
+                """, (now.isoformat(), row['id'], row['claim_lock'], row['version']))
 
                 if result.rowcount > 0:
                     reclaimed.append(row['id'])

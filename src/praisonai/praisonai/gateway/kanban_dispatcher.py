@@ -140,25 +140,48 @@ class KanbanDispatcher:
                 
                 # Spawn worker process
                 success = await self._spawn_worker(task, store)
-                if success:
+                if not success:
+                    # Failed to spawn, release claim
+                    store.release_claim(task.id, self.worker_id)
+                    continue
+
+                # Worker is now running. From here on we MUST NOT release the
+                # claim on error: doing so would return the task to 'ready' and
+                # let another dispatcher spawn a duplicate while this worker is
+                # still executing. Post-spawn bookkeeping is therefore isolated.
+                spawned += 1
+                try:
                     # Record the spawned worker's PID against the claim so the
                     # reclaim loop can detect a crashed/killed worker.
                     self._record_worker_pid(store, task.id)
-                    spawned += 1
-                    
+
                     # Fire claimed hook event
                     self._fire_hook_event('KANBAN_TASK_CLAIMED', {
                         'task_id': task.id,
                         'worker_id': self.worker_id,
                         'task': task.to_dict()
                     })
-                else:
-                    # Failed to spawn, release claim
-                    store.release_claim(task.id, self.worker_id)
-                    
+                except Exception as post_spawn_err:
+                    # Never release the claim for an already-running worker.
+                    logger.error(
+                        "Post-spawn bookkeeping failed for task %s (worker still "
+                        "running); leaving claim intact: %s",
+                        task.id, post_spawn_err,
+                        exc_info=True,
+                    )
+
             except Exception as e:
                 logger.error(f"Error processing task {task.id}: {e}")
-                # Release claim on error
+                # Only release the claim if we never spawned a worker for it.
+                # If a worker is already running, releasing would risk a
+                # duplicate run; the reclaim loop will recover it if it dies.
+                if task.id in self.running_tasks:
+                    logger.warning(
+                        "Task %s has a running worker; not releasing claim despite error",
+                        task.id,
+                    )
+                    continue
+                # Release claim on error (no worker spawned)
                 try:
                     store.release_claim(task.id, self.worker_id)
                 except Exception as release_err:

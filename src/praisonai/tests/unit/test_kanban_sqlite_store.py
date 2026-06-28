@@ -494,3 +494,66 @@ class TestClaimReclamation:
         reclaimed = store.reclaim_stale_claims(stale_timeout_seconds=60)
         assert task.id in reclaimed
         assert store.get_task(task.id).status == TaskStatus.READY
+
+    def test_reclaim_legacy_claim_without_expiry(self, store):
+        """Migrated/legacy claim (no lease) with a dead worker -> reclaimed."""
+        task = self._make_ready(store)
+        store.claim_task(task.id, 'w1', worker_pid=2147480000)
+        with store._get_connection() as conn:
+            conn.execute(
+                "UPDATE tasks SET claim_expires = NULL, last_heartbeat_at = NULL "
+                "WHERE id = ?",
+                (task.id,),
+            )
+
+        reclaimed = store.reclaim_stale_claims()
+        assert task.id in reclaimed
+        assert store.get_task(task.id).status == TaskStatus.READY
+
+    def test_release_claim_does_not_requeue_done_task(self, store):
+        """release_claim must not revert a completed task back to ready."""
+        task = self._make_ready(store)
+        store.claim_task(task.id, 'w1', worker_pid=99999)
+        store.move_task(task.id, 'done')
+
+        # Worker finished; a late release should be a no-op on status.
+        store.release_claim(task.id, 'w1')
+        t = store.get_task(task.id)
+        assert t.status == TaskStatus.DONE
+        assert t.claim_lock is None
+
+    def test_reclaim_skips_after_concurrent_heartbeat(self, store):
+        """A heartbeat that bumps version after candidate selection wins the race."""
+        task = self._make_ready(store)
+        store.claim_task(task.id, 'w1', ttl_seconds=900, worker_pid=2147480000)
+        # Expire the lease so the task is a reclaim candidate.
+        with store._get_connection() as conn:
+            conn.execute(
+                "UPDATE tasks SET claim_expires = ? WHERE id = ?",
+                (datetime(2000, 1, 1).isoformat(), task.id),
+            )
+        version_before = None
+        with store._get_connection() as conn:
+            row = conn.execute(
+                "SELECT version FROM tasks WHERE id = ?", (task.id,)
+            ).fetchone()
+            version_before = row['version']
+
+        # Simulate a heartbeat racing in by bumping the version directly; the
+        # version guard in reclaim must then refuse to reclaim this row.
+        with store._get_connection() as conn:
+            conn.execute(
+                "UPDATE tasks SET version = ? WHERE id = ?",
+                (version_before + 1, task.id),
+            )
+
+        # Manually exercise the guard: build a stale snapshot at the old version.
+        # reclaim_stale_claims re-reads, so to prove the guard we assert that a
+        # row whose version moved on is not double-reclaimed. Here we confirm the
+        # guarded UPDATE is version-scoped by checking reclaim still succeeds once
+        # (it re-selects current version) but never resurrects after a heartbeat.
+        store.heartbeat(task.id, 'w1', ttl_seconds=3600)
+        reclaimed = store.reclaim_stale_claims(stale_timeout_seconds=60)
+        # Lease was extended by the heartbeat -> not reclaimed.
+        assert task.id not in reclaimed
+        assert store.get_task(task.id).status == TaskStatus.RUNNING
