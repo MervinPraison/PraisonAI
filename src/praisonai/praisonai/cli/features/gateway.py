@@ -14,6 +14,31 @@ from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
+# Restart-intent exit-code protocol (Issue #2437). Source of truth lives in
+# core; fall back to the sysexits.h values if running against an older core.
+try:
+    from praisonaiagents.gateway import (
+        GATEWAY_OK_EXIT_CODE,
+        GATEWAY_RESTART_EXIT_CODE,
+        GATEWAY_FATAL_CONFIG_EXIT_CODE,
+        FatalConfigError,
+        classify_exit_reason,
+    )
+except ImportError:  # pragma: no cover - older core without the protocol
+    GATEWAY_OK_EXIT_CODE = 0
+    GATEWAY_RESTART_EXIT_CODE = 75
+    GATEWAY_FATAL_CONFIG_EXIT_CODE = 78
+
+    class FatalConfigError(Exception):
+        """Fallback fatal-config error when core lacks the protocol."""
+
+    def classify_exit_reason(exc):  # type: ignore[no-redef]
+        if exc is None or isinstance(exc, KeyboardInterrupt):
+            return GATEWAY_OK_EXIT_CODE
+        if isinstance(exc, FatalConfigError):
+            return GATEWAY_FATAL_CONFIG_EXIT_CODE
+        return GATEWAY_RESTART_EXIT_CODE
+
 
 def _load_praisonai_env_file() -> Dict[str, str]:
     """Load ``~/.praisonai/.env`` into ``os.environ`` (without overwriting).
@@ -73,9 +98,18 @@ class GatewayHandler:
         max_concurrent_runs: Optional[int] = None,
         queue_depth: Optional[int] = None,
         overflow_policy: Optional[str] = None,
-    ) -> None:
+    ) -> int:
         """Start the gateway server.
-        
+
+        Returns a supervisor-friendly exit code (Issue #2437):
+
+        * ``0`` — clean shutdown (Ctrl+C / SIGTERM drain).
+        * ``75`` (``EX_TEMPFAIL``) — transient failure; ask the supervisor
+          to restart.
+        * ``78`` (``EX_CONFIG``) — fatal configuration error (bad/missing
+          ``gateway.yaml``, no platforms, duplicate token); the supervisor
+          should stop restarting so the operator can fix the config.
+
         Args:
             host: Host to bind to
             port: Port to listen on
@@ -119,10 +153,12 @@ class GatewayHandler:
             from praisonai.gateway import WebSocketGateway
             from praisonaiagents.gateway import GatewayConfig
         except ImportError as e:
+            # Missing optional deps is a config/setup problem the operator
+            # must fix; restarting won't help (#2437).
             print(f"Error: Gateway requires additional dependencies. {e}")
             print("Install with: pip install praisonai[api]")
-            return
-        
+            return GATEWAY_FATAL_CONFIG_EXIT_CODE
+
         # Multi-bot mode: load from gateway.yaml
         if config_file:
             config = GatewayConfig(host=host, port=port)
@@ -144,12 +180,20 @@ class GatewayHandler:
                 print("\nStopping gateway...")
                 asyncio.run(self._gateway.stop_channels(drain_timeout=drain_timeout))
                 asyncio.run(self._gateway.stop(drain_timeout=drain_timeout))
+                return GATEWAY_OK_EXIT_CODE
+            except FatalConfigError as e:
+                # Duplicate token, no platforms, invalid credentials, etc.
+                print(f"Fatal config error: {e}")
+                return GATEWAY_FATAL_CONFIG_EXIT_CODE
             except FileNotFoundError as e:
+                # A missing/malformed gateway.yaml is unrecoverable until fixed.
                 print(f"Error: {e}")
+                return GATEWAY_FATAL_CONFIG_EXIT_CODE
             except Exception as e:
                 print(f"Error starting gateway: {e}")
-            return
-        
+                return classify_exit_reason(e)
+            return GATEWAY_OK_EXIT_CODE
+
         # Standard WebSocket-only mode
         config = GatewayConfig(host=host, port=port)
         self._gateway = WebSocketGateway(config=config)
@@ -165,20 +209,31 @@ class GatewayHandler:
                     overflow_policy=overflow_policy or "reject",
                 )
             except Exception as e:
+                # Invalid admission-control config is unrecoverable until the
+                # operator fixes it; restarting won't help (#2437).
                 print(f"Error: invalid admission-control config: {e}")
-                return
-        
+                return GATEWAY_FATAL_CONFIG_EXIT_CODE
+
+
         if agent_file:
             self._load_agents_from_file(agent_file)
-        
+
         print(f"Starting gateway on ws://{host}:{port}")
         print("Press Ctrl+C to stop")
-        
+
         try:
             asyncio.run(self._gateway.start())
         except KeyboardInterrupt:
             print("\nStopping gateway...")
             asyncio.run(self._gateway.stop())
+            return GATEWAY_OK_EXIT_CODE
+        except FatalConfigError as e:
+            print(f"Fatal config error: {e}")
+            return GATEWAY_FATAL_CONFIG_EXIT_CODE
+        except Exception as e:
+            print(f"Error starting gateway: {e}")
+            return classify_exit_reason(e)
+        return GATEWAY_OK_EXIT_CODE
     
     def _load_agents_from_file(self, file_path: str) -> None:
         """Load agents from a configuration file."""
@@ -538,7 +593,9 @@ def handle_gateway_command(args) -> int:
     subcommand = getattr(args, "gateway_command", None) or "start"
     
     if subcommand == "start":
-        handler.start(
+        # Propagate the supervisor-friendly exit code from start() (#2437):
+        # 0 clean, 75 transient/restart, 78 fatal-config/do-not-restart.
+        return handler.start(
             host=getattr(args, "host", "127.0.0.1"),
             port=getattr(args, "port", 8765),
             agent_file=getattr(args, "agents", None),
