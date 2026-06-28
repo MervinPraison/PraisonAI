@@ -39,9 +39,29 @@ def test_promote_ready_fires_moved_event():
     assert store.recompute_calls == 1
     assert len(fired) == 1
     event_type, data = fired[0]
-    assert event_type == "KANBAN_TASK_MOVED"
+    assert event_type == "kanban_task_moved"
     assert data["task_id"] == "t_child"
     assert data["to_status"] == "ready"
+    assert data["task"] == {"id": "t_child", "status": "ready"}
+
+
+def test_promote_ready_skips_event_when_task_unreadable():
+    """A promoted task that can't be read back fires no (empty) move event."""
+    dispatcher = KanbanDispatcher()
+
+    class _UnreadableStore(_FakeStore):
+        def get_task(self, task_id):
+            return None
+
+    store = _UnreadableStore(promoted=["t_child"])
+
+    fired = []
+    dispatcher._fire_hook_event = lambda event_type, data: fired.append((event_type, data))
+
+    promoted = dispatcher._promote_ready(store)
+
+    assert promoted == ["t_child"]
+    assert fired == []
 
 
 def test_promote_ready_no_promotions_no_events():

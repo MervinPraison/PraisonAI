@@ -411,9 +411,24 @@ class SQLiteKanbanStore:
                 """, (task_id,))
 
                 if parent_check.fetchone()['incomplete_parents'] == 0:
-                    self._update_task_with_conn(
-                        task_id, {'status': TaskStatus.READY.value}, conn
+                    # Guard against a concurrent transition: only promote if the
+                    # task is *still* waiting. This prevents overwriting a newer
+                    # status (e.g. archived/moved) set since the candidate scan.
+                    from datetime import timezone
+                    cursor_update = conn.execute(
+                        """
+                        UPDATE tasks
+                        SET status = ?, updated_at = ?, version = version + 1
+                        WHERE id = ? AND status IN ('todo', 'blocked')
+                        """,
+                        (
+                            TaskStatus.READY.value,
+                            datetime.now(timezone.utc).isoformat(),
+                            task_id,
+                        ),
                     )
+                    if cursor_update.rowcount == 0:
+                        continue
                     self._log_event(conn, task_id, 'promoted', {
                         'old_status': _old_status,
                         'new_status': TaskStatus.READY.value,

@@ -169,10 +169,6 @@ class KanbanStoreProtocol:
         """Move task to new status."""
         ...
     
-    def recompute_ready(self) -> List[str]:
-        """Promote dependent tasks to 'ready' when all parents are terminal."""
-        ...
-    
     def get_board(self, board: str = "default") -> Dict[str, Any]:
         """Get board layout for UI."""
         ...
@@ -199,4 +195,18 @@ class KanbanStoreProtocol:
     
     def list_events(self, since: Optional[datetime] = None) -> List[TaskEvent]:
         """List events for SSE."""
+        ...
+
+
+class KanbanPromotionProtocol:
+    """Extension protocol for dependency-driven task promotion.
+
+    Kept separate from the minimal KanbanStoreProtocol so base store
+    implementations stay minimal; only stores that opt into auto-promotion
+    need to implement this. Mirrors KanbanPromotionProtocol in
+    praisonaiagents.kanban.
+    """
+
+    def recompute_ready(self) -> List[str]:
+        """Promote dependent tasks to 'ready' when all parents are terminal."""
         ...
