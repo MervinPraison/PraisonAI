@@ -1061,6 +1061,35 @@ class BotOS:
             drain_timeout=drain_timeout,
         )
 
+    async def probe_all(self) -> Dict[str, Any]:
+        """Probe every registered bot's channel credentials concurrently.
+
+        Pre-flight credential check (#2426): validates each channel's token
+        and surfaces the bot identity *without* starting message processing.
+        Unlike :meth:`health`, this is safe to call before ``start()`` — each
+        bot builds its adapter lazily inside ``probe()``.
+
+        Returns:
+            Dictionary mapping platform name to ``ProbeResult``.
+        """
+        from praisonaiagents.bots import ProbeResult
+
+        if not self._bots:
+            return {}
+
+        platforms = list(self._bots.keys())
+
+        async def _probe_one(bot: Bot) -> Any:
+            try:
+                return await bot.probe()
+            except Exception as e:  # pragma: no cover — defensive
+                return ProbeResult(ok=False, platform=bot.platform, error=str(e))
+
+        results = await asyncio.gather(
+            *(_probe_one(self._bots[p]) for p in platforms)
+        )
+        return dict(zip(platforms, results))
+
     async def health(self) -> Dict[str, HealthResult]:
         """Get health status of all bots.
         

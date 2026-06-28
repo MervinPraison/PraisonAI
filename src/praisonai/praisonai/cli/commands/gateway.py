@@ -20,6 +20,11 @@ def gateway_start(
     port: Optional[int] = typer.Option(None, "--port", help="Port to listen on"),
     agents: Optional[str] = typer.Option(None, "--agents", help="Path to agent configuration file"),
     config: Optional[str] = typer.Option(None, "--config", help="Path to gateway.yaml for multi-bot mode"),
+    preflight: bool = typer.Option(
+        True,
+        "--preflight/--no-preflight",
+        help="Validate channel credentials before starting (fail fast on bad tokens)",
+    ),
 ):
     """Start the gateway server.
 
@@ -27,6 +32,7 @@ def gateway_start(
         praisonai gateway start
         praisonai gateway start --config gateway.yaml
         praisonai gateway start --agents agents.yaml --port 9000
+        praisonai gateway start --config gateway.yaml --no-preflight
         GATEWAY_PORT=9000 praisonai gateway start
     """
     import os
@@ -38,6 +44,23 @@ def gateway_start(
             port = int(os.environ.get("GATEWAY_PORT", "8765"))
         except ValueError:
             port = 8765
+
+    # Pre-flight: validate channel credentials before launch so bad/expired
+    # tokens fail fast with a precise per-channel reason instead of entering a
+    # silent reconnect loop (#2426). Only runs in multi-bot config mode.
+    if preflight and config and os.path.exists(config):
+        import asyncio
+
+        channels = _load_channels(config)
+        if channels:
+            results = asyncio.run(_probe_channels(channels))
+            all_ok = _render_probe_results(results)
+            if not all_ok:
+                print(
+                    "\nPre-flight check failed — aborting start. "
+                    "Fix the channel credentials above or pass --no-preflight to skip."
+                )
+                raise typer.Exit(1)
 
     handler = GatewayHandler()
     handler.start(host=host, port=port, agent_file=agents, config_file=config)
@@ -130,16 +153,132 @@ def gateway_status(
             output.print_error(f"Error checking gateway server status: {str(e)}")
 
 
+def _resolve_env_token(value):
+    """Resolve a ``${VAR}`` placeholder to its env value (pass-through otherwise)."""
+    import os
+
+    if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+        return os.environ.get(value[2:-1], "")
+    return value
+
+
+def _load_channels(config: str) -> dict:
+    """Load the ``channels`` mapping from a gateway.yaml file (or exit)."""
+    import os
+    import yaml
+
+    if not os.path.exists(config):
+        print(f"Error: Config file not found: {config}")
+        raise typer.Exit(1)
+
+    with open(config) as f:
+        cfg = yaml.safe_load(f) or {}
+
+    return cfg.get("channels", {})
+
+
+async def _probe_channels(channels: dict) -> dict:
+    """Build a lightweight Bot per channel and probe its credentials.
+
+    Probing builds the adapter lazily and calls the platform identity API
+    (Telegram getMe, Slack auth.test, …) without starting message
+    processing. No agent is required. Returns ``{name: ProbeResult}``.
+    """
+    from praisonai.bots import Bot
+    from praisonaiagents.bots import ProbeResult
+
+    async def _probe_one(name: str, ch_cfg: dict):
+        platform = ch_cfg.get("platform", name)
+        token = _resolve_env_token(ch_cfg.get("token", ""))
+        extras = {
+            k: _resolve_env_token(v)
+            for k, v in ch_cfg.items()
+            if k not in ("platform", "token")
+        }
+        try:
+            bot = Bot(platform, token=token, **extras)
+            return name, await bot.probe()
+        except Exception as e:  # pragma: no cover — defensive
+            return name, ProbeResult(ok=False, platform=platform, error=str(e))
+
+    import asyncio as _asyncio
+
+    results = await _asyncio.gather(
+        *(_probe_one(name, ch_cfg or {}) for name, ch_cfg in channels.items())
+    )
+    return dict(results)
+
+
+def _render_probe_results(results: dict, json_output: bool = False) -> bool:
+    """Print per-channel probe verdicts. Returns True if all channels passed."""
+    all_ok = all(getattr(r, "ok", False) for r in results.values())
+
+    if json_output:
+        import json
+
+        print(
+            json.dumps(
+                {
+                    name: r.to_dict() if hasattr(r, "to_dict") else vars(r)
+                    for name, r in results.items()
+                },
+                indent=2,
+            )
+        )
+        return all_ok
+
+    for name, r in results.items():
+        mark = "✓" if getattr(r, "ok", False) else "✗"
+        identity = getattr(r, "bot_username", None) or ""
+        if getattr(r, "ok", False):
+            detail = f"@{identity}" if identity else (getattr(r, "platform", "") or "")
+        else:
+            detail = getattr(r, "error", None) or "unknown error"
+        print(f"{name:<12} {mark}  {detail}")
+
+    return all_ok
+
+
+@app.command("doctor")
+def gateway_doctor(
+    config: str = typer.Option("gateway.yaml", "--config", "-c", help="Path to gateway.yaml"),
+    json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+):
+    """Validate every configured channel's credentials (pre-flight check).
+
+    Probes each channel's token and surfaces the bot identity
+    (Telegram getMe, Slack auth.test, Discord identify, WhatsApp token check)
+    without starting message processing. Exits non-zero if any channel fails.
+
+    Examples:
+        praisonai gateway doctor
+        praisonai gateway doctor --config my-gateway.yaml --json
+    """
+    import asyncio
+
+    channels = _load_channels(config)
+    if not channels:
+        print("No channels configured.")
+        raise typer.Exit(0)
+
+    results = asyncio.run(_probe_channels(channels))
+    all_ok = _render_probe_results(results, json_output=json_output)
+    if not all_ok:
+        raise typer.Exit(1)
+
+
 @app.command("channels")
 def gateway_channels(
     config: str = typer.Option("gateway.yaml", "--config", "-c", help="Path to gateway.yaml"),
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
+    probe: bool = typer.Option(False, "--probe", help="Probe each channel's credentials"),
 ):
     """List channels configured in a gateway.yaml file.
 
     Examples:
         praisonai gateway channels
         praisonai gateway channels --config my-gateway.yaml --json
+        praisonai gateway channels --probe
     """
     import os
     import yaml
@@ -155,6 +294,15 @@ def gateway_channels(
 
     if not channels:
         print("No channels configured.")
+        raise typer.Exit(0)
+
+    if probe:
+        import asyncio
+
+        results = asyncio.run(_probe_channels(channels))
+        all_ok = _render_probe_results(results, json_output=json_output)
+        if not all_ok:
+            raise typer.Exit(1)
         raise typer.Exit(0)
 
     if json_output:
@@ -567,7 +715,8 @@ Manage the gateway server: praisonai gateway <command>
   [green]start[/green]       Start the gateway server
   [green]stop[/green]        Stop a running gateway instance
   [green]status[/green]      Check gateway and daemon status
-  [green]channels[/green]    List channels from gateway.yaml
+  [green]doctor[/green]      Validate channel credentials (pre-flight check)
+  [green]channels[/green]    List channels from gateway.yaml (use --probe to check creds)
   [green]send[/green]        Send a test message to a channel
   [green]install[/green]     Install as OS daemon service
   [green]uninstall[/green]   Uninstall daemon service
@@ -585,7 +734,8 @@ Manage the gateway server: praisonai gateway <command>
   praisonai gateway status
 
 [bold]Channel Management:[/bold]
-  praisonai gateway channels --config gateway.yaml
+  praisonai gateway doctor --config gateway.yaml
+  praisonai gateway channels --config gateway.yaml --probe
   praisonai gateway send --config gateway.yaml --channel telegram --channel-id 12345 -m "test"
 """
         try:
