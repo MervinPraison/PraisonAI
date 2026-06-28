@@ -171,6 +171,26 @@ def __getattr__(name):
             from .sanitize import sanitize_text
             _lazy_cache[name] = sanitize_text
             return sanitize_text
+        elif name == "PanelLLM":
+            from .panel import PanelLLM
+            _lazy_cache[name] = PanelLLM
+            return PanelLLM
+        elif name == "create_panel_llm":
+            from .panel import create_panel_llm
+            _lazy_cache[name] = create_panel_llm
+            return create_panel_llm
+        elif name == "register_panel_preset":
+            from .panel import register_panel_preset
+            _lazy_cache[name] = register_panel_preset
+            return register_panel_preset
+        elif name == "resolve_panel_config":
+            from .panel import resolve_panel_config
+            _lazy_cache[name] = resolve_panel_config
+            return resolve_panel_config
+        elif name == "is_panel_descriptor":
+            from .panel import is_panel_descriptor
+            _lazy_cache[name] = is_panel_descriptor
+            return is_panel_descriptor
         elif name == "ErrorCategory":
             from .error_classifier import ErrorCategory
             _lazy_cache[name] = ErrorCategory
@@ -215,6 +235,12 @@ __all__ = [
     "OpenAIAdapter",
     "UnifiedLLMDispatcher",
     "create_llm_dispatcher",
+    # Panel (multi-model) provider
+    "PanelLLM",
+    "create_panel_llm",
+    "register_panel_preset",
+    "resolve_panel_config",
+    "is_panel_descriptor",
     # Exceptions
     "LLMProviderError",
     "RateLimitError",

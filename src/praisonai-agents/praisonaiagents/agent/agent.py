@@ -306,6 +306,16 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
         """Lazy-create LLM instance from deferred init params (avoids import at Agent())."""
         if self._llm_instance is not None:
             return self._llm_instance
+        if self._panel_descriptor is not None:
+            try:
+                from ..llm.panel import create_panel_llm
+                self._llm_instance = create_panel_llm(self._panel_descriptor)
+            except ImportError as e:
+                raise ImportError(
+                    "LLM features requested but dependencies not installed. "
+                    "Please install with: pip install \"praisonaiagents[llm]\""
+                ) from e
+            return self._llm_instance
         if self._llm_init_params:
             try:
                 from ..llm.llm import LLM
@@ -1578,6 +1588,7 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
         self._using_custom_llm = False
         self._llm_instance = None
         self._llm_init_params = None
+        self._panel_descriptor = None
         # Flag to track if final result has been displayed to prevent duplicates
         self._final_display_shown = False
         
@@ -1645,8 +1656,15 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
         self.base_url = base_url
         self.api_key = api_key
 
+        # Panel (multi-model) descriptor: "panel:<name>" or {"provider": "panel"}.
+        # Resolved lazily into a PanelLLM; composes with the normal tool loop.
+        from ..llm.panel import is_panel_descriptor
+        if is_panel_descriptor(llm):
+            self._panel_descriptor = llm
+            self._using_custom_llm = True
+            self.llm = llm if isinstance(llm, str) else "panel"
         # If base_url is provided, defer custom LLM instance creation
-        if base_url:
+        elif base_url:
             if isinstance(llm, dict):
                 llm_config = llm.copy()
                 llm_config['base_url'] = base_url
