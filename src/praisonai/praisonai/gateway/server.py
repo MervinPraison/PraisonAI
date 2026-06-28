@@ -4657,7 +4657,17 @@ class WebSocketGateway:
         forensics_cfg = gw_cfg.get("forensics")
         if not isinstance(forensics_cfg, dict):
             forensics_cfg = {}
-        forensics_enabled = forensics_cfg.get("enabled", True)
+        # Normalise the toggle: env-substituted YAML (e.g. ``enabled:
+        # ${FORENSICS_ENABLED}``) arrives as a string, so a raw truthiness
+        # check would treat "false"/"0" as enabled. Default to enabled.
+        forensics_enabled_raw = forensics_cfg.get("enabled", True)
+        if isinstance(forensics_enabled_raw, str):
+            forensics_enabled = (
+                forensics_enabled_raw.strip().lower()
+                in ("1", "true", "yes", "on")
+            )
+        else:
+            forensics_enabled = bool(forensics_enabled_raw)
         diagnostic_dir = forensics_cfg.get("diagnostic_dir") or os.path.join(
             os.path.expanduser("~"), ".praisonai", "gateway", "forensics"
         )
@@ -4701,9 +4711,16 @@ class WebSocketGateway:
         # loop.add_signal_handler (async-safe) with signal.signal fallback.
         import signal
 
-        def _request_shutdown(signal_name: Optional[str] = None):
+        def _request_shutdown(
+            signal_name: Optional[str] = None, forensic: bool = True
+        ):
             logger.info("Received shutdown signal, stopping gateway...")
-            if forensics is not None:
+            # ``forensic`` is False on the raw ``signal.signal`` fallback path:
+            # that callback runs in a C-signal context where re-entering
+            # logging / subprocess could deadlock if a lock was held when the
+            # signal arrived. There we only flip ``should_exit`` and let the
+            # async path (when available) capture forensics.
+            if forensic and forensics is not None:
                 try:
                     from praisonaiagents.gateway import format_forensics_for_log
 
@@ -4720,13 +4737,19 @@ class WebSocketGateway:
             sig_name = sig.name
             try:
                 loop.add_signal_handler(
-                    sig, lambda n=sig_name: _request_shutdown(n)
+                    sig, lambda n=sig_name: _request_shutdown(n, forensic=True)
                 )
             except (NotImplementedError, OSError, ValueError):
-                # Fallback for platforms where add_signal_handler is unavailable
+                # Fallback for platforms where add_signal_handler is
+                # unavailable. This runs in a C-signal context, so we must not
+                # re-enter logging/subprocess: skip forensics here and only
+                # request exit (forensic=False).
                 try:
                     signal.signal(
-                        sig, lambda s, f, n=sig_name: _request_shutdown(n)
+                        sig,
+                        lambda s, f, n=sig_name: _request_shutdown(
+                            n, forensic=False
+                        ),
                     )
                 except (OSError, ValueError):
                     pass

@@ -2334,7 +2334,7 @@ class ShutdownForensicsProtocol(Protocol):
         """
         ...
 
-    def spawn_diagnostic(self, ctx: Dict[str, Any], log_dir: str) -> None:
+    def spawn_diagnostic(self, ctx: Dict[str, Any], log_dir: Optional[str]) -> None:
         """Fire-and-forget a detached diagnostic into ``log_dir``.
 
         Must never raise and must not block the caller; the diagnostic runs in

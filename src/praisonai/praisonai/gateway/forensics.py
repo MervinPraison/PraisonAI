@@ -50,6 +50,19 @@ class ShutdownForensics:
     def __init__(self, log_dir: Optional[str] = None, enabled: bool = True):
         self.log_dir = log_dir
         self.enabled = bool(enabled)
+        # Pre-create the diagnostic directory at startup so the signal path
+        # never performs synchronous filesystem I/O (a slow/hung FS such as NFS
+        # or an automount could otherwise block shutdown before drain). Only a
+        # directory we successfully prepared here is used by spawn_diagnostic.
+        self._prepared_dir: Optional[str] = None
+        if self.enabled and self.log_dir:
+            try:
+                os.makedirs(self.log_dir, exist_ok=True)
+                self._prepared_dir = self.log_dir
+            except (OSError, TypeError, ValueError) as exc:
+                logger.debug(
+                    "forensics: could not prepare diagnostic dir: %s", exc
+                )
 
     def snapshot(self, signal_name: Optional[str] = None) -> Dict[str, Any]:
         """Capture a fast (<10ms), best-effort forensic context.
@@ -102,15 +115,21 @@ class ShutdownForensics:
         Writes recent kernel OOM/killed lines, the process tree, and load into
         ``<log_dir>/gateway-forensics-<pid>.log`` from a process detached via a
         new session (``start_new_session=True``) so a kill on the gateway's
-        process group does not also kill the diagnostic. Never raises.
+        process group does not also kill the diagnostic. Never raises and never
+        performs synchronous filesystem I/O on the signal path: the directory is
+        prepared once in ``__init__``.
         """
         if not self.enabled:
             return
-        target_dir = log_dir or self.log_dir
+        # Only use a directory we already created at startup; this keeps the
+        # signal path free of blocking ``os.makedirs`` on a slow/hung FS. A
+        # ``log_dir`` argument is honoured only when it is the prepared one.
+        target_dir = self._prepared_dir
+        if log_dir and log_dir != target_dir:
+            return
         if not target_dir:
             return
         try:
-            os.makedirs(target_dir, exist_ok=True)
             pid = ctx.get("pid", os.getpid())
             out_path = os.path.join(target_dir, f"gateway-forensics-{pid}.log")
         except Exception as exc:  # pragma: no cover - defensive

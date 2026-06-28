@@ -112,3 +112,50 @@ def test_snapshot_never_raises_and_is_serialisable():
     import json
 
     json.dumps(ctx)
+
+
+def test_diagnostic_dir_prepared_in_init(tmp_path):
+    """The diagnostic directory is created at startup, not on the signal path."""
+    pytest.importorskip("praisonai.gateway.forensics", reason="wrapper not installed")
+    from praisonai.gateway.forensics import ShutdownForensics
+
+    target = tmp_path / "forensics"
+    f = ShutdownForensics(log_dir=str(target), enabled=True)
+    assert target.is_dir()
+    assert f._prepared_dir == str(target)
+
+
+def test_spawn_diagnostic_does_no_makedirs_on_signal_path(tmp_path, monkeypatch):
+    """spawn_diagnostic must not call os.makedirs (would block on slow FS)."""
+    pytest.importorskip("praisonai.gateway.forensics", reason="wrapper not installed")
+    import os as _os
+
+    from praisonai.gateway.forensics import ShutdownForensics
+
+    f = ShutdownForensics(log_dir=str(tmp_path / "d"), enabled=True)
+
+    def _boom(*a, **k):
+        raise AssertionError("os.makedirs must not run on the signal path")
+
+    monkeypatch.setattr(_os, "makedirs", _boom)
+    # Must not raise and must not call makedirs.
+    f.spawn_diagnostic({"pid": _os.getpid()}, None)
+
+
+def test_spawn_diagnostic_disabled_when_dir_unprepared(monkeypatch):
+    """When the dir could not be prepared, spawn_diagnostic is a safe no-op."""
+    pytest.importorskip("praisonai.gateway.forensics", reason="wrapper not installed")
+    import os as _os
+
+    from praisonai.gateway.forensics import ShutdownForensics
+
+    f = ShutdownForensics(log_dir=None, enabled=True)
+    assert f._prepared_dir is None
+
+    def _no_popen(*a, **k):
+        raise AssertionError("no diagnostic should spawn without a prepared dir")
+
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "Popen", _no_popen)
+    f.spawn_diagnostic({"pid": _os.getpid()}, None)
