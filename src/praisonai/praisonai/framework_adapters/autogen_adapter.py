@@ -323,39 +323,44 @@ class AutoGenFamilyAdapter(BaseFrameworkAdapter):
         v4_available = _selectable("autogen_v4")
         ag2_available = _selectable("ag2")
 
-        # Explicit version pins: honour only when the variant can actually run,
-        # otherwise warn and fall back to a usable variant.
+        # Explicit version pins: honour only when the variant can actually run.
+        # An explicit pin must NOT silently fall back to a different variant —
+        # a workflow that depends on v0.4 / AG2 APIs would otherwise run under
+        # v0.2 with different behaviour. Fail fast with an actionable error so
+        # the mismatch surfaces instead of producing wrong-runtime results.
         if requested == "v0.2":
             if v2_available:
                 return "autogen_v2"
-            logger.warning("AUTOGEN_VERSION=v0.2 requested but autogen (v0.2) is not available")
+            raise ImportError(
+                "AUTOGEN_VERSION=v0.2 was requested, but the AutoGen v0.2 adapter "
+                "is not available. Install with: pip install 'praisonai[autogen]'."
+            )
         elif requested == "v0.4":
             if v4_available:
                 return "autogen_v4"
-            logger.warning(
-                "AUTOGEN_VERSION=v0.4 requested but the v0.4 adapter is not "
-                "registered/available; falling back to v0.2 if installed"
+            raise ImportError(
+                "AUTOGEN_VERSION=v0.4 was requested, but the v0.4 adapter is not "
+                "registered or available. Install/register an autogen_v4 adapter "
+                "(pip install 'praisonai[autogen-v4]'), or unset AUTOGEN_VERSION "
+                "to use auto-selection."
             )
-            if v2_available:
-                return "autogen_v2"
         elif requested == "ag2":
             if ag2_available:
                 return "ag2"
-            logger.warning(
-                "AUTOGEN_VERSION=ag2 requested but the AG2 adapter is not "
-                "registered/available; falling back to v0.2 if installed"
+            raise ImportError(
+                "AUTOGEN_VERSION=ag2 was requested, but the AG2 adapter is not "
+                "registered or available. Install/register an AG2 adapter "
+                "(pip install 'praisonai[ag2]'), or unset AUTOGEN_VERSION to use "
+                "auto-selection."
             )
-            if v2_available:
-                return "autogen_v2"
 
         # Auto selection: prefer v2 (v4/ag2 are currently unimplemented).
-        if requested not in ("v0.2", "v0.4", "ag2"):
-            if v2_available:
-                return "autogen_v2"
-            if v4_available:
-                return "autogen_v4"
-            if ag2_available:
-                return "ag2"
+        if v2_available:
+            return "autogen_v2"
+        if v4_available:
+            return "autogen_v4"
+        if ag2_available:
+            return "ag2"
 
         # Nothing selectable.
         raise ImportError(
