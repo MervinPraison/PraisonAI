@@ -118,22 +118,30 @@ class PraisonAIDB:
             try:
                 self._build_stores()
                 self._initialized = True
-            except BaseException as e:
+            except Exception as e:
+                # Only memoize ordinary errors. KeyboardInterrupt/SystemExit and
+                # other BaseExceptions (e.g. asyncio.CancelledError surfacing
+                # through to_thread) must NOT permanently poison _init_failed.
                 self._init_failed = e
                 raise
 
     async def _ainit_stores(self):
         """Lazily initialize stores on first use (async path).
 
-        Never holds a threading.Lock on the event-loop thread and runs the
-        blocking store construction off-loop via asyncio.to_thread.
+        Never holds a threading.Lock on the event-loop thread. The blocking
+        store construction is delegated to the same locked sync initializer
+        (``_init_stores``) via :func:`asyncio.to_thread`, so the sync and async
+        paths share a single ``_init_lock`` and can never construct stores
+        concurrently on the same adapter instance.
         """
         if self._initialized:
             return
         if self._init_failed is not None:
             raise self._init_failed
 
-        # Create the asyncio.Lock lazily so it binds to the running loop.
+        # Create the asyncio.Lock lazily so it binds to the running loop. This
+        # serialises async callers; the off-loop _init_stores serialises against
+        # sync callers via the shared threading _init_lock.
         if self._ainit_lock is None:
             self._ainit_lock = asyncio.Lock()
 
@@ -142,12 +150,7 @@ class PraisonAIDB:
                 return
             if self._init_failed is not None:
                 raise self._init_failed
-            try:
-                await asyncio.to_thread(self._build_stores)
-                self._initialized = True
-            except BaseException as e:
-                self._init_failed = e
-                raise
+            await asyncio.to_thread(self._init_stores)
     
     def _detect_backend(self, url: str) -> str:
         """Detect backend type from URL.

@@ -519,12 +519,20 @@ class BaseAutoGenerator:
             try:
                 litellm = _get_litellm()
                 call = litellm.acompletion if is_async else litellm.completion
-                response = await _maybe_await(call(
+                call_kwargs = dict(
                     model=model_name,
                     messages=messages,
                     response_format=response_model,
-                    **kwargs
-                ))
+                    **kwargs,
+                )
+                # The async path awaits the provider coroutine directly. The sync
+                # path offloads the blocking provider call via asyncio.to_thread
+                # so it never blocks the bridge event loop this coroutine runs on.
+                response = (
+                    await _maybe_await(call(**call_kwargs))
+                    if is_async
+                    else await asyncio.to_thread(lambda: call(**call_kwargs))
+                )
                 content = response.choices[0].message.content
                 return response_model.model_validate_json(content)
             except Exception as e:
@@ -545,12 +553,20 @@ class BaseAutoGenerator:
                 self._get_async_openai_client() if is_async
                 else self._get_openai_client()
             )
-            response = await _maybe_await(client.beta.chat.completions.parse(
+            parse = client.beta.chat.completions.parse
+            parse_kwargs = dict(
                 model=model_name,
                 messages=messages,
                 response_format=response_model,
-                **kwargs
-            ))
+                **kwargs,
+            )
+            # As above: await directly when async, otherwise offload the blocking
+            # sync parse() so the bridge event loop is never blocked.
+            response = (
+                await _maybe_await(parse(**parse_kwargs))
+                if is_async
+                else await asyncio.to_thread(lambda: parse(**parse_kwargs))
+            )
             return response.choices[0].message.parsed
 
         # Neither available - raise helpful error
@@ -578,9 +594,45 @@ class BaseAutoGenerator:
         Raises:
             ImportError: If neither litellm nor openai is installed
         """
-        return run_sync(
-            self._completion_impl(response_model, messages, is_async=False, **kwargs)
-        )
+        # Backward compatibility: the historical sync path called the blocking
+        # provider clients directly, so it worked even when invoked from inside a
+        # running event loop (FastAPI handler, Jupyter, async test). run_sync()
+        # rejects that case, so when a loop is already running we drive the sync
+        # ladder on a dedicated worker thread (with its own loop) instead of
+        # raising. The provider calls still execute off the caller's loop.
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = False
+        else:
+            running_loop = True
+
+        if not running_loop:
+            return run_sync(
+                self._completion_impl(response_model, messages, is_async=False, **kwargs)
+            )
+
+        result: List[Any] = []
+        error: List[BaseException] = []
+
+        def _runner() -> None:
+            try:
+                result.append(
+                    asyncio.run(
+                        self._completion_impl(
+                            response_model, messages, is_async=False, **kwargs
+                        )
+                    )
+                )
+            except BaseException as e:  # noqa: BLE001 - re-raised on caller thread
+                error.append(e)
+
+        thread = threading.Thread(target=_runner, name="praisonai-sync-completion")
+        thread.start()
+        thread.join()
+        if error:
+            raise error[0]
+        return result[0]
 
     async def _astructured_completion(self, response_model: Type[T], messages: List[Dict], **kwargs) -> T:
         """

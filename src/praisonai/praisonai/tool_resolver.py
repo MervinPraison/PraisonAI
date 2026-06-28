@@ -133,8 +133,10 @@ class ToolResolver:
         # Cache for the tools/ directory class scan so a long-running multi-agent
         # process does not re-glob the directory and re-import every module on
         # every resolve_all_from_yaml() call (mirrors the tools.py cache above).
-        self._local_tools_dir_cache: Optional[Dict[str, Any]] = None
-        self._local_tools_dir_loaded: bool = False
+        # Keyed by the resolved directory path so a resolver reused across
+        # different projects / after a cwd change resolves against the correct
+        # tools/ tree instead of returning a stale first-scan result.
+        self._local_tools_dir_cache: Dict[str, Dict[str, Any]] = {}
         self._local_tools_dir_lock = threading.Lock()
         self._registry = registry
         
@@ -628,8 +630,7 @@ class ToolResolver:
             self._local_tools_cache = MappingProxyType({})
             self._local_tools_loaded = False
         with self._local_tools_dir_lock:
-            self._local_tools_dir_cache = None
-            self._local_tools_dir_loaded = False
+            self._local_tools_dir_cache = {}
         with self._resolve_cache_lock:
             self._resolve_cache.clear()
             self._resolve_cache_epoch += 1
@@ -673,15 +674,20 @@ class ToolResolver:
         Returns:
             Dictionary mapping class names to instantiated tool objects
         """
-        if self._local_tools_dir_loaded and self._local_tools_dir_cache is not None:
-            return self._local_tools_dir_cache
+        from pathlib import Path
+
+        cache_key = str(Path(tools_dir).resolve())
+        cached = self._local_tools_dir_cache.get(cache_key)
+        if cached is not None:
+            return cached
 
         with self._local_tools_dir_lock:
-            if self._local_tools_dir_loaded and self._local_tools_dir_cache is not None:
-                return self._local_tools_dir_cache
-            self._local_tools_dir_cache = self._scan_tools_dir(tools_dir)
-            self._local_tools_dir_loaded = True
-            return self._local_tools_dir_cache
+            cached = self._local_tools_dir_cache.get(cache_key)
+            if cached is not None:
+                return cached
+            scanned = self._scan_tools_dir(tools_dir)
+            self._local_tools_dir_cache[cache_key] = scanned
+            return scanned
 
     def _scan_tools_dir(self, tools_dir: "os.PathLike|str") -> Dict[str, Any]:
         """Glob a tools/ directory and instantiate its tool classes (uncached)."""
@@ -703,8 +709,7 @@ class ToolResolver:
     def invalidate_local_tools_dir(self) -> None:
         """Re-scan tools/ on next resolution (e.g. from a dev-mode file watcher)."""
         with self._local_tools_dir_lock:
-            self._local_tools_dir_loaded = False
-            self._local_tools_dir_cache = None
+            self._local_tools_dir_cache = {}
 
     def _extract_tool_classes(self, module):
         """Extract tool classes from a loaded module that inherit from BaseTool 
