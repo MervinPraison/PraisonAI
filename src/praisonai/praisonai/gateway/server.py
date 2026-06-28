@@ -4648,23 +4648,86 @@ class WebSocketGateway:
             self._start_scheduler_tick()
             await self.start()
 
+        # Issue #2436: crash/shutdown forensics. Capture a fast, non-blocking
+        # snapshot on a termination signal so the next boot (and the operator)
+        # can see *why* the previous instance died (OOM vs supervisor stop vs
+        # parent death). The snapshot/diagnostic never raise and never block
+        # the asyncio teardown. A startup sanity check warns when the
+        # supervisor's stop-timeout has less headroom than ``drain_timeout``.
+        forensics_cfg = gw_cfg.get("forensics")
+        if not isinstance(forensics_cfg, dict):
+            forensics_cfg = {}
+        forensics_enabled = forensics_cfg.get("enabled", True)
+        diagnostic_dir = forensics_cfg.get("diagnostic_dir") or os.path.join(
+            os.path.expanduser("~"), ".praisonai", "gateway", "forensics"
+        )
+        forensics = None
+        if forensics_enabled:
+            try:
+                from .forensics import ShutdownForensics
+
+                forensics = ShutdownForensics(
+                    log_dir=diagnostic_dir, enabled=True
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug("Could not initialise shutdown forensics: %s", exc)
+                forensics = None
+
+        # Startup sanity check: warn (don't fail) when the supervisor would
+        # likely kill us mid-drain with no explanation.
+        if forensics is not None and drain_timeout_cfg and drain_timeout_cfg > 0:
+            try:
+                from praisonaiagents.gateway import drain_timeout_has_headroom
+
+                stop_timeout_env = (
+                    forensics_cfg.get("stop_timeout")
+                    or os.environ.get("PRAISONAI_STOP_TIMEOUT")
+                )
+                stop_timeout = (
+                    float(stop_timeout_env) if stop_timeout_env else None
+                )
+                if not drain_timeout_has_headroom(stop_timeout, drain_timeout_cfg):
+                    logger.warning(
+                        "Supervisor stop-timeout (%ss) < drain_timeout (%ss) "
+                        "+ headroom; gateway may be killed mid-drain with no "
+                        "explanation.",
+                        stop_timeout,
+                        drain_timeout_cfg,
+                    )
+            except (TypeError, ValueError, ImportError):
+                pass
+
         # Register signal handlers for graceful shutdown using
         # loop.add_signal_handler (async-safe) with signal.signal fallback.
         import signal
 
-        def _request_shutdown():
+        def _request_shutdown(signal_name: Optional[str] = None):
             logger.info("Received shutdown signal, stopping gateway...")
+            if forensics is not None:
+                try:
+                    from praisonaiagents.gateway import format_forensics_for_log
+
+                    ctx = forensics.snapshot(signal_name=signal_name)
+                    logger.warning(format_forensics_for_log(ctx))
+                    forensics.spawn_diagnostic(ctx, diagnostic_dir)
+                except Exception:  # pragma: no cover - never block teardown
+                    pass
             if self._server:
                 self._server.should_exit = True
 
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
+            sig_name = sig.name
             try:
-                loop.add_signal_handler(sig, _request_shutdown)
+                loop.add_signal_handler(
+                    sig, lambda n=sig_name: _request_shutdown(n)
+                )
             except (NotImplementedError, OSError, ValueError):
                 # Fallback for platforms where add_signal_handler is unavailable
                 try:
-                    signal.signal(sig, lambda s, f: _request_shutdown())
+                    signal.signal(
+                        sig, lambda s, f, n=sig_name: _request_shutdown(n)
+                    )
                 except (OSError, ValueError):
                     pass
 

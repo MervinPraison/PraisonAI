@@ -59,6 +59,11 @@ from .protocols import (
     # Port-less, restart-safe external drain trigger (Issue #2390)
     current_epoch,
     DrainMarkerPolicy,
+    # Crash / shutdown forensics (Issue #2436)
+    ShutdownForensicsProtocol,
+    format_forensics_for_log,
+    is_supervised,
+    drain_timeout_has_headroom,
     # Protocol version negotiation
     PROTOCOL_VERSION,
     MIN_PROTOCOL_VERSION,
@@ -175,6 +180,11 @@ __all__ = [
     # Port-less, restart-safe external drain trigger (Issue #2390)
     "current_epoch",
     "DrainMarkerPolicy",
+    # Crash / shutdown forensics (Issue #2436)
+    "ShutdownForensicsProtocol",
+    "format_forensics_for_log",
+    "is_supervised",
+    "drain_timeout_has_headroom",
     # Protocol version negotiation
     "PROTOCOL_VERSION",
     "MIN_PROTOCOL_VERSION",

@@ -2299,6 +2299,168 @@ class DrainMarkerPolicy:
 
 
 # ---------------------------------------------------------------------------
+# Crash / shutdown forensics (Issue #2436)
+#
+# A 24/7 gateway restarted by a supervisor (systemd/s6/Kubernetes) leaves no
+# evidence of *why* it died when the death was not its own decision — OOM kill,
+# supervisor ``SIGKILL``/``SIGTERM``, or a parent dying. The wrapper installs
+# forensic signal handlers that capture a fast, non-blocking snapshot and spawn
+# a detached diagnostic that survives a ``SIGKILL`` on the process group.
+#
+# The decision/formatting pieces that need no OS I/O live here as pure helpers
+# beside ``ScaleToZeroPolicy``/``DrainTimeoutPolicy``/``DrainMarkerPolicy``; the
+# heavy /proc reads, ``os.getrusage``/``os.getloadavg`` calls, and detached
+# subprocess spawn live in the praisonai wrapper behind the protocol below.
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class ShutdownForensicsProtocol(Protocol):
+    """Protocol for capturing forensics when a gateway dies unexpectedly.
+
+    Pure contract consumed by the wrapper's signal handlers. ``snapshot``
+    must be fast (<10ms), never raise, and never block the asyncio teardown;
+    ``spawn_diagnostic`` is fire-and-forget and must run the diagnostic in a
+    *detached* session so a ``SIGKILL`` on the process group does not also kill
+    the diagnostic. Concrete OS I/O (``/proc`` reads, ``os.getrusage``,
+    ``os.getloadavg``, subprocess spawn) lives in the wrapper implementation.
+    """
+
+    def snapshot(self, signal_name: Optional[str] = None) -> Dict[str, Any]:
+        """Return a small, JSON-serialisable forensic context.
+
+        Must never raise; on any internal failure it returns a best-effort
+        (possibly partial) dict so the caller can still log *something*.
+        """
+        ...
+
+    def spawn_diagnostic(self, ctx: Dict[str, Any], log_dir: str) -> None:
+        """Fire-and-forget a detached diagnostic into ``log_dir``.
+
+        Must never raise and must not block the caller; the diagnostic runs in
+        a detached session so it survives a ``SIGKILL`` on the process group.
+        """
+        ...
+
+
+def format_forensics_for_log(ctx: Optional[Dict[str, Any]]) -> str:
+    """Render a forensic snapshot dict as a single, stable log line.
+
+    Pure and side-effect free so it is provable in isolation and safe to call
+    from a signal handler. Unknown/missing fields are simply omitted; the
+    output is a compact ``key=value`` sequence prefixed with a stable marker so
+    operators (and log scrapers) can grep ``gateway-forensics`` reliably.
+
+    Args:
+        ctx: The dict returned by :meth:`ShutdownForensicsProtocol.snapshot`,
+            or ``None``.
+
+    Returns:
+        A single-line, human-readable summary. Never raises.
+    """
+    if not isinstance(ctx, dict):
+        return "gateway-forensics: <unavailable>"
+
+    # Ordered so the most operationally useful facts come first.
+    keys = (
+        "signal",
+        "pid",
+        "ppid",
+        "supervised",
+        "loadavg_1m",
+        "traced",
+        "maxrss_kb",
+    )
+    parts: List[str] = []
+    for key in keys:
+        if key not in ctx:
+            continue
+        value = ctx[key]
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            rendered = "yes" if value else "no"
+        elif isinstance(value, float):
+            rendered = f"{value:.2f}"
+        else:
+            rendered = str(value).replace("\n", " ").strip()
+        if rendered == "":
+            continue
+        parts.append(f"{key}={rendered}")
+
+    if not parts:
+        return "gateway-forensics: <empty>"
+    return "gateway-forensics: " + " ".join(parts)
+
+
+def is_supervised(ppid: Optional[int], invocation_id: Optional[str]) -> bool:
+    """Return whether the process appears to run under a service manager.
+
+    Pure predicate. A process is considered supervised when either:
+
+    * its parent is PID 1 (``ppid == 1`` — reparented to init / the container
+      entrypoint), or
+    * the systemd ``INVOCATION_ID`` environment variable is present (the unit
+      was started by systemd).
+
+    Args:
+        ppid: The parent PID, or ``None`` when unavailable.
+        invocation_id: The value of ``$INVOCATION_ID``, or ``None``/empty.
+
+    Returns:
+        ``True`` when either supervision signal is present.
+    """
+    if ppid == 1:
+        return True
+    return bool(invocation_id)
+
+
+def drain_timeout_has_headroom(
+    stop_timeout_s: Optional[float],
+    drain_timeout_s: Optional[float],
+    headroom_s: float = 30.0,
+) -> bool:
+    """Return whether the supervisor stop-timeout leaves room to drain.
+
+    Pure predicate used by a startup sanity check. A supervisor whose
+    stop-timeout is shorter than ``drain_timeout + headroom`` will ``SIGKILL``
+    the gateway mid-drain, leaving no explanation. This returns ``False`` only
+    when we can *prove* the headroom is insufficient; when either value is
+    unknown (``None``) or non-positive it returns ``True`` (fail-open: do not
+    emit a spurious warning when we cannot tell).
+
+    Args:
+        stop_timeout_s: The supervisor's configured stop-timeout in seconds, or
+            ``None`` when it could not be determined.
+        drain_timeout_s: The gateway's configured drain timeout in seconds, or
+            ``None``/0 when draining is disabled.
+        headroom_s: Slack to reserve beyond the drain window for teardown.
+
+    Returns:
+        ``True`` when there is adequate headroom (or it cannot be determined),
+        ``False`` only when the stop-timeout is provably too short.
+    """
+    try:
+        drain = float(drain_timeout_s) if drain_timeout_s is not None else 0.0
+        head = float(headroom_s)
+    except (TypeError, ValueError):
+        return True
+    if drain <= 0:
+        # Draining disabled: nothing to be killed mid-drain.
+        return True
+    if stop_timeout_s is None:
+        # Unknown supervisor timeout: cannot prove a problem.
+        return True
+    try:
+        stop = float(stop_timeout_s)
+    except (TypeError, ValueError):
+        return True
+    if stop <= 0:
+        return True
+    return stop >= drain + head
+
+
+# ---------------------------------------------------------------------------
 # Protocol Version Negotiation (Issue #2130)
 # ---------------------------------------------------------------------------
 
