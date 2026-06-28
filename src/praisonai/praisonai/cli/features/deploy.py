@@ -502,23 +502,22 @@ def handle_deploy_command(args):
     deploy_args.project_id = None
     deploy_args.resource_group = None
 
+    value_flags = {
+        '--file': 'file', '-f': 'file',
+        '--tag': 'tag', '-t': 'tag',
+        '--region': 'region', '-r': 'region',
+        '--project': 'project_id', '-p': 'project_id',
+        '--resource-group': 'resource_group', '-g': 'resource_group',
+    }
+
     i = 0
     while i < len(sub_args):
         arg = sub_args[i]
-        if arg in ['--file', '-f'] and i + 1 < len(sub_args):
-            deploy_args.file = sub_args[i + 1]
-            i += 2
-        elif arg in ['--tag', '-t'] and i + 1 < len(sub_args):
-            deploy_args.tag = sub_args[i + 1]
-            i += 2
-        elif arg in ['--region', '-r'] and i + 1 < len(sub_args):
-            deploy_args.region = sub_args[i + 1]
-            i += 2
-        elif arg in ['--project', '-p'] and i + 1 < len(sub_args):
-            deploy_args.project_id = sub_args[i + 1]
-            i += 2
-        elif arg in ['--resource-group', '-g'] and i + 1 < len(sub_args):
-            deploy_args.resource_group = sub_args[i + 1]
+        if arg in value_flags:
+            if i + 1 >= len(sub_args):
+                print(f"Error: option '{arg}' requires a value")
+                return 1
+            setattr(deploy_args, value_flags[arg], sub_args[i + 1])
             i += 2
         elif arg == '--json':
             deploy_args.json = True
@@ -527,7 +526,8 @@ def handle_deploy_command(args):
             deploy_args.file = arg
             i += 1
         else:
-            i += 1
+            print(f"Error: unknown option '{arg}'")
+            return 1
 
     if subcommand == 'docker':
         deploy_args.type = 'docker'

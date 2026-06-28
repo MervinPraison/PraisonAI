@@ -20,7 +20,7 @@ def deploy_docker(
     from ..features.deploy import handle_deploy_command
 
     args = ["docker", file]
-    if tag:
+    if tag is not None:
         args.extend(["--tag", tag])
 
     raise typer.Exit(handle_deploy_command(args))
@@ -35,7 +35,7 @@ def deploy_aws(
     from ..features.deploy import handle_deploy_command
 
     args = ["aws", file]
-    if region:
+    if region is not None:
         args.extend(["--region", region])
 
     raise typer.Exit(handle_deploy_command(args))
@@ -50,7 +50,7 @@ def deploy_gcp(
     from ..features.deploy import handle_deploy_command
 
     args = ["gcp", file]
-    if project:
+    if project is not None:
         args.extend(["--project", project])
 
     raise typer.Exit(handle_deploy_command(args))
@@ -65,7 +65,7 @@ def deploy_azure(
     from ..features.deploy import handle_deploy_command
 
     args = ["azure", file]
-    if resource_group:
+    if resource_group is not None:
         args.extend(["--resource-group", resource_group])
 
     raise typer.Exit(handle_deploy_command(args))
