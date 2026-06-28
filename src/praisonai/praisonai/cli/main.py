@@ -1015,12 +1015,12 @@ class PraisonAI:
         try:
             from ..framework_adapters.registry import list_framework_choices
             _framework_choices = list_framework_choices(include_unavailable=True) or [
-                "praisonai", "crewai", "autogen",
+                "ag2", "autogen", "crewai", "praisonai",
             ]
         except ImportError:
-            # Only fall back to the static trio when the adapter layer itself
+            # Only fall back to the static list when the adapter layer itself
             # cannot be imported; genuine registry discovery errors should surface.
-            _framework_choices = ["praisonai", "crewai", "autogen"]
+            _framework_choices = ["ag2", "autogen", "crewai", "praisonai"]
         parser.add_argument(
             "--framework",
             choices=_framework_choices,
