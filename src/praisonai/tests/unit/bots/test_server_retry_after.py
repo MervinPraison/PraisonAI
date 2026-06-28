@@ -10,7 +10,6 @@ Covers:
 """
 
 import asyncio
-from unittest.mock import AsyncMock
 
 import pytest
 
