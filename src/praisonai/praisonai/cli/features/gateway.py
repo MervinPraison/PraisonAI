@@ -15,29 +15,47 @@ from typing import Dict, Optional
 logger = logging.getLogger(__name__)
 
 # Restart-intent exit-code protocol (Issue #2437). Source of truth lives in
-# core; fall back to the sysexits.h values if running against an older core.
+# core; fall back to the sysexits.h values only when running against an older
+# core that predates the protocol. We import the gateway package first and read
+# the symbols off it, so a genuinely broken core install (an ImportError raised
+# *while importing* praisonaiagents.gateway) still surfaces instead of being
+# silently masked by the fallback — only the absence of the new symbols
+# (AttributeError) triggers the compatibility shims.
+
+
+def _gateway_exit_protocol_fallbacks():
+    """Build the (constants, FatalConfigError, classifier) fallback tuple."""
+    ok, restart, fatal = 0, 75, 78
+
+    class FatalConfigError(Exception):
+        """Fallback fatal-config error when core lacks the protocol."""
+
+    def classify_exit_reason(exc):
+        if exc is None or isinstance(exc, KeyboardInterrupt):
+            return ok
+        if isinstance(exc, FatalConfigError):
+            return fatal
+        return restart
+
+    return ok, restart, fatal, FatalConfigError, classify_exit_reason
+
+
 try:
-    from praisonaiagents.gateway import (
+    import praisonaiagents.gateway as _gw
+
+    GATEWAY_OK_EXIT_CODE = _gw.GATEWAY_OK_EXIT_CODE
+    GATEWAY_RESTART_EXIT_CODE = _gw.GATEWAY_RESTART_EXIT_CODE
+    GATEWAY_FATAL_CONFIG_EXIT_CODE = _gw.GATEWAY_FATAL_CONFIG_EXIT_CODE
+    FatalConfigError = _gw.FatalConfigError
+    classify_exit_reason = _gw.classify_exit_reason
+except (ModuleNotFoundError, AttributeError):  # pragma: no cover - old/absent core
+    (
         GATEWAY_OK_EXIT_CODE,
         GATEWAY_RESTART_EXIT_CODE,
         GATEWAY_FATAL_CONFIG_EXIT_CODE,
         FatalConfigError,
         classify_exit_reason,
-    )
-except ImportError:  # pragma: no cover - older core without the protocol
-    GATEWAY_OK_EXIT_CODE = 0
-    GATEWAY_RESTART_EXIT_CODE = 75
-    GATEWAY_FATAL_CONFIG_EXIT_CODE = 78
-
-    class FatalConfigError(Exception):
-        """Fallback fatal-config error when core lacks the protocol."""
-
-    def classify_exit_reason(exc):  # type: ignore[no-redef]
-        if exc is None or isinstance(exc, KeyboardInterrupt):
-            return GATEWAY_OK_EXIT_CODE
-        if isinstance(exc, FatalConfigError):
-            return GATEWAY_FATAL_CONFIG_EXIT_CODE
-        return GATEWAY_RESTART_EXIT_CODE
+    ) = _gateway_exit_protocol_fallbacks()
 
 
 def _load_praisonai_env_file() -> Dict[str, str]:
@@ -185,9 +203,13 @@ class GatewayHandler:
                 # Duplicate token, no platforms, invalid credentials, etc.
                 print(f"Fatal config error: {e}")
                 return GATEWAY_FATAL_CONFIG_EXIT_CODE
-            except FileNotFoundError as e:
-                # A missing/malformed gateway.yaml is unrecoverable until fixed.
-                print(f"Error: {e}")
+            except (FileNotFoundError, ValueError) as e:
+                # A missing, malformed, or schema-invalid gateway.yaml is
+                # unrecoverable until an operator fixes it. ``load_gateway_config``
+                # raises ``ValueError`` for empty/non-dict YAML, a missing
+                # ``agents``/``channels`` section, or a missing channel token —
+                # all fatal-config conditions that must not crash-loop (#2437).
+                print(f"Fatal config error: {e}")
                 return GATEWAY_FATAL_CONFIG_EXIT_CODE
             except Exception as e:
                 print(f"Error starting gateway: {e}")
@@ -216,7 +238,15 @@ class GatewayHandler:
 
 
         if agent_file:
-            self._load_agents_from_file(agent_file)
+            try:
+                self._load_agents_from_file(agent_file)
+            except FatalConfigError as e:
+                # A missing/malformed --agents file means the gateway would
+                # start serving no agents while looking healthy to a
+                # supervisor. Treat it as fatal-config so it stops, not
+                # crash-loops, until the operator fixes it (#2437).
+                print(f"Fatal config error: {e}")
+                return GATEWAY_FATAL_CONFIG_EXIT_CODE
 
         print(f"Starting gateway on ws://{host}:{port}")
         print("Press Ctrl+C to stop")
@@ -236,31 +266,41 @@ class GatewayHandler:
         return GATEWAY_OK_EXIT_CODE
     
     def _load_agents_from_file(self, file_path: str) -> None:
-        """Load agents from a configuration file."""
+        """Load agents from a configuration file.
+
+        Raises:
+            FatalConfigError: If the file is missing, unreadable, malformed,
+                or contains no usable ``agents`` section. A broken ``--agents``
+                file is unrecoverable until fixed, so it must surface (#2437)
+                rather than silently starting an empty gateway.
+        """
         import os
         import yaml
-        
+
         if not os.path.exists(file_path):
-            print(f"Warning: Agent file not found: {file_path}")
-            return
-        
+            raise FatalConfigError(f"Agent file not found: {file_path}")
+
         try:
             with open(file_path, "r") as f:
                 config = yaml.safe_load(f)
-            
-            if "agents" in config:
-                from praisonaiagents import Agent
-                
-                for agent_config in config["agents"]:
-                    agent = Agent(
-                        name=agent_config.get("name", "agent"),
-                        instructions=agent_config.get("instructions", ""),
-                        llm=agent_config.get("llm"),
-                    )
-                    agent_id = self._gateway.register_agent(agent)
-                    print(f"Registered agent: {agent_id}")
-        except Exception as e:
-            print(f"Error loading agents: {e}")
+        except (OSError, yaml.YAMLError) as e:
+            raise FatalConfigError(f"Could not read agent file {file_path}: {e}")
+
+        if not isinstance(config, dict) or not config.get("agents"):
+            raise FatalConfigError(
+                f"Agent file {file_path} has no 'agents' section"
+            )
+
+        from praisonaiagents import Agent
+
+        for agent_config in config["agents"]:
+            agent = Agent(
+                name=agent_config.get("name", "agent"),
+                instructions=agent_config.get("instructions", ""),
+                llm=agent_config.get("llm"),
+            )
+            agent_id = self._gateway.register_agent(agent)
+            print(f"Registered agent: {agent_id}")
     
     def stop(self, host: str = "127.0.0.1", port: int = 8765, force: bool = False) -> None:
         """Stop a running gateway instance.

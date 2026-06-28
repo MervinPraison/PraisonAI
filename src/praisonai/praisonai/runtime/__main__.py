@@ -13,17 +13,20 @@ import sys
 from .server import serve_runtime
 
 # Restart-intent exit-code protocol (Issue #2437). Shared with the gateway
-# CLI; source of truth lives in core. Fall back to the sysexits.h values and
-# a minimal classifier if running against an older core.
+# CLI; source of truth lives in core. Fall back to the sysexits.h values and a
+# minimal classifier only when the core gateway package is absent
+# (``ModuleNotFoundError``) or predates the protocol (missing symbols →
+# ``AttributeError``). Any *other* failure raised while importing
+# praisonaiagents.gateway surfaces instead of being masked by the fallback.
 try:
-    from praisonaiagents.gateway import (
-        GATEWAY_OK_EXIT_CODE,
-        GATEWAY_RESTART_EXIT_CODE,
-        GATEWAY_FATAL_CONFIG_EXIT_CODE,
-        FatalConfigError,
-        classify_exit_reason,
-    )
-except ImportError:  # pragma: no cover - older core without the protocol
+    import praisonaiagents.gateway as _gw
+
+    GATEWAY_OK_EXIT_CODE = _gw.GATEWAY_OK_EXIT_CODE
+    GATEWAY_RESTART_EXIT_CODE = _gw.GATEWAY_RESTART_EXIT_CODE
+    GATEWAY_FATAL_CONFIG_EXIT_CODE = _gw.GATEWAY_FATAL_CONFIG_EXIT_CODE
+    FatalConfigError = _gw.FatalConfigError
+    classify_exit_reason = _gw.classify_exit_reason
+except (ModuleNotFoundError, AttributeError):  # pragma: no cover - old/absent core
     GATEWAY_OK_EXIT_CODE = 0
     GATEWAY_RESTART_EXIT_CODE = 75
     GATEWAY_FATAL_CONFIG_EXIT_CODE = 78
