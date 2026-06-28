@@ -19,7 +19,7 @@ def _framework_help() -> str:
     try:
         from ...framework_adapters.registry import framework_option_help
         return framework_option_help()
-    except Exception:
+    except ImportError:
         return "Framework: praisonai, crewai, autogen"
 
 

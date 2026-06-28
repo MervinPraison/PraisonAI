@@ -206,18 +206,15 @@ def get_install_hint(name: str) -> str:
     except (ValueError, TypeError):
         pass
     extra_name = {"autogen_v4": "autogen-v4"}.get(name, name)
-    return (
-        f"pip install 'praisonai-frameworks[{extra_name}]'  "
-        f"# or: pip install 'praisonai[{extra_name}]'"
-    )
+    return f"pip install 'praisonai[{extra_name}]'"
 
 
 def framework_option_help() -> str:
     """Help text for CLI --framework options (registry-driven)."""
     try:
         names = list_framework_choices(include_unavailable=True)
-        if names:
-            return "Framework: " + ", ".join(names)
-    except Exception:
-        pass
+    except ImportError:
+        return "Framework: praisonai, crewai, autogen"
+    if names:
+        return "Framework: " + ", ".join(names)
     return "Framework: praisonai, crewai, autogen"

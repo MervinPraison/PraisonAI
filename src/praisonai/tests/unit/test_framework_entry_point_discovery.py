@@ -80,12 +80,6 @@ roles:
         adapter_registry=registry,
     )
 
-    class _Prep:
-        adapter = registry.create("echo_test_adapter")
-
-        def run(self, *args, **kwargs):
-            return self.adapter.run(*args, **kwargs)
-
     monkeypatch.setattr(gen, "_prepare_for_run", lambda _config=None: {
         "adapter": registry.create("echo_test_adapter"),
         "config": {"framework": "echo_test_adapter", "topic": "hello", "roles": {}},
