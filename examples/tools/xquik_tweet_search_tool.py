@@ -19,6 +19,10 @@ from praisonaiagents import Agent, tool
 XQUIK_SEARCH_URL = "https://xquik.com/api/v1/x/tweets/search"
 
 
+def _xquik_api_key_available() -> tuple[bool, str]:
+    return bool(os.environ.get("XQUIK_API_KEY")), "Set XQUIK_API_KEY before using search_x_posts."
+
+
 def _as_record(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -27,16 +31,23 @@ def _as_record(value: Any) -> dict[str, Any]:
 
 def _as_text(value: Any) -> str:
     if isinstance(value, str):
-        return value.strip()
+        return " ".join(value.split())
     if value is None:
         return ""
-    return str(value).strip()
+    return " ".join(str(value).split())
 
 
 def _tweet_line(tweet: dict[str, Any]) -> str:
-    author = _as_text(tweet.get("author_username") or tweet.get("username"))
-    text = _as_text(tweet.get("text") or tweet.get("full_text"))
-    tweet_id = _as_text(tweet.get("id"))
+    author_record = _as_record(tweet.get("author") or tweet.get("user"))
+    author = _as_text(
+        tweet.get("author_username")
+        or tweet.get("username")
+        or author_record.get("username")
+        or author_record.get("screen_name")
+        or author_record.get("handle")
+    )
+    text = _as_text(tweet.get("text") or tweet.get("full_text") or tweet.get("content"))
+    tweet_id = _as_text(tweet.get("id") or tweet.get("tweet_id") or tweet.get("tweetId"))
     prefix = f"@{author}: " if author else ""
     suffix = f" ({tweet_id})" if tweet_id else ""
     return f"{prefix}{text}{suffix}".strip()
@@ -44,21 +55,25 @@ def _tweet_line(tweet: dict[str, Any]) -> str:
 
 def _bounded_limit(value: Any) -> int:
     try:
-        parsed = int(value)
-    except (TypeError, ValueError):
+        parsed = int(float(value))
+    except (TypeError, ValueError, OverflowError):
         return 5
     return max(1, min(parsed, 10))
 
 
-@tool
+@tool(availability=_xquik_api_key_available)
 def search_x_posts(query: str, limit: int = 5) -> str:
     """Search recent public X posts with Xquik."""
     api_key = os.environ.get("XQUIK_API_KEY")
     if not api_key:
         return "Set XQUIK_API_KEY before using search_x_posts."
 
+    query_text = _as_text(query)
+    if not query_text:
+        return "Provide a non-empty query before using search_x_posts."
+
     bounded_limit = _bounded_limit(limit)
-    params = {"q": query, "limit": bounded_limit, "queryType": "Latest"}
+    params = {"q": query_text, "limit": bounded_limit, "queryType": "Latest"}
     url = f"{XQUIK_SEARCH_URL}?{urlencode(params)}"
     request = Request(
         url,
