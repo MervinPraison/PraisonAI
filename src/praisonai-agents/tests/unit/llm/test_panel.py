@@ -232,3 +232,131 @@ def test_partial_failure_tolerance(monkeypatch):
     assert "unavailable" in guidance  # bad reference folded in as a note
     # Raw provider exception text must not be injected into the prompt.
     assert "network down" not in guidance
+
+
+# ---------------------------------------------------------------------------
+# Async parity: the async path shares the same cache/inject/trim helpers, but
+# is verified independently so regressions in get_response_async are caught.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_response_async_injects_and_caches(monkeypatch):
+    panel = _make_panel(monkeypatch, references=["ref1", "ref2"])
+
+    calls = {"ref": 0}
+
+    async def fake_run_async(view):
+        calls["ref"] += 1
+        return "\n\n[REFS]"
+
+    captured = {}
+
+    async def fake_super_get_response_async(
+        self, prompt, system_prompt=None, chat_history=None, **kwargs
+    ):
+        captured["prompt"] = prompt
+        return "AGG RESPONSE"
+
+    monkeypatch.setattr(panel, "_run_references_async", fake_run_async)
+    monkeypatch.setattr(
+        "praisonaiagents.llm.llm.LLM.get_response_async", fake_super_get_response_async
+    )
+
+    out1 = await panel.get_response_async(prompt="hello", system_prompt="SYS")
+    assert out1 == "AGG RESPONSE"
+    assert captured["prompt"] == "hello\n\n[REFS]"
+    assert calls["ref"] == 1
+
+    # Same trimmed view -> reference call cached (run once per turn signature).
+    await panel.get_response_async(prompt="hello", system_prompt="SYS")
+    assert calls["ref"] == 1
+
+
+@pytest.mark.asyncio
+async def test_get_response_async_enabled_false_collapses(monkeypatch):
+    panel = _make_panel(monkeypatch, references=["ref1"], enabled=False)
+
+    async def fail_run_async(view):
+        raise AssertionError("references must not run when disabled")
+
+    captured = {}
+
+    async def fake_super_get_response_async(
+        self, prompt, system_prompt=None, chat_history=None, **kwargs
+    ):
+        captured["prompt"] = prompt
+        return "AGG"
+
+    monkeypatch.setattr(panel, "_run_references_async", fail_run_async)
+    monkeypatch.setattr(
+        "praisonaiagents.llm.llm.LLM.get_response_async", fake_super_get_response_async
+    )
+
+    out = await panel.get_response_async(prompt="hello")
+    assert out == "AGG"
+    assert captured["prompt"] == "hello"
+
+
+@pytest.mark.asyncio
+async def test_async_partial_failure_tolerance(monkeypatch):
+    panel = _make_panel(monkeypatch, references=["good", "bad"])
+
+    class FakeRefLLM:
+        def __init__(self, model):
+            self.model = model
+
+        async def get_response_async(self, **kwargs):
+            if self.model == "bad":
+                raise RuntimeError("network down")
+            return "good perspective"
+
+    monkeypatch.setattr(panel, "_get_reference_llm", lambda m: FakeRefLLM(m))
+
+    guidance = await panel._run_references_async(
+        [{"role": "user", "content": "q"}]
+    )
+    assert "good perspective" in guidance
+    assert "unavailable" in guidance
+    # Raw provider exception text must not be injected into the prompt.
+    assert "network down" not in guidance
+
+
+# ---------------------------------------------------------------------------
+# Agent wiring: a panel descriptor resolves to a PanelLLM and Agent-level
+# connection settings (base_url/api_key) are forwarded to the aggregator.
+# ---------------------------------------------------------------------------
+
+
+def test_agent_panel_descriptor_forwards_connection_settings(monkeypatch):
+    import praisonaiagents.llm.panel as panel_mod
+    from praisonaiagents.agent.agent import Agent
+
+    captured = {}
+
+    def fake_create_panel_llm(descriptor, **kwargs):
+        captured["descriptor"] = descriptor
+        captured["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(panel_mod, "create_panel_llm", fake_create_panel_llm)
+
+    agent = Agent(
+        instructions="x",
+        llm={"provider": "panel", "references": ["a"], "aggregator": "c"},
+        base_url="http://localhost:11434/v1",
+        api_key="k",
+    )
+    # Lazy build of the panel LLM forwards Agent connection settings.
+    agent._ensure_llm_instance()
+    assert captured["kwargs"]["base_url"] == "http://localhost:11434/v1"
+    assert captured["kwargs"]["api_key"] == "k"
+    assert captured["descriptor"]["aggregator"] == "c"
+
+
+def test_agent_non_panel_llm_unaffected():
+    from praisonaiagents.agent.agent import Agent
+
+    agent = Agent(instructions="x", llm="gpt-4o-mini")
+    # Non-panel selection must not be treated as a panel descriptor.
+    assert agent._panel_descriptor is None
