@@ -335,7 +335,17 @@ class AutoGenFamilyAdapter(BaseFrameworkAdapter):
         logger.info(f"AutoGenFamilyAdapter resolved to: {adapter_name}")
         return concrete_adapter
     
-    def run(self, config: Dict[str, Any], llm_config: List[Dict], topic: str) -> str:
+    def run(
+        self,
+        config: Dict[str, Any],
+        llm_config: List[Dict],
+        topic: str,
+        *,
+        tools_dict: Optional[Dict[str, Any]] = None,
+        agent_callback: Optional[Callable] = None,
+        task_callback: Optional[Callable] = None,
+        cli_config: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """Router should never run directly."""
         raise RuntimeError(
             "AutoGenFamilyAdapter.run() should not be called directly. "
