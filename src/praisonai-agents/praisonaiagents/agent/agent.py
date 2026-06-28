@@ -309,15 +309,12 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
         if self._panel_descriptor is not None:
             try:
                 from ..llm.panel import create_panel_llm
-                # Forward Agent-level connection settings so the aggregator uses
-                # the same endpoint/credentials as a normal model selection.
-                panel_kwargs = {}
-                if getattr(self, "base_url", None):
-                    panel_kwargs["base_url"] = self.base_url
-                if getattr(self, "api_key", None):
-                    panel_kwargs["api_key"] = self.api_key
+                # Forward the same Agent-level connection/execution settings a
+                # normal model selection preserves (base_url, api_key, auth,
+                # metrics, max_iter, web_search, web_fetch, prompt_caching,
+                # claude_memory) so the panel aggregator behaves identically.
                 self._llm_instance = create_panel_llm(
-                    self._panel_descriptor, **panel_kwargs
+                    self._panel_descriptor, **self._panel_llm_kwargs
                 )
             except ImportError as e:
                 raise ImportError(
@@ -1598,6 +1595,7 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
         self._llm_instance = None
         self._llm_init_params = None
         self._panel_descriptor = None
+        self._panel_llm_kwargs = {}
         # Flag to track if final result has been displayed to prevent duplicates
         self._final_display_shown = False
         
@@ -1676,6 +1674,25 @@ class Agent(SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin
             self._panel_descriptor = llm
             self._using_custom_llm = True
             self.llm = llm if isinstance(llm, str) else "panel"
+            # Capture the same connection/execution options the normal LLM paths
+            # forward, so the panel aggregator (and references) behave identically
+            # to a regular model selection. Stored now because some (e.g. auth)
+            # are not retained as Agent attributes.
+            self._panel_llm_kwargs = {
+                k: v
+                for k, v in (
+                    ("base_url", base_url),
+                    ("api_key", api_key),
+                    ("auth", auth),
+                    ("metrics", metrics),
+                    ("max_iter", max_iter),
+                    ("web_search", web_search),
+                    ("web_fetch", web_fetch),
+                    ("prompt_caching", prompt_caching),
+                    ("claude_memory", claude_memory),
+                )
+                if v is not None
+            }
         # If base_url is provided, defer custom LLM instance creation
         elif base_url:
             if isinstance(llm, dict):

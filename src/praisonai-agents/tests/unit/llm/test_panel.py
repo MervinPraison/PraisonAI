@@ -375,11 +375,15 @@ def test_agent_panel_descriptor_forwards_connection_settings(monkeypatch):
         llm={"provider": "panel", "references": ["a"], "aggregator": "c"},
         base_url="http://localhost:11434/v1",
         api_key="k",
+        auth="claude-code",
     )
     # Lazy build of the panel LLM forwards Agent connection settings.
     agent._ensure_llm_instance()
     assert captured["kwargs"]["base_url"] == "http://localhost:11434/v1"
     assert captured["kwargs"]["api_key"] == "k"
+    # Execution options the normal LLM paths preserve must also reach the panel.
+    assert captured["kwargs"]["auth"] == "claude-code"
+    assert "max_iter" in captured["kwargs"]
     assert captured["descriptor"]["aggregator"] == "c"
 
 
