@@ -75,6 +75,22 @@ def _is_monitoring_disabled() -> bool:
     _TELEMETRY_DISABLED_CACHE = not explicitly_enabled
     return _TELEMETRY_DISABLED_CACHE
 
+def _is_telemetry_explicitly_disabled() -> bool:
+    """
+    Check if telemetry is explicitly disabled via opt-out environment variables.
+
+    Unlike `_is_monitoring_disabled`, this only returns True when the user has
+    explicitly opted out (e.g. DO_NOT_TRACK). It does NOT treat the
+    "disabled by default" case as disabled, so programmatic `enable_telemetry()`
+    can re-enable telemetry unless the user has explicitly opted out.
+    """
+    return any([
+        os.environ.get('PRAISONAI_PERFORMANCE_DISABLED', '').lower() in ('true', '1', 'yes'),
+        os.environ.get('PRAISONAI_TELEMETRY_DISABLED', '').lower() in ('true', '1', 'yes'),
+        os.environ.get('PRAISONAI_DISABLE_TELEMETRY', '').lower() in ('true', '1', 'yes'),
+        os.environ.get('DO_NOT_TRACK', '').lower() in ('true', '1', 'yes'),
+    ])
+
 class MinimalTelemetry:
     """
     Minimal telemetry collector for anonymous usage tracking.
@@ -703,7 +719,7 @@ def enable_telemetry():
     """Programmatically enable telemetry (if not disabled by environment)."""
     global _telemetry_instance
     with _telemetry_instance_lock:
-        if not _is_monitoring_disabled():
+        if not _is_telemetry_explicitly_disabled():
             if _telemetry_instance:
                 _telemetry_instance.enabled = True
             else:
