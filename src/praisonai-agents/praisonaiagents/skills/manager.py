@@ -1,11 +1,14 @@
 """SkillManager for Agent Skills integration."""
 
 import logging
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
 from .models import SkillMetadata, SkillState
+
+if TYPE_CHECKING:
+    from .bundles import BundleManifest
 from .discovery import discover_skills, get_default_skill_dirs
 from .loader import SkillLoader, LoadedSkill
 from .prompt import generate_skills_xml
@@ -47,6 +50,7 @@ class SkillManager:
                 for safe-by-default behaviour).
         """
         self._skills: Dict[str, LoadedSkill] = {}
+        self._bundles: Dict[str, "BundleManifest"] = {}
         self._loader = SkillLoader()
         self._discovered = False
         self._validation_cache: Dict[str, ValidationResult] = {}
@@ -102,6 +106,90 @@ class SkillManager:
         self._discovered = True
         return len(props_list)
 
+    # ── Bundles (composition over skills) ─────────────────────────────
+
+    @property
+    def bundles(self) -> List["BundleManifest"]:
+        """Get all registered bundle manifests."""
+        return list(self._bundles.values())
+
+    @property
+    def bundle_names(self) -> List[str]:
+        """Get names of all registered bundles."""
+        return list(self._bundles.keys())
+
+    def add_bundle(self, manifest: "BundleManifest") -> None:
+        """Register a bundle manifest.
+
+        First registration wins; a later bundle of the same name is shadowed
+        and logged (same precedence stance discovery already uses).
+        """
+        if manifest.name in self._bundles:
+            logger.info(
+                "Bundle '%s' already registered; ignoring duplicate (precedence).",
+                manifest.name,
+            )
+            return
+        self._bundles[manifest.name] = manifest
+
+    def get_bundle(self, name: str) -> Optional["BundleManifest"]:
+        """Get a bundle manifest by name (``@`` marker optional)."""
+        from .bundles import strip_bundle_marker
+        return self._bundles.get(strip_bundle_marker(name))
+
+    def discover_bundles(
+        self,
+        skill_dirs: Optional[List[str]] = None,
+        include_defaults: bool = True,
+    ) -> int:
+        """Discover bundle manifests from directories.
+
+        Returns:
+            Number of bundles registered.
+        """
+        from .bundles import discover_bundles as _discover_bundles
+        manifests = _discover_bundles(skill_dirs, include_defaults)
+        added = 0
+        for manifest in manifests:
+            if manifest.name not in self._bundles:
+                self._bundles[manifest.name] = manifest
+                added += 1
+        return added
+
+    def resolve(self, selectors: List[str]) -> List[str]:
+        """Expand ``@bundle`` selectors into member skill names.
+
+        Plain skill names/paths pass through unchanged. A ``@bundle`` selector
+        expands to its member skill names (forgiving: a missing/unknown bundle
+        is logged, not fatal). Duplicates are removed while preserving order.
+        """
+        from .bundles import is_bundle_selector, strip_bundle_marker
+
+        resolved: List[str] = []
+        seen = set()
+
+        def _add(item: str) -> None:
+            if item and item not in seen:
+                seen.add(item)
+                resolved.append(item)
+
+        for selector in selectors or []:
+            if is_bundle_selector(selector):
+                name = strip_bundle_marker(selector)
+                manifest = self._bundles.get(name)
+                if manifest is None:
+                    logger.warning(
+                        "Unknown skill bundle '@%s'; skipping (no such bundle).",
+                        name,
+                    )
+                    continue
+                for member in manifest.skills:
+                    _add(member)
+            else:
+                _add(selector)
+
+        return resolved
+
     def add_skill(self, skill_path: str) -> Optional[LoadedSkill]:
         """Add a single skill from a directory path.
 
@@ -115,6 +203,26 @@ class SkillManager:
         if skill:
             self._skills[skill.properties.name] = skill
         return skill
+
+    def add_skill_by_name(
+        self,
+        name: str,
+        skill_dirs: Optional[List[str]] = None,
+        include_defaults: bool = True,
+    ) -> Optional[LoadedSkill]:
+        """Add a single skill resolved by *name* (not path).
+
+        Searches the given/default skill directories for a skill whose name
+        matches and loads it. Used to materialise bundle members, which are
+        referenced by name. Forgiving: returns None if no match is found.
+        """
+        if name in self._skills:
+            return self._skills[name]
+        props_list = discover_skills(skill_dirs, include_defaults)
+        for props in props_list:
+            if props.name == name and props.path is not None:
+                return self.add_skill(str(props.path))
+        return None
 
     def get_skill(self, name: str) -> Optional[LoadedSkill]:
         """Get a skill by name.
@@ -1309,6 +1417,7 @@ version: 1.0.0
     def clear(self) -> None:
         """Clear all loaded skills."""
         self._skills.clear()
+        self._bundles.clear()
         self._validation_cache.clear()
         self._validator.clear_cache()
         self._discovered = False

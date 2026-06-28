@@ -9,6 +9,89 @@ import typer
 
 app = typer.Typer(help="Skill management and inspection")
 
+bundle_app = typer.Typer(help="Skill bundle inspection (named sets of skills)")
+app.add_typer(bundle_app, name="bundle")
+
+
+@bundle_app.command("list")
+def bundle_list(
+    skill_dirs: str = typer.Option(
+        None, "--dirs", "-d", help="Comma-separated skill directories"
+    ),
+):
+    """List available skill bundles."""
+    try:
+        from praisonaiagents.skills import discover_bundles
+    except ImportError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    dirs = skill_dirs.split(",") if skill_dirs else None
+    bundles = discover_bundles(dirs, include_defaults=True)
+
+    if not bundles:
+        typer.echo("No skill bundles found.")
+        return
+
+    from rich.console import Console
+    from rich.table import Table
+
+    console = Console()
+    table = Table(title=f"Skill Bundles ({len(bundles)} found)")
+    table.add_column("Name", style="cyan")
+    table.add_column("Skills", style="green")
+    table.add_column("Description")
+
+    for b in bundles:
+        desc = b.description or ""
+        table.add_row(
+            b.name,
+            ", ".join(b.skills) if b.skills else "-",
+            desc[:60] + "..." if len(desc) > 60 else desc,
+        )
+
+    console.print(table)
+
+
+@bundle_app.command("show")
+def bundle_show(
+    name: str = typer.Argument(..., help="Bundle name"),
+    skill_dirs: str = typer.Option(
+        None, "--dirs", "-d", help="Comma-separated skill directories"
+    ),
+):
+    """Show the members of a skill bundle."""
+    try:
+        from praisonaiagents.skills import discover_bundles
+        from praisonaiagents.skills.bundles import strip_bundle_marker
+    except ImportError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    dirs = skill_dirs.split(",") if skill_dirs else None
+    bundles = discover_bundles(dirs, include_defaults=True)
+
+    target = strip_bundle_marker(name)
+    match = next((b for b in bundles if b.name == target), None)
+    if match is None:
+        typer.echo(f"Bundle not found: {name}", err=True)
+        raise typer.Exit(1)
+
+    from rich.console import Console
+
+    console = Console()
+    console.print(f"\n[bold cyan]{match.name}[/bold cyan]")
+    if match.description:
+        console.print(f"[dim]{match.description}[/dim]")
+    if match.instruction:
+        console.print(f"\n[bold]Instruction:[/bold]\n{match.instruction}")
+    console.print("\n[bold]Skills:[/bold]")
+    if match.skills:
+        for s in match.skills:
+            console.print(f"  - {s}")
+    else:
+        console.print("  (none)")
+
 
 @app.command("list")
 def skills_list(

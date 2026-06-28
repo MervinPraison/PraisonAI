@@ -2669,10 +2669,29 @@ Summary:"""
             from ..skills import SkillManager
             self._skill_manager = SkillManager()
 
-            # Add explicit skill paths
+            # Discover bundles so '@bundle' selectors in self._skills can be
+            # expanded into their member skill names before injection.
+            try:
+                self._skill_manager.discover_bundles(
+                    self._skills_dirs,
+                    include_defaults=True,
+                )
+            except Exception as e:  # noqa: BLE001 - bundles are optional
+                logging.debug("Bundle discovery skipped: %s", e)
+
+            # Add explicit skill selectors. '@bundle' entries expand to their
+            # member skill names (resolved by name against discovered skills);
+            # plain paths pass through unchanged and load directly.
             if self._skills:
-                for skill_path in self._skills:
-                    self._skill_manager.add_skill(skill_path)
+                from ..skills.bundles import is_bundle_selector
+                for selector in self._skills:
+                    if is_bundle_selector(selector):
+                        for member in self._skill_manager.resolve([selector]):
+                            self._skill_manager.add_skill_by_name(
+                                member, self._skills_dirs, include_defaults=True,
+                            )
+                    else:
+                        self._skill_manager.add_skill(selector)
 
             # Discover skills from directories; honour SkillsConfig.auto_discover
             # by falling back to default locations when requested.
