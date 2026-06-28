@@ -130,6 +130,12 @@ class ToolResolver:
         self._local_tools_loaded: bool = False
         self._praisonai_tools_available: Optional[bool] = None
         self._local_tools_lock = threading.Lock()
+        # Cache for the tools/ directory class scan so a long-running multi-agent
+        # process does not re-glob the directory and re-import every module on
+        # every resolve_all_from_yaml() call (mirrors the tools.py cache above).
+        self._local_tools_dir_cache: Optional[Dict[str, Any]] = None
+        self._local_tools_dir_loaded: bool = False
+        self._local_tools_dir_lock = threading.Lock()
         self._registry = registry
         
         # Resolution chain as an ordered list of ToolSource objects. When a
@@ -621,6 +627,9 @@ class ToolResolver:
         with self._local_tools_lock:
             self._local_tools_cache = MappingProxyType({})
             self._local_tools_loaded = False
+        with self._local_tools_dir_lock:
+            self._local_tools_dir_cache = None
+            self._local_tools_dir_loaded = False
         with self._resolve_cache_lock:
             self._resolve_cache.clear()
             self._resolve_cache_epoch += 1
@@ -652,16 +661,33 @@ class ToolResolver:
 
     def get_local_tool_classes_from_dir(self, tools_dir: "os.PathLike|str") -> Dict[str, Any]:
         """Load BaseTool/langchain classes from every *.py in a tools/ directory.
-        
+
+        Results are cached per resolver instance so a long-running multi-agent
+        process does not re-glob the directory and re-import every module on
+        every call. Call :meth:`invalidate_local_tools_dir` (or
+        :meth:`clear_cache`) to force a re-scan after the directory changes.
+
         Args:
             tools_dir: Path to the tools directory
-            
+
         Returns:
             Dictionary mapping class names to instantiated tool objects
         """
+        if self._local_tools_dir_loaded and self._local_tools_dir_cache is not None:
+            return self._local_tools_dir_cache
+
+        with self._local_tools_dir_lock:
+            if self._local_tools_dir_loaded and self._local_tools_dir_cache is not None:
+                return self._local_tools_dir_cache
+            self._local_tools_dir_cache = self._scan_tools_dir(tools_dir)
+            self._local_tools_dir_loaded = True
+            return self._local_tools_dir_cache
+
+    def _scan_tools_dir(self, tools_dir: "os.PathLike|str") -> Dict[str, Any]:
+        """Glob a tools/ directory and instantiate its tool classes (uncached)."""
         from pathlib import Path
         from ._safe_loader import load_user_module
-        
+
         classes: Dict[str, Any] = {}
         for py_file in Path(tools_dir).glob("*.py"):
             if py_file.name.startswith("__"):
@@ -673,6 +699,12 @@ class ToolResolver:
             except Exception as e:
                 logger.warning(f"Error loading tool classes from file {py_file}: {e}")
         return classes
+
+    def invalidate_local_tools_dir(self) -> None:
+        """Re-scan tools/ on next resolution (e.g. from a dev-mode file watcher)."""
+        with self._local_tools_dir_lock:
+            self._local_tools_dir_loaded = False
+            self._local_tools_dir_cache = None
 
     def _extract_tool_classes(self, module):
         """Extract tool classes from a loaded module that inherit from BaseTool 
@@ -774,16 +806,28 @@ class ToolResolver:
         root_directory = os.getcwd()
         tools_py_path = os.path.join(root_directory, 'tools.py')
         tools_dir = Path(root_directory) / 'tools'
-        
+
+        # Local class-based tools (path B semantics) are layered on top of the
+        # chain result. Surface any name collision so a silent override of a
+        # chain-resolved tool by a same-named local class is debuggable.
+        def _merge_local(local_tools: Dict[str, Any]) -> None:
+            for name in local_tools:
+                if name in tools_dict:
+                    logger.warning(
+                        "Local tool %r overrides a tool already resolved from "
+                        "the resolution chain", name,
+                    )
+            tools_dict.update(local_tools)
+
         # Load from tools.py if it exists
         local_tools = self.get_local_tool_classes()
         if local_tools:
-            tools_dict.update(local_tools)
+            _merge_local(local_tools)
             if os.path.isfile(tools_py_path):
                 logger.debug("tools.py exists in the root directory. Loading tools.py and skipping tools folder.")
         # Otherwise load from tools/ directory if it exists
         elif tools_dir.is_dir():
-            tools_dict.update(self.get_local_tool_classes_from_dir(tools_dir))
+            _merge_local(self.get_local_tool_classes_from_dir(tools_dir))
             logger.debug("tools folder exists in the root directory")
         return tools_dict
 
