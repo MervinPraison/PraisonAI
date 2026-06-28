@@ -53,6 +53,7 @@ class SessionCheckpointManager:
     workspace_dir: str
     enabled: bool = False
     verbose: bool = False
+    storage_dir: Optional[str] = None
     _handler: Optional[object] = field(default=None, repr=False)
     _turns: List[_Turn] = field(default_factory=list)
     _turn_counter: int = 0
@@ -84,16 +85,21 @@ class SessionCheckpointManager:
             section.get("storage_dir") if isinstance(section, dict) else None
         )
 
-        manager = cls(workspace_dir=workspace_dir, enabled=enabled, verbose=verbose)
-        manager._storage_dir = storage_dir  # type: ignore[attr-defined]
-        return manager
+        return cls(
+            workspace_dir=workspace_dir,
+            enabled=enabled,
+            verbose=verbose,
+            storage_dir=storage_dir,
+        )
 
     def _get_handler(self):
         if self._handler is None:
             from .checkpoints import CheckpointsHandler
 
             self._handler = CheckpointsHandler(
-                workspace_dir=self.workspace_dir, verbose=self.verbose
+                workspace_dir=self.workspace_dir,
+                verbose=self.verbose,
+                storage_dir=self.storage_dir,
             )
         return self._handler
 
@@ -103,8 +109,13 @@ class SessionCheckpointManager:
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(coro)
-        # Fallback for the rare case a loop is already running on this thread.
-        return asyncio.new_event_loop().run_until_complete(coro)
+        # A loop is already running on this thread (async-hosted caller):
+        # run the coroutine on a dedicated worker thread so we never try to
+        # drive a second loop on a thread that already has one.
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(asyncio.run, coro).result()
 
     @property
     def turns(self) -> List[_Turn]:
@@ -170,11 +181,12 @@ class SessionCheckpointManager:
             handler = self._get_handler()
             ok = self._run(handler.restore(target.checkpoint_id))
             if ok:
-                # The workspace now matches `target`'s checkpoint, so keep the
-                # timeline up to and including `target` and drop the reverted
-                # turns above it. target == self._turns[-n] -> keep up to that
-                # index (inclusive).
-                self._turns = self._turns[: len(self._turns) - n + 1]
+                # The workspace now matches `target`'s checkpoint. Drop the
+                # restored turn *and* every turn above it from the timeline so
+                # the next /undo walks further back instead of restoring the
+                # same checkpoint again. With [start, t1, t2], revert(1)
+                # restores t2 and leaves [start, t1], so the next /undo -> t1.
+                self._turns = self._turns[: len(self._turns) - n]
                 return target
         except Exception:
             pass

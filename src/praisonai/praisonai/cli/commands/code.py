@@ -248,7 +248,20 @@ def _revert_workspace(ref: str, workspace: str, verbose: bool = False) -> None:
     from ..commands.checkpoint import _resolve_checkpoint_id
     from ..features.checkpoints import CheckpointsHandler
 
-    handler = CheckpointsHandler(workspace_dir=workspace, verbose=verbose)
+    # Honor a configured checkpoints.storage_dir so this one-shot restore reads
+    # from the same store the interactive session writes to.
+    storage_dir = None
+    try:
+        from ..configuration.resolver import resolve_config
+        section = (resolve_config().extra or {}).get("checkpoints", {})
+        if isinstance(section, dict):
+            storage_dir = section.get("storage_dir")
+    except Exception:
+        storage_dir = None
+
+    handler = CheckpointsHandler(
+        workspace_dir=workspace, verbose=verbose, storage_dir=storage_dir
+    )
 
     async def _run() -> bool:
         resolved = await _resolve_checkpoint_id(handler, ref)

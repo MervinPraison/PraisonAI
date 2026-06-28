@@ -6800,6 +6800,23 @@ Provide a concise summary (max 200 words):"""
         except Exception as e:
             console.print(f"[red]Error handling context command: {e}[/red]")
     
+    def _worker_busy(self, session_state):
+        """Return True if the execution worker is processing or has queued work.
+
+        Used to gate workspace-mutating rollbacks (/undo, /revert) so a restore
+        never races a turn that is still writing files.
+        """
+        worker_state = session_state.get('worker_state') or {}
+        if worker_state.get('current_task') is not None:
+            return True
+        queue = session_state.get('execution_queue')
+        try:
+            if queue is not None and queue.qsize() > 0:
+                return True
+        except Exception:
+            pass
+        return False
+
     def _handle_undo_command(self, console, session_state):
         """
         Handle /undo command - undo the last response.
@@ -6830,6 +6847,13 @@ Provide a concise summary (max 200 words):"""
             # not just a conversation-history edit.
             ckpt = session_state.get('session_checkpoints')
             if ckpt is not None and getattr(ckpt, 'enabled', False) and ckpt.turns:
+                if self._worker_busy(session_state):
+                    console.print(
+                        "[yellow]A turn is still running; conversation undone but "
+                        "workspace left untouched.[/yellow] "
+                        "Wait for it to finish (/status), then use /revert."
+                    )
+                    return
                 console.print("[dim]Reverting workspace files to the previous checkpoint...[/dim]")
                 ckpt.preview(1)
                 restored = ckpt.revert(1)
@@ -6859,6 +6883,14 @@ Provide a concise summary (max 200 words):"""
 
         if not ckpt.turns:
             console.print("[yellow]No checkpoints to revert to[/yellow]")
+            return
+
+        if self._worker_busy(session_state):
+            console.print(
+                "[yellow]A turn is still running.[/yellow] "
+                "Reverting now could race the agent's file writes — wait for it "
+                "to finish (check /status), then retry /revert."
+            )
             return
 
         n = 1
