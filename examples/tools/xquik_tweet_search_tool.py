@@ -26,17 +26,22 @@ def _as_record(value: Any) -> dict[str, Any]:
 
 
 def _as_text(value: Any) -> str:
-    if isinstance(value, str):
-        return value.strip()
     if value is None:
         return ""
-    return str(value).strip()
+    return " ".join(str(value).split())
 
 
 def _tweet_line(tweet: dict[str, Any]) -> str:
-    author = _as_text(tweet.get("author_username") or tweet.get("username"))
-    text = _as_text(tweet.get("text") or tweet.get("full_text"))
-    tweet_id = _as_text(tweet.get("id"))
+    author_field = (
+        tweet.get("author_username")
+        or tweet.get("username")
+        or _as_record(tweet.get("author")).get("username")
+    )
+    author = _as_text(author_field)
+    text = _as_text(
+        tweet.get("text") or tweet.get("full_text") or tweet.get("content")
+    )
+    tweet_id = _as_text(tweet.get("id") or tweet.get("tweet_id"))
     prefix = f"@{author}: " if author else ""
     suffix = f" ({tweet_id})" if tweet_id else ""
     return f"{prefix}{text}{suffix}".strip()
@@ -44,21 +49,30 @@ def _tweet_line(tweet: dict[str, Any]) -> str:
 
 def _bounded_limit(value: Any) -> int:
     try:
-        parsed = int(value)
+        parsed = int(float(value))
     except (TypeError, ValueError):
         return 5
     return max(1, min(parsed, 10))
 
 
-@tool
+@tool(
+    availability=lambda: (
+        bool(os.environ.get("XQUIK_API_KEY")),
+        "Set XQUIK_API_KEY before using search_x_posts.",
+    )
+)
 def search_x_posts(query: str, limit: int = 5) -> str:
     """Search recent public X posts with Xquik."""
     api_key = os.environ.get("XQUIK_API_KEY")
     if not api_key:
         return "Set XQUIK_API_KEY before using search_x_posts."
 
+    query_text = _as_text(query)
+    if not query_text:
+        return "Provide a non-empty query before using search_x_posts."
+
     bounded_limit = _bounded_limit(limit)
-    params = {"q": query, "limit": bounded_limit, "queryType": "Latest"}
+    params = {"q": query_text, "limit": bounded_limit, "queryType": "Latest"}
     url = f"{XQUIK_SEARCH_URL}?{urlencode(params)}"
     request = Request(
         url,
