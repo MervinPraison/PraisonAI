@@ -89,7 +89,16 @@ def session_list(
                 self.name = data.get("agent_name", "")
                 self.status = data.get("status")  # Use actual status from data if available
                 self.event_count = data.get("message_count", 0)
-                
+
+                # Cumulative usage totals persisted per session (Issue #2421).
+                usage = data.get("usage")
+                if isinstance(usage, dict):
+                    self.total_tokens = usage.get("total_tokens") or 0
+                    self.cost = usage.get("cost") or 0.0
+                else:
+                    self.total_tokens = data.get("total_tokens") or 0
+                    self.cost = data.get("cost") or 0.0
+
                 # Parse updated_at string
                 updated_str = data.get("updated_at", "")
                 try:
@@ -103,6 +112,8 @@ def session_list(
                     "name": self.name,
                     "status": self.status,
                     "event_count": self.event_count,
+                    "total_tokens": self.total_tokens,
+                    "cost": self.cost,
                     "updated_at": self.updated_at.isoformat(),
                 }
         
@@ -135,14 +146,18 @@ def session_list(
         output.print_info("No sessions found")
         return
     
-    headers = ["ID", "Name", "Status", "Events", "Updated"]
+    headers = ["ID", "Name", "Status", "Events", "Tokens", "Cost", "Updated"]
     rows = []
     for s in sessions:
+        total_tokens = getattr(s, "total_tokens", 0) or 0
+        cost = getattr(s, "cost", 0.0) or 0.0
         rows.append([
             s.session_id[:20] + "..." if len(s.session_id) > 20 else s.session_id,
             s.name or "-",
             s.status,
             str(s.event_count),
+            f"{int(total_tokens):,}" if total_tokens else "-",
+            f"${float(cost):.4f}" if cost else "-",
             s.updated_at.strftime("%Y-%m-%d %H:%M"),
         ])
     
@@ -194,10 +209,17 @@ def session_resume(
             })
             return
 
+        from ..state.project_sessions import format_usage_footer
+
+        usage_line = ""
+        if restored.usage and (restored.usage.get("total_tokens") or restored.usage.get("cost")):
+            usage_line = f"\nUsage: {format_usage_footer(restored.usage)}"
+
         output.print_panel(
             f"Session: {restored.agent_name or restored.session_id}\n"
             f"Model: {restored.model or 'default'}\n"
-            f"Messages restored: {len(restored.chat_history)}",
+            f"Messages restored: {len(restored.chat_history)}"
+            f"{usage_line}",
             title="Session Resumed"
         )
 

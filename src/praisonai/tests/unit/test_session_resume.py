@@ -108,3 +108,86 @@ def test_session_exists_anywhere_checks_both_stores(temp_project_store, temp_sto
     assert session_exists_anywhere("inproj") is True
     assert session_exists_anywhere("inglobal") is True
     assert session_exists_anywhere("missing") is False
+
+
+def _track(input_tokens, output_tokens, model="gpt-4o-mini"):
+    """Feed a fake LLM call into the global token collector."""
+    from praisonaiagents.telemetry.token_collector import (
+        TokenMetrics,
+        get_token_collector,
+    )
+
+    get_token_collector().track_tokens(
+        model, "Agent", TokenMetrics(input_tokens=input_tokens, output_tokens=output_tokens)
+    )
+
+
+@pytest.fixture(autouse=False)
+def reset_collector():
+    from praisonaiagents.telemetry.token_collector import get_token_collector
+
+    get_token_collector().reset()
+    yield
+    get_token_collector().reset()
+
+
+def test_accumulate_session_usage_persists_totals(temp_project_store, reset_collector):
+    from praisonai.cli.state.project_sessions import (
+        accumulate_session_usage,
+        read_session_usage,
+    )
+
+    temp_project_store.add_user_message("u1", "hi")
+
+    _track(1000, 500)
+    _track(240, 3480)
+    usage = accumulate_session_usage("u1", model="gpt-4o-mini")
+
+    assert usage["input_tokens"] == 1240
+    assert usage["output_tokens"] == 3980
+    assert usage["total_tokens"] == 5220
+    assert usage["requests"] == 2
+    assert usage["cost"] > 0
+
+    # Persisted and re-readable.
+    assert read_session_usage("u1")["total_tokens"] == 5220
+
+
+def test_accumulate_session_usage_is_cumulative_across_runs(temp_project_store, reset_collector):
+    from praisonai.cli.state.project_sessions import accumulate_session_usage
+
+    temp_project_store.add_user_message("u2", "hi")
+
+    _track(100, 200)
+    first = accumulate_session_usage("u2", model="gpt-4o-mini")
+    assert first["total_tokens"] == 300
+
+    # A second run's usage adds to the first (collector reset internally).
+    _track(50, 50)
+    second = accumulate_session_usage("u2", model="gpt-4o-mini")
+    assert second["total_tokens"] == 400
+    assert second["requests"] == 2
+
+
+def test_rehydrate_restores_usage(temp_project_store, reset_collector):
+    from praisonai.cli.session.resume import rehydrate_session
+    from praisonai.cli.state.project_sessions import accumulate_session_usage
+
+    temp_project_store.add_user_message("u3", "hi")
+    _track(500, 700)
+    accumulate_session_usage("u3", model="gpt-4o-mini")
+
+    restored = rehydrate_session("u3")
+    assert restored.found is True
+    assert restored.usage.get("total_tokens") == 1200
+
+
+def test_format_usage_footer():
+    from praisonai.cli.state.project_sessions import format_usage_footer
+
+    footer = format_usage_footer(
+        {"input_tokens": 1240, "output_tokens": 3980, "cost": 0.014}
+    )
+    assert "1,240 in" in footer
+    assert "3,980 out" in footer
+    assert "$0.0140" in footer

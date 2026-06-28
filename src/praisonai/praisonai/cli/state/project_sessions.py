@@ -6,7 +6,7 @@ Provides session continuity within project boundaries.
 
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from praisonaiagents.session.store import DefaultSessionStore
 from ..utils.project import get_project_id, get_project_name, get_project_sessions_dir
@@ -177,3 +177,129 @@ def apply_cli_session_continuity(agent, session_id: str, project_path: Optional[
         pass
 
     agent._session_store_initialized = True
+
+
+def _empty_usage() -> Dict[str, Any]:
+    """A zeroed cumulative-usage record."""
+    return {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cached_tokens": 0,
+        "total_tokens": 0,
+        "cost": 0.0,
+        "requests": 0,
+    }
+
+
+def read_session_usage(
+    session_id: str, project_path: Optional[str] = None
+) -> Dict[str, Any]:
+    """Read the persisted cumulative usage totals for a session.
+
+    Returns a dict with ``input_tokens``/``output_tokens``/``cached_tokens``/
+    ``total_tokens``/``cost``/``requests``. Missing values default to zero so
+    callers can render a total even for never-tracked sessions (Issue #2421).
+    """
+    usage = _empty_usage()
+    try:
+        store = get_project_session_store(project_path)
+        if not store.session_exists(session_id):
+            return usage
+        data = store.get_session(session_id)
+        metadata = dict(getattr(data, "metadata", {}) or {})
+    except Exception:
+        return usage
+
+    stored = metadata.get("usage")
+    if isinstance(stored, dict):
+        for key in usage:
+            if isinstance(stored.get(key), (int, float)):
+                usage[key] = stored[key]
+    # Back-compat with the flat fields surfaced by list_sessions/to_dict.
+    if not usage["total_tokens"] and isinstance(metadata.get("total_tokens"), (int, float)):
+        usage["total_tokens"] = metadata["total_tokens"]
+    if not usage["cost"] and isinstance(metadata.get("cost"), (int, float)):
+        usage["cost"] = metadata["cost"]
+    return usage
+
+
+def format_usage_footer(usage: Dict[str, Any]) -> str:
+    """Render a compact one-line usage footer, e.g.
+    ``1,240 in / 3,980 out · $0.0140``.
+    """
+    usage = usage or _empty_usage()
+    in_tok = int(usage.get("input_tokens", 0) or 0)
+    out_tok = int(usage.get("output_tokens", 0) or 0)
+    cost = float(usage.get("cost", 0.0) or 0.0)
+    return f"{in_tok:,} in / {out_tok:,} out \u00b7 ${cost:.4f}"
+
+
+def accumulate_session_usage(
+    session_id: str,
+    model: Optional[str] = None,
+    project_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Accumulate the global token collector's usage into a session record.
+
+    Reads per-call token usage already aggregated by
+    ``praisonaiagents.telemetry.token_collector`` for this run, prices it via
+    the CLI cost tracker, and merges the deltas into the session's persisted
+    ``usage`` metadata so cumulative ``cost``/``tokens`` survive resume
+    (Issue #2421). Also mirrors flat ``total_tokens``/``cost`` fields that
+    ``list_sessions`` already surfaces.
+
+    Best-effort: any failure leaves the session untouched and returns the
+    current (possibly unchanged) totals.
+    """
+    current = read_session_usage(session_id, project_path)
+    try:
+        from praisonaiagents.telemetry.token_collector import get_token_collector
+
+        summary = get_token_collector().get_session_summary()
+    except Exception:
+        return current
+
+    totals = (summary or {}).get("total_metrics") or {}
+    delta_in = int(totals.get("input_tokens", 0) or 0)
+    delta_out = int(totals.get("output_tokens", 0) or 0)
+    delta_cached = int(totals.get("cached_tokens", 0) or 0)
+    delta_total = int(totals.get("total_tokens", 0) or 0)
+    delta_requests = int((summary or {}).get("total_interactions", 0) or 0)
+
+    if not (delta_in or delta_out or delta_total):
+        return current
+
+    delta_cost = 0.0
+    try:
+        from ..features.cost_tracker import get_pricing
+
+        pricing = get_pricing(model or "default")
+        delta_cost = pricing.calculate_cost(delta_in, delta_out)
+    except Exception:
+        delta_cost = 0.0
+
+    updated = {
+        "input_tokens": current["input_tokens"] + delta_in,
+        "output_tokens": current["output_tokens"] + delta_out,
+        "cached_tokens": current["cached_tokens"] + delta_cached,
+        "total_tokens": current["total_tokens"] + (delta_total or (delta_in + delta_out)),
+        "cost": round(current["cost"] + delta_cost, 6),
+        "requests": current["requests"] + delta_requests,
+    }
+
+    try:
+        store = get_project_session_store(project_path)
+        store.update_session_metadata(
+            session_id,
+            usage=updated,
+            total_tokens=updated["total_tokens"],
+            cost=updated["cost"],
+        )
+        # Avoid double-counting if accumulate is called again in-process.
+        from praisonaiagents.telemetry.token_collector import get_token_collector
+
+        get_token_collector().reset()
+    except Exception:
+        return current
+
+    return updated

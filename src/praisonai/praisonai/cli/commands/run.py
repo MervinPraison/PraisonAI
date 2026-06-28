@@ -1058,6 +1058,7 @@ def _run_prompt(
 
             if bridge is not None:
                 bridge.emit_run_result(result, ok=True)
+            _record_session_usage(session_id or auto_save_name, model, output)
             output.emit_result(
                 message="Prompt completed",
                 data={"result": str(result) if result else None}
@@ -1124,6 +1125,7 @@ def _run_prompt(
         
         result = praison.handle_direct_prompt(prompt)
         
+        _record_session_usage(session_id or auto_save_name, model, output)
         output.emit_result(
             message="Prompt completed",
             data={"result": str(result) if result else None}
@@ -1140,6 +1142,35 @@ def _run_prompt(
         output.emit_error(message=str(e))
         output.print_error(str(e))
         raise typer.Exit(1)
+
+
+def _record_session_usage(session_id, model, output) -> None:
+    """Accumulate this run's token/cost usage into the active session and show
+    a compact running total footer (Issue #2421).
+
+    Best-effort: never let usage accounting break a completed run. Stays quiet
+    in JSON mode so machine-readable output is unaffected.
+    """
+    if not session_id:
+        return
+    try:
+        from ..state.project_sessions import (
+            accumulate_session_usage,
+            format_usage_footer,
+        )
+
+        usage = accumulate_session_usage(session_id, model=model)
+    except Exception:
+        return
+
+    if not usage or not usage.get("total_tokens"):
+        return
+    if getattr(output, "is_json_mode", False):
+        return
+    try:
+        output.print_info(format_usage_footer(usage))
+    except Exception:
+        pass
 
 
 def _run_from_file_profiled(

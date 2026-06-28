@@ -25,6 +25,8 @@ class RehydratedSession:
         model: Persisted model/provider used for the session, if known.
         agent_name: Persisted agent name for the session, if known.
         metadata: Any additional persisted metadata (tokens, cost, source...).
+        usage: Cumulative token/cost totals restored from metadata so resume
+            continues accumulating instead of resetting (Issue #2421).
         found: Whether a stored session was actually located.
     """
 
@@ -33,6 +35,7 @@ class RehydratedSession:
     model: Optional[str] = None
     agent_name: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    usage: Dict[str, Any] = field(default_factory=dict)
     found: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
@@ -42,6 +45,7 @@ class RehydratedSession:
             "model": self.model,
             "agent_name": self.agent_name,
             "metadata": self.metadata,
+            "usage": self.usage,
             "found": self.found,
         }
 
@@ -104,6 +108,13 @@ def rehydrate_session(
         metadata = dict(getattr(data, "metadata", {}) or {})
         model = metadata.get("model") or metadata.get("llm")
         agent_name = getattr(data, "agent_name", None) or metadata.get("agent_name")
+        usage = metadata.get("usage")
+        if not isinstance(usage, dict):
+            usage = {}
+            if isinstance(metadata.get("total_tokens"), (int, float)):
+                usage["total_tokens"] = metadata["total_tokens"]
+            if isinstance(metadata.get("cost"), (int, float)):
+                usage["cost"] = metadata["cost"]
 
         return RehydratedSession(
             session_id=session_id,
@@ -111,6 +122,7 @@ def rehydrate_session(
             model=model,
             agent_name=agent_name,
             metadata=metadata,
+            usage=usage,
             found=True,
         )
 
