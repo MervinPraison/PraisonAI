@@ -25,12 +25,16 @@ def validate_workflow_framework(
     supported = ""
     try:
         from .registry import list_framework_choices
+    except ImportError:
+        # Only the registry module being unavailable is tolerated here; genuine
+        # discovery/initialization errors must surface rather than be masked as
+        # a simple unsupported-framework config mistake.
+        list_framework_choices = None  # type: ignore[assignment]
 
+    if list_framework_choices is not None:
         choices = [f for f in list_framework_choices(include_unavailable=True) if f != "praisonai"]
         if choices:
             supported = f" Available registered frameworks: {', '.join(sorted(choices))}."
-    except Exception:
-        pass
 
     message = (
         f"framework='{framework}' in {source} is not supported for workflow execution. "
