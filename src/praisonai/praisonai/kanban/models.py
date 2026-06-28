@@ -38,6 +38,9 @@ class Task:
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     metadata: Optional[Dict[str, Any]] = None
+    max_retries: Optional[int] = None
+    consecutive_failures: int = 0
+    current_run_id: Optional[int] = None
 
     def __post_init__(self):
         from datetime import timezone
@@ -65,6 +68,7 @@ class Task:
         # Remove fields that don't belong to Task model
         filtered_data = data.copy()
         filtered_data.pop('version', None)  # Remove version field used for optimistic locking
+        filtered_data.pop('idempotency_key', None)  # Stored on row but not part of model
         
         # Handle datetime fields
         if 'created_at' in filtered_data and filtered_data['created_at']:
@@ -86,6 +90,10 @@ class Task:
                 filtered_data['metadata'] = json.loads(filtered_data['metadata']) if isinstance(filtered_data['metadata'], str) else filtered_data['metadata']
             except (json.JSONDecodeError, TypeError):
                 filtered_data['metadata'] = {}
+        
+        # Normalise consecutive_failures (NULL -> 0 for legacy rows)
+        if filtered_data.get('consecutive_failures') is None:
+            filtered_data['consecutive_failures'] = 0
         
         return cls(**filtered_data)
 
@@ -148,6 +156,71 @@ class TaskEvent:
             'data': self.data,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
+
+
+class RunOutcome(str, Enum):
+    """Outcome of a single task attempt (run)."""
+    COMPLETED = "completed"
+    BLOCKED = "blocked"
+    CRASHED = "crashed"
+    FAILED = "failed"
+    GAVE_UP = "gave_up"
+
+
+@dataclass
+class TaskRun:
+    """A single attempt (run) at executing a task.
+
+    One row per attempt capturing the outcome, a structured summary/metadata
+    handoff, and any error. ``tasks.current_run_id`` points at the active run.
+    """
+    id: Optional[int]
+    task_id: str
+    profile: str = ""
+    outcome: Optional[str] = None  # one of RunOutcome values while open it is None
+    summary: str = ""
+    metadata: Optional[Dict[str, Any]] = None
+    error: str = ""
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+
+    def __post_init__(self):
+        from datetime import timezone
+        if self.started_at is None:
+            self.started_at = datetime.now(timezone.utc)
+        if self.metadata is None:
+            self.metadata = {}
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for API/JSON serialization."""
+        return {
+            'id': self.id,
+            'task_id': self.task_id,
+            'profile': self.profile,
+            'outcome': self.outcome,
+            'summary': self.summary,
+            'metadata': self.metadata,
+            'error': self.error,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'ended_at': self.ended_at.isoformat() if self.ended_at else None,
+        }
+
+    @classmethod
+    def from_row(cls, row: Dict[str, Any]) -> 'TaskRun':
+        """Create from a SQLite row dict."""
+        data = dict(row)
+        metadata = data.get('metadata')
+        if metadata and isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except (json.JSONDecodeError, TypeError):
+                metadata = {}
+        data['metadata'] = metadata or {}
+        for field_name in ('started_at', 'ended_at'):
+            value = data.get(field_name)
+            if value and isinstance(value, str):
+                data[field_name] = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        return cls(**data)
 
 
 # Protocol placeholder - will import from praisonaiagents when available

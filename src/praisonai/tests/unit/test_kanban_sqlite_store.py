@@ -557,3 +557,94 @@ class TestClaimReclamation:
         # Lease was extended by the heartbeat -> not reclaimed.
         assert task.id not in reclaimed
         assert store.get_task(task.id).status == TaskStatus.RUNNING
+
+
+class TestTaskRunsAndRetry:
+    """Tests for attempt history, structured handoff and circuit-breaker."""
+
+    def test_idempotent_create_returns_existing(self, store):
+        """Repeat create with same idempotency_key returns the same task."""
+        first = store.create_task({'title': 'Audit auth'}, idempotency_key='audit-1')
+        second = store.create_task({'title': 'Different title'}, idempotency_key='audit-1')
+
+        assert first.id == second.id
+        assert second.title == 'Audit auth'  # original is returned unchanged
+
+    def test_idempotent_create_different_keys(self, store):
+        """Different idempotency keys create distinct tasks."""
+        a = store.create_task({'title': 'A'}, idempotency_key='k-a')
+        b = store.create_task({'title': 'B'}, idempotency_key='k-b')
+        assert a.id != b.id
+
+    def test_start_and_close_run(self, store):
+        """A run captures profile/outcome/summary/metadata/error."""
+        task = store.create_task({'title': 'Runnable'})
+
+        run_id = store.start_run(task.id, profile='worker-1')
+        assert isinstance(run_id, int)
+
+        # current_run_id points at the active run
+        assert store.get_task(task.id).current_run_id == run_id
+
+        closed = store.close_run(
+            run_id, 'crashed',
+            summary='tried path A', metadata={'changed_files': ['a.py']},
+            error='boom',
+        )
+        assert closed.outcome == 'crashed'
+        assert closed.summary == 'tried path A'
+        assert closed.metadata == {'changed_files': ['a.py']}
+        assert closed.error == 'boom'
+        assert closed.ended_at is not None
+
+    def test_get_runs_ordered(self, store):
+        """get_runs returns all attempts oldest first."""
+        task = store.create_task({'title': 'Multi attempt'})
+        store.record_run(task.id, 'failed', error='e1')
+        store.record_run(task.id, 'completed', summary='done')
+
+        runs = store.get_runs(task.id)
+        assert len(runs) == 2
+        assert [r.outcome for r in runs] == ['failed', 'completed']
+
+    def test_record_failure_circuit_breaker(self, store):
+        """Auto-block when consecutive failures reach max_retries."""
+        task = store.create_task({'title': 'Flaky', 'max_retries': 2})
+
+        assert store.record_failure(task.id, error='e1') is False
+        assert store.record_failure(task.id, error='e2') is True
+
+        blocked = store.get_task(task.id)
+        assert blocked.status == TaskStatus.BLOCKED
+        assert blocked.consecutive_failures == 2
+
+    def test_completion_resets_failure_counter(self, store):
+        """A completed run resets consecutive_failures to zero."""
+        task = store.create_task({'title': 'Recovers', 'max_retries': 5})
+        store.record_failure(task.id, error='e1')
+        assert store.get_task(task.id).consecutive_failures == 1
+
+        store.record_run(task.id, 'completed', summary='ok')
+        assert store.get_task(task.id).consecutive_failures == 0
+
+    def test_default_max_retries_used_when_unset(self, store):
+        """Tasks without max_retries fall back to the board default."""
+        from praisonai.kanban.sqlite_store import DEFAULT_MAX_RETRIES
+        task = store.create_task({'title': 'Default breaker'})
+
+        blocked = False
+        for i in range(DEFAULT_MAX_RETRIES):
+            blocked = store.record_failure(task.id, error=f'e{i}')
+        assert blocked is True
+        assert store.get_task(task.id).status == TaskStatus.BLOCKED
+
+    def test_get_retry_context(self, store):
+        """Retry context exposes prior outcomes/summaries/errors."""
+        task = store.create_task({'title': 'Retryable'})
+        store.record_run(task.id, 'crashed', error='segfault', summary='path A')
+
+        ctx = store.get_retry_context(task.id)
+        assert len(ctx) == 1
+        assert ctx[0]['outcome'] == 'crashed'
+        assert ctx[0]['error'] == 'segfault'
+        assert ctx[0]['summary'] == 'path A'
