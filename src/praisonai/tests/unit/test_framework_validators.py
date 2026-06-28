@@ -64,6 +64,7 @@ class TestAssertFrameworkAvailableRaises:
         with patch("praisonai.framework_adapters.validators.get_default_registry") as mock_get:
             mock_registry = MagicMock()
             mock_registry.is_available.return_value = False
+            mock_registry.create.return_value.install_hint = None
             mock_get.return_value = mock_registry
 
             with pytest.raises(ImportError) as exc_info:
@@ -74,11 +75,13 @@ class TestAssertFrameworkAvailableRaises:
         with patch("praisonai.framework_adapters.validators.get_default_registry") as mock_get:
             mock_registry = MagicMock()
             mock_registry.is_available.return_value = False
+            mock_registry.create.return_value.install_hint = None
             mock_get.return_value = mock_registry
 
             with pytest.raises(ImportError) as exc_info:
                 assert_framework_available("some_unknown_framework_xyz")
             assert "some_unknown_framework_xyz" in str(exc_info.value)
+            assert "pip install 'praisonai[some_unknown_framework_xyz]'" in str(exc_info.value)
 
 
 class TestAssertFrameworkAvailableSucceeds:
