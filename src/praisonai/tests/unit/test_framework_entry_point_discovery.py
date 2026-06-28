@@ -1,5 +1,8 @@
 """Entry-point style framework adapter registration smoke test."""
 
+from types import SimpleNamespace
+from unittest import mock
+
 import pytest
 
 from praisonai.framework_adapters.base import BaseFrameworkAdapter
@@ -92,3 +95,24 @@ roles:
 
     result = gen.generate_crew_and_kickoff()
     assert "echo:hello" in result
+
+
+def test_entry_point_discovery_without_manual_register():
+    """A `praisonai.framework_adapters` entry point is discovered and usable
+    without calling registry.register() directly."""
+    fake_ep = SimpleNamespace(name="echo_test_adapter", load=lambda: _EchoAdapter)
+
+    def _fake_entry_points(*, group):
+        if group == "praisonai.framework_adapters":
+            return [fake_ep]
+        return []
+
+    with mock.patch(
+        "praisonai._registry.entry_points", side_effect=_fake_entry_points
+    ):
+        registry = FrameworkAdapterRegistry()
+
+    assert "echo_test_adapter" in registry.list_names()
+    adapter = registry.create("echo_test_adapter")
+    assert adapter.run({}, [], "world", tools_dict={}) == "echo:world"
+    assert "echo_test_adapter" in registry.list_available_frameworks()

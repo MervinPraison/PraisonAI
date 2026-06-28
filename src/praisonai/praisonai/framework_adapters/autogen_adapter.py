@@ -274,40 +274,72 @@ class AutoGenFamilyAdapter(BaseFrameworkAdapter):
         return v2.is_available() or v4.is_available() or ag2.is_available()
     
     def resolve_alias(self) -> str:
-        """Resolve which concrete AutoGen adapter to use."""
-        requested = os.getenv("AUTOGEN_VERSION", "auto").lower()
-        
-        # Check availability
-        v2_available = AutoGenAdapter().is_available()
-        v4_available = AutoGenV4Adapter().is_available()
-        ag2_available = AG2Adapter().is_available()
+        """Resolve which concrete AutoGen adapter to use.
 
-        # Explicit version pins with warnings if not available
+        Only returns an alias whose concrete adapter is actually registered AND
+        available, so the downstream ``registry.create(alias)`` never fails with
+        an opaque lookup error. ``autogen_v4`` / ``ag2`` are unimplemented and
+        unregistered by default, so explicit pins for them fall back to v0.2
+        when possible, otherwise raise an actionable ``ImportError``.
+        """
+        requested = os.getenv("AUTOGEN_VERSION", "auto").lower()
+
+        # A variant is selectable only if its adapter is registered in the
+        # registry (built-in or entry-point) and reports availability.
+        try:
+            from .registry import get_default_registry
+            registry = get_default_registry()
+            registered = set(registry.list_names())
+
+            def _selectable(alias: str) -> bool:
+                return alias in registered and registry.is_available(alias)
+        except ImportError:
+            registered = set()
+
+            def _selectable(alias: str) -> bool:
+                return False
+
+        v2_available = _selectable("autogen_v2")
+        v4_available = _selectable("autogen_v4")
+        ag2_available = _selectable("ag2")
+
+        # Explicit version pins: honour only when the variant can actually run,
+        # otherwise warn and fall back to a usable variant.
         if requested == "v0.2":
-            if not v2_available:
-                logger.warning("AUTOGEN_VERSION=v0.2 requested but autogen (v0.2) is not installed")
-            return "autogen_v2"
-        if requested == "v0.4":
-            if not v4_available:
-                logger.warning("AUTOGEN_VERSION=v0.4 requested but autogen_agentchat (v0.4) is not installed")
-            return "autogen_v4"
-        if requested == "ag2":
-            if not ag2_available:
-                logger.warning("AUTOGEN_VERSION=ag2 requested but AG2 is not installed")
-            return "ag2"
-        
-        # Auto selection: prefer v2 (v4 is currently unimplemented)
-        if v2_available:
-            return "autogen_v2"
-        elif v4_available:
-            logger.warning("AutoGen v0.4 is installed but not yet implemented, falling back.")
-            return "autogen_v4"
-        elif ag2_available:
-            return "ag2"
-        
-        # Nothing available
+            if v2_available:
+                return "autogen_v2"
+            logger.warning("AUTOGEN_VERSION=v0.2 requested but autogen (v0.2) is not available")
+        elif requested == "v0.4":
+            if v4_available:
+                return "autogen_v4"
+            logger.warning(
+                "AUTOGEN_VERSION=v0.4 requested but the v0.4 adapter is not "
+                "registered/available; falling back to v0.2 if installed"
+            )
+            if v2_available:
+                return "autogen_v2"
+        elif requested == "ag2":
+            if ag2_available:
+                return "ag2"
+            logger.warning(
+                "AUTOGEN_VERSION=ag2 requested but the AG2 adapter is not "
+                "registered/available; falling back to v0.2 if installed"
+            )
+            if v2_available:
+                return "autogen_v2"
+
+        # Auto selection: prefer v2 (v4/ag2 are currently unimplemented).
+        if requested not in ("v0.2", "v0.4", "ag2"):
+            if v2_available:
+                return "autogen_v2"
+            if v4_available:
+                return "autogen_v4"
+            if ag2_available:
+                return "ag2"
+
+        # Nothing selectable.
         raise ImportError(
-            "No AutoGen variant is available. Install with:\n"
+            "No runnable AutoGen variant is available. Install with:\n"
             "  pip install 'praisonai[autogen]' for v0.2\n"
             "  pip install 'praisonai[autogen-v4]' for v0.4\n"
             "  pip install 'praisonai[ag2]' for AG2"

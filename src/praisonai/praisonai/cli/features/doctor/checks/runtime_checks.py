@@ -68,13 +68,18 @@ class RuntimeCompatibilityChecker:
         def _runtime_usable(framework_name: str, package_name: str) -> bool:
             try:
                 from praisonai.framework_adapters.registry import get_default_registry
-                registry = get_default_registry()
-                if framework_name in registry.list_names():
-                    return registry.is_available(framework_name)
-            except Exception:
-                pass
-            # Fallback to raw package probe when the registry is unavailable.
-            return is_available(package_name)
+            except ImportError:
+                # Fallback to raw package probe only when the registry module
+                # itself cannot be imported (e.g. partial install).
+                return is_available(package_name)
+
+            registry = get_default_registry()
+            # When the registry is the source of truth, an unregistered
+            # framework is not runnable even if its packages are installed,
+            # so doctor stays consistent with the `--framework` choices.
+            if framework_name not in registry.list_names():
+                return False
+            return registry.is_available(framework_name)
         
         # PraisonAI Agents runtime
         runtimes['praisonai'] = RuntimeInfo(
