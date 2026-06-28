@@ -267,13 +267,26 @@ class AutoGenFamilyAdapter(BaseFrameworkAdapter):
     is_router = True
     
     def is_available(self) -> bool:
-        """Check if any AutoGen variant is available."""
-        v2 = AutoGenAdapter()
-        v4 = AutoGenV4Adapter()
-        ag2 = AG2Adapter()
-        return v2.is_available() or v4.is_available() or ag2.is_available()
+        """Check if any AutoGen variant is runnable.
+
+        Mirrors ``resolve_alias()``'s registry-backed selectability so router
+        availability stays consistent: ``registry.is_available("autogen")`` only
+        reports True when a concrete variant is registered AND available, and
+        thus actually dispatchable by ``resolve()``. Raw v4/ag2 packages alone
+        (no registered adapter) correctly report unavailable.
+        """
+        try:
+            from .registry import get_default_registry
+            registry = get_default_registry()
+            registered = set(registry.list_names())
+        except ImportError:
+            return False
+        return any(
+            alias in registered and registry.is_available(alias)
+            for alias in ("autogen_v2", "autogen_v4", "ag2")
+        )
     
-    def resolve_alias(self) -> str:
+    def resolve_alias(self, config: Optional[Dict[str, Any]] = None) -> str:
         """Resolve which concrete AutoGen adapter to use.
 
         Only returns an alias whose concrete adapter is actually registered AND
@@ -281,8 +294,15 @@ class AutoGenFamilyAdapter(BaseFrameworkAdapter):
         an opaque lookup error. ``autogen_v4`` / ``ag2`` are unimplemented and
         unregistered by default, so explicit pins for them fall back to v0.2
         when possible, otherwise raise an actionable ``ImportError``.
+
+        The workflow-supplied ``autogen_version`` (config/YAML) takes precedence
+        over the ``AUTOGEN_VERSION`` environment variable so an explicit YAML
+        pin wins over ambient env state.
         """
-        requested = os.getenv("AUTOGEN_VERSION", "auto").lower()
+        requested = str(
+            (config or {}).get("autogen_version")
+            or os.getenv("AUTOGEN_VERSION", "auto")
+        ).strip().lower()
 
         # A variant is selectable only if its adapter is registered in the
         # registry (built-in or entry-point) and reports availability.
@@ -356,8 +376,8 @@ class AutoGenFamilyAdapter(BaseFrameworkAdapter):
         Returns:
             The concrete AutoGen adapter instance
         """
-        # Get the adapter name to use
-        adapter_name = self.resolve_alias()
+        # Get the adapter name to use (config autogen_version wins over env)
+        adapter_name = self.resolve_alias(config)
         
         # Import registry to create the concrete adapter
         from .registry import get_default_registry
