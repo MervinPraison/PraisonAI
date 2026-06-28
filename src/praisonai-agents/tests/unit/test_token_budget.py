@@ -317,3 +317,51 @@ class TestPostCallBudgetOnStreamingAutoDetect:
                     [{"role": "user", "content": "second"}],
                     stream=None,
                 )
+
+
+class TestAsyncBudgetEnforcement:
+    """Async unified dispatch must enforce max_budget like sync _chat_completion."""
+
+    def _mock_response(self):
+        usage = MagicMock(prompt_tokens=100, completion_tokens=50)
+        return MagicMock(usage=usage, choices=[])
+
+    @pytest.mark.asyncio
+    async def test_async_guard_blocks_before_dispatch(self):
+        from unittest.mock import AsyncMock
+        from praisonaiagents import Agent, ExecutionConfig, BudgetExceededError
+
+        agent = Agent(
+            name="test", instructions="test", llm="gpt-4o",
+            execution=ExecutionConfig(max_budget=0.0001),
+        )
+        mock_dispatcher = MagicMock()
+        mock_dispatcher.achat_completion = AsyncMock(
+            side_effect=AssertionError("LLM dispatched despite budget guard")
+        )
+        agent._unified_dispatcher = mock_dispatcher
+        messages = [{"role": "user", "content": "x" * 200_000}]
+        with pytest.raises(BudgetExceededError):
+            await agent._execute_unified_achat_completion(messages)
+        mock_dispatcher.achat_completion.assert_not_called()
+        assert agent._total_cost == 0.0
+
+    @pytest.mark.asyncio
+    async def test_async_records_cost_and_enforces_ceiling(self):
+        from unittest.mock import AsyncMock
+        from praisonaiagents import Agent, ExecutionConfig, BudgetExceededError
+
+        agent = Agent(
+            name="test", instructions="test", llm="gpt-4o",
+            execution=ExecutionConfig(max_budget=0.10),
+        )
+        mock_response = self._mock_response()
+        mock_dispatcher = MagicMock()
+        mock_dispatcher.achat_completion = AsyncMock(return_value=mock_response)
+        agent._unified_dispatcher = mock_dispatcher
+        messages = [{"role": "user", "content": "hello"}]
+        with patch.object(agent, "_calculate_llm_cost", return_value=0.08):
+            await agent._execute_unified_achat_completion(messages)
+            assert agent._total_cost == 0.08
+            with pytest.raises(BudgetExceededError):
+                await agent._execute_unified_achat_completion(messages)
