@@ -131,14 +131,17 @@ def test_reference_llms_receive_connection_settings(monkeypatch):
             "aggregator": "agg",
             "base_url": "http://custom-ollama:11434/v1",
             "api_key": "secret",
+            "auth": "claude-code",
         }
     )
-    # Building a reference LLM must forward the connection settings.
+    # Building a reference LLM must forward the connection + credential settings
+    # (including subscription auth) so references hit the same backend.
     panel._get_reference_llm("ref-a")
     ref_call = captured[-1]
     assert ref_call["model"] == "ref-a"
     assert ref_call["base_url"] == "http://custom-ollama:11434/v1"
     assert ref_call["api_key"] == "secret"
+    assert ref_call["auth"] == "claude-code"
 
 
 def _make_panel(monkeypatch, references, enabled=True):

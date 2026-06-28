@@ -147,12 +147,15 @@ class PanelLLM(LLM):
         self._panel_references = list(references or [])
         self._panel_enabled = bool(enabled)
         self._panel_reference_temperature = reference_temperature
-        # Connection settings forwarded to reference LLMs so advisory calls hit
-        # the same backend/credentials as the aggregator (e.g. a custom Ollama
-        # endpoint). Only connection-relevant kwargs are propagated.
+        # Connection/credential settings forwarded to reference LLMs so advisory
+        # calls hit the same backend and authenticate the same way as the
+        # aggregator (e.g. a custom Ollama endpoint or subscription ``auth``).
+        # Only connection-relevant kwargs are propagated; execution options
+        # (tools, web_search, etc.) are intentionally excluded since references
+        # are tool-free advisory calls.
         self._panel_ref_kwargs = {
             k: kwargs[k]
-            for k in ("base_url", "api_key", "api_version")
+            for k in ("base_url", "api_key", "api_version", "auth")
             if k in kwargs and kwargs[k] is not None
         }
         # Per-turn cache: signature(trimmed view) -> joined reference guidance.
