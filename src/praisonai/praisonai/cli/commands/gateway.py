@@ -51,6 +51,16 @@ def gateway_start(
     if preflight and config and os.path.exists(config):
         import asyncio
 
+        # Load ~/.praisonai/.env BEFORE probing so ${VAR} tokens stored there
+        # (e.g. by `praisonai onboard`) resolve — GatewayHandler.start() loads
+        # this same file before runtime ${VAR} substitution, so the pre-flight
+        # must mirror it or it would falsely reject valid env-file tokens (#2426).
+        try:
+            from ..features.gateway import _load_praisonai_env_file
+            _load_praisonai_env_file()
+        except Exception:  # pragma: no cover — defensive
+            pass
+
         channels = _load_channels(config)
         if channels:
             results = asyncio.run(_probe_channels(channels))
@@ -177,13 +187,18 @@ def _load_channels(config: str) -> dict:
     return cfg.get("channels", {})
 
 
-async def _probe_channels(channels: dict) -> dict:
+async def _probe_channels(channels: dict, timeout: float = 15.0) -> dict:
     """Build a lightweight Bot per channel and probe its credentials.
 
     Probing builds the adapter lazily and calls the platform identity API
     (Telegram getMe, Slack auth.test, …) without starting message
     processing. No agent is required. Returns ``{name: ProbeResult}``.
+
+    Each probe is bounded by ``timeout`` (seconds) so one stuck adapter
+    cannot hang the whole pre-flight; a timeout is reported as a failure.
     """
+    import asyncio as _asyncio
+
     from praisonai.bots import Bot
     from praisonaiagents.bots import ProbeResult
 
@@ -197,11 +212,15 @@ async def _probe_channels(channels: dict) -> dict:
         }
         try:
             bot = Bot(platform, token=token, **extras)
-            return name, await bot.probe()
+            return name, await _asyncio.wait_for(bot.probe(), timeout=timeout)
+        except _asyncio.TimeoutError:
+            return name, ProbeResult(
+                ok=False,
+                platform=platform,
+                error=f"probe timed out after {timeout:g}s",
+            )
         except Exception as e:  # pragma: no cover — defensive
             return name, ProbeResult(ok=False, platform=platform, error=str(e))
-
-    import asyncio as _asyncio
 
     results = await _asyncio.gather(
         *(_probe_one(name, ch_cfg or {}) for name, ch_cfg in channels.items())

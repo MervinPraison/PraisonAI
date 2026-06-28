@@ -1061,13 +1061,18 @@ class BotOS:
             drain_timeout=drain_timeout,
         )
 
-    async def probe_all(self) -> Dict[str, Any]:
+    async def probe_all(self, timeout: float = 15.0) -> Dict[str, Any]:
         """Probe every registered bot's channel credentials concurrently.
 
         Pre-flight credential check (#2426): validates each channel's token
         and surfaces the bot identity *without* starting message processing.
         Unlike :meth:`health`, this is safe to call before ``start()`` — each
         bot builds its adapter lazily inside ``probe()``.
+
+        Args:
+            timeout: Per-bot deadline (seconds) so one stuck adapter cannot
+                hang the whole aggregate. A timeout is reported as a failed
+                ``ProbeResult`` for that platform.
 
         Returns:
             Dictionary mapping platform name to ``ProbeResult``.
@@ -1081,7 +1086,13 @@ class BotOS:
 
         async def _probe_one(bot: Bot) -> Any:
             try:
-                return await bot.probe()
+                return await asyncio.wait_for(bot.probe(), timeout=timeout)
+            except asyncio.TimeoutError:
+                return ProbeResult(
+                    ok=False,
+                    platform=bot.platform,
+                    error=f"probe timed out after {timeout:g}s",
+                )
             except Exception as e:  # pragma: no cover — defensive
                 return ProbeResult(ok=False, platform=bot.platform, error=str(e))
 

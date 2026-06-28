@@ -64,6 +64,7 @@ def test_probe_channels_and_render(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert all_ok is False
     assert "telegram" in out and "✓" in out
+    assert "@support_bot" in out
     assert "slack" in out and "✗" in out and "invalid_auth" in out
 
 
@@ -104,3 +105,59 @@ def test_channels_probe_flag_passes_when_all_ok(monkeypatch, tmp_path):
     result = runner.invoke(app, ["channels", "--probe", "--config", str(cfg)])
     assert result.exit_code == 0
     assert "telegram" in result.stdout
+
+
+def test_start_preflight_fails_fast_on_bad_token(monkeypatch, tmp_path):
+    typer_testing = pytest.importorskip("typer.testing")
+    _patch_probe(monkeypatch)
+
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text(
+        "channels:\n"
+        "  slack:\n    platform: slack\n    token: s\n"
+    )
+
+    import praisonai.cli.features.gateway as gw_feature
+
+    def _fail_if_called(self, *a, **k):  # pragma: no cover - must not run
+        raise AssertionError("handler.start() must not run on preflight failure")
+
+    monkeypatch.setattr(gw_feature.GatewayHandler, "start", _fail_if_called)
+
+    from praisonai.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(app, ["start", "--config", str(cfg)])
+    assert result.exit_code == 1
+    assert "slack" in result.stdout
+
+
+def test_start_no_preflight_skips_probe(monkeypatch, tmp_path):
+    typer_testing = pytest.importorskip("typer.testing")
+
+    cfg = tmp_path / "gateway.yaml"
+    cfg.write_text(
+        "channels:\n"
+        "  slack:\n    platform: slack\n    token: s\n"
+    )
+
+    async def _must_not_probe(self):  # pragma: no cover - must not run
+        raise AssertionError("probe must not run with --no-preflight")
+
+    monkeypatch.setattr(Bot, "probe", _must_not_probe)
+
+    import praisonai.cli.features.gateway as gw_feature
+
+    started = {}
+
+    def _record_start(self, *a, **k):
+        started["called"] = True
+
+    monkeypatch.setattr(gw_feature.GatewayHandler, "start", _record_start)
+
+    from praisonai.cli.commands.gateway import app
+
+    runner = typer_testing.CliRunner()
+    result = runner.invoke(app, ["start", "--config", str(cfg), "--no-preflight"])
+    assert result.exit_code == 0
+    assert started.get("called") is True
