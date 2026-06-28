@@ -191,6 +191,37 @@ def _empty_usage() -> Dict[str, Any]:
     }
 
 
+def _resolve_usage_store(session_id: str, project_path: Optional[str] = None):
+    """Return the store that actually holds ``session_id``.
+
+    Mirrors ``rehydrate_session``'s search order (project-scoped store first,
+    then the global default store) so usage reads/writes target the same record
+    that resume restored from, rather than always defaulting to the current
+    project store (Issue #2421). Returns ``None`` if no store has the session.
+    """
+    for store in (
+        ("project", lambda: get_project_session_store(project_path)),
+        ("global", _get_default_store),
+    ):
+        try:
+            candidate = store[1]()
+            if candidate is not None and candidate.session_exists(session_id):
+                return candidate
+        except Exception:
+            continue
+    return None
+
+
+def _get_default_store():
+    """Lazily resolve the global default session store (best-effort)."""
+    try:
+        from praisonaiagents.session.store import get_default_session_store
+
+        return get_default_session_store()
+    except Exception:
+        return None
+
+
 def read_session_usage(
     session_id: str, project_path: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -201,10 +232,10 @@ def read_session_usage(
     callers can render a total even for never-tracked sessions (Issue #2421).
     """
     usage = _empty_usage()
+    store = _resolve_usage_store(session_id, project_path)
+    if store is None:
+        return usage
     try:
-        store = get_project_session_store(project_path)
-        if not store.session_exists(session_id):
-            return usage
         data = store.get_session(session_id)
         metadata = dict(getattr(data, "metadata", {}) or {})
     except Exception:
@@ -273,8 +304,20 @@ def accumulate_session_usage(
     try:
         from ..features.cost_tracker import get_pricing
 
-        pricing = get_pricing(model or "default")
-        delta_cost = pricing.calculate_cost(delta_in, delta_out)
+        # Price per-model when the collector breaks usage down by model so
+        # multi-model runs persist the correct cost; fall back to the
+        # CLI-selected model otherwise (Issue #2421).
+        by_model = (summary or {}).get("by_model") or {}
+        if by_model:
+            for model_name, metrics in by_model.items():
+                pricing = get_pricing(model_name or model or "default")
+                delta_cost += pricing.calculate_cost(
+                    int((metrics or {}).get("input_tokens", 0) or 0),
+                    int((metrics or {}).get("output_tokens", 0) or 0),
+                )
+        else:
+            pricing = get_pricing(model or "default")
+            delta_cost = pricing.calculate_cost(delta_in, delta_out)
     except Exception:
         delta_cost = 0.0
 
@@ -288,7 +331,10 @@ def accumulate_session_usage(
     }
 
     try:
-        store = get_project_session_store(project_path)
+        # Write back to the same store the session lives in (project-scoped or
+        # the global fallback) so cumulative totals don't split after a resume
+        # of a globally-stored session (Issue #2421).
+        store = _resolve_usage_store(session_id, project_path) or get_project_session_store(project_path)
         store.update_session_metadata(
             session_id,
             usage=updated,

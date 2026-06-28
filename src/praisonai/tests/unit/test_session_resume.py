@@ -182,6 +182,47 @@ def test_rehydrate_restores_usage(temp_project_store, reset_collector):
     assert restored.usage.get("total_tokens") == 1200
 
 
+def test_accumulate_prices_per_model(temp_project_store, reset_collector):
+    """Multi-model runs are priced per-model, not with a single CLI model."""
+    from praisonai.cli.features.cost_tracker import get_pricing
+    from praisonai.cli.state.project_sessions import accumulate_session_usage
+
+    temp_project_store.add_user_message("um", "hi")
+
+    _track(1000, 1000, model="gpt-4o-mini")
+    _track(1000, 1000, model="gpt-4o")
+
+    # Pass an unrelated CLI model to prove the cost derives from by_model, not it.
+    usage = accumulate_session_usage("um", model="gpt-4o-mini")
+
+    expected = get_pricing("gpt-4o-mini").calculate_cost(1000, 1000) + \
+        get_pricing("gpt-4o").calculate_cost(1000, 1000)
+    assert usage["cost"] == pytest.approx(round(expected, 6))
+    assert usage["total_tokens"] == 4000
+
+
+def test_accumulate_uses_global_store_after_resume(temp_project_store, temp_store, reset_collector):
+    """Usage for a globally-stored session accumulates into that same store."""
+    from praisonai.cli.state.project_sessions import (
+        accumulate_session_usage,
+        read_session_usage,
+    )
+
+    # Session only exists in the global store (e.g. created by the gateway/TUI).
+    temp_store.add_user_message("gonly", "hi")
+
+    _track(100, 200)
+    usage = accumulate_session_usage("gonly", model="gpt-4o-mini")
+    assert usage["total_tokens"] == 300
+
+    # Persisted into the global store and re-readable from there.
+    assert read_session_usage("gonly")["total_tokens"] == 300
+    global_meta = temp_store.get_session("gonly").metadata
+    assert global_meta.get("usage", {}).get("total_tokens") == 300
+    # The project store must NOT have shadow-created the session.
+    assert not temp_project_store.session_exists("gonly")
+
+
 def test_format_usage_footer():
     from praisonai.cli.state.project_sessions import format_usage_footer
 
