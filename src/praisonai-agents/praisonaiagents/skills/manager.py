@@ -171,13 +171,29 @@ class SkillManager:
             # Skip if explicitly disabled for model invocation
             if getattr(skill.properties, "disable_model_invocation", False):
                 continue
-                
-            # Check capability requirements if enforcement is strict
-            if self._validator.enforcement_level == EnforcementLevel.STRICT:
+
+            req = getattr(skill.properties, "requirements", None)
+            is_fallback_skill = bool(
+                req is not None and (req.fallback_for_tools or req.fallback_for_servers)
+            )
+
+            # Check capability requirements when enforcement is strict, OR for
+            # fallback skills regardless of mode: a fallback skill must still
+            # satisfy its own ``requires_*`` gates (e.g. a web-via-terminal
+            # fallback that needs the terminal tool stays hidden if terminal is
+            # also absent), so we never inject an unusable skill.
+            if self._validator.enforcement_level == EnforcementLevel.STRICT or is_fallback_skill:
                 try:
                     validation = self.validate_skill_capabilities(skill.properties.name)
                     if validation.state == SkillState.UNAVAILABLE:
                         continue  # Skip unavailable skills in strict mode
+                    # A fallback skill must satisfy its own requires_* gates in
+                    # every mode. In non-strict modes missing tools/servers only
+                    # mark the skill DEGRADED (not UNAVAILABLE), so check the
+                    # critical-missing flag directly to avoid offering a fallback
+                    # that itself cannot run.
+                    if is_fallback_skill and validation.has_critical_missing:
+                        continue
                 except Exception as e:
                     logger.warning(f"Skipping skill '{skill.properties.name}' due to validation error: {e}")
                     continue
@@ -185,8 +201,7 @@ class SkillManager:
             # Graceful degradation: a fallback skill is only offered when its
             # target capability is absent. When the real tool/server is present,
             # the fallback stays hidden to keep the skills index lean.
-            req = getattr(skill.properties, "requirements", None)
-            if req is not None and (req.fallback_for_tools or req.fallback_for_servers):
+            if is_fallback_skill:
                 if available_tools is None:
                     available_tools = self._validator._get_available_tools()
                 if available_servers is None:
