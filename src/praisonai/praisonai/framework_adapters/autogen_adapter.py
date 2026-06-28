@@ -261,8 +261,9 @@ class AutoGenFamilyAdapter(BaseFrameworkAdapter):
     Router adapter for AutoGen family (v0.2, v0.4, AG2).
     Dispatches to concrete adapter based on config/environment.
     """
-    
+
     name = "autogen"
+    is_router = True
     
     def is_available(self) -> bool:
         """Check if any AutoGen variant is available."""

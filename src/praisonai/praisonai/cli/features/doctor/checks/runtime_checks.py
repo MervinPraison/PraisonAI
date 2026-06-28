@@ -105,11 +105,11 @@ class RuntimeCompatibilityChecker:
             supports_tool_loop=True
         )
         
-        # AutoGen v0.4 runtime
+        # AutoGen v0.4 runtime (optional entry-point adapter)
         runtimes['autogen_v4'] = RuntimeInfo(
             id='autogen_v4',
             name='AutoGen v0.4',
-            available=is_available('autogen') and self._check_autogen_v4(),
+            available=is_available('autogen_v4'),
             capabilities=[
                 RuntimeCapability('agent_creation', 'Create and manage agents'),
                 RuntimeCapability('tool_execution', 'Execute tools and functions'),
@@ -119,7 +119,7 @@ class RuntimeCompatibilityChecker:
             supports_tool_loop=True
         )
         
-        # AG2 runtime
+        # AG2 runtime (optional entry-point adapter)
         runtimes['ag2'] = RuntimeInfo(
             id='ag2',
             name='AG2 (AutoGen Next)',
@@ -135,11 +135,10 @@ class RuntimeCompatibilityChecker:
         return runtimes
     
     def _check_autogen_v4(self) -> bool:
-        """Check if AutoGen v0.4+ is available."""
+        """Check if AutoGen v0.4+ packages are installed."""
         try:
-            import autogen
-            version = getattr(autogen, '__version__', '0.0.0')
-            return version.startswith(('0.4', '0.5'))
+            from praisonai._framework_availability import is_available as fw_available
+            return fw_available('autogen_v4')
         except ImportError:
             return False
     

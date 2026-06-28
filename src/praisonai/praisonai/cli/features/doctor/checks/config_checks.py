@@ -168,8 +168,14 @@ def check_agents_yaml_schema(config: DoctorConfig) -> CheckResult:
     # Check for common fields
     if "framework" in data:
         framework = data["framework"]
-        if framework not in ["praisonai", "crewai", "autogen"]:
-            warnings.append(f"Unknown framework: {framework}")
+        try:
+            from praisonai.framework_adapters.registry import get_default_registry
+            registered = get_default_registry().list_names()
+            if framework not in registered:
+                warnings.append(f"Unknown framework: {framework} (registered: {', '.join(sorted(registered))})")
+        except Exception:
+            if framework not in ["praisonai", "crewai", "autogen"]:
+                warnings.append(f"Unknown framework: {framework}")
     
     # Check for agents section
     agents = data.get("agents") or data.get("roles")

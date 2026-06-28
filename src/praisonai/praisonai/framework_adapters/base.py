@@ -1,218 +1,66 @@
 """
-Base framework adapter protocol for PraisonAI.
+Base framework adapter protocol for PraisonAI wrapper.
 
-This module defines the protocol that all framework adapters must implement,
-enabling lazy-loaded, protocol-driven framework support.
+Protocol and shared helpers live in praisonaiagents.frameworks; this module
+re-exports them and adds wrapper-specific LLM resolution via PraisonAIModel.
 """
 
-from typing import Protocol, Dict, List, Any, Optional, Callable
+from __future__ import annotations
+
 from contextlib import contextmanager
+from typing import Any, Callable, Dict, List, Optional
+
+from praisonaiagents.frameworks.base import BaseFrameworkAdapter as _CoreBaseFrameworkAdapter
+from praisonaiagents.frameworks.protocols import FrameworkAdapterProtocol
+
+# Backward-compatible alias used across the wrapper
+FrameworkAdapter = FrameworkAdapterProtocol
 
 
-class FrameworkAdapter(Protocol):
-    """Protocol for framework adapters."""
-    
-    name: str
-    install_hint: str
-    requires_tools_extra: bool
-    
-    def is_available(self) -> bool:
-        """Check if the framework is available for import."""
-        ...
-    
-    def resolve(self, *, config: Optional[Dict[str, Any]] = None) -> "FrameworkAdapter":
-        """Pick the concrete adapter variant (e.g. autogen v0.2 vs v0.4).
-        
-        Args:
-            config: YAML configuration that may contain version preferences
-        
-        Returns:
-            The resolved adapter instance (self or a different adapter)
-        """
-        ...
-    
-    def setup(self, *, framework_tag: str) -> None:
-        """Framework-specific pre-run hooks (observability, sdk init, etc.).
-        
-        Args:
-            framework_tag: Framework name for observability tagging
-        """
-        ...
-    
-    def run(
-        self,
-        config: Dict[str, Any],
-        llm_config: List[Dict],
-        topic: str,
-        *,
-        tools_dict: Optional[Dict[str, Any]] = None,
-        agent_callback: Optional[Callable] = None,
-        task_callback: Optional[Callable] = None,
-        cli_config: Optional[Dict[str, Any]] = None,
-    ) -> str:
-        """
-        Run the framework with given configuration.
-        
-        Args:
-            config: Framework configuration
-            llm_config: LLM configuration list
-            topic: Topic for the tasks
-            tools_dict: Available tools dictionary
-            agent_callback: Callback for agent events
-            task_callback: Callback for task events
-            cli_config: CLI configuration
-            
-        Returns:
-            Execution result as string
-        """
-        ...
+class BaseFrameworkAdapter(_CoreBaseFrameworkAdapter):
+    """Wrapper base adapter with PraisonAIModel LLM resolution for CrewAI etc."""
 
-    async def arun(
-        self,
-        config: Dict[str, Any],
-        llm_config: List[Dict],
-        topic: str,
-        *,
-        tools_dict: Optional[Dict[str, Any]] = None,
-        agent_callback: Optional[Callable] = None,
-        task_callback: Optional[Callable] = None,
-        cli_config: Optional[Dict[str, Any]] = None,
-    ) -> str:
-        """
-        Async-native execution. Default = offload sync run() to a thread.
-        
-        Args:
-            config: Framework configuration
-            llm_config: LLM configuration list
-            topic: Topic for the tasks
-            tools_dict: Available tools dictionary
-            agent_callback: Callback for agent events
-            task_callback: Callback for task events
-            cli_config: CLI configuration
-            
-        Returns:
-            Execution result as string
-        """
-        ...
-    
-    def cleanup(self) -> None:
-        """Clean up any resources after execution."""
-        ...
-    
-    def resolve_alias(self) -> str:
-        """Return the concrete adapter name to dispatch to (e.g. 'autogen_v4').
-        Default: return self.name."""
-        ...
-
-
-class BaseFrameworkAdapter:
-    """Base class for framework adapters providing common functionality."""
-    
-    DEFAULT_MODEL = "openai/gpt-4o-mini"
-    
-    def __init__(self):
-        pass
-    
-    def _resolve_llm(self, spec, llm_config):
-        """Build a PraisonAIModel from a per-agent llm/function_calling_llm spec.
-        Accepts str, dict, or None. Single source of truth for all adapters."""
+    def _resolve_llm(self, spec: Any, llm_config: Optional[List[Dict]]):
+        """Build a provider model object from spec and shared llm_config."""
         from ..inc import PraisonAIModel
-        import os
-        
-        base = llm_config[0].get('base_url') if (llm_config and len(llm_config) > 0) else None
-        key = llm_config[0].get('api_key') if (llm_config and len(llm_config) > 0) else None
+
+        base = llm_config[0].get("base_url") if (llm_config and len(llm_config) > 0) else None
+        key = llm_config[0].get("api_key") if (llm_config and len(llm_config) > 0) else None
 
         if isinstance(spec, str) and spec.strip():
             model = spec.strip()
-        elif isinstance(spec, dict) and spec.get('model'):
-            model = spec['model']
+        elif isinstance(spec, dict) and spec.get("model"):
+            model = spec["model"]
         else:
+            import os
             model = os.environ.get("MODEL_NAME") or self.DEFAULT_MODEL
 
         return PraisonAIModel(model=model, base_url=base, api_key=key).get_model()
-    
-    def _format_template(self, template: str, **kwargs) -> str:
-        """Safely format template string with given kwargs, preserving JSON-like braces."""
-        if not isinstance(template, str):
-            return template
-        
-        import re
-        
-        def _sub(m):
-            name = m.group(1)
-            return str(kwargs[name]) if name in kwargs else m.group(0)
-        
-        # Only substitute simple variable names like {topic}, not JSON like {"level":2}
-        return re.sub(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', _sub, template)
-    
-    def resolve(self, *, config: Optional[Dict[str, Any]] = None) -> "FrameworkAdapter":
-        """Default implementation returns self."""
-        return self
-    
-    def setup(self, *, framework_tag: str) -> None:
-        """Default implementation does nothing."""
-        pass
-    
-    async def arun(
-        self,
-        config: Dict[str, Any],
-        llm_config: List[Dict],
-        topic: str,
-        *,
-        tools_dict: Optional[Dict[str, Any]] = None,
-        agent_callback: Optional[Callable] = None,
-        task_callback: Optional[Callable] = None,
-        cli_config: Optional[Dict[str, Any]] = None,
-    ) -> str:
-        """
-        Safe default: run sync implementation in a worker thread.
-        
-        Framework adapters with native async support should override this method.
-        """
-        import asyncio
-        return await asyncio.to_thread(
-            self.run, config, llm_config, topic,
-            tools_dict=tools_dict,
-            agent_callback=agent_callback,
-            task_callback=task_callback,
-            cli_config=cli_config
-        )
-    
-    def cleanup(self) -> None:
-        """Clean up resources - default implementation does nothing."""
-        pass
-    
-    def resolve_alias(self) -> str:
-        """Return the concrete adapter name to dispatch to.
-        Default: return self.name."""
-        return self.name
 
 
 @contextmanager
 def scoped_telemetry_disable(telemetry_class):
     """
     Context manager to temporarily disable telemetry methods.
-    
-    This replaces import-time monkey patching with scoped patching
+
+    Replaces import-time monkey patching with scoped patching
     that is automatically restored after use.
     """
     if not telemetry_class:
         yield
         return
-        
-    # Store original methods
+
     originals = {}
     noop = lambda *args, **kwargs: None
-    
+
     for attr_name in dir(telemetry_class):
         attr = getattr(telemetry_class, attr_name)
         if callable(attr) and not attr_name.startswith("__"):
             originals[attr_name] = attr
             setattr(telemetry_class, attr_name, noop)
-    
+
     try:
         yield
     finally:
-        # Restore original methods
         for attr_name, original_method in originals.items():
             setattr(telemetry_class, attr_name, original_method)
