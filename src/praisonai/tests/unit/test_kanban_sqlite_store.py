@@ -392,3 +392,105 @@ class TestSQLiteKanbanStore:
         # This update should fail due to version mismatch
         with pytest.raises(ValueError, match="modified by another process"):
             store.update_task(task.id, {'title': 'Concurrent Update'})
+
+
+class TestClaimReclamation:
+    """Tests for durable claim leases and stale-claim reclamation."""
+
+    def _make_ready(self, store, title='Reclaim Test'):
+        return store.create_task({'title': title, 'status': 'ready'})
+
+    def test_claim_records_lease_and_pid(self, store):
+        task = self._make_ready(store)
+        ok = store.claim_task(task.id, 'w1', ttl_seconds=900, worker_pid=12345)
+        assert ok is True
+
+        claimed = store.get_task(task.id)
+        assert claimed.status == TaskStatus.RUNNING
+        assert claimed.claim_lock == 'w1'
+        assert claimed.worker_pid == 12345
+        assert claimed.claim_expires is not None
+        assert claimed.last_heartbeat_at is not None
+
+    def test_claim_backward_compatible_defaults(self, store):
+        task = self._make_ready(store)
+        assert store.claim_task(task.id, 'w1') is True
+        claimed = store.get_task(task.id)
+        assert claimed.status == TaskStatus.RUNNING
+        assert claimed.claim_lock == 'w1'
+
+    def test_heartbeat_updates_timestamp(self, store):
+        task = self._make_ready(store)
+        store.claim_task(task.id, 'w1', worker_pid=99999)
+        before = store.get_task(task.id).last_heartbeat_at
+        assert store.heartbeat(task.id, 'w1') is True
+        after = store.get_task(task.id).last_heartbeat_at
+        assert after >= before
+
+    def test_heartbeat_wrong_worker_fails(self, store):
+        task = self._make_ready(store)
+        store.claim_task(task.id, 'w1', worker_pid=99999)
+        assert store.heartbeat(task.id, 'other') is False
+
+    def test_heartbeat_extends_lease(self, store):
+        task = self._make_ready(store)
+        store.claim_task(task.id, 'w1', ttl_seconds=1, worker_pid=99999)
+        old_expiry = store.get_task(task.id).claim_expires
+        assert store.heartbeat(task.id, 'w1', ttl_seconds=3600) is True
+        new_expiry = store.get_task(task.id).claim_expires
+        assert new_expiry > old_expiry
+
+    def test_reclaim_dead_worker(self, store):
+        """Expired lease + dead PID -> reclaimed to ready."""
+        task = self._make_ready(store)
+        store.claim_task(task.id, 'w1', ttl_seconds=900, worker_pid=2147480000)
+        with store._get_connection() as conn:
+            conn.execute(
+                "UPDATE tasks SET claim_expires = ? WHERE id = ?",
+                (datetime(2000, 1, 1).isoformat(), task.id),
+            )
+
+        reclaimed = store.reclaim_stale_claims()
+        assert task.id in reclaimed
+        t = store.get_task(task.id)
+        assert t.status == TaskStatus.READY
+        assert t.claim_lock is None
+        assert t.worker_pid is None
+
+    def test_reclaim_skips_valid_lease(self, store):
+        """Unexpired lease is never reclaimed."""
+        task = self._make_ready(store)
+        store.claim_task(task.id, 'w1', ttl_seconds=3600, worker_pid=2147480000)
+        reclaimed = store.reclaim_stale_claims()
+        assert task.id not in reclaimed
+        assert store.get_task(task.id).status == TaskStatus.RUNNING
+
+    def test_reclaim_keeps_live_heartbeating_worker(self, store):
+        """Expired lease but live PID + fresh heartbeat -> kept."""
+        import os
+        task = self._make_ready(store)
+        store.claim_task(task.id, 'w1', ttl_seconds=900, worker_pid=os.getpid())
+        with store._get_connection() as conn:
+            conn.execute(
+                "UPDATE tasks SET claim_expires = ?, last_heartbeat_at = ? WHERE id = ?",
+                (datetime(2000, 1, 1).isoformat(),
+                 datetime.utcnow().isoformat(), task.id),
+            )
+        reclaimed = store.reclaim_stale_claims(stale_timeout_seconds=3600)
+        assert task.id not in reclaimed
+        assert store.get_task(task.id).status == TaskStatus.RUNNING
+
+    def test_reclaim_stale_heartbeat_live_worker(self, store):
+        """Expired lease, live PID, but stale heartbeat -> reclaimed."""
+        import os
+        task = self._make_ready(store)
+        store.claim_task(task.id, 'w1', ttl_seconds=900, worker_pid=os.getpid())
+        with store._get_connection() as conn:
+            conn.execute(
+                "UPDATE tasks SET claim_expires = ?, last_heartbeat_at = ? WHERE id = ?",
+                (datetime(2000, 1, 1).isoformat(),
+                 datetime(2000, 1, 1).isoformat(), task.id),
+            )
+        reclaimed = store.reclaim_stale_claims(stale_timeout_seconds=60)
+        assert task.id in reclaimed
+        assert store.get_task(task.id).status == TaskStatus.READY

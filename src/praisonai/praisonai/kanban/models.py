@@ -32,6 +32,9 @@ class Task:
     board: str = "default"
     workspace_kind: str = "default"
     claim_lock: Optional[str] = None
+    claim_expires: Optional[datetime] = None
+    worker_pid: Optional[int] = None
+    last_heartbeat_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     metadata: Optional[Dict[str, Any]] = None
@@ -50,6 +53,8 @@ class Task:
         result = asdict(self)
         result['created_at'] = self.created_at.isoformat() if self.created_at else None
         result['updated_at'] = self.updated_at.isoformat() if self.updated_at else None
+        result['claim_expires'] = self.claim_expires.isoformat() if self.claim_expires else None
+        result['last_heartbeat_at'] = self.last_heartbeat_at.isoformat() if self.last_heartbeat_at else None
         result['status'] = self.status.value
         result['metadata'] = json.dumps(self.metadata) if self.metadata else None
         return result
@@ -66,6 +71,10 @@ class Task:
             filtered_data['created_at'] = datetime.fromisoformat(filtered_data['created_at'].replace('Z', '+00:00'))
         if 'updated_at' in filtered_data and filtered_data['updated_at']:
             filtered_data['updated_at'] = datetime.fromisoformat(filtered_data['updated_at'].replace('Z', '+00:00'))
+        if filtered_data.get('claim_expires'):
+            filtered_data['claim_expires'] = datetime.fromisoformat(str(filtered_data['claim_expires']).replace('Z', '+00:00'))
+        if filtered_data.get('last_heartbeat_at'):
+            filtered_data['last_heartbeat_at'] = datetime.fromisoformat(str(filtered_data['last_heartbeat_at']).replace('Z', '+00:00'))
         
         # Handle status enum
         if 'status' in filtered_data:
@@ -195,6 +204,20 @@ class KanbanStoreProtocol:
     
     def list_events(self, since: Optional[datetime] = None) -> List[TaskEvent]:
         """List events for SSE."""
+        ...
+
+    def claim_task(self, task_id: str, worker_id: str, *, ttl_seconds: int = 900,
+                   worker_pid: Optional[int] = None) -> bool:
+        """Claim a ready task with a lease."""
+        ...
+
+    def heartbeat(self, task_id: str, worker_id: str, *,
+                  ttl_seconds: Optional[int] = None) -> bool:
+        """Record a worker heartbeat, optionally extending the lease."""
+        ...
+
+    def reclaim_stale_claims(self, *, stale_timeout_seconds: int = 1800) -> List[str]:
+        """Reclaim running tasks stranded by dead/stale workers."""
         ...
 
 

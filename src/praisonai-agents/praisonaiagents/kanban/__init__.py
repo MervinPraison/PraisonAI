@@ -12,6 +12,7 @@ from praisonaiagents.kanban.protocols import (
     KanbanCommentingProtocol,
     KanbanLinkingProtocol,
     KanbanPromotionProtocol,
+    KanbanReclaimProtocol,
     VALID_KANBAN_STATUSES,
 )
 
@@ -21,5 +22,6 @@ __all__ = [
     "KanbanCommentingProtocol", 
     "KanbanLinkingProtocol",
     "KanbanPromotionProtocol",
+    "KanbanReclaimProtocol",
     "VALID_KANBAN_STATUSES",
 ]
