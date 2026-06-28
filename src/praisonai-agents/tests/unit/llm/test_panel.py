@@ -113,6 +113,34 @@ def test_create_panel_llm_forwards_extra_descriptor_options(monkeypatch):
         assert key not in captured["kwargs"]
 
 
+def test_reference_llms_receive_connection_settings(monkeypatch):
+    """Reference models must use the same backend/credentials as the aggregator."""
+    import praisonaiagents.llm.panel as panel_mod
+
+    captured = []
+
+    def fake_init(self, model=None, **kwargs):
+        captured.append({"model": model, **kwargs})
+
+    monkeypatch.setattr("praisonaiagents.llm.llm.LLM.__init__", fake_init)
+
+    panel = panel_mod.create_panel_llm(
+        {
+            "provider": "panel",
+            "references": ["ref-a", "ref-b"],
+            "aggregator": "agg",
+            "base_url": "http://custom-ollama:11434/v1",
+            "api_key": "secret",
+        }
+    )
+    # Building a reference LLM must forward the connection settings.
+    panel._get_reference_llm("ref-a")
+    ref_call = captured[-1]
+    assert ref_call["model"] == "ref-a"
+    assert ref_call["base_url"] == "http://custom-ollama:11434/v1"
+    assert ref_call["api_key"] == "secret"
+
+
 def _make_panel(monkeypatch, references, enabled=True):
     """Create a PanelLLM without invoking LLM.__init__ (no litellm needed)."""
     panel = PanelLLM.__new__(PanelLLM)
@@ -124,6 +152,7 @@ def _make_panel(monkeypatch, references, enabled=True):
     panel._panel_ref_cache = OrderedDict()
     panel._panel_ref_cache_max = 128
     panel._panel_ref_llms = {}
+    panel._panel_ref_kwargs = {}
     return panel
 
 

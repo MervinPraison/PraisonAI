@@ -147,6 +147,14 @@ class PanelLLM(LLM):
         self._panel_references = list(references or [])
         self._panel_enabled = bool(enabled)
         self._panel_reference_temperature = reference_temperature
+        # Connection settings forwarded to reference LLMs so advisory calls hit
+        # the same backend/credentials as the aggregator (e.g. a custom Ollama
+        # endpoint). Only connection-relevant kwargs are propagated.
+        self._panel_ref_kwargs = {
+            k: kwargs[k]
+            for k in ("base_url", "api_key", "api_version")
+            if k in kwargs and kwargs[k] is not None
+        }
         # Per-turn cache: signature(trimmed view) -> joined reference guidance.
         # Bounded (FIFO) so long-lived agents with many unique turns do not leak.
         self._panel_ref_cache: "OrderedDict[str, str]" = OrderedDict()
@@ -203,7 +211,7 @@ class PanelLLM(LLM):
 
     def _get_reference_llm(self, model: str) -> LLM:
         if model not in self._panel_ref_llms:
-            self._panel_ref_llms[model] = LLM(model=model)
+            self._panel_ref_llms[model] = LLM(model=model, **self._panel_ref_kwargs)
         return self._panel_ref_llms[model]
 
     def _format_reference_guidance(self, results: List[tuple]) -> str:
