@@ -1017,7 +1017,9 @@ class PraisonAI:
             _framework_choices = list_framework_choices(include_unavailable=True) or [
                 "praisonai", "crewai", "autogen",
             ]
-        except Exception:
+        except ImportError:
+            # Only fall back to the static trio when the adapter layer itself
+            # cannot be imported; genuine registry discovery errors should surface.
             _framework_choices = ["praisonai", "crewai", "autogen"]
         parser.add_argument(
             "--framework",
@@ -2028,7 +2030,7 @@ class PraisonAI:
                     print("pip install \"praisonai[crewai]\"  # CrewAI")
                     print("pip install \"praisonai[autogen]\"  # AutoGen\n")
                     sys.exit(1)
-            except Exception:
+            except ImportError:
                 if not CREWAI_AVAILABLE and not AUTOGEN_AVAILABLE and not PRAISONAI_AVAILABLE:
                     print("[red]ERROR: No framework is installed. Please install at least one framework:[/red]")
                     print("\npip install \"praisonai\\[crewai]\"  # For CrewAI")
@@ -3068,6 +3070,12 @@ class PraisonAI:
             
             parser = YAMLWorkflowParser()
             workflow = parser.parse_file(yaml_file)
+
+            from ..framework_adapters.workflow_framework import validate_workflow_framework
+            validate_workflow_framework(
+                getattr(workflow, "framework", "praisonai"),
+                source=f"workflow file {yaml_file}",
+            )
             
             # Show validation results
             table = Table(title="Workflow Validation")
@@ -5666,7 +5674,7 @@ Now, {final_instruction.lower()}:"""
                 _gradio_frameworks = list_framework_choices(include_unavailable=True) or [
                     "crewai", "autogen", "praisonai",
                 ]
-            except Exception:
+            except ImportError:
                 _gradio_frameworks = ["crewai", "autogen", "praisonai"]
 
             gr.Interface(

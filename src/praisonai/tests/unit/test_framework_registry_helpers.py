@@ -29,4 +29,4 @@ def test_ag2_not_in_default_builtins():
     from praisonai.framework_adapters.registry import get_default_registry
 
     registry = get_default_registry()
-    assert "ag2" not in registry.list_names() or not registry.is_available("ag2")
+    assert "ag2" not in registry.list_names()

@@ -173,9 +173,10 @@ def check_agents_yaml_schema(config: DoctorConfig) -> CheckResult:
             registered = get_default_registry().list_names()
             if framework not in registered:
                 warnings.append(f"Unknown framework: {framework} (registered: {', '.join(sorted(registered))})")
-        except Exception:
-            if framework not in ["praisonai", "crewai", "autogen"]:
-                warnings.append(f"Unknown framework: {framework}")
+        except ImportError:
+            # Registry unavailable (adapter layer not installed); skip the
+            # unknown-framework check rather than guessing against a stale list.
+            pass
     
     # Check for agents section
     agents = data.get("agents") or data.get("roles")

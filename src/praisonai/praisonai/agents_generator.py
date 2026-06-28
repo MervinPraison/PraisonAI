@@ -713,8 +713,9 @@ class AgentsGenerator:
             framework_from_config,
             validate_workflow_framework,
         )
+        effective_framework = (self.framework or framework_from_config(config))
         validate_workflow_framework(
-            framework_from_config(config),
+            effective_framework,
             source="agents.yaml workflow section",
         )
         
@@ -777,8 +778,9 @@ class AgentsGenerator:
             framework_from_config,
             validate_workflow_framework,
         )
+        effective_framework = (self.framework or framework_from_config(config))
         validate_workflow_framework(
-            framework_from_config(config),
+            effective_framework,
             source="agents.yaml workflow section",
         )
         

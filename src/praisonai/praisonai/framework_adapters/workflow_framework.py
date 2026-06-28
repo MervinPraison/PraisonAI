@@ -19,10 +19,21 @@ def validate_workflow_framework(
     if not framework or str(framework).lower() == "praisonai":
         return
 
+    supported = ""
+    try:
+        from .registry import list_framework_choices
+
+        choices = [f for f in list_framework_choices(include_unavailable=True) if f != "praisonai"]
+        if choices:
+            supported = f" Available registered frameworks: {', '.join(sorted(choices))}."
+    except Exception:
+        pass
+
     raise ValueError(
         f"framework='{framework}' in {source} is not supported for workflow execution. "
         "Native PraisonAI Workflow engine only supports framework='praisonai'. "
-        "Use agents.yaml with framework: crewai|autogen, or set framework: praisonai."
+        "Use a non-workflow agents.yaml with a supported registered framework, "
+        f"or set framework: praisonai.{supported}"
     )
 
 
