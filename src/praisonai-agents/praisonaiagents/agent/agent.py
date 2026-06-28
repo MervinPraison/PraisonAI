@@ -4119,24 +4119,6 @@ Summary:"""
     #                     Runtime Capability Management
     # -------------------------------------------------------------------------
     
-    def _resolve_runtime_config(self, runtime):
-        """Resolve runtime configuration parameter.
-        
-        Args:
-            runtime: Runtime parameter (bool, str, dict, or RuntimeConfig)
-            
-        Returns:
-            RuntimeConfig instance or None
-        """
-        try:
-            from ..config import resolve_runtime
-            return resolve_runtime(runtime)
-        except ImportError:
-            raise ImportError(
-                "Runtime capability features requested but configuration not available. "
-                "This should not happen in a properly installed praisonaiagents package."
-            )
-    
     def _validate_runtime_capabilities(self):
         """Validate that current runtime supports required capabilities.
         
