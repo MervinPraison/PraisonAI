@@ -58,7 +58,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
 
-from ._resilience import BackoffPolicy, compute_backoff, is_recoverable_error
+from ._resilience import BackoffPolicy, compute_backoff, is_recoverable_error, server_retry_after
 
 logger = logging.getLogger(__name__)
 
@@ -346,9 +346,16 @@ class OutboundQueue:
                 failed += 1
                 continue
             
-            # Calculate backoff delay
+            # Calculate backoff delay. Honour a server-mandated wait
+            # (Telegram retry_after / HTTP Retry-After) recorded in the prior
+            # error over the generic backoff estimate, so we don't retry early
+            # and re-trip the platform's throttle.
             if entry.last_attempt:
                 delay = compute_backoff(self.backoff, entry.attempts + 1)
+                if entry.error:
+                    mandated = server_retry_after(Exception(entry.error))
+                    if mandated is not None:
+                        delay = max(delay, mandated)
                 time_since_last = time.time() - entry.last_attempt
                 if time_since_last < delay:
                     # Not ready for retry yet

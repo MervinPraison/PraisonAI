@@ -17,7 +17,13 @@ if TYPE_CHECKING:
 from ._chunk import chunk_message, _calculate_length
 from ._streaming import DraftStreamer, StreamingConfig, StreamingMode
 from ._rate_limit import RateLimiter
-from ._resilience import BackoffPolicy, compute_backoff, is_recoverable_error, sleep_with_abort
+from ._resilience import (
+    BackoffPolicy,
+    compute_backoff,
+    is_recoverable_error,
+    server_retry_after,
+    sleep_with_abort,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -287,6 +293,7 @@ async def deliver_with_retry(
     max_attempts: int = 3,
     abort_signal: Optional[asyncio.Event] = None,
     platform: str = "",
+    rate_limiter: Optional[RateLimiter] = None,
     **send_kwargs
 ) -> tuple[bool, Optional[str]]:
     """Attempt delivery with bounded exponential backoff retry.
@@ -299,6 +306,8 @@ async def deliver_with_retry(
         max_attempts: Maximum delivery attempts
         abort_signal: Optional event to cancel retries
         platform: Platform name for error classification
+        rate_limiter: Optional limiter to penalise after a server throttle
+            signal so subsequent sends to the channel hold off.
         **send_kwargs: Additional kwargs for send_message
         
     Returns:
@@ -342,12 +351,23 @@ async def deliver_with_retry(
                 )
                 return False, f"Max attempts exceeded: {last_error}"
             
-            # Calculate backoff delay
-            delay = compute_backoff(backoff, attempt)
+            # Honour a server-mandated wait (Telegram retry_after, HTTP
+            # Retry-After) over the generic backoff estimate.
+            mandated = server_retry_after(e)
+            delay = mandated if mandated is not None else compute_backoff(backoff, attempt)
             
+            # Widen this channel's lane so the next send does not immediately
+            # re-trip the platform limit.
+            if rate_limiter is not None and delay > 0:
+                try:
+                    await rate_limiter.penalise(channel_id, delay)
+                except Exception:
+                    pass
+            
+            hint = " (server Retry-After)" if mandated is not None else ""
             logger.warning(
                 f"[{platform}] Delivery attempt {attempt} failed to {channel_id}: "
-                f"{e}; retrying in {delay:.1f}s"
+                f"{e}; retrying in {delay:.1f}s{hint}"
             )
             
             # Sleep with abort capability

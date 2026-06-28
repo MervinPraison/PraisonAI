@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional, Set
@@ -100,6 +101,98 @@ _TELEGRAM_RECOVERABLE: Set[str] = {
     "retry after",
     "webhook",
 }
+
+
+def _parse_http_date_seconds(value: str) -> Optional[float]:
+    """Parse an HTTP-date Retry-After value into seconds from now.
+
+    Returns None if the value is not a parseable HTTP-date.
+    """
+    try:
+        from email.utils import parsedate_to_datetime
+        from datetime import datetime, timezone
+
+        dt = parsedate_to_datetime(value)
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        delta = (dt - datetime.now(timezone.utc)).total_seconds()
+        return max(0.0, delta)
+    except Exception:
+        return None
+
+
+def server_retry_after(err: BaseException) -> Optional[float]:
+    """Extract a server-mandated wait (seconds) from an error/response.
+
+    Honours explicit throttle signals instead of guessing with backoff:
+      * Telegram: ``parameters.retry_after`` (or ``retry_after``) on a 429.
+      * HTTP channels (Slack/Discord/WhatsApp): ``Retry-After`` header,
+        as integer seconds or an HTTP-date.
+      * Text fallback: "retry after <n>" / "retry_after: <n>" in the message.
+
+    Args:
+        err: The exception raised by an outbound send.
+
+    Returns:
+        The mandated wait in seconds, or None when no hint is present.
+    """
+    if err is None:
+        return None
+
+    # 1) Telegram-style: parameters.retry_after (python-telegram-bot exposes
+    #    `retry_after` directly; raw API returns parameters={"retry_after": N}).
+    for attr in ("retry_after",):
+        val = getattr(err, attr, None)
+        if isinstance(val, (int, float)) and val >= 0:
+            return float(val)
+
+    params = getattr(err, "parameters", None)
+    if isinstance(params, dict):
+        val = params.get("retry_after")
+        if isinstance(val, (int, float)) and val >= 0:
+            return float(val)
+
+    # 2) HTTP Retry-After header from a variety of response shapes.
+    headers = None
+    for holder in (err, getattr(err, "response", None), getattr(err, "resp", None)):
+        if holder is None:
+            continue
+        h = getattr(holder, "headers", None)
+        if h is not None:
+            headers = h
+            break
+
+    if headers is not None:
+        try:
+            getter = getattr(headers, "get", None)
+            raw = getter("Retry-After") if callable(getter) else None
+            if raw is None and callable(getter):
+                raw = getter("retry-after")
+        except Exception:
+            raw = None
+        if raw is not None:
+            raw_str = str(raw).strip()
+            try:
+                secs = float(raw_str)
+                if secs >= 0:
+                    return secs
+            except (TypeError, ValueError):
+                parsed = _parse_http_date_seconds(raw_str)
+                if parsed is not None:
+                    return parsed
+
+    # 3) Text fallback: parse "retry after 30" / "retry_after: 30" from message.
+    msg = str(err)
+    match = re.search(r"retry[\s_-]?after[:\s]+(\d+(?:\.\d+)?)", msg, re.IGNORECASE)
+    if match:
+        try:
+            return float(match.group(1))
+        except (TypeError, ValueError):
+            return None
+
+    return None
 
 
 def is_recoverable_error(err: BaseException, platform: str = "") -> bool:
@@ -225,12 +318,21 @@ class ConnectionMonitor:
         self.last_error = str(err)
         self.last_error_time = time.time()
         
-        delay = compute_backoff(self.policy, self.attempt)
-        
-        logger.warning(
-            f"[{self.platform}] Error (attempt {self.attempt}): "
-            f"{self.last_error}; retrying in {delay:.1f}s"
-        )
+        # Honour an explicit server-mandated wait (Telegram retry_after,
+        # HTTP Retry-After) over the generic backoff estimate.
+        mandated = server_retry_after(err)
+        if mandated is not None:
+            delay = mandated
+            logger.warning(
+                f"[{self.platform}] Error (attempt {self.attempt}): "
+                f"{self.last_error}; honouring server Retry-After {delay:.1f}s"
+            )
+        else:
+            delay = compute_backoff(self.policy, self.attempt)
+            logger.warning(
+                f"[{self.platform}] Error (attempt {self.attempt}): "
+                f"{self.last_error}; retrying in {delay:.1f}s"
+            )
         
         return delay
     
@@ -327,12 +429,14 @@ async def deliver_with_retry(
                         logger.error(f"Failed to park outbound message: {dlq_exc}")
                 raise
             
-            # Compute backoff delay
-            delay = compute_backoff(policy, attempt)
+            # Honour a server-mandated wait if present, else generic backoff.
+            mandated = server_retry_after(e)
+            delay = mandated if mandated is not None else compute_backoff(policy, attempt)
             attempts_display = f"{attempt}/{policy.max_attempts}" if policy.max_attempts > 0 else f"{attempt}/∞"
+            hint = " (server Retry-After)" if mandated is not None else ""
             logger.warning(
                 f"[{platform}] Outbound send failed (attempt {attempts_display}): "
-                f"{e}; retrying in {delay:.1f}s"
+                f"{e}; retrying in {delay:.1f}s{hint}"
             )
             
             await asyncio.sleep(delay)
