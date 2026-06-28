@@ -370,6 +370,94 @@ class SQLiteKanbanStore:
             
             return updated_task
 
+    def recompute_ready(self) -> List[str]:
+        """Promote dependent tasks to 'ready' once all parents are terminal.
+
+        Scans tasks currently in 'todo'/'blocked' that have at least one
+        parent link and, for each one whose parents are *all* in a terminal
+        state ('done'/'archived'), advances it to 'ready'.
+
+        Parentless tasks are intentionally left untouched so that 'todo'
+        remains usable as a manual staging column (backward compatible);
+        only dependency-driven tasks are auto-promoted.
+
+        This is the engine that turns a static dependency graph into a
+        self-driving pipeline; the dispatcher calls it each tick before
+        claiming work.
+
+        Returns:
+            List of task IDs that were promoted to 'ready' this pass.
+        """
+        promoted: List[str] = []
+
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT t.id AS id, t.status AS status
+                FROM tasks t
+                WHERE t.status IN ('todo', 'blocked')
+                  AND EXISTS (
+                      SELECT 1 FROM task_links tl WHERE tl.child_id = t.id
+                  )
+                ORDER BY t.priority DESC, t.created_at ASC
+            """)
+            candidates = [(row['id'], row['status']) for row in cursor.fetchall()]
+
+            for task_id, _old_status in candidates:
+                parent_check = conn.execute("""
+                    SELECT COUNT(*) as incomplete_parents
+                    FROM task_links tl
+                    JOIN tasks t ON t.id = tl.parent_id
+                    WHERE tl.child_id = ? AND t.status NOT IN ('done', 'archived')
+                """, (task_id,))
+
+                if parent_check.fetchone()['incomplete_parents'] == 0:
+                    self._update_task_with_conn(
+                        task_id, {'status': TaskStatus.READY.value}, conn
+                    )
+                    self._log_event(conn, task_id, 'promoted', {
+                        'old_status': _old_status,
+                        'new_status': TaskStatus.READY.value,
+                    })
+                    promoted.append(task_id)
+
+        return promoted
+
+    def get_ready_children(self, parent_id: str) -> List[str]:
+        """Return children of ``parent_id`` that are now ready to promote.
+
+        A child is returned when it is in 'todo'/'blocked' and *all* of its
+        parents (not just ``parent_id``) are in a terminal state.
+
+        Args:
+            parent_id: Parent task identifier.
+
+        Returns:
+            List of child task IDs eligible for promotion.
+        """
+        ready_children: List[str] = []
+
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT tl.child_id
+                FROM task_links tl
+                JOIN tasks t ON t.id = tl.child_id
+                WHERE tl.parent_id = ? AND t.status IN ('todo', 'blocked')
+            """, (parent_id,))
+            child_ids = [row['child_id'] for row in cursor.fetchall()]
+
+            for child_id in child_ids:
+                parent_check = conn.execute("""
+                    SELECT COUNT(*) as incomplete_parents
+                    FROM task_links tl
+                    JOIN tasks t ON t.id = tl.parent_id
+                    WHERE tl.child_id = ? AND t.status NOT IN ('done', 'archived')
+                """, (child_id,))
+
+                if parent_check.fetchone()['incomplete_parents'] == 0:
+                    ready_children.append(child_id)
+
+        return ready_children
+
     def get_board(self, board: str = "default") -> Dict[str, Any]:
         """Get board layout for UI."""
         tasks = self.list_tasks({'board': board})

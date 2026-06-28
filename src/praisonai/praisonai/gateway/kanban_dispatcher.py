@@ -69,6 +69,10 @@ class KanbanDispatcher:
         # Clean up completed processes first
         self._cleanup_completed_tasks(store)
         
+        # Promote dependency-driven tasks before claiming so a completed
+        # parent advances its children to 'ready' on the next tick.
+        self._promote_ready(store)
+        
         # Check how many slots we have available
         available_slots = self.max_concurrent - len(self.running_tasks)
         if available_slots <= 0:
@@ -123,6 +127,45 @@ class KanbanDispatcher:
         
         return spawned
     
+    def _promote_ready(self, store: Any) -> List[str]:
+        """Promote dependency-driven tasks to 'ready' and fire move events.
+
+        Runs once per dispatch tick before claiming. Delegates the promotion
+        algorithm to the store's ``recompute_ready`` (when available) so that
+        children whose parents are all terminal become claimable.
+
+        Args:
+            store: Kanban store instance.
+
+        Returns:
+            List of task IDs promoted to 'ready' this tick.
+        """
+        recompute = getattr(store, "recompute_ready", None)
+        if not callable(recompute):
+            return []
+
+        try:
+            promoted = recompute() or []
+        except Exception as e:
+            logger.error(f"Error recomputing ready tasks: {e}")
+            return []
+
+        for task_id in promoted:
+            try:
+                task = store.get_task(task_id)
+            except Exception:
+                task = None
+            self._fire_hook_event('KANBAN_TASK_MOVED', {
+                'task_id': task_id,
+                'to_status': 'ready',
+                'task': task.to_dict() if task and hasattr(task, 'to_dict') else {},
+            })
+
+        if promoted:
+            logger.info(f"Promoted {len(promoted)} kanban task(s) to ready")
+
+        return promoted
+
     async def _spawn_worker(self, task: Any, store: Any) -> bool:
         """
         Spawn a worker process for the task.

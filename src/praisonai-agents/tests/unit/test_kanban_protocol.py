@@ -14,6 +14,7 @@ from praisonaiagents.kanban.protocols import (
     KanbanTaskProtocol,
     KanbanCommentingProtocol,
     KanbanLinkingProtocol,
+    KanbanPromotionProtocol,
     VALID_KANBAN_STATUSES,
 )
 from praisonaiagents.hooks.types import (
@@ -143,7 +144,27 @@ class TestKanbanProtocol:
         assert isinstance(full_store, KanbanStoreProtocol)
         assert isinstance(full_store, KanbanCommentingProtocol)
         assert isinstance(full_store, KanbanLinkingProtocol)
-        
+
+    def test_promotion_protocol_checks(self):
+        """Test that KanbanPromotionProtocol works as an independent extension."""
+
+        class PromotingStore:
+            def recompute_ready(self):
+                return []
+
+        class NonPromotingStore:
+            def get_task(self, task_id):
+                return None
+
+        promoting = PromotingStore()
+        non_promoting = NonPromotingStore()
+
+        assert runtime_checkable(KanbanPromotionProtocol)
+        assert isinstance(promoting, KanbanPromotionProtocol)
+        assert not isinstance(non_promoting, KanbanPromotionProtocol)
+        # Extension must not be conflated with the core store protocol
+        assert not isinstance(promoting, KanbanStoreProtocol)
+
     def test_kanban_task_protocol_shape(self):
         """Test KanbanTaskProtocol typed dict structure."""
         # This tests that the TypedDict can be used for type hints

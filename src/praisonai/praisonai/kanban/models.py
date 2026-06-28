@@ -169,6 +169,10 @@ class KanbanStoreProtocol:
         """Move task to new status."""
         ...
     
+    def recompute_ready(self) -> List[str]:
+        """Promote dependent tasks to 'ready' when all parents are terminal."""
+        ...
+    
     def get_board(self, board: str = "default") -> Dict[str, Any]:
         """Get board layout for UI."""
         ...
