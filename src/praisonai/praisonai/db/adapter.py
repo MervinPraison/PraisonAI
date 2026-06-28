@@ -71,7 +71,7 @@ class PraisonAIDB:
         # Remember a hard init failure so a soft error (bad config / missing dep
         # / cloud auth failure) is surfaced cleanly instead of being re-tried —
         # and re-raised — on every subsequent callback.
-        self._init_failed: Optional[BaseException] = None
+        self._init_failed: Optional[Exception] = None
 
     def _build_stores(self):
         """Construct the backing stores (blocking I/O). Caller handles locking."""
