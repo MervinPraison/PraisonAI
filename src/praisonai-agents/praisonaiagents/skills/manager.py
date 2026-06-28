@@ -158,8 +158,15 @@ class SkillManager:
         This is used for system prompt injection. Skills are filtered by:
         1. disable-model-invocation: true (excluded)
         2. Capability enforcement (if strict mode, exclude UNAVAILABLE skills)
+        3. Graceful-degradation fallbacks: a skill that declares
+           ``fallback_for_tools`` / ``fallback_for_servers`` is offered only
+           when the referenced capability is ABSENT.
         """
         available = []
+        # Resolved capability sets are needed to evaluate fallback eligibility.
+        # Computed lazily and cached by the validator.
+        available_tools = None
+        available_servers = None
         for skill in self._skills.values():
             # Skip if explicitly disabled for model invocation
             if getattr(skill.properties, "disable_model_invocation", False):
@@ -174,7 +181,21 @@ class SkillManager:
                 except Exception as e:
                     logger.warning(f"Skipping skill '{skill.properties.name}' due to validation error: {e}")
                     continue
-                    
+
+            # Graceful degradation: a fallback skill is only offered when its
+            # target capability is absent. When the real tool/server is present,
+            # the fallback stays hidden to keep the skills index lean.
+            req = getattr(skill.properties, "requirements", None)
+            if req is not None and (req.fallback_for_tools or req.fallback_for_servers):
+                if available_tools is None:
+                    available_tools = self._validator._get_available_tools()
+                if available_servers is None:
+                    available_servers = self._validator._get_available_servers()
+                if any(t in available_tools for t in req.fallback_for_tools):
+                    continue
+                if any(s in available_servers for s in req.fallback_for_servers):
+                    continue
+
             available.append(skill.metadata)
             
         return available
