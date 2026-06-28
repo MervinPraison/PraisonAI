@@ -201,20 +201,37 @@ def kanban_complete(
     """
     try:
         store = _get_kanban_store()
-        
-        # Record a completed run capturing the structured handoff
-        run = None
-        try:
+
+        existing_task = store.get_task(task_id)
+        if existing_task is None:
+            raise ValueError(f"Task {task_id} not found; create it before completing it")
+
+        # Close the active attempt if the dispatcher opened one; otherwise
+        # record a fresh completed run. Either way the structured handoff must
+        # persist before we transition the task to done.
+        current_run_id = getattr(existing_task, 'current_run_id', None)
+        if current_run_id:
+            run = store.close_run(
+                current_run_id,
+                'completed',
+                summary=summary,
+                metadata=metadata or {},
+            )
+        else:
             run = store.record_run(
                 task_id,
                 'completed',
                 summary=summary,
                 metadata=metadata or {},
             )
-        except Exception as run_err:
-            logger.warning(f"Failed to record completion run for {task_id}: {run_err}")
-        
-        # Move to done status
+
+        if run is None:
+            raise ValueError(
+                f"Completion run for task {task_id} could not be recorded; "
+                "verify current_run_id and retry completion"
+            )
+
+        # Move to done status only after the handoff is durably recorded
         task = store.move_task(task_id, 'done')
         
         # Preserve free-text comment behaviour for back-compat

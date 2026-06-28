@@ -135,7 +135,7 @@ class SQLiteKanbanStore:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_task_runs_task ON task_runs(task_id)")
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_idempotency "
-                "ON tasks(board, idempotency_key) WHERE idempotency_key IS NOT NULL"
+                "ON tasks(board, tenant, idempotency_key) WHERE idempotency_key IS NOT NULL"
             )
 
     def _migrate_schema(self, conn: sqlite3.Connection):
@@ -206,10 +206,22 @@ class SQLiteKanbanStore:
         task_id = task_data.get('id', self._generate_id())
         now = datetime.utcnow()
         board = task_data.get('board', self.board or 'default')
+        tenant = task_data.get('tenant', 'default')
         if idempotency_key is None:
             idempotency_key = task_data.get('idempotency_key')
+        # Reject non-positive / non-integer overrides so a bad caller value
+        # cannot auto-block a task on its first failure; fall back to the
+        # board default instead.
         max_retries = task_data.get('max_retries')
-        
+        if max_retries is not None:
+            try:
+                max_retries = int(max_retries)
+            except (TypeError, ValueError):
+                max_retries = None
+            else:
+                if max_retries < 1:
+                    max_retries = None
+
         task = Task(
             id=task_id,
             title=task_data['title'],
@@ -217,7 +229,7 @@ class SQLiteKanbanStore:
             status=TaskStatus(task_data.get('status', 'todo')),
             assignee=task_data.get('assignee', ''),
             priority=task_data.get('priority', 0),
-            tenant=task_data.get('tenant', 'default'),
+            tenant=tenant,
             board=board,
             workspace_kind=task_data.get('workspace_kind', 'default'),
             metadata=task_data.get('metadata', {}),
@@ -225,35 +237,49 @@ class SQLiteKanbanStore:
             created_at=now,
             updated_at=now
         )
-        
+
+        def _find_existing(conn):
+            cursor = conn.execute(
+                "SELECT * FROM tasks WHERE board = ? AND tenant = ? AND idempotency_key = ?",
+                (board, tenant, idempotency_key)
+            )
+            row = cursor.fetchone()
+            return Task.from_dict(dict(row)) if row else None
+
         with self._get_connection() as conn:
             # Idempotent create: return existing task if key already used
+            # (scoped per board + tenant to avoid cross-tenant collisions).
             if idempotency_key is not None:
-                cursor = conn.execute(
-                    "SELECT * FROM tasks WHERE board = ? AND idempotency_key = ?",
-                    (board, idempotency_key)
-                )
-                existing = cursor.fetchone()
+                existing = _find_existing(conn)
                 if existing:
-                    return Task.from_dict(dict(existing))
-            
-            conn.execute("""
-                INSERT INTO tasks (
-                    id, title, body, status, assignee, priority, 
-                    tenant, board, workspace_kind, metadata, 
-                    idempotency_key, max_retries, consecutive_failures,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                task.id, task.title, task.body, task.status.value,
-                task.assignee, task.priority, task.tenant, task.board,
-                task.workspace_kind, json.dumps(task.metadata),
-                idempotency_key, max_retries, 0,
-                task.created_at.isoformat(), task.updated_at.isoformat()
-            ))
-            
+                    return existing
+
+            try:
+                conn.execute("""
+                    INSERT INTO tasks (
+                        id, title, body, status, assignee, priority,
+                        tenant, board, workspace_kind, metadata,
+                        idempotency_key, max_retries, consecutive_failures,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    task.id, task.title, task.body, task.status.value,
+                    task.assignee, task.priority, task.tenant, task.board,
+                    task.workspace_kind, json.dumps(task.metadata),
+                    idempotency_key, max_retries, 0,
+                    task.created_at.isoformat(), task.updated_at.isoformat()
+                ))
+            except sqlite3.IntegrityError:
+                # Lost a concurrent race on the idempotency key: return the
+                # row that won instead of bubbling up the duplicate error.
+                if idempotency_key is not None:
+                    existing = _find_existing(conn)
+                    if existing:
+                        return existing
+                raise
+
             self._log_event(conn, task_id, 'created', task.to_dict())
-        
+
         return task
 
     def get_task(self, task_id: str) -> Optional[Task]:
@@ -427,8 +453,12 @@ class SQLiteKanbanStore:
                 if cursor.fetchone()['incomplete_parents'] > 0:
                     raise ValueError("Cannot move to ready: incomplete parent tasks")
             
-            # Update task status
-            updated_task = self._update_task_with_conn(task_id, {'status': status}, conn)
+            # Update task status. Terminal statuses also clear the claim so a
+            # finished/archived task is no longer reported as owned by a worker.
+            status_updates = {'status': status}
+            if new_status in (TaskStatus.DONE, TaskStatus.ARCHIVED):
+                status_updates['claim_lock'] = None
+            updated_task = self._update_task_with_conn(task_id, status_updates, conn)
             
             # Promote children if moving to done
             if new_status == TaskStatus.DONE:
@@ -1000,6 +1030,14 @@ class SQLiteKanbanStore:
                 outcome_value, new_summary or '', json.dumps(new_metadata or {}),
                 new_error or '', now, run_id
             ))
+            # The attempt is no longer active: clear the task pointer, but only
+            # if it still points at THIS run so a late close from an older run
+            # cannot wipe a newer active attempt.
+            conn.execute(
+                "UPDATE tasks SET current_run_id = NULL, updated_at = ? "
+                "WHERE id = ? AND current_run_id = ?",
+                (now, run.task_id, run_id)
+            )
             # Successful completion resets the failure counter
             if outcome_value == RunOutcome.COMPLETED.value:
                 conn.execute(

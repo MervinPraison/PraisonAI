@@ -596,6 +596,8 @@ class TestTaskRunsAndRetry:
         assert closed.metadata == {'changed_files': ['a.py']}
         assert closed.error == 'boom'
         assert closed.ended_at is not None
+        # Closing the run clears the active-attempt pointer
+        assert store.get_task(task.id).current_run_id is None
 
     def test_get_runs_ordered(self, store):
         """get_runs returns all attempts oldest first."""
@@ -648,3 +650,36 @@ class TestTaskRunsAndRetry:
         assert ctx[0]['outcome'] == 'crashed'
         assert ctx[0]['error'] == 'segfault'
         assert ctx[0]['summary'] == 'path A'
+
+    def test_idempotent_create_scoped_by_tenant(self, store):
+        """Same idempotency key under different tenants creates distinct tasks."""
+        a = store.create_task(
+            {'title': 'Tenant A task', 'tenant': 'tenant-a'},
+            idempotency_key='shared-key',
+        )
+        b = store.create_task(
+            {'title': 'Tenant B task', 'tenant': 'tenant-b'},
+            idempotency_key='shared-key',
+        )
+        assert a.id != b.id
+        assert a.tenant == 'tenant-a'
+        assert b.tenant == 'tenant-b'
+
+    def test_invalid_max_retries_falls_back_to_default(self, store):
+        """Non-positive / invalid max_retries must not auto-block on first fail."""
+        for bad in (0, -1, 'oops'):
+            task = store.create_task({'title': f'Bad {bad}', 'max_retries': bad})
+            # First failure should NOT circuit-break (falls back to default)
+            assert store.record_failure(task.id, error='e1') is False
+            assert store.get_task(task.id).status != TaskStatus.BLOCKED
+
+    def test_move_to_done_clears_claim(self, store):
+        """A task moved to a terminal status no longer carries a claim_lock."""
+        task = store.create_task({'title': 'Claimed', 'status': 'ready'})
+        assert store.claim_task(task.id, 'worker-1') is True
+        assert store.get_task(task.id).claim_lock == 'worker-1'
+
+        store.move_task(task.id, 'done')
+        done = store.get_task(task.id)
+        assert done.status == TaskStatus.DONE
+        assert not done.claim_lock

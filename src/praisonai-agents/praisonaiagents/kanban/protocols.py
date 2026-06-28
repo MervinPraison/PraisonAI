@@ -67,9 +67,8 @@ class KanbanRunProtocol(TypedDict, total=False):
     summary: str
     metadata: dict
     error: str
-    # Timestamps are serialized as ISO 8601 strings to match TaskRun.to_dict().
-    started_at: str
-    ended_at: str | None
+    started_at: str | None  # ISO-8601 string (matches TaskRun.to_dict())
+    ended_at: str | None    # ISO-8601 string; None while the run is open
 
 
 @runtime_checkable
