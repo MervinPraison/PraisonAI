@@ -240,12 +240,23 @@ def build_admission_gate(
     """Construct an :class:`AdmissionGate` from config, or return ``None``.
 
     Returns ``None`` (no gate, legacy behaviour) when admission control is not
-    configured — i.e. no explicit ``policy`` and ``max_concurrent_runs <= 0``.
+    configured — i.e. no explicit ``policy`` and ``max_concurrent_runs == 0``.
+    A *negative* ``max_concurrent_runs`` is a misconfiguration (not "disabled")
+    and is forwarded to :class:`ConcurrencyLimitPolicy`, which raises
+    ``ValueError`` so startup fails fast instead of silently dropping the gate.
     Otherwise builds a :class:`ConcurrencyLimitPolicy` from the supplied config
     (unless an explicit ``policy`` is given) and wraps it in a gate.
     """
     if policy is None:
-        if not max_concurrent_runs or int(max_concurrent_runs) <= 0:
+        # Only an explicit ``0`` (or ``None``) disables admission control. A
+        # *negative* ceiling is a misconfiguration, not "disabled": fall through
+        # to ``ConcurrencyLimitPolicy`` so it fails fast with a clear
+        # ``ValueError`` instead of silently dropping overload protection.
+        try:
+            ceiling = int(max_concurrent_runs or 0)
+        except (TypeError, ValueError):
+            ceiling = -1  # non-int → let the policy raise the precise error
+        if max_concurrent_runs in (None, 0, "0") or ceiling == 0:
             return None
         try:
             from praisonaiagents.gateway import ConcurrencyLimitPolicy

@@ -49,6 +49,13 @@ def test_build_admission_gate_returns_none_when_unconfigured():
     assert build_admission_gate() is None
 
 
+def test_build_admission_gate_rejects_negative_runs():
+    # A negative ceiling is a misconfiguration, NOT "disabled": it must fail
+    # fast so a numeric typo can't silently remove overload protection.
+    with pytest.raises(ValueError):
+        build_admission_gate(max_concurrent_runs=-1)
+
+
 def test_gate_disabled_is_transparent():
     async def main():
         gate = AdmissionGate(policy=None)
