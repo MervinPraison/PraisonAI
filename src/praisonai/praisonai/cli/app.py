@@ -245,6 +245,8 @@ class LazyCommandGroup(TyperGroup):
             try:
                 module = importlib.import_module(module_path, __package__)
                 sub_app = getattr(module, attr_name)
+                if isinstance(sub_app, click.Command):
+                    return sub_app
                 return typer_get_command(sub_app)
             except (ImportError, AttributeError) as e:
                 typer.echo(f"Error loading command '{name}': {e}", err=True)
@@ -258,6 +260,8 @@ class LazyCommandGroup(TyperGroup):
                 create_func = getattr(module, func_name)
                 sub_app = create_func()
                 if sub_app:
+                    if isinstance(sub_app, click.Command):
+                        return sub_app
                     return typer_get_command(sub_app)
             except (ImportError, AttributeError) as e:
                 typer.echo(f"Error loading command '{name}': {e}", err=True)
