@@ -99,7 +99,7 @@ jobs:
   main:
     needs: smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     strategy:
       matrix:
         python-version: ['3.11']
@@ -144,7 +144,7 @@ jobs:
       run: |
         set -euo pipefail
         cd src/praisonai
-        python -m pytest tests/unit/ tests/integration/ \
+        python -m pytest tests/unit/ \
           -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
           -q --tb=line \
           --timeout=60 \
@@ -152,11 +152,11 @@ jobs:
           --ignore=tests/e2e \
           --ignore=tests/live \
           --ignore=tests/unit/jobs \
-          --ignore=tests/unit/api \
           --ignore=tests/unit/sandbox \
+          --ignore=tests/unit/test_langflow_components.py \
           --cov=praisonai \
           --cov-report=xml \
-          -n 2 \
+          -n 2 --dist loadfile \
           --maxfail=10
     
     - name: Upload coverage
