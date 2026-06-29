@@ -160,8 +160,14 @@ class AdmissionGate:
         if waited:
             # Under ``shed_oldest``, a newcomer arriving at a full queue evicts
             # the oldest in-progress waiter so the queue can't grow unbounded.
+            # If no live waiter can actually be shed (e.g. every queued waiter is
+            # already signalled but still mid-cleanup), there is no slot to free,
+            # so reject the newcomer rather than letting the wait set grow past
+            # ``queue_depth``.
             if self._overflow == "shed_oldest" and self._queued >= self._queue_depth:
-                self._shed_oldest_waiter()
+                if not self._shed_oldest_waiter():
+                    self.rejected += 1
+                    raise AdmissionRejected()
             self._queued += 1
             ticket = next(self._ticket)
             shed_event = asyncio.Event()
@@ -206,13 +212,20 @@ class AdmissionGate:
             self._in_flight -= 1
             sem.release()
 
-    def _shed_oldest_waiter(self) -> None:
-        """Signal the oldest in-progress waiter to shed, freeing a queue slot."""
+    def _shed_oldest_waiter(self) -> bool:
+        """Signal the oldest in-progress waiter to shed, freeing a queue slot.
+
+        Returns ``True`` if a live (not-yet-signalled) waiter was evicted, or
+        ``False`` when no waiter could be shed (every queued waiter is already
+        signalled and mid-cleanup), so the caller knows no slot was actually
+        freed and must not enqueue past ``queue_depth``.
+        """
         for ticket in list(self._waiters):
             event = self._waiters.get(ticket)
             if event is not None and not event.is_set():
                 event.set()
-                return
+                return True
+        return False
 
     def _decide(self, *, session_id: str):
         from praisonaiagents.gateway import AdmissionDecision

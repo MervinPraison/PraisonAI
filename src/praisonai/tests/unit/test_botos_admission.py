@@ -184,6 +184,54 @@ def test_shed_signal_wins_when_slot_also_free():
     asyncio.run(main())
 
 
+def test_shed_oldest_no_free_slot_rejects_newcomer():
+    # Regression (#2454): under shed_oldest, if every queued waiter is already
+    # signalled (mid-cleanup) so no live waiter can be evicted, a newcomer must
+    # be rejected — the wait set must NOT grow past ``queue_depth``.
+    async def main():
+        gate = build_admission_gate(
+            max_concurrent_runs=1, queue_depth=1, overflow_policy="shed_oldest"
+        )
+        release = asyncio.Event()
+
+        async def holder():
+            async with gate.admit(session_id="holder"):
+                await release.wait()
+
+        t_hold = asyncio.create_task(holder())
+        while gate.in_flight != 1:
+            await asyncio.sleep(0)
+
+        async def waiter():
+            try:
+                async with gate.admit(session_id="w"):
+                    await release.wait()
+            except AdmissionRejected:
+                pass
+
+        t_wait = asyncio.create_task(waiter())
+        while gate.queued != 1:
+            await asyncio.sleep(0)
+
+        # Simulate the race window: the lone queued waiter is already signalled
+        # but has not yet popped itself out of the registry.
+        gate._shed_oldest_waiter()
+        assert gate._shed_oldest_waiter() is False
+
+        # With the queue full and no live waiter to shed, the newcomer must be
+        # rejected rather than enqueued past ``queue_depth``.
+        with pytest.raises(AdmissionRejected):
+            async with gate.admit(session_id="newcomer"):
+                pass
+        assert gate.queued == 1
+
+        release.set()
+        await asyncio.gather(t_hold, t_wait)
+        assert gate.in_flight == 0
+
+    asyncio.run(main())
+
+
 def test_gate_releases_slot_on_exception():
     async def main():
         gate = build_admission_gate(max_concurrent_runs=1, queue_depth=0)
