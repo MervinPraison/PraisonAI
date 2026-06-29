@@ -117,6 +117,49 @@ class TestShellStreaming:
         assert out == "hello\n"
         assert err == ""
 
+    def test_blocked_reader_does_not_hang_past_timeout(self):
+        """If a reader stays blocked in readline() after the process exits
+        (e.g. a background child inherited the pipe), the call must fall back to
+        a TimeoutExpired within the budget instead of hanging indefinitely."""
+        import threading
+        import time as _time
+
+        from praisonaiagents.tools.shell_tools import ShellTools
+
+        release = threading.Event()
+
+        class _BlockingStream:
+            def readline(self):
+                # Block until released, simulating a pipe held open by a
+                # background child after the direct child has exited.
+                release.wait(timeout=30)
+                return ""
+
+            def close(self):
+                release.set()
+
+        class _FakeProc:
+            args = "x"
+            stdout = _BlockingStream()
+            stderr = None
+            returncode = 0
+
+            def wait(self, timeout=None):
+                return 0  # direct child exits immediately
+
+        st = ShellTools()
+        start = _time.monotonic()
+        try:
+            st._communicate_streaming(_FakeProc(), timeout=1)
+            assert False, "expected TimeoutExpired for a blocked reader"
+        except subprocess.TimeoutExpired:
+            pass
+        finally:
+            release.set()
+        elapsed = _time.monotonic() - start
+        # Should return roughly within the drain grace, well under 30s.
+        assert elapsed < 10, f"call hung for {elapsed:.1f}s instead of timing out"
+
     def test_timeout_surfaces_recorded_read_error(self):
         """A reader-thread failure recorded before a timeout must not be masked
         by the generic TimeoutExpired — the real read error is surfaced."""

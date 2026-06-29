@@ -18,6 +18,11 @@ import platform
 from typing import Dict, List, Optional, Union
 from ..approval import require_approval
 
+# Minimum grace period (seconds) always granted for stdout/stderr reader threads
+# to flush already-written output after the process exits, even when the command
+# consumed nearly all of its timeout budget.
+_DRAIN_GRACE_SECONDS = 1.0
+
 class ShellTools:
     """Tools for executing shell commands safely."""
     
@@ -223,6 +228,7 @@ class ShellTools:
         t_out.start()
         t_err.start()
 
+        deadline = None if timeout is None else time.monotonic() + timeout
         try:
             process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -236,10 +242,27 @@ class ShellTools:
                 raise read_errors[0]
             raise
 
-        # Wait for the readers to fully drain the pipe buffers before returning,
+        # Wait for the readers to drain the pipe buffers before returning,
         # preserving subprocess.communicate()'s "all captured output" semantics.
-        t_out.join()
-        t_err.join()
+        # A bounded join keeps the overall call within the original timeout
+        # budget: if a background child inherited stdout/stderr and keeps the
+        # pipe open after the direct child exits, a reader can stay blocked in
+        # readline(). Rather than hang indefinitely, fall back to the configured
+        # timeout result once the remaining budget is exhausted. A small minimum
+        # grace is always allowed so a command that used most of its timeout can
+        # still flush its already-written output.
+        for reader in (t_out, t_err):
+            if deadline is None:
+                remaining = None
+            else:
+                remaining = max(_DRAIN_GRACE_SECONDS, deadline - time.monotonic())
+            reader.join(timeout=remaining)
+
+        if t_out.is_alive() or t_err.is_alive():
+            # Readers still blocked on a leaked pipe past the budget — stop
+            # emitting and report a timeout so the caller can kill the process.
+            stop_emitting.set()
+            raise subprocess.TimeoutExpired(process.args, timeout)
 
         if read_errors:
             raise read_errors[0]
