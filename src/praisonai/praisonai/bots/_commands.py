@@ -495,6 +495,64 @@ def handle_run_status_command(
         return f"Error getting status: {e}"
 
 
+def check_code_skew(session_manager) -> Optional[str]:
+    """Return a "restart required" message if the gateway code changed on disk.
+
+    The gateway is a long-lived process that imports much of its surface
+    lazily. When an operator updates a *running* checkout in place, the next
+    first-use lazy import on a hot path (e.g. ``/model``) can pick up changed
+    code and crash with a cryptic ``ImportError``. This best-effort guard
+    captures a boot fingerprint once (cached on ``session_manager``) and
+    compares it to the current on-disk fingerprint before such an operation.
+
+    It is fail-open: any error, an unavailable fingerprint, or an explicit
+    ``code_skew_guard = False`` opt-out returns ``None`` so normal operation is
+    never blocked. (Issue #2460)
+
+    Args:
+        session_manager: The bot/gateway session manager. Used to cache the
+            boot fingerprint and read an optional ``code_skew_guard`` toggle.
+
+    Returns:
+        A clear, actionable message string on detected skew, otherwise ``None``.
+    """
+    try:
+        if session_manager is None:
+            return None
+        if getattr(session_manager, "code_skew_guard", True) is False:
+            return None
+
+        from praisonaiagents.gateway import (
+            read_code_fingerprint,
+            detect_code_skew,
+        )
+
+        boot_fp = getattr(session_manager, "_boot_code_fp", None)
+        if boot_fp is None:
+            # First call without a captured boot fingerprint: capture it now so
+            # this and subsequent checks have a baseline. This still catches a
+            # later in-place update; it just cannot guard the very first call.
+            boot_fp = read_code_fingerprint()
+            try:
+                session_manager._boot_code_fp = boot_fp
+            except Exception:
+                pass
+            return None
+
+        disk_fp = read_code_fingerprint()
+        skew = detect_code_skew(boot_fp, disk_fp)
+        if skew:
+            return (
+                f"⚠️ Gateway code changed on disk since it started "
+                f"({skew[0]} → {skew[1]}). Restart the gateway to apply "
+                f"updates before switching models."
+            )
+    except Exception:
+        # Never let the guard itself break a hot operation.
+        return None
+    return None
+
+
 def handle_model_command(
     session_manager,
     user_id: str,
@@ -512,6 +570,14 @@ def handle_model_command(
     Returns:
         Response message
     """
+    # Pre-flight code-skew guard: if the gateway's code changed on disk since
+    # it booted, refuse the switch with a clear "restart required" message
+    # instead of risking a cryptic ImportError from a first-use lazy import.
+    if model_name:
+        skew_message = check_code_skew(session_manager)
+        if skew_message:
+            return skew_message
+
     # Resolve the storage key so the override is keyed identically to how
     # chat() looks it up (handles cross-platform identity resolution).
     storage_key = user_id

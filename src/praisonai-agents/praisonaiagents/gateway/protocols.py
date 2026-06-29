@@ -25,6 +25,7 @@ from typing import (
     Optional,
     Protocol,
     Set,
+    Tuple,
     TypedDict,
     Union,
     runtime_checkable,
@@ -2458,6 +2459,125 @@ def drain_timeout_has_headroom(
     if stop <= 0:
         return True
     return stop >= drain + head
+
+
+# ---------------------------------------------------------------------------
+# Code-skew guard for hot operations (Issue #2460)
+# ---------------------------------------------------------------------------
+
+
+def read_code_fingerprint(checkout_dir: Optional[str] = None) -> Optional[str]:
+    """Return a lightweight fingerprint of the on-disk gateway code.
+
+    The gateway is a long-lived process that imports much of its surface
+    lazily. When an operator updates a *running* checkout in place (``git
+    pull`` / ``pip install -U`` / an auto-update step on a durable volume) the
+    next first-use lazy import can pick up changed code and fail cryptically.
+    Capturing this fingerprint once at boot and comparing it before a hot
+    operation lets the gateway refuse the risky operation with a clear
+    "restart required" message instead of crashing.
+
+    The fingerprint is best-effort and never raises:
+
+    * when ``checkout_dir`` is a git checkout, ``git rev-parse HEAD`` is used;
+    * otherwise the newest source ``.py`` mtime under the directory is used as
+      ``"mtime:<int>"`` so an in-place file update still moves the fingerprint;
+    * on any error (no git, unreadable dir) ``None`` is returned so callers
+      fail open and never block normal operation.
+
+    Args:
+        checkout_dir: Directory whose code revision to fingerprint. Defaults to
+            the directory containing this module's package.
+
+    Returns:
+        An opaque, non-secret fingerprint string, or ``None`` if it cannot be
+        determined.
+    """
+    import os
+
+    if checkout_dir is None:
+        try:
+            checkout_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        except Exception:
+            return None
+
+    if not isinstance(checkout_dir, str) or not checkout_dir:
+        return None
+
+    # Prefer a git revision when the checkout is a working tree.
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=checkout_dir,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        rev = result.stdout.strip()
+        if result.returncode == 0 and rev:
+            return rev
+    except Exception:
+        pass
+
+    # Fall back to the newest .py mtime so in-place file edits still register.
+    try:
+        newest = 0.0
+        for root, _dirs, files in os.walk(checkout_dir):
+            for name in files:
+                if not name.endswith(".py"):
+                    continue
+                try:
+                    mtime = os.path.getmtime(os.path.join(root, name))
+                except OSError:
+                    continue
+                if mtime > newest:
+                    newest = mtime
+        if newest > 0.0:
+            return f"mtime:{int(newest)}"
+    except Exception:
+        return None
+
+    return None
+
+
+def detect_code_skew(
+    boot_fp: Optional[str], disk_fp: Optional[str]
+) -> Optional[Tuple[str, str]]:
+    """Return shortened ``(boot, disk)`` fingerprints if the code changed.
+
+    This is the pure, side-effect-free heart of the code-skew guard. It does
+    not read the filesystem or git; callers pass the fingerprint captured at
+    boot and a freshly-read on-disk fingerprint (see
+    :func:`read_code_fingerprint`).
+
+    The check is intentionally fail-open: if either fingerprint is unknown
+    (``None`` / empty) it returns ``None`` so the caller proceeds normally and
+    never blocks an operation just because the revision could not be read.
+
+    Args:
+        boot_fp: Fingerprint captured when the gateway started.
+        disk_fp: Fingerprint of the code currently on disk.
+
+    Returns:
+        ``(boot_short, disk_short)`` when the running code differs from disk,
+        otherwise ``None``. Git SHAs are shortened to 7 characters; other
+        fingerprints are returned unchanged.
+    """
+    if not boot_fp or not disk_fp:
+        return None
+    if boot_fp == disk_fp:
+        return None
+
+    def _short(fp: str) -> str:
+        # Shorten bare git SHAs (40 hex chars) to the conventional 7; leave
+        # other fingerprint shapes (e.g. "mtime:...") untouched.
+        if len(fp) == 40 and all(c in "0123456789abcdef" for c in fp.lower()):
+            return fp[:7]
+        return fp
+
+    return (_short(boot_fp), _short(disk_fp))
 
 
 # ---------------------------------------------------------------------------
