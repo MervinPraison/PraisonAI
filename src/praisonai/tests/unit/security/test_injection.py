@@ -247,9 +247,10 @@ class TestInjectionDefense:
 class TestEnableInjectionDefense:
     def test_enable_returns_hook_id(self):
         from praisonai.security import enable_injection_defense
-        hook_id = enable_injection_defense()
-        assert hook_id is not None
-        assert isinstance(hook_id, str)
+        hook_ids = enable_injection_defense()
+        assert isinstance(hook_ids, dict)
+        assert "before_tool" in hook_ids
+        assert isinstance(hook_ids["before_tool"], str)
 
     def test_enable_twice_does_not_duplicate(self):
         """Calling enable twice should be idempotent (no error)."""
@@ -270,4 +271,6 @@ class TestEnableSecurity:
     def test_enable_security_injection_id_is_string(self):
         from praisonai.security import enable_security
         result = enable_security()
-        assert isinstance(result["injection"], str)
+        assert isinstance(result["injection"], dict)
+        assert "before_tool" in result["injection"]
+        assert isinstance(result["injection"]["before_tool"], str)

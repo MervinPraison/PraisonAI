@@ -1,7 +1,7 @@
 """Tests for dashboard (unified) CLI command flags and aiui behavior."""
 
+import sys
 import inspect
-import subprocess
 from unittest.mock import MagicMock, patch
 
 from rich.console import Console
@@ -17,23 +17,16 @@ def test_unified_command_has_new_flags():
 
 
 def test_run_aiui_dashboard_returns_false_when_aiui_missing():
-    """Should fail gracefully when praisonaiui import check fails."""
+    """Should fail gracefully when aiui integration dependencies are missing."""
     console = Console()
-    with patch("subprocess.run", return_value=MagicMock(returncode=1)):
+    with patch.dict(sys.modules, {"uvicorn": None}):
         assert _run_aiui_dashboard(3000, "127.0.0.1", console) is False
 
 
 def test_run_aiui_dashboard_returns_false_on_subprocess_failure():
-    """Should fail gracefully when aiui subprocess exits non-zero."""
+    """Should fail gracefully when in-process host startup fails."""
     console = Console()
-    with patch.object(console, "print") as mock_print:
-        with patch(
-            "subprocess.run",
-            side_effect=[
-                MagicMock(returncode=0),
-                subprocess.CalledProcessError(1, ["python", "temp_script.py"]),
-            ],
-        ):
+    mock_app = MagicMock()
+    with patch("uvicorn.run", side_effect=RuntimeError("host failed")):
+        with patch("praisonai.integration.host_app.build_host_app", return_value=mock_app):
             assert _run_aiui_dashboard(3000, "127.0.0.1", console) is False
-    printed_messages = [call.args[0] for call in mock_print.call_args_list if call.args]
-    assert any("exited with code 1" in message for message in printed_messages)

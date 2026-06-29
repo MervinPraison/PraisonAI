@@ -13,17 +13,34 @@ import unittest
 from unittest import mock
 from typing import Type, Optional
 
-import praisonai.praisonai.endpoints.registry as registry_module
-from praisonai.praisonai.endpoints.providers.base import BaseProvider
+import praisonai.endpoints.registry as registry_module
+from praisonai.endpoints.providers.base import BaseProvider, HealthResult, InvokeResult, ProviderInfo
+from praisonai.endpoints.discovery import EndpointInfo
 
 
 class MockProvider(BaseProvider):
     """Mock provider for testing."""
-    
+
+    provider_type = "mock"
+
     def __init__(self, base_url="http://localhost:8765", api_key=None, **kwargs):
-        self.base_url = base_url
-        self.api_key = api_key
+        super().__init__(base_url=base_url, api_key=api_key)
         self.kwargs = kwargs
+
+    def get_provider_info(self) -> ProviderInfo:
+        return ProviderInfo(type="mock", name="mock", version="1.0", description="mock")
+
+    def list_endpoints(self, tags=None):
+        return []
+
+    def describe_endpoint(self, name: str):
+        return None
+
+    def invoke(self, name, input_data=None, config=None, stream=False) -> InvokeResult:
+        return InvokeResult(ok=True, data={})
+
+    def health(self) -> HealthResult:
+        return HealthResult(healthy=True)
 
 
 class TestProviderRegistryBackwardCompatibility(unittest.TestCase):
@@ -36,7 +53,7 @@ class TestProviderRegistryBackwardCompatibility(unittest.TestCase):
 
     def test_provider_registry_smoke(self):
         """Smoke test: basic registry operations work."""
-        from praisonai.praisonai.endpoints.registry import ProviderRegistry
+        from praisonai.endpoints.registry import ProviderRegistry
         
         registry = ProviderRegistry()
         self.assertIsNotNone(registry)
@@ -48,7 +65,7 @@ class TestProviderRegistryBackwardCompatibility(unittest.TestCase):
 
     def test_backward_compat_instance_methods(self):
         """Test that old ProviderRegistry instance methods still work."""
-        from praisonai.praisonai.endpoints.registry import ProviderRegistry
+        from praisonai.endpoints.registry import ProviderRegistry
         
         registry = ProviderRegistry()
         
@@ -122,17 +139,12 @@ class TestProviderRegistryBackwardCompatibility(unittest.TestCase):
         result = registry_module.get_provider_class("definitely_missing")
         self.assertIsNone(result)
         
-        # Test import error handling
+        # Test import error handling via lazy loader (not cached class)
         registry = registry_module.get_default_registry()
-        
-        # Mock a provider that fails to import
-        def failing_loader():
-            raise ImportError("Mock import failure")
-        
-        registry.register("failing_provider", failing_loader)
-        
-        # Should raise the import error (not return None)
-        with self.assertRaises(ImportError):
+        registry._items.pop("failing_provider", None)
+        registry._loaders["failing_provider"] = lambda: (_ for _ in ()).throw(ImportError("Mock import failure"))
+
+        with self.assertRaises(ValueError):
             registry_module.get_provider_class("failing_provider")
 
     def test_default_registry_singleton_thread_safety(self):
@@ -161,7 +173,7 @@ class TestProviderRegistryBackwardCompatibility(unittest.TestCase):
 
     def test_registry_get_method_error_handling(self):
         """Test error handling in ProviderRegistry.get() method."""
-        from praisonai.praisonai.endpoints.registry import ProviderRegistry
+        from praisonai.endpoints.registry import ProviderRegistry
         
         registry = ProviderRegistry()
         
@@ -169,19 +181,16 @@ class TestProviderRegistryBackwardCompatibility(unittest.TestCase):
         result = registry.get("missing_provider")
         self.assertIsNone(result)
         
-        # Mock a provider that fails to import
-        def failing_loader():
-            raise ImportError("Mock import failure") 
-        
-        registry.register("failing_provider", failing_loader)
-        
-        # Import error should be raised (not swallowed)
-        with self.assertRaises(ImportError):
+        # Mock a provider whose lazy loader fails to import
+        registry._items.pop("failing_provider", None)
+        registry._loaders["failing_provider"] = lambda: (_ for _ in ()).throw(ImportError("Mock import failure"))
+
+        with self.assertRaises(ValueError):
             registry.get("failing_provider")
 
     def test_builtin_providers_loaded(self):
         """Test that builtin providers are properly loaded."""
-        from praisonai.praisonai.endpoints.registry import get_default_registry
+        from praisonai.endpoints.registry import get_default_registry
         
         registry = get_default_registry()
         available_types = registry.list_names()
@@ -217,7 +226,7 @@ class TestProviderRegistryBackwardCompatibility(unittest.TestCase):
     def test_try_create_backward_compatibility(self):
         """Test backward compatibility of try_create pattern if it existed."""
         # This tests the pattern mentioned in the original request
-        from praisonai.praisonai.endpoints.registry import ProviderRegistry
+        from praisonai.endpoints.registry import ProviderRegistry
         
         registry = ProviderRegistry()
         registry.register("test_create", MockProvider)

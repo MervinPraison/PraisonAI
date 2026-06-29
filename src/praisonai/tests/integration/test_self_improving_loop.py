@@ -23,6 +23,11 @@ from praisonaiagents.config.feature_configs import LearnConfig
 from praisonai.tools.skill_manage import skill_manage
 
 
+@pytest.mark.skipif(
+    os.environ.get("PRAISONAI_LIVE_TESTS", "0") != "1"
+    or not os.environ.get("OPENAI_API_KEY"),
+    reason="Real agentic test — requires PRAISONAI_LIVE_TESTS=1 with valid OPENAI_API_KEY",
+)
 def test_self_improving_agent_loop():
     """Test the end-to-end self-improving agent loop.
     
@@ -170,15 +175,15 @@ This procedure should be reused for all new Python projects.
         # Verify skill was created in pending state
         assert "pending approval" in skill_result or "created" in skill_result
         
-        # List pending skills
-        pending_result = skill_manage(action="list", name="")
+        # List pending skills (use the same isolated mutator for consistency)
+        pending_result = isolated_skill_manage(action="list", name="")
         print(f"Pending skills: {pending_result}")
         
         # Should show our pending skill
         assert "python-project-setup" in pending_result
         
         # Approve the skill
-        approve_result = skill_manage(action="approve", name="python-project-setup")
+        approve_result = isolated_skill_manage(action="approve", name="python-project-setup")
         print(f"Approval result: {approve_result}")
         assert "approved" in approve_result
         
