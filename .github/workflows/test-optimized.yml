@@ -75,6 +75,7 @@ jobs:
       env:
         PRAISONAI_TEST_TIER: smoke
         PRAISONAI_ALLOW_NETWORK: '0'
+        OPENAI_MODEL_NAME: gpt-4o-mini
       shell: bash
       run: |
         set -euo pipefail
@@ -135,6 +136,7 @@ jobs:
       env:
         PRAISONAI_TEST_TIER: main
         PRAISONAI_ALLOW_NETWORK: '0'
+        OPENAI_MODEL_NAME: gpt-4o-mini
         OPENAI_API_KEY: 'test-key'
         ANTHROPIC_API_KEY: 'test-key'
         GOOGLE_API_KEY: 'test-key'

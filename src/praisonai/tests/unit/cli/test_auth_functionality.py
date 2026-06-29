@@ -57,6 +57,22 @@ def test_credential_store():
         print("✅ Credential store tests passed")
 
 
+def _clear_llm_env_for_defaults():
+    """Remove provider credentials and model overrides so defaults are deterministic."""
+    for key in (
+        "OPENAI_API_KEY",
+        "OPENAI_MODEL_NAME",
+        "MODEL_NAME",
+        "PRAISONAI_MODEL",
+        "ANTHROPIC_API_KEY",
+        "GOOGLE_API_KEY",
+        "GEMINI_API_KEY",
+        "GROQ_API_KEY",
+        "COHERE_API_KEY",
+    ):
+        os.environ.pop(key, None)
+
+
 def test_llm_endpoint_resolution():
     """Test LLM endpoint resolution with credential fallback."""
     print("🧪 Testing LLM endpoint resolution...")
@@ -69,9 +85,7 @@ def test_llm_endpoint_resolution():
     original_key = os.environ.get("OPENAI_API_KEY")
     
     try:
-        # Clear env key for testing
-        if "OPENAI_API_KEY" in os.environ:
-            del os.environ["OPENAI_API_KEY"]
+        _clear_llm_env_for_defaults()
         
         # Test basic resolution without key
         endpoint = resolve_llm_endpoint()
@@ -153,9 +167,7 @@ def test_auth_integration():
     original_key = os.environ.get("OPENAI_API_KEY")
     
     try:
-        # Clear env key for testing
-        if "OPENAI_API_KEY" in os.environ:
-            del os.environ["OPENAI_API_KEY"]
+        _clear_llm_env_for_defaults()
         
         # Test endpoint resolution without credentials
         endpoint = resolve_llm_endpoint_with_credentials()
