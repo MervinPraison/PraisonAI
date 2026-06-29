@@ -1,17 +1,17 @@
 {
   "version": "1.5.87",
-  "lastUpdated": "2026-06-27",
+  "lastUpdated": "2026-06-29",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
-    "pythonCoreFeatures": 392,
+    "pythonCoreFeatures": 394,
     "pythonWrapperFeatures": 100,
     "typescriptFeatures": 1190,
-    "gapCount": 99,
+    "gapCount": 101,
     "priorityP0": 2,
     "priorityP1": 5,
     "priorityP2": 6,
-    "priorityP3": 86
+    "priorityP3": 88
   },
   "pythonCoreSDK": {
     "path": "/home/runner/work/PraisonAI/PraisonAI/src/praisonai-agents/praisonaiagents",
@@ -49,6 +49,7 @@
       "AutonomyLevel",
       "BALANCED_POLICY",
       "BackendNotAvailableError",
+      "BaseFrameworkAdapter",
       "BaseTool",
       "BotChannel",
       "BotConfig",
@@ -124,6 +125,7 @@
       "FileSearchCall",
       "FileTracker",
       "FlowDisplay",
+      "FrameworkAdapterProtocol",
       "FunctionPlugin",
       "FunctionTool",
       "GUARDRAIL_PRESETS",
@@ -647,6 +649,7 @@
         "AutonomyConfig",
         "BALANCED_POLICY",
         "BackendNotAvailableError",
+        "BaseFrameworkAdapter",
         "BudgetExceededError",
         "CONSERVATIVE_POLICY",
         "ChromaMemory",
@@ -668,6 +671,7 @@
         "EscalationStage",
         "EventType",
         "FileTracker",
+        "FrameworkAdapterProtocol",
         "HandoffCycleError",
         "HandoffDepthError",
         "HandoffError",
@@ -4376,6 +4380,15 @@
         "category": "other"
       },
       {
+        "feature": "BaseFrameworkAdapter",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "BotChannel",
         "python": true,
         "typescript": true,
@@ -4842,6 +4855,15 @@
         "effort": "high",
         "status": "DONE",
         "category": "flow_display"
+      },
+      {
+        "feature": "FrameworkAdapterProtocol",
+        "python": true,
+        "typescript": false,
+        "priority": "P3",
+        "effort": "medium",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "FunctionPlugin",

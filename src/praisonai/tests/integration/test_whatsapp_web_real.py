@@ -26,6 +26,8 @@ try:
 except Exception as e:
     pytest.skip(f"Skipping whatsapp tests: 'neonize' not available ({e}).", allow_module_level=True)
 
+pytestmark = pytest.mark.local_service
+
 # ── Helpers ────────────────────────────────────────────────────────
 
 PRAISONAI_SRC = os.path.join(

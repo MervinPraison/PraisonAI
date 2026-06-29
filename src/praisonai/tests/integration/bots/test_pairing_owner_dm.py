@@ -223,8 +223,8 @@ class TestPairingOwnerDM:
         # Users are allowed through without persistence per the design
     
     @pytest.mark.skipif(
-        not os.environ.get("OPENAI_API_KEY"),
-        reason="Requires OPENAI_API_KEY for real-LLM agentic flow",
+        not os.environ.get("OPENAI_API_KEY") or os.environ.get("PRAISONAI_LIVE_TESTS", "0") != "1",
+        reason="Requires real OPENAI_API_KEY and PRAISONAI_LIVE_TESTS=1 for LLM agentic flow",
     )
     async def test_real_agentic_flow_with_stub_adapter(self):
         """Real agentic test - full flow with stub adapter."""
