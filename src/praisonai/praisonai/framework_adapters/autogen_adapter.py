@@ -16,7 +16,7 @@ class AutoGenAdapter(BaseFrameworkAdapter):
     """Adapter for AutoGen v0.2 framework with version resolution."""
     
     name = "autogen_v2"  # Changed from "autogen" to "autogen_v2" per PR fix
-    install_hint = 'pip install "praisonai[autogen]"'  # v0.2 only
+    install_hint = 'pip install "praisonai-frameworks[autogen]"'  # v0.2 only
     requires_tools_extra = True
     
     def is_available(self) -> bool:
@@ -62,7 +62,7 @@ class AutoGenAdapter(BaseFrameworkAdapter):
         # If we get here, neither version is available
         raise ImportError(
             f"AutoGen is not available. Version requested: {version}. "
-            f"Install with 'pip install praisonai[autogen]' for v0.2 or 'pip install praisonai[autogen-v4]' for v0.4"
+            f"Install with 'pip install praisonai-frameworks[autogen]' for v0.2 or 'pip install praisonai-frameworks[autogen-v4]' for v0.4"
         )
     
     def run(
@@ -166,7 +166,7 @@ class AutoGenV4Adapter(BaseFrameworkAdapter):
     """Adapter for AutoGen v0.4 framework."""
     
     name = "autogen_v4"
-    install_hint = 'pip install "praisonai[autogen-v4]"'
+    install_hint = 'pip install "praisonai-frameworks[autogen-v4]"'
     requires_tools_extra = True
     implemented: bool = False  # explicit marker
     
@@ -213,7 +213,7 @@ class AG2Adapter(BaseFrameworkAdapter):
     """Adapter for AG2 framework."""
     
     name = "ag2"
-    install_hint = 'pip install "praisonai[ag2]"'
+    install_hint = 'pip install "praisonai-frameworks[ag2]"'
     requires_tools_extra = False
     implemented: bool = False  # explicit marker
     
@@ -263,7 +263,7 @@ class AutoGenFamilyAdapter(BaseFrameworkAdapter):
     """
 
     name = "autogen"
-    install_hint = 'pip install "praisonai[autogen]"'
+    install_hint = 'pip install "praisonai-frameworks[autogen]"'
     is_router = True
     
     def is_available(self) -> bool:
@@ -333,7 +333,7 @@ class AutoGenFamilyAdapter(BaseFrameworkAdapter):
                 return "autogen_v2"
             raise ImportError(
                 "AUTOGEN_VERSION=v0.2 was requested, but the AutoGen v0.2 adapter "
-                "is not available. Install with: pip install 'praisonai[autogen]'."
+                "is not available. Install with: pip install 'praisonai-frameworks[autogen]'."
             )
         elif requested == "v0.4":
             if v4_available:
@@ -341,7 +341,7 @@ class AutoGenFamilyAdapter(BaseFrameworkAdapter):
             raise ImportError(
                 "AUTOGEN_VERSION=v0.4 was requested, but the v0.4 adapter is not "
                 "registered or available. Install/register an autogen_v4 adapter "
-                "(pip install 'praisonai[autogen-v4]'), or unset AUTOGEN_VERSION "
+                "(pip install 'praisonai-frameworks[autogen-v4]'), or unset AUTOGEN_VERSION "
                 "to use auto-selection."
             )
         elif requested == "ag2":
@@ -350,7 +350,7 @@ class AutoGenFamilyAdapter(BaseFrameworkAdapter):
             raise ImportError(
                 "AUTOGEN_VERSION=ag2 was requested, but the AG2 adapter is not "
                 "registered or available. Install/register an AG2 adapter "
-                "(pip install 'praisonai[ag2]'), or unset AUTOGEN_VERSION to use "
+                "(pip install 'praisonai-frameworks[ag2]'), or unset AUTOGEN_VERSION to use "
                 "auto-selection."
             )
 
@@ -365,9 +365,9 @@ class AutoGenFamilyAdapter(BaseFrameworkAdapter):
         # Nothing selectable.
         raise ImportError(
             "No runnable AutoGen variant is available. Install with:\n"
-            "  pip install 'praisonai[autogen]' for v0.2\n"
-            "  pip install 'praisonai[autogen-v4]' for v0.4\n"
-            "  pip install 'praisonai[ag2]' for AG2"
+            "  pip install 'praisonai-frameworks[autogen]' for v0.2\n"
+            "  pip install 'praisonai-frameworks[autogen-v4]' for v0.4\n"
+            "  pip install 'praisonai-frameworks[ag2]' for AG2"
         )
     
     def resolve(self, *, config: Optional[Dict[str, Any]] = None) -> "BaseFrameworkAdapter":

@@ -56,7 +56,7 @@ class TestAssertFrameworkAvailableRaises:
             with pytest.raises(ImportError) as exc_info:
                 assert_framework_available("crewai")
             error_msg = str(exc_info.value)
-            assert "praisonai[crewai]" in error_msg or "pip install crewai" in error_msg
+            assert "praisonai-frameworks[crewai]" in error_msg or "pip install crewai" in error_msg
 
     def test_autogen_hint_mentions_pyautogen(self):
         with patch("praisonai.framework_adapters.validators.get_default_registry") as mock_get:

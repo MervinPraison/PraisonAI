@@ -206,7 +206,7 @@ def get_install_hint(name: str) -> str:
     except (ValueError, TypeError):
         pass
     extra_name = {"autogen_v4": "autogen-v4"}.get(name, name)
-    return f"pip install 'praisonai[{extra_name}]'"
+    return f"pip install 'praisonai-frameworks[{extra_name}]'"
 
 
 def framework_option_help() -> str:

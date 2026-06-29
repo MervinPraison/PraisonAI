@@ -263,7 +263,7 @@ def _get_autogen():
     # execution protocol. This still honours any user-registered "autogen"
     # adapter discovered via the praisonai.framework_adapters entry points.
     adapter = get_default_registry().resolve("autogen")()
-    hint = getattr(adapter, "install_hint", 'pip install "praisonai[autogen]"')
+    hint = getattr(adapter, "install_hint", 'pip install "praisonai-frameworks[autogen]"')
     if not adapter.is_available():
         raise ImportError(f"AutoGen is not installed. {hint}")
     # The family adapter's is_available() is True if *any* variant (v0.2/v0.4/AG2)
@@ -2027,15 +2027,15 @@ class PraisonAI:
                 if not list_framework_choices():
                     print("[red]ERROR: No framework adapter is installed.[/red]")
                     print("\npip install praisonaiagents  # native PraisonAI")
-                    print("pip install \"praisonai[crewai]\"  # CrewAI")
-                    print("pip install \"praisonai[autogen]\"  # AutoGen\n")
+                    print("pip install \"praisonai-frameworks[crewai]\"  # CrewAI")
+                    print("pip install \"praisonai-frameworks[autogen]\"  # AutoGen\n")
                     sys.exit(1)
             except ImportError:
                 if not CREWAI_AVAILABLE and not AUTOGEN_AVAILABLE and not PRAISONAI_AVAILABLE:
                     print("[red]ERROR: No framework is installed. Please install at least one framework:[/red]")
-                    print("\npip install \"praisonai\\[crewai]\"  # For CrewAI")
-                    print("pip install \"praisonai\\[autogen]\"  # For AutoGen")
-                    print("pip install \"praisonai\\[crewai,autogen]\"  # For both frameworks\n")
+                    print("\npip install \"praisonai-frameworks\\[crewai]\"  # For CrewAI")
+                    print("pip install \"praisonai-frameworks\\[autogen]\"  # For AutoGen")
+                    print("pip install \"praisonai-frameworks\\[crewai,autogen]\"  # For both frameworks\n")
                     print("pip install praisonaiagents # For Agents\n")
                     sys.exit(1)
 
