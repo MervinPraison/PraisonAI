@@ -358,7 +358,8 @@ class PraisonAI:
         Single source of truth for the "needs praisonaiagents" guard so the same
         check is not duplicated across every command branch.
         """
-        if not PRAISONAI_AVAILABLE:
+        _ensure_availability_flags()
+        if not globals().get("PRAISONAI_AVAILABLE", False):
             print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
             print("\npip install praisonaiagents\n")
             sys.exit(1)

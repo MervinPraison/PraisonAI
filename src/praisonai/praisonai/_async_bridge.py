@@ -27,6 +27,13 @@ class AsyncBridge:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        # Permanently-closed flag. Set by ``shutdown(permanent=True)`` for
+        # scope-owned bridges so a leaked context (e.g. an ``asyncio.Task`` that
+        # copied the ContextVar inside a ``scoped_bridge`` block) cannot silently
+        # resurrect an orphaned loop+thread after the scope exits. The shared
+        # default is never marked permanent so its only teardown is the atexit
+        # hook at process exit.
+        self._closed = False
         # Identity of the thread currently holding ``self._lock``. Set under the
         # lock by ``get()``/``submit()`` so ``_spawn_locked()`` can verify the
         # *caller* (not merely *someone*) owns the lock.
@@ -48,6 +55,16 @@ class AsyncBridge:
         if self._lock_owner != threading.get_ident():
             raise AssertionError(
                 "_spawn_locked() must be called while holding self._lock"
+            )
+        # Refuse to resurrect a permanently-closed (scope-owned) bridge. This
+        # guards the case where a context copied inside ``scoped_bridge`` outlives
+        # the ``with`` block and later tries to run work through the now-shut-down
+        # bridge: instead of silently starting an orphaned loop+thread that no
+        # scope or atexit hook owns, fail loudly.
+        if self._closed:
+            raise RuntimeError(
+                "AsyncBridge has been shut down and cannot be reused; "
+                "this usually means a context outlived its scoped_bridge() block"
             )
         if self._loop is None or self._loop.is_closed():
             self._loop = asyncio.new_event_loop()
@@ -105,9 +122,22 @@ class AsyncBridge:
             fut.cancel()
             raise
 
-    def shutdown(self, timeout: float = 5.0) -> None:
+    def shutdown(self, timeout: float = 5.0, *, permanent: bool = False) -> None:
+        """Tear down the loop+thread.
+
+        Args:
+            timeout: Seconds to wait for in-flight tasks to cancel and the
+                background thread to join.
+            permanent: When ``True`` the bridge is marked closed and may not be
+                reused; a later ``run_sync``/``submit`` raises ``RuntimeError``
+                rather than silently resurrecting an orphaned loop. Used by
+                :func:`scoped_bridge` for the bridges it owns. The shared default
+                is shut down with ``permanent=False`` so it never poisons callers.
+        """
         # Snapshot loop and thread outside lock to avoid holding lock during wait
         with self._lock:
+            if permanent:
+                self._closed = True
             loop, thread = self._loop, self._thread
             if loop is None:
                 return
@@ -207,7 +237,9 @@ def scoped_bridge(bridge: Optional[AsyncBridge] = None) -> Iterator[AsyncBridge]
     finally:
         _bridge_var.reset(token)
         if owns:
-            bridge.shutdown()
+            # ``permanent=True`` poisons the bridge so a context that copied the
+            # ContextVar inside this block cannot resurrect it after we exit.
+            bridge.shutdown(permanent=True)
 
 
 def _shutdown_default() -> None:

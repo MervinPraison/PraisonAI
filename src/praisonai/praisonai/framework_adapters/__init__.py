@@ -58,12 +58,15 @@ def __getattr__(name):
     target = _LAZY_ATTRS.get(name)
     if target is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    if name in _DEPRECATED:
-        warnings.warn(_DEPRECATION.format(name=name), DeprecationWarning, stacklevel=2)
     from importlib import import_module
 
     module = import_module(target[0], __name__)
     value = getattr(module, target[1])
+    if name in _DEPRECATED:
+        # Warn on every access; do not memoize so the warning is not silenced
+        # after the first lookup.
+        warnings.warn(_DEPRECATION.format(name=name), DeprecationWarning, stacklevel=2)
+        return value
     globals()[name] = value
     return value
 
