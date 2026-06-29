@@ -294,13 +294,26 @@ version: 1.0.0
                                 "created_at": proposal.get("timestamp", "unknown")
                             })
                         except Exception:
-                            # Handle skills without proposal metadata
-                            pending.append({
-                                "name": skill_dir.name,
-                                "action": "create",
-                                "status": "pending",
-                                "created_at": "unknown"
-                            })
+                            # Malformed proposal metadata. Only surface it as a
+                            # pending create if a real SKILL.md is present, so a
+                            # stray/temp dir can't be advertised as approvable.
+                            if (skill_dir / "SKILL.md").exists():
+                                pending.append({
+                                    "name": skill_dir.name,
+                                    "action": "create",
+                                    "status": "pending",
+                                    "created_at": "unknown"
+                                })
+                    elif (skill_dir / "SKILL.md").exists():
+                        # Skill dir without proposal metadata but with a valid
+                        # SKILL.md (created via create()). Only surface real skills
+                        # so stray/temp directories can't be approved into place.
+                        pending.append({
+                            "name": skill_dir.name,
+                            "action": "create",
+                            "status": "pending",
+                            "created_at": "unknown"
+                        })
         
         return pending
     
@@ -316,13 +329,25 @@ version: 1.0.0
             return f"❌ No pending proposal found for '{name}'."
         
         try:
-            # Check if this is a proposal with metadata
+            # Check if this is a proposal with metadata. Malformed metadata is
+            # treated as a legacy create record to stay consistent with
+            # list_pending(), which surfaces such entries as pending creates.
             if proposal_file.exists():
-                proposal = json.loads(proposal_file.read_text())
-                action = proposal.get("action", "create")
+                try:
+                    proposal = json.loads(proposal_file.read_text())
+                    action = proposal.get("action", "create")
+                except Exception:
+                    proposal = {}
+                    action = "create"
                 
                 if action == "create":
-                    # For create actions, move the entire directory
+                    # For create actions, move the entire directory. Require a
+                    # valid SKILL.md so a stray/temp dir (e.g. one carrying only a
+                    # malformed .proposal.json) can't be approved into place over
+                    # an existing active skill.
+                    if not (pending_path / "SKILL.md").exists():
+                        return f"❌ Pending '{name}' has no SKILL.md and cannot be approved."
+
                     active_path = self.skills_dir / name
                     if active_path.exists():
                         import shutil
@@ -377,7 +402,12 @@ version: 1.0.0
                     shutil.rmtree(pending_path)
                     
             else:
-                # Legacy: No proposal metadata, treat as create action
+                # Legacy: No proposal metadata, treat as create action.
+                # Require a valid SKILL.md so a stray/temp directory can't be
+                # approved into place over an existing active skill.
+                if not (pending_path / "SKILL.md").exists():
+                    return f"❌ Pending '{name}' has no SKILL.md and cannot be approved."
+
                 active_path = self.skills_dir / name
                 if active_path.exists():
                     import shutil

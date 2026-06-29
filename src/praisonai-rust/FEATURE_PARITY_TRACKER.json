@@ -1,14 +1,14 @@
 {
   "version": "1.5.87",
-  "lastUpdated": "2026-06-27",
+  "lastUpdated": "2026-06-29",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "status": "PARITY_ACHIEVED",
   "summary": {
-    "pythonCoreFeatures": 392,
+    "pythonCoreFeatures": 394,
     "rustFeatures": 667,
-    "gapCount": 110,
-    "parityPercentage": 170.2
+    "gapCount": 112,
+    "parityPercentage": 169.3
   },
   "pythonCoreSDK": {
     "exports": [
@@ -45,6 +45,7 @@
       "AutonomyLevel",
       "BALANCED_POLICY",
       "BackendNotAvailableError",
+      "BaseFrameworkAdapter",
       "BaseTool",
       "BotChannel",
       "BotConfig",
@@ -120,6 +121,7 @@
       "FileSearchCall",
       "FileTracker",
       "FlowDisplay",
+      "FrameworkAdapterProtocol",
       "FunctionPlugin",
       "FunctionTool",
       "GUARDRAIL_PRESETS",
@@ -3229,6 +3231,15 @@
         "category": "other"
       },
       {
+        "feature": "BaseFrameworkAdapter",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "high",
+        "status": "TODO",
+        "category": "other"
+      },
+      {
         "feature": "BotChannel",
         "python": true,
         "rust": true,
@@ -3695,6 +3706,15 @@
         "effort": "high",
         "status": "DONE",
         "category": "flow_display"
+      },
+      {
+        "feature": "FrameworkAdapterProtocol",
+        "python": true,
+        "rust": false,
+        "priority": "P3",
+        "effort": "medium",
+        "status": "TODO",
+        "category": "other"
       },
       {
         "feature": "FunctionPlugin",
