@@ -422,7 +422,9 @@ goal: Help users
 """)
             
             discovery = CustomDefinitionsDiscovery()
-            with patch.object(discovery, '_find_project_dirs', return_value=[Path(tmpdir)]):
+            with patch.object(
+                CustomDefinitionsDiscovery, "_find_project_dirs", return_value=[Path(tmpdir)]
+            ):
                 config = load_agent_from_name("helper")
                 
                 assert config is not None
@@ -445,7 +447,9 @@ Hello! $ARGUMENTS
 """)
             
             discovery = CustomDefinitionsDiscovery()
-            with patch.object(discovery, '_find_project_dirs', return_value=[Path(tmpdir)]):
+            with patch.object(
+                CustomDefinitionsDiscovery, "_find_project_dirs", return_value=[Path(tmpdir)]
+            ):
                 result = interpolate_command_template("greet", "How are you?")
                 
                 assert result == "Hello! How are you?"

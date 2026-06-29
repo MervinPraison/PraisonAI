@@ -42,13 +42,12 @@ def _praisonai_loader():
     from .praisonai_adapter import PraisonAIAdapter
     return PraisonAIAdapter
 
-# Built-in framework adapters with lazy loading
+# Built-in framework adapters with lazy loading.
+# autogen_v4 / ag2 loaders remain for entry-point packages; not registered until implemented.
 _BUILTIN_ADAPTERS = {
     "crewai": _crewai_loader,
-    "autogen": _autogen_loader,      # Family adapter for version resolution
-    "autogen_v2": _autogen_v2_loader, # Direct access to v2
-    "autogen_v4": _autogen_v4_loader,
-    "ag2": _ag2_loader,
+    "autogen": _autogen_loader,       # Family adapter for version resolution
+    "autogen_v2": _autogen_v2_loader,  # Direct access to v0.2
     "praisonai": _praisonai_loader,
 }
 
@@ -116,8 +115,11 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
     
     def _validate_adapter(self, name: str, adapter) -> None:
         """Validate that adapter implements the required protocol signature."""
+        if getattr(adapter, "is_router", False):
+            return
+
         _REQUIRED_KW = {"tools_dict", "agent_callback", "task_callback", "cli_config"}
-        
+
         sig = inspect.signature(type(adapter).run)
         kw_only = {
             p.name for p in sig.parameters.values()
@@ -129,12 +131,18 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
                 f"FrameworkAdapter {name!r} does not implement the protocol: "
                 f"missing keyword-only parameters {sorted(missing)}"
             )
-    
+
     def create(self, name: str, *args, **kwargs):
         """Create an adapter instance with protocol validation."""
         adapter = super().create(name, *args, **kwargs)
         self._validate_adapter(name, adapter)
         return adapter
+
+    def list_available_frameworks(self) -> list[str]:
+        """Return registered framework names that report availability."""
+        return sorted(
+            name for name in self.list_names() if self.is_available(name)
+        )
 
     # Backward compatibility aliases - delegate to parent methods
     def list_registered(self) -> list[str]:
@@ -172,3 +180,41 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
 def get_default_registry() -> FrameworkAdapterRegistry:
     """Return the process-default registry. Prefer DI; use this only at the edge."""
     return FrameworkAdapterRegistry.default()
+
+
+def list_framework_choices(*, include_unavailable: bool = False) -> list[str]:
+    """Single source of truth for CLI/YAML framework name lists."""
+    registry = get_default_registry()
+    if include_unavailable:
+        return sorted(registry.list_names())
+    return registry.list_available_frameworks()
+
+
+def list_available_frameworks() -> list[str]:
+    """Return registered framework names that report availability."""
+    return get_default_registry().list_available_frameworks()
+
+
+def get_install_hint(name: str) -> str:
+    """Return install hint for a framework, consulting the adapter when registered."""
+    registry = get_default_registry()
+    try:
+        adapter = registry.create(name)
+        hint = getattr(adapter, "install_hint", None)
+        if hint:
+            return hint
+    except (ValueError, TypeError):
+        pass
+    extra_name = {"autogen_v4": "autogen-v4"}.get(name, name)
+    return f"pip install 'praisonai[{extra_name}]'"
+
+
+def framework_option_help() -> str:
+    """Help text for CLI --framework options (registry-driven)."""
+    try:
+        names = list_framework_choices(include_unavailable=True)
+    except ImportError:
+        return "Framework: praisonai, crewai, autogen"
+    if names:
+        return "Framework: " + ", ".join(names)
+    return "Framework: praisonai, crewai, autogen"
