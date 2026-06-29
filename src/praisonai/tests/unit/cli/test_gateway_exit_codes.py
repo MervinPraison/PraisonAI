@@ -59,6 +59,25 @@ def test_agents_file_without_agents_section_is_fatal(tmp_path):
     assert code == GATEWAY_FATAL_CONFIG_EXIT_CODE
 
 
+def test_agents_file_with_non_mapping_entry_is_fatal(tmp_path):
+    # A truthy 'agents' list with a non-mapping item (e.g. ["bad"]) used to
+    # raise AttributeError on .get(), routing through classify_exit_reason to
+    # the restart code (75) and crash-looping forever. It must be FATAL (78).
+    handler = GatewayHandler()
+    agents = tmp_path / "agents.yaml"
+    agents.write_text("agents:\n  - bad\n")
+    code = handler.start(agent_file=str(agents))
+    assert code == GATEWAY_FATAL_CONFIG_EXIT_CODE
+
+
+def test_agents_section_not_a_list_is_fatal(tmp_path):
+    handler = GatewayHandler()
+    agents = tmp_path / "agents.yaml"
+    agents.write_text("agents:\n  name: bad\n")
+    code = handler.start(agent_file=str(agents))
+    assert code == GATEWAY_FATAL_CONFIG_EXIT_CODE
+
+
 def test_load_agents_raises_fatal_config_error(tmp_path):
     from praisonai.cli.features.gateway import FatalConfigError
 

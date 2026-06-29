@@ -293,7 +293,17 @@ class GatewayHandler:
 
         from praisonaiagents import Agent
 
-        for agent_config in config["agents"]:
+        agents = config["agents"]
+        if not isinstance(agents, list):
+            raise FatalConfigError(
+                f"Agent file {file_path} 'agents' section must be a list"
+            )
+
+        for agent_config in agents:
+            if not isinstance(agent_config, dict):
+                raise FatalConfigError(
+                    f"Agent file {file_path} contains a non-mapping agent entry"
+                )
             agent = Agent(
                 name=agent_config.get("name", "agent"),
                 instructions=agent_config.get("instructions", ""),
