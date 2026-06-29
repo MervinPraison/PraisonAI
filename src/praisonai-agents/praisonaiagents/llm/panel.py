@@ -71,7 +71,9 @@ def resolve_panel_config(llm: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
     """Resolve a panel descriptor into a normalized config dict.
 
     Returns a dict with keys ``references`` (list[str]), ``aggregator`` (str),
-    and ``enabled`` (bool).
+    ``enabled`` (bool), and ``options`` (dict) carrying any extra provider/model
+    settings (e.g. ``base_url``, ``api_key``, ``temperature``) so they survive
+    both the dict-descriptor and named-preset resolution paths.
 
     Raises:
         ValueError: if the preset is unknown, the config is incomplete, or a
@@ -112,10 +114,19 @@ def resolve_panel_config(llm: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
         if is_panel_descriptor(ref):
             raise ValueError("Panel 'references' cannot contain a panel descriptor.")
 
+    # Extra provider/model settings (e.g. base_url, api_key, temperature) carried
+    # so both dict descriptors and named presets configure the aggregator the same.
+    options = {
+        k: v
+        for k, v in config.items()
+        if k not in ("references", "aggregator", "enabled", "provider", "model")
+    }
+
     return {
         "references": list(references),
         "aggregator": aggregator,
         "enabled": bool(enabled),
+        "options": options,
     }
 
 
@@ -325,10 +336,10 @@ def create_panel_llm(descriptor: Union[str, Dict[str, Any]], **llm_kwargs: Any) 
     """
     config = resolve_panel_config(descriptor)
     # Preserve extra provider options (e.g. base_url, api_key, temperature)
-    # supplied inside a dict descriptor so they reach the aggregator LLM.
-    descriptor_kwargs: Dict[str, Any] = {}
-    if isinstance(descriptor, dict):
-        descriptor_kwargs = dict(descriptor)
+    # supplied inside a dict descriptor *or* a named preset so they reach the
+    # aggregator LLM. ``options`` is normalized by ``resolve_panel_config`` for
+    # both paths; explicit ``llm_kwargs`` (Agent-level) take precedence.
+    descriptor_kwargs: Dict[str, Any] = dict(config.get("options") or {})
     descriptor_kwargs.update(llm_kwargs)
     for key in ("references", "aggregator", "enabled", "provider", "model"):
         descriptor_kwargs.pop(key, None)

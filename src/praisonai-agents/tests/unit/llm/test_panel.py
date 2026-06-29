@@ -30,7 +30,12 @@ def test_resolve_panel_config_dict():
     cfg = resolve_panel_config(
         {"provider": "panel", "references": ["a", "b"], "aggregator": "c"}
     )
-    assert cfg == {"references": ["a", "b"], "aggregator": "c", "enabled": True}
+    assert cfg == {
+        "references": ["a", "b"],
+        "aggregator": "c",
+        "enabled": True,
+        "options": {},
+    }
 
 
 def test_resolve_panel_config_preset():
@@ -109,6 +114,39 @@ def test_create_panel_llm_forwards_extra_descriptor_options(monkeypatch):
     assert captured["kwargs"]["base_url"] == "http://localhost:11434/v1"
     assert captured["kwargs"]["api_key"] == "k"
     # Panel-only keys must not leak into the aggregator LLM kwargs.
+    for key in ("references", "aggregator", "enabled", "provider"):
+        assert key not in captured["kwargs"]
+
+
+def test_create_panel_llm_forwards_preset_options(monkeypatch):
+    """Named presets must carry extra LLM options to the aggregator, like dicts."""
+    import praisonaiagents.llm.panel as panel_mod
+
+    captured = {}
+
+    def fake_init(self, model=None, **kwargs):
+        captured["model"] = model
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr("praisonaiagents.llm.llm.LLM.__init__", fake_init)
+
+    register_panel_preset(
+        "unit_hot",
+        {
+            "references": ["a"],
+            "aggregator": "c",
+            "base_url": "http://localhost:11434/v1",
+            "temperature": 0.9,
+        },
+    )
+    try:
+        panel_mod.create_panel_llm("panel:unit_hot")
+    finally:
+        PANEL_PRESETS.pop("unit_hot", None)
+
+    assert captured["model"] == "c"
+    assert captured["kwargs"]["base_url"] == "http://localhost:11434/v1"
+    assert captured["kwargs"]["temperature"] == 0.9
     for key in ("references", "aggregator", "enabled", "provider"):
         assert key not in captured["kwargs"]
 
