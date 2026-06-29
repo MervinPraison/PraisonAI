@@ -166,7 +166,11 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
         """
         try:
             adapter = self.create(name)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, ImportError):
+            # ImportError covers ModuleNotFoundError raised when an adapter's
+            # constructor touches a missing optional dependency; treat the
+            # framework as simply unavailable rather than leaking a raw import
+            # error to callers (CLI validation, doctor checks, pick_default).
             return False
         
         try:

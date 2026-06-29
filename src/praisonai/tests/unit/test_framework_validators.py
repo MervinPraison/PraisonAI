@@ -84,6 +84,28 @@ class TestAssertFrameworkAvailableRaises:
             assert "pip install 'praisonai[some_unknown_framework_xyz]'" in str(exc_info.value)
 
 
+class TestRegistryImportErrorIsContained:
+    """Registry must not leak raw ImportError from adapter construction."""
+
+    def test_is_available_swallows_constructor_import_error(self):
+        from praisonai.framework_adapters.registry import get_default_registry
+
+        registry = get_default_registry()
+        with patch.object(registry, "create", side_effect=ImportError("missing dep")):
+            assert registry.is_available("crewai") is False
+
+    def test_assert_framework_available_gives_friendly_hint_on_import_error(self):
+        from praisonai.framework_adapters.registry import get_default_registry
+
+        registry = get_default_registry()
+        with patch(
+            "praisonai.framework_adapters.validators.get_default_registry",
+            return_value=registry,
+        ), patch.object(registry, "create", side_effect=ImportError("missing dep")):
+            with pytest.raises(ImportError, match="was requested but is not installed"):
+                assert_framework_available("crewai")
+
+
 class TestAssertFrameworkAvailableSucceeds:
     """Tests that no exception is raised for available frameworks."""
 
