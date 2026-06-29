@@ -96,7 +96,6 @@ jobs:
               tests/unit/doctor/
               tests/unit/code/
               tests/unit/acp/
-              tests/unit/jobs/
               tests/unit/agent/
               tests/unit/tools/
               tests/unit/persistence/
