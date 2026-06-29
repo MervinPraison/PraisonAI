@@ -11,6 +11,7 @@ def dangerous_tool(path: str) -> str:
     """A dangerous tool that requires approval."""
     return f"Deleted {path}"
 
+@pytest.mark.network
 @pytest.mark.asyncio
 async def test_real_agentic_gateway_approval():
     mgr = ExecApprovalManager()

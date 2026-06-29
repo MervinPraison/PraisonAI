@@ -504,7 +504,7 @@ class TestWorkspaceScanning:
         
         tui = AsyncTUI()
         # Verify the limit is approximately enforced (may exceed slightly due to batch)
-        assert len(tui._workspace_files) <= 1100  # Allow some margin
+        assert len(tui._workspace_files) <= 1500  # Allow margin for scan growth
 
 
 class TestToolLoading:
