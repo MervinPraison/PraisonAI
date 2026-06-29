@@ -33,6 +33,8 @@ KNOWN_TOP_LEVEL_KEYS = {
     "traces", "mcp", "permissions", "model", "llm", "session", "rules",
     # Custom command settings (e.g. opt-in live shell substitution gate).
     "commands",
+    # Auto workspace checkpointing for the coding loop ({auto, storage_dir}).
+    "checkpoints",
 }
 
 # Known keys for the nested output section.

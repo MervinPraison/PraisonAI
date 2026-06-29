@@ -28,9 +28,11 @@ class CheckpointsHandler:
     - List and manage checkpoints
     """
     
-    def __init__(self, workspace_dir: Optional[str] = None, verbose: bool = False):
+    def __init__(self, workspace_dir: Optional[str] = None, verbose: bool = False,
+                 storage_dir: Optional[str] = None):
         self.workspace_dir = workspace_dir or os.getcwd()
         self.verbose = verbose
+        self.storage_dir = storage_dir
         self._service = None
     
     @property
@@ -41,9 +43,10 @@ class CheckpointsHandler:
         """Lazy load the checkpoint service."""
         if self._service is None:
             from praisonaiagents.checkpoints import CheckpointService
-            self._service = CheckpointService(
-                workspace_dir=self.workspace_dir
-            )
+            kwargs = {"workspace_dir": self.workspace_dir}
+            if self.storage_dir:
+                kwargs["storage_dir"] = self.storage_dir
+            self._service = CheckpointService(**kwargs)
             await self._service.initialize()
         return self._service
     

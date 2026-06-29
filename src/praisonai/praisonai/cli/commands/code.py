@@ -25,6 +25,8 @@ def code_main(
     no_lsp: bool = typer.Option(False, "--no-lsp", help="Disable LSP tools (code intelligence)"),
     safe_mode: bool = typer.Option(True, "--safe/--no-safe", help="Safe mode (default ON): require approval for file writes and commands"),
     dangerously_skip_approval: bool = typer.Option(False, "--dangerously-skip-approval", help="Skip all approval prompts and run dangerous tools unguarded (restores legacy behaviour)"),
+    checkpoints: bool = typer.Option(False, "--checkpoints/--no-checkpoints", help="Auto-checkpoint the workspace before each file-mutating turn (enables in-session /undo and /revert)"),
+    revert: Optional[str] = typer.Option(None, "--revert", help="Restore the workspace to a prior checkpoint (id, short id, or 'last') and exit"),
     session_id: Optional[str] = typer.Option(None, "--session", "-s", help="Session ID to resume"),
     continue_session: bool = typer.Option(False, "--continue", "-c", help="Continue last session"),
     agent: Optional[str] = typer.Option(None, "--agent", "-a", help="Use a named custom agent profile (applies its tools and permission/mode scope)"),
@@ -75,7 +77,21 @@ def code_main(
     # Set workspace if provided
     if workspace:
         os.environ["PRAISONAI_WORKSPACE"] = workspace
-    
+
+    # --revert: restore the workspace to a prior checkpoint and exit before
+    # starting a session. Reuses the existing CheckpointsHandler so the same
+    # 'last'/short-id/prefix resolution as `praisonai checkpoint restore`
+    # applies. This is a one-shot CLI path, not the interactive /revert.
+    if revert is not None:
+        _revert_workspace(revert, workspace or os.getcwd(), verbose)
+        return
+
+    # --checkpoints opts the session into turn-aware auto-checkpointing,
+    # surfaced to the interactive loop via the env override the session
+    # checkpoint manager reads. Default off keeps zero overhead.
+    if checkpoints:
+        os.environ["PRAISONAI_CHECKPOINTS"] = "on"
+
     # Enable code-specific environment
     os.environ["PRAISONAI_CODE_MODE"] = "true"
     
@@ -219,3 +235,42 @@ def _run_profiled_code(
     
     # Print profiling report
     profiler.print_report()
+
+
+def _revert_workspace(ref: str, workspace: str, verbose: bool = False) -> None:
+    """Restore the workspace to a checkpoint (one-shot ``code --revert``).
+
+    Resolves ``ref`` ('last'/short id/prefix) the same way
+    ``praisonai checkpoint restore`` does, previews the diff, then restores.
+    """
+    import asyncio
+
+    from ..commands.checkpoint import _resolve_checkpoint_id
+    from ..features.checkpoints import CheckpointsHandler
+
+    # Honor a configured checkpoints.storage_dir so this one-shot restore reads
+    # from the same store the interactive session writes to.
+    storage_dir = None
+    try:
+        from ..configuration.resolver import resolve_config
+        section = (resolve_config().extra or {}).get("checkpoints", {})
+        if isinstance(section, dict):
+            storage_dir = section.get("storage_dir")
+    except Exception:
+        storage_dir = None
+
+    handler = CheckpointsHandler(
+        workspace_dir=workspace, verbose=verbose, storage_dir=storage_dir
+    )
+
+    async def _run() -> bool:
+        resolved = await _resolve_checkpoint_id(handler, ref)
+        if resolved is None:
+            handler._print_error(f"No checkpoint found for: {ref}")
+            return False
+        # Preview what restoring will change before applying it.
+        await handler.diff(resolved, None)
+        return await handler.restore(resolved)
+
+    if not asyncio.run(_run()):
+        raise typer.Exit(1)
