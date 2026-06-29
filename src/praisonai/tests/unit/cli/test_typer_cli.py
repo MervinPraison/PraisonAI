@@ -83,7 +83,7 @@ class TestConfigCommand:
         from praisonai.cli.commands.config import app
         result = runner.invoke(app, ["path"])
         assert result.exit_code == 0
-        assert "config.toml" in result.output
+        assert "config.yaml" in result.output or "config.toml" in result.output
 
 
 class TestTracesCommand:

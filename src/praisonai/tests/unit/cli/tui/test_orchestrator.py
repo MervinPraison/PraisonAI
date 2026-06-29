@@ -298,6 +298,7 @@ class TestSimulationRunner:
         assert orchestrator.state.model == "gpt-4"
     
     @pytest.mark.asyncio
+    @pytest.mark.allow_sleep
     async def test_run_sleep_step(self, config):
         """Test sleep step."""
         orchestrator = TuiOrchestrator(

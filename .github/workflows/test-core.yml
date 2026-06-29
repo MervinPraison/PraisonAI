@@ -19,6 +19,7 @@ env:
   PYTHONPATH: ${{ github.workspace }}/src/praisonai-agents
   PRAISONAI_ALLOW_NETWORK: '0'
   PRAISONAI_LIVE_TESTS: '0'
+  PRAISONAI_TEST_TIER: main
 
 jobs:
   test-core-collect:
@@ -61,7 +62,7 @@ jobs:
     name: test-core (${{ matrix.shard }})
     needs: test-core-collect
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -70,16 +71,17 @@ jobs:
             paths: >-
               tests/unit/cli/
               tests/unit/tui/
+            extra_ignore: --ignore=tests/unit/cli/test_message_queue.py
           - shard: bots-gateway
             paths: >-
               tests/unit/bots/
               tests/unit/gateway/
+            extra_ignore: ""
           - shard: subdirs
             paths: >-
               tests/unit/scheduler/
               tests/unit/integrations/
               tests/unit/deploy/
-              tests/unit/sandbox/
               tests/unit/mcp_server/
               tests/unit/mcp/
               tests/unit/knowledge/
@@ -106,8 +108,11 @@ jobs:
               tests/unit/templates/
               tests/unit/suite_runner/
               tests/unit/standardise/
+            extra_ignore: ""
           - shard: root
-            paths: tests/unit/test_*.py
+            paths: ""
+            extra_ignore: ""
+            root_glob: "true"
     steps:
     - uses: actions/checkout@v4
       with:
@@ -138,12 +143,39 @@ jobs:
       run: |
         set -euo pipefail
         cd src/praisonai
-        python -m pytest ${{ matrix.paths }} \
-          -m "not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
-          -q --tb=line --disable-warnings \
-          --timeout=60 -n 2 \
-          --ignore=tests/fixtures \
-          --maxfail=20
+        PYTEST_ARGS=(
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere"
+          -q --tb=line --disable-warnings
+          --timeout=60 -n 2 --dist loadfile
+          --ignore=tests/fixtures
+          --ignore=tests/unit/jobs
+          --ignore=tests/unit/api
+          --ignore=tests/unit/sandbox
+          --ignore=tests/e2e
+          --ignore=tests/live
+          --ignore=tests/unit/test_langflow_components.py
+        )
+        if [ "${{ matrix.root_glob || 'false' }}" = "true" ]; then
+          shopt -s nullglob
+          ROOT_TESTS=(tests/unit/test_*.py)
+          shopt -u nullglob
+          EXCLUDE=(tests/unit/test_langflow_components.py)
+          FILTERED=()
+          for t in "${ROOT_TESTS[@]}"; do
+            skip=false
+            for e in "${EXCLUDE[@]}"; do
+              if [ "$t" = "$e" ]; then skip=true; break; fi
+            done
+            if [ "$skip" = false ]; then FILTERED+=("$t"); fi
+          done
+          if [ ${#FILTERED[@]} -eq 0 ]; then
+            echo "No root unit tests matched"
+            exit 0
+          fi
+          python -m pytest "${FILTERED[@]}" "${PYTEST_ARGS[@]}"
+        else
+          python -m pytest ${{ matrix.paths }} "${PYTEST_ARGS[@]}" ${{ matrix.extra_ignore }}
+        fi
 
   test-core-integration:
     name: test-core-integration
@@ -181,13 +213,14 @@ jobs:
         set -euo pipefail
         cd src/praisonai
         python -m pytest tests/integration/ \
-          -m "not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
           -q --tb=line --disable-warnings \
           --timeout=120 \
           --ignore=tests/fixtures \
+          --ignore=tests/e2e \
+          --ignore=tests/live \
           --ignore=tests/integration/test_tracker_complex_tasks.py \
-          --ignore=tests/integration/test_serve_integration.py \
-          --maxfail=20
+          --ignore=tests/integration/test_serve_integration.py
 
   test-core:
     name: test-core

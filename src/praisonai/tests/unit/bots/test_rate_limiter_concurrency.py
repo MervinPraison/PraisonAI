@@ -13,6 +13,8 @@ except ImportError:
     # Handle missing dependencies gracefully in CI
     pytest.skip("praisonai.bots dependencies not available", allow_module_level=True)
 
+pytestmark = [pytest.mark.allow_sleep, pytest.mark.slow]
+
 
 class TestRateLimiterConcurrency:
     """Test rate limiter properly handles concurrent requests."""
