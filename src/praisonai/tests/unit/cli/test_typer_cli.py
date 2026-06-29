@@ -176,7 +176,7 @@ class TestVersionCommand:
         previous = get_output_controller()
         set_output_controller(OutputController(mode=OutputMode.JSON))
         try:
-            result = CliRunner(mix_stderr=False).invoke(app, ["show"])
+            result = CliRunner().invoke(app, ["show"])
             assert result.exit_code == 0
             assert "PraisonAI" in result.output or "praisonai" in result.output.lower()
         finally:
