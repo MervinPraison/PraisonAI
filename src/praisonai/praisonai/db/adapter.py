@@ -56,6 +56,9 @@ class PraisonAIDB:
         self._database_url = database_url
         self._state_url = state_url
         self._knowledge_url = knowledge_url
+        # Pop adapter-level options before forwarding the rest to the backend
+        # store factories, so they are never passed through as backend kwargs.
+        init_retry_cooldown = options.pop("init_retry_cooldown", 30.0)
         self._options = options
         
         # Lazy-loaded stores
@@ -68,10 +71,17 @@ class PraisonAIDB:
         # the event loop is never blocked on a threading.Lock, and the blocking
         # store construction runs off-loop via asyncio.to_thread.
         self._ainit_lock: Optional["asyncio.Lock"] = None
-        # Remember a hard init failure so a soft error (bad config / missing dep
-        # / cloud auth failure) is surfaced cleanly instead of being re-tried —
-        # and re-raised — on every subsequent callback.
+        # Remember the last init failure so a soft error (bad config / missing
+        # dep / cloud auth failure) is surfaced cleanly instead of being re-tried
+        # — and re-raised — on every subsequent callback. The failure is NOT
+        # permanent: after a short cool-down a later callback re-attempts
+        # construction, so persistence transparently recovers once a transient
+        # DB/network outage clears, while a down backend is not hammered on
+        # every call in between.
         self._init_failed: Optional[Exception] = None
+        self._init_failed_at: float = 0.0
+        # Seconds to suppress retries after an init failure before re-attempting.
+        self._init_retry_cooldown: float = float(init_retry_cooldown)
 
     def _build_stores(self):
         """Construct the backing stores (blocking I/O). Caller handles locking."""
@@ -103,26 +113,49 @@ class PraisonAIDB:
                 backend, url=self._knowledge_url, **self._options
             )
 
+    def _init_failure_active(self) -> Optional[Exception]:
+        """Return the cached init failure if still within the cool-down window.
+
+        A failure older than ``_init_retry_cooldown`` seconds is cleared so the
+        next caller re-attempts construction — this lets persistence recover
+        automatically after a transient DB/network outage instead of staying
+        permanently disabled for the adapter's lifetime.
+        """
+        if self._init_failed is None:
+            return None
+        if (time.monotonic() - self._init_failed_at) >= self._init_retry_cooldown:
+            self._init_failed = None
+            self._init_failed_at = 0.0
+            return None
+        return self._init_failed
+
     def _init_stores(self):
         """Lazily initialize stores on first use (sync path)."""
         if self._initialized:
             return
-        if self._init_failed is not None:
-            raise self._init_failed
+        cached = self._init_failure_active()
+        if cached is not None:
+            raise cached
 
         with self._init_lock:
             if self._initialized:  # Double-check inside lock
                 return
-            if self._init_failed is not None:
-                raise self._init_failed
+            cached = self._init_failure_active()
+            if cached is not None:
+                raise cached
             try:
                 self._build_stores()
                 self._initialized = True
+                self._init_failed = None
+                self._init_failed_at = 0.0
             except Exception as e:
-                # Only memoize ordinary errors. KeyboardInterrupt/SystemExit and
-                # other BaseExceptions (e.g. asyncio.CancelledError surfacing
-                # through to_thread) must NOT permanently poison _init_failed.
+                # Memoize ordinary errors for a bounded cool-down window so a
+                # down backend is not hammered on every callback, but recovery
+                # is still possible (see _init_failure_active). KeyboardInterrupt
+                # /SystemExit and other BaseExceptions (e.g. CancelledError
+                # surfacing through to_thread) must NOT poison _init_failed.
                 self._init_failed = e
+                self._init_failed_at = time.monotonic()
                 raise
 
     async def _ainit_stores(self):
@@ -136,8 +169,9 @@ class PraisonAIDB:
         """
         if self._initialized:
             return
-        if self._init_failed is not None:
-            raise self._init_failed
+        cached = self._init_failure_active()
+        if cached is not None:
+            raise cached
 
         # Create the asyncio.Lock lazily so it binds to the running loop. This
         # serialises async callers; the off-loop _init_stores serialises against
@@ -148,8 +182,9 @@ class PraisonAIDB:
         async with self._ainit_lock:
             if self._initialized:
                 return
-            if self._init_failed is not None:
-                raise self._init_failed
+            cached = self._init_failure_active()
+            if cached is not None:
+                raise cached
             await asyncio.to_thread(self._init_stores)
     
     def _detect_backend(self, url: str) -> str:
