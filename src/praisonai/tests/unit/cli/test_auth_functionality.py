@@ -57,20 +57,38 @@ def test_credential_store():
         print("✅ Credential store tests passed")
 
 
+_LLM_ENV_KEYS = (
+    "OPENAI_API_KEY",
+    "OPENAI_MODEL_NAME",
+    "MODEL_NAME",
+    "PRAISONAI_MODEL",
+    "ANTHROPIC_API_KEY",
+    "GOOGLE_API_KEY",
+    "GEMINI_API_KEY",
+    "GROQ_API_KEY",
+    "COHERE_API_KEY",
+)
+
+
 def _clear_llm_env_for_defaults():
-    """Remove provider credentials and model overrides so defaults are deterministic."""
-    for key in (
-        "OPENAI_API_KEY",
-        "OPENAI_MODEL_NAME",
-        "MODEL_NAME",
-        "PRAISONAI_MODEL",
-        "ANTHROPIC_API_KEY",
-        "GOOGLE_API_KEY",
-        "GEMINI_API_KEY",
-        "GROQ_API_KEY",
-        "COHERE_API_KEY",
-    ):
+    """Remove provider credentials/model overrides so defaults are deterministic.
+
+    Returns a snapshot of the cleared values so callers can restore them and
+    avoid leaking deletions into later tests.
+    """
+    snapshot = {key: os.environ.get(key) for key in _LLM_ENV_KEYS}
+    for key in _LLM_ENV_KEYS:
         os.environ.pop(key, None)
+    return snapshot
+
+
+def _restore_llm_env(snapshot):
+    """Restore environment variables captured by _clear_llm_env_for_defaults."""
+    for key, value in snapshot.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
 
 
 def test_llm_endpoint_resolution():
@@ -82,10 +100,10 @@ def test_llm_endpoint_resolution():
     from praisonai.cli.configuration.credentials import CredentialStore
     
     # Save original env
-    original_key = os.environ.get("OPENAI_API_KEY")
+    _env_snapshot = None
     
     try:
-        _clear_llm_env_for_defaults()
+        _env_snapshot = _clear_llm_env_for_defaults()
         
         # Test basic resolution without key
         endpoint = resolve_llm_endpoint()
@@ -118,10 +136,8 @@ def test_llm_endpoint_resolution():
         
     finally:
         # Restore original env
-        if original_key:
-            os.environ["OPENAI_API_KEY"] = original_key
-        elif "OPENAI_API_KEY" in os.environ:
-            del os.environ["OPENAI_API_KEY"]
+        if _env_snapshot is not None:
+            _restore_llm_env(_env_snapshot)
 
 
 def test_config_schema():
@@ -164,10 +180,10 @@ def test_auth_integration():
     from praisonai.llm.credentials import resolve_llm_endpoint_with_credentials
     
     # Save original env
-    original_key = os.environ.get("OPENAI_API_KEY")
+    _env_snapshot = None
     
     try:
-        _clear_llm_env_for_defaults()
+        _env_snapshot = _clear_llm_env_for_defaults()
         
         # Test endpoint resolution without credentials
         endpoint = resolve_llm_endpoint_with_credentials()
@@ -183,10 +199,8 @@ def test_auth_integration():
         
     finally:
         # Restore original env
-        if original_key:
-            os.environ["OPENAI_API_KEY"] = original_key
-        elif "OPENAI_API_KEY" in os.environ:
-            del os.environ["OPENAI_API_KEY"]
+        if _env_snapshot is not None:
+            _restore_llm_env(_env_snapshot)
 
 
 if __name__ == "__main__":
