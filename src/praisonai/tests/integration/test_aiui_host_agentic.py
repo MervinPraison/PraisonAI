@@ -10,8 +10,8 @@ from starlette.testclient import TestClient
 pytest.importorskip("praisonaiui")
 
 pytestmark = pytest.mark.skipif(
-    not os.getenv("OPENAI_API_KEY"),
-    reason="OPENAI_API_KEY required for real agentic test",
+    os.environ.get("PRAISONAI_LIVE_TESTS", "0") != "1" or not os.getenv("OPENAI_API_KEY"),
+    reason="Set PRAISONAI_LIVE_TESTS=1 and OPENAI_API_KEY for real agentic test",
 )
 
 
