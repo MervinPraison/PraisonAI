@@ -114,6 +114,8 @@ jobs:
               tests/unit/templates/
               tests/unit/suite_runner/
               tests/unit/standardise/
+              tests/unit/jobs/
+              tests/unit/sandbox/
             extra_ignore: ""
           - shard: root
             paths: ""
@@ -154,9 +156,6 @@ jobs:
           -q --tb=line --disable-warnings
           --timeout=60 -n 2 --dist loadfile
           --ignore=tests/fixtures
-          --ignore=tests/unit/jobs
-          --ignore=tests/unit/api
-          --ignore=tests/unit/sandbox
           --ignore=tests/e2e
           --ignore=tests/live
           --ignore=tests/unit/test_langflow_components.py
