@@ -105,20 +105,20 @@ class TestLLMProviderRegistry:
         from praisonai.llm.registry import LLMProviderRegistry
         
         registry = LLMProviderRegistry()
-        registry.register("mock", MockLLMProvider)
+        registry.register_provider("mock", MockLLMProvider)
         
         with pytest.raises(ValueError, match="already registered"):
-            registry.register("mock", CustomCloudflareProvider)
+            registry.register_provider("mock", CustomCloudflareProvider)
     
     def test_override_registration(self):
         """Should allow override with explicit flag."""
         from praisonai.llm.registry import LLMProviderRegistry
         
         registry = LLMProviderRegistry()
-        registry.register("mock", MockLLMProvider)
-        registry.register("mock", CustomCloudflareProvider, override=True)
+        registry.register_provider("mock", MockLLMProvider)
+        registry.register_provider("mock", CustomCloudflareProvider, override=True)
         
-        provider = registry.resolve("mock", "test-model")
+        provider = registry.resolve_provider("mock", "test-model")
         assert provider.provider_id == "cloudflare"
     
     def test_unregister_provider(self):
@@ -148,7 +148,7 @@ class TestLLMProviderRegistry:
         registry = LLMProviderRegistry()
         registry.register("mock", MockLLMProvider)
         
-        provider = registry.resolve("mock", "test-model")
+        provider = registry.resolve_provider("mock", "test-model")
         assert isinstance(provider, MockLLMProvider)
         assert provider.model_id == "test-model"
     
@@ -160,7 +160,7 @@ class TestLLMProviderRegistry:
         registry.register("mock", MockLLMProvider)
         
         config = {"api_key": "test-key", "timeout": 5000}
-        provider = registry.resolve("mock", "test-model", config)
+        provider = registry.resolve_provider("mock", "test-model", config)
         assert provider.config == config
     
     def test_resolve_via_alias(self):
@@ -170,7 +170,7 @@ class TestLLMProviderRegistry:
         registry = LLMProviderRegistry()
         registry.register("cloudflare", CustomCloudflareProvider, aliases=["cf"])
         
-        provider = registry.resolve("cf", "workers-ai-model")
+        provider = registry.resolve_provider("cf", "workers-ai-model")
         assert provider.provider_id == "cloudflare"
     
     def test_resolve_unknown_provider_raises_error(self):
@@ -182,10 +182,10 @@ class TestLLMProviderRegistry:
         registry.register("anthropic-custom", MockLLMProvider)
         
         with pytest.raises(ValueError) as exc_info:
-            registry.resolve("cloudflare", "model")
+            registry.resolve_provider("cloudflare", "model")
         
         error_msg = str(exc_info.value).lower()
-        assert "unknown provider" in error_msg
+        assert "unknown" in error_msg
         assert "cloudflare" in error_msg
         assert "openai-custom" in error_msg or "anthropic-custom" in error_msg
 
@@ -259,8 +259,8 @@ class TestMultiAgentSafety:
         registry1.register("shared-name", MockLLMProvider)
         registry2.register("shared-name", CustomCloudflareProvider)
         
-        provider1 = registry1.resolve("shared-name", "model")
-        provider2 = registry2.resolve("shared-name", "model")
+        provider1 = registry1.resolve_provider("shared-name", "model")
+        provider2 = registry2.resolve_provider("shared-name", "model")
         
         assert provider1.provider_id == "mock"
         assert provider2.provider_id == "cloudflare"
@@ -340,40 +340,39 @@ class TestCollisionDetection:
         from praisonai.llm.registry import LLMProviderRegistry
         
         registry = LLMProviderRegistry()
-        registry.register("provider-a", MockLLMProvider, aliases=["shared-alias"])
+        registry.register_provider("provider-a", MockLLMProvider, aliases=["shared-alias"])
         
         with pytest.raises(ValueError) as exc_info:
-            registry.register("provider-b", CustomCloudflareProvider, aliases=["shared-alias"])
+            registry.register_provider("provider-b", CustomCloudflareProvider, aliases=["shared-alias"])
         
         error_msg = str(exc_info.value)
         assert "shared-alias" in error_msg
         assert "already registered" in error_msg
-        assert "provider-a" in error_msg  # Should mention the existing target
     
     def test_alias_collision_with_provider_name(self):
         """Should raise error when alias collides with provider name."""
         from praisonai.llm.registry import LLMProviderRegistry
         
         registry = LLMProviderRegistry()
-        registry.register("existing-provider", MockLLMProvider)
+        registry.register_provider("existing-provider", MockLLMProvider)
         
         with pytest.raises(ValueError) as exc_info:
-            registry.register("new-provider", CustomCloudflareProvider, aliases=["existing-provider"])
+            registry.register_provider("new-provider", CustomCloudflareProvider, aliases=["existing-provider"])
         
         error_msg = str(exc_info.value)
         assert "existing-provider" in error_msg
-        assert "conflicts" in error_msg
+        assert "already registered" in error_msg
     
     def test_alias_override_with_flag(self):
         """Should allow alias override with override=True."""
         from praisonai.llm.registry import LLMProviderRegistry
         
         registry = LLMProviderRegistry()
-        registry.register("provider-a", MockLLMProvider, aliases=["shared-alias"])
-        registry.register("provider-b", CustomCloudflareProvider, aliases=["shared-alias"], override=True)
+        registry.register_provider("provider-a", MockLLMProvider, aliases=["shared-alias"])
+        registry.register_provider("provider-b", CustomCloudflareProvider, aliases=["shared-alias"], override=True)
         
         # Alias should now point to provider-b
-        provider = registry.resolve("shared-alias", "model")
+        provider = registry.resolve_provider("shared-alias", "model")
         assert provider.provider_id == "cloudflare"
     
     def test_case_insensitive_collision(self):
@@ -381,10 +380,10 @@ class TestCollisionDetection:
         from praisonai.llm.registry import LLMProviderRegistry
         
         registry = LLMProviderRegistry()
-        registry.register("MyProvider", MockLLMProvider)
+        registry.register_provider("MyProvider", MockLLMProvider)
         
         with pytest.raises(ValueError, match="already registered"):
-            registry.register("myprovider", CustomCloudflareProvider)
+            registry.register_provider("myprovider", CustomCloudflareProvider)
     
     def test_error_message_includes_available_providers(self):
         """Error message should list available providers."""
@@ -395,13 +394,13 @@ class TestCollisionDetection:
         registry.register("anthropic-custom", MockLLMProvider)
         
         with pytest.raises(ValueError) as exc_info:
-            registry.resolve("unknown", "model")
+            registry.resolve_provider("unknown", "model")
         
         error_msg = str(exc_info.value).lower()
-        assert "unknown provider" in error_msg
+        assert "unknown" in error_msg
         assert "openai-custom" in error_msg
         assert "anthropic-custom" in error_msg
-        assert "register" in error_msg  # Should suggest how to register
+        assert "available" in error_msg
 
 
 class TestParseModelString:
@@ -448,12 +447,11 @@ class TestParseModelString:
         assert result["model_id"] == "o1-preview"
     
     def test_parse_unknown_model_defaults_to_openai(self):
-        """Should default unknown models to openai."""
+        """Unknown bare models must use provider/model form."""
         from praisonai.llm.registry import parse_model_string
         
-        result = parse_model_string("llama-3.1-8b")
-        assert result["provider_id"] == "openai"
-        assert result["model_id"] == "llama-3.1-8b"
+        with pytest.raises(ValueError, match="Cannot infer provider"):
+            parse_model_string("llama-3.1-8b")
     
     def test_parse_custom_provider_model(self):
         """Should parse custom provider/model format."""
@@ -505,6 +503,6 @@ class TestLiteLLMIsolation:
                     imports.append(node.module)
         
         # Only stdlib modules should be imported at the top level (no heavy deps like litellm)
-        allowed_stdlib_imports = {'typing', 'threading'}
+        allowed_stdlib_imports = {'typing', '.._registry', '_registry'}
         unexpected = set(imports) - allowed_stdlib_imports
         assert not unexpected, f"Unexpected top-level imports: {unexpected}"

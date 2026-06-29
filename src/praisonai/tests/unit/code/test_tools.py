@@ -18,7 +18,7 @@ class TestReadFile:
             with open(file_path, 'w') as f:
                 f.write("line1\nline2\nline3")
             
-            result = read_file(file_path, add_line_nums=False)
+            result = read_file(file_path, workspace=temp_dir, add_line_nums=False)
             
             assert result['success'] is True
             assert result['content'] == "line1\nline2\nline3"
@@ -33,7 +33,7 @@ class TestReadFile:
             with open(file_path, 'w') as f:
                 f.write("line1\nline2\nline3")
             
-            result = read_file(file_path, add_line_nums=True)
+            result = read_file(file_path, workspace=temp_dir, add_line_nums=True)
             
             assert result['success'] is True
             assert "1 | line1" in result['content']
@@ -48,7 +48,7 @@ class TestReadFile:
             with open(file_path, 'w') as f:
                 f.write("line1\nline2\nline3\nline4\nline5")
             
-            result = read_file(file_path, start_line=2, end_line=4, add_line_nums=False)
+            result = read_file(file_path, workspace=temp_dir, start_line=2, end_line=4, add_line_nums=False)
             
             assert result['success'] is True
             assert result['start_line'] == 2
@@ -62,10 +62,14 @@ class TestReadFile:
         """Test reading nonexistent file."""
         from praisonai.code.tools.read_file import read_file
         
-        result = read_file("/nonexistent/path/file.txt")
-        
-        assert result['success'] is False
-        assert "not found" in result['error'].lower()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = read_file(
+                os.path.join(temp_dir, "missing.txt"),
+                workspace=temp_dir,
+            )
+            
+            assert result['success'] is False
+            assert "not found" in result['error'].lower()
     
     def test_read_with_workspace(self):
         """Test reading with workspace path."""
@@ -103,7 +107,7 @@ class TestWriteFile:
         with tempfile.TemporaryDirectory() as temp_dir:
             file_path = os.path.join(temp_dir, "new_file.txt")
             
-            result = write_file(file_path, "Hello, World!")
+            result = write_file(file_path, "Hello, World!", workspace=temp_dir)
             
             assert result['success'] is True
             assert result['created'] is True
@@ -120,7 +124,7 @@ class TestWriteFile:
             with open(file_path, 'w') as f:
                 f.write("old content")
             
-            result = write_file(file_path, "new content")
+            result = write_file(file_path, "new content", workspace=temp_dir)
             
             assert result['success'] is True
             assert result['created'] is False
@@ -135,7 +139,7 @@ class TestWriteFile:
         with tempfile.TemporaryDirectory() as temp_dir:
             file_path = os.path.join(temp_dir, "a", "b", "c", "file.txt")
             
-            result = write_file(file_path, "content", create_directories=True)
+            result = write_file(file_path, "content", workspace=temp_dir, create_directories=True)
             
             assert result['success'] is True
             assert os.path.exists(file_path)
@@ -152,7 +156,7 @@ def hello():
     pass
 ```"""
             
-            result = write_file(file_path, content, strip_code_fences=True)
+            result = write_file(file_path, content, workspace=temp_dir, strip_code_fences=True)
             
             assert result['success'] is True
             
@@ -171,7 +175,7 @@ def hello():
             with open(file_path, 'w') as f:
                 f.write("original")
             
-            result = write_file(file_path, "modified", backup=True)
+            result = write_file(file_path, "modified", workspace=temp_dir, backup=True)
             
             assert result['success'] is True
             assert result['backup_path'] is not None

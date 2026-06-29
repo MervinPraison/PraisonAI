@@ -117,7 +117,7 @@ class TestSuiteResult:
         assert result.startup_cold_ms == 0.0
         assert result.startup_warm_ms == 0.0
         assert len(result.import_analysis) == 0
-        assert result.timestamp.endswith("Z")  # ISO format with Z suffix
+        assert result.timestamp.endswith(("Z", "+00:00"))
     
     def test_to_dict(self):
         """Test conversion to dictionary."""
