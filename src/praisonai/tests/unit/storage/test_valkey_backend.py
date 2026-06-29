@@ -209,8 +209,18 @@ class TestValkeySearchBackend:
         backend, _ = _make_search_backend()
         mock_ft = MagicMock()
         mock_ft.create.return_value = b"OK"
+        mock_vector_algo = MagicMock()
+        mock_vector_algo.HNSW = "HNSW"
 
-        with patch("praisonai.storage.valkey_adapter.ft", mock_ft):
+        with patch("praisonai.storage.valkey_adapter.ft", mock_ft), patch(
+            "praisonai.storage.valkey_adapter.VectorAlgorithm", mock_vector_algo
+        ), patch("praisonai.storage.valkey_adapter.VectorField", MagicMock()), patch(
+            "praisonai.storage.valkey_adapter.VectorFieldAttributesHnsw", MagicMock()
+        ), patch("praisonai.storage.valkey_adapter.DistanceMetricType", MagicMock(COSINE="COSINE")), patch(
+            "praisonai.storage.valkey_adapter.VectorType", MagicMock(FLOAT32="FLOAT32")
+        ), patch("praisonai.storage.valkey_adapter.FtCreateOptions", MagicMock()), patch(
+            "praisonai.storage.valkey_adapter.DataType", MagicMock(HASH="HASH")
+        ):
             backend.create_index()
 
         mock_ft.create.assert_called_once()
@@ -238,7 +248,9 @@ class TestValkeySearchBackend:
         mock_ft = MagicMock()
         mock_ft.search.return_value = ft_result
 
-        with patch("praisonai.storage.valkey_adapter.ft", mock_ft):
+        with patch("praisonai.storage.valkey_adapter.ft", mock_ft), patch(
+            "praisonai.storage.valkey_adapter.FtSearchOptions", MagicMock()
+        ), patch("praisonai.storage.valkey_adapter.ReturnField", MagicMock()):
             results = backend.search([0.1, 0.2, 0.3, 0.4], k=5)
 
         assert isinstance(results, list)
