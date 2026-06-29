@@ -2536,7 +2536,29 @@ class WebSocketGateway:
 
         try:
             loop = asyncio.get_running_loop()
-            reply = await loop.run_in_executor(None, agent.chat, message)
+            gate = getattr(self, "_admission_gate", None)
+            if gate is not None and getattr(gate, "enabled", False):
+                # Gateway-wide inbound admission ceiling (#2454). Hook-triggered
+                # runs are a distinct inbound surface; route them through the
+                # shared gate so a burst of POST /hooks/<path> requests cannot
+                # exceed max_concurrent_runs and recreate the overload it guards.
+                from ..bots._admission import AdmissionRejected
+                try:
+                    async with gate.admit(session_id=session_key):
+                        reply = await loop.run_in_executor(
+                            None, agent.chat, message
+                        )
+                except AdmissionRejected as rej:
+                    return {
+                        "ok": False,
+                        "error": rej.message,
+                        "action": "agent",
+                        "agent": agent_id,
+                        "session": session_key,
+                        "rejected": True,
+                    }
+            else:
+                reply = await loop.run_in_executor(None, agent.chat, message)
         except Exception as e:  # noqa: BLE001 - report run failure to caller
             logger.error("Hook '%s' agent run failed: %s", hook.path, e)
             return {"ok": False, "error": str(e), "session": session_key}
