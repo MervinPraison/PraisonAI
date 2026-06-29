@@ -16,6 +16,16 @@ def reset_cli_output_singletons():
 
     console_module._output_controller = None
     console_module._console = None
+    try:
+        from praisonai.cli.app import state
+        state.output_controller = None
+    except ImportError:
+        pass
     yield
     console_module._output_controller = None
     console_module._console = None
+    try:
+        from praisonai.cli.app import state
+        state.output_controller = None
+    except ImportError:
+        pass

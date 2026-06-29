@@ -23,6 +23,10 @@ from praisonaiagents.config.feature_configs import LearnConfig
 from praisonai.tools.skill_manage import skill_manage
 
 
+@pytest.mark.skipif(
+    os.environ.get("PRAISONAI_LIVE_TESTS", "0") != "1",
+    reason="Real agentic test — requires PRAISONAI_LIVE_TESTS=1 with valid OPENAI_API_KEY",
+)
 def test_self_improving_agent_loop():
     """Test the end-to-end self-improving agent loop.
     
