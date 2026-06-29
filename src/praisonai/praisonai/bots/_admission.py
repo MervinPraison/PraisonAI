@@ -179,14 +179,16 @@ class AdmissionGate:
                 )
                 for t in pending:
                     t.cancel()
-                if shed_task in done and acquire_task in pending:
-                    # Evicted before we got a slot: shed with a busy ack. Guard
-                    # against the rare race where acquire also completed.
+                # The eviction signal takes priority: if we were shed we must
+                # NOT run, even in the race where the slot also became available
+                # in the same wakeup. Release any acquired slot and reject.
+                if shed_event.is_set():
                     if acquire_task in done and not acquire_task.cancelled():
                         sem.release()
                     self.shed += 1
                     raise AdmissionRejected()
-                # We acquired a slot (consume any settled exception on cancel).
+                # Not evicted: ensure we hold a slot (consume the settled task or
+                # acquire if it was still pending when shed lost the race).
                 if acquire_task in pending:
                     await sem.acquire()
             else:

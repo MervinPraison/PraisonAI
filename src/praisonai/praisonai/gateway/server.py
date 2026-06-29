@@ -2019,7 +2019,23 @@ class WebSocketGateway:
                 
                 try:
                     loop = asyncio.get_event_loop()
-                    response = await loop.run_in_executor(None, agent.chat, content)
+                    gate = getattr(self, "_admission_gate", None)
+                    if gate is not None and getattr(gate, "enabled", False):
+                        # Gateway-wide inbound admission ceiling (#2454). The
+                        # direct WebSocket path bypasses the bot-session gate,
+                        # so enforce the shared gate here too.
+                        from ..bots._admission import AdmissionRejected
+                        try:
+                            async with gate.admit(session_id=session.session_id):
+                                response = await loop.run_in_executor(
+                                    None, agent.chat, content
+                                )
+                        except AdmissionRejected as rej:
+                            response = rej.message
+                    else:
+                        response = await loop.run_in_executor(
+                            None, agent.chat, content
+                        )
                 except Exception as e:
                     logger.error(f"Agent error in queue processor: {e}")
                     response = f"Error: {str(e)}"

@@ -131,6 +131,52 @@ def test_shed_oldest_evicts_oldest_waiter():
     asyncio.run(main())
 
 
+def test_shed_signal_wins_when_slot_also_free():
+    # Regression (#2454): an evicted (shed_oldest) waiter must NOT run even when
+    # a slot becomes free in the same scheduler wakeup as the eviction signal.
+    # Drives the real ``admit()`` path: we evict the queued waiter and free the
+    # in-flight slot together, then assert the evicted turn sheds (no capacity
+    # leak, no admitting a shed request during overload).
+    async def main():
+        gate = build_admission_gate(
+            max_concurrent_runs=1, queue_depth=1, overflow_policy="shed_oldest"
+        )
+        release = asyncio.Event()
+        outcomes = {}
+
+        async def holder():
+            async with gate.admit(session_id="holder"):
+                outcomes["holder"] = "ran"
+                await release.wait()
+
+        async def waiter():
+            try:
+                async with gate.admit(session_id="waiter"):
+                    outcomes["waiter"] = "ran"
+            except AdmissionRejected:
+                outcomes["waiter"] = "shed"
+
+        t_hold = asyncio.create_task(holder())
+        while gate.in_flight != 1:
+            await asyncio.sleep(0)
+        t_wait = asyncio.create_task(waiter())
+        while gate.queued != 1:
+            await asyncio.sleep(0)
+
+        # Free the slot and evict the oldest waiter in the same turn.
+        release.set()
+        gate._shed_oldest_waiter()
+
+        await asyncio.gather(t_hold, t_wait)
+        # The evicted waiter must have shed, not run, and the slot must be back.
+        assert outcomes["waiter"] == "shed"
+        assert gate.in_flight == 0
+        assert gate.stats()["shed"] == 1
+        assert gate._ensure_sem()._value == 1
+
+    asyncio.run(main())
+
+
 def test_gate_releases_slot_on_exception():
     async def main():
         gate = build_admission_gate(max_concurrent_runs=1, queue_depth=0)
