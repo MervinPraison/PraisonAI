@@ -6887,6 +6887,23 @@ Provide a concise summary (max 200 words):"""
         if len(history) < 2:
             console.print("[yellow]Nothing to undo[/yellow]")
             return
+
+        # If auto-checkpointing is active, /undo also rolls the workspace files
+        # back to the pre-turn checkpoint. In that case the worker-busy check
+        # MUST run *before* we mutate conversation_history: otherwise a turn that
+        # is still writing files would leave history changed while the workspace
+        # is untouched (and the running turn could then append its own result),
+        # putting history and files permanently out of sync.
+        ckpt = session_state.get('session_checkpoints')
+        rollback_enabled = (
+            ckpt is not None and getattr(ckpt, 'enabled', False) and ckpt.turns
+        )
+        if rollback_enabled and self._worker_busy(session_state):
+            console.print(
+                "[yellow]A turn is still running; nothing undone.[/yellow] "
+                "Wait for it to finish (/status), then retry /undo."
+            )
+            return
         
         # Remove last assistant response and user prompt
         if len(history) >= 2:
@@ -6899,18 +6916,10 @@ Provide a concise summary (max 200 words):"""
             console.print("[green]✓ Undone last turn[/green]")
             console.print(f"[dim]Removed: {str(removed_user.get('content', ''))[:50]}...[/dim]")
 
-            # If auto-checkpointing is active, also roll the workspace files
-            # back to the pre-turn checkpoint so /undo is a true safety net,
-            # not just a conversation-history edit.
-            ckpt = session_state.get('session_checkpoints')
-            if ckpt is not None and getattr(ckpt, 'enabled', False) and ckpt.turns:
-                if self._worker_busy(session_state):
-                    console.print(
-                        "[yellow]A turn is still running; conversation undone but "
-                        "workspace left untouched.[/yellow] "
-                        "Wait for it to finish (/status), then use /revert."
-                    )
-                    return
+            # Roll the workspace files back to the pre-turn checkpoint so /undo
+            # is a true safety net, not just a conversation-history edit. The
+            # worker-busy gate was already checked above before mutating history.
+            if rollback_enabled:
                 console.print("[dim]Reverting workspace files to the previous checkpoint...[/dim]")
                 ckpt.preview(1)
                 restored = ckpt.revert(1)
