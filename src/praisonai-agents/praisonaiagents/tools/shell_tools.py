@@ -23,6 +23,16 @@ from ..approval import require_approval
 # consumed nearly all of its timeout budget.
 _DRAIN_GRACE_SECONDS = 1.0
 
+
+class _StreamDrainTimeout(Exception):
+    """Raised when the direct child has already exited but a reader thread is
+    still blocked draining an inherited pipe past the timeout budget.
+
+    Distinct from ``subprocess.TimeoutExpired`` because the direct child is gone:
+    the caller must report a timeout WITHOUT trying to kill an already-exited
+    process.
+    """
+
 class ShellTools:
     """Tools for executing shell commands safely."""
     
@@ -126,6 +136,19 @@ class ShellTools:
                     'execution_time': time.time() - start_time
                 }
             
+            except _StreamDrainTimeout:
+                # The direct child already exited; only an inherited pipe kept a
+                # reader blocked. Report a timeout but do NOT kill — the direct
+                # child's PID is gone (and may have been recycled), so killing it
+                # would be unsafe and misleading.
+                return {
+                    'stdout': '',
+                    'stderr': f'Command output streaming timed out after {timeout} seconds',
+                    'exit_code': -1,
+                    'success': False,
+                    'execution_time': timeout
+                }
+
             except subprocess.TimeoutExpired:
                 # Kill process on timeout
                 try:
@@ -138,6 +161,9 @@ class ShellTools:
                 except ImportError:
                     # Fallback: kill without psutil
                     process.kill()
+                except psutil.NoSuchProcess:
+                    # Process already gone — nothing to kill.
+                    pass
                 
                 return {
                     'stdout': '',
@@ -232,14 +258,12 @@ class ShellTools:
         try:
             process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            # Disable any further emission before the caller kills the process so
-            # no progress is surfaced after the tool has already returned.
+            # The direct child is still running. Disable any further emission and
+            # re-raise TimeoutExpired so the caller's timeout path KILLS the
+            # process before returning — a recorded read error must not short-
+            # circuit that cleanup (otherwise the still-running child leaks with
+            # its pipes open).
             stop_emitting.set()
-            # If a reader thread already failed (e.g. UnicodeDecodeError on
-            # invalid output bytes), surface that as the real failure instead of
-            # masking it with a generic timeout — it is the more actionable error.
-            if read_errors:
-                raise read_errors[0]
             raise
 
         # Wait for the readers to drain the pipe buffers before returning,
@@ -259,10 +283,12 @@ class ShellTools:
             reader.join(timeout=remaining)
 
         if t_out.is_alive() or t_err.is_alive():
-            # Readers still blocked on a leaked pipe past the budget — stop
-            # emitting and report a timeout so the caller can kill the process.
+            # Readers still blocked on a leaked (inherited) pipe past the budget,
+            # but the DIRECT child has already exited (process.wait() returned).
+            # Stop emitting and signal a drain-timeout so the caller reports a
+            # timeout WITHOUT trying to kill an already-exited process.
             stop_emitting.set()
-            raise subprocess.TimeoutExpired(process.args, timeout)
+            raise _StreamDrainTimeout()
 
         if read_errors:
             raise read_errors[0]

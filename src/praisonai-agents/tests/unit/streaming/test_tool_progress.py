@@ -118,13 +118,20 @@ class TestShellStreaming:
         assert err == ""
 
     def test_blocked_reader_does_not_hang_past_timeout(self):
-        """If a reader stays blocked in readline() after the process exits
+        """If a reader stays blocked in readline() after the DIRECT child exits
         (e.g. a background child inherited the pipe), the call must fall back to
-        a TimeoutExpired within the budget instead of hanging indefinitely."""
+        a _StreamDrainTimeout within the budget instead of hanging indefinitely.
+
+        This is distinct from a real process timeout: the direct child is gone,
+        so the caller must NOT try to kill it.
+        """
         import threading
         import time as _time
 
-        from praisonaiagents.tools.shell_tools import ShellTools
+        from praisonaiagents.tools.shell_tools import (
+            ShellTools,
+            _StreamDrainTimeout,
+        )
 
         release = threading.Event()
 
@@ -151,8 +158,8 @@ class TestShellStreaming:
         start = _time.monotonic()
         try:
             st._communicate_streaming(_FakeProc(), timeout=1)
-            assert False, "expected TimeoutExpired for a blocked reader"
-        except subprocess.TimeoutExpired:
+            assert False, "expected _StreamDrainTimeout for a blocked reader"
+        except _StreamDrainTimeout:
             pass
         finally:
             release.set()
@@ -160,9 +167,83 @@ class TestShellStreaming:
         # Should return roughly within the drain grace, well under 30s.
         assert elapsed < 10, f"call hung for {elapsed:.1f}s instead of timing out"
 
-    def test_timeout_surfaces_recorded_read_error(self):
-        """A reader-thread failure recorded before a timeout must not be masked
-        by the generic TimeoutExpired — the real read error is surfaced."""
+    def test_drain_timeout_does_not_kill_exited_process(self, monkeypatch):
+        """execute_command must report a drain-timeout WITHOUT killing the
+        already-exited direct child (its PID may have been recycled)."""
+        from praisonaiagents.tools import shell_tools as _shell_tools
+        from praisonaiagents.tools.shell_tools import ShellTools, _StreamDrainTimeout
+
+        monkeypatch.setenv("PRAISONAI_AUTO_APPROVE", "true")
+
+        killed = {"called": False}
+
+        class _FakeProc:
+            args = ["x"]
+            pid = -1
+            returncode = 0
+
+            def kill(self):
+                killed["called"] = True
+
+        monkeypatch.setattr(
+            _shell_tools.subprocess, "Popen", lambda *a, **k: _FakeProc()
+        )
+
+        def _raise_drain_timeout(self, process, timeout):
+            raise _StreamDrainTimeout()
+
+        monkeypatch.setattr(
+            ShellTools, "_communicate_streaming", _raise_drain_timeout
+        )
+
+        st = ShellTools()
+        result = st.execute_command("echo hi", timeout=1)
+
+        assert result["success"] is False
+        assert result["exit_code"] == -1
+        assert "timed out" in result["stderr"]
+        assert killed["called"] is False, "drain-timeout must NOT kill the exited child"
+
+    def test_real_timeout_kills_running_process(self, monkeypatch):
+        """A genuine TimeoutExpired (direct child still running) must reach the
+        kill path so the subprocess is terminated."""
+        from praisonaiagents.tools import shell_tools as _shell_tools
+        from praisonaiagents.tools.shell_tools import ShellTools
+
+        monkeypatch.setenv("PRAISONAI_AUTO_APPROVE", "true")
+        # Force the psutil-free fallback path so process.kill() is exercised.
+        monkeypatch.setitem(sys.modules, "psutil", None)
+
+        killed = {"called": False}
+
+        class _FakeProc:
+            args = ["x"]
+            pid = -1
+            returncode = 0
+
+            def kill(self):
+                killed["called"] = True
+
+        monkeypatch.setattr(
+            _shell_tools.subprocess, "Popen", lambda *a, **k: _FakeProc()
+        )
+
+        def _raise_timeout(self, process, timeout):
+            raise subprocess.TimeoutExpired(cmd="x", timeout=timeout)
+
+        monkeypatch.setattr(ShellTools, "_communicate_streaming", _raise_timeout)
+
+        st = ShellTools()
+        result = st.execute_command("sleep 100", timeout=1)
+
+        assert result["success"] is False
+        assert result["exit_code"] == -1
+        assert killed["called"] is True, "real timeout must kill the running child"
+
+    def test_timeout_kills_running_process_even_with_read_error(self):
+        """A reader-thread failure recorded before a REAL process timeout must
+        NOT short-circuit cleanup: TimeoutExpired is re-raised so the caller
+        kills the still-running child."""
         from praisonaiagents.tools.shell_tools import ShellTools
 
         class _FailingStream:
@@ -185,7 +266,7 @@ class TestShellStreaming:
         try:
             st._communicate_streaming(_FakeProc(), timeout=0.01)
             assert False, "expected an exception"
-        except UnicodeDecodeError:
-            pass  # read error surfaced instead of TimeoutExpired
         except subprocess.TimeoutExpired:
-            assert False, "timeout masked the recorded read error"
+            pass  # process still running -> caller's kill path runs
+        except UnicodeDecodeError:
+            assert False, "read error short-circuited the timeout/kill cleanup"
