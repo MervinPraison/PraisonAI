@@ -364,6 +364,8 @@ class YAMLWorkflowParser:
         
         # Store additional attributes for feature parity with agents.yaml
         workflow.description = description
+        # Metadata only: native Workflow engine does not dispatch on framework != praisonai.
+        # Wrapper validates via framework_adapters.workflow_framework.validate_workflow_framework().
         workflow.framework = framework
         
         # Store approved tools for auto-approval during workflow execution

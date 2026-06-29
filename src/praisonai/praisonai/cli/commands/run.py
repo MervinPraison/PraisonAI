@@ -15,6 +15,17 @@ from ..configuration.resolver import resolve_config
 app = typer.Typer(help="Run agents")
 
 
+def _framework_help() -> str:
+    try:
+        from ...framework_adapters.registry import framework_option_help
+        return framework_option_help()
+    except ImportError:
+        return "Framework: praisonai, crewai, autogen"
+
+
+_FRAMEWORK_HELP = _framework_help()
+
+
 def _parse_permissions(allow: Optional[List[str]], deny: Optional[List[str]], permissions_file: Optional[str], default: Optional[str]) -> Optional[dict]:
     """Parse permission flags into a config dict.
     
@@ -425,7 +436,7 @@ def run_main(
     ctx: typer.Context,
     target: Optional[str] = typer.Argument(None, help="Agent file or prompt"),
     model: Optional[str] = typer.Option(None, "--model", "-m", help="LLM model to use"),
-    framework: Optional[str] = typer.Option(None, "--framework", "-f", help="Framework: praisonai, crewai, autogen"),
+    framework: Optional[str] = typer.Option(None, "--framework", "-f", help=_FRAMEWORK_HELP),
     interactive: bool = typer.Option(False, "--interactive", "-i", help="Interactive mode"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     stream: bool = typer.Option(False, "--stream/--no-stream", help="Stream output (default: off for production use)"),
@@ -660,7 +671,7 @@ def run_main(
             "  praisonai run --command summarize \"Long text here\"\n\n"
             "Options:\n"
             "  --model, -m       LLM model to use\n"
-            "  --framework, -f   Framework (praisonai, crewai, autogen)\n"
+            f"  --framework, -f   {_FRAMEWORK_HELP}\n"
             "  --interactive, -i Interactive mode\n"
             "  --verbose, -v     Verbose output\n"
             "  --trace           Enable tracing\n"
