@@ -5334,9 +5334,9 @@ Now, {final_instruction.lower()}:"""
             return "Task completed"
         else:
             print("[red]ERROR: No framework is installed. Please install at least one framework:[/red]")
-            print("\npip install \"praisonai\\[crewai]\"  # For CrewAI")
-            print("pip install \"praisonai\\[autogen]\"  # For AutoGen")
-            print("pip install \"praisonai\\[crewai,autogen]\"  # For both frameworks\n")
+            print("\npip install \"praisonai-frameworks\\[crewai]\"  # For CrewAI")
+            print("pip install \"praisonai-frameworks\\[autogen]\"  # For AutoGen")
+            print("pip install \"praisonai-frameworks\\[crewai,autogen]\"  # For both frameworks\n")
             print("pip install praisonaiagents # For Agents\n")  
             sys.exit(1)
 
