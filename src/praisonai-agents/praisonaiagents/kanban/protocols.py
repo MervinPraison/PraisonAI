@@ -219,3 +219,26 @@ class KanbanLinkingProtocol(Protocol):
             True if unlinked successfully, False otherwise
         """
         ...
+
+
+@runtime_checkable
+class KanbanPromotionProtocol(Protocol):
+    """Extension protocol for dependency-driven task promotion.
+
+    Implemented separately from KanbanStoreProtocol so that stores can opt
+    into auto-promotion without breaking isinstance checks on the core
+    protocol. This is the engine that turns a linked parent->child DAG into
+    a self-driving pipeline: the dispatcher calls ``recompute_ready`` each
+    tick before claiming work.
+    """
+
+    def recompute_ready(self) -> list[str]:
+        """Promote dependent tasks to 'ready' when all parents are terminal.
+
+        Scans tasks waiting on dependencies and advances any whose parent
+        tasks are all in a terminal state ('done'/'archived') to 'ready'.
+
+        Returns:
+            List of task IDs promoted to 'ready' in this pass.
+        """
+        ...

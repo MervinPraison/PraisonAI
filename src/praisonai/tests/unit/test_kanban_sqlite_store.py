@@ -279,6 +279,83 @@ class TestSQLiteKanbanStore:
         updated_child = store.get_task(child.id)
         assert updated_child.status == TaskStatus.READY
 
+    def test_recompute_ready_promotes_when_parents_done(self, store):
+        """recompute_ready promotes a child once all parents are terminal."""
+        parent = store.create_task({'title': 'Parent', 'status': 'running'})
+        child = store.create_task({'title': 'Child', 'status': 'todo'})
+        store.add_link(parent.id, child.id)
+
+        # Parent not done yet -> no promotion
+        assert store.recompute_ready() == []
+        assert store.get_task(child.id).status == TaskStatus.TODO
+
+        # Complete parent via direct update (bypassing move_task promotion)
+        store.update_task(parent.id, {'status': 'done'})
+
+        promoted = store.recompute_ready()
+        assert child.id in promoted
+        assert store.get_task(child.id).status == TaskStatus.READY
+
+    def test_recompute_ready_child_linked_after_parent_done(self, store):
+        """Child linked after parent already done is still promoted."""
+        parent = store.create_task({'title': 'Parent', 'status': 'done'})
+        child = store.create_task({'title': 'Child', 'status': 'todo'})
+
+        # Link after the parent is already terminal
+        store.add_link(parent.id, child.id)
+
+        promoted = store.recompute_ready()
+        assert child.id in promoted
+        assert store.get_task(child.id).status == TaskStatus.READY
+
+    def test_recompute_ready_waits_for_all_parents(self, store):
+        """A child with multiple parents only promotes when all are terminal."""
+        p1 = store.create_task({'title': 'P1', 'status': 'done'})
+        p2 = store.create_task({'title': 'P2', 'status': 'running'})
+        child = store.create_task({'title': 'Child', 'status': 'todo'})
+        store.add_link(p1.id, child.id)
+        store.add_link(p2.id, child.id)
+
+        assert store.recompute_ready() == []
+        assert store.get_task(child.id).status == TaskStatus.TODO
+
+        store.update_task(p2.id, {'status': 'archived'})
+        promoted = store.recompute_ready()
+        assert child.id in promoted
+        assert store.get_task(child.id).status == TaskStatus.READY
+
+    def test_recompute_ready_ignores_parentless_todo(self, store):
+        """Parentless 'todo' tasks are not auto-promoted (backward compatible)."""
+        lone = store.create_task({'title': 'Lone', 'status': 'todo'})
+        promoted = store.recompute_ready()
+        assert lone.id not in promoted
+        assert store.get_task(lone.id).status == TaskStatus.TODO
+
+    def test_recompute_ready_promotes_blocked_child(self, store):
+        """A 'blocked' child is re-evaluated and promoted when parents finish."""
+        parent = store.create_task({'title': 'Parent', 'status': 'done'})
+        child = store.create_task({'title': 'Child', 'status': 'blocked'})
+        store.add_link(parent.id, child.id)
+
+        promoted = store.recompute_ready()
+        assert child.id in promoted
+        assert store.get_task(child.id).status == TaskStatus.READY
+
+    def test_get_ready_children(self, store):
+        """get_ready_children returns children eligible for promotion."""
+        parent = store.create_task({'title': 'Parent', 'status': 'done'})
+        ready_child = store.create_task({'title': 'Ready Child', 'status': 'todo'})
+        store.add_link(parent.id, ready_child.id)
+
+        other_parent = store.create_task({'title': 'Other', 'status': 'running'})
+        blocked_child = store.create_task({'title': 'Blocked Child', 'status': 'todo'})
+        store.add_link(parent.id, blocked_child.id)
+        store.add_link(other_parent.id, blocked_child.id)
+
+        children = store.get_ready_children(parent.id)
+        assert ready_child.id in children
+        assert blocked_child.id not in children
+
     def test_blocked_by_parents(self, store):
         """Test that child cannot move to ready if parents are incomplete."""
         parent = store.create_task({'title': 'Incomplete Parent', 'status': 'todo'})

@@ -45,6 +45,26 @@ class KanbanDispatcher:
             logger.error("Kanban store not available")
             return None
     
+    def _kanban_event_id(self, event_name: str) -> str:
+        """Resolve a HookEvent name to its canonical event id.
+
+        Maps an enum member name (e.g. ``"KANBAN_TASK_MOVED"``) to its
+        canonical value (e.g. ``"kanban_task_moved"``) so hook subscribers
+        listening on the real event id receive it. Falls back to the
+        provided name if the hooks package is unavailable.
+
+        Args:
+            event_name: HookEvent member name.
+
+        Returns:
+            Canonical event id string, or ``event_name`` on failure.
+        """
+        try:
+            from praisonaiagents.hooks.types import HookEvent
+            return HookEvent[event_name].value
+        except Exception:
+            return event_name
+
     def _fire_hook_event(self, event_type: str, task_data: Dict[str, Any]):
         """Fire kanban hook events (when available)."""
         try:
@@ -68,6 +88,10 @@ class KanbanDispatcher:
         
         # Clean up completed processes first
         self._cleanup_completed_tasks(store)
+        
+        # Promote dependency-driven tasks before claiming so a completed
+        # parent advances its children to 'ready' on the next tick.
+        self._promote_ready(store)
         
         # Check how many slots we have available
         available_slots = self.max_concurrent - len(self.running_tasks)
@@ -123,6 +147,55 @@ class KanbanDispatcher:
         
         return spawned
     
+    def _promote_ready(self, store: Any) -> List[str]:
+        """Promote dependency-driven tasks to 'ready' and fire move events.
+
+        Runs once per dispatch tick before claiming. Delegates the promotion
+        algorithm to the store's ``recompute_ready`` (when available) so that
+        children whose parents are all terminal become claimable.
+
+        Args:
+            store: Kanban store instance.
+
+        Returns:
+            List of task IDs promoted to 'ready' this tick.
+        """
+        recompute = getattr(store, "recompute_ready", None)
+        if not callable(recompute):
+            return []
+
+        try:
+            promoted = recompute() or []
+        except Exception as e:
+            logger.error(f"Error recomputing ready tasks: {e}")
+            return []
+
+        for task_id in promoted:
+            try:
+                task = store.get_task(task_id)
+            except Exception:
+                task = None
+            task_dict = task.to_dict() if task and hasattr(task, 'to_dict') else None
+            if task_dict is None:
+                # Promotion already committed; if we can't read the task back,
+                # skip emitting an event with an empty payload so consumers
+                # never receive a moved event for a task they can't resolve.
+                logger.debug(
+                    "Promoted task %s could not be read back; skipping move event",
+                    task_id,
+                )
+                continue
+            self._fire_hook_event(self._kanban_event_id('KANBAN_TASK_MOVED'), {
+                'task_id': task_id,
+                'to_status': 'ready',
+                'task': task_dict,
+            })
+
+        if promoted:
+            logger.info(f"Promoted {len(promoted)} kanban task(s) to ready")
+
+        return promoted
+
     async def _spawn_worker(self, task: Any, store: Any) -> bool:
         """
         Spawn a worker process for the task.
