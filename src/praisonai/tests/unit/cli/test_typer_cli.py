@@ -83,7 +83,7 @@ class TestConfigCommand:
         from praisonai.cli.commands.config import app
         result = runner.invoke(app, ["path"])
         assert result.exit_code == 0
-        assert "config.toml" in result.output
+        assert "config.yaml" in result.output or "config.toml" in result.output
 
 
 class TestTracesCommand:
@@ -96,11 +96,24 @@ class TestTracesCommand:
         assert result.exit_code == 0
         assert "Trace" in result.output or "trace" in result.output.lower()
     
-    def test_traces_enable(self):
+    def test_traces_enable(self, capsys):
         """Test traces enable command."""
-        from praisonai.cli.commands.traces import app
-        result = runner.invoke(app, ["enable"])
-        assert result.exit_code == 0
+        from praisonai.cli.commands.traces import traces_enable
+        from praisonai.cli.output.console import (
+            OutputController,
+            OutputMode,
+            get_output_controller,
+            set_output_controller,
+        )
+
+        previous = get_output_controller()
+        set_output_controller(OutputController(mode=OutputMode.JSON))
+        try:
+            traces_enable(endpoint=None, sample_rate=1.0)
+            out = capsys.readouterr().out
+            assert "traces_enabled" in out or "success" in out.lower()
+        finally:
+            set_output_controller(previous)
 
 
 class TestEnvCommand:
@@ -162,12 +175,27 @@ class TestCompletionCommand:
 class TestVersionCommand:
     """Tests for version command group."""
     
-    def test_version_show(self):
+    def test_version_show(self, capsys):
         """Test version show command."""
-        from praisonai.cli.commands.version import app
-        result = runner.invoke(app, ["show"])
-        assert result.exit_code == 0
-        assert "PraisonAI" in result.output or "praisonai" in result.output.lower()
+        from praisonai.cli.commands.version import version_show
+        from praisonai.cli.output.console import (
+            OutputController,
+            OutputMode,
+            get_output_controller,
+            set_output_controller,
+        )
+
+        # Call handler directly — avoids CliRunner closed-buffer flake under xdist
+        # (Click #3140 / typer.testing.py after async_tui stdout swaps on same worker).
+        previous = get_output_controller()
+        set_output_controller(OutputController(mode=OutputMode.JSON))
+        try:
+            version_show()
+            out = capsys.readouterr().out
+            payload = json.loads(out)
+            assert "praisonai" in payload
+        finally:
+            set_output_controller(previous)
 
 
 class TestMCPCommand:

@@ -261,51 +261,110 @@ class AutoGenFamilyAdapter(BaseFrameworkAdapter):
     Router adapter for AutoGen family (v0.2, v0.4, AG2).
     Dispatches to concrete adapter based on config/environment.
     """
-    
+
     name = "autogen"
+    install_hint = 'pip install "praisonai[autogen]"'
+    is_router = True
     
     def is_available(self) -> bool:
-        """Check if any AutoGen variant is available."""
-        v2 = AutoGenAdapter()
-        v4 = AutoGenV4Adapter()
-        ag2 = AG2Adapter()
-        return v2.is_available() or v4.is_available() or ag2.is_available()
-    
-    def resolve_alias(self) -> str:
-        """Resolve which concrete AutoGen adapter to use."""
-        requested = os.getenv("AUTOGEN_VERSION", "auto").lower()
-        
-        # Check availability
-        v2_available = AutoGenAdapter().is_available()
-        v4_available = AutoGenV4Adapter().is_available()
-        ag2_available = AG2Adapter().is_available()
+        """Check if any AutoGen variant is runnable.
 
-        # Explicit version pins with warnings if not available
+        Mirrors ``resolve_alias()``'s registry-backed selectability so router
+        availability stays consistent: ``registry.is_available("autogen")`` only
+        reports True when a concrete variant is registered AND available, and
+        thus actually dispatchable by ``resolve()``. Raw v4/ag2 packages alone
+        (no registered adapter) correctly report unavailable.
+        """
+        try:
+            from .registry import get_default_registry
+            registry = get_default_registry()
+            registered = set(registry.list_names())
+        except ImportError:
+            return False
+        return any(
+            alias in registered and registry.is_available(alias)
+            for alias in ("autogen_v2", "autogen_v4", "ag2")
+        )
+    
+    def resolve_alias(self, config: Optional[Dict[str, Any]] = None) -> str:
+        """Resolve which concrete AutoGen adapter to use.
+
+        Only returns an alias whose concrete adapter is actually registered AND
+        available, so the downstream ``registry.create(alias)`` never fails with
+        an opaque lookup error. ``autogen_v4`` / ``ag2`` are unimplemented and
+        unregistered by default, so explicit pins for them fall back to v0.2
+        when possible, otherwise raise an actionable ``ImportError``.
+
+        The workflow-supplied ``autogen_version`` (config/YAML) takes precedence
+        over the ``AUTOGEN_VERSION`` environment variable so an explicit YAML
+        pin wins over ambient env state.
+        """
+        requested = str(
+            (config or {}).get("autogen_version")
+            or os.getenv("AUTOGEN_VERSION", "auto")
+        ).strip().lower()
+
+        # A variant is selectable only if its adapter is registered in the
+        # registry (built-in or entry-point) and reports availability.
+        try:
+            from .registry import get_default_registry
+            registry = get_default_registry()
+            registered = set(registry.list_names())
+
+            def _selectable(alias: str) -> bool:
+                return alias in registered and registry.is_available(alias)
+        except ImportError:
+            registered = set()
+
+            def _selectable(alias: str) -> bool:
+                return False
+
+        v2_available = _selectable("autogen_v2")
+        v4_available = _selectable("autogen_v4")
+        ag2_available = _selectable("ag2")
+
+        # Explicit version pins: honour only when the variant can actually run.
+        # An explicit pin must NOT silently fall back to a different variant —
+        # a workflow that depends on v0.4 / AG2 APIs would otherwise run under
+        # v0.2 with different behaviour. Fail fast with an actionable error so
+        # the mismatch surfaces instead of producing wrong-runtime results.
         if requested == "v0.2":
-            if not v2_available:
-                logger.warning("AUTOGEN_VERSION=v0.2 requested but autogen (v0.2) is not installed")
-            return "autogen_v2"
-        if requested == "v0.4":
-            if not v4_available:
-                logger.warning("AUTOGEN_VERSION=v0.4 requested but autogen_agentchat (v0.4) is not installed")
-            return "autogen_v4"
-        if requested == "ag2":
-            if not ag2_available:
-                logger.warning("AUTOGEN_VERSION=ag2 requested but AG2 is not installed")
-            return "ag2"
-        
-        # Auto selection: prefer v2 (v4 is currently unimplemented)
+            if v2_available:
+                return "autogen_v2"
+            raise ImportError(
+                "AUTOGEN_VERSION=v0.2 was requested, but the AutoGen v0.2 adapter "
+                "is not available. Install with: pip install 'praisonai[autogen]'."
+            )
+        elif requested == "v0.4":
+            if v4_available:
+                return "autogen_v4"
+            raise ImportError(
+                "AUTOGEN_VERSION=v0.4 was requested, but the v0.4 adapter is not "
+                "registered or available. Install/register an autogen_v4 adapter "
+                "(pip install 'praisonai[autogen-v4]'), or unset AUTOGEN_VERSION "
+                "to use auto-selection."
+            )
+        elif requested == "ag2":
+            if ag2_available:
+                return "ag2"
+            raise ImportError(
+                "AUTOGEN_VERSION=ag2 was requested, but the AG2 adapter is not "
+                "registered or available. Install/register an AG2 adapter "
+                "(pip install 'praisonai[ag2]'), or unset AUTOGEN_VERSION to use "
+                "auto-selection."
+            )
+
+        # Auto selection: prefer v2 (v4/ag2 are currently unimplemented).
         if v2_available:
             return "autogen_v2"
-        elif v4_available:
-            logger.warning("AutoGen v0.4 is installed but not yet implemented, falling back.")
+        if v4_available:
             return "autogen_v4"
-        elif ag2_available:
+        if ag2_available:
             return "ag2"
-        
-        # Nothing available
+
+        # Nothing selectable.
         raise ImportError(
-            "No AutoGen variant is available. Install with:\n"
+            "No runnable AutoGen variant is available. Install with:\n"
             "  pip install 'praisonai[autogen]' for v0.2\n"
             "  pip install 'praisonai[autogen-v4]' for v0.4\n"
             "  pip install 'praisonai[ag2]' for AG2"
@@ -322,8 +381,8 @@ class AutoGenFamilyAdapter(BaseFrameworkAdapter):
         Returns:
             The concrete AutoGen adapter instance
         """
-        # Get the adapter name to use
-        adapter_name = self.resolve_alias()
+        # Get the adapter name to use (config autogen_version wins over env)
+        adapter_name = self.resolve_alias(config)
         
         # Import registry to create the concrete adapter
         from .registry import get_default_registry
@@ -334,7 +393,17 @@ class AutoGenFamilyAdapter(BaseFrameworkAdapter):
         logger.info(f"AutoGenFamilyAdapter resolved to: {adapter_name}")
         return concrete_adapter
     
-    def run(self, config: Dict[str, Any], llm_config: List[Dict], topic: str) -> str:
+    def run(
+        self,
+        config: Dict[str, Any],
+        llm_config: List[Dict],
+        topic: str,
+        *,
+        tools_dict: Optional[Dict[str, Any]] = None,
+        agent_callback: Optional[Callable] = None,
+        task_callback: Optional[Callable] = None,
+        cli_config: Optional[Dict[str, Any]] = None,
+    ) -> str:
         """Router should never run directly."""
         raise RuntimeError(
             "AutoGenFamilyAdapter.run() should not be called directly. "
