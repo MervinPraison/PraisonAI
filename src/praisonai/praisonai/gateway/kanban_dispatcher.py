@@ -57,12 +57,19 @@ class KanbanDispatcher:
         self._task_runs: Dict[str, int] = {}  # task_id -> open run_id
         self.worker_id = f"gateway_{os.getpid()}"
 
-    def _close_run_safe(self, store, run_id, outcome, *, summary=None, metadata=None, error=None):
-        """Close a run, swallowing errors so dispatch stays resilient."""
+    def _close_run_safe(self, store, run_id, outcome, *, summary=None, metadata=None, error=None) -> bool:
+        """Close a run, swallowing errors so dispatch stays resilient.
+
+        Returns True when the run was closed, False on a transient store error
+        so the caller can keep tracking the open run id and retry the close
+        on a later cycle instead of leaving stale active-run state behind.
+        """
         try:
             store.close_run(run_id, outcome, summary=summary, metadata=metadata, error=error)
+            return True
         except Exception as e:
             logger.warning(f"Failed to close run {run_id} ({outcome}): {e}")
+            return False
 
     def _record_failure_safe(self, store, task_id, *, error=None):
         """Record a failure / circuit-breaker check, swallowing errors.
@@ -464,20 +471,31 @@ class KanbanDispatcher:
                     else:
                         stdout_data = "<no log available>"
                     
-                    run_id = self._task_runs.pop(task_id, None)
+                    # Peek (do not pop) the open run id. We only forget it once
+                    # the run is durably closed so a transient close failure does
+                    # not leave a stale current_run_id we can no longer retry.
+                    run_id = self._task_runs.get(task_id)
                     
                     # Update task based on exit code
                     if return_code == 0:
-                        # Success - close run, reset failures, mark as done
-                        if run_id is not None:
-                            self._close_run_safe(
-                                store, run_id, 'completed',
-                                summary=stdout_data[:500].strip(),
-                                metadata={'return_code': return_code},
-                            )
+                        # Success - mark as done FIRST so the terminal transition
+                        # is the durable commit. If move_task fails the task stays
+                        # claimed (not released for retry), avoiding a duplicate
+                        # run of an already-successful worker.
                         # move_task to a terminal status clears the claim_lock
                         # so the finished task is no longer shown as owned.
                         store.move_task(task_id, 'done')
+                        # Now record the completed run. Forget the run id only
+                        # when the close persists; otherwise retry on next cycle.
+                        if run_id is not None:
+                            if self._close_run_safe(
+                                store, run_id, 'completed',
+                                summary=stdout_data[:500].strip(),
+                                metadata={'return_code': return_code},
+                            ):
+                                self._task_runs.pop(task_id, None)
+                        else:
+                            self._task_runs.pop(task_id, None)
                         store.add_comment(
                             task_id, 
                             self.worker_id, 
@@ -496,14 +514,19 @@ class KanbanDispatcher:
                         
                         logger.info(f"Task {task_id} completed successfully")
                     else:
-                        # Failed - close run as failed, count it, circuit-break
+                        # Failed - close run as failed, count it, circuit-break.
+                        # Forget the run id only once the close persists so a
+                        # transient store error is retried on a later cycle.
                         error_text = f"exit code {return_code}: {stdout_data[:500]}"
                         if run_id is not None:
-                            self._close_run_safe(
+                            if self._close_run_safe(
                                 store, run_id, 'failed',
                                 metadata={'return_code': return_code},
                                 error=error_text,
-                            )
+                            ):
+                                self._task_runs.pop(task_id, None)
+                        else:
+                            self._task_runs.pop(task_id, None)
                         circuit_broken = self._record_failure_safe(
                             store, task_id, error=error_text
                         )

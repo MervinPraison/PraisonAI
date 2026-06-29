@@ -206,9 +206,16 @@ def kanban_complete(
         if existing_task is None:
             raise ValueError(f"Task {task_id} not found; create it before completing it")
 
-        # Close the active attempt if the dispatcher opened one; otherwise
-        # record a fresh completed run. Either way the structured handoff must
-        # persist before we transition the task to done.
+        # Transition the task to done FIRST so the terminal status is the
+        # durable commit. If move_task fails (task deleted concurrently, DB
+        # locked, etc.) we never record a completed run for a task that is
+        # not actually done, avoiding split/inconsistent completion state.
+        task = store.move_task(task_id, 'done')
+
+        # Now persist the structured handoff. Close the active attempt if the
+        # dispatcher opened one; otherwise record a fresh completed run. A
+        # failure here surfaces to the caller but the task is already durably
+        # done, so the handoff can be re-applied without re-running work.
         current_run_id = getattr(existing_task, 'current_run_id', None)
         if current_run_id:
             run = store.close_run(
@@ -224,15 +231,6 @@ def kanban_complete(
                 summary=summary,
                 metadata=metadata or {},
             )
-
-        if run is None:
-            raise ValueError(
-                f"Completion run for task {task_id} could not be recorded; "
-                "verify current_run_id and retry completion"
-            )
-
-        # Move to done status only after the handoff is durably recorded
-        task = store.move_task(task_id, 'done')
         
         # Preserve free-text comment behaviour for back-compat
         if comment:
