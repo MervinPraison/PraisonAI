@@ -25,6 +25,8 @@ class RehydratedSession:
         model: Persisted model/provider used for the session, if known.
         agent_name: Persisted agent name for the session, if known.
         metadata: Any additional persisted metadata (tokens, cost, source...).
+        usage: Cumulative token/cost totals restored from metadata so resume
+            continues accumulating instead of resetting (Issue #2421).
         found: Whether a stored session was actually located.
     """
 
@@ -33,6 +35,7 @@ class RehydratedSession:
     model: Optional[str] = None
     agent_name: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    usage: Dict[str, Any] = field(default_factory=dict)
     found: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
@@ -42,6 +45,7 @@ class RehydratedSession:
             "model": self.model,
             "agent_name": self.agent_name,
             "metadata": self.metadata,
+            "usage": self.usage,
             "found": self.found,
         }
 
@@ -105,12 +109,39 @@ def rehydrate_session(
         model = metadata.get("model") or metadata.get("llm")
         agent_name = getattr(data, "agent_name", None) or metadata.get("agent_name")
 
+        # Resolve usage through the same store-preference order used when
+        # accumulating (prefer the store whose record already carries usage), so
+        # a resumed globally-stored session restores the real cumulative totals
+        # instead of a project shadow record's empty/stale usage (Issue #2421).
+        usage: Dict[str, Any] = {}
+        try:
+            from ..state.project_sessions import read_session_usage
+
+            resolved = read_session_usage(session_id, project_path)
+            if isinstance(resolved, dict) and (
+                resolved.get("total_tokens") or resolved.get("cost")
+            ):
+                usage = resolved
+        except Exception:
+            usage = {}
+
+        if not usage:
+            stored = metadata.get("usage")
+            if isinstance(stored, dict):
+                usage = dict(stored)
+            else:
+                if isinstance(metadata.get("total_tokens"), (int, float)):
+                    usage["total_tokens"] = metadata["total_tokens"]
+                if isinstance(metadata.get("cost"), (int, float)):
+                    usage["cost"] = metadata["cost"]
+
         return RehydratedSession(
             session_id=session_id,
             chat_history=chat_history,
             model=model,
             agent_name=agent_name,
             metadata=metadata,
+            usage=usage,
             found=True,
         )
 
