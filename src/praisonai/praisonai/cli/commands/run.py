@@ -314,6 +314,23 @@ def _checkpoints_auto_enabled() -> bool:
     return True
 
 
+def _checkpoints_storage_dir() -> Optional[str]:
+    """Return a configured ``checkpoints.storage_dir`` (or ``None``).
+
+    Keeps ``praisonai run`` auto-checkpoints and restores reading from the same
+    store the rest of the CLI (``code --checkpoints``, ``praisonai checkpoint``)
+    uses when ``checkpoints.storage_dir`` is configured.
+    """
+    try:
+        config = resolve_config()
+    except (ValueError, OSError):
+        return None
+    checkpoints = (getattr(config, "extra", None) or {}).get("checkpoints")
+    if isinstance(checkpoints, dict):
+        return checkpoints.get("storage_dir")
+    return None
+
+
 def _auto_checkpoint(label: str, *, no_checkpoint: bool, workspace_dir: Optional[str] = None) -> None:
     """Create an automatic checkpoint of the workspace before a run.
 
@@ -336,7 +353,10 @@ def _auto_checkpoint(label: str, *, no_checkpoint: bool, workspace_dir: Optional
     try:
         from ..features.checkpoints import CheckpointsHandler
 
-        handler = CheckpointsHandler(workspace_dir=workspace_dir or os.getcwd())
+        handler = CheckpointsHandler(
+            workspace_dir=workspace_dir or os.getcwd(),
+            storage_dir=_checkpoints_storage_dir(),
+        )
         asyncio.run(handler.save(label, allow_empty=False, quiet=True))
     except Exception as e:  # pragma: no cover - defensive, never block the run
         if getattr(output, "is_verbose", False):
@@ -350,7 +370,10 @@ def _restore_checkpoint(ref: str, workspace_dir: Optional[str] = None) -> None:
 
     from ..features.checkpoints import CheckpointsHandler
 
-    handler = CheckpointsHandler(workspace_dir=workspace_dir or os.getcwd())
+    handler = CheckpointsHandler(
+        workspace_dir=workspace_dir or os.getcwd(),
+        storage_dir=_checkpoints_storage_dir(),
+    )
 
     async def _run() -> bool:
         service = await handler._get_service()

@@ -22,11 +22,34 @@ import typer
 app = typer.Typer(help="File-level checkpoint management (save / restore / diff)")
 
 
+def _resolve_storage_dir() -> Optional[str]:
+    """Return a configured ``checkpoints.storage_dir`` if one is set.
+
+    Threading this through keeps the standalone ``praisonai checkpoint``
+    commands reading from the same store the interactive coding session
+    (``code --checkpoints``) writes to. Falls back to ``None`` (the default
+    store) when no config is present or it cannot be read.
+    """
+    try:
+        from ..configuration.resolver import resolve_config
+
+        section = (resolve_config().extra or {}).get("checkpoints", {})
+        if isinstance(section, dict):
+            return section.get("storage_dir")
+    except Exception:
+        pass
+    return None
+
+
 def _handler(workspace: Optional[str] = None, verbose: bool = False):
     """Build a CheckpointsHandler for the current workspace."""
     from ..features.checkpoints import CheckpointsHandler
 
-    return CheckpointsHandler(workspace_dir=workspace or os.getcwd(), verbose=verbose)
+    return CheckpointsHandler(
+        workspace_dir=workspace or os.getcwd(),
+        verbose=verbose,
+        storage_dir=_resolve_storage_dir(),
+    )
 
 
 async def _resolve_checkpoint_id(handler, ref: str) -> Optional[str]:

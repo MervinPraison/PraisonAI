@@ -7081,7 +7081,14 @@ Provide a concise summary (max 200 words):"""
                         task = execution_queue.get(timeout=0.5)
                     except queue_module.Empty:
                         continue
-                    
+
+                    # Mark the worker busy atomically with dequeue. The queue
+                    # item is no longer visible to qsize() once get() returns, so
+                    # publishing current_task immediately closes the window where
+                    # a workspace rollback (/undo, /revert) could race a turn
+                    # that is about to write files.
+                    worker_state['current_task'] = task
+
                     # Extract task context
                     prompt = task.get('prompt', '')
                     task_id = task.get('task_id', 0)
@@ -7092,7 +7099,6 @@ Provide a concise summary (max 200 words):"""
                     state_manager.set_state(ProcessingState.PROCESSING)
                     task['status'] = 'running'
                     task['start_time'] = start_time
-                    worker_state['current_task'] = task  # Full task context
                     live_status.clear()
                     live_status.update_status(f"Task #{task_id}: Thinking...")
                     

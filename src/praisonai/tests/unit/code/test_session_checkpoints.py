@@ -149,5 +149,28 @@ def test_revert_out_of_range_is_safe(monkeypatch):
         assert mgr.revert(5) is None
 
 
+def test_standalone_checkpoint_command_honors_configured_storage_dir(monkeypatch):
+    """`praisonai checkpoint` reads the same store as `code --checkpoints`.
+
+    Guards against the split-store regression where the standalone command
+    group built CheckpointsHandler without the configured storage_dir and so
+    reported saved checkpoints as missing.
+    """
+    from praisonai.cli.commands import checkpoint as checkpoint_cmd
+
+    with tempfile.TemporaryDirectory() as workspace, \
+            tempfile.TemporaryDirectory() as store:
+        class _Cfg:
+            extra = {"checkpoints": {"auto": True, "storage_dir": store}}
+
+        monkeypatch.setattr(
+            "praisonai.cli.configuration.resolver.resolve_config",
+            lambda *a, **k: _Cfg(),
+        )
+
+        handler = checkpoint_cmd._handler(workspace=workspace)
+        assert handler.storage_dir == store
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
