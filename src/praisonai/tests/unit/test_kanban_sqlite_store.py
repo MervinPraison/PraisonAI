@@ -714,6 +714,18 @@ class TestTaskRunsAndRetry:
         assert store.record_failure(task.id, error='e1') is False
         assert store.get_task(task.id).status != TaskStatus.BLOCKED
 
+    def test_record_failure_noop_on_terminal_task(self, store):
+        """A stale process-exit must not re-fail an already-completed task."""
+        task = store.create_task({'title': 'Done already', 'status': 'ready'})
+        store.move_task(task.id, 'done')
+
+        # A late, non-zero worker exit handler calling record_failure must not
+        # increment the counter or re-block a task that already finished.
+        assert store.record_failure(task.id, error='stale exit') is False
+        refreshed = store.get_task(task.id)
+        assert refreshed.status == TaskStatus.DONE
+        assert refreshed.consecutive_failures == 0
+
     def test_migration_replaces_global_idempotency_index(self, tmp_path):
         """A legacy non-tenant-scoped idempotency index is replaced on init."""
         import praisonai.kanban.sqlite_store

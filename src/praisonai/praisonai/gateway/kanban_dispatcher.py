@@ -85,6 +85,31 @@ class KanbanDispatcher:
             logger.warning(f"Failed to record failure for task {task_id}: {e}")
             return None
         
+    def _retry_pending_run_closes(self, store):
+        """Retry closing runs whose close failed transiently on a prior cycle.
+
+        A run id stays in ``_task_runs`` after its task leaves ``running_tasks``
+        only when ``_close_run_safe`` returned False (transient store error).
+        Those entries would otherwise never be revisited until shutdown, leaving
+        the run open and ``tasks.current_run_id`` stale. Close them as failed
+        (the worker already exited) and forget the id once the close persists.
+        """
+        if not self._task_runs:
+            return
+        for task_id in list(self._task_runs.keys()):
+            if task_id in self.running_tasks:
+                # Still active; its close is handled by the per-process loop.
+                continue
+            run_id = self._task_runs.get(task_id)
+            if run_id is None:
+                self._task_runs.pop(task_id, None)
+                continue
+            if self._close_run_safe(
+                store, run_id, 'failed',
+                error='Run close retried after a prior transient store error',
+            ):
+                self._task_runs.pop(task_id, None)
+
     def _get_kanban_store(self):
         """Get kanban store instance."""
         try:
@@ -446,6 +471,12 @@ class KanbanDispatcher:
         Args:
             store: Kanban store instance
         """
+        # Retry any run closes that did not persist on a previous cycle. Those
+        # run ids are retained in _task_runs but their task is no longer in
+        # running_tasks, so the per-process loop below would never revisit them
+        # and the open run / stale current_run_id would linger until shutdown.
+        self._retry_pending_run_closes(store)
+
         completed = []
         
         for task_id, process in self.running_tasks.items():

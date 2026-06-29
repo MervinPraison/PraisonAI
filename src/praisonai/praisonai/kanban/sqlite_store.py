@@ -1116,6 +1116,12 @@ class SQLiteKanbanStore:
             row = cursor.fetchone()
             if not row:
                 raise ValueError(f"Task {task_id} not found")
+            # A terminal task (already completed/archived by another caller,
+            # e.g. kanban_complete) must not be re-failed: a stale process-exit
+            # handler could otherwise increment the counter and re-block a task
+            # that already finished. Treat as a no-op (not circuit-broken).
+            if (row['status'] or '') in ('done', 'archived'):
+                return False
             failures = (row['consecutive_failures'] or 0) + 1
             # Normalize the persisted limit too: a task created before create-path
             # validation (or via migration) may carry max_retries=0/negative,
