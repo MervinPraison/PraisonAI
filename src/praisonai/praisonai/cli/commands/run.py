@@ -991,7 +991,11 @@ def _run_prompt(
         # not carry session state, so any explicit session flag stays local.
         # Default auto-save also stays in-process until the warm path can persist
         # sessions the same way as the normal run path.
-        runtime_eligible = no_save and not any([
+        # An explicit --thinking budget is a per-invocation override (like tools/
+        # approval/memory), so it stays in-process: the warm runtime reuses a
+        # cached agent and does not carry a per-call thinking budget, so attaching
+        # would silently drop the requested setting.
+        runtime_eligible = no_save and thinking_budget is None and not any([
             mcp, mcp_servers, tools, toolset, approval, approve_all_tools,
             memory, permissions_config, continue_session, session, fork,
         ])
