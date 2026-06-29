@@ -56,6 +56,11 @@ from .protocols import (
     DrainDecision,
     GatewayDrainPolicyProtocol,
     DrainTimeoutPolicy,
+    # Gateway inbound admission control (Issue #2454)
+    AdmissionDecision,
+    GatewayConcurrencyPolicyProtocol,
+    GatewayConcurrencyPolicy,  # backward-compat alias
+    ConcurrencyLimitPolicy,
     # Port-less, restart-safe external drain trigger (Issue #2390)
     current_epoch,
     DrainMarkerPolicy,
@@ -172,6 +177,11 @@ __all__ = [
     "DrainDecision",
     "GatewayDrainPolicyProtocol",
     "DrainTimeoutPolicy",
+    # Gateway inbound admission control (Issue #2454)
+    "AdmissionDecision",
+    "GatewayConcurrencyPolicyProtocol",
+    "GatewayConcurrencyPolicy",
+    "ConcurrencyLimitPolicy",
     # Port-less, restart-safe external drain trigger (Issue #2390)
     "current_epoch",
     "DrainMarkerPolicy",

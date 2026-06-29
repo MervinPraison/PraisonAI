@@ -3635,6 +3635,22 @@ class WebSocketGateway:
                 bot = self._create_bot(channel_type, token, default_agent, config, ch_cfg)
                 if bot is None:
                     continue
+                # Issue #2454: share the gateway-wide admission gate with this
+                # channel bot's session manager so inbound runs are admitted
+                # through the global concurrency ceiling / fair queue. The
+                # concrete adapters (TelegramBot, DiscordBot, …) expose their
+                # session under ``_session`` / ``_session_mgr``. No-op when not
+                # configured, preserving today's immediate-dispatch path.
+                _gate = getattr(self, "_admission_gate", None)
+                if _gate is not None:
+                    _sess = (
+                        getattr(bot, "_session", None)
+                        or getattr(bot, "_session_mgr", None)
+                    )
+                    if _sess is not None and hasattr(_sess, "_admission_gate"):
+                        _sess._admission_gate = _gate
+                    elif hasattr(bot, "_admission_gate"):
+                        bot._admission_gate = _gate
                 self._channel_bots[channel_name] = bot
                 logger.info(f"Channel '{channel_name}' ({channel_type}) initialized")
             except Exception as e:
@@ -4606,7 +4622,39 @@ class WebSocketGateway:
                     drain_timeout_cfg,
                 )
                 drain_timeout_cfg = None
-        
+
+        # Issue #2454: gateway-wide inbound admission control. Build a single
+        # shared admission gate from the gateway config (CLI overrides win over
+        # YAML) and stamp it onto each channel bot in ``start_channels`` so the
+        # concurrency ceiling / fair queue / overflow policy is enforced on the
+        # inbound run-dispatch path. Disabled (no gate) when no positive
+        # ceiling is configured — preserving today's immediate-dispatch path.
+        def _ovr(attr: str, key: str, default: Any) -> Any:
+            val = getattr(self, attr, None)
+            if val is None:
+                val = gw_cfg.get(key, default)
+            return val
+
+        try:
+            _max_runs = int(_ovr("_max_concurrent_runs_override", "max_concurrent_runs", 0) or 0)
+            _queue_depth = int(_ovr("_queue_depth_override", "queue_depth", 0) or 0)
+            _overflow = str(_ovr("_overflow_policy_override", "overflow_policy", "reject") or "reject")
+            from ..bots._admission import build_admission_gate
+            self._admission_gate = build_admission_gate(
+                max_concurrent_runs=_max_runs,
+                queue_depth=_queue_depth,
+                overflow_policy=_overflow,
+            )
+            if self._admission_gate is not None:
+                logger.info(
+                    "Gateway admission control enabled "
+                    "(max_concurrent_runs=%d queue_depth=%d overflow=%s)",
+                    _max_runs, _queue_depth, _overflow,
+                )
+        except Exception as e:  # pragma: no cover — defensive
+            logger.warning("Failed to configure admission control: %s", e)
+            self._admission_gate = None
+
         # Parse health monitoring configuration
         health_cfg = gw_cfg.get("health")
         if health_cfg and isinstance(health_cfg, dict):

@@ -70,6 +70,9 @@ class GatewayHandler:
         agent_file: Optional[str] = None,
         config_file: Optional[str] = None,
         drain_timeout: Optional[float] = None,
+        max_concurrent_runs: Optional[int] = None,
+        queue_depth: Optional[int] = None,
+        overflow_policy: Optional[str] = None,
     ) -> None:
         """Start the gateway server.
         
@@ -81,6 +84,14 @@ class GatewayHandler:
             drain_timeout: Optional graceful-drain window in seconds (#2375).
                 Overrides any ``gateway.drain_timeout`` in the YAML config.
                 ``0`` disables; ``None`` falls back to the config value.
+            max_concurrent_runs: Optional gateway-wide ceiling on concurrent
+                agent runs (#2454). Overrides ``gateway.max_concurrent_runs``.
+                ``0`` disables; ``None`` falls back to the config value.
+            queue_depth: Optional bounded wait-queue depth (#2454). Overrides
+                ``gateway.queue_depth``.
+            overflow_policy: Optional overflow behaviour when the queue is full
+                (#2454): ``reject`` | ``queue`` | ``shed_oldest``. Overrides
+                ``gateway.overflow_policy``.
         """
         # Ensure INFO-level logs surface to bot-stdout.log / bot-stderr.log
         # when running under launchd / systemd. Many key lifecycle events
@@ -119,6 +130,13 @@ class GatewayHandler:
             # CLI --drain-timeout overrides gateway.drain_timeout in YAML (#2375)
             if drain_timeout is not None:
                 self._gateway._drain_timeout_override = drain_timeout
+            # CLI admission-control flags override gateway.* in YAML (#2454)
+            if max_concurrent_runs is not None:
+                self._gateway._max_concurrent_runs_override = max_concurrent_runs
+            if queue_depth is not None:
+                self._gateway._queue_depth_override = queue_depth
+            if overflow_policy is not None:
+                self._gateway._overflow_policy_override = overflow_policy
             print(f"Loading gateway config from {config_file}")
             try:
                 asyncio.run(self._gateway.start_with_config(config_file))
@@ -437,6 +455,19 @@ def handle_gateway_command(args) -> int:
             "--drain-timeout", dest="drain_timeout", type=float, default=None,
             help="Seconds to wait for in-flight agent turns to finish on shutdown (0 disables; #2375)",
         )
+        start_parser.add_argument(
+            "--max-concurrent-runs", dest="max_concurrent_runs", type=int, default=None,
+            help="Gateway-wide ceiling on simultaneously-running agent turns (0 disables; #2454)",
+        )
+        start_parser.add_argument(
+            "--queue-depth", dest="queue_depth", type=int, default=None,
+            help="Bounded wait queue depth when at the concurrency ceiling (#2454)",
+        )
+        start_parser.add_argument(
+            "--overflow-policy", dest="overflow_policy", default=None,
+            choices=["reject", "queue", "shed_oldest"],
+            help="Behaviour when the wait queue is full (default: reject; #2454)",
+        )
         
         # status subcommand
         status_parser = subparsers.add_parser("status", help="Check gateway status")
@@ -499,6 +530,9 @@ def handle_gateway_command(args) -> int:
             agent_file=getattr(args, "agents", None),
             config_file=getattr(args, "config_file", None),
             drain_timeout=getattr(args, "drain_timeout", None),
+            max_concurrent_runs=getattr(args, "max_concurrent_runs", None),
+            queue_depth=getattr(args, "queue_depth", None),
+            overflow_policy=getattr(args, "overflow_policy", None),
         )
     elif subcommand == "status":
         handler.status(

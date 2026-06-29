@@ -99,6 +99,10 @@ class BotOS:
         enable_supervision: bool = True,
         idle_policy: Optional[Any] = None,
         drain_timeout: Optional[float] = None,
+        max_concurrent_runs: int = 0,
+        queue_depth: int = 0,
+        overflow_policy: str = "reject",
+        admission_policy: Optional[Any] = None,
     ):
         self._bots: Dict[str, Bot] = {}
         self._is_running = False
@@ -118,6 +122,22 @@ class BotOS:
         self._last_inbound_ts: float = time.time()
         self._running_turns: int = 0
         self._is_dormant: bool = False
+        # Issue #2454: opt-in gateway-wide inbound admission control. Default
+        # off — when ``max_concurrent_runs <= 0`` and no ``admission_policy`` is
+        # given, the gate is None and every inbound turn dispatches immediately
+        # (legacy behaviour). When configured, a single shared ``AdmissionGate``
+        # bounds the aggregate number of concurrent agent runs across all
+        # users/channels, with a bounded fair wait queue and a declared
+        # overflow policy, and is wired into every bot's session manager so
+        # enforcement happens in the run-dispatch path itself.
+        from ._admission import build_admission_gate
+
+        self._admission_gate = build_admission_gate(
+            max_concurrent_runs=max_concurrent_runs,
+            queue_depth=queue_depth,
+            overflow_policy=overflow_policy,
+            policy=admission_policy,
+        )
         self._on_quiesce = None  # optional callable(): host-suspend driver
         # W1: shared identity resolver applied to every managed bot —
         # gives cross-platform unified-user sessions out of the box.
@@ -242,6 +262,12 @@ class BotOS:
         # ``BotOutboundMessenger``, making the built-in core ``send_message``
         # tool actually deliver instead of returning "no gateway available".
         self._wire_outbound_messenger()
+
+        # Issue #2454: share the single gateway-wide admission gate with every
+        # bot's session manager so the concurrency ceiling / fair queue /
+        # overflow policy is enforced in the inbound run-dispatch path. No-op
+        # when admission control is not configured.
+        self._wire_admission_gate()
 
         # Start health monitoring if enabled
         if self._enable_supervision and self._supervisor:
@@ -677,6 +703,50 @@ class BotOS:
                     "Failed to wire outbound messenger for %s: %s", platform, e
                 )
 
+    def _wire_admission_gate(self) -> None:
+        """Hand the shared admission gate to every bot's session manager (#2454).
+
+        Lets each agent turn pass through the single gateway-wide admission gate
+        so the aggregate concurrency ceiling, fair wait queue and overflow
+        policy are enforced in the inbound run-dispatch path. Mirrors
+        :meth:`_wire_outbound_messenger`: pre-start it is stamped onto the
+        ``Bot`` (spliced into the lazily-built session by ``Bot._build_adapter``)
+        and any already-built session is wired in place. No-op when admission
+        control is not configured (``self._admission_gate is None``), preserving
+        the legacy immediate-dispatch behaviour.
+        """
+        if self._admission_gate is None:
+            return
+        for platform, bot in self._bots.items():
+            try:
+                # Pre-start: applied when the adapter is lazily built.
+                if hasattr(bot, "_admission_gate"):
+                    bot._admission_gate = self._admission_gate
+                # Post-start / direct adapter: wire any existing session now.
+                session = self._find_session_manager(bot)
+                if session is not None and hasattr(session, "_admission_gate"):
+                    session._admission_gate = self._admission_gate
+            except Exception as e:  # pragma: no cover — defensive
+                logger.debug(
+                    "Failed to wire admission gate for %s: %s", platform, e
+                )
+
+    @property
+    def admission_stats(self) -> Optional[Dict[str, Any]]:
+        """Live admission counters for health/metrics, or ``None`` when off.
+
+        Surfaces the current in-flight count, queue depth, and cumulative
+        admits/rejects/sheds (Issue #2454 observability requirement). Returns
+        ``None`` when no admission gate is configured.
+        """
+        gate = self._admission_gate
+        if gate is None:
+            return None
+        try:
+            return gate.stats()
+        except Exception:  # pragma: no cover — defensive
+            return None
+
     def _configure_delivery_from_bots(self) -> None:
         """Configure delivery router from bot configurations."""
         for platform, bot in self._bots.items():
@@ -1054,11 +1124,32 @@ class BotOS:
         gateway_cfg = raw.get("gateway") or {}
         drain_timeout = raw.get("drain_timeout", gateway_cfg.get("drain_timeout"))
 
+        # Issue #2454: gateway-wide inbound admission control. Read from the
+        # ``gateway`` block (or top-level fallback). Default 0/None disables it
+        # so today's immediate-dispatch behaviour is preserved.
+        max_concurrent_runs = int(
+            raw.get(
+                "max_concurrent_runs",
+                gateway_cfg.get("max_concurrent_runs", 0),
+            )
+            or 0
+        )
+        queue_depth = int(
+            raw.get("queue_depth", gateway_cfg.get("queue_depth", 0)) or 0
+        )
+        overflow_policy = (
+            raw.get("overflow_policy", gateway_cfg.get("overflow_policy", "reject"))
+            or "reject"
+        )
+
         return cls(
             bots=bots,
             health_monitor=health_monitor,
             enable_supervision=enable_supervision,
             drain_timeout=drain_timeout,
+            max_concurrent_runs=max_concurrent_runs,
+            queue_depth=queue_depth,
+            overflow_policy=overflow_policy,
         )
 
     async def health(self) -> Dict[str, HealthResult]:
