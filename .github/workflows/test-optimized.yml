@@ -129,7 +129,7 @@ jobs:
         cd src/praisonai-agents
         pip install -e ".[all]"
         cd ../praisonai
-        pip install -e ".[crewai,autogen]"
+        pip install -e ".[crewai,autogen,ui,chat]"
         pip install pytest pytest-asyncio pytest-timeout pytest-cov pytest-xdist
     
     - name: Run Main Tests
