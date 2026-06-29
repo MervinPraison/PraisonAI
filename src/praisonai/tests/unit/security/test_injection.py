@@ -273,3 +273,4 @@ class TestEnableSecurity:
         result = enable_security()
         assert isinstance(result["injection"], dict)
         assert "before_tool" in result["injection"]
+        assert isinstance(result["injection"]["before_tool"], str)
