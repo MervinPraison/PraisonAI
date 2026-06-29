@@ -24,7 +24,8 @@ from praisonai.tools.skill_manage import skill_manage
 
 
 @pytest.mark.skipif(
-    os.environ.get("PRAISONAI_LIVE_TESTS", "0") != "1",
+    os.environ.get("PRAISONAI_LIVE_TESTS", "0") != "1"
+    or not os.environ.get("OPENAI_API_KEY"),
     reason="Real agentic test — requires PRAISONAI_LIVE_TESTS=1 with valid OPENAI_API_KEY",
 )
 def test_self_improving_agent_loop():

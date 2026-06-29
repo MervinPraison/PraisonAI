@@ -13,7 +13,8 @@ import pytest
 
 # Skip unless live tests explicitly enabled (CI uses a fake OPENAI_API_KEY)
 pytestmark = pytest.mark.skipif(
-    os.environ.get("PRAISONAI_LIVE_TESTS", "0") != "1",
+    os.environ.get("PRAISONAI_LIVE_TESTS", "0") != "1"
+    or not os.environ.get("OPENAI_API_KEY"),
     reason="Real LLM tests — set PRAISONAI_LIVE_TESTS=1 with a valid OPENAI_API_KEY",
 )
 
