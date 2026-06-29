@@ -4635,25 +4635,32 @@ class WebSocketGateway:
                 val = gw_cfg.get(key, default)
             return val
 
+        # Coerce + validate admission config. Invalid config is fail-fast: a
+        # typo in the overload-control knobs must NOT silently start the
+        # gateway with unbounded inbound runs (which would remove the very
+        # protection the operator asked for). ``build_admission_gate`` raises
+        # ``ValueError`` on bad values; we let that propagate to abort startup.
         try:
             _max_runs = int(_ovr("_max_concurrent_runs_override", "max_concurrent_runs", 0) or 0)
             _queue_depth = int(_ovr("_queue_depth_override", "queue_depth", 0) or 0)
-            _overflow = str(_ovr("_overflow_policy_override", "overflow_policy", "reject") or "reject")
-            from ..bots._admission import build_admission_gate
-            self._admission_gate = build_admission_gate(
-                max_concurrent_runs=_max_runs,
-                queue_depth=_queue_depth,
-                overflow_policy=_overflow,
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                f"Invalid gateway admission config "
+                f"(max_concurrent_runs/queue_depth must be integers): {e}"
+            ) from e
+        _overflow = str(_ovr("_overflow_policy_override", "overflow_policy", "reject") or "reject")
+        from ..bots._admission import build_admission_gate
+        self._admission_gate = build_admission_gate(
+            max_concurrent_runs=_max_runs,
+            queue_depth=_queue_depth,
+            overflow_policy=_overflow,
+        )
+        if self._admission_gate is not None:
+            logger.info(
+                "Gateway admission control enabled "
+                "(max_concurrent_runs=%d queue_depth=%d overflow=%s)",
+                _max_runs, _queue_depth, _overflow,
             )
-            if self._admission_gate is not None:
-                logger.info(
-                    "Gateway admission control enabled "
-                    "(max_concurrent_runs=%d queue_depth=%d overflow=%s)",
-                    _max_runs, _queue_depth, _overflow,
-                )
-        except Exception as e:  # pragma: no cover — defensive
-            logger.warning("Failed to configure admission control: %s", e)
-            self._admission_gate = None
 
         # Parse health monitoring configuration
         health_cfg = gw_cfg.get("health")

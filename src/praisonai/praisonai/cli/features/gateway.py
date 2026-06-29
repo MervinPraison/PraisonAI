@@ -153,6 +153,20 @@ class GatewayHandler:
         # Standard WebSocket-only mode
         config = GatewayConfig(host=host, port=port)
         self._gateway = WebSocketGateway(config=config)
+        # CLI admission-control flags also apply in no-config mode (#2454):
+        # build a shared gate directly so `--max-concurrent-runs` is honoured
+        # even without a gateway.yaml.
+        if max_concurrent_runs is not None:
+            try:
+                from praisonai.bots._admission import build_admission_gate
+                self._gateway._admission_gate = build_admission_gate(
+                    max_concurrent_runs=max_concurrent_runs,
+                    queue_depth=queue_depth or 0,
+                    overflow_policy=overflow_policy or "reject",
+                )
+            except Exception as e:
+                print(f"Error: invalid admission-control config: {e}")
+                return
         
         if agent_file:
             self._load_agents_from_file(agent_file)

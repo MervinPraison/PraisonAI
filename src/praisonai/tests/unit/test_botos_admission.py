@@ -83,6 +83,43 @@ def test_gate_enforces_ceiling_and_rejects_overflow():
     asyncio.run(main())
 
 
+def test_shed_oldest_evicts_oldest_waiter():
+    async def main():
+        # ceiling=1, queue_depth=1, shed_oldest: 1 in-flight, 1 queued; a third
+        # turn must evict the *oldest* waiter (not the newcomer, not unbounded).
+        gate = build_admission_gate(
+            max_concurrent_runs=1, queue_depth=1, overflow_policy="shed_oldest"
+        )
+        release = asyncio.Event()
+        shed = []
+
+        async def run(i):
+            try:
+                async with gate.admit(session_id=str(i)):
+                    await release.wait()
+            except AdmissionRejected as r:
+                shed.append(i)
+
+        t0 = asyncio.create_task(run(0))  # admitted, holds the slot
+        await asyncio.sleep(0.02)
+        t1 = asyncio.create_task(run(1))  # queued (oldest waiter)
+        await asyncio.sleep(0.02)
+        assert gate.in_flight == 1
+        assert gate.queued == 1
+        t2 = asyncio.create_task(run(2))  # newcomer evicts the oldest waiter
+        await asyncio.sleep(0.02)
+        # Oldest waiter (1) was shed; newcomer (2) took its queue slot. Queue
+        # never grew past its depth, so shedding is bounded.
+        assert shed == [1]
+        assert gate.queued == 1
+        assert gate.stats()["shed"] == 1
+        release.set()
+        await asyncio.gather(t0, t1, t2)
+        assert gate.in_flight == 0
+
+    asyncio.run(main())
+
+
 def test_gate_releases_slot_on_exception():
     async def main():
         gate = build_admission_gate(max_concurrent_runs=1, queue_depth=0)

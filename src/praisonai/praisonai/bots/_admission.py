@@ -26,9 +26,10 @@ no-op so legacy behaviour is preserved bit-for-bit.
 from __future__ import annotations
 
 import asyncio
+import itertools
 import logging
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,7 @@ class AdmissionGate:
         self._sem: Optional[asyncio.Semaphore] = None
         self._max = int(getattr(policy, "max_concurrent_runs", 0) or 0)
         self._queue_depth = int(getattr(policy, "queue_depth", 0) or 0)
+        self._overflow = str(getattr(policy, "overflow_policy", "reject") or "reject")
         # Live counters.
         self._in_flight = 0
         self._queued = 0
@@ -84,6 +86,10 @@ class AdmissionGate:
         self.admitted = 0
         self.rejected = 0
         self.shed = 0
+        # FIFO registry of in-progress waiters, keyed by monotonic ticket, used
+        # to evict the *oldest* waiter under the ``shed_oldest`` overflow policy.
+        self._waiters: "Dict[int, asyncio.Event]" = {}
+        self._ticket = itertools.count()
 
     @property
     def enabled(self) -> bool:
@@ -149,12 +155,45 @@ class AdmissionGate:
 
         sem = self._ensure_sem()
         waited = decision is AdmissionDecision.QUEUE
+        shed_event: Optional[asyncio.Event] = None
+        ticket: Optional[int] = None
         if waited:
+            # Under ``shed_oldest``, a newcomer arriving at a full queue evicts
+            # the oldest in-progress waiter so the queue can't grow unbounded.
+            if self._overflow == "shed_oldest" and self._queued >= self._queue_depth:
+                self._shed_oldest_waiter()
             self._queued += 1
+            ticket = next(self._ticket)
+            shed_event = asyncio.Event()
+            self._waiters[ticket] = shed_event
+
         try:
-            await sem.acquire()
+            if shed_event is not None:
+                # Race the slot acquisition against an eviction signal. Whichever
+                # resolves first wins; the loser is cancelled cleanly.
+                acquire_task = asyncio.ensure_future(sem.acquire())
+                shed_task = asyncio.ensure_future(shed_event.wait())
+                done, pending = await asyncio.wait(
+                    {acquire_task, shed_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                for t in pending:
+                    t.cancel()
+                if shed_task in done and acquire_task in pending:
+                    # Evicted before we got a slot: shed with a busy ack. Guard
+                    # against the rare race where acquire also completed.
+                    if acquire_task in done and not acquire_task.cancelled():
+                        sem.release()
+                    self.shed += 1
+                    raise AdmissionRejected()
+                # We acquired a slot (consume any settled exception on cancel).
+                if acquire_task in pending:
+                    await sem.acquire()
+            else:
+                await sem.acquire()
         finally:
-            if waited:
+            if ticket is not None:
+                self._waiters.pop(ticket, None)
                 self._queued -= 1
 
         self._in_flight += 1
@@ -164,6 +203,14 @@ class AdmissionGate:
         finally:
             self._in_flight -= 1
             sem.release()
+
+    def _shed_oldest_waiter(self) -> None:
+        """Signal the oldest in-progress waiter to shed, freeing a queue slot."""
+        for ticket in list(self._waiters):
+            event = self._waiters.get(ticket)
+            if event is not None and not event.is_set():
+                event.set()
+                return
 
     def _decide(self, *, session_id: str):
         from praisonaiagents.gateway import AdmissionDecision
