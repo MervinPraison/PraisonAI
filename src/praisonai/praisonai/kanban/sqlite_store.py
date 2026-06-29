@@ -152,12 +152,25 @@ class SQLiteKanbanStore:
             if column not in existing:
                 conn.execute(ddl)
 
-            # Migrate pre-existing databases that lack the reclamation columns.
-            self._ensure_columns(conn, "tasks", {
-                "claim_expires": "TIMESTAMP",
-                "worker_pid": "INTEGER",
-                "last_heartbeat_at": "TIMESTAMP",
-            })
+        # Migrate pre-existing databases that lack the reclamation columns.
+        self._ensure_columns(conn, "tasks", {
+            "claim_expires": "TIMESTAMP",
+            "worker_pid": "INTEGER",
+            "last_heartbeat_at": "TIMESTAMP",
+        })
+
+        # Drop a pre-existing idempotency index that is not tenant-scoped so the
+        # tenant-aware unique index below can replace it. Legacy DBs created the
+        # index on (board, idempotency_key); reusing the same name with
+        # IF NOT EXISTS would otherwise leave two tenants able to collide on the
+        # same board+key after migration.
+        cursor = conn.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'index' AND name = 'idx_tasks_idempotency'"
+        )
+        index_row = cursor.fetchone()
+        if index_row and index_row[0] and 'tenant' not in index_row[0]:
+            conn.execute("DROP INDEX idx_tasks_idempotency")
 
     def _ensure_columns(self, conn: sqlite3.Connection, table: str, columns: Dict[str, str]):
         """Add missing columns to an existing table (idempotent migration)."""
@@ -1019,6 +1032,13 @@ class SQLiteKanbanStore:
             if not row:
                 return None
             run = TaskRun.from_row(dict(row))
+            # Reject already-finalized runs: once ended_at is set the outcome is
+            # immutable. This guards against a stale current_run_id (e.g. the
+            # dispatcher already closed this run as 'failed') being re-closed as
+            # 'completed', which would rewrite audit/retry history with the wrong
+            # result. Return the existing run unchanged instead.
+            if row['ended_at']:
+                return run
             new_summary = summary if summary is not None else run.summary
             new_error = error if error is not None else run.error
             new_metadata = metadata if metadata is not None else run.metadata
@@ -1097,7 +1117,16 @@ class SQLiteKanbanStore:
             if not row:
                 raise ValueError(f"Task {task_id} not found")
             failures = (row['consecutive_failures'] or 0) + 1
-            limit = row['max_retries'] if row['max_retries'] is not None else DEFAULT_MAX_RETRIES
+            # Normalize the persisted limit too: a task created before create-path
+            # validation (or via migration) may carry max_retries=0/negative,
+            # which would otherwise auto-block on the first failure. Fall back to
+            # the board default for any non-positive / non-integer stored value.
+            stored_limit = row['max_retries']
+            try:
+                stored_limit = int(stored_limit) if stored_limit is not None else None
+            except (TypeError, ValueError):
+                stored_limit = None
+            limit = stored_limit if (stored_limit is not None and stored_limit >= 1) else DEFAULT_MAX_RETRIES
             blocked = failures >= limit
             if blocked:
                 conn.execute("""

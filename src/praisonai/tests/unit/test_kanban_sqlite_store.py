@@ -5,6 +5,7 @@ import pytest
 pytestmark = pytest.mark.skip(reason="Legacy unit test pending Core Tests gate update")
 import tempfile
 import shutil
+import sqlite3
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -683,3 +684,70 @@ class TestTaskRunsAndRetry:
         done = store.get_task(task.id)
         assert done.status == TaskStatus.DONE
         assert not done.claim_lock
+
+    def test_close_run_rejects_already_finalized(self, store):
+        """A finalized run cannot be re-closed with a different outcome."""
+        task = store.create_task({'title': 'Finalize once'})
+        run_id = store.start_run(task.id, profile='worker-1')
+        store.close_run(run_id, 'failed', error='boom', summary='attempt A')
+
+        # A stale caller trying to mark the same run completed must NOT rewrite
+        # the already-finalized outcome/summary/error.
+        result = store.close_run(run_id, 'completed', summary='now done')
+        assert result.outcome == 'failed'
+        assert result.summary == 'attempt A'
+        assert result.error == 'boom'
+
+        runs = store.get_runs(task.id)
+        assert len(runs) == 1
+        assert runs[0].outcome == 'failed'
+
+    def test_legacy_zero_max_retries_does_not_block_on_first_failure(self, store):
+        """A persisted max_retries=0 (legacy/migrated) falls back to default."""
+        task = store.create_task({'title': 'Legacy breaker'})
+        # Simulate a row written before create-path validation existed.
+        with store._get_connection() as conn:
+            conn.execute(
+                "UPDATE tasks SET max_retries = 0 WHERE id = ?", (task.id,)
+            )
+
+        assert store.record_failure(task.id, error='e1') is False
+        assert store.get_task(task.id).status != TaskStatus.BLOCKED
+
+    def test_migration_replaces_global_idempotency_index(self, tmp_path):
+        """A legacy non-tenant-scoped idempotency index is replaced on init."""
+        import praisonai.kanban.sqlite_store
+        legacy_path = tmp_path / 'legacy_kanban.db'
+        conn = sqlite3.connect(str(legacy_path))
+        conn.execute("""
+            CREATE TABLE tasks (
+                id TEXT PRIMARY KEY, title TEXT, body TEXT, status TEXT,
+                assignee TEXT, priority INTEGER, tenant TEXT, board TEXT,
+                workspace_kind TEXT, metadata TEXT, idempotency_key TEXT,
+                claim_lock TEXT, version INTEGER DEFAULT 1,
+                created_at TEXT, updated_at TEXT
+            )
+        """)
+        # Old, board-only (non-tenant-scoped) idempotency index.
+        conn.execute(
+            "CREATE UNIQUE INDEX idx_tasks_idempotency "
+            "ON tasks(board, idempotency_key) WHERE idempotency_key IS NOT NULL"
+        )
+        conn.commit()
+        conn.close()
+
+        # Re-opening through the store should migrate the index to be
+        # tenant-scoped so two tenants on the same board no longer collide.
+        original = praisonai.kanban.sqlite_store.get_kanban_db_path
+        praisonai.kanban.sqlite_store.get_kanban_db_path = lambda board=None: legacy_path
+        try:
+            migrated = SQLiteKanbanStore()
+            a = migrated.create_task(
+                {'title': 'A', 'tenant': 'tenant-a'}, idempotency_key='shared'
+            )
+            b = migrated.create_task(
+                {'title': 'B', 'tenant': 'tenant-b'}, idempotency_key='shared'
+            )
+            assert a.id != b.id
+        finally:
+            praisonai.kanban.sqlite_store.get_kanban_db_path = original
