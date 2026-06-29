@@ -7091,21 +7091,26 @@ Provide a concise summary (max 200 words):"""
             """Main worker loop - processes execution queue."""
             while worker_state['running']:
                 try:
-                    # Wait for a message with timeout (allows checking running flag)
-                    try:
-                        task = execution_queue.get(timeout=0.5)
-                    except queue_module.Empty:
-                        continue
-
-                    # Mark the worker busy atomically with dequeue under the
-                    # shared processing_lock. Without the lock there is a window
-                    # between get() (which makes the item invisible to qsize())
-                    # and publishing current_task where _worker_busy() would see
-                    # no task AND an empty queue, letting a workspace rollback
-                    # (/undo, /revert) race a turn that is about to write files.
-                    # Taking the same lock that _worker_busy() uses closes it.
+                    # Dequeue and publish current_task atomically under the
+                    # shared processing_lock so _worker_busy() can never observe
+                    # the gap between get() (which makes the item invisible to
+                    # qsize()) and the current_task assignment. We use a
+                    # non-blocking get_nowait() inside the lock instead of a
+                    # blocking get(timeout=...) so the lock is held only for the
+                    # microsecond-scale dequeue+publish, never across the poll
+                    # wait (which would stall the rollback gate for up to 0.5s).
+                    task = None
                     with processing_lock:
-                        worker_state['current_task'] = task
+                        try:
+                            task = execution_queue.get_nowait()
+                            worker_state['current_task'] = task
+                        except queue_module.Empty:
+                            task = None
+                    if task is None:
+                        # No work right now; sleep briefly to avoid busy-spin,
+                        # then re-check the running flag and the queue.
+                        time.sleep(0.05)
+                        continue
 
                     # Extract task context
                     prompt = task.get('prompt', '')
