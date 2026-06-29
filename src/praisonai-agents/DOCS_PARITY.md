@@ -18,70 +18,70 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 420 |
-| ✅ Agent | 21 | 42 | 11563 |
-| ✅ Agent-to-Agent (A2A) | 1 | 7 | 2880 |
-| ✅ Agent-to-User (A2U) | 1 | 3 | 575 |
-| ✅ Approval | 1 | 3 | 1574 |
-| ✅ Audio | 2 | 10 | 649 |
-| ✅ Auto Generation | 5 | 7 | 1976 |
-| ✅ Autonomy | 3 | 5 | 1919 |
-| ✅ Bots | 7 | 24 | 8215 |
+| ✅ Agent | 21 | 42 | 11618 |
+| ✅ Agent-to-Agent (A2A) | 1 | 7 | 2911 |
+| ✅ Agent-to-User (A2U) | 1 | 3 | 573 |
+| ✅ Approval | 1 | 3 | 1567 |
+| ✅ Audio | 2 | 10 | 645 |
+| ✅ Auto Generation | 5 | 7 | 1978 |
+| ✅ Autonomy | 3 | 5 | 1925 |
+| ✅ Bots | 7 | 24 | 8248 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 110 | 27757 |
-| ✅ Chunking | 2 | 2 | 288 |
+| ✅ CLI | 5 | 110 | 27803 |
+| ✅ Chunking | 2 | 2 | 338 |
 | ✅ Citations | 2 | 1 | 202 |
-| ✅ Code Execution | 2 | 13 | 3627 |
-| ✅ Conditions | 1 | 3 | 1085 |
-| ✅ Configuration | 3 | 7 | 2261 |
-| ✅ Context Management | 16 | 33 | 10534 |
-| ✅ Database | 1 | 40 | 5409 |
+| ✅ Code Execution | 2 | 13 | 3658 |
+| ✅ Conditions | 1 | 3 | 1107 |
+| ✅ Configuration | 3 | 7 | 2280 |
+| ✅ Context Management | 16 | 33 | 11147 |
+| ✅ Database | 1 | 40 | 5641 |
 | ✅ Deep Research | 8 | 2 | 437 |
-| ✅ Display | 6 | 2 | 282 |
-| ✅ Embeddings | 6 | 23 | 1966 |
-| ✅ Evaluation | 1 | 6 | 2505 |
-| ✅ Events | 1 | 2 | 705 |
-| ✅ Execution | 3 | 3 | 1180 |
-| ✅ Failover | 2 | 1 | 394 |
-| ✅ Files | 2 | 6 | 1718 |
-| ✅ Flow | 1 | 2 | 435 |
-| ✅ Gateway | 7 | 23 | 8447 |
-| ✅ Guardrails | 4 | 4 | 1619 |
-| ✅ Handoffs | 11 | 6 | 2529 |
-| ✅ Hooks | 2 | 8 | 3160 |
-| ✅ Image | 1 | 11 | 1096 |
-| ✅ Knowledge | 4 | 24 | 4627 |
-| ✅ LLM | 3 | 10 | 3674 |
-| ✅ Loops | 4 | 3 | 774 |
-| ✅ MCP | 1 | 51 | 10939 |
-| ✅ Memory | 6 | 16 | 5904 |
-| ✅ OCR | 2 | 1 | 226 |
-| ✅ Observability | 2 | 23 | 2754 |
-| ✅ Optimizer | 1 | 2 | 653 |
-| ✅ Output | 3 | 4 | 860 |
-| ✅ Parallel Execution | 3 | 2 | 404 |
-| ✅ Planning | 6 | 5 | 1198 |
-| ✅ Plugins | 8 | 3 | 1502 |
-| ✅ Prompts | 2 | 7 | 1579 |
-| ✅ Providers | 1 | 52 | 6214 |
+| ✅ Display | 6 | 2 | 290 |
+| ✅ Embeddings | 6 | 23 | 1968 |
+| ✅ Evaluation | 1 | 6 | 2509 |
+| ✅ Events | 1 | 2 | 711 |
+| ✅ Execution | 3 | 3 | 1184 |
+| ✅ Failover | 2 | 1 | 398 |
+| ✅ Files | 2 | 6 | 1769 |
+| ✅ Flow | 1 | 3 | 777 |
+| ✅ Gateway | 7 | 24 | 8916 |
+| ✅ Guardrails | 4 | 4 | 1622 |
+| ✅ Handoffs | 11 | 6 | 2595 |
+| ✅ Hooks | 2 | 8 | 3169 |
+| ✅ Image | 1 | 11 | 1105 |
+| ✅ Knowledge | 4 | 24 | 4698 |
+| ✅ LLM | 3 | 10 | 3713 |
+| ✅ Loops | 4 | 3 | 778 |
+| ✅ MCP | 1 | 51 | 10912 |
+| ✅ Memory | 6 | 16 | 5894 |
+| ✅ OCR | 2 | 1 | 228 |
+| ✅ Observability | 2 | 23 | 2757 |
+| ✅ Optimizer | 1 | 2 | 742 |
+| ✅ Output | 3 | 4 | 876 |
+| ✅ Parallel Execution | 3 | 2 | 364 |
+| ✅ Planning | 6 | 5 | 1177 |
+| ✅ Plugins | 8 | 3 | 948 |
+| ✅ Prompts | 2 | 7 | 1186 |
+| ✅ Providers | 1 | 52 | 6314 |
 | ✅ Query | 1 | 2 | 616 |
-| ✅ RAG | 5 | 15 | 3214 |
+| ✅ RAG | 5 | 15 | 2889 |
 | ✅ Realtime | 2 | 5 | 584 |
 | ✅ Reflection | 3 | 2 | 477 |
-| ✅ Retrieval | 2 | 5 | 945 |
-| ✅ Routing | 1 | 2 | 597 |
-| ✅ Sandbox | 5 | 6 | 2512 |
-| ✅ Security | 1 | 3 | 2749 |
-| ✅ Sessions | 4 | 12 | 3793 |
-| ✅ Skills | 6 | 10 | 3663 |
-| ✅ Tasks | 2 | 6 | 3088 |
-| ✅ Telemetry | 1 | 2 | 560 |
-| ✅ Templates | 1 | 8 | 1641 |
-| ✅ Tools | 12 | 118 | 26051 |
+| ✅ Retrieval | 2 | 5 | 903 |
+| ✅ Routing | 1 | 2 | 365 |
+| ✅ Sandbox | 5 | 6 | 2458 |
+| ✅ Security | 1 | 3 | 2772 |
+| ✅ Sessions | 4 | 12 | 3947 |
+| ✅ Skills | 6 | 10 | 3807 |
+| ✅ Tasks | 2 | 6 | 2709 |
+| ✅ Telemetry | 1 | 2 | 552 |
+| ✅ Templates | 1 | 8 | 1655 |
+| ✅ Tools | 12 | 118 | 28063 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Video | 2 | 6 | 510 |
 | ✅ Vision | 2 | 1 | 283 |
-| ✅ Web | 3 | 8 | 1802 |
-| ✅ Workflows | 4 | 14 | 5894 |
+| ✅ Web | 3 | 8 | 1849 |
+| ✅ Workflows | 4 | 14 | 6183 |
 
 ## Undocumented Categories (Need Documentation)
 
@@ -93,7 +93,7 @@ This report compares **Python SDK feature categories** against **Python document
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ Documents (1 docs, 773 lines)
+- ℹ️ Documents (1 docs, 775 lines)
 
 ---
 

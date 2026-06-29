@@ -17,74 +17,74 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
-| ✅ AGUI | 1 | 1 | 193 |
-| ✅ Agent | 66 | 7 | 1926 |
-| ✅ Agent-to-Agent (A2A) | 15 | 1 | 340 |
-| ✅ Approval | 9 | 1 | 162 |
-| ✅ Audio | 8 | 1 | 159 |
-| ✅ Auto Generation | 14 | 3 | 508 |
-| ✅ Autonomy | 5 | 1 | 160 |
-| ✅ Bots | 5 | 1 | 181 |
-| ✅ Budget | 1 | 1 | 194 |
-| ✅ CLI | 2 | 1 | 112 |
-| ✅ Caching | 2 | 1 | 208 |
-| ✅ Chunking | 2 | 2 | 204 |
-| ✅ Citations | 3 | 1 | 152 |
-| ✅ Code Execution | 6 | 4 | 376 |
-| ✅ Conditions | 1 | 1 | 370 |
-| ✅ Configuration | 3 | 1 | 270 |
-| ✅ Context Management | 17 | 3 | 406 |
-| ✅ Criteria | 1 | 1 | 158 |
-| ✅ Database | 14 | 2 | 367 |
-| ✅ Display | 20 | 1 | 340 |
-| ✅ Embeddings | 6 | 3 | 743 |
-| ✅ Evaluation | 8 | 4 | 647 |
+| ✅ AGUI | 1 | 1 | 195 |
+| ✅ Agent | 66 | 7 | 2084 |
+| ✅ Agent-to-Agent (A2A) | 15 | 1 | 342 |
+| ✅ Approval | 9 | 1 | 165 |
+| ✅ Audio | 8 | 1 | 162 |
+| ✅ Auto Generation | 14 | 3 | 620 |
+| ✅ Autonomy | 5 | 1 | 164 |
+| ✅ Bots | 5 | 1 | 184 |
+| ✅ Budget | 1 | 1 | 197 |
+| ✅ CLI | 2 | 1 | 144 |
+| ✅ Caching | 2 | 1 | 249 |
+| ✅ Chunking | 2 | 2 | 299 |
+| ✅ Citations | 3 | 1 | 156 |
+| ✅ Code Execution | 6 | 4 | 464 |
+| ✅ Conditions | 1 | 1 | 372 |
+| ✅ Configuration | 3 | 1 | 272 |
+| ✅ Context Management | 17 | 3 | 504 |
+| ✅ Criteria | 1 | 1 | 162 |
+| ✅ Database | 14 | 2 | 469 |
+| ✅ Display | 20 | 1 | 342 |
+| ✅ Embeddings | 6 | 3 | 813 |
+| ✅ Evaluation | 8 | 4 | 866 |
 | ✅ Events | 4 | 1 | 157 |
 | ✅ Execution | 4 | 1 | 157 |
 | ✅ Failover | 2 | 1 | 160 |
 | ✅ Files | 10 | 1 | 151 |
 | ✅ Flow | 4 | 1 | 164 |
-| ✅ Gateway | 6 | 1 | 399 |
-| ✅ Guardrails | 6 | 3 | 632 |
+| ✅ Gateway | 6 | 1 | 401 |
+| ✅ Guardrails | 6 | 3 | 744 |
 | ✅ Handoffs | 12 | 1 | 179 |
-| ✅ Hooks | 8 | 3 | 499 |
-| ✅ Image | 4 | 2 | 203 |
-| ✅ Knowledge | 3 | 4 | 696 |
-| ✅ LLM | 6 | 4 | 545 |
-| ✅ Loops | 11 | 1 | 182 |
-| ✅ MCP | 17 | 4 | 687 |
-| ✅ Memory | 17 | 4 | 620 |
-| ✅ OCR | 2 | 1 | 164 |
-| ✅ Observability | 6 | 28 | 1658 |
-| ✅ Optimizer | 1 | 1 | 164 |
-| ✅ Output | 3 | 1 | 155 |
-| ✅ Parallel Execution | 3 | 2 | 215 |
-| ✅ Planning | 11 | 2 | 434 |
-| ✅ Plugins | 9 | 2 | 648 |
-| ✅ Prompts | 4 | 2 | 163 |
-| ✅ Providers | 24 | 116 | 5534 |
-| ✅ PubSub | 1 | 1 | 152 |
-| ✅ Query | 3 | 2 | 167 |
-| ✅ RAG | 6 | 2 | 309 |
-| ✅ Realtime | 2 | 1 | 154 |
-| ✅ Reflection | 3 | 1 | 150 |
-| ✅ Retrieval | 5 | 1 | 154 |
-| ✅ Routing | 1 | 1 | 157 |
-| ✅ Sandbox | 8 | 2 | 56 |
-| ✅ Security | 2 | 1 | 160 |
-| ✅ Sessions | 3 | 2 | 355 |
-| ✅ Skills | 7 | 2 | 307 |
-| ✅ Tasks | 4 | 1 | 158 |
-| ✅ Teams | 1 | 1 | 163 |
-| ✅ Telemetry | 6 | 2 | 184 |
-| ✅ Templates | 1 | 2 | 516 |
-| ✅ Tools | 34 | 17 | 3144 |
-| ✅ Tracing | 8 | 3 | 434 |
-| ✅ Video | 2 | 1 | 152 |
-| ✅ Vision | 2 | 1 | 157 |
-| ✅ Voice | 1 | 2 | 398 |
-| ✅ Web | 4 | 1 | 152 |
-| ✅ Workflows | 7 | 4 | 698 |
+| ✅ Hooks | 8 | 3 | 572 |
+| ✅ Image | 4 | 2 | 282 |
+| ✅ Knowledge | 3 | 4 | 842 |
+| ✅ LLM | 6 | 4 | 668 |
+| ✅ Loops | 11 | 1 | 180 |
+| ✅ MCP | 17 | 4 | 828 |
+| ✅ Memory | 17 | 4 | 779 |
+| ✅ OCR | 2 | 1 | 162 |
+| ✅ Observability | 6 | 28 | 2277 |
+| ✅ Optimizer | 1 | 1 | 162 |
+| ✅ Output | 3 | 1 | 153 |
+| ✅ Parallel Execution | 3 | 2 | 256 |
+| ✅ Planning | 11 | 2 | 525 |
+| ✅ Plugins | 9 | 2 | 710 |
+| ✅ Prompts | 4 | 2 | 262 |
+| ✅ Providers | 24 | 116 | 8067 |
+| ✅ PubSub | 1 | 1 | 149 |
+| ✅ Query | 3 | 2 | 246 |
+| ✅ RAG | 6 | 2 | 386 |
+| ✅ Realtime | 2 | 1 | 150 |
+| ✅ Reflection | 3 | 1 | 147 |
+| ✅ Retrieval | 5 | 1 | 150 |
+| ✅ Routing | 1 | 1 | 153 |
+| ✅ Sandbox | 8 | 2 | 134 |
+| ✅ Security | 2 | 1 | 157 |
+| ✅ Sessions | 3 | 2 | 429 |
+| ✅ Skills | 7 | 2 | 380 |
+| ✅ Tasks | 4 | 1 | 165 |
+| ✅ Teams | 1 | 1 | 170 |
+| ✅ Telemetry | 6 | 2 | 269 |
+| ✅ Templates | 1 | 2 | 598 |
+| ✅ Tools | 34 | 17 | 3598 |
+| ✅ Tracing | 8 | 3 | 477 |
+| ✅ Video | 2 | 1 | 150 |
+| ✅ Vision | 2 | 1 | 155 |
+| ✅ Voice | 1 | 2 | 515 |
+| ✅ Web | 4 | 1 | 150 |
+| ✅ Workflows | 7 | 4 | 876 |
 
 ## Undocumented Categories (Need Documentation)
 
@@ -102,7 +102,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ Deep Research (2 docs, 191 lines)
+- ℹ️ Deep Research (2 docs, 292 lines)
 
 ---
 
