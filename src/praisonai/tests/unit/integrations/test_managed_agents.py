@@ -21,7 +21,7 @@ def test_managed_config_dataclass():
     assert config.system == "You are a helpful coding assistant."
     assert config.tools == [{"type": "agent_toolset_20260401"}]
     assert config.env_name == "praisonai-env"
-    assert config.networking == {"type": "unrestricted"}
+    assert config.networking.type.value == "unrestricted"
     
     # Test with custom values
     custom_config = ManagedConfig(

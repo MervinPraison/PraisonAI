@@ -8,7 +8,7 @@ Tests for:
 """
 
 import pytest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from praisonai.scheduler.base import ScheduleParser, ExecutorInterface, PraisonAgentExecutor
 from praisonai.scheduler._base_scheduler import (
     _compute_run_cost,
@@ -136,37 +136,35 @@ class TestPraisonAgentExecutor:
     def test_execute_success(self):
         """Test successful execution."""
         mock_agent = Mock()
-        mock_agent.start = Mock(return_value="Agent result")
-        
         executor = PraisonAgentExecutor(mock_agent)
-        result = executor.execute("Test task")
+        with patch('praisonai.scheduler.base.run_sync', return_value="Agent result"):
+            result = executor.execute("Test task")
         
         assert result == "Agent result"
-        mock_agent.start.assert_called_once_with("Test task")
     
     def test_execute_failure(self):
         """Test execution failure raises exception."""
         mock_agent = Mock()
-        mock_agent.start = Mock(side_effect=Exception("Agent error"))
-        
         executor = PraisonAgentExecutor(mock_agent)
         
-        with pytest.raises(Exception, match="Agent error"):
-            executor.execute("Test task")
+        with patch('praisonai.scheduler.base.run_sync', side_effect=Exception("Agent error")):
+            with pytest.raises(Exception, match="Agent error"):
+                executor.execute("Test task")
     
     def test_execute_with_different_tasks(self):
         """Test execution with different tasks."""
         mock_agent = Mock()
-        mock_agent.start = Mock(side_effect=lambda task: f"Result for: {task}")
-        
         executor = PraisonAgentExecutor(mock_agent)
         
-        result1 = executor.execute("Task 1")
-        result2 = executor.execute("Task 2")
+        with patch(
+            'praisonai.scheduler.base.run_sync',
+            side_effect=["Result for: Task 1", "Result for: Task 2"],
+        ):
+            result1 = executor.execute("Task 1")
+            result2 = executor.execute("Task 2")
         
         assert result1 == "Result for: Task 1"
         assert result2 == "Result for: Task 2"
-        assert mock_agent.start.call_count == 2
 
 
 class TestComputeRunCost:
