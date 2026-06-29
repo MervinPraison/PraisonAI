@@ -47,9 +47,10 @@ jobs:
         pip install -e .
         cd ../praisonai
         pip install -e ".[ui,dev]"
-        # Install PraisonAIUI in development mode
+        # Install PraisonAIUI in development mode (pytest-cov required by pyproject addopts)
         cd ../../../PraisonAIUI
         pip install -e .
+        pip install pytest pytest-cov
         
     - name: Verify versions
       run: |

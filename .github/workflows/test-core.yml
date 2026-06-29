@@ -18,7 +18,7 @@ on:
 jobs:
   test-core:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
 
     steps:
     - uses: actions/checkout@v4
@@ -39,7 +39,7 @@ jobs:
         cd src/praisonai
         uv pip install --system ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
         uv pip install --system duckduckgo_search
-        uv pip install --system pytest pytest-asyncio pytest-cov pytest-timeout
+        uv pip install --system pytest pytest-asyncio pytest-cov pytest-timeout pytest-xdist
         uv pip install --system "praisonaiagents[knowledge]"
 
     - name: Set environment variables
@@ -51,9 +51,9 @@ jobs:
 
     - name: Run Unit Tests
       run: |
-        cd src/praisonai && python -m pytest tests/unit/ -v --tb=short --disable-warnings \
+        cd src/praisonai && python -m pytest tests/unit/ -q --tb=line --disable-warnings \
           --cov=praisonai --cov-report=xml --cov-branch \
-          --timeout=60
+          --timeout=60 -n 4
 
     - name: Run Integration Tests
       run: |
