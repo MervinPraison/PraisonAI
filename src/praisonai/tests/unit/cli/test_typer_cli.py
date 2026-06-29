@@ -445,8 +445,8 @@ class TestPermissionsLazyLoad:
         result = runner.invoke(app, ["permissions", "--help"])
         assert "_add_completion" not in result.output
         assert "Error loading command 'permissions'" not in result.output
-        assert "allow" in result.output
-        assert "deny" in result.output
+        for subcommand in ("list", "allow", "deny", "ask", "remove", "reset", "export", "import-rules"):
+            assert subcommand in result.output
 
     def test_help_has_no_permissions_load_error(self):
         """Top-level --help must not emit a permissions load error."""
