@@ -6852,15 +6852,27 @@ Provide a concise summary (max 200 words):"""
         never races a turn that is still writing files.
         """
         worker_state = session_state.get('worker_state') or {}
-        if worker_state.get('current_task') is not None:
-            return True
         queue = session_state.get('execution_queue')
-        try:
-            if queue is not None and queue.qsize() > 0:
+        lock = session_state.get('processing_lock')
+
+        def _check():
+            if worker_state.get('current_task') is not None:
                 return True
-        except Exception:
-            pass
-        return False
+            try:
+                if queue is not None and queue.qsize() > 0:
+                    return True
+            except Exception:
+                pass
+            return False
+
+        # Read current_task and queue size under the same lock the worker holds
+        # when it dequeues and publishes current_task. This guarantees we never
+        # observe the gap between get() (item leaves the queue) and the
+        # current_task assignment, where a turn is in-flight but invisible.
+        if lock is not None:
+            with lock:
+                return _check()
+        return _check()
 
     def _handle_undo_command(self, console, session_state):
         """
@@ -7065,6 +7077,9 @@ Provide a concise summary (max 200 words):"""
         approval_request_queue = session_state['approval_request_queue']
         approval_response_queue = session_state['approval_response_queue']
         worker_state = session_state['worker_state']
+        # Shared with _worker_busy() so dequeue+publish of current_task is
+        # atomic w.r.t. the rollback gate (no lock -> fall back to a private one).
+        processing_lock = session_state.get('processing_lock') or threading.Lock()
         
         # Check if trust mode is enabled (via --trust flag or PRAISON_APPROVAL_MODE=auto env var)
         trust_mode = getattr(self.args, 'trust', False) if hasattr(self, 'args') else False
@@ -7082,12 +7097,15 @@ Provide a concise summary (max 200 words):"""
                     except queue_module.Empty:
                         continue
 
-                    # Mark the worker busy atomically with dequeue. The queue
-                    # item is no longer visible to qsize() once get() returns, so
-                    # publishing current_task immediately closes the window where
-                    # a workspace rollback (/undo, /revert) could race a turn
-                    # that is about to write files.
-                    worker_state['current_task'] = task
+                    # Mark the worker busy atomically with dequeue under the
+                    # shared processing_lock. Without the lock there is a window
+                    # between get() (which makes the item invisible to qsize())
+                    # and publishing current_task where _worker_busy() would see
+                    # no task AND an empty queue, letting a workspace rollback
+                    # (/undo, /revert) race a turn that is about to write files.
+                    # Taking the same lock that _worker_busy() uses closes it.
+                    with processing_lock:
+                        worker_state['current_task'] = task
 
                     # Extract task context
                     prompt = task.get('prompt', '')
