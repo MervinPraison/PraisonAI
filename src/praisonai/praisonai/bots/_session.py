@@ -189,6 +189,17 @@ class BotSessionManager:
         # Probe availability once so behaviour/tests can detect whether
         # compaction is active without sharing the stateful instance.
         self._compaction_enabled = self._build_compactor(compaction) is not None
+        # Code-skew guard (Issue #2460): capture the wrapper code fingerprint at
+        # startup so a later in-place update (git pull / pip install -U) is
+        # caught before a hot operation (e.g. /model) triggers a first-use lazy
+        # import against changed code. Best-effort and fail-open; capturing here
+        # (rather than on first /model use) also guards the very first call.
+        try:
+            from ._commands import capture_boot_fingerprint
+
+            capture_boot_fingerprint(self)
+        except Exception:
+            pass
 
     @staticmethod
     def _build_compactor(compaction: Optional[Any]) -> Optional[Any]:

@@ -65,7 +65,6 @@ from .protocols import (
     is_supervised,
     drain_timeout_has_headroom,
     # Code-skew guard for hot operations (Issue #2460)
-    read_code_fingerprint,
     detect_code_skew,
     # Protocol version negotiation
     PROTOCOL_VERSION,
@@ -189,7 +188,6 @@ __all__ = [
     "is_supervised",
     "drain_timeout_has_headroom",
     # Code-skew guard for hot operations (Issue #2460)
-    "read_code_fingerprint",
     "detect_code_skew",
     # Protocol version negotiation
     "PROTOCOL_VERSION",
