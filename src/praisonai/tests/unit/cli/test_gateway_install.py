@@ -23,8 +23,9 @@ def test_gateway_install_success(mock_install):
     assert result.exit_code == 0
 
 
+@patch("praisonai.cli._paths.resolve_bot_config_path", return_value="bot.yaml")
 @patch("praisonai.daemon.install_daemon")
-def test_gateway_install_failure(mock_install):
+def test_gateway_install_failure(mock_install, mock_resolve):
     """Test failed gateway install command."""
     mock_install.return_value = {"ok": False, "error": "Installation failed"}
     
