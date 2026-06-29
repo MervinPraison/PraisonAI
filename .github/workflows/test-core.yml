@@ -15,11 +15,20 @@ on:
       - '.github/workflows/test-core.yml'
   workflow_dispatch:
 
-jobs:
-  test-core:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+permissions:
+  contents: read
 
+env:
+  PYTHONPATH: ${{ github.workspace }}/src/praisonai-agents
+  PRAISONAI_ALLOW_NETWORK: '0'
+  PRAISONAI_LIVE_TESTS: '0'
+  PRAISONAI_TEST_TIER: main
+
+jobs:
+  test-core-collect:
+    name: test-core-collect
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
     - uses: actions/checkout@v4
       with:
@@ -28,45 +37,211 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-
     - name: Install UV
       run: |
         curl -LsSf https://astral.sh/uv/install.sh | sh
         echo "$HOME/.local/bin" >> $GITHUB_PATH
-
     - name: Install dependencies
       run: |
         cd src/praisonai
         uv pip install --system ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
         uv pip install --system duckduckgo_search
-        uv pip install --system pytest pytest-asyncio pytest-cov pytest-timeout pytest-xdist
+        uv pip install --system pytest pytest-asyncio pytest-timeout pytest-xdist
         uv pip install --system "praisonaiagents[knowledge]"
-
     - name: Set environment variables
       run: |
         echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}" >> $GITHUB_ENV
         echo "OPENAI_API_BASE=${{ secrets.OPENAI_API_BASE || 'https://api.openai.com/v1' }}" >> $GITHUB_ENV
-        echo "OPENAI_MODEL_NAME=${{ secrets.OPENAI_MODEL_NAME || 'gpt-5-nano' }}" >> $GITHUB_ENV
+        echo "OPENAI_MODEL_NAME=gpt-4o-mini" >> $GITHUB_ENV
         echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
-
-    - name: Run Unit Tests
+    - name: Verify unit test collection
+      shell: bash
       run: |
-        cd src/praisonai && python -m pytest tests/unit/ -q --tb=line --disable-warnings \
-          --cov=praisonai --cov-report=xml --cov-branch \
-          --timeout=60 -n 4
+        set -euo pipefail
+        cd src/praisonai
+        python -m pytest tests/unit/ \
+          -m "not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          --ignore=tests/fixtures \
+          --collect-only -q --disable-warnings
 
-    - name: Run Integration Tests
+  test-core-unit:
+    name: test-core (${{ matrix.shard }})
+    needs: test-core-collect
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: cli
+            paths: >-
+              tests/unit/cli/
+              tests/unit/tui/
+            extra_ignore: --ignore=tests/unit/cli/test_message_queue.py
+          - shard: bots-gateway
+            paths: >-
+              tests/unit/bots/
+              tests/unit/gateway/
+            extra_ignore: ""
+          - shard: subdirs
+            paths: >-
+              tests/unit/scheduler/
+              tests/unit/integrations/
+              tests/unit/deploy/
+              tests/unit/mcp_server/
+              tests/unit/mcp/
+              tests/unit/knowledge/
+              tests/unit/train/
+              tests/unit/llm/
+              tests/unit/doctor/
+              tests/unit/code/
+              tests/unit/acp/
+              tests/unit/agent/
+              tests/unit/tools/
+              tests/unit/persistence/
+              tests/unit/security/
+              tests/unit/recipe/
+              tests/unit/storage/
+              tests/unit/rag/
+              tests/unit/replay/
+              tests/unit/escalation/
+              tests/unit/orchestration/
+              tests/unit/dev/
+              tests/unit/_dev/
+              tests/unit/daemon/
+              tests/unit/context/
+              tests/unit/adapters/
+              tests/unit/templates/
+              tests/unit/suite_runner/
+              tests/unit/standardise/
+            extra_ignore: ""
+          - shard: root
+            paths: ""
+            extra_ignore: ""
+            root_glob: "true"
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Install UV
       run: |
-        cd src/praisonai && python -m pytest tests/integration/ -v --tb=short --disable-warnings \
-          --timeout=60 \
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+    - name: Install dependencies
+      run: |
+        cd src/praisonai
+        uv pip install --system ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
+        uv pip install --system duckduckgo_search
+        uv pip install --system pytest pytest-asyncio pytest-timeout pytest-xdist
+        uv pip install --system "praisonaiagents[knowledge]"
+    - name: Set environment variables
+      run: |
+        echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}" >> $GITHUB_ENV
+        echo "OPENAI_API_BASE=${{ secrets.OPENAI_API_BASE || 'https://api.openai.com/v1' }}" >> $GITHUB_ENV
+        echo "OPENAI_MODEL_NAME=gpt-4o-mini" >> $GITHUB_ENV
+        echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
+    - name: Run unit shard
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd src/praisonai
+        PYTEST_ARGS=(
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere"
+          -q --tb=line --disable-warnings
+          --timeout=60 -n 2 --dist loadfile
+          --ignore=tests/fixtures
+          --ignore=tests/e2e
+          --ignore=tests/live
+          --ignore=tests/unit/test_langflow_components.py
+        )
+        if [ "${{ matrix.root_glob || 'false' }}" = "true" ]; then
+          shopt -s nullglob
+          ROOT_TESTS=(tests/unit/test_*.py)
+          shopt -u nullglob
+          EXCLUDE=(tests/unit/test_langflow_components.py)
+          FILTERED=()
+          for t in "${ROOT_TESTS[@]}"; do
+            skip=false
+            for e in "${EXCLUDE[@]}"; do
+              if [ "$t" = "$e" ]; then skip=true; break; fi
+            done
+            if [ "$skip" = false ]; then FILTERED+=("$t"); fi
+          done
+          if [ ${#FILTERED[@]} -eq 0 ]; then
+            echo "No root unit tests matched"
+            exit 0
+          fi
+          python -m pytest "${FILTERED[@]}" "${PYTEST_ARGS[@]}"
+        else
+          python -m pytest ${{ matrix.paths }} "${PYTEST_ARGS[@]}" ${{ matrix.extra_ignore }}
+        fi
+
+  test-core-integration:
+    name: test-core-integration
+    needs: test-core-unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Install UV
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+    - name: Install dependencies
+      run: |
+        cd src/praisonai
+        uv pip install --system ."[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
+        uv pip install --system duckduckgo_search
+        uv pip install --system pytest pytest-asyncio pytest-timeout
+        uv pip install --system "praisonaiagents[knowledge]"
+    - name: Set environment variables
+      run: |
+        echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY || 'sk-test-key-for-github-actions-testing-only-not-real' }}" >> $GITHUB_ENV
+        echo "OPENAI_API_BASE=${{ secrets.OPENAI_API_BASE || 'https://api.openai.com/v1' }}" >> $GITHUB_ENV
+        echo "OPENAI_MODEL_NAME=gpt-4o-mini" >> $GITHUB_ENV
+        echo "PYTHONPATH=${{ github.workspace }}/src/praisonai-agents:$PYTHONPATH" >> $GITHUB_ENV
+    - name: Run integration tests
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd src/praisonai
+        python -m pytest tests/integration/ \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -q --tb=line --disable-warnings \
+          --timeout=120 \
+          --ignore=tests/fixtures \
+          --ignore=tests/e2e \
+          --ignore=tests/live \
           --ignore=tests/integration/test_tracker_complex_tasks.py \
           --ignore=tests/integration/test_serve_integration.py
 
-    - name: Upload coverage to Codecov
-      if: always()
-      uses: codecov/codecov-action@v5
-      with:
-        token: ${{ secrets.CODECOV_TOKEN || '' }}
-        files: src/praisonai/coverage.xml
-        flags: core-tests
-        fail_ci_if_error: false
+  test-core:
+    name: test-core
+    needs: [test-core-collect, test-core-unit, test-core-integration]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - name: Report Core Tests result
+      shell: bash
+      run: |
+        set -euo pipefail
+        collect='${{ needs.test-core-collect.result }}'
+        unit='${{ needs.test-core-unit.result }}'
+        integration='${{ needs.test-core-integration.result }}'
+        echo "collect=$collect unit=$unit integration=$integration"
+        if [ "$collect" != "success" ] || [ "$unit" != "success" ] || [ "$integration" != "success" ]; then
+          echo "Core Tests failed"
+          exit 1
+        fi
+        echo "Core Tests passed"

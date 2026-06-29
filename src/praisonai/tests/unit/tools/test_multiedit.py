@@ -20,7 +20,7 @@ class TestMultieditTool:
                 {"old": "print('world')", "new": "print('World!')"},
             ]
             
-            result = multiedit(filepath, edits)
+            result = multiedit(filepath, edits, workspace_root=os.path.dirname(filepath))
             
             assert result["success"] is True
             assert result["edits_applied"] == 2
@@ -48,7 +48,7 @@ class TestMultieditTool:
                 {"old": "line4", "new": "LINE4", "line": 4},
             ]
             
-            result = multiedit(filepath, edits)
+            result = multiedit(filepath, edits, workspace_root=os.path.dirname(filepath))
             
             assert result["success"] is True
             
@@ -73,7 +73,7 @@ class TestMultieditTool:
                 {"old": "x = 1", "new": "x = 10"},
             ]
             
-            result = multiedit(filepath, edits)
+            result = multiedit(filepath, edits, workspace_root=os.path.dirname(filepath))
             
             with open(filepath) as f:
                 content = f.read()
@@ -97,7 +97,7 @@ class TestMultieditTool:
                 {"old": "nonexistent", "new": "NOPE"},  # This won't match
             ]
             
-            result = multiedit(filepath, edits)
+            result = multiedit(filepath, edits, workspace_root=os.path.dirname(filepath))
             
             assert result["edits_applied"] == 1
             assert result["edits_failed"] == 1
@@ -117,7 +117,7 @@ class TestMultieditTool:
                 {"old": "original", "new": "modified"},
             ]
             
-            result = multiedit(filepath, edits, dry_run=True)
+            result = multiedit(filepath, edits, dry_run=True, workspace_root=os.path.dirname(filepath))
             
             assert result["success"] is True
             assert result["dry_run"] is True
@@ -143,7 +143,7 @@ class TestMultieditTool:
                 {"old": "old text", "new": "new text"},
             ]
             
-            result = multiedit(filepath, edits)
+            result = multiedit(filepath, edits, workspace_root=os.path.dirname(filepath))
             
             assert "diff" in result
             assert "-old text" in result["diff"] or "old text" in result["diff"]
@@ -172,7 +172,7 @@ class TestMultieditValidation:
             filepath = f.name
         
         try:
-            result = multiedit(filepath, [])
+            result = multiedit(filepath, [], workspace_root=os.path.dirname(filepath))
             
             assert result["success"] is False
             assert "error" in result
@@ -189,7 +189,9 @@ class TestMultieditValidation:
         
         try:
             # Missing 'new' key
-            result = multiedit(filepath, [{"old": "content"}])
+            result = multiedit(
+                filepath, [{"old": "content"}], workspace_root=os.path.dirname(filepath)
+            )
             
             assert result["success"] is False
         finally:
