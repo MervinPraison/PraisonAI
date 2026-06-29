@@ -71,8 +71,8 @@ def test_bind_aware_auth_with_real_agent():
     
     # Test 4: Real agent test (as required by spec)
     print("\n4. Real agentic test:")
-    if not os.getenv("OPENAI_API_KEY"):
-        pytest.skip("OPENAI_API_KEY required for the real agentic e2e test")
+    if not os.getenv("OPENAI_API_KEY") or os.getenv("PRAISONAI_LIVE_TESTS", "0") != "1":
+        pytest.skip("Requires real OPENAI_API_KEY and PRAISONAI_LIVE_TESTS=1 for agent call")
 
     agent = Agent(
         name="test-agent",
