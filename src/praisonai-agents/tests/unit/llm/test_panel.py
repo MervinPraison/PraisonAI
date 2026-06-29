@@ -434,3 +434,22 @@ def test_agent_non_panel_llm_unaffected():
     agent = Agent(instructions="x", llm="gpt-4o-mini")
     # Non-panel selection must not be treated as a panel descriptor.
     assert agent._panel_descriptor is None
+
+
+def test_agent_panel_forwards_config_derived_options(monkeypatch):
+    # Guards against a regression where the panel branch captures Agent-level
+    # config-derived options (web_search/web_fetch/metrics/max_iter) before they
+    # are resolved, yielding None. They are resolved upstream, so the captured
+    # values must reflect the real config, not None.
+    from praisonaiagents.agent.agent import Agent, WebConfig
+
+    monkeypatch.setattr(Agent, "_model_supports_web_search", lambda self: True)
+
+    agent = Agent(
+        instructions="x",
+        llm={"provider": "panel", "references": ["a"], "aggregator": "c"},
+        web=WebConfig(search=True, fetch=False),
+    )
+    assert agent._panel_llm_kwargs["web_search"] is True
+    assert agent._panel_llm_kwargs["web_fetch"] is False
+    assert "max_iter" in agent._panel_llm_kwargs
