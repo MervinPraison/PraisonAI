@@ -165,13 +165,22 @@ class TestVersionCommand:
     def test_version_show(self):
         """Test version show command."""
         from praisonai.cli.commands.version import app
-        from praisonai.cli.output.console import OutputController, OutputMode, set_output_controller
+        from praisonai.cli.output.console import (
+            OutputController,
+            OutputMode,
+            get_output_controller,
+            set_output_controller,
+        )
 
         # JSON mode avoids Rich panel I/O that can race with xdist + CliRunner capture.
+        previous = get_output_controller()
         set_output_controller(OutputController(mode=OutputMode.JSON))
-        result = CliRunner(mix_stderr=False).invoke(app, ["show"])
-        assert result.exit_code == 0
-        assert "PraisonAI" in result.output or "praisonai" in result.output.lower()
+        try:
+            result = CliRunner(mix_stderr=False).invoke(app, ["show"])
+            assert result.exit_code == 0
+            assert "PraisonAI" in result.output or "praisonai" in result.output.lower()
+        finally:
+            set_output_controller(previous)
 
 
 class TestMCPCommand:
