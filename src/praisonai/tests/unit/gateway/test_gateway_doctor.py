@@ -68,6 +68,38 @@ def test_probe_channels_and_render(monkeypatch, capsys):
     assert "slack" in out and "✗" in out and "invalid_auth" in out
 
 
+def test_probe_channels_loads_env_file(monkeypatch):
+    """_probe_channels must load ~/.praisonai/.env before resolving ${VAR}
+    tokens so doctor / channels --probe match runtime token resolution (#2426)."""
+    import praisonai.cli.features.gateway as gw_feature
+
+    loaded = {"called": False}
+
+    def _fake_load_env():
+        loaded["called"] = True
+        import os
+        os.environ.setdefault("ENVFILE_TOKEN", "from-env-file")
+        return {}
+
+    monkeypatch.setattr(gw_feature, "_load_praisonai_env_file", _fake_load_env)
+
+    captured = {}
+
+    async def capture_probe(self):
+        captured["token"] = self._explicit_token
+        return ProbeResult(ok=True, platform=self._platform, bot_username="bot")
+
+    monkeypatch.setattr(Bot, "probe", capture_probe)
+
+    from praisonai.cli.commands.gateway import _probe_channels
+
+    channels = {"telegram": {"platform": "telegram", "token": "${ENVFILE_TOKEN}"}}
+    asyncio.run(_probe_channels(channels))
+
+    assert loaded["called"] is True
+    assert captured["token"] == "from-env-file"
+
+
 def test_doctor_command_exits_nonzero_on_failure(monkeypatch, tmp_path):
     typer_testing = pytest.importorskip("typer.testing")
     _patch_probe(monkeypatch)

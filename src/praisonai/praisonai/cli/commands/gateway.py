@@ -51,16 +51,9 @@ def gateway_start(
     if preflight and config and os.path.exists(config):
         import asyncio
 
-        # Load ~/.praisonai/.env BEFORE probing so ${VAR} tokens stored there
-        # (e.g. by `praisonai onboard`) resolve — GatewayHandler.start() loads
-        # this same file before runtime ${VAR} substitution, so the pre-flight
-        # must mirror it or it would falsely reject valid env-file tokens (#2426).
-        try:
-            from ..features.gateway import _load_praisonai_env_file
-            _load_praisonai_env_file()
-        except Exception:  # pragma: no cover — defensive
-            pass
-
+        # _probe_channels() loads ~/.praisonai/.env before resolving ${VAR}
+        # tokens, mirroring GatewayHandler.start() so valid env-file tokens
+        # are not falsely rejected (#2426).
         channels = _load_channels(config)
         if channels:
             results = asyncio.run(_probe_channels(channels))
@@ -196,8 +189,22 @@ async def _probe_channels(channels: dict, timeout: float = 15.0) -> dict:
 
     Each probe is bounded by ``timeout`` (seconds) so one stuck adapter
     cannot hang the whole pre-flight; a timeout is reported as a failure.
+
+    Loads ``~/.praisonai/.env`` first so ``${VAR}`` tokens stored there
+    (e.g. by ``praisonai onboard``) resolve — mirroring what
+    ``GatewayHandler.start()`` does at runtime, so every credential check
+    (doctor / channels --probe / start --preflight) uses the same
+    token-resolution behavior (#2426).
     """
     import asyncio as _asyncio
+
+    # Load env-file BEFORE resolving ${VAR} tokens so all probe paths
+    # (doctor, channels --probe, start --preflight) match runtime behavior.
+    try:
+        from ..features.gateway import _load_praisonai_env_file
+        _load_praisonai_env_file()
+    except Exception:  # pragma: no cover — defensive
+        pass
 
     from praisonai.bots import Bot
     from praisonaiagents.bots import ProbeResult
