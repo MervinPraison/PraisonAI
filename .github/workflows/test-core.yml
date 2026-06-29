@@ -114,8 +114,6 @@ jobs:
               tests/unit/templates/
               tests/unit/suite_runner/
               tests/unit/standardise/
-              tests/unit/jobs/
-              tests/unit/sandbox/
             extra_ignore: ""
           - shard: root
             paths: ""
