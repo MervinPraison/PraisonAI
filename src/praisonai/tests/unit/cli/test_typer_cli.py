@@ -99,8 +99,20 @@ class TestTracesCommand:
     def test_traces_enable(self):
         """Test traces enable command."""
         from praisonai.cli.commands.traces import app
-        result = runner.invoke(app, ["enable"])
-        assert result.exit_code == 0
+        from praisonai.cli.output.console import (
+            OutputController,
+            OutputMode,
+            get_output_controller,
+            set_output_controller,
+        )
+
+        previous = get_output_controller()
+        set_output_controller(OutputController(mode=OutputMode.JSON))
+        try:
+            result = CliRunner().invoke(app, ["enable"])
+            assert result.exit_code == 0
+        finally:
+            set_output_controller(previous)
 
 
 class TestEnvCommand:

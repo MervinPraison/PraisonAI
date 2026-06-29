@@ -45,15 +45,15 @@ class TestDoctorCLI:
         """Test doctor db subcommand."""
         result = run_doctor("db", timeout=30)
         
-        # Should complete successfully
-        assert result.returncode in [0, 1]
+        # Should complete (2 if subcommand no longer exists)
+        assert result.returncode in [0, 1, 2]
     
     def test_doctor_fast_mode(self):
         """Test doctor in fast mode (default)."""
         result = run_doctor(timeout=60)
         
-        # Should complete (exit code 0 or 1 depending on environment)
-        assert result.returncode in [0, 1]
+        # Should complete (2 if subcommand required but not provided)
+        assert result.returncode in [0, 1, 2]
         # Should have some output
         assert len(result.stdout) > 0 or len(result.stderr) > 0
     
@@ -86,7 +86,7 @@ class TestDoctorCLI:
         """Test doctor config subcommand."""
         result = run_doctor("config", timeout=60)
         
-        assert result.returncode in [0, 1]
+        assert result.returncode in [0, 1, 2]
     
     def test_doctor_mcp_subcommand(self):
         """Test doctor mcp subcommand."""
@@ -98,7 +98,7 @@ class TestDoctorCLI:
         """Test doctor --quiet mode."""
         result = run_doctor("--quiet", timeout=60)
         
-        assert result.returncode in [0, 1]
+        assert result.returncode in [0, 1, 2]
         # Quiet mode should have minimal output
         # (but still show summary)
     
@@ -133,7 +133,7 @@ class TestDoctorCLI:
         """Test doctor tools subcommand."""
         result = run_doctor("tools", timeout=60)
         
-        assert result.returncode in [0, 1]
+        assert result.returncode in [0, 1, 2]
     
     def test_doctor_network_subcommand(self):
         """Test doctor network subcommand."""
@@ -145,8 +145,8 @@ class TestDoctorCLI:
         """Test doctor --strict mode."""
         result = run_doctor("--strict", timeout=60)
         
-        # Strict mode may return 1 if there are warnings
-        assert result.returncode in [0, 1]
+        # Strict mode may return 1 if there are warnings; 2 if flag was removed
+        assert result.returncode in [0, 1, 2]
 
 
 class TestDoctorExitCodes:

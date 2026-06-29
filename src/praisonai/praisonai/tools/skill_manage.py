@@ -294,13 +294,20 @@ version: 1.0.0
                                 "created_at": proposal.get("timestamp", "unknown")
                             })
                         except Exception:
-                            # Handle skills without proposal metadata
                             pending.append({
                                 "name": skill_dir.name,
                                 "action": "create",
                                 "status": "pending",
                                 "created_at": "unknown"
                             })
+                    else:
+                        # Skill dir without proposal metadata (created via create())
+                        pending.append({
+                            "name": skill_dir.name,
+                            "action": "create",
+                            "status": "pending",
+                            "created_at": "unknown"
+                        })
         
         return pending
     
