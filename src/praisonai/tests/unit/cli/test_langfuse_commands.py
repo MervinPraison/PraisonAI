@@ -435,7 +435,8 @@ class TestObservabilityConfigLoading:
         """Test that provider factory uses correct credentials."""
         # Mock the praisonai-tools module
         mock_module = MagicMock()
-        mock_provider_class = MagicMock(return_value="mock_provider")
+        mock_instance = MagicMock()
+        mock_provider_class = MagicMock(return_value=mock_instance)
         mock_module.LangfuseProvider = mock_provider_class
         mock_import.return_value = mock_module
         

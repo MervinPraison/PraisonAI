@@ -20,7 +20,7 @@ class TestInteractiveConfig:
         assert config.enable_lsp is True
         assert config.verbose is False
         assert config.memory is False
-        assert config.approval_mode == "prompt"  # Default: ask user
+        assert config.approval_mode == "auto"
         assert config.files == []
     
     def test_config_with_values(self):

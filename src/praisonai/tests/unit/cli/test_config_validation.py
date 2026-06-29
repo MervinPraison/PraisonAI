@@ -45,7 +45,12 @@ def test_nested_scaffold_shape_applies_model():
     assert rc.output_format == "text"
 
 
-def test_resolver_warns_on_typo_but_still_applies_valid_keys(tmp_path):
+def test_resolver_warns_on_typo_but_still_applies_valid_keys(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir(parents=True, exist_ok=True)
+    for env_var in ("MODEL_NAME", "OPENAI_MODEL_NAME", "PRAISONAI_MODEL"):
+        monkeypatch.delenv(env_var, raising=False)
+
     cfg_dir = tmp_path / ".praisonai"
     cfg_dir.mkdir()
     (cfg_dir / "config.yaml").write_text(
