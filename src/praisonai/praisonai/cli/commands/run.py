@@ -896,6 +896,7 @@ def _run_from_file(
         # Run
         result = praison.run()
         
+        _record_session_usage(session_id or auto_save_name, model, output)
         output.emit_result(
             message="Run completed",
             data={"result": str(result) if result else None}
@@ -1176,10 +1177,14 @@ def _record_session_usage(session_id, model, output) -> None:
 
     if not usage or not usage.get("total_tokens"):
         return
-    if getattr(output, "is_json_mode", False):
+    if output is not None and getattr(output, "is_json_mode", False):
         return
     try:
-        output.print_info(format_usage_footer(usage))
+        footer = format_usage_footer(usage)
+        if output is not None:
+            output.print_info(footer)
+        else:
+            typer.echo(footer)
     except Exception:
         pass
 
@@ -1273,6 +1278,8 @@ def _run_from_file_profiled(
     profiler.mark_exec_start()
     result = praison.run()
     profiler.mark_exec_end()
+    
+    _record_session_usage(session_id or auto_save_name, model, None)
     
     profiler.stop()
     
@@ -1414,6 +1421,7 @@ def _run_custom_agent(
 
         if bridge is not None:
             bridge.emit_run_result(result, ok=True)
+        _record_session_usage(session_id or auto_save_name, model, output)
         output.emit_result(
             message="Agent completed",
             data={"result": str(result) if result else None}
@@ -1522,6 +1530,8 @@ def _run_prompt_profiled(
     profiler.mark_exec_start()
     response = agent.start(prompt)
     profiler.mark_exec_end()
+    
+    _record_session_usage(session_id or auto_save_name, model, None)
     
     profiler.stop()
     

@@ -223,6 +223,32 @@ def test_accumulate_uses_global_store_after_resume(temp_project_store, temp_stor
     assert not temp_project_store.session_exists("gonly")
 
 
+def test_accumulate_prefers_store_holding_usage(temp_project_store, temp_store, reset_collector):
+    """A globally-stored session keeps accumulating into the global store even
+    when resume shadow-creates a project record without usage (Issue #2421)."""
+    from praisonai.cli.state.project_sessions import (
+        accumulate_session_usage,
+        read_session_usage,
+    )
+
+    # Global store holds the real cumulative usage.
+    temp_store.add_user_message("gboth", "hi")
+    temp_store.update_session_metadata(
+        "gboth", usage={"total_tokens": 300, "input_tokens": 100, "output_tokens": 200, "cost": 0.0},
+        total_tokens=300,
+    )
+    # Resume shadow-creates a project record (no usage yet).
+    temp_project_store.add_user_message("gboth", "hi")
+
+    _track(50, 50)
+    usage = accumulate_session_usage("gboth", model="gpt-4o-mini")
+
+    # Merged into the global record, not restarted from zero in the project one.
+    assert usage["total_tokens"] == 400
+    assert read_session_usage("gboth")["total_tokens"] == 400
+    assert temp_store.get_session("gboth").metadata["usage"]["total_tokens"] == 400
+
+
 def test_format_usage_footer():
     from praisonai.cli.state.project_sessions import format_usage_footer
 

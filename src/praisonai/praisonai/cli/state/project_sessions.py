@@ -191,25 +191,57 @@ def _empty_usage() -> Dict[str, Any]:
     }
 
 
+def _store_has_usage(store, session_id: str) -> bool:
+    """Return True if ``store``'s record for ``session_id`` carries usage data."""
+    try:
+        data = store.get_session(session_id)
+        metadata = dict(getattr(data, "metadata", {}) or {})
+    except Exception:
+        return False
+    if isinstance(metadata.get("usage"), dict):
+        return True
+    return isinstance(metadata.get("total_tokens"), (int, float)) or isinstance(
+        metadata.get("cost"), (int, float)
+    )
+
+
 def _resolve_usage_store(session_id: str, project_path: Optional[str] = None):
-    """Return the store that actually holds ``session_id``.
+    """Return the store that actually holds ``session_id``'s usage.
 
     Mirrors ``rehydrate_session``'s search order (project-scoped store first,
     then the global default store) so usage reads/writes target the same record
     that resume restored from, rather than always defaulting to the current
-    project store (Issue #2421). Returns ``None`` if no store has the session.
+    project store (Issue #2421).
+
+    Resuming a globally-stored session writes a project-side shadow record via
+    ``apply_cli_session_continuity`` before usage is accumulated. To avoid
+    splitting cumulative totals across stores, prefer the store whose record
+    already carries usage metadata; fall back to plain existence order
+    otherwise. Returns ``None`` if no store has the session.
     """
-    for store in (
-        ("project", lambda: get_project_session_store(project_path)),
-        ("global", _get_default_store),
+    candidates = []
+    for resolve in (
+        lambda: get_project_session_store(project_path),
+        _get_default_store,
     ):
         try:
-            candidate = store[1]()
-            if candidate is not None and candidate.session_exists(session_id):
-                return candidate
+            candidate = resolve()
         except Exception:
             continue
-    return None
+        if candidate is None:
+            continue
+        try:
+            if candidate.session_exists(session_id):
+                candidates.append(candidate)
+        except Exception:
+            continue
+
+    if not candidates:
+        return None
+    for candidate in candidates:
+        if _store_has_usage(candidate, session_id):
+            return candidate
+    return candidates[0]
 
 
 def _get_default_store():
