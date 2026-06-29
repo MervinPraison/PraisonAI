@@ -43,3 +43,12 @@ def test_non_sha_fingerprints_are_not_shortened():
     disk = "mtime:1700000999"
     skew = detect_code_skew(boot, disk)
     assert skew == (boot, disk)
+
+
+def test_combined_sha_mtime_fingerprint_shortens_leading_sha():
+    # Dirty/source checkout fingerprints combine the rev with the newest mtime
+    # as "<sha>+mtime:<ns>"; the leading SHA should still be shortened to 7.
+    boot = "a" * 40 + "+mtime:100"
+    disk = "a" * 40 + "+mtime:200"
+    skew = detect_code_skew(boot, disk)
+    assert skew == ("aaaaaaa+mtime:100", "aaaaaaa+mtime:200")

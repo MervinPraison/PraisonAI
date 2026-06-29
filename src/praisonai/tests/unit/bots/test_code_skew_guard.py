@@ -102,6 +102,48 @@ def test_fingerprint_dir_explicit_dir_is_single(tmp_path):
     assert _fingerprint_dir(str(tmp_path)) == "mtime:1700000000000000000"
 
 
+def test_fingerprint_dir_combines_git_rev_with_mtime(tmp_path, monkeypatch):
+    # When git succeeds, the newest .py mtime is combined with the rev so an
+    # in-place file overwrite that does NOT advance HEAD still moves the
+    # fingerprint (Greptile P1: dirty/source checkouts).
+    import subprocess
+
+    class _Result:
+        returncode = 0
+        stdout = "a" * 40 + "\n"
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Result())
+
+    py_file = tmp_path / "module.py"
+    py_file.write_text("x = 1\n")
+    os.utime(py_file, (1_700_000_000, 1_700_000_000))
+
+    fp = _fingerprint_dir(str(tmp_path))
+    assert fp == "a" * 40 + "+mtime:1700000000000000000"
+
+
+def test_fingerprint_dir_dirty_overwrite_changes_fingerprint(tmp_path, monkeypatch):
+    # Same HEAD, but a .py file is overwritten with a newer mtime -> the
+    # combined fingerprint must change so the guard catches the skew.
+    import subprocess
+
+    class _Result:
+        returncode = 0
+        stdout = "deadbeef" * 5 + "\n"  # 40 hex chars
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Result())
+
+    py_file = tmp_path / "module.py"
+    py_file.write_text("x = 1\n")
+    os.utime(py_file, (1_700_000_000, 1_700_000_000))
+    before = _fingerprint_dir(str(tmp_path))
+
+    os.utime(py_file, (1_700_000_005, 1_700_000_005))
+    after = _fingerprint_dir(str(tmp_path))
+
+    assert before != after
+
+
 def test_capture_boot_fingerprint_caches_on_session_manager():
     sm = _FakeSessionManager()
     fp = capture_boot_fingerprint(sm)

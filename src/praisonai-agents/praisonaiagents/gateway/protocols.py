@@ -2486,7 +2486,8 @@ def detect_code_skew(
 
     Returns:
         ``(boot_short, disk_short)`` when the running code differs from disk,
-        otherwise ``None``. Git SHAs are shortened to 7 characters; other
+        otherwise ``None``. Git SHAs are shortened to 7 characters (including a
+        leading SHA in a combined ``"<sha>+mtime:..."`` fingerprint); other
         fingerprints are returned unchanged.
     """
     if not boot_fp or not disk_fp:
@@ -2494,11 +2495,18 @@ def detect_code_skew(
     if boot_fp == disk_fp:
         return None
 
+    def _is_sha(token: str) -> bool:
+        return len(token) == 40 and all(c in "0123456789abcdef" for c in token.lower())
+
     def _short(fp: str) -> str:
-        # Shorten bare git SHAs (40 hex chars) to the conventional 7; leave
+        # Shorten bare git SHAs (40 hex chars) to the conventional 7, including
+        # a leading SHA in a combined "<sha>+mtime:<ns>" fingerprint; leave
         # other fingerprint shapes (e.g. "mtime:...") untouched.
-        if len(fp) == 40 and all(c in "0123456789abcdef" for c in fp.lower()):
+        if _is_sha(fp):
             return fp[:7]
+        head, sep, tail = fp.partition("+")
+        if sep and _is_sha(head):
+            return f"{head[:7]}{sep}{tail}"
         return fp
 
     return (_short(boot_fp), _short(disk_fp))

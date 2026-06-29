@@ -495,42 +495,16 @@ def handle_run_status_command(
         return f"Error getting status: {e}"
 
 
-def _fingerprint_dir(checkout_dir: Optional[str]) -> Optional[str]:
-    """Best-effort fingerprint of a single directory (git rev or newest mtime).
+def _newest_py_mtime_ns(checkout_dir: str) -> int:
+    """Return the newest ``.py`` modification time (ns) under ``checkout_dir``.
 
-    * when ``checkout_dir`` is a git checkout, ``git rev-parse HEAD`` is used;
-    * otherwise the newest source ``.py`` mtime under the directory is used as
-      ``"mtime:<int_ns>"`` so an in-place file update still moves the
-      fingerprint, preserving nanosecond precision for rapid edits;
-    * on any error (no git, unreadable dir) ``None`` is returned so callers
-      fail open and never block normal operation.
+    Returns ``0`` when no readable ``.py`` files are found. Best-effort: per-file
+    ``OSError`` and any walk error are swallowed so the caller can fail open.
     """
     import os
 
-    if not isinstance(checkout_dir, str) or not checkout_dir:
-        return None
-
-    # Prefer a git revision when the checkout is a working tree.
+    newest = 0
     try:
-        import subprocess
-
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=checkout_dir,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        rev = result.stdout.strip()
-        if result.returncode == 0 and rev:
-            return rev
-    except Exception:
-        pass
-
-    # Fall back to the newest .py mtime so in-place file edits still register.
-    # Use nanosecond precision so rapid successive edits are distinguishable.
-    try:
-        newest = 0
         for root, _dirs, files in os.walk(checkout_dir):
             for name in files:
                 if not name.endswith(".py"):
@@ -541,10 +515,59 @@ def _fingerprint_dir(checkout_dir: Optional[str]) -> Optional[str]:
                     continue
                 if mtime > newest:
                     newest = mtime
-        if newest > 0:
-            return f"mtime:{newest}"
     except Exception:
+        return 0
+    return newest
+
+
+def _fingerprint_dir(checkout_dir: Optional[str]) -> Optional[str]:
+    """Best-effort fingerprint of a single directory (git rev + newest mtime).
+
+    * when ``checkout_dir`` is a git checkout, ``git rev-parse HEAD`` is used and
+      the newest source ``.py`` mtime is *combined* with it
+      (``"<rev>+mtime:<int_ns>"``) so an in-place file overwrite that does **not**
+      advance ``HEAD`` (e.g. an editable/source checkout patched by ``pip install
+      -U`` or a manual copy) still moves the fingerprint;
+    * otherwise the newest source ``.py`` mtime alone is used as
+      ``"mtime:<int_ns>"`` so an in-place file update still moves the
+      fingerprint, preserving nanosecond precision for rapid edits;
+    * on any error (no git, unreadable dir) ``None`` is returned so callers
+      fail open and never block normal operation.
+    """
+    if not isinstance(checkout_dir, str) or not checkout_dir:
         return None
+
+    # Prefer a git revision when the checkout is a working tree.
+    rev = None
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=checkout_dir,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        candidate = result.stdout.strip()
+        if result.returncode == 0 and candidate:
+            rev = candidate
+    except Exception:
+        rev = None
+
+    # Compute the newest .py mtime so an in-place edit registers even when git
+    # succeeds but HEAD is unchanged (dirty/source checkout). Use nanosecond
+    # precision so rapid successive edits are distinguishable.
+    newest = _newest_py_mtime_ns(checkout_dir)
+
+    if rev is not None:
+        # Combine so a same-HEAD file overwrite still moves the fingerprint.
+        if newest > 0:
+            return f"{rev}+mtime:{newest}"
+        return rev
+
+    if newest > 0:
+        return f"mtime:{newest}"
 
     return None
 
