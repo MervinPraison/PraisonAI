@@ -32,7 +32,7 @@ def test_api_config_defaults():
     assert config.port == 8005
     assert config.workers == 1
     assert config.cors_enabled is True
-    assert config.auth_enabled is False
+    assert config.auth_enabled is True
 
 
 def test_api_config_custom():

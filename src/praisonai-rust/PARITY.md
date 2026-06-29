@@ -1,16 +1,16 @@
 # Rust Feature Parity Tracker
 
-> **Python Features:** 392 | **Rust Features:** 667 | **Parity:** 73.5%
+> **Python Features:** 394 | **Rust Features:** 667 | **Parity:** 73.1%
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 392 |
+| Python Core Features | 394 |
 | Rust Features | 667 |
-| **Actual Gap Count** | **104** |
+| **Actual Gap Count** | **106** |
 | Language Limitations (N/A) | 5 |
-| **Parity** | **73.5%** |
+| **Parity** | **73.1%** |
 
 ## Implemented Features
 
@@ -704,6 +704,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `AutoMemory`
 - ❌ `BALANCED_POLICY`
 - ❌ `BackendNotAvailableError`
+- ❌ `BaseFrameworkAdapter`
 - ❌ `BaseTool`
 - ❌ `BotOSConfig`
 - ❌ `BotOSProtocol`
@@ -729,6 +730,7 @@ These Python features cannot be directly implemented in Rust due to reserved key
 - ❌ `EscalationPipeline`
 - ❌ `EscalationStage`
 - ❌ `FileTracker`
+- ❌ `FrameworkAdapterProtocol`
 - ❌ `HandoffToolPolicy`
 - ❌ `Heartbeat`
 - ❌ `HeartbeatConfig`

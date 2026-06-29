@@ -37,6 +37,8 @@ class TestResolverSurfacesMcpAndPermissions:
         # Isolate global config so only project config is picked up.
         monkeypatch.setenv("HOME", str(tmp_path / "home"))
         (tmp_path / "home").mkdir(parents=True, exist_ok=True)
+        for env_var in ("MODEL_NAME", "OPENAI_MODEL_NAME", "PRAISONAI_MODEL"):
+            monkeypatch.delenv(env_var, raising=False)
 
         _write_project_config(
             tmp_path,
