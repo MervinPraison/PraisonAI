@@ -495,22 +495,8 @@ def handle_run_status_command(
         return f"Error getting status: {e}"
 
 
-def read_code_fingerprint(checkout_dir: Optional[str] = None) -> Optional[str]:
-    """Return a lightweight fingerprint of the on-disk wrapper code.
-
-    The gateway is a long-lived process that imports much of its surface
-    lazily. When an operator updates a *running* checkout in place (``git
-    pull`` / ``pip install -U`` / an auto-update step on a durable volume) the
-    next first-use lazy import can pick up changed code and fail cryptically.
-    Capturing this fingerprint once at boot and comparing it before a hot
-    operation lets the gateway refuse the risky operation with a clear
-    "restart required" message instead of crashing.
-
-    This is the concrete, wrapper-side implementation (subprocess + filesystem
-    walk); the pure comparison predicate lives in the core SDK as
-    :func:`praisonaiagents.gateway.detect_code_skew`.
-
-    The fingerprint is best-effort and never raises:
+def _fingerprint_dir(checkout_dir: Optional[str]) -> Optional[str]:
+    """Best-effort fingerprint of a single directory (git rev or newest mtime).
 
     * when ``checkout_dir`` is a git checkout, ``git rev-parse HEAD`` is used;
     * otherwise the newest source ``.py`` mtime under the directory is used as
@@ -518,24 +504,8 @@ def read_code_fingerprint(checkout_dir: Optional[str] = None) -> Optional[str]:
       fingerprint, preserving nanosecond precision for rapid edits;
     * on any error (no git, unreadable dir) ``None`` is returned so callers
       fail open and never block normal operation.
-
-    Args:
-        checkout_dir: Directory whose code revision to fingerprint. Defaults to
-            the ``praisonai`` wrapper package directory — the package that owns
-            the hot ``/model`` path and lazy-loads ``praisonai.gateway.*``.
-
-    Returns:
-        An opaque, non-secret fingerprint string, or ``None`` if it cannot be
-        determined.
     """
     import os
-
-    if checkout_dir is None:
-        try:
-            # praisonai/praisonai/ — the wrapper package that owns the hot path.
-            checkout_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        except Exception:
-            return None
 
     if not isinstance(checkout_dir, str) or not checkout_dir:
         return None
@@ -577,6 +547,76 @@ def read_code_fingerprint(checkout_dir: Optional[str] = None) -> Optional[str]:
         return None
 
     return None
+
+
+def read_code_fingerprint(checkout_dir: Optional[str] = None) -> Optional[str]:
+    """Return a lightweight fingerprint of the on-disk gateway code.
+
+    The gateway is a long-lived process that imports much of its surface
+    lazily. When an operator updates a *running* checkout in place (``git
+    pull`` / ``pip install -U`` / an auto-update step on a durable volume) the
+    next first-use lazy import can pick up changed code and fail cryptically.
+    Capturing this fingerprint once at boot and comparing it before a hot
+    operation lets the gateway refuse the risky operation with a clear
+    "restart required" message instead of crashing.
+
+    This is the concrete, wrapper-side implementation (subprocess + filesystem
+    walk); the pure comparison predicate lives in the core SDK as
+    :func:`praisonaiagents.gateway.detect_code_skew`.
+
+    When ``checkout_dir`` is not given, the fingerprint spans **both** packages
+    that participate in the hot ``/model`` path: the ``praisonai`` wrapper
+    (which owns the command handler) and the ``praisonaiagents`` SDK (whose
+    ``gateway.*`` surface is lazy-imported). In an installed layout these are
+    sibling packages, so an in-place update to *either* must move the
+    fingerprint. The per-package fingerprints are combined fail-open: any
+    package that resolves contributes; if none resolve, ``None`` is returned.
+
+    Args:
+        checkout_dir: Directory whose code revision to fingerprint. When given,
+            only that directory is fingerprinted. When omitted, both the
+            ``praisonai`` and ``praisonaiagents`` package directories are used.
+
+    Returns:
+        An opaque, non-secret fingerprint string, or ``None`` if it cannot be
+        determined.
+    """
+    import os
+
+    if checkout_dir is not None:
+        return _fingerprint_dir(checkout_dir)
+
+    # Fingerprint both packages on the hot path so an in-place update to either
+    # the wrapper or the lazily-imported SDK is detected. Resolve each package
+    # directory independently and fail open per package.
+    targets = []
+    try:
+        # praisonai/praisonai/ — the wrapper package that owns the /model path.
+        targets.append(
+            ("praisonai", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
+    except Exception:
+        pass
+    try:
+        import praisonaiagents
+
+        agents_file = getattr(praisonaiagents, "__file__", None)
+        if agents_file:
+            targets.append(
+                ("praisonaiagents", os.path.dirname(os.path.abspath(agents_file)))
+            )
+    except Exception:
+        pass
+
+    parts = []
+    for label, directory in targets:
+        fp = _fingerprint_dir(directory)
+        if fp:
+            parts.append(f"{label}={fp}")
+
+    if not parts:
+        return None
+    return "|".join(parts)
 
 
 def capture_boot_fingerprint(session_manager) -> Optional[str]:
