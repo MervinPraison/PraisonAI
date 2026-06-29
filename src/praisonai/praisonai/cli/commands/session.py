@@ -135,10 +135,40 @@ def session_list(
         
         manager = get_session_manager()
         sessions = manager.list(limit=limit)
-    
+
+        # SessionMetadata objects don't carry usage; surface persisted totals
+        # for global/backend listings the same way the project path does so the
+        # Tokens/Cost columns aren't blank when usage was recorded (Issue #2421).
+        try:
+            from ..state.project_sessions import read_session_usage
+
+            for s in sessions:
+                sid = getattr(s, "session_id", None) or getattr(s, "id", None)
+                if not sid:
+                    continue
+                usage = read_session_usage(sid)
+                if usage.get("total_tokens") or usage.get("cost"):
+                    try:
+                        s.total_tokens = usage.get("total_tokens") or 0
+                        s.cost = usage.get("cost") or 0.0
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
     if output.is_json_mode:
+        def _session_dict(s):
+            d = s.to_dict()
+            # Ensure usage totals surface in JSON even for SessionMetadata,
+            # whose to_dict() omits them (Issue #2421).
+            if "total_tokens" not in d:
+                d["total_tokens"] = getattr(s, "total_tokens", 0) or 0
+            if "cost" not in d:
+                d["cost"] = getattr(s, "cost", 0.0) or 0.0
+            return d
+
         output.print_json({
-            "sessions": [s.to_dict() for s in sessions]
+            "sessions": [_session_dict(s) for s in sessions]
         })
         return
     

@@ -108,13 +108,32 @@ def rehydrate_session(
         metadata = dict(getattr(data, "metadata", {}) or {})
         model = metadata.get("model") or metadata.get("llm")
         agent_name = getattr(data, "agent_name", None) or metadata.get("agent_name")
-        usage = metadata.get("usage")
-        if not isinstance(usage, dict):
+
+        # Resolve usage through the same store-preference order used when
+        # accumulating (prefer the store whose record already carries usage), so
+        # a resumed globally-stored session restores the real cumulative totals
+        # instead of a project shadow record's empty/stale usage (Issue #2421).
+        usage: Dict[str, Any] = {}
+        try:
+            from ..state.project_sessions import read_session_usage
+
+            resolved = read_session_usage(session_id, project_path)
+            if isinstance(resolved, dict) and (
+                resolved.get("total_tokens") or resolved.get("cost")
+            ):
+                usage = resolved
+        except Exception:
             usage = {}
-            if isinstance(metadata.get("total_tokens"), (int, float)):
-                usage["total_tokens"] = metadata["total_tokens"]
-            if isinstance(metadata.get("cost"), (int, float)):
-                usage["cost"] = metadata["cost"]
+
+        if not usage:
+            stored = metadata.get("usage")
+            if isinstance(stored, dict):
+                usage = dict(stored)
+            else:
+                if isinstance(metadata.get("total_tokens"), (int, float)):
+                    usage["total_tokens"] = metadata["total_tokens"]
+                if isinstance(metadata.get("cost"), (int, float)):
+                    usage["cost"] = metadata["cost"]
 
         return RehydratedSession(
             session_id=session_id,

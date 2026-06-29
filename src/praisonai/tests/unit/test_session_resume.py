@@ -249,6 +249,26 @@ def test_accumulate_prefers_store_holding_usage(temp_project_store, temp_store, 
     assert temp_store.get_session("gboth").metadata["usage"]["total_tokens"] == 400
 
 
+def test_rehydrate_prefers_store_holding_usage(temp_project_store, temp_store, reset_collector):
+    """Resume restores the real cumulative usage from whichever store holds it,
+    even when an empty project shadow record is found first (Issue #2421)."""
+    from praisonai.cli.session.resume import rehydrate_session
+
+    # Real cumulative usage lives in the global store.
+    temp_store.add_user_message("rboth", "hi")
+    temp_store.update_session_metadata(
+        "rboth",
+        usage={"total_tokens": 500, "input_tokens": 200, "output_tokens": 300, "cost": 0.01},
+        total_tokens=500,
+    )
+    # A project shadow record exists first but carries no usage.
+    temp_project_store.add_user_message("rboth", "hi")
+
+    restored = rehydrate_session("rboth")
+    assert restored.found is True
+    assert restored.usage.get("total_tokens") == 500
+
+
 def test_format_usage_footer():
     from praisonai.cli.state.project_sessions import format_usage_footer
 
