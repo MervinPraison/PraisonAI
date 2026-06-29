@@ -351,6 +351,18 @@ class PraisonAI:
         """
         return self.main()
 
+    @staticmethod
+    def _require_agents():
+        """Exit with an install hint if praisonaiagents is unavailable.
+
+        Single source of truth for the "needs praisonaiagents" guard so the same
+        check is not duplicated across every command branch.
+        """
+        if not PRAISONAI_AVAILABLE:
+            print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
+            print("\npip install praisonaiagents\n")
+            sys.exit(1)
+
     def read_stdin_if_available(self):
         """
         Read from stdin if it's available (when data is piped in).
@@ -1431,10 +1443,7 @@ class PraisonAI:
                 sys.exit(0)
 
             elif args.command == 'context':
-                if not PRAISONAI_AVAILABLE:
-                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
-                    print("\npip install praisonaiagents\n")
-                    sys.exit(1)
+                self._require_agents()
                 
                 if not args.url:
                     print("[red]ERROR: --url is required for context command[/red]")
@@ -1450,10 +1459,7 @@ class PraisonAI:
                 sys.exit(0)
 
             elif args.command == 'research':
-                if not PRAISONAI_AVAILABLE:
-                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
-                    print("\npip install praisonaiagents\n")
-                    sys.exit(1)
+                self._require_agents()
                 
                 # Get the research query from remaining args
                 research_query = ' '.join(unknown_args) if unknown_args else None
@@ -1473,10 +1479,7 @@ class PraisonAI:
                 sys.exit(0)
 
             elif args.command == 'memory':
-                if not PRAISONAI_AVAILABLE:
-                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
-                    print("\npip install praisonaiagents\n")
-                    sys.exit(1)
+                self._require_agents()
                 
                 # Get action and arguments from remaining args
                 action = unknown_args[0] if unknown_args else 'help'
@@ -1486,10 +1489,7 @@ class PraisonAI:
                 sys.exit(0)
 
             elif args.command == 'rules':
-                if not PRAISONAI_AVAILABLE:
-                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
-                    print("\npip install praisonaiagents\n")
-                    sys.exit(1)
+                self._require_agents()
                 
                 # Get action and arguments from remaining args
                 action = unknown_args[0] if unknown_args else 'list'
@@ -1498,10 +1498,7 @@ class PraisonAI:
                 sys.exit(0)
 
             elif args.command == 'workflow':
-                if not PRAISONAI_AVAILABLE:
-                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
-                    print("\npip install praisonaiagents\n")
-                    sys.exit(1)
+                self._require_agents()
                 
                 # Get action and arguments from remaining args
                 action = unknown_args[0] if unknown_args else 'list'
@@ -1516,10 +1513,7 @@ class PraisonAI:
                 sys.exit(0)
 
             elif args.command == 'hooks':
-                if not PRAISONAI_AVAILABLE:
-                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
-                    print("\npip install praisonaiagents\n")
-                    sys.exit(1)
+                self._require_agents()
                 
                 # Get action from remaining args
                 action = unknown_args[0] if unknown_args else 'list'
@@ -1527,10 +1521,7 @@ class PraisonAI:
                 sys.exit(0)
 
             elif args.command == 'knowledge':
-                if not PRAISONAI_AVAILABLE:
-                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
-                    print("\npip install praisonaiagents\n")
-                    sys.exit(1)
+                self._require_agents()
                 
                 # Get action and arguments from remaining args
                 action = unknown_args[0] if unknown_args else 'help'
@@ -1539,10 +1530,7 @@ class PraisonAI:
                 sys.exit(0)
 
             elif args.command == 'session':
-                if not PRAISONAI_AVAILABLE:
-                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
-                    print("\npip install praisonaiagents\n")
-                    sys.exit(1)
+                self._require_agents()
                 
                 # Get action and arguments from remaining args
                 action = unknown_args[0] if unknown_args else 'list'
@@ -1551,10 +1539,7 @@ class PraisonAI:
                 sys.exit(0)
 
             elif args.command == 'tools':
-                if not PRAISONAI_AVAILABLE:
-                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
-                    print("\npip install praisonaiagents\n")
-                    sys.exit(1)
+                self._require_agents()
                 
                 # Get action and arguments from remaining args
                 action = unknown_args[0] if unknown_args else 'list'
@@ -1563,10 +1548,7 @@ class PraisonAI:
                 sys.exit(0)
 
             elif args.command == 'todo':
-                if not PRAISONAI_AVAILABLE:
-                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
-                    print("\npip install praisonaiagents\n")
-                    sys.exit(1)
+                self._require_agents()
                 
                 # Get action and arguments from remaining args
                 action = unknown_args[0] if unknown_args else 'list'
@@ -1575,10 +1557,7 @@ class PraisonAI:
                 sys.exit(0)
 
             elif args.command == 'docs':
-                if not PRAISONAI_AVAILABLE:
-                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
-                    print("\npip install praisonaiagents\n")
-                    sys.exit(1)
+                self._require_agents()
                 
                 # Get action and arguments from remaining args
                 action = unknown_args[0] if unknown_args else 'list'
@@ -1587,10 +1566,7 @@ class PraisonAI:
                 sys.exit(0)
 
             elif args.command == 'mcp':
-                if not PRAISONAI_AVAILABLE:
-                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
-                    print("\npip install praisonaiagents\n")
-                    sys.exit(1)
+                self._require_agents()
                 
                 # Get action and arguments from remaining args
                 action = unknown_args[0] if unknown_args else 'list'
@@ -1599,19 +1575,13 @@ class PraisonAI:
                 sys.exit(0)
 
             elif args.command == 'commit':
-                if not PRAISONAI_AVAILABLE:
-                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
-                    print("\npip install praisonaiagents\n")
-                    sys.exit(1)
+                self._require_agents()
                 
                 self.handle_commit_command(unknown_args)
                 sys.exit(0)
 
             elif args.command == 'skills':
-                if not PRAISONAI_AVAILABLE:
-                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
-                    print("\npip install praisonaiagents\n")
-                    sys.exit(1)
+                self._require_agents()
                 
                 from .features.skills import handle_skills_command, add_skills_parser
                 
@@ -1704,10 +1674,7 @@ class PraisonAI:
             
             elif args.command == 'agents':
                 # Agents command - run multiple agents with custom definitions
-                if not PRAISONAI_AVAILABLE:
-                    print("[red]ERROR: PraisonAI Agents is not installed. Install with:[/red]")
-                    print("\npip install praisonaiagents\n")
-                    sys.exit(1)
+                self._require_agents()
                 
                 from .features.agents import handle_agents_command, add_agents_parser
                 
