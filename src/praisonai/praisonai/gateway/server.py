@@ -4720,6 +4720,13 @@ class WebSocketGateway:
             # signal arrived. There we only flip ``should_exit`` and let the
             # async path (when available) capture forensics. Keep *all* logging
             # behind this guard so the fallback never touches a logging lock.
+            # Request drain FIRST so uvicorn always begins shutting down even
+            # if the (best-effort) forensic logging / ``subprocess.Popen`` below
+            # momentarily blocks under memory pressure or on a stuck host. This
+            # guarantees we never miss the supervisor's drain window because of
+            # diagnostics work.
+            if self._server:
+                self._server.should_exit = True
             if forensic:
                 logger.info("Received shutdown signal, stopping gateway...")
             if forensic and forensics is not None:
@@ -4731,8 +4738,6 @@ class WebSocketGateway:
                     forensics.spawn_diagnostic(ctx, diagnostic_dir)
                 except Exception:  # pragma: no cover - never block teardown
                     pass
-            if self._server:
-                self._server.should_exit = True
 
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
