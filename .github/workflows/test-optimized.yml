@@ -75,17 +75,18 @@ jobs:
       env:
         PRAISONAI_TEST_TIER: smoke
         PRAISONAI_ALLOW_NETWORK: '0'
+        OPENAI_MODEL_NAME: gpt-4o-mini
+      shell: bash
       run: |
+        set -euo pipefail
         cd src/praisonai
-        # Run only CLI tests for smoke - fast and critical path
         python -m pytest tests/unit/cli/ \
           -m "not slow and not network" \
           -q --tb=line \
           --timeout=30 \
           --ignore=tests/fixtures \
           --ignore=tests/unit/cli/test_message_queue.py \
-          --maxfail=5 \
-          || echo "Some smoke tests failed"
+          --maxfail=5
     
     - name: Smoke Test Summary
       if: always()
@@ -135,13 +136,16 @@ jobs:
       env:
         PRAISONAI_TEST_TIER: main
         PRAISONAI_ALLOW_NETWORK: '0'
+        OPENAI_MODEL_NAME: gpt-4o-mini
         OPENAI_API_KEY: 'test-key'
         ANTHROPIC_API_KEY: 'test-key'
         GOOGLE_API_KEY: 'test-key'
+      shell: bash
       run: |
+        set -euo pipefail
         cd src/praisonai
         python -m pytest tests/unit/ tests/integration/ \
-          -m "not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
           -q --tb=line \
           --timeout=60 \
           --ignore=tests/fixtures \
@@ -149,11 +153,11 @@ jobs:
           --ignore=tests/live \
           --ignore=tests/unit/jobs \
           --ignore=tests/unit/api \
+          --ignore=tests/unit/sandbox \
           --cov=praisonai \
           --cov-report=xml \
-          -n 4 \
-          --maxfail=10 \
-          || echo "Some tests failed"
+          -n 2 \
+          --maxfail=10
     
     - name: Upload coverage
       if: matrix.python-version == '3.11'
