@@ -4714,12 +4714,14 @@ class WebSocketGateway:
         def _request_shutdown(
             signal_name: Optional[str] = None, forensic: bool = True
         ):
-            logger.info("Received shutdown signal, stopping gateway...")
             # ``forensic`` is False on the raw ``signal.signal`` fallback path:
             # that callback runs in a C-signal context where re-entering
             # logging / subprocess could deadlock if a lock was held when the
             # signal arrived. There we only flip ``should_exit`` and let the
-            # async path (when available) capture forensics.
+            # async path (when available) capture forensics. Keep *all* logging
+            # behind this guard so the fallback never touches a logging lock.
+            if forensic:
+                logger.info("Received shutdown signal, stopping gateway...")
             if forensic and forensics is not None:
                 try:
                     from praisonaiagents.gateway import format_forensics_for_log
