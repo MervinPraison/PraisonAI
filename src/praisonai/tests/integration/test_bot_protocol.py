@@ -3,6 +3,8 @@
 import sys
 import os
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'praisonai'))
 
 from praisonaiagents.bots import ChatCommandInfo, ChatCommandProtocol
@@ -22,6 +24,7 @@ class TestChatCommandProtocolTelegram:
     """Test TelegramBot satisfies ChatCommandProtocol."""
 
     def _make_bot(self):
+        pytest.importorskip("telegram", reason="python-telegram-bot not installed")
         from praisonai.bots.telegram import TelegramBot
         return TelegramBot(token="fake-token", agent=MockAgent())
 
