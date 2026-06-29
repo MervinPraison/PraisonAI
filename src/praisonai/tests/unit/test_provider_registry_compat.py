@@ -23,8 +23,8 @@ class MockProvider(BaseProvider):
 
     provider_type = "mock"
 
-    def __init__(self, base_url="http://localhost:8765", api_key=None, **kwargs):
-        super().__init__(base_url=base_url, api_key=api_key)
+    def __init__(self, base_url="http://localhost:8765", api_key=None, timeout=30.0, **kwargs):
+        super().__init__(base_url=base_url, api_key=api_key, timeout=timeout)
         self.kwargs = kwargs
 
     def get_provider_info(self) -> ProviderInfo:
@@ -139,13 +139,18 @@ class TestProviderRegistryBackwardCompatibility(unittest.TestCase):
         result = registry_module.get_provider_class("definitely_missing")
         self.assertIsNone(result)
         
-        # Test import error handling via lazy loader (not cached class)
+        # Test import error handling via lazy loader (not cached class).
+        # Inject a failing loader into the shared default registry, then clean
+        # up in finally so we never leak synthetic state into later tests.
         registry = registry_module.get_default_registry()
         registry._items.pop("failing_provider", None)
         registry._loaders["failing_provider"] = lambda: (_ for _ in ()).throw(ImportError("Mock import failure"))
-
-        with self.assertRaises(ValueError):
-            registry_module.get_provider_class("failing_provider")
+        try:
+            with self.assertRaises(ValueError):
+                registry_module.get_provider_class("failing_provider")
+        finally:
+            registry._loaders.pop("failing_provider", None)
+            registry._items.pop("failing_provider", None)
 
     def test_default_registry_singleton_thread_safety(self):
         """Test that default registry singleton is thread-safe."""
@@ -220,7 +225,9 @@ class TestProviderRegistryBackwardCompatibility(unittest.TestCase):
         self.assertIsInstance(provider, MockProvider)
         self.assertEqual(provider.base_url, "https://custom.api.com") 
         self.assertEqual(provider.api_key, "sk-custom123")
-        self.assertEqual(provider.kwargs["timeout"], 30)
+        # timeout is a first-class BaseProvider arg, so it is wired into
+        # provider.timeout rather than captured in **kwargs.
+        self.assertEqual(provider.timeout, 30)
         self.assertEqual(provider.kwargs["retries"], 3)
 
     def test_try_create_backward_compatibility(self):

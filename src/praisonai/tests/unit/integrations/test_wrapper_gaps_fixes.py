@@ -7,9 +7,11 @@ Tests cover:
 3. configure_host contextvars isolation
 """
 
+import sys
 import pytest
 import threading
 import concurrent.futures
+import contextlib
 from unittest.mock import patch, MagicMock
 import shutil
 import tempfile
@@ -19,6 +21,27 @@ from praisonai.integrations.base import BaseCLIIntegration
 from praisonai.integrations.registry import ExternalAgentRegistry, create_integration
 from praisonai.integration.host_app import configure_host, _configured_context, reset_configuration
 from praisonai._registry import PluginRegistry
+
+
+@contextlib.contextmanager
+def _patch_host_aiui():
+    """Patch the praisonaiui host backend used by ``configure_host``.
+
+    ``configure_host`` lazily does ``import praisonaiui as aiui`` and calls a set
+    of ``set_*`` helpers (notably ``set_datastore``). Tests only need those calls
+    to be observable no-ops, so we install a stub module plus a stub datastore
+    and yield the captured mocks keyed by name.
+    """
+    aiui_stub = MagicMock(name="praisonaiui")
+    datastore_mod = MagicMock(name="praisonai.ui._aiui_datastore")
+    with patch.dict(
+        sys.modules,
+        {"praisonaiui": aiui_stub, "praisonai.ui._aiui_datastore": datastore_mod},
+    ):
+        yield {
+            "aiui": aiui_stub,
+            "set_datastore": aiui_stub.set_datastore,
+        }
 
 
 class TestExternalAgentRegistryTryCreate:
@@ -184,7 +207,6 @@ class TestBaseCLIIntegrationInvalidateAvailability:
             assert all(result is True for result in results), f"Unexpected availability results: {results}"
 
 
-@pytest.mark.skip(reason="host_app global configure flag changed thread/async isolation semantics")
 class TestConfigureHostContextVarsIsolation:
     """Test the configure_host contextvars isolation added in PR #1849."""
 
@@ -220,6 +242,7 @@ class TestConfigureHostContextVarsIsolation:
                 configure_host()
                 assert mocks["set_datastore"].call_count == 1
 
+    @pytest.mark.skip(reason="host_app global configure flag intentionally crosses thread contexts; per-thread isolation no longer applies")
     def test_configure_host_thread_isolation(self):
         """Test that configure_host provides proper thread isolation."""
         self.setUp()
@@ -264,6 +287,7 @@ class TestConfigureHostContextVarsIsolation:
         # Thread should start unconfigured, then become configured
         assert thread_configured == [False, True]
 
+    @pytest.mark.skip(reason="host_app global configure flag intentionally crosses async contexts; per-context isolation no longer applies")
     def test_configure_host_async_context_isolation(self):
         """Test configure_host works with async context isolation."""
         import asyncio
