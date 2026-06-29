@@ -218,17 +218,9 @@ async def test_pairing_store_exception():
 
 @pytest.mark.asyncio
 async def test_invalid_policy_fallback():
-    """Test that invalid policy falls back to deny."""
-    config = BotConfig(allowed_users=["allowed_user"], unknown_user_policy="invalid_policy")
-    handler = UnknownUserHandler(config)
-    
-    message = BotMessage(
-        sender=BotUser(user_id="unknown_user"),
-        channel=BotChannel(channel_id="test_chat", channel_type="telegram")
-    )
-    
-    result = await handler.handle(message)
-    assert result == "drop"
+    """Invalid policy is rejected at BotConfig construction."""
+    with pytest.raises(ValueError, match="unknown_user_policy must be one of"):
+        BotConfig(allowed_users=["allowed_user"], unknown_user_policy="invalid_policy")
 
 
 @pytest.mark.asyncio

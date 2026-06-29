@@ -477,8 +477,8 @@ class TestCLIIntegration:
         result = runner.invoke(app, ["find", "demo", "--path", str(tmp_path), "--limit", "0"])
 
         assert result.exit_code == 2
-        clean_stderr = re.sub(r"\x1b\[[0-9;]*m", "", result.stderr or "")
-        assert "Invalid value for '--limit'" in clean_stderr
+        clean_output = re.sub(r"\x1b\[[0-9;]*m", "", result.output or "")
+        assert "Invalid value for '--limit'" in clean_output
     
     def test_examples_list_command(self, tmp_path):
         """Test 'praisonai examples list' command."""

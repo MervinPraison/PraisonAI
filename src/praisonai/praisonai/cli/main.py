@@ -1012,7 +1012,20 @@ class PraisonAI:
         special_commands = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'recipe', 'endpoints', 'audio', 'embed', 'embedding', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor', 'registry', 'package', 'install', 'uninstall', 'acp', 'debug', 'lsp', 'diag', 'browser', 'replay', 'bot', 'gateway', 'sandbox', 'wizard', 'migrate', 'security', 'persistence', 'paths', 'claw', 'github', 'managed', 'flow', 'dashboard', 'backends', 'audit']
         
         parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
-        parser.add_argument("--framework", choices=["crewai", "autogen", "praisonai"], help="Specify the framework")
+        try:
+            from ..framework_adapters.registry import list_framework_choices
+            _framework_choices = list_framework_choices(include_unavailable=True) or [
+                "praisonai", "crewai", "autogen",
+            ]
+        except ImportError:
+            # Only fall back to the static trio when the adapter layer itself
+            # cannot be imported; genuine registry discovery errors should surface.
+            _framework_choices = ["praisonai", "crewai", "autogen"]
+        parser.add_argument(
+            "--framework",
+            choices=_framework_choices,
+            help="Specify the agent framework (discovered from installed adapters)",
+        )
         parser.add_argument("--ui", choices=["chainlit", "gradio"], help="Specify the UI framework (gradio or chainlit).")
         parser.add_argument("--auto", nargs=argparse.REMAINDER, help="Enable auto mode and pass arguments for it")
         parser.add_argument("--init", nargs=argparse.REMAINDER, help="Initialize agents with optional topic")
@@ -2009,13 +2022,22 @@ class PraisonAI:
 
         # Only check framework availability for agent-related operations
         if not args.command and (args.init or args.auto or args.framework):
-            if not CREWAI_AVAILABLE and not AUTOGEN_AVAILABLE and not PRAISONAI_AVAILABLE:
-                print("[red]ERROR: No framework is installed. Please install at least one framework:[/red]")
-                print("\npip install \"praisonai\\[crewai]\"  # For CrewAI")
-                print("pip install \"praisonai\\[autogen]\"  # For AutoGen")
-                print("pip install \"praisonai\\[crewai,autogen]\"  # For both frameworks\n")
-                print("pip install praisonaiagents # For Agents\n")  
-                sys.exit(1)
+            try:
+                from ..framework_adapters.registry import list_framework_choices
+                if not list_framework_choices():
+                    print("[red]ERROR: No framework adapter is installed.[/red]")
+                    print("\npip install praisonaiagents  # native PraisonAI")
+                    print("pip install \"praisonai[crewai]\"  # CrewAI")
+                    print("pip install \"praisonai[autogen]\"  # AutoGen\n")
+                    sys.exit(1)
+            except ImportError:
+                if not CREWAI_AVAILABLE and not AUTOGEN_AVAILABLE and not PRAISONAI_AVAILABLE:
+                    print("[red]ERROR: No framework is installed. Please install at least one framework:[/red]")
+                    print("\npip install \"praisonai\\[crewai]\"  # For CrewAI")
+                    print("pip install \"praisonai\\[autogen]\"  # For AutoGen")
+                    print("pip install \"praisonai\\[crewai,autogen]\"  # For both frameworks\n")
+                    print("pip install praisonaiagents # For Agents\n")
+                    sys.exit(1)
 
         # Handle direct prompt if command is not a special command or file
         # Skip this during testing to avoid pytest arguments interfering
@@ -2914,6 +2936,12 @@ class PraisonAI:
             
             # Load and execute the YAML workflow with tool registry
             workflow = manager.load_yaml(yaml_file, tool_registry=tool_registry)
+
+            from ..framework_adapters.workflow_framework import validate_workflow_framework
+            validate_workflow_framework(
+                getattr(workflow, "framework", "praisonai"),
+                source=f"workflow file {yaml_file}",
+            )
             
             # Show workflow info
             table = Table(title=f"Workflow: {workflow.name}")
@@ -3042,6 +3070,12 @@ class PraisonAI:
             
             parser = YAMLWorkflowParser()
             workflow = parser.parse_file(yaml_file)
+
+            from ..framework_adapters.workflow_framework import validate_workflow_framework
+            validate_workflow_framework(
+                getattr(workflow, "framework", "praisonai"),
+                source=f"workflow file {yaml_file}",
+            )
             
             # Show validation results
             table = Table(title="Workflow Validation")
@@ -5635,9 +5669,20 @@ Now, {final_instruction.lower()}:"""
                 result = agents_generator.generate_crew_and_kickoff()
                 return result
 
+            try:
+                from ..framework_adapters.registry import list_framework_choices
+                _gradio_frameworks = list_framework_choices(include_unavailable=True) or [
+                    "crewai", "autogen", "praisonai",
+                ]
+            except ImportError:
+                _gradio_frameworks = ["crewai", "autogen", "praisonai"]
+
             gr.Interface(
                 fn=generate_crew_and_kickoff_interface,
-                inputs=[gr.Textbox(lines=2, label="Auto Args"), gr.Dropdown(choices=["crewai", "autogen"], label="Framework")],
+                inputs=[
+                    gr.Textbox(lines=2, label="Auto Args"),
+                    gr.Dropdown(choices=_gradio_frameworks, label="Framework"),
+                ],
                 outputs="textbox",
                 title="Praison AI Studio",
                 description="Create Agents and perform tasks",
