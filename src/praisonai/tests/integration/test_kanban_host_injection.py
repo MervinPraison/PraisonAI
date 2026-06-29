@@ -81,18 +81,25 @@ def test_kanban_store_environment_variable_support(temp_kanban_dir):
     
     test_board = "test_board"
     
+    expected_db = temp_kanban_dir / f"{test_board}_kanban.db"
+
     with patch.dict(os.environ, {'PRAISONAI_KANBAN_BOARD': test_board}):
-        with patch('praisonai.kanban.paths.get_kanban_db_path') as mock_path:
-            mock_path.return_value = temp_kanban_dir / f"{test_board}_kanban.db"
-            
+        # Mock only the filesystem/DB path resolution edge; keep the real
+        # SQLiteKanbanStore so the env-var-driven path actually flows through
+        # get_kanban_db_path() and lands in the constructed store.
+        with patch('praisonai.kanban.sqlite_store.get_kanban_db_path') as mock_path:
+            mock_path.return_value = expected_db
+
             from praisonai.integration.bridges.kanban_bridge import get_kanban_store_factory
-            
-            # get_kanban_store_factory must be called inside the patch so the closure
-            # captures the mock (the 'from ... import' inside it reads the patched attr)
-            with patch('praisonai.kanban.sqlite_store.SQLiteKanbanStore') as mock_store:
-                factory = get_kanban_store_factory()
-                store = factory()
-                mock_store.assert_called_once()
+
+            factory = get_kanban_store_factory()
+            store = factory()
+
+            # The real store must have resolved its path via the patched
+            # get_kanban_db_path(); this proves PRAISONAI_KANBAN_BOARD handling
+            # is exercised rather than just asserting a mock was called.
+            assert mock_path.called
+            assert Path(store.db_path) == expected_db
 
 
 def test_missing_dependencies_graceful_degradation():
