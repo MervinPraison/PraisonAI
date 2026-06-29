@@ -33,9 +33,9 @@ class TestRateLimiterConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_timeline_advancement(self, rate_limiter):
         """Test that concurrent callers cannot reuse the same future time slot."""
-        # This is the core bug fix - concurrent callers should not be able to
-        # reserve the same future interval, which would allow bursts past rate limit
-        
+        # Exhaust the initial burst token so both concurrent callers must wait.
+        await rate_limiter.acquire("warmup")
+
         start_time = time.monotonic()
         
         # Start two concurrent acquire operations when no tokens available
@@ -59,11 +59,10 @@ class TestRateLimiterConcurrency:
         """Test that sequential requests are properly spaced according to rate limit."""
         times = []
         
-        # Make 3 sequential requests
+        # Make 3 sequential requests — record completion times, not start times.
         for i in range(3):
-            start = time.monotonic()
             await rate_limiter.acquire(f"channel{i}")
-            times.append(start)
+            times.append(time.monotonic())
         
         # Check spacing between requests
         if len(times) >= 2:
