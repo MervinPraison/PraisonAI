@@ -47,22 +47,54 @@ class ShutdownForensics:
             :meth:`snapshot` is still available for logging).
     """
 
-    def __init__(self, log_dir: Optional[str] = None, enabled: bool = True):
+    def __init__(
+        self,
+        log_dir: Optional[str] = None,
+        enabled: bool = True,
+        prepare_timeout: float = 2.0,
+    ):
         self.log_dir = log_dir
         self.enabled = bool(enabled)
-        # Pre-create the diagnostic directory at startup so the signal path
+        # Pre-create the diagnostic directory at startup so the *signal* path
         # never performs synchronous filesystem I/O (a slow/hung FS such as NFS
         # or an automount could otherwise block shutdown before drain). Only a
         # directory we successfully prepared here is used by spawn_diagnostic.
+        #
+        # ``os.makedirs`` itself can *hang* (not just error) on a stuck
+        # NFS/FUSE/automount path, which would block gateway startup before it
+        # binds. The ``except`` below only catches failures, not hangs, so we
+        # run the prep in a daemon thread and wait at most ``prepare_timeout``
+        # seconds; if it doesn't finish, forensics degrades to a no-op rather
+        # than wedging the startup path. Bounded and fail-open on both ends.
         self._prepared_dir: Optional[str] = None
         if self.enabled and self.log_dir:
+            self._prepare_dir_bounded(self.log_dir, prepare_timeout)
+
+    def _prepare_dir_bounded(self, log_dir: str, timeout: float) -> None:
+        """Create ``log_dir`` without letting a hung FS block startup."""
+        import threading
+
+        def _make() -> None:
             try:
-                os.makedirs(self.log_dir, exist_ok=True)
-                self._prepared_dir = self.log_dir
+                os.makedirs(log_dir, exist_ok=True)
+                self._prepared_dir = log_dir
             except (OSError, TypeError, ValueError) as exc:
                 logger.debug(
                     "forensics: could not prepare diagnostic dir: %s", exc
                 )
+
+        worker = threading.Thread(target=_make, daemon=True)
+        worker.start()
+        worker.join(timeout if timeout and timeout > 0 else None)
+        if worker.is_alive():
+            # Filesystem is hung; leave ``_prepared_dir`` unset so forensics is
+            # a no-op instead of blocking startup. The daemon thread is
+            # abandoned and dies with the process.
+            logger.debug(
+                "forensics: diagnostic dir prep timed out (%ss); disabling "
+                "detached diagnostics",
+                timeout,
+            )
 
     def snapshot(self, signal_name: Optional[str] = None) -> Dict[str, Any]:
         """Capture a fast (<10ms), best-effort forensic context.

@@ -159,3 +159,31 @@ def test_spawn_diagnostic_disabled_when_dir_unprepared(monkeypatch):
 
     monkeypatch.setattr(subprocess, "Popen", _no_popen)
     f.spawn_diagnostic({"pid": _os.getpid()}, None)
+
+
+def test_dir_prep_does_not_block_startup_on_hung_fs(monkeypatch):
+    """A hung ``os.makedirs`` must not block startup; prep is bounded."""
+    pytest.importorskip("praisonai.gateway.forensics", reason="wrapper not installed")
+    import os as _os
+    import threading
+    import time as _time
+
+    from praisonai.gateway.forensics import ShutdownForensics
+
+    release = threading.Event()
+
+    def _hang(*a, **k):
+        # Simulate a stuck NFS/FUSE/automount: block until released.
+        release.wait(5)
+
+    monkeypatch.setattr(_os, "makedirs", _hang)
+
+    start = _time.monotonic()
+    f = ShutdownForensics(log_dir="/tmp/whatever", enabled=True, prepare_timeout=0.2)
+    elapsed = _time.monotonic() - start
+
+    # Construction returned promptly (did not wait for the hung makedirs).
+    assert elapsed < 2.0
+    # Forensics degrades to a no-op rather than wedging startup.
+    assert f._prepared_dir is None
+    release.set()
