@@ -644,6 +644,7 @@ def run_main(
             session=session,
             fork=fork,
             no_save=no_save,
+            thinking_budget=thinking_budget,
         )
         return
     
@@ -792,6 +793,7 @@ def run_main(
             fork=fork,
             no_save=no_save,
             attach_session=attach,
+            thinking_budget=thinking_budget,
         )
 
 
@@ -924,6 +926,7 @@ def _run_prompt(
     fork: bool = False,
     no_save: bool = False,
     attach_session: Optional[str] = None,
+    thinking_budget: Optional[int] = None,
 ):
     """Run a direct prompt."""
     output = get_output_controller()
