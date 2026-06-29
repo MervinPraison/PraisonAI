@@ -116,3 +116,33 @@ class TestShellStreaming:
         out, err = st._communicate_streaming(proc, timeout=10)
         assert out == "hello\n"
         assert err == ""
+
+    def test_timeout_surfaces_recorded_read_error(self):
+        """A reader-thread failure recorded before a timeout must not be masked
+        by the generic TimeoutExpired — the real read error is surfaced."""
+        from praisonaiagents.tools.shell_tools import ShellTools
+
+        class _FailingStream:
+            def readline(self):
+                raise UnicodeDecodeError("utf-8", b"", 0, 1, "boom")
+
+            def close(self):
+                pass
+
+        class _FakeProc:
+            stdout = _FailingStream()
+            stderr = None
+
+            def wait(self, timeout=None):
+                import time
+                time.sleep(0.05)
+                raise subprocess.TimeoutExpired(cmd="x", timeout=timeout)
+
+        st = ShellTools()
+        try:
+            st._communicate_streaming(_FakeProc(), timeout=0.01)
+            assert False, "expected an exception"
+        except UnicodeDecodeError:
+            pass  # read error surfaced instead of TimeoutExpired
+        except subprocess.TimeoutExpired:
+            assert False, "timeout masked the recorded read error"

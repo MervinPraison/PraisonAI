@@ -229,6 +229,11 @@ class ShellTools:
             # Disable any further emission before the caller kills the process so
             # no progress is surfaced after the tool has already returned.
             stop_emitting.set()
+            # If a reader thread already failed (e.g. UnicodeDecodeError on
+            # invalid output bytes), surface that as the real failure instead of
+            # masking it with a generic timeout — it is the more actionable error.
+            if read_errors:
+                raise read_errors[0]
             raise
 
         # Wait for the readers to fully drain the pipe buffers before returning,
