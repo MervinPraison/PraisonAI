@@ -36,6 +36,12 @@ def _get_posthog():
 # Cached result to avoid repeated environment variable checks
 _TELEMETRY_DISABLED_CACHE = None
 
+# Programmatic override set by enable_telemetry()/disable_telemetry().
+# Takes precedence over the env-based default (but NOT over an explicit
+# env opt-out), and bypasses the cache so downstream instrumentation gates
+# (e.g. instrument_agent/instrument_workflow) see the updated state.
+_MONITORING_OVERRIDE = None
+
 def _is_monitoring_disabled() -> bool:
     """
     Check if monitoring/telemetry is disabled via environment variables.
@@ -46,8 +52,20 @@ def _is_monitoring_disabled() -> bool:
     The legacy disable flags still work for backward compatibility.
     
     This function is cached to avoid repeated environment variable lookups.
+    A programmatic override via enable_telemetry()/disable_telemetry() takes
+    precedence over the default, unless telemetry was explicitly disabled
+    via environment variables.
     """
     global _TELEMETRY_DISABLED_CACHE
+    
+    # Explicit env opt-out always wins, even over a programmatic enable.
+    if _is_telemetry_explicitly_disabled():
+        return True
+    
+    # Programmatic override (set by enable_telemetry/disable_telemetry)
+    # bypasses the cache so instrumentation gates reflect the new state.
+    if _MONITORING_OVERRIDE is not None:
+        return _MONITORING_OVERRIDE
     
     # Return cached result if available
     if _TELEMETRY_DISABLED_CACHE is not None:
@@ -673,8 +691,12 @@ def get_telemetry() -> MinimalTelemetry:
 
 def disable_telemetry():
     """Programmatically disable telemetry."""
-    global _telemetry_instance
+    global _telemetry_instance, _MONITORING_OVERRIDE
     with _telemetry_instance_lock:
+        # Flip the monitoring gate so instrumentation paths that check
+        # _is_monitoring_disabled() (e.g. instrument_agent/instrument_workflow)
+        # also stop installing hooks.
+        _MONITORING_OVERRIDE = True
         if _telemetry_instance:
             _telemetry_instance.enabled = False
         else:
@@ -717,9 +739,13 @@ def force_shutdown_telemetry():
 
 def enable_telemetry():
     """Programmatically enable telemetry (if not disabled by environment)."""
-    global _telemetry_instance
+    global _telemetry_instance, _MONITORING_OVERRIDE
     with _telemetry_instance_lock:
         if not _is_telemetry_explicitly_disabled():
+            # Flip the monitoring gate so instrumentation paths that check
+            # _is_monitoring_disabled() (e.g. instrument_agent/instrument_workflow)
+            # actually install their hooks even in the default (no env var) case.
+            _MONITORING_OVERRIDE = False
             if _telemetry_instance:
                 _telemetry_instance.enabled = True
             else:
