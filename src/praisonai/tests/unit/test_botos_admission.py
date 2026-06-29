@@ -9,18 +9,23 @@ import asyncio
 
 import pytest
 
+# Admission primitives have no optional deps, so import them unconditionally —
+# a failure here is a real package regression and must surface, not be skipped.
+from praisonai.bots._admission import (  # noqa: E402
+    AdmissionGate,
+    AdmissionRejected,
+    build_admission_gate,
+)
+
+# BotOS may pull optional adapter deps; only a genuine optional-dependency miss
+# (ModuleNotFoundError) is allowed to skip — any other import error propagates.
 try:
     from praisonai.bots.botos import BotOS
-    from praisonai.bots._admission import (
-        AdmissionGate,
-        AdmissionRejected,
-        build_admission_gate,
-    )
-except ImportError:  # pragma: no cover - optional deps not installed
+except ModuleNotFoundError:  # pragma: no cover - optional deps not installed
     BotOS = None
 
 pytestmark = pytest.mark.skipif(
-    BotOS is None, reason="praisonai bots not importable"
+    BotOS is None, reason="praisonai BotOS optional dependency not installed"
 )
 
 
@@ -70,8 +75,14 @@ def test_gate_enforces_ceiling_and_rejects_overflow():
                 rejected.append(r.message)
 
         tasks = [asyncio.create_task(run(i)) for i in range(4)]
-        await asyncio.sleep(0.05)
-        # 2 admitted (in flight), 1 queued, 1 rejected (queue full).
+
+        async def settled():
+            # Wait for the steady state instead of a fixed sleep (CI-robust):
+            # 2 admitted (in flight), 1 queued, 1 rejected (queue full).
+            while gate.in_flight != 2 or gate.queued != 1 or len(rejected) != 1:
+                await asyncio.sleep(0)
+
+        await asyncio.wait_for(settled(), timeout=2)
         assert gate.in_flight == 2
         assert gate.queued == 1
         release.set()

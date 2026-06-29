@@ -536,6 +536,13 @@ class WebSocketGateway:
             max_queued_frames=int(
                 gateway_config.get("max_queued_frames", 1000)
             ),
+            max_concurrent_runs=int(
+                gateway_config.get("max_concurrent_runs", 0) or 0
+            ),
+            queue_depth=int(gateway_config.get("queue_depth", 0) or 0),
+            overflow_policy=str(
+                gateway_config.get("overflow_policy", "reject") or "reject"
+            ),
             session_config=session_config,
         )
         
@@ -3636,21 +3643,9 @@ class WebSocketGateway:
                 if bot is None:
                     continue
                 # Issue #2454: share the gateway-wide admission gate with this
-                # channel bot's session manager so inbound runs are admitted
-                # through the global concurrency ceiling / fair queue. The
-                # concrete adapters (TelegramBot, DiscordBot, …) expose their
-                # session under ``_session`` / ``_session_mgr``. No-op when not
-                # configured, preserving today's immediate-dispatch path.
-                _gate = getattr(self, "_admission_gate", None)
-                if _gate is not None:
-                    _sess = (
-                        getattr(bot, "_session", None)
-                        or getattr(bot, "_session_mgr", None)
-                    )
-                    if _sess is not None and hasattr(_sess, "_admission_gate"):
-                        _sess._admission_gate = _gate
-                    elif hasattr(bot, "_admission_gate"):
-                        bot._admission_gate = _gate
+                # channel bot so inbound runs are admitted through the global
+                # concurrency ceiling / fair queue. No-op when not configured.
+                self._stamp_admission_gate(bot)
                 self._channel_bots[channel_name] = bot
                 logger.info(f"Channel '{channel_name}' ({channel_type}) initialized")
             except Exception as e:
@@ -3668,6 +3663,27 @@ class WebSocketGateway:
                 task = asyncio.create_task(self._run_bot_safe(name, bot))
                 self._channel_tasks[name] = task
             logger.info(f"Started {len(self._channel_bots)} channel bot(s)")
+
+    def _stamp_admission_gate(self, bot: Any) -> None:
+        """Share the gateway-wide admission gate with a channel bot (Issue #2454).
+
+        The concrete adapters (TelegramBot, DiscordBot, …) expose their session
+        under ``_session`` / ``_session_mgr``. No-op when admission control is
+        not configured, preserving today's immediate-dispatch path. Called from
+        both ``start_channels`` and ``_start_single_channel`` (hot-reload) so a
+        restarted channel can't silently bypass the global concurrency ceiling.
+        """
+        gate = getattr(self, "_admission_gate", None)
+        if gate is None:
+            return
+        sess = (
+            getattr(bot, "_session", None)
+            or getattr(bot, "_session_mgr", None)
+        )
+        if sess is not None and hasattr(sess, "_admission_gate"):
+            sess._admission_gate = gate
+        elif hasattr(bot, "_admission_gate"):
+            bot._admission_gate = gate
 
     def _create_bot(
         self,
@@ -4328,6 +4344,9 @@ class WebSocketGateway:
             bot = self._create_bot(channel_type, token, default_agent, config, ch_cfg)
             if bot is None:
                 return
+            # Issue #2454: stamp the shared admission gate so a channel restarted
+            # during hot-reload still enforces the global concurrency ceiling.
+            self._stamp_admission_gate(bot)
             self._channel_bots[channel_name] = bot
             logger.info(f"Channel '{channel_name}' ({channel_type}) initialized")
         except Exception as e:
