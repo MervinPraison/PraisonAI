@@ -294,12 +294,16 @@ version: 1.0.0
                                 "created_at": proposal.get("timestamp", "unknown")
                             })
                         except Exception:
-                            pending.append({
-                                "name": skill_dir.name,
-                                "action": "create",
-                                "status": "pending",
-                                "created_at": "unknown"
-                            })
+                            # Malformed proposal metadata. Only surface it as a
+                            # pending create if a real SKILL.md is present, so a
+                            # stray/temp dir can't be advertised as approvable.
+                            if (skill_dir / "SKILL.md").exists():
+                                pending.append({
+                                    "name": skill_dir.name,
+                                    "action": "create",
+                                    "status": "pending",
+                                    "created_at": "unknown"
+                                })
                     elif (skill_dir / "SKILL.md").exists():
                         # Skill dir without proposal metadata but with a valid
                         # SKILL.md (created via create()). Only surface real skills
@@ -337,7 +341,13 @@ version: 1.0.0
                     action = "create"
                 
                 if action == "create":
-                    # For create actions, move the entire directory
+                    # For create actions, move the entire directory. Require a
+                    # valid SKILL.md so a stray/temp dir (e.g. one carrying only a
+                    # malformed .proposal.json) can't be approved into place over
+                    # an existing active skill.
+                    if not (pending_path / "SKILL.md").exists():
+                        return f"❌ Pending '{name}' has no SKILL.md and cannot be approved."
+
                     active_path = self.skills_dir / name
                     if active_path.exists():
                         import shutil

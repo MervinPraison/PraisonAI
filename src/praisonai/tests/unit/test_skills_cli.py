@@ -339,3 +339,20 @@ class TestBasicSkillMutatorPending:
             assert "broken" in [p["name"] for p in mutator.list_pending()]
             result = mutator.approve("broken")
             assert "approved" in result.lower()
+
+    def test_malformed_proposal_without_skill_md_not_approvable(self):
+        """A dir with malformed .proposal.json but no SKILL.md must be rejected."""
+        from praisonai.tools.skill_manage import BasicSkillMutator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mutator = BasicSkillMutator(skills_dir=tmpdir)
+
+            stray = Path(tmpdir) / "pending" / "stray"
+            stray.mkdir(parents=True)
+            (stray / ".proposal.json").write_text("{not json")
+
+            assert "stray" not in [p["name"] for p in mutator.list_pending()]
+
+            result = mutator.approve("stray")
+            assert "SKILL.md" in result
+            assert not (Path(tmpdir) / "stray").exists()
