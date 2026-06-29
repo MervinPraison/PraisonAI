@@ -708,6 +708,16 @@ class AgentsGenerator:
         # Ensure name is present
         if 'name' not in config:
             config['name'] = config.get('topic', 'Workflow')
+
+        from .framework_adapters.workflow_framework import (
+            framework_from_config,
+            validate_workflow_framework,
+        )
+        effective_framework = (self.framework or framework_from_config(config))
+        validate_workflow_framework(
+            effective_framework,
+            source="agents.yaml workflow section",
+        )
         
         # Pass model from config_list to workflow as default_llm
         if self.config_list and self.config_list[0].get('model'):
@@ -763,6 +773,16 @@ class AgentsGenerator:
         # Ensure name is present (YAMLWorkflowParser handles roles->agents conversion)
         if 'name' not in config:
             config['name'] = config.get('topic', 'Workflow')
+
+        from .framework_adapters.workflow_framework import (
+            framework_from_config,
+            validate_workflow_framework,
+        )
+        effective_framework = (self.framework or framework_from_config(config))
+        validate_workflow_framework(
+            effective_framework,
+            source="agents.yaml workflow section",
+        )
         
         # Pass model from config_list to workflow as default_llm
         if self.config_list and self.config_list[0].get('model'):

@@ -96,7 +96,7 @@ class TestGetTyperCommandsCache(unittest.TestCase):
     def test_failure_does_not_poison_cache(self):
         """If discovery fails, the next caller must be allowed to retry."""
         with mock.patch(
-            "praisonai.cli.app.register_commands",
+            "praisonai.cli.app.get_command_names",
             side_effect=ImportError("simulated optional dep missing"),
         ):
             result = dispatcher._get_typer_commands()

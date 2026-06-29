@@ -68,11 +68,12 @@ class ChatCommandMixin:
             platform: If provided, only return commands available on
                 this platform.  Builtins are always returned.
         """
-        builtin_names = {"status", "new", "help"}
+        builtin_names = {"status", "new", "help", "stop"}
         builtins = [
             ChatCommandInfo(name="status", description="Show bot status and info"),
             ChatCommandInfo(name="new", description="Reset conversation session"),
             ChatCommandInfo(name="help", description="Show this help message"),
+            ChatCommandInfo(name="stop", description="Cancel current agent task"),
         ]
         custom_all = getattr(self, '_command_info', {})
         channels_map = getattr(self, '_command_channels', {})

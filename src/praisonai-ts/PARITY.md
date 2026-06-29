@@ -1,20 +1,20 @@
 # Feature Parity Tracker
 
-> **Version:** 1.5.87 | **Last Updated:** 2026-06-27
+> **Version:** 1.5.87 | **Last Updated:** 2026-06-29
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 ## Summary
 
 | Metric | Count |
 |--------|-------|
-| Python Core Features | 392 |
+| Python Core Features | 394 |
 | Python Wrapper Features | 100 |
 | TypeScript Features | 1190 |
-| **Gap Count** | **99** |
+| **Gap Count** | **101** |
 | P0 (Critical) | 2 |
 | P1 (High) | 5 |
 | P2 (Medium) | 6 |
-| P3 (Low) | 86 |
+| P3 (Low) | 88 |
 
 ## Gap Matrix
 
@@ -159,7 +159,7 @@
 | `enable\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 | `get\_telemetry` | ✅ | ✅ | low | ✅ DONE |
 
-### P3_Advanced (180 done, 86 todo)
+### P3_Advanced (180 done, 88 todo)
 
 | Feature | Python | TypeScript | Effort | Status |
 |---------|--------|------------|--------|--------|
@@ -172,6 +172,7 @@
 | `AutoApproveBackend` | ✅ | ❌ | high | ⏳ TODO |
 | `BALANCED\_POLICY` | ✅ | ❌ | low | ⏳ TODO |
 | `BackendNotAvailableError` | ✅ | ❌ | low | ⏳ TODO |
+| `BaseFrameworkAdapter` | ✅ | ❌ | high | ⏳ TODO |
 | `BotOSConfig` | ✅ | ❌ | low | ⏳ TODO |
 | `BotOSProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `CONSERVATIVE\_POLICY` | ✅ | ❌ | low | ⏳ TODO |
@@ -194,6 +195,7 @@
 | `EscalationPipeline` | ✅ | ❌ | high | ⏳ TODO |
 | `EscalationStage` | ✅ | ❌ | high | ⏳ TODO |
 | `FileTracker` | ✅ | ❌ | high | ⏳ TODO |
+| `FrameworkAdapterProtocol` | ✅ | ❌ | medium | ⏳ TODO |
 | `GatewayEventType` | ✅ | ❌ | high | ⏳ TODO |
 | `Heartbeat` | ✅ | ❌ | high | ⏳ TODO |
 | `HeartbeatConfig` | ✅ | ❌ | low | ⏳ TODO |
@@ -588,7 +590,7 @@ from praisonaiagents import Memory
 </details>
 
 <details>
-<summary><strong>other</strong> (91 exports)</summary>
+<summary><strong>other</strong> (93 exports)</summary>
 
 ```python
 from praisonaiagents import AGGRESSIVE_POLICY, AgentMessageEvent, AgentRunOutcome, AgentRuntimeProtocol, Agents, AsyncLearnProtocol, AutoMemory, AutonomyConfig, BALANCED_POLICY, BackendNotAvailableError...

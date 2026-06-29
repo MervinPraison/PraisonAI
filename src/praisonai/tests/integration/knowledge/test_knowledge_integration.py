@@ -12,20 +12,22 @@ import os
 import pytest
 import tempfile
 
-# Skip markers
+# Skip markers — require PRAISONAI_LIVE_TESTS=1 (CI sets a fake OPENAI_API_KEY)
+_live = os.environ.get("PRAISONAI_LIVE_TESTS", "0") == "1"
+
 requires_openai = pytest.mark.skipif(
-    not os.environ.get("OPENAI_API_KEY"),
-    reason="OPENAI_API_KEY not set"
+    not _live or not os.environ.get("OPENAI_API_KEY"),
+    reason="Set PRAISONAI_LIVE_TESTS=1 and OPENAI_API_KEY for embedding/LLM tests",
 )
 
 requires_pinecone = pytest.mark.skipif(
-    not os.environ.get("PINECONE_API_KEY"),
-    reason="PINECONE_API_KEY not set"
+    not _live or not os.environ.get("PINECONE_API_KEY"),
+    reason="Set PRAISONAI_LIVE_TESTS=1 and PINECONE_API_KEY for Pinecone tests",
 )
 
 requires_cohere = pytest.mark.skipif(
-    not os.environ.get("COHERE_API_KEY"),
-    reason="COHERE_API_KEY not set"
+    not _live or not os.environ.get("COHERE_API_KEY"),
+    reason="Set PRAISONAI_LIVE_TESTS=1 and COHERE_API_KEY for Cohere reranker tests",
 )
 
 requires_chromadb = pytest.mark.skipif(

@@ -55,7 +55,7 @@ def config_list(
         print_dict(config_dict)
         
         # Show sources if verbose
-        if output.verbose:
+        if output.is_verbose:
             output.print("\n[dim]Sources:[/dim]")
             for source in config.sources:
                 output.print(f"  • {source}")
