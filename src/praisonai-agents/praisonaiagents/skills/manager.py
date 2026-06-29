@@ -193,9 +193,9 @@ class SkillManager:
                     name,
                 )
                 return
-            # Record top-level selected bundles so their bundle-level
-            # 'instruction' can be surfaced in the prompt.
-            if not stack and name not in self._selected_bundles:
+            # Record selected bundles so their bundle-level 'instruction' can
+            # be surfaced in the prompt, including nested bundles.
+            if name not in self._selected_bundles:
                 self._selected_bundles.append(name)
             for member in manifest.skills:
                 _expand(member, stack + (name,))

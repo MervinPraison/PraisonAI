@@ -204,6 +204,25 @@ class TestSkillManagerBundles:
         assert "Prefer small commits." in xml
         assert "<bundle_instructions>" in xml
 
+    def test_nested_bundle_instruction_in_prompt(self):
+        from praisonaiagents.skills import SkillManager
+        from praisonaiagents.skills.bundles import BundleManifest
+
+        mgr = SkillManager()
+        mgr.add_bundle(BundleManifest(
+            name="common", skills=["log"],
+            instruction="Always log structured events.",
+        ))
+        mgr.add_bundle(BundleManifest(
+            name="backend", skills=["@common", "api"],
+            instruction="Prefer small commits.",
+        ))
+        mgr.resolve(["@backend"])
+        xml = mgr.to_prompt()
+        assert "Prefer small commits." in xml
+        assert "Always log structured events." in xml
+        assert "<bundle_instructions>" in xml
+
     def test_no_bundle_instruction_no_block(self):
         from praisonaiagents.skills import SkillManager
 
