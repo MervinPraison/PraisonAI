@@ -663,6 +663,18 @@ def capture_boot_fingerprint(session_manager) -> Optional[str]:
     try:
         if session_manager is None:
             return None
+        # Pre-resolve the pure comparison predicate now, while imports are
+        # known-good. Caching it means check_code_skew never has to import the
+        # SDK gateway surface *during* a hot operation — an in-place update that
+        # broke that import would otherwise make the guard's own import raise,
+        # fail open, and let the risky switch proceed (defeating the guard).
+        try:
+            if getattr(session_manager, "_boot_detect_code_skew", None) is None:
+                from praisonaiagents.gateway import detect_code_skew
+
+                session_manager._boot_detect_code_skew = detect_code_skew
+        except Exception:
+            pass
         existing = getattr(session_manager, "_boot_code_fp", None)
         if existing is not None:
             return existing
@@ -705,7 +717,13 @@ def check_code_skew(session_manager) -> Optional[str]:
         if getattr(session_manager, "code_skew_guard", True) is False:
             return None
 
-        from praisonaiagents.gateway import detect_code_skew
+        # Prefer the predicate resolved at boot (when imports were known-good)
+        # so a broken SDK gateway surface after an in-place update cannot make
+        # the guard's *own* import raise and fail open. Fall back to a fresh
+        # import only when no boot reference was cached.
+        detect_code_skew = getattr(session_manager, "_boot_detect_code_skew", None)
+        if detect_code_skew is None:
+            from praisonaiagents.gateway import detect_code_skew
 
         boot_fp = getattr(session_manager, "_boot_code_fp", None)
         if boot_fp is None:

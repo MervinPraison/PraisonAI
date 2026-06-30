@@ -204,3 +204,35 @@ def test_check_code_skew_opt_out_returns_none(monkeypatch):
 
 def test_check_code_skew_none_session_manager():
     assert check_code_skew(None) is None
+
+
+def test_capture_boot_fingerprint_caches_detect_predicate():
+    # The pure comparison predicate must be resolved at boot (while imports are
+    # known-good) and cached, so the guard never re-imports the SDK gateway
+    # surface during a hot operation (Greptile P1: "Guard imports too late").
+    from praisonaiagents.gateway import detect_code_skew as real_predicate
+
+    sm = _FakeSessionManager()
+    capture_boot_fingerprint(sm)
+    assert getattr(sm, "_boot_detect_code_skew", None) is real_predicate
+
+
+def test_check_code_skew_uses_cached_predicate_not_fresh_import(monkeypatch):
+    # If a cached boot predicate exists, the guard must use it and must NOT rely
+    # on a fresh import of the SDK gateway (which could fail after an in-place
+    # update). Simulate a broken import surface to prove independence.
+    import praisonai.bots._commands as commands
+
+    sm = _FakeSessionManager()
+    sm._boot_code_fp = "a" * 40
+    sm._boot_detect_code_skew = lambda boot, disk: ("aaaaaaa", "bbbbbbb")
+    monkeypatch.setattr(commands, "read_code_fingerprint", lambda *a, **k: "b" * 40)
+
+    # Break the SDK gateway import path; the cached predicate must still work.
+    import praisonaiagents.gateway as gw
+
+    monkeypatch.delattr(gw, "detect_code_skew", raising=False)
+
+    msg = check_code_skew(sm)
+    assert msg is not None
+    assert "Restart the gateway" in msg

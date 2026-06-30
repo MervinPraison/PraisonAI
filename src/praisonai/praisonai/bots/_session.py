@@ -193,7 +193,8 @@ class BotSessionManager:
         # startup so a later in-place update (git pull / pip install -U) is
         # caught before a hot operation (e.g. /model) triggers a first-use lazy
         # import against changed code. Best-effort and fail-open; capturing here
-        # (rather than on first /model use) also guards the very first call.
+        # (rather than on first /model use) also guards the very first call and
+        # pre-resolves the comparison predicate while imports are known-good.
         try:
             from ._commands import capture_boot_fingerprint
 
