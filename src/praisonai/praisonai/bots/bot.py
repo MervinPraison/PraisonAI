@@ -288,6 +288,19 @@ class Bot:
             await self._adapter.stop()
         self._is_running = False
 
+    async def go_dormant(self) -> None:
+        """Pause inbound dispatch while keeping the connection alive.
+
+        Issue #2485: forwards to a relay adapter's ``go_dormant`` so a
+        scale-to-zero controller can ask an out-of-process connector to keep
+        buffering inbound events while the gateway sleeps, rather than
+        disconnecting. A no-op for adapters that do not support dormancy.
+        """
+        adapter = self._adapter
+        go_dormant = getattr(adapter, "go_dormant", None) if adapter else None
+        if go_dormant is not None:
+            await go_dormant()
+
     def run(self) -> None:
         """Synchronous entry point — starts the bot.
 

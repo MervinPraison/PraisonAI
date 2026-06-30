@@ -53,6 +53,13 @@ class RelayAdapter:
         self._message_handlers: List[Callable] = []
         self._command_handlers: Dict[str, Callable] = {}
 
+        # A real BotSessionManager so relayed inbound messages are routed to
+        # the configured agent exactly like an in-process adapter, and so the
+        # owning BotOS can splice the admission gate / identity resolver /
+        # delivery router onto ``_session`` (it duck-types on this attribute).
+        # Built lazily on ``start`` to keep construction import-light.
+        self._session: Optional[Any] = None
+
     # ── Properties ──────────────────────────────────────────────────
 
     @property
@@ -73,12 +80,30 @@ class RelayAdapter:
 
     # ── Lifecycle ───────────────────────────────────────────────────
 
+    def _ensure_session(self) -> Any:
+        """Build the per-user session manager on first use.
+
+        Mirrors the in-process adapters (``build_session_manager``) so relayed
+        inbound traffic gets the same persistent history, durable inbound
+        delivery, and—once spliced by ``BotOS``—admission control / identity
+        resolution / outbound delivery wiring.
+        """
+        if self._session is None:
+            from praisonaiagents.bots import BotConfig
+
+            from ._session import build_session_manager
+
+            config = self._config or BotConfig(token="")
+            self._session = build_session_manager(config, self._platform)
+        return self._session
+
     async def start(self) -> None:
         """Connect the relay, negotiate capabilities, and wire inbound events."""
         if self._is_running:
             logger.warning("RelayAdapter(%s) already running", self._platform)
             return
 
+        self._ensure_session()
         self._transport.set_inbound_handler(self._on_inbound)
         self._capabilities = await self._transport.connect()
         self._is_running = True
@@ -110,7 +135,18 @@ class RelayAdapter:
     # ── Inbound ─────────────────────────────────────────────────────
 
     async def _on_inbound(self, message: Any) -> None:
-        """Dispatch a relayed inbound message to registered handlers."""
+        """Route a relayed inbound message to the agent, then to handlers.
+
+        The message is first run through the configured agent via the session
+        manager (the same path platform adapters take), so a headless gateway
+        produces the normal AI reply and honours the spliced admission gate /
+        identity / delivery wiring. Any reply is relayed back down through the
+        transport. Manually-registered ``on_message`` handlers still fire so
+        application-level hooks keep working.
+        """
+        if self._agent is not None:
+            await self._route_to_agent(message)
+
         for handler in list(self._message_handlers):
             try:
                 result = handler(message)
@@ -119,6 +155,43 @@ class RelayAdapter:
             except Exception:  # pragma: no cover - defensive
                 logger.exception(
                     "RelayAdapter(%s) inbound handler failed", self._platform
+                )
+
+    async def _route_to_agent(self, message: Any) -> None:
+        """Run the inbound message through the agent and relay the reply."""
+        session = self._ensure_session()
+        content = getattr(message, "content", "")
+        prompt = content if isinstance(content, str) else str(content)
+        if not prompt:
+            return
+
+        user_id = getattr(message, "sender_id", "") or "unknown"
+        channel_id = getattr(message, "session_id", "") or user_id
+        message_id = getattr(message, "message_id", "") or ""
+        reply_to = getattr(message, "reply_to", None)
+
+        try:
+            response = await session.chat(
+                self._agent,
+                user_id,
+                prompt,
+                chat_id=channel_id,
+                message_id=message_id,
+            )
+        except Exception:
+            logger.exception(
+                "RelayAdapter(%s) agent run failed", self._platform
+            )
+            return
+
+        if response:
+            try:
+                await self.send_message(
+                    channel_id, str(response), reply_to=reply_to
+                )
+            except Exception:  # pragma: no cover - defensive
+                logger.exception(
+                    "RelayAdapter(%s) outbound relay failed", self._platform
                 )
 
     def on_message(self, handler: Callable) -> Callable:
