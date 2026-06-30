@@ -217,6 +217,39 @@ def test_run_attaches_warm_runtime_when_no_save(monkeypatch):
     assert len(attach_calls) == 1
 
 
+def test_run_skips_warm_runtime_when_thinking_budget_set(monkeypatch):
+    """An explicit --thinking budget must stay in-process so it isn't dropped.
+
+    The warm runtime reuses a cached agent and does not carry a per-call thinking
+    budget, so attach-eligible ``run --thinking ...`` invocations would silently
+    lose the requested setting if they attached.
+    """
+    import importlib
+
+    attach_calls = []
+
+    def _fake_attach(*args, **kwargs):
+        attach_calls.append(True)
+        return False
+
+    monkeypatch.setattr("praisonai.cli.commands.run._try_attach_runtime", _fake_attach)
+
+    mock_praison = type("P", (), {"config_list": [{}], "handle_direct_prompt": lambda self, p: "ok"})()
+    main_mod = importlib.import_module("praisonai.cli.main")
+    monkeypatch.setattr(main_mod, "PraisonAI", lambda: mock_praison)
+
+    mock_output = type("O", (), {
+        "is_json_mode": False,
+        "emit_result": lambda *a, **k: None,
+    })()
+    monkeypatch.setattr("praisonai.cli.commands.run.get_output_controller", lambda: mock_output)
+
+    from praisonai.cli.commands.run import _run_prompt
+
+    _run_prompt("hello", no_save=True, thinking_budget=1024)
+    assert attach_calls == []
+
+
 def test_server_roundtrip(monkeypatch):
     """Boot the real stdlib server with a stubbed agent and round-trip a prompt."""
     from praisonai.runtime import server as server_mod
