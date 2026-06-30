@@ -50,6 +50,16 @@ def test_validate_workflow_framework_rejects_google_adk(caplog):
     assert any("google_adk" in r.message for r in caplog.records)
 
 
+def test_validate_workflow_framework_rejects_pydantic_ai(caplog):
+    import logging
+    from praisonai.framework_adapters.workflow_framework import validate_workflow_framework
+
+    with caplog.at_level(logging.WARNING):
+        with pytest.raises(ValueError, match="not supported for workflow execution"):
+            validate_workflow_framework("pydantic_ai", source="workflow.yaml")
+    assert any("pydantic_ai" in r.message for r in caplog.records)
+
+
 def test_framework_from_config_defaults_praisonai():
     from praisonai.framework_adapters.workflow_framework import framework_from_config
 

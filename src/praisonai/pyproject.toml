@@ -124,6 +124,10 @@ google-adk = [
     "praisonai-frameworks[google-adk]>=0.1.8",
     "praisonai-tools>=0.1.0",
 ]
+pydantic-ai = [
+    "praisonai-frameworks[pydantic-ai]>=0.1.9",
+    "praisonai-tools>=0.1.0",
+]
 acp = [
     "agent-client-protocol>=0.7.0",
 ]

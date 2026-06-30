@@ -640,6 +640,21 @@ class CodeConverter:
             if re.search(pattern, converted, flags):
                 converted = re.sub(pattern, replacement, converted, flags=flags)
                 imports_to_add.add("from praisonaiagents import Agent, AgentTeam")
+
+        pydantic_ai_replacements = [
+            (r'^from\s+pydantic_ai\s+import\s+Agent\b.*$', 'from praisonaiagents import Agent', re.MULTILINE),
+            (r'\.run_sync\s*\(', '.start('),
+        ]
+
+        for item in pydantic_ai_replacements:
+            if len(item) == 3:
+                pattern, replacement, flags = item
+            else:
+                pattern, replacement = item
+                flags = 0
+            if re.search(pattern, converted, flags):
+                converted = re.sub(pattern, replacement, converted, flags=flags)
+                imports_to_add.add("from praisonaiagents import Agent")
         
         # Add imports if not already present
         if imports_to_add and "from praisonaiagents import" not in converted:
