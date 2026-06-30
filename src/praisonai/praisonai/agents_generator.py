@@ -80,10 +80,6 @@ def __dir__():
 
 
 
-_TOOL_TIMEOUT_EXECUTOR = None
-# Eagerly initialised so concurrent first-callers always share one lock (and
-# therefore one executor); a lazily-created lock would itself race.
-_TOOL_TIMEOUT_EXECUTOR_LOCK = threading.Lock()
 _DEFAULT_TOOL_TIMEOUT_WORKERS = 32
 
 
@@ -113,33 +109,15 @@ def _resolve_tool_timeout_workers():
     return workers
 
 
-def _get_tool_timeout_executor():
-    """Lazily create a bounded, observable thread pool for sync tool timeouts.
-
-    Using a bounded pool (instead of unbounded bare daemon threads) means any
-    background work left running after a timeout is at least capped and named,
-    so operators can enumerate it rather than accumulating phantom threads.
-    """
-    global _TOOL_TIMEOUT_EXECUTOR
-    import concurrent.futures
-
-    with _TOOL_TIMEOUT_EXECUTOR_LOCK:
-        if _TOOL_TIMEOUT_EXECUTOR is None:
-            _TOOL_TIMEOUT_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
-                max_workers=_resolve_tool_timeout_workers(),
-                thread_name_prefix="praisonai-tool-timeout",
-            )
-    return _TOOL_TIMEOUT_EXECUTOR
-
-
-def _wrap_with_timeout(tool, timeout_seconds: float):
+def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory):
     """Enforce a per-call timeout on a tool, sync or async.
 
     For async tools the underlying task is cancelled on timeout. For sync tools
-    the call runs in a bounded thread pool; on timeout we best-effort cancel the
-    future and log a warning. Note: a synchronous call that has already started
-    cannot be forcibly interrupted, so background work may continue executing —
-    the returned payload flags this with ``background_work_may_continue``.
+    the call runs in an instance-owned bounded thread pool obtained from
+    ``executor_factory``; on timeout we best-effort cancel the future and log a
+    warning. Note: a synchronous call that has already started cannot be forcibly
+    interrupted, so background work may continue executing — the returned payload
+    flags this with ``background_work_may_continue``.
     """
     if timeout_seconds is None or timeout_seconds <= 0 or not callable(tool):
         return tool
@@ -165,7 +143,7 @@ def _wrap_with_timeout(tool, timeout_seconds: float):
 
     @functools.wraps(tool)
     def _sync_wrapped(*args, **kwargs):
-        executor = _get_tool_timeout_executor()
+        executor = executor_factory()
         future = executor.submit(tool, *args, **kwargs)
         try:
             return future.result(timeout=timeout_seconds)
@@ -235,7 +213,7 @@ def _resolve_yaml_cli_backend(cli_backend_config, logger):
 
 
 class AgentsGenerator:
-    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None, tools=None, cli_config=None, adapter_registry=None):
+    def __init__(self, agent_file, framework, config_list, log_level=None, agent_callback=None, task_callback=None, agent_yaml=None, tools=None, cli_config=None, adapter_registry=None, tool_timeout_executor=None):
         """
         Initialize the AgentsGenerator object.
 
@@ -289,10 +267,52 @@ class AgentsGenerator:
         # DI-friendly: tests/multi-tenant runtimes pass their own registry;
         # CLI users get the process default.
         self._adapter_registry = adapter_registry or _get_default_adapter_registry()
+
+        # Instance-owned tool-timeout executor so multi-tenant runtimes can scope
+        # it per session (no process-wide singleton). Created lazily on first use
+        # to avoid spawning threads for generators that never time a sync tool.
+        # A caller-supplied executor is treated as borrowed and never shut down.
+        self._tool_timeout_executor = tool_timeout_executor
+        self._owns_tool_timeout_executor = tool_timeout_executor is None
+        self._tool_timeout_executor_lock = threading.Lock()
         
         # Defer framework adapter creation until YAML is loaded
         # This fixes the issue where empty framework string fails before YAML framework is read
         self.framework_adapter = None
+
+    def _get_tool_timeout_executor(self):
+        """Lazily create this generator's bounded sync-tool-timeout thread pool.
+
+        The pool is owned by the instance (not a module global), so concurrent
+        sessions / tenants never share workers and a stuck tool in one session
+        cannot starve another.
+        """
+        import concurrent.futures
+
+        with self._tool_timeout_executor_lock:
+            if self._tool_timeout_executor is None:
+                self._tool_timeout_executor = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=_resolve_tool_timeout_workers(),
+                    thread_name_prefix=f"praisonai-tool-timeout-{id(self):x}",
+                )
+        return self._tool_timeout_executor
+
+    def _wrap_tool_with_timeout(self, tool, timeout_seconds):
+        """Wrap a tool with this generator's instance-owned timeout executor."""
+        return _wrap_with_timeout(tool, timeout_seconds, self._get_tool_timeout_executor)
+
+    def close(self):
+        """Release the owned tool-timeout executor; safe to call repeatedly."""
+        if self._owns_tool_timeout_executor and self._tool_timeout_executor is not None:
+            self._tool_timeout_executor.shutdown(wait=False, cancel_futures=True)
+            self._tool_timeout_executor = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+        return False
 
     def _get_framework_adapter(self, framework: str) -> FrameworkAdapter:
         """
