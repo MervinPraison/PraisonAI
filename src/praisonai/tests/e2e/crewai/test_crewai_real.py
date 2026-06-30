@@ -32,11 +32,13 @@ class TestCrewAIReal:
 framework: crewai
 topic: Simple Question Answer
 roles:
-  - name: Helper
+  helper:
+    role: Helper
     goal: Answer simple questions accurately
     backstory: I am a helpful assistant who provides clear answers
     tasks:
-      - description: What is the capital of France? Provide just the city name.
+      answer:
+        description: What is the capital of France? Provide just the city name.
         expected_output: The capital city of France
 """
             
@@ -95,17 +97,21 @@ roles:
 framework: crewai
 topic: Multi-Agent Collaboration Test
 roles:
-  - name: Researcher
+  researcher:
+    role: Researcher
     goal: Gather information
     backstory: I research topics thoroughly
     tasks:
-      - description: Research a simple topic
+      research:
+        description: Research a simple topic
         expected_output: Brief research summary
-  - name: Writer
+  writer:
+    role: Writer
     goal: Write clear content
     backstory: I write clear and concise content
     tasks:
-      - description: Write based on research
+      write:
+        description: Write based on research
         expected_output: Written content
 """
             
@@ -141,7 +147,8 @@ roles:
         This will consume API credits and show real output logs.
         """
         try:
-            from praisonai import PraisonAI
+            from praisonai import run
+            from praisonai.framework_adapters.registry import get_default_registry
             import logging
             
             # Enable detailed logging to see the output
@@ -156,11 +163,13 @@ roles:
 framework: crewai
 topic: Quick Math Test
 roles:
-  - name: Calculator
+  calculator:
+    role: Calculator
     goal: Do simple math quickly
     backstory: I am a calculator that gives brief answers
     tasks:
-      - description: Calculate 3+3. Answer with just the number, nothing else.
+      math:
+        description: Calculate 3+3. Answer with just the number, nothing else.
         expected_output: Just the number
 """
             
@@ -170,20 +179,16 @@ roles:
                 test_file = f.name
             
             try:
-                # Initialize PraisonAI with CrewAI
-                praisonai = PraisonAI(
-                    agent_file=test_file,
-                    framework="crewai"
-                )
-                
-                print(f"⛵ Initializing CrewAI with file: {test_file}")
-                print(f"📋 Framework: {praisonai.framework}")
+                adapter = get_default_registry().create("crewai")
+                print(f"📦 CrewAI adapter: {type(adapter).__module__}")
+
+                print(f"⛵ Running CrewAI with file: {test_file}")
                 
                 # 💰 ACTUAL EXECUTION - THIS COSTS MONEY!
                 print("\n💰 EXECUTING REAL CREWAI WORKFLOW...")
                 print("⚠️  This will make actual API calls!")
                 
-                result = praisonai.run()
+                result = run(test_file, framework="crewai")
                 
                 print("\n" + "="*60)
                 print("✅ CREWAI EXECUTION COMPLETED!")
@@ -195,8 +200,8 @@ roles:
                     print("📄 No result returned")
                 print("="*60)
                 
-                # Verify we got some result
-                assert result is not None or True  # Allow empty results
+                assert result is not None
+                assert "6" in str(result)
                 
             finally:
                 # Cleanup
