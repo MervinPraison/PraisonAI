@@ -12,12 +12,12 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from .base import FrameworkAdapter
+from .base import BaseFrameworkAdapter
 
 logger = logging.getLogger(__name__)
 
 
-class PraisonAIAdapter(FrameworkAdapter):
+class PraisonAIAdapter(BaseFrameworkAdapter):
     """
     Adapter for running PraisonAI agents natively using praisonaiagents.
     
@@ -61,19 +61,6 @@ class PraisonAIAdapter(FrameworkAdapter):
             Self, as PraisonAI doesn't have variants
         """
         return self
-    
-    def _format_template(self, text: str, **kwargs) -> str:
-        """Format a template string with provided values."""
-        if not text:
-            return ""
-        
-        import re
-        formatted = text
-        for key, value in kwargs.items():
-            # Replace {key} with value
-            pattern = r'\{' + key + r'\}'
-            formatted = re.sub(pattern, str(value), formatted)
-        return formatted
     
     def _resolve_agent_model(self, details: Dict, default_model: str) -> str:
         """
@@ -268,21 +255,24 @@ class PraisonAIAdapter(FrameworkAdapter):
     def _build_agents_and_tasks(self, config, topic, tools_dict, agent_callback, task_callback, model_name):
         """Build agents and tasks from configuration."""
         from praisonaiagents import Agent as PraisonAgent, Task as PraisonTask
-        
+        from ._config_builder import build_agent_specs
+
         agents = {}
         tasks = []
-        
-        # Process agents from config
-        for role, details in config.get('roles', {}).items():
-            role_filled = self._format_template(details.get('role', role), topic=topic)
-            goal_filled = self._format_template(details.get('goal', ''), topic=topic)
-            backstory_filled = self._format_template(details.get('backstory', ''), topic=topic)
-            
-            # Resolve tools for this agent from tools_dict
-            agent_tool_list = []
-            if tools_dict:
-                agent_tools = details.get('tools', [])
-                agent_tool_list = [tools_dict[t] for t in agent_tools if t in tools_dict]
+
+        # Single canonical YAML -> spec conversion (shared across adapters)
+        specs = build_agent_specs(config, topic, tools_dict, self._format_template)
+
+        # Process agents from the normalized specs
+        for spec in specs:
+            role = spec.key
+            details = spec.extras
+            role_filled = spec.role
+            goal_filled = spec.goal
+            backstory_filled = spec.backstory
+
+            # Resolve tools for this agent (already normalized by the builder)
+            agent_tool_list = spec.tools
             
             # Extract toolsets from YAML config
             agent_toolsets = details.get('toolsets', [])
@@ -321,9 +311,8 @@ class PraisonAIAdapter(FrameworkAdapter):
                 
             agents[role] = agent
             
-            # Create tasks for the agent
-            agent_tasks = details.get('tasks', {})
-            if not agent_tasks:
+            # Create tasks for the agent (already normalized by the builder)
+            if not spec.tasks:
                 # Auto-generate a task
                 task_description = details.get('instructions') or backstory_filled
                 task = PraisonTask(
@@ -335,19 +324,17 @@ class PraisonAIAdapter(FrameworkAdapter):
                     task.callback = task_callback
                 tasks.append(task)
             else:
-                for _task_name, task_details in agent_tasks.items():
-                    description_filled = self._format_template(
-                        task_details.get('description', ''), topic=topic
-                    )
-                    expected_output_filled = self._format_template(
-                        task_details.get('expected_output', 'Task completed successfully.'), topic=topic
-                    )
-                    
-                    task = PraisonTask(
-                        description=description_filled,
-                        expected_output=expected_output_filled,
-                        agent=agent,
-                    )
+                for task_spec in spec.tasks:
+                    task_kwargs = {
+                        'description': task_spec.description,
+                        'expected_output': task_spec.expected_output,
+                        'agent': agent,
+                    }
+                    # Forward task-level tools so per-task YAML tools are honored
+                    # consistently with the CrewAI adapter.
+                    if task_spec.tools:
+                        task_kwargs['tools'] = task_spec.tools
+                    task = PraisonTask(**task_kwargs)
                     
                     if task_callback:
                         task.callback = task_callback

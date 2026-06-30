@@ -68,19 +68,18 @@ class CrewAIAdapter(BaseFrameworkAdapter):
 
             # Use scoped telemetry disabling instead of global patching
             with scoped_telemetry_disable(Telemetry):
+                from ._config_builder import build_agent_specs
+
                 agents = {}
                 tasks = []
                 tasks_dict = {}
 
-                # Create agents from config
-                for role, details in config['roles'].items():
-                    role_filled = self._format_template(details['role'], topic=topic)
-                    goal_filled = self._format_template(details['goal'], topic=topic)
-                    backstory_filled = self._format_template(details['backstory'], topic=topic)
+                # Single canonical YAML -> spec conversion (shared across adapters)
+                specs = build_agent_specs(config, topic, tools_dict, self._format_template)
 
-                    # Get agent tools
-                    agent_tools = [tools_dict[tool] for tool in details.get('tools', [])
-                                 if tools_dict and tool in tools_dict]
+                # Create agents from the normalized specs
+                for spec in specs:
+                    details = spec.extras
 
                     # Configure LLM using shared resolver
                     llm = self._resolve_llm(details.get('llm'), llm_config)
@@ -90,10 +89,10 @@ class CrewAIAdapter(BaseFrameworkAdapter):
 
                     # Create CrewAI agent with full feature set
                     agent = Agent(
-                        role=role_filled,
-                        goal=goal_filled,
-                        backstory=backstory_filled,
-                        tools=agent_tools,
+                        role=spec.role,
+                        goal=spec.goal,
+                        backstory=spec.backstory,
+                        tools=spec.tools,
                         allow_delegation=details.get('allow_delegation', False),
                         llm=llm,
                         function_calling_llm=function_calling_llm,
@@ -111,27 +110,17 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                     if agent_callback:
                         agent.step_callback = agent_callback
 
-                    agents[role] = agent
+                    agents[spec.key] = agent
 
                     # Create tasks for the agent
-                    for task_name, task_details in details.get('tasks', {}).items():
-                        description_filled = self._format_template(task_details['description'], topic=topic)
-                        expected_output_filled = self._format_template(task_details['expected_output'], topic=topic)
-
-                        # Resolve task tools from tools_dict
-                        task_tools = []
-                        for tool_name in task_details.get('tools', []):
-                            if isinstance(tool_name, str) and tools_dict and tool_name in tools_dict:
-                                task_tools.append(tools_dict[tool_name])
-                            elif callable(tool_name):
-                                # Already a callable tool object
-                                task_tools.append(tool_name)
+                    for task_spec in spec.tasks:
+                        task_details = task_spec.extras
 
                         task = Task(
-                            description=description_filled,
-                            expected_output=expected_output_filled,
+                            description=task_spec.description,
+                            expected_output=task_spec.expected_output,
                             agent=agent,
-                            tools=task_tools,
+                            tools=task_spec.tools,
                             async_execution=task_details.get('async_execution', False),
                             context=[],
                             config=task_details.get('config', {}),
@@ -148,7 +137,13 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                             task.callback = task_callback
 
                         tasks.append(task)
-                        tasks_dict[task_name] = task
+                        if task_spec.name in tasks_dict:
+                            raise ValueError(
+                                f"Duplicate CrewAI task name: {task_spec.name!r}. "
+                                "Task names must be unique across roles so context "
+                                "wiring resolves to the correct task."
+                            )
+                        tasks_dict[task_spec.name] = task
 
                 # Set up task contexts
                 for details in config['roles'].values():
