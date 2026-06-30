@@ -17,12 +17,28 @@ if TYPE_CHECKING:
 from ._chunk import chunk_message, _calculate_length
 from ._streaming import DraftStreamer, StreamingConfig, StreamingMode
 from ._rate_limit import RateLimiter
-from ._resilience import BackoffPolicy, compute_backoff, is_recoverable_error, sleep_with_abort
+from ._resilience import (
+    BackoffPolicy,
+    compute_backoff,
+    is_recoverable_error,
+    server_retry_after,
+    sleep_with_abort,
+)
 
 logger = logging.getLogger(__name__)
 
 # Constant for permanent error detection
 PERMANENT_ERROR_PREFIX = "Permanent error:"
+
+
+class _TransientDeliveryError(Exception):
+    """Recoverable delivery failure carrying the underlying error text.
+
+    Raised by the durable drain sender so the outbox persists the real error
+    (and any server Retry-After hint embedded in it) instead of a generic
+    "Delivery returned false". Always classified recoverable so the entry is
+    retried rather than marked a permanent failure.
+    """
 
 
 class MessageSender(Protocol):
@@ -287,6 +303,7 @@ async def deliver_with_retry(
     max_attempts: int = 3,
     abort_signal: Optional[asyncio.Event] = None,
     platform: str = "",
+    rate_limiter: Optional[RateLimiter] = None,
     **send_kwargs
 ) -> tuple[bool, Optional[str]]:
     """Attempt delivery with bounded exponential backoff retry.
@@ -299,6 +316,8 @@ async def deliver_with_retry(
         max_attempts: Maximum delivery attempts
         abort_signal: Optional event to cancel retries
         platform: Platform name for error classification
+        rate_limiter: Optional limiter to penalise after a server throttle
+            signal so subsequent sends to the channel hold off.
         **send_kwargs: Additional kwargs for send_message
         
     Returns:
@@ -342,12 +361,25 @@ async def deliver_with_retry(
                 )
                 return False, f"Max attempts exceeded: {last_error}"
             
-            # Calculate backoff delay
-            delay = compute_backoff(backoff, attempt)
+            # Honour a server-mandated wait (Telegram retry_after, HTTP
+            # Retry-After) over the generic backoff estimate.
+            mandated = server_retry_after(e)
+            delay = mandated if mandated is not None else compute_backoff(backoff, attempt)
             
+            # Widen this channel's lane so the next send does not immediately
+            # re-trip the platform limit. Only penalise on a server-mandated
+            # wait — a generic backoff after an ordinary transient error must
+            # not synthetically throttle later sends to this channel.
+            if mandated is not None and rate_limiter is not None and delay > 0:
+                try:
+                    await rate_limiter.penalise(channel_id, delay)
+                except Exception:
+                    pass
+            
+            hint = " (server Retry-After)" if mandated is not None else ""
             logger.warning(
                 f"[{platform}] Delivery attempt {attempt} failed to {channel_id}: "
-                f"{e}; retrying in {delay:.1f}s"
+                f"{e}; retrying in {delay:.1f}s{hint}"
             )
             
             # Sleep with abort capability
@@ -595,6 +627,13 @@ class DurableDelivery:
             # Preserve permanent failure information
             if not success and error and error.startswith(PERMANENT_ERROR_PREFIX):
                 raise RuntimeError(error)
+            
+            # Surface a transient failure (with its underlying error text) so the
+            # outbox records it and its retry gate can honour any server
+            # Retry-After hint carried in that text. Returning False would store
+            # a generic "Delivery returned false" and lose the hint.
+            if not success and error:
+                raise _TransientDeliveryError(error)
             
             return success
         

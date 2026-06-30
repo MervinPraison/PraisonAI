@@ -58,7 +58,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
 
-from ._resilience import BackoffPolicy, compute_backoff, is_recoverable_error
+from ._resilience import BackoffPolicy, compute_backoff, is_recoverable_error, server_retry_after
 
 logger = logging.getLogger(__name__)
 
@@ -346,9 +346,16 @@ class OutboundQueue:
                 failed += 1
                 continue
             
-            # Calculate backoff delay
+            # Calculate backoff delay. Honour a server-mandated wait
+            # (Telegram retry_after / HTTP Retry-After) recorded in the prior
+            # error over the generic backoff estimate, so we don't retry early
+            # and re-trip the platform's throttle.
             if entry.last_attempt:
                 delay = compute_backoff(self.backoff, entry.attempts + 1)
+                if entry.error:
+                    mandated = server_retry_after(Exception(entry.error))
+                    if mandated is not None:
+                        delay = max(delay, mandated)
                 time_since_last = time.time() - entry.last_attempt
                 if time_since_last < delay:
                     # Not ready for retry yet
@@ -400,7 +407,16 @@ class OutboundQueue:
             except Exception as e:
                 # Check if error is permanent
                 permanent = not is_recoverable_error(e)
-                await self.mark_failed(key, str(e), permanent=permanent)
+                # Persist any server-mandated wait from the *live* exception
+                # (structured Telegram parameters / HTTP Retry-After headers are
+                # lost once only str(e) is stored). Append it in a form the
+                # text fallback in server_retry_after() recovers on the next
+                # drain so the gate honours the platform's throttle.
+                error_text = str(e)
+                mandated = server_retry_after(e)
+                if mandated is not None and "retry_after" not in error_text.lower():
+                    error_text = f"{error_text} [retry_after: {mandated:g}]"
+                await self.mark_failed(key, error_text, permanent=permanent)
                 failed += 1
                 
                 if permanent:
