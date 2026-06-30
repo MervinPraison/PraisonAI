@@ -48,12 +48,13 @@ from ._debounce import InboundDebouncer
 from ._ack import AckReactor
 from ._unknown_user import UnknownUserHandler, BotContext
 from ._pairing_ui import PairingUIBuilder, PairingCallbackHandler
+from ._outbound_resilience import OutboundResilienceMixin
 from ..gateway.pairing import PairingStore
 
 logger = logging.getLogger(__name__)
 
 
-class SlackBot(ChatCommandMixin, MessageHookMixin):
+class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
     """Slack bot runtime for PraisonAI agents.
     
     Connects an agent to Slack, handling messages, slash commands,
@@ -78,6 +79,8 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
     
     Requires: pip install slack-bolt
     """
+    
+    _outbound_platform = "slack"
     
     def __init__(
         self,
@@ -638,7 +641,16 @@ class SlackBot(ChatCommandMixin, MessageHookMixin):
         if thread_id:
             kwargs["thread_ts"] = thread_id
         
-        response = await self._client.chat_postMessage(**kwargs)
+        # Durable delivery: retry transient failures with backoff and park the
+        # reply in the outbound DLQ on permanent failure instead of dropping it.
+        send_kwargs = dict(kwargs)
+        response = await self.deliver_outbound(
+            lambda: self._client.chat_postMessage(**send_kwargs),
+            channel_id=channel_id,
+            reply_text=text,
+            thread_id=thread_id,
+            reply_to=reply_to,
+        )
         
         return BotMessage(
             message_id=response["ts"],

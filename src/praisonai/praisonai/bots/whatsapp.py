@@ -47,6 +47,7 @@ from ._commands import format_status, format_help, handle_stop_command
 from ._session import BotSessionManager
 from ._rate_limit import RateLimiter
 from ._ack import AckReactor
+from ._outbound_resilience import OutboundResilienceMixin
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ GRAPH_API_VERSION = "v21.0"
 GRAPH_API_BASE = f"https://graph.facebook.com/{GRAPH_API_VERSION}"
 
 
-class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
+class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
     """WhatsApp bot runtime for PraisonAI agents.
 
     Connects an agent to WhatsApp via the Cloud API, handling messages,
@@ -75,6 +76,8 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
 
         await bot.start()
     """
+
+    _outbound_platform = "whatsapp"
 
     def __init__(
         self,
@@ -851,22 +854,39 @@ class WhatsAppBot(ChatCommandMixin, MessageHookMixin):
             # Rate limit before sending
             await self._rate_limiter.acquire(to)
 
-            try:
-                async with self._http_session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                        result = await resp.json()
-                        if "error" in result:
-                            logger.error(f"WhatsApp send error: {result['error']}")
-                        else:
-                            msg_id = result.get("messages", [{}])[0].get("id", "")
-                            sent_msg = BotMessage(
-                                message_id=msg_id,
-                                content=chunk,
-                                message_type=MessageType.TEXT,
-                                sender=self._bot_user,
-                                channel=BotChannel(channel_id=to, channel_type="dm"),
-                            )
-            except Exception as e:
-                logger.error(f"Failed to send WhatsApp message: {e}")
+            async def _post_chunk(chunk_text: str = chunk) -> dict:
+                # Surface HTTP errors so the durable wrapper can retry transient
+                # failures (5xx / rate-limit / network) instead of dropping the
+                # reply. A returned ``{"error": ...}`` body is raised so the same
+                # retry/DLQ path applies.
+                async with self._http_session.post(
+                    url, headers=headers, json=payload,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    result = await resp.json()
+                    if isinstance(result, dict) and "error" in result:
+                        raise RuntimeError(f"WhatsApp send error: {result['error']}")
+                    return result
+
+            # Durable delivery: retry transient failures with backoff and park
+            # the chunk in the outbound DLQ on permanent failure. The original
+            # exception is allowed to propagate (parity with Telegram/Slack/
+            # Discord) so callers never treat an undelivered or partially
+            # delivered reply as successfully sent.
+            result = await self.deliver_outbound(
+                _post_chunk,
+                channel_id=to,
+                reply_text=chunk,
+                reply_to=reply_to,
+            )
+            msg_id = result.get("messages", [{}])[0].get("id", "")
+            sent_msg = BotMessage(
+                message_id=msg_id,
+                content=chunk,
+                message_type=MessageType.TEXT,
+                sender=self._bot_user,
+                channel=BotChannel(channel_id=to, channel_type="dm"),
+            )
 
         return sent_msg or BotMessage(content=text)
 

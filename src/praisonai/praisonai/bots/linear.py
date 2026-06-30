@@ -35,6 +35,7 @@ from praisonaiagents.bots import (
 from ._commands import format_status, format_help
 from ._rate_limit import RateLimiter
 from ._ack import AckReactor
+from ._outbound_resilience import OutboundResilienceMixin
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ logger = logging.getLogger(__name__)
 LINEAR_API_BASE = "https://api.linear.app/graphql"
 
 
-class LinearBot(ChatCommandMixin, MessageHookMixin):
+class LinearBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
     """Linear bot runtime for PraisonAI agents.
 
     Connects an agent to Linear via AgentSession webhooks, handling
@@ -61,6 +62,8 @@ class LinearBot(ChatCommandMixin, MessageHookMixin):
 
         await bot.start()
     """
+
+    _outbound_platform = "linear"
 
     def __init__(
         self,
@@ -515,7 +518,16 @@ class LinearBot(ChatCommandMixin, MessageHookMixin):
         """Send a message (comment) to a Linear issue."""
         text = content if isinstance(content, str) else str(content)
         try:
-            await self._send_comment(channel_id, text)
+            # Durable delivery: retry transient failures with backoff and park
+            # the reply in the outbound DLQ on permanent failure instead of
+            # dropping it.
+            await self.deliver_outbound(
+                lambda: self._send_comment(channel_id, text),
+                channel_id=channel_id,
+                reply_text=text,
+                thread_id=thread_id,
+                reply_to=reply_to,
+            )
             return BotMessage(
                 message_id=f"linear-{channel_id}-{int(time.time())}",
                 content=text,
