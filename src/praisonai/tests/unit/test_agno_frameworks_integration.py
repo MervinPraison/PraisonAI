@@ -117,7 +117,7 @@ def test_agents_generator_agno_via_frameworks_adapter(mock_completion):
         tools_dict={},
         agent_callback=None,
         task_callback=None,
-        cli_config=None,
+        cli_config={},
     )
 
 

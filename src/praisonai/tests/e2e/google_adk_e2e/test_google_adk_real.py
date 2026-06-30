@@ -180,3 +180,46 @@ roles:
         finally:
             if os.path.exists(test_file):
                 os.unlink(test_file)
+
+    @pytest.mark.skipif(
+        not os.getenv("PRAISONAI_LIVE_TESTS"),
+        reason="Set PRAISONAI_LIVE_TESTS=1 to run real API calls",
+    )
+    @pytest.mark.skipif(not _google_key(), reason="GOOGLE_API_KEY or GEMINI_API_KEY not set")
+    def test_google_adk_full_execution_handoff_yaml(self):
+        try:
+            from praisonai import PraisonAI
+        except ImportError as exc:
+            pytest.skip(f"PraisonAI not available: {exc}")
+
+        pytest.importorskip("google.adk")
+        pytest.importorskip("praisonai_frameworks")
+
+        yaml_content = """
+framework: google_adk
+topic: greeting
+roles:
+  triage:
+    role: Triage Agent
+    goal: Route English requests to English Agent
+    backstory: Delegate English to the English Agent.
+    handoff:
+      to:
+        - English Agent
+    tasks:
+      route:
+        description: User says hello in English. Delegate appropriately.
+        expected_output: A friendly English reply
+  english:
+    role: English Agent
+    goal: Reply in English only
+    backstory: English specialist.
+"""
+        test_file = _write_yaml(yaml_content)
+        try:
+            praisonai = PraisonAI(agent_file=test_file, framework="google_adk")
+            result = praisonai.run()
+            assert str(result).strip()
+        finally:
+            if os.path.exists(test_file):
+                os.unlink(test_file)
