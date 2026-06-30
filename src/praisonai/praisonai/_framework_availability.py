@@ -20,6 +20,16 @@ def _autogen_v4_probe() -> bool:
     return (importlib.util.find_spec("autogen_agentchat") is not None
             and importlib.util.find_spec("autogen_ext") is not None)
 
+def _langgraph_probe() -> bool:
+    # find_spec on a submodule imports the parent package; guard against
+    # import-time errors in langgraph/its deps crashing the availability check.
+    try:
+        if importlib.util.find_spec("langgraph") is None:
+            return False
+        return importlib.util.find_spec("langgraph.prebuilt") is not None
+    except Exception:
+        return False
+
 _PROBES: dict[str, Callable[[], bool]] = {
     "crewai":            lambda: importlib.util.find_spec("crewai") is not None,
     "autogen":           lambda: importlib.util.find_spec("autogen") is not None,
@@ -40,6 +50,7 @@ _PROBES: dict[str, Callable[[], bool]] = {
     "pinecone":          lambda: importlib.util.find_spec("pinecone") is not None,
     "qdrant_client":     lambda: importlib.util.find_spec("qdrant_client") is not None,
     "weaviate":          lambda: importlib.util.find_spec("weaviate") is not None,
+    "langgraph":         _langgraph_probe,
 }
 
 def is_available(name: str) -> bool:
