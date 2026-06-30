@@ -116,6 +116,29 @@ class AgentConfig(BaseModel):
     
     @model_validator(mode='before')
     @classmethod
+    def normalize_cli_retry_policy(cls, data):
+        """Accept praisonaiagents RetryPolicy objects injected by CLI merge."""
+        if isinstance(data, dict) and data.get("tool_retry_policy") is not None:
+            policy = data["tool_retry_policy"]
+            if isinstance(policy, dict):
+                return data
+            try:
+                from praisonaiagents.tools.retry import RetryPolicy as AgentRetryPolicy
+
+                if isinstance(policy, AgentRetryPolicy):
+                    data = dict(data)
+                    data["tool_retry_policy"] = {
+                        "max_attempts": policy.max_attempts,
+                        "delay": policy.initial_delay_ms / 1000.0,
+                        "backoff_factor": policy.backoff_factor,
+                        "max_delay": policy.max_delay_ms / 1000.0,
+                    }
+            except ImportError:
+                pass
+        return data
+
+    @model_validator(mode='before')
+    @classmethod
     def normalize_stream_alias(cls, data):
         """Map legacy 'stream' into canonical 'streaming'."""
         if isinstance(data, dict) and 'streaming' not in data and 'stream' in data:
@@ -141,6 +164,21 @@ class AgentConfig(BaseModel):
         # Convert tool_retry_policy dict to ToolRetryPolicy
         if isinstance(self.tool_retry_policy, dict):
             self.tool_retry_policy = ToolRetryPolicy(**self.tool_retry_policy)
+        elif self.tool_retry_policy is not None and not isinstance(
+            self.tool_retry_policy, ToolRetryPolicy
+        ):
+            try:
+                from praisonaiagents.tools.retry import RetryPolicy as AgentRetryPolicy
+
+                if isinstance(self.tool_retry_policy, AgentRetryPolicy):
+                    self.tool_retry_policy = ToolRetryPolicy(
+                        max_attempts=self.tool_retry_policy.max_attempts,
+                        delay=self.tool_retry_policy.initial_delay_ms / 1000.0,
+                        backoff_factor=self.tool_retry_policy.backoff_factor,
+                        max_delay=self.tool_retry_policy.max_delay_ms / 1000.0,
+                    )
+            except ImportError:
+                pass
         
         # Convert approval dict/bool to ApprovalConfig
         if isinstance(self.approval, bool):

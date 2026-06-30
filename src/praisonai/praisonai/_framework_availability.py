@@ -40,6 +40,10 @@ _PROBES: dict[str, Callable[[], bool]] = {
     "pinecone":          lambda: importlib.util.find_spec("pinecone") is not None,
     "qdrant_client":     lambda: importlib.util.find_spec("qdrant_client") is not None,
     "weaviate":          lambda: importlib.util.find_spec("weaviate") is not None,
+    "langgraph":         lambda: (
+        importlib.util.find_spec("langgraph") is not None
+        and importlib.util.find_spec("langgraph.prebuilt") is not None
+    ),
 }
 
 def is_available(name: str) -> bool:

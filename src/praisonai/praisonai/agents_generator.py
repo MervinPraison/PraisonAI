@@ -362,6 +362,21 @@ class AgentsGenerator:
         # Handle agent-level overrides using unified approach
         agent_level_fields = ['tool_timeout', 'tool_retry_policy', 'planning_tools', 'autonomy', 'planning', 'web', 'web_fetch']
         agent_overrides = {k: v for k, v in cli_config.items() if k in agent_level_fields}
+
+        if "tool_retry_policy" in agent_overrides:
+            policy = agent_overrides["tool_retry_policy"]
+            try:
+                from praisonaiagents.tools.retry import RetryPolicy
+
+                if isinstance(policy, RetryPolicy):
+                    agent_overrides["tool_retry_policy"] = {
+                        "max_attempts": policy.max_attempts,
+                        "delay": policy.initial_delay_ms / 1000.0,
+                        "backoff_factor": policy.backoff_factor,
+                        "max_delay": policy.max_delay_ms / 1000.0,
+                    }
+            except ImportError:
+                pass
         
         # Handle handoff configuration - convert CLI flags into handoff dict
         handoff_fields = ['handoff', 'handoff_policy', 'handoff_timeout', 'handoff_max_depth', 'handoff_max_concurrent', 'handoff_detect_cycles']

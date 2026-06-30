@@ -152,6 +152,19 @@ class RuntimeCompatibilityChecker:
             supports_handoff=False,
             supports_tool_loop=True
         )
+
+        runtimes['langgraph'] = RuntimeInfo(
+            id='langgraph',
+            name='LangGraph',
+            available=_runtime_usable('langgraph', 'langgraph'),
+            capabilities=[
+                RuntimeCapability('agent_creation', 'Create and manage agents'),
+                RuntimeCapability('tool_execution', 'Execute tools and functions'),
+                RuntimeCapability('sequential_execution', 'Sequential task execution'),
+            ],
+            supports_handoff=False,
+            supports_tool_loop=True
+        )
         
         return runtimes
     
