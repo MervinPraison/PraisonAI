@@ -425,11 +425,11 @@ class Memory(SearchMixin, MemoryCoreMixin):
             try:
                 import chromadb
                 from chromadb.config import Settings as ChromaSettings
-            except ImportError:
+            except ImportError as exc:
                 raise ImportError(
                     "chromadb is required for the rag memory provider. "
                     "Install with: pip install 'praisonaiagents[memory]'"
-                )
+                ) from exc
 
             # Initialize ChromaDB with persistent storage
             self.chroma_client = chromadb.PersistentClient(
