@@ -166,7 +166,11 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
         """
         try:
             adapter = self.create(name)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, ImportError):
+            # ImportError covers ModuleNotFoundError raised when an adapter's
+            # constructor touches a missing optional dependency; treat the
+            # framework as simply unavailable rather than leaking a raw import
+            # error to callers (CLI validation, doctor checks, pick_default).
             return False
         
         try:
@@ -183,7 +187,20 @@ def get_default_registry() -> FrameworkAdapterRegistry:
 
 
 def list_framework_choices(*, include_unavailable: bool = False) -> list[str]:
-    """Single source of truth for CLI/YAML framework name lists."""
+    """Single source of truth for CLI/YAML framework name lists.
+
+    Discovers built-in adapters *and* third-party adapters registered via the
+    ``praisonai.framework_adapters`` entry-point group, so newly installed
+    adapters appear automatically wherever framework names are shown or
+    validated (argparse ``choices``, doctor checks, etc.).
+
+    Args:
+        include_unavailable: When True, return every registered adapter name;
+            otherwise only those reporting availability.
+
+    Returns:
+        Sorted list of framework adapter names.
+    """
     registry = get_default_registry()
     if include_unavailable:
         return sorted(registry.list_names())
@@ -196,14 +213,18 @@ def list_available_frameworks() -> list[str]:
 
 
 def get_install_hint(name: str) -> str:
-    """Return install hint for a framework, consulting the adapter when registered."""
+    """Return install hint for a framework, consulting the adapter when registered.
+
+    Falls back to ``pip install 'praisonai[<extra>]'`` when the adapter cannot
+    be resolved (e.g. its dependencies are missing) or does not declare a hint.
+    """
     registry = get_default_registry()
     try:
         adapter = registry.create(name)
         hint = getattr(adapter, "install_hint", None)
         if hint:
             return hint
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, ImportError):
         pass
     extra_name = {"autogen_v4": "autogen-v4"}.get(name, name)
     return f"pip install 'praisonai[{extra_name}]'"

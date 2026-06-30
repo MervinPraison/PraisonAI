@@ -3,6 +3,11 @@ import warnings
 
 from .base import FrameworkAdapter, BaseFrameworkAdapter, scoped_telemetry_disable
 from .praisonai_adapter import PraisonAIAdapter
+from .registry import (
+    get_default_registry,
+    get_install_hint,
+    list_framework_choices,
+)
 
 __all__ = [
     "FrameworkAdapter",
@@ -13,6 +18,9 @@ __all__ = [
     "AutoGenV4Adapter",
     "AG2Adapter",
     "PraisonAIAdapter",
+    "get_default_registry",
+    "get_install_hint",
+    "list_framework_choices",
 ]
 
 _DEPRECATION = (

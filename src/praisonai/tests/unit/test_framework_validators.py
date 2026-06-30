@@ -42,6 +42,7 @@ class TestAssertFrameworkAvailableRaises:
         with patch("praisonai.framework_adapters.validators.get_default_registry") as mock_get:
             mock_registry = MagicMock()
             mock_registry.is_available.return_value = False
+            mock_registry.create.return_value.install_hint = 'pip install "praisonai[crewai]"'
             mock_get.return_value = mock_registry
 
             with pytest.raises(ImportError, match="pip install"):
@@ -51,6 +52,7 @@ class TestAssertFrameworkAvailableRaises:
         with patch("praisonai.framework_adapters.validators.get_default_registry") as mock_get:
             mock_registry = MagicMock()
             mock_registry.is_available.return_value = False
+            mock_registry.create.return_value.install_hint = 'pip install "praisonai[crewai]"'
             mock_get.return_value = mock_registry
 
             with pytest.raises(ImportError) as exc_info:
@@ -62,6 +64,7 @@ class TestAssertFrameworkAvailableRaises:
         with patch("praisonai.framework_adapters.validators.get_default_registry") as mock_get:
             mock_registry = MagicMock()
             mock_registry.is_available.return_value = False
+            mock_registry.create.return_value.install_hint = None
             mock_get.return_value = mock_registry
 
             with pytest.raises(ImportError) as exc_info:
@@ -72,11 +75,35 @@ class TestAssertFrameworkAvailableRaises:
         with patch("praisonai.framework_adapters.validators.get_default_registry") as mock_get:
             mock_registry = MagicMock()
             mock_registry.is_available.return_value = False
+            mock_registry.create.return_value.install_hint = None
             mock_get.return_value = mock_registry
 
             with pytest.raises(ImportError) as exc_info:
                 assert_framework_available("some_unknown_framework_xyz")
             assert "some_unknown_framework_xyz" in str(exc_info.value)
+            assert "pip install 'praisonai[some_unknown_framework_xyz]'" in str(exc_info.value)
+
+
+class TestRegistryImportErrorIsContained:
+    """Registry must not leak raw ImportError from adapter construction."""
+
+    def test_is_available_swallows_constructor_import_error(self):
+        from praisonai.framework_adapters.registry import get_default_registry
+
+        registry = get_default_registry()
+        with patch.object(registry, "create", side_effect=ImportError("missing dep")):
+            assert registry.is_available("crewai") is False
+
+    def test_assert_framework_available_gives_friendly_hint_on_import_error(self):
+        from praisonai.framework_adapters.registry import get_default_registry
+
+        registry = get_default_registry()
+        with patch(
+            "praisonai.framework_adapters.validators.get_default_registry",
+            return_value=registry,
+        ), patch.object(registry, "create", side_effect=ImportError("missing dep")):
+            with pytest.raises(ImportError, match="was requested but is not installed"):
+                assert_framework_available("crewai")
 
 
 class TestAssertFrameworkAvailableSucceeds:
