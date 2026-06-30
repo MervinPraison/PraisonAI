@@ -16,6 +16,10 @@ from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     from praisonaiagents import Agent
+    from praisonaiagents.bots.presentation import (
+        MessagePresentation,
+        PresentationLimits,
+    )
 
 from praisonai.bots._protocol_mixin import ChatCommandMixin, MessageHookMixin
 from praisonaiagents.bots import (
@@ -534,6 +538,17 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                                         except Exception as e:
                                             logger.error(f"Failed to send media: {e}")
                             
+                            # Render any agent-attached portable presentation
+                            # (buttons/menus) natively after the streamed text.
+                            try:
+                                presentation = self._session.pop_last_presentation(user_id)
+                                if presentation is not None:
+                                    await self.render_presentation(
+                                        str(update.message.chat_id), presentation
+                                    )
+                            except Exception as e:  # pragma: no cover — defensive
+                                logger.debug("presentation render skipped: %s", e)
+
                             # Fire sent hooks
                             self.fire_message_sent(
                                 str(update.message.chat_id), send_result["content"],
@@ -592,6 +607,19 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                             send_result["content"],
                             reply_to=update.message.message_id,
                         )
+                        # If the agent attached a portable presentation
+                        # (buttons/menus), render it natively as an inline
+                        # keyboard. The text reply above already serves as the
+                        # plain-text fallback, so a render failure degrades
+                        # gracefully rather than dropping the reply.
+                        try:
+                            presentation = self._session.pop_last_presentation(user_id)
+                            if presentation is not None:
+                                await self.render_presentation(
+                                    str(update.message.chat_id), presentation
+                                )
+                        except Exception as e:  # pragma: no cover — defensive
+                            logger.debug("presentation render skipped: %s", e)
                         self.fire_message_sent(
                             str(update.message.chat_id), send_result["content"],
                         )
@@ -1644,6 +1672,57 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             )
         except Exception as e:
             logger.error(f"Failed to send reply: {e}")
+
+    @property
+    def presentation_limits(self) -> "PresentationLimits":
+        """Telegram presentation limits (see ``SupportsPresentation``)."""
+        from praisonaiagents.bots.presentation import PresentationLimits
+        return PresentationLimits.telegram()
+
+    def truncate_presentation(
+        self, presentation: "MessagePresentation"
+    ) -> "MessagePresentation":
+        """Adapt a portable presentation to Telegram's limits."""
+        from praisonaiagents.bots.presentation import adapt_presentation
+        return adapt_presentation(presentation, self.presentation_limits)
+
+    async def render_presentation(
+        self,
+        target: str,
+        presentation: "MessagePresentation",
+    ) -> Optional[str]:
+        """Render a portable presentation as a Telegram inline keyboard.
+
+        Implements ``SupportsPresentation``: delegates to
+        ``TelegramPresentationRenderer`` (which runs ``adapt_presentation``
+        internally), then sends the resulting text + ``reply_markup`` natively.
+        Returns the sent message id, or ``None`` if delivery failed.
+        """
+        if not self._application:
+            return None
+        try:
+            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+            from ._presentation_renderer import TelegramPresentationRenderer
+
+            rendered = TelegramPresentationRenderer.render(presentation)
+            send_kwargs: Dict[str, Any] = {
+                "chat_id": int(target),
+                "text": rendered.get("text") or "\u200b",
+            }
+            reply_markup = rendered.get("reply_markup")
+            inline_keyboard = (reply_markup or {}).get("inline_keyboard")
+            if inline_keyboard:
+                send_kwargs["reply_markup"] = InlineKeyboardMarkup(
+                    [
+                        [InlineKeyboardButton(**btn) for btn in row]
+                        for row in inline_keyboard
+                    ]
+                )
+            message = await self._application.bot.send_message(**send_kwargs)
+            return str(message.message_id)
+        except Exception as e:
+            logger.error(f"Failed to render presentation: {e}")
+            return None
 
 
 async def process_inbound_telegram_message(
