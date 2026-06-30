@@ -186,27 +186,48 @@ def bump_version(new_version: str, agents_version: Optional[str] = None):
     print("\n✨ Version bump complete!")
 
 
-def validate_dependencies(max_retries: int = 3, retry_interval: int = 60, use_frozen: bool = False) -> bool:
-    """Validate that uv lock will succeed, with retry logic for PyPI propagation."""
+def validate_dependencies(
+    max_retries: int = 3,
+    retry_interval: int = 60,
+    use_frozen: bool = False,
+    agents_version: Optional[str] = None,
+) -> bool:
+    """Validate release dependency resolution, with retry logic for PyPI propagation."""
     praisonai_dir = get_praisonai_dir()
-    
-    lock_cmd = ["uv", "lock", "--frozen"] if use_frozen else ["uv", "lock", "--dry-run"]
-    
+
+    if use_frozen:
+        lock_cmd = ["uv", "lock", "--frozen"]
+    elif agents_version:
+        # Patch releases only bump praisonaiagents — avoid re-resolving every optional
+        # extra together (crewai/flow/langfuse have known cross-extra conflicts).
+        # Use --dry-run (not --frozen) so the targeted upgrade can be simulated without
+        # writing the lockfile; --frozen would forbid the upgrade entirely.
+        lock_cmd = ["uv", "lock", "--dry-run", "--upgrade-package", f"praisonaiagents=={agents_version}"]
+    else:
+        lock_cmd = ["uv", "lock", "--dry-run"]
+
     for attempt in range(max_retries):
         print(f"\n🔍 Validating dependencies (attempt {attempt + 1}/{max_retries})...")
-        
-        if not use_frozen:
+
+        if not use_frozen and not agents_version:
             run(["uv", "cache", "clean"], cwd=praisonai_dir, silent=True)
-        
+
         result = run(lock_cmd, cwd=praisonai_dir, check=False)
-        if result.returncode == 0:
+        if result.returncode != 0:
+            if attempt < max_retries - 1:
+                print(f"\n⏳ Waiting {retry_interval}s for PyPI propagation before retry...")
+                time.sleep(retry_interval)
+            continue
+
+        base = run(["uv", "pip", "install", "--dry-run", "-e", "."], cwd=praisonai_dir, check=False)
+        if base.returncode == 0:
             print("  ✅ Dependencies validated successfully")
             return True
-        
+
         if attempt < max_retries - 1:
             print(f"\n⏳ Waiting {retry_interval}s for PyPI propagation before retry...")
             time.sleep(retry_interval)
-    
+
     print("\n❌ Dependency validation failed after all retries.")
     return False
 
@@ -233,7 +254,12 @@ def release(version: str, use_frozen_lock: bool = False, no_add_all: bool = Fals
         run(["uv", "cache", "clean"], cwd=praisonai_dir)
     
     print("\n📦 Running uv lock...")
-    run(["uv", "lock", "--frozen"] if use_frozen_lock else ["uv", "lock"], cwd=praisonai_dir)
+    if use_frozen_lock:
+        run(["uv", "lock", "--frozen"], cwd=praisonai_dir)
+    else:
+        # Targeted upgrade must WRITE uv.lock so the refreshed resolution can be committed
+        # and published. Do not pass --frozen here — it would block the lockfile update.
+        run(["uv", "lock", "--upgrade-package", "praisonaiagents"], cwd=praisonai_dir)
     
     # 3. uv build
     print("\n🔨 Running uv build...")
@@ -411,7 +437,11 @@ Examples:
     
     # Validate dependencies after version bump (with retries)
     use_frozen = args.agents is None
-    if not validate_dependencies(max_retries=args.retries, use_frozen=use_frozen):
+    if not validate_dependencies(
+        max_retries=args.retries,
+        use_frozen=use_frozen,
+        agents_version=args.agents,
+    ):
         print("\n💡 Tip: Revert changes with 'git checkout .' if needed")
         print("💡 Tip: The package may need more time to propagate to PyPI")
         sys.exit(1)

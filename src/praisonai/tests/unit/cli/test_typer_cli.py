@@ -175,7 +175,7 @@ class TestCompletionCommand:
 class TestVersionCommand:
     """Tests for version command group."""
     
-    def test_version_show(self, capsys):
+    def test_version_show(self):
         """Test version show command."""
         from praisonai.cli.commands.version import version_show
         from praisonai.cli.output.console import (
@@ -185,15 +185,18 @@ class TestVersionCommand:
             set_output_controller,
         )
 
-        # Call handler directly — avoids CliRunner closed-buffer flake under xdist
-        # (Click #3140 / typer.testing.py after async_tui stdout swaps on same worker).
+        # Mock print_json — capsys.readouterr() is empty under xdist when pytest
+        # captures stdout separately from capsys (JSON visible in failure logs only).
+        controller = OutputController(mode=OutputMode.JSON)
         previous = get_output_controller()
-        set_output_controller(OutputController(mode=OutputMode.JSON))
+        set_output_controller(controller)
         try:
-            version_show()
-            out = capsys.readouterr().out
-            payload = json.loads(out)
-            assert "praisonai" in payload
+            with patch.object(controller, "print_json") as mock_print_json:
+                version_show()
+                mock_print_json.assert_called_once()
+                payload = mock_print_json.call_args[0][0]
+                assert "praisonai" in payload
+                assert "python" in payload
         finally:
             set_output_controller(previous)
 
