@@ -92,6 +92,41 @@ class TestDisplayPolicy:
         assert policy.streaming == "off"
         assert policy.footer == "compact"
 
+    def test_from_dict_string_booleans(self):
+        """String booleans from YAML/JSON are parsed, not blindly truthy."""
+        assert (
+            DisplayPolicy.from_dict(
+                {"interim_assistant_messages": "false"}
+            ).interim_assistant_messages
+            is False
+        )
+        assert (
+            DisplayPolicy.from_dict(
+                {"interim_assistant_messages": "true"}
+            ).interim_assistant_messages
+            is True
+        )
+        # Non-boolean garbage falls back to the default (False).
+        assert (
+            DisplayPolicy.from_dict(
+                {"interim_assistant_messages": "maybe"}
+            ).interim_assistant_messages
+            is False
+        )
+        # Real booleans pass through unchanged.
+        assert (
+            DisplayPolicy.from_dict(
+                {"interim_assistant_messages": True}
+            ).interim_assistant_messages
+            is True
+        )
+
+    def test_platform_override_case_insensitive(self):
+        """Natural-cased platform keys still match the resolved platform."""
+        config = {"platforms": {"Telegram": {"streaming": "off"}}}
+        policy = resolve_display_policy("telegram", config)
+        assert policy.streaming == "off"  # override applied despite key casing
+
     def test_tier_defaults_telegram(self):
         """Edit-capable personal chats stream live by default."""
         policy = resolve_display_policy("telegram", None)

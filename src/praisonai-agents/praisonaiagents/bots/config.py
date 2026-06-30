@@ -272,8 +272,11 @@ class DisplayPolicy:
                 _DISPLAY_TOOL_PROGRESS,
                 base.tool_progress,
             ),
-            interim_assistant_messages=bool(
-                data.get("interim_assistant_messages", base.interim_assistant_messages)
+            interim_assistant_messages=_coerce_bool(
+                data.get(
+                    "interim_assistant_messages", base.interim_assistant_messages
+                ),
+                base.interim_assistant_messages,
             ),
             footer=_coerce_choice(
                 data.get("footer", base.footer), _DISPLAY_FOOTER, base.footer
@@ -304,6 +307,28 @@ def _coerce_choice(value: Any, allowed: set, default: str) -> str:
     """Return ``value`` if it is an allowed choice, else ``default``."""
     if isinstance(value, str) and value in allowed:
         return value
+    return default
+
+
+# String tokens treated as booleans for text-backed config (YAML/JSON/env).
+_TRUE_TOKENS = {"true", "1", "yes", "on"}
+_FALSE_TOKENS = {"false", "0", "no", "off"}
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    """Coerce ``value`` to a bool without ``bool("false") is True`` surprises.
+
+    Real booleans pass through. Strings are matched against known truthy/falsy
+    tokens (case-insensitive). Anything else falls back to ``default``.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        token = value.strip().lower()
+        if token in _TRUE_TOKENS:
+            return True
+        if token in _FALSE_TOKENS:
+            return False
     return default
 
 
@@ -344,13 +369,28 @@ def resolve_display_policy(platform: str, config: Optional[Dict[str, Any]]) -> D
     # Layer 1: explicit platform override.
     platforms = display.get("platforms") or {}
     if isinstance(platforms, dict):
-        platform_overrides = platforms.get(platform) or platforms.get(
-            (platform or "").lower()
-        )
+        platform_overrides = _lookup_platform(platforms, platform)
         if isinstance(platform_overrides, dict):
             policy = _merge_policy(policy, platform_overrides)
 
     return policy
+
+
+def _lookup_platform(platforms: Dict[str, Any], platform: str) -> Any:
+    """Look up a platform's overrides, tolerating key casing differences.
+
+    Tries the exact key, then the lower-cased key, then a case-insensitive
+    scan so natural config keys (e.g. ``Telegram``) still match ``telegram``.
+    """
+    if platform in platforms:
+        return platforms[platform]
+    normalized = (platform or "").lower()
+    if normalized in platforms:
+        return platforms[normalized]
+    for key, value in platforms.items():
+        if isinstance(key, str) and key.lower() == normalized:
+            return value
+    return None
 
 
 def _extract_display(config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
