@@ -64,10 +64,14 @@ def _google_adk_probe() -> bool:
     if importlib.util.find_spec("google.adk") is None:
         return False
     try:
-        from google.adk import Agent  # noqa: F401
+        from google.adk.agents import Agent  # noqa: F401
         return True
     except ImportError:
-        return False
+        try:
+            from google.adk import Agent  # noqa: F401
+            return True
+        except ImportError:
+            return False
 
 _PROBES: dict[str, Callable[[], bool]] = {
     "crewai":            lambda: importlib.util.find_spec("crewai") is not None,
