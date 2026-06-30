@@ -436,12 +436,15 @@ Examples:
     # Run bump version
     bump_version(args.version, args.agents)
     
-    # Patch releases (--agents set): frozen targeted upgrade only.
-    # Full releases: regenerate lock from scratch.
+    # Validation: patch releases (--agents set) use the targeted frozen
+    # --upgrade-package check (selected via agents_version); full releases use
+    # the full uv lock --dry-run re-resolve. Release: patch releases must WRITE
+    # uv.lock via the targeted upgrade (use_frozen_lock=False); full releases
+    # regenerate the lock from scratch.
     patch_release = args.agents is not None
     if not validate_dependencies(
         max_retries=args.retries,
-        use_frozen=not patch_release,
+        use_frozen=False,
         agents_version=args.agents,
     ):
         print("\n💡 Tip: Revert changes with 'git checkout .' if needed")
@@ -449,7 +452,7 @@ Examples:
         sys.exit(1)
     
     # Run release
-    release(args.version, use_frozen_lock=patch_release, no_add_all=args.no_add_all)
+    release(args.version, use_frozen_lock=not patch_release, no_add_all=args.no_add_all)
 
 
 if __name__ == "__main__":
