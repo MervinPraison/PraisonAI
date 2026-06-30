@@ -501,5 +501,35 @@ class TestCLIArgumentParsing:
         assert cli_config['handoff_detect_cycles'] == 'false'
 
 
+class TestDirectPromptToolConfig:
+    """Regression tests for issue #2468: `praisonai run` must not pass the
+    deprecated `tool_timeout` kwarg to Agent, but map it to ToolConfig."""
+
+    def test_agent_rejects_legacy_tool_timeout_kwarg(self):
+        """Agent.__init__ no longer accepts a top-level tool_timeout kwarg."""
+        from praisonaiagents import Agent
+
+        with pytest.raises(TypeError):
+            Agent(name="t", role="r", goal="g", tool_timeout=60)
+
+    def test_tool_config_maps_timeout_and_retry(self):
+        """The CLI mapping (timeout + retry_policy -> ToolConfig) is accepted by Agent."""
+        from praisonaiagents import Agent
+        from praisonaiagents.config.feature_configs import ToolConfig
+        from praisonaiagents.tools.retry import RetryPolicy
+
+        agent = Agent(
+            name="t",
+            role="r",
+            goal="g",
+            tool_config=ToolConfig(
+                timeout=60,
+                retry_policy=RetryPolicy(max_attempts=3),
+            ),
+        )
+        assert agent._tool_timeout == 60
+        assert agent._tool_retry_policy is not None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short", "-x"])

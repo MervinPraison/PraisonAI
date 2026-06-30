@@ -4583,26 +4583,35 @@ Do NOT add any explanations or formatting."""
                     
                     agent_config["planning"] = PlanningConfig(**planning_kwargs) if planning_kwargs else True
                 
-                # P8/G11: Tool timeout - prevent slow tools from blocking
+                # P8/G11: Tool timeout and retry policy via ToolConfig
+                # Agent expects tool execution settings through tool_config=ToolConfig(...),
+                # not the deprecated top-level tool_timeout / tool_retry_policy kwargs.
+                tool_config_kwargs = {}
+
+                # Tool timeout - prevent slow tools from blocking
                 tool_timeout = getattr(self.args, 'tool_timeout', 60)
                 if tool_timeout and tool_timeout > 0:
-                    agent_config["tool_timeout"] = tool_timeout
-                
+                    tool_config_kwargs["timeout"] = int(tool_timeout)
+
                 # Tool retry policy - handle transient failures with exponential backoff
                 retry_attempts = getattr(self.args, 'tool_retry_attempts', 3)
                 retry_delay = getattr(self.args, 'tool_retry_delay', 1000)
                 retry_backoff = getattr(self.args, 'tool_retry_backoff', 2.0)
                 retry_on_str = getattr(self.args, 'tool_retry_on', "timeout,rate_limit,connection_error")
                 retry_on = set(error_type.strip() for error_type in retry_on_str.split(',') if error_type.strip())
-                
+
                 if retry_attempts > 1:  # Only create retry policy if retries are enabled
                     from praisonaiagents.tools.retry import RetryPolicy
-                    agent_config["tool_retry_policy"] = RetryPolicy(
+                    tool_config_kwargs["retry_policy"] = RetryPolicy(
                         max_attempts=retry_attempts,
                         initial_delay_ms=retry_delay,
                         backoff_factor=retry_backoff,
                         retry_on=retry_on
                     )
+
+                if tool_config_kwargs:
+                    from praisonaiagents.config.feature_configs import ToolConfig
+                    agent_config["tool_config"] = ToolConfig(**tool_config_kwargs)
                 
                 # Memory
                 if getattr(self.args, 'memory', False):
