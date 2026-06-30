@@ -105,6 +105,13 @@ class Plugin(ABC):
     def after_tool(self, tool_name: str, result: Any) -> Any:
         """Called after tool execution. Can modify result."""
         return result
+
+    def before_tool_definitions(
+        self, tool_definitions: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Called after advertised tool definitions are assembled and before
+        they reach the LLM. Can inspect, filter, or rewrite them."""
+        return tool_definitions
     
     def before_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Called before message is processed. Can modify message."""

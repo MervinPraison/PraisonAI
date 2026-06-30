@@ -528,6 +528,34 @@ Your Goal: {self.goal}"""
         )
         return cleaned_tools
 
+    def _apply_before_tool_definitions_hook(self, formatted_tools):
+        """Fire the BEFORE_TOOL_DEFINITIONS hook so hooks/plugins can inspect or
+        rewrite the advertised tool definitions before they reach the LLM.
+
+        Mirrors how BEFORE_LLM lets a hook mutate ``messages`` in place. No-op
+        (returns the input unchanged) when no hook runner or no tools exist.
+        Returns the possibly-mutated list of tool definitions.
+        """
+        if not formatted_tools or not getattr(self, '_hook_runner', None):
+            return formatted_tools
+        try:
+            from ..hooks import HookEvent, BeforeToolDefinitionsInput
+            _inp = BeforeToolDefinitionsInput(
+                session_id=getattr(self, '_session_id', 'default'),
+                cwd=os.getcwd(),
+                event_name=HookEvent.BEFORE_TOOL_DEFINITIONS,
+                timestamp=str(time.time()),
+                agent_name=self.name,
+                model=self.llm if isinstance(self.llm, str) else str(self.llm),
+                tool_definitions=formatted_tools,
+            )
+            self._hook_runner.execute_sync(HookEvent.BEFORE_TOOL_DEFINITIONS, _inp)
+            # Adopt mutations, mirroring how BEFORE_LLM adopts messages.
+            return _inp.tool_definitions
+        except Exception as _e:
+            logging.debug(f"[before-tool-definitions] hook skipped: {_e}")
+            return formatted_tools
+
     def _build_multimodal_prompt(
         self, 
         prompt: str, 
@@ -986,6 +1014,8 @@ Your Goal: {self.goal}"""
 
         # Use the new _format_tools_for_completion helper method
         formatted_tools = self._format_tools_for_completion(tools)
+        # Let hooks/plugins inspect or rewrite advertised tool definitions
+        formatted_tools = self._apply_before_tool_definitions_hook(formatted_tools)
 
         # Smart fallback for streaming: try streaming first, fall back to non-streaming if unsupported
         streaming_response = None
@@ -2867,6 +2897,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                     # Use the new _format_tools_for_completion helper method
                     formatted_tools = self._format_tools_for_completion(tools)
+                    # Let hooks/plugins inspect or rewrite advertised tool definitions
+                    formatted_tools = self._apply_before_tool_definitions_hook(formatted_tools)
                     
                     # NEW: Unified protocol dispatch path (Issue #1304) - Async version
                     # Enable unified dispatch by default for DRY and feature parity (sync/async consistent)

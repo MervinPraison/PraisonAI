@@ -63,6 +63,7 @@ __all__ = [
     # Event-specific inputs
     "BeforeToolInput",
     "AfterToolInput",
+    "BeforeToolDefinitionsInput",
     "BeforeAgentInput",
     "AfterAgentInput",
     "BeforeLLMInput",
@@ -130,6 +131,7 @@ _LAZY_GROUPS = {
     'events': {
         'BeforeToolInput': ('praisonaiagents.hooks.events', 'BeforeToolInput'),
         'AfterToolInput': ('praisonaiagents.hooks.events', 'AfterToolInput'),
+        'BeforeToolDefinitionsInput': ('praisonaiagents.hooks.events', 'BeforeToolDefinitionsInput'),
         'BeforeAgentInput': ('praisonaiagents.hooks.events', 'BeforeAgentInput'),
         'AfterAgentInput': ('praisonaiagents.hooks.events', 'AfterAgentInput'),
         'BeforeLLMInput': ('praisonaiagents.hooks.events', 'BeforeLLMInput'),

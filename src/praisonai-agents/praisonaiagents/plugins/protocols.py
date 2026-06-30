@@ -103,6 +103,12 @@ class HookPluginProtocol(PluginProtocol, Protocol):
             def after_tool(self, tool_name: str, result: Any) -> Any:
                 # Modify result after tool execution
                 return result
+
+            def before_tool_definitions(
+                self, tool_definitions: List[Dict[str, Any]]
+            ) -> List[Dict[str, Any]]:
+                # Inspect/rewrite advertised tool definitions before the LLM call
+                return tool_definitions
     """
     
     def before_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
@@ -111,6 +117,14 @@ class HookPluginProtocol(PluginProtocol, Protocol):
     
     def after_tool(self, tool_name: str, result: Any) -> Any:
         """Called after tool execution. Can modify result."""
+        ...
+
+    def before_tool_definitions(
+        self, tool_definitions: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Called after the advertised tool definitions are assembled and
+        before they reach the LLM. Can inspect, filter, or rewrite the
+        tool definitions (descriptions and parameter schemas)."""
         ...
 
 
