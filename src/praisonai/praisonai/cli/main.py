@@ -2064,13 +2064,14 @@ class PraisonAI:
                 else:
                     # Treat as comma-separated tool names
                     try:
+                        import inspect
                         from praisonai.tool_resolver import resolve_tool
 
-                        tool_names = [t.strip() for t in rewrite_tools.split(',')]
+                        tool_names = [t.strip() for t in rewrite_tools.split(',') if t.strip()]
                         for tool_name in tool_names:
                             tool = resolve_tool(tool_name)
                             if tool is not None:
-                                rewrite_tools_list.append(tool)
+                                rewrite_tools_list.append(tool() if inspect.isclass(tool) else tool)
                             else:
                                 print(f"[yellow]Warning: Unknown rewrite tool '{tool_name}'[/yellow]")
                         if rewrite_tools_list:
@@ -2152,13 +2153,14 @@ class PraisonAI:
                 else:
                     # Treat as comma-separated tool names
                     try:
+                        import inspect
                         from praisonai.tool_resolver import resolve_tool
 
-                        tool_names = [t.strip() for t in expand_tools.split(',')]
+                        tool_names = [t.strip() for t in expand_tools.split(',') if t.strip()]
                         for tool_name in tool_names:
                             tool = resolve_tool(tool_name)
                             if tool is not None:
-                                expand_tools_list.append(tool)
+                                expand_tools_list.append(tool() if inspect.isclass(tool) else tool)
                             else:
                                 print(f"[yellow]Warning: Unknown expand tool '{tool_name}'[/yellow]")
                         if expand_tools_list:
@@ -5789,13 +5791,14 @@ Now, {final_instruction.lower()}:"""
                 else:
                     # Treat as comma-separated tool names (e.g., "internet_search,wiki_search")
                     try:
+                        import inspect
                         from praisonai.tool_resolver import resolve_tool
 
-                        tool_names = [t.strip() for t in tools_path.split(',')]
+                        tool_names = [t.strip() for t in tools_path.split(',') if t.strip()]
                         for tool_name in tool_names:
                             tool = resolve_tool(tool_name)
                             if tool is not None:
-                                tools_list.append(tool)
+                                tools_list.append(tool() if inspect.isclass(tool) else tool)
                             else:
                                 print(f"[yellow]Warning: Unknown tool '{tool_name}'[/yellow]")
                         if tools_list:
