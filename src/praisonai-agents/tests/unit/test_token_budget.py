@@ -360,9 +360,12 @@ class TestAsyncBudgetEnforcement:
         mock_dispatcher.achat_completion = AsyncMock(return_value=mock_response)
         agent._unified_dispatcher = mock_dispatcher
         messages = [{"role": "user", "content": "hello"}]
-        with patch.object(agent, "_calculate_llm_cost", return_value=0.08):
+        with (
+            patch.object(agent, "_estimate_min_call_cost", return_value=0.01),
+            patch.object(agent, "_calculate_llm_cost", return_value=0.08),
+        ):
             await agent._execute_unified_achat_completion(messages)
             assert agent._total_cost == 0.08
             with pytest.raises(BudgetExceededError):
                 await agent._execute_unified_achat_completion(messages)
-        mock_dispatcher.achat_completion.assert_awaited_once()
+            assert mock_dispatcher.achat_completion.await_count == 2
