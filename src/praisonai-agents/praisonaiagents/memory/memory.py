@@ -422,7 +422,14 @@ class Memory(SearchMixin, MemoryCoreMixin):
             os.makedirs(rag_path, exist_ok=True)
 
             # Get chromadb lazily
-            chromadb, ChromaSettings = _get_chromadb()
+            try:
+                import chromadb
+                from chromadb.config import Settings as ChromaSettings
+            except ImportError as exc:
+                raise ImportError(
+                    "chromadb is required for the rag memory provider. "
+                    "Install with: pip install 'praisonaiagents[memory]'"
+                ) from exc
 
             # Initialize ChromaDB with persistent storage
             self.chroma_client = chromadb.PersistentClient(
@@ -1798,7 +1805,11 @@ class Memory(SearchMixin, MemoryCoreMixin):
         """
 
         try:
-            if _check_litellm():
+            import importlib.util
+            litellm_available = importlib.util.find_spec("litellm") is not None
+            openai_available = importlib.util.find_spec("openai") is not None
+
+            if litellm_available:
                 # Use LiteLLM for consistency with the rest of the codebase
                 import litellm
                 
@@ -1814,7 +1825,7 @@ class Memory(SearchMixin, MemoryCoreMixin):
                     response_format={"type": "json_object"},
                     temperature=0.3
                 )
-            elif _check_openai():
+            elif openai_available:
                 # Fallback to OpenAI client
                 from openai import OpenAI
                 client = OpenAI()
