@@ -26,7 +26,25 @@ logger = logging.getLogger(__name__)
 
 class TelegramPresentationRenderer:
     """Renders presentations as Telegram inline keyboards."""
-    
+
+    # Telegram limits callback_data to 64 *bytes* (UTF-8), not characters.
+    _CALLBACK_MAX_BYTES = 64
+
+    @staticmethod
+    def _truncate_callback_data(value: str) -> str:
+        """Truncate callback_data to Telegram's 64-byte UTF-8 limit.
+
+        Slicing by characters can still exceed 64 bytes for non-ASCII input,
+        which makes Telegram reject the whole inline keyboard. This truncates on
+        a UTF-8 boundary so the payload always fits.
+        """
+        encoded = value.encode("utf-8")
+        if len(encoded) <= TelegramPresentationRenderer._CALLBACK_MAX_BYTES:
+            return value
+        return encoded[: TelegramPresentationRenderer._CALLBACK_MAX_BYTES].decode(
+            "utf-8", "ignore"
+        )
+
     @staticmethod
     def get_limits() -> "PresentationLimits":
         """Get Telegram-specific presentation limits."""
@@ -91,13 +109,23 @@ class TelegramPresentationRenderer:
                                 button_data["web_app"] = {"url": button.action.web_app_url}
                             elif button.action.type == "command" and button.action.command:
                                 # For commands, we use callback data
-                                button_data["callback_data"] = f"cmd:{button.action.command}"[:64]
+                                button_data["callback_data"] = (
+                                    TelegramPresentationRenderer._truncate_callback_data(
+                                        f"cmd:{button.action.command}"
+                                    )
+                                )
                             elif button.action.type == "callback" and button.action.value:
-                                button_data["callback_data"] = button.action.value[:64]
+                                button_data["callback_data"] = (
+                                    TelegramPresentationRenderer._truncate_callback_data(
+                                        button.action.value
+                                    )
+                                )
                         
                         if "callback_data" not in button_data and "url" not in button_data and "web_app" not in button_data:
                             # Fallback to callback data with label
-                            button_data["callback_data"] = label[:64]
+                            button_data["callback_data"] = (
+                                TelegramPresentationRenderer._truncate_callback_data(label)
+                            )
                         
                         current_row.append(button_data)
                     
