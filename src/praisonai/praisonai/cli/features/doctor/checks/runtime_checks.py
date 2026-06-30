@@ -195,7 +195,7 @@ class RuntimeCompatibilityChecker:
         runtimes['google_adk'] = RuntimeInfo(
             id='google_adk',
             name='Google ADK',
-            available=_runtime_usable('google_adk', 'google.adk'),
+            available=_runtime_usable('google_adk', 'google_adk'),
             capabilities=[
                 RuntimeCapability('agent_creation', 'Create and manage agents'),
                 RuntimeCapability('tool_execution', 'Execute tools and functions'),
