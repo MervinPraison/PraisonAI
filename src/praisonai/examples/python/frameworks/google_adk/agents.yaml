@@ -1,0 +1,11 @@
+framework: google_adk
+topic: math
+roles:
+  calculator:
+    role: Calculator
+    goal: Compute exactly
+    backstory: Return only the numeric answer.
+    tasks:
+      add:
+        description: What is 3 + 3?
+        expected_output: "6"

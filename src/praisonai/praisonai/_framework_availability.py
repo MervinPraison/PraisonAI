@@ -56,6 +56,23 @@ def _agno_probe() -> bool:
     except ImportError:
         return False
 
+def _google_adk_probe() -> bool:
+    try:
+        importlib.metadata.distribution("google-adk")
+    except importlib.metadata.PackageNotFoundError:
+        return False
+    if importlib.util.find_spec("google.adk") is None:
+        return False
+    try:
+        from google.adk.agents import Agent  # noqa: F401
+        return True
+    except ImportError:
+        try:
+            from google.adk import Agent  # noqa: F401
+            return True
+        except ImportError:
+            return False
+
 _PROBES: dict[str, Callable[[], bool]] = {
     "crewai":            lambda: importlib.util.find_spec("crewai") is not None,
     "autogen":           lambda: importlib.util.find_spec("autogen") is not None,
@@ -79,6 +96,7 @@ _PROBES: dict[str, Callable[[], bool]] = {
     "langgraph":         _langgraph_probe,
     "openai_agents":     _openai_agents_probe,
     "agno":              _agno_probe,
+    "google_adk":        _google_adk_probe,
 }
 
 def is_available(name: str) -> bool:

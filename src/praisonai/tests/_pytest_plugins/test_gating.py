@@ -96,6 +96,11 @@ def _check_provider_available(provider_marker: str) -> tuple[bool, str]:
             return True, ""
         return False, "Ollama not running on localhost:11434"
     
+    if provider_marker == 'provider_google':
+        if os.environ.get('GOOGLE_API_KEY') or os.environ.get('GEMINI_API_KEY'):
+            return True, ""
+        return False, "GOOGLE_API_KEY or GEMINI_API_KEY not set"
+
     if env_key:
         if os.environ.get(env_key):
             return True, ""

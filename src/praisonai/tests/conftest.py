@@ -166,6 +166,7 @@ def setup_test_environment(request):
             'OPENAI_API_KEY': 'test-key',
             'ANTHROPIC_API_KEY': 'test-key',
             'GOOGLE_API_KEY': 'test-key',
+            'GEMINI_API_KEY': 'test-key',
             'XAI_API_KEY': 'test-key',
             'GROQ_API_KEY': 'test-key',
             'COHERE_API_KEY': 'test-key',

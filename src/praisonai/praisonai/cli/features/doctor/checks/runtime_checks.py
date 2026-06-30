@@ -191,6 +191,19 @@ class RuntimeCompatibilityChecker:
             supports_handoff=False,
             supports_tool_loop=True
         )
+
+        runtimes['google_adk'] = RuntimeInfo(
+            id='google_adk',
+            name='Google ADK',
+            available=_runtime_usable('google_adk', 'google_adk'),
+            capabilities=[
+                RuntimeCapability('agent_creation', 'Create and manage agents'),
+                RuntimeCapability('tool_execution', 'Execute tools and functions'),
+                RuntimeCapability('sequential_execution', 'Sequential task execution'),
+            ],
+            supports_handoff=False,
+            supports_tool_loop=True
+        )
         
         return runtimes
     

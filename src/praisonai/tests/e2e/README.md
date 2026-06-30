@@ -31,6 +31,8 @@ tests/e2e/
 │   └── test_openai_agents_real.py  # Real OpenAI Agents SDK tests
 ├── agno_e2e/
 │   └── test_agno_real.py           # Real Agno tests
+├── google_adk_e2e/
+│   └── test_google_adk_real.py     # Real Google ADK tests
 ├── README.md                   # This file
 └── __init__.py
 ```
@@ -91,7 +93,12 @@ python -m pytest tests/e2e/openai_agents_e2e/ -v -m real
 
 **Run Agno real tests only:**
 ```bash
-python -m pytest tests/e2e/agno_e2e/ -v -m real
+PRAISONAI_LIVE_TESTS=1 OPENAI_API_KEY="your-key" python -m pytest tests/e2e/agno_e2e/ -v -m real
+```
+
+**Run Google ADK real tests only:**
+```bash
+PRAISONAI_LIVE_TESTS=1 GOOGLE_API_KEY="your-key" PRAISONAI_TEST_PROVIDERS=all python -m pytest tests/e2e/google_adk_e2e/ -v -m real
 ```
 
 **Skip real tests (default behavior without API keys):**

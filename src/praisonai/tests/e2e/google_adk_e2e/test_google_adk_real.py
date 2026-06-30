@@ -1,5 +1,5 @@
 """
-Agno Real End-to-End Test
+Google ADK Real End-to-End Test
 
 WARNING: Live tests make real API calls and may incur costs.
 """
@@ -19,12 +19,16 @@ def _write_yaml(content: str) -> str:
     return handle.name
 
 
-@pytest.mark.real
-class TestAgnoReal:
-    """Real Agno tests with actual API calls."""
+def _google_key() -> str | None:
+    return os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 
-    def test_agno_simple_setup(self):
-        pytest.importorskip("agno")
+
+@pytest.mark.real
+class TestGoogleAdkReal:
+    """Real Google ADK tests with actual API calls."""
+
+    def test_google_adk_simple_setup(self):
+        pytest.importorskip("google.adk")
         pytest.importorskip("praisonai_frameworks")
         try:
             from praisonai import PraisonAI
@@ -32,7 +36,7 @@ class TestAgnoReal:
             pytest.skip(f"PraisonAI not available: {exc}")
 
         yaml_content = """
-framework: agno
+framework: google_adk
 topic: Simple Question Answer
 roles:
   researcher:
@@ -46,39 +50,39 @@ roles:
 """
         test_file = _write_yaml(yaml_content)
         try:
-            praisonai = PraisonAI(agent_file=test_file, framework="agno")
+            praisonai = PraisonAI(agent_file=test_file, framework="google_adk")
             assert praisonai is not None
-            assert praisonai.framework == "agno"
+            assert praisonai.framework == "google_adk"
         finally:
             if os.path.exists(test_file):
                 os.unlink(test_file)
 
-    @pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="OPENAI_API_KEY not set")
-    def test_agno_environment_check(self):
-        pytest.importorskip("agno")
+    @pytest.mark.skipif(not _google_key(), reason="GOOGLE_API_KEY or GEMINI_API_KEY not set")
+    def test_google_adk_environment_check(self):
+        pytest.importorskip("google.adk")
         pytest.importorskip("praisonai_frameworks")
         from praisonai_frameworks._availability import is_available
-        from praisonai_frameworks.agno.adapter import AgnoAdapter
+        from praisonai_frameworks.google_adk.adapter import GoogleAdkAdapter
 
-        assert is_available("agno") is True
-        assert AgnoAdapter().is_available() is True
+        assert is_available("google_adk") is True
+        assert GoogleAdkAdapter().is_available() is True
 
     @pytest.mark.skipif(
         not os.getenv("PRAISONAI_LIVE_TESTS"),
         reason="Set PRAISONAI_LIVE_TESTS=1 to run real API calls",
     )
-    @pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="OPENAI_API_KEY not set")
-    def test_agno_full_execution_single_task(self):
+    @pytest.mark.skipif(not _google_key(), reason="GOOGLE_API_KEY or GEMINI_API_KEY not set")
+    def test_google_adk_full_execution_single_task(self):
         try:
             from praisonai import PraisonAI
         except ImportError as exc:
             pytest.skip(f"PraisonAI not available: {exc}")
 
-        pytest.importorskip("agno")
+        pytest.importorskip("google.adk")
         pytest.importorskip("praisonai_frameworks")
 
         yaml_content = """
-framework: agno
+framework: google_adk
 topic: Quick Math Test
 roles:
   helper:
@@ -92,12 +96,12 @@ roles:
 """
         test_file = _write_yaml(yaml_content)
         try:
-            praisonai = PraisonAI(agent_file=test_file, framework="agno")
+            praisonai = PraisonAI(agent_file=test_file, framework="google_adk")
             result = praisonai.run()
             text = str(result)
             assert text.strip()
             assert "6" in text
-            assert "Agno Output" in text
+            assert "Google ADK Output" in text
         finally:
             if os.path.exists(test_file):
                 os.unlink(test_file)
@@ -106,14 +110,14 @@ roles:
         not os.getenv("PRAISONAI_LIVE_TESTS"),
         reason="Set PRAISONAI_LIVE_TESTS=1 to run real API calls",
     )
-    @pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="OPENAI_API_KEY not set")
-    def test_agno_adapter_direct_run(self):
-        pytest.importorskip("agno")
+    @pytest.mark.skipif(not _google_key(), reason="GOOGLE_API_KEY or GEMINI_API_KEY not set")
+    def test_google_adk_adapter_direct_run(self):
+        pytest.importorskip("google.adk")
         pytest.importorskip("praisonai_frameworks")
-        from praisonai_frameworks.agno.adapter import AgnoAdapter
+        from praisonai_frameworks.google_adk.adapter import GoogleAdkAdapter
 
         config = {
-            "framework": "agno",
+            "framework": "google_adk",
             "topic": "Quick test",
             "roles": {
                 "helper": {
@@ -129,27 +133,27 @@ roles:
                 }
             },
         }
-        llm_config = [{"model": "gpt-4o-mini", "api_key": os.environ["OPENAI_API_KEY"]}]
-        result = AgnoAdapter().run(config, llm_config, "Quick test", tools_dict={})
-        assert "### Agno Output ###" in result
+        llm_config = [{"model": "gemini-2.5-flash", "api_key": _google_key()}]
+        result = GoogleAdkAdapter().run(config, llm_config, "Quick test", tools_dict={})
+        assert "### Google ADK Output ###" in result
         assert "OK" in result.upper()
 
     @pytest.mark.skipif(
         not os.getenv("PRAISONAI_LIVE_TESTS"),
         reason="Set PRAISONAI_LIVE_TESTS=1 to run real API calls",
     )
-    @pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="OPENAI_API_KEY not set")
-    def test_agno_full_execution_sequential_context(self):
+    @pytest.mark.skipif(not _google_key(), reason="GOOGLE_API_KEY or GEMINI_API_KEY not set")
+    def test_google_adk_full_execution_sequential_context(self):
         try:
             from praisonai import PraisonAI
         except ImportError as exc:
             pytest.skip(f"PraisonAI not available: {exc}")
 
-        pytest.importorskip("agno")
+        pytest.importorskip("google.adk")
         pytest.importorskip("praisonai_frameworks")
 
         yaml_content = """
-framework: agno
+framework: google_adk
 topic: numbers
 roles:
   writer:
@@ -168,11 +172,11 @@ roles:
 """
         test_file = _write_yaml(yaml_content)
         try:
-            praisonai = PraisonAI(agent_file=test_file, framework="agno")
+            praisonai = PraisonAI(agent_file=test_file, framework="google_adk")
             result = praisonai.run()
             text = str(result)
             assert "6" in text
-            assert "Agno Output" in text
+            assert "Google ADK Output" in text
         finally:
             if os.path.exists(test_file):
                 os.unlink(test_file)

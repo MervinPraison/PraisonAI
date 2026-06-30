@@ -226,7 +226,11 @@ def get_install_hint(name: str) -> str:
             return hint
     except (ValueError, TypeError, ImportError):
         pass
-    extra_name = {"autogen_v4": "autogen-v4", "openai_agents": "openai-agents"}.get(name, name)
+    extra_name = {
+        "autogen_v4": "autogen-v4",
+        "openai_agents": "openai-agents",
+        "google_adk": "google-adk",
+    }.get(name, name)
     return f"pip install 'praisonai-frameworks[{extra_name}]'"
 
 

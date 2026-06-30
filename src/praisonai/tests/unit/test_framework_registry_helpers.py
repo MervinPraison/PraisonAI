@@ -45,6 +45,13 @@ def test_get_install_hint_agno_extra():
     assert "agno" in hint
 
 
+def test_get_install_hint_google_adk_extra():
+    from praisonai.framework_adapters.registry import get_install_hint
+
+    hint = get_install_hint("google_adk")
+    assert "google-adk" in hint
+
+
 def test_autogen_family_is_router_skips_run_validation():
     from praisonai.framework_adapters.registry import FrameworkAdapterRegistry
 

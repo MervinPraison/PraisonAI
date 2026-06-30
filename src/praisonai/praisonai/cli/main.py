@@ -1998,7 +1998,8 @@ class PraisonAI:
                     print("pip install \"praisonai-frameworks[crewai]\"  # CrewAI")
                     print("pip install \"praisonai-frameworks[autogen]\"  # AutoGen")
                     print("pip install \"praisonai-frameworks[openai-agents]\"  # OpenAI Agents SDK")
-                    print("pip install \"praisonai-frameworks[agno]\"  # Agno\n")
+                    print("pip install \"praisonai-frameworks[agno]\"  # Agno")
+                    print("pip install \"praisonai-frameworks[google-adk]\"  # Google ADK\n")
                     sys.exit(1)
             except ImportError:
                 if not CREWAI_AVAILABLE and not AUTOGEN_AVAILABLE and not PRAISONAI_AVAILABLE:
@@ -2007,6 +2008,7 @@ class PraisonAI:
                     print("pip install \"praisonai-frameworks\\[autogen]\"  # For AutoGen")
                     print("pip install \"praisonai-frameworks\\[openai-agents]\"  # OpenAI Agents SDK")
                     print("pip install \"praisonai-frameworks\\[agno]\"  # Agno")
+                    print("pip install \"praisonai-frameworks\\[google-adk]\"  # Google ADK")
                     print("pip install \"praisonai-frameworks\\[crewai,autogen]\"  # Multiple frameworks\n")
                     print("pip install praisonaiagents # For Agents\n")
                     sys.exit(1)
@@ -5311,8 +5313,6 @@ Now, {final_instruction.lower()}:"""
             print("[red]ERROR: No framework is installed. Please install at least one framework:[/red]")
             print("\npip install \"praisonai-frameworks\\[crewai]\"  # For CrewAI")
             print("pip install \"praisonai-frameworks\\[autogen]\"  # For AutoGen")
-            print("pip install \"praisonai-frameworks\\[openai-agents]\"  # OpenAI Agents SDK")
-            print("pip install \"praisonai-frameworks\\[agno]\"  # Agno")
             print("pip install \"praisonai-frameworks\\[crewai,autogen]\"  # Multiple frameworks\n")
             print("pip install praisonaiagents # For Agents\n")  
             sys.exit(1)
