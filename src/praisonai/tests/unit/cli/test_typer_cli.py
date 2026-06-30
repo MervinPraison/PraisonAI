@@ -446,5 +446,42 @@ class TestExitCodes:
         assert result.exit_code == 2
 
 
+class TestPermissionsLazyLoad:
+    """Regression tests for permissions Click group lazy loading (issue #2457)."""
+
+    @pytest.fixture(autouse=True)
+    def setup_commands(self):
+        """Register commands before each test."""
+        from praisonai.cli.app import register_commands
+        register_commands()
+
+    def test_permissions_command_loads(self):
+        """Permissions (a Click group) loads without _add_completion error."""
+        import click
+        from typer.main import get_command
+        from praisonai.cli.app import app
+
+        main_cmd = get_command(app)
+        ctx = click.Context(main_cmd)
+        cmd = main_cmd.get_command(ctx, "permissions")
+        assert cmd is not None
+        assert isinstance(cmd, click.Command)
+
+    def test_permissions_help_lists_subcommands(self):
+        """`praisonai permissions --help` lists subcommands without load error."""
+        from praisonai.cli.app import app
+        result = runner.invoke(app, ["permissions", "--help"])
+        assert "_add_completion" not in result.output
+        assert "Error loading command 'permissions'" not in result.output
+        for subcommand in ("list", "allow", "deny", "ask", "remove", "reset", "export", "import-rules"):
+            assert subcommand in result.output
+
+    def test_help_has_no_permissions_load_error(self):
+        """Top-level --help must not emit a permissions load error."""
+        from praisonai.cli.app import app
+        result = runner.invoke(app, ["--help"])
+        assert "Error loading command 'permissions'" not in result.output
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
