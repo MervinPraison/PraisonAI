@@ -142,22 +142,6 @@ class AuthProfile:
         self.last_error = None
         self.last_error_time = None
 
-@runtime_checkable
-class FailoverProtocol(Protocol):
-    """Protocol for failover management."""
-    
-    def get_next_profile(self) -> Optional[AuthProfile]:
-        """Get the next available profile."""
-        ...
-    
-    def mark_failure(self, profile: AuthProfile, error: str) -> None:
-        """Mark a profile as failed."""
-        ...
-    
-    def mark_success(self, profile: AuthProfile) -> None:
-        """Mark a profile as successful."""
-        ...
-
 @dataclass
 class FailoverConfig:
     """Configuration for failover behavior.
@@ -403,3 +387,27 @@ class FailoverManager:
         """Reset all profiles to available status."""
         for profile in self._profiles:
             profile.reset()
+
+
+@runtime_checkable
+class FailoverProtocol(Protocol):
+    """Deprecated structural protocol for failover managers.
+
+    Retained only for backward compatibility with code that imports the deep
+    path ``praisonaiagents.llm.failover.FailoverProtocol`` or uses it for
+    ``isinstance`` checks. ``FailoverManager`` already satisfies this shape.
+    Prefer the public ``LLMFailoverProtocol`` (exported from
+    ``praisonaiagents.llm``) for new code.
+    """
+
+    def get_next_profile(self) -> Optional[AuthProfile]:
+        """Get the next available profile."""
+        ...
+
+    def mark_failure(self, profile: AuthProfile, error: str) -> None:
+        """Mark a profile as failed."""
+        ...
+
+    def mark_success(self, profile: AuthProfile) -> None:
+        """Mark a profile as successful."""
+        ...
