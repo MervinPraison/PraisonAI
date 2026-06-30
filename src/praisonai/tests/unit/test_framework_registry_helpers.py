@@ -31,6 +31,13 @@ def test_get_install_hint_autogen_v4_extra():
     assert "autogen-v4" in hint
 
 
+def test_get_install_hint_openai_agents_extra():
+    from praisonai.framework_adapters.registry import get_install_hint
+
+    hint = get_install_hint("openai_agents")
+    assert "openai-agents" in hint
+
+
 def test_autogen_family_is_router_skips_run_validation():
     from praisonai.framework_adapters.registry import FrameworkAdapterRegistry
 

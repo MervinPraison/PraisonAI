@@ -165,6 +165,19 @@ class RuntimeCompatibilityChecker:
             supports_handoff=False,
             supports_tool_loop=True
         )
+
+        runtimes['openai_agents'] = RuntimeInfo(
+            id='openai_agents',
+            name='OpenAI Agents SDK',
+            available=_runtime_usable('openai_agents', 'openai_agents'),
+            capabilities=[
+                RuntimeCapability('agent_creation', 'Create and manage agents'),
+                RuntimeCapability('tool_execution', 'Execute tools and functions'),
+                RuntimeCapability('handoff_support', 'Agent-to-agent handoffs', required=False),
+            ],
+            supports_handoff=True,
+            supports_tool_loop=True
+        )
         
         return runtimes
     
@@ -390,7 +403,7 @@ class RuntimeCompatibilityChecker:
                     status=CheckStatus.FAIL,
                     message=f"Agent '{agent.role_name}' configured for handoffs but runtime '{runtime_info.name if runtime_info else agent.resolved_runtime}' doesn't support handoffs",
                     details=f"Handoff targets: {', '.join(agent.handoff_targets)}",
-                    remediation="Use praisonai or autogen_v4 framework for handoff support",
+                    remediation="Use praisonai, autogen_v4, or openai_agents framework for handoff support",
                     severity=CheckSeverity.HIGH
                 )
                 continue
@@ -443,7 +456,7 @@ class RuntimeCompatibilityChecker:
         handoff_agents = [a for a in agents if a.handoff_targets]
         if handoff_agents:
             handoff_runtimes = {a.resolved_runtime for a in handoff_agents}
-            incompatible_handoff_runtimes = handoff_runtimes - {'praisonai', 'autogen_v4'}
+            incompatible_handoff_runtimes = handoff_runtimes - {'praisonai', 'autogen_v4', 'openai_agents'}
             
             if incompatible_handoff_runtimes:
                 yield CheckResult(
@@ -452,8 +465,8 @@ class RuntimeCompatibilityChecker:
                     category=CheckCategory.CONFIG,
                     status=CheckStatus.FAIL,
                     message=f"Handoffs configured with incompatible runtimes: {', '.join(incompatible_handoff_runtimes)}",
-                    details="Only praisonai and autogen_v4 runtimes support handoffs",
-                    remediation="Use praisonai or autogen_v4 for agents that need handoff capabilities",
+                    details="Only praisonai, autogen_v4, and openai_agents runtimes support handoffs",
+                    remediation="Use praisonai, autogen_v4, or openai_agents for agents that need handoff capabilities",
                     severity=CheckSeverity.HIGH
                 )
 

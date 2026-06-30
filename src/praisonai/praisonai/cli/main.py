@@ -1996,7 +1996,8 @@ class PraisonAI:
                     print("[red]ERROR: No framework adapter is installed.[/red]")
                     print("\npip install praisonaiagents  # native PraisonAI")
                     print("pip install \"praisonai-frameworks[crewai]\"  # CrewAI")
-                    print("pip install \"praisonai-frameworks[autogen]\"  # AutoGen\n")
+                    print("pip install \"praisonai-frameworks[autogen]\"  # AutoGen")
+                    print("pip install \"praisonai-frameworks[openai-agents]\"  # OpenAI Agents SDK\n")
                     sys.exit(1)
             except ImportError:
                 if not CREWAI_AVAILABLE and not AUTOGEN_AVAILABLE and not PRAISONAI_AVAILABLE:

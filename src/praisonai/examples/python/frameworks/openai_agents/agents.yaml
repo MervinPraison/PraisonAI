@@ -1,0 +1,11 @@
+framework: openai_agents
+topic: Example task
+roles:
+  assistant:
+    role: Assistant
+    goal: Answer helpfully
+    backstory: You are concise and accurate.
+    tasks:
+      greet:
+        description: Say hello in one short sentence about {topic}.
+        expected_output: A short greeting
