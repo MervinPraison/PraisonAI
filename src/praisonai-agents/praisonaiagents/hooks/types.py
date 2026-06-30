@@ -23,6 +23,7 @@ class HookEvent(str, Enum):
     # Tool lifecycle
     BEFORE_TOOL = "before_tool"
     AFTER_TOOL = "after_tool"
+    BEFORE_TOOL_DEFINITIONS = "before_tool_definitions"
     
     # Agent lifecycle
     BEFORE_AGENT = "before_agent"
