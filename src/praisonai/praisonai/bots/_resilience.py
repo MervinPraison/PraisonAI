@@ -235,6 +235,95 @@ def is_recoverable_error(err: BaseException, platform: str = "") -> bool:
     return False
 
 
+# Patterns that confirm a *whole target* is permanently unreachable: the bot
+# was kicked/blocked, the chat/group/channel no longer exists. These differ from
+# transient errors (handled by is_recoverable_error) and from thread-/message-
+# level 404s (deleting one message must NOT condemn the whole channel).
+_PERMANENT_TARGET_PATTERNS: Set[str] = {
+    "forbidden",
+    "bot was kicked",
+    "bot was blocked",
+    "user is deactivated",
+    "chat not found",
+    "channel not found",
+    "group chat was deleted",
+    "the group chat was deleted",
+    "bot is not a member",
+    "not enough rights",
+    "have no rights to send",
+    "need administrator rights",
+    "peer_id_invalid",
+    "account_not_found",
+    "channel_archived",
+    "is_archived",
+    "blocked by the user",
+}
+
+# Substrings that indicate a 404 is scoped to a *message/thread*, not the whole
+# target, so it stays on the retry path instead of condemning the channel.
+_THREAD_SCOPED_NOT_FOUND: Set[str] = {
+    "message to edit not found",
+    "message not found",
+    "message to delete not found",
+    "message_id_invalid",
+    "thread not found",
+    "unknown message",
+    "reply not found",
+    "message can't be edited",
+}
+
+
+def is_permanent_target_failure(err: BaseException, platform: str = "") -> bool:
+    """Check if an error means a whole delivery target is permanently dead.
+
+    Returns True only for *confirmed permanent* whole-target failures — the bot
+    was kicked/blocked, or the chat/channel no longer exists (typically HTTP
+    ``403`` or a ``404`` "chat not found"). Such targets should be suppressed by
+    a :class:`~praisonai.bots._dead_targets.DeadTargetRegistry` until a later
+    send succeeds and self-heals them.
+
+    Transient errors (5xx, 429, timeouts) and thread-/message-level 404s are
+    *not* permanent and return False so they stay on the retry/backoff path.
+
+    Args:
+        err: The exception raised by an outbound send.
+        platform: Optional platform name (reserved for platform-specific tuning).
+
+    Returns:
+        True if the target should be marked dead, else False.
+    """
+    if err is None:
+        return False
+
+    # Transient wins: never condemn a target on a recoverable error.
+    if is_recoverable_error(err, platform):
+        return False
+
+    msg = str(err).lower()
+
+    # A 404 that is scoped to a single message/thread must not kill the channel.
+    for pat in _THREAD_SCOPED_NOT_FOUND:
+        if pat in msg:
+            return False
+
+    # HTTP status: 403 Forbidden and 404 Not Found are the canonical
+    # permanent-target signals (after the message-scoped 404 guard above).
+    status = getattr(err, "status", None)
+    if status is None:
+        status = getattr(err, "status_code", None)
+    if status is None:
+        status = getattr(err, "error_code", None)
+    if isinstance(status, int) and status in (401, 403, 404, 410):
+        return True
+
+    # Text patterns from platforms that don't surface a clean status code.
+    for pat in _PERMANENT_TARGET_PATTERNS:
+        if pat in msg:
+            return True
+
+    return False
+
+
 def is_conflict_error(err: BaseException) -> bool:
     """Check if error is a Telegram getUpdates 409 conflict.
     

@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from ._session import BotSessionManager
     from ._identity import StoreBackedIdentityResolver
     from ._dlq import InboundDLQ, DLQEntry
+    from ._dead_targets import DeadTargetRegistry, DeadTarget
     from ._ingress import InboundJournal, JournalEntry
     from ._slack_approval import SlackApproval
     from ._telegram_approval import TelegramApproval
@@ -101,6 +102,13 @@ def __getattr__(name: str):
     if name == "DLQEntry":
         from ._dlq import DLQEntry
         return DLQEntry
+    # Self-healing dead-target registry (issue #2486)
+    if name == "DeadTargetRegistry":
+        from ._dead_targets import DeadTargetRegistry
+        return DeadTargetRegistry
+    if name == "DeadTarget":
+        from ._dead_targets import DeadTarget
+        return DeadTarget
     # Inbound message journal for durable processing
     if name == "InboundJournal":
         from ._ingress import InboundJournal
@@ -168,6 +176,7 @@ __all__ = [
     "BotSessionManager",
     "StoreBackedIdentityResolver",
     "InboundDLQ", "DLQEntry",
+    "DeadTargetRegistry", "DeadTarget",
     "InboundJournal", "JournalEntry",
     "OutboundQueue", "OutboundEntry",
     "ApprovalStore",
