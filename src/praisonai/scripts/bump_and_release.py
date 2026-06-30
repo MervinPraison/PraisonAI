@@ -201,11 +201,20 @@ def validate_dependencies(
         # Patch releases only bump praisonaiagents — avoid re-resolving every optional
         # extra together (crewai/flow/langfuse have known cross-extra conflicts).
         # --dry-run still universal-resolves all requires-python splits (e.g. py3.14
-        # win32) and fails even when the wheel is on PyPI; --frozen --upgrade-package
-        # validates the targeted bump without a full lock regeneration.
-        lock_cmd = ["uv", "lock", "--frozen", "--upgrade-package", f"praisonaiagents=={agents_version}"]
+        # win32) and fails even when the wheel is on PyPI. A targeted --upgrade-package
+        # actually resolves the bump against PyPI (validating the wheel exists) while
+        # leaving the rest of the lock pinned. --frozen must NOT be combined with
+        # --upgrade-package: --frozen forbids lockfile writes, so the upgrade would be
+        # a no-op and the requested version never validated.
+        lock_cmd = ["uv", "lock", "--upgrade-package", f"praisonaiagents=={agents_version}"]
     else:
         lock_cmd = ["uv", "lock", "--dry-run"]
+
+    # A targeted --upgrade-package rewrites uv.lock; validation must not mutate the
+    # committed lockfile (the release step owns the authoritative lock write), so we
+    # snapshot and restore it around the validation attempts.
+    lock_path = praisonai_dir / "uv.lock"
+    lock_backup = lock_path.read_text() if (agents_version and lock_path.exists()) else None
 
     for attempt in range(max_retries):
         print(f"\n🔍 Validating dependencies (attempt {attempt + 1}/{max_retries})...")
@@ -214,6 +223,8 @@ def validate_dependencies(
             run(["uv", "cache", "clean"], cwd=praisonai_dir, silent=True)
 
         result = run(lock_cmd, cwd=praisonai_dir, check=False)
+        if lock_backup is not None and lock_path.exists():
+            lock_path.write_text(lock_backup)
         if result.returncode != 0:
             if attempt < max_retries - 1:
                 print(f"\n⏳ Waiting {retry_interval}s for PyPI propagation before retry...")
@@ -233,7 +244,8 @@ def validate_dependencies(
     return False
 
 
-def release(version: str, use_frozen_lock: bool = False, no_add_all: bool = False):
+def release(version: str, use_frozen_lock: bool = False, no_add_all: bool = False,
+            agents_version: Optional[str] = None):
     """Run the release process."""
     root = get_project_root()
     praisonai_dir = get_praisonai_dir()
@@ -255,11 +267,18 @@ def release(version: str, use_frozen_lock: bool = False, no_add_all: bool = Fals
         run(["uv", "cache", "clean"], cwd=praisonai_dir)
     
     print("\n📦 Running uv lock...")
-    if use_frozen_lock:
-        run(["uv", "lock", "--frozen", "--upgrade-package", "praisonaiagents"], cwd=praisonai_dir)
+    if use_frozen_lock and agents_version:
+        # Patch release: only praisonaiagents was bumped. Do a TARGETED upgrade so the
+        # new version is written into uv.lock (and can be committed/published) without
+        # re-resolving every optional extra. --frozen must NOT be used here: it forbids
+        # lockfile writes, so the bump would never land and the publish would ship a
+        # stale lock.
+        run(["uv", "lock", "--upgrade-package", f"praisonaiagents=={agents_version}"], cwd=praisonai_dir)
+    elif use_frozen_lock:
+        # No dependency bump requested — reuse the existing lock as-is.
+        run(["uv", "lock", "--frozen"], cwd=praisonai_dir)
     else:
-        # Targeted upgrade must WRITE uv.lock so the refreshed resolution can be committed
-        # and published. Do not pass --frozen here — it would block the lockfile update.
+        # Full release: regenerate the lock, refreshing the praisonaiagents pin.
         run(["uv", "lock", "--upgrade-package", "praisonaiagents"], cwd=praisonai_dir)
     
     # 3. uv build
@@ -449,7 +468,8 @@ Examples:
         sys.exit(1)
     
     # Run release
-    release(args.version, use_frozen_lock=patch_release, no_add_all=args.no_add_all)
+    release(args.version, use_frozen_lock=patch_release, no_add_all=args.no_add_all,
+            agents_version=args.agents)
 
 
 if __name__ == "__main__":
