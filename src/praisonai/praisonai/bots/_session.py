@@ -19,11 +19,13 @@ import asyncio
 import logging
 import time
 import weakref
+from contextlib import asynccontextmanager
 from datetime import datetime
 from functools import partial
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from .._lockmap import LockMap
 from ._reset_policy import SessionResetPolicy
+from ._admission import AdmissionRejected
 
 if TYPE_CHECKING:
     from praisonaiagents import Agent
@@ -34,6 +36,12 @@ logger = logging.getLogger(__name__)
 class BotRunTimeout(Exception):
     """Exception raised when a bot run times out."""
     pass
+
+
+@asynccontextmanager
+async def _null_async_context():
+    """A no-op async context manager (admission gate disabled)."""
+    yield
 
 
 class BotSessionManager:
@@ -84,6 +92,7 @@ class BotSessionManager:
         delivery_router: Optional[Any] = None,
         session_scope: str = "per_user",
         attribution: str = "[{sender}] ",
+        admission_gate: Optional[Any] = None,
     ) -> None:
         self._histories: Dict[str, List[Dict[str, Any]]] = {}
         self._locks = LockMap()
@@ -185,6 +194,13 @@ class BotSessionManager:
         # per-conversation state (iterative summary, anti-thrashing streaks),
         # so a single shared instance would leak context across users and
         # race under concurrent saves on the executor thread pool.
+        # Issue #2454: optional gateway-wide inbound admission gate. When set,
+        # each turn must acquire a global concurrency slot (bounded by
+        # ``max_concurrent_runs``) before its per-user lock, with a bounded
+        # wait queue and a declared overflow policy. ``None`` preserves the
+        # legacy behaviour (every inbound turn dispatches immediately, only
+        # per-user serialisation applies).
+        self._admission_gate = admission_gate
         self._compaction_config = compaction
         # Probe availability once so behaviour/tests can detect whether
         # compaction is active without sharing the stateful instance.
@@ -585,6 +601,20 @@ class BotSessionManager:
 
         return _restore
 
+    def _admission_context(self, user_id: str):
+        """Return an async context manager admitting one inbound turn.
+
+        Issue #2454: when a gateway-wide admission gate is configured, this
+        acquires a global concurrency slot (bounded by ``max_concurrent_runs``)
+        with a bounded wait queue, and raises ``AdmissionRejected`` when the
+        gateway is at capacity. A no-op pass-through when no gate is set, so
+        the legacy dispatch path is preserved exactly.
+        """
+        gate = self._admission_gate
+        if gate is None:
+            return _null_async_context()
+        return gate.admit(session_id=self._storage_key(user_id))
+
     async def chat(
         self,
         agent: "Agent",
@@ -813,7 +843,11 @@ class BotSessionManager:
         # Initialize result variable
         result: Optional[str] = None
         claim_ctx = None
-        
+        # Issue #2454: admission-gate context for this turn (released in the
+        # finally below regardless of outcome). ``None`` when no gate is set.
+        _admission_cm = None
+        _admission_active = False
+
         try:
             # Claim journal entry if we have one
             if journal_key is not None:
@@ -821,6 +855,31 @@ class BotSessionManager:
                 await claim_ctx.__aenter__()
                 
             try:
+                # Issue #2454: gateway-wide admission gate in front of the
+                # per-user lock. Acquires a global concurrency slot (bounded
+                # by ``max_concurrent_runs``) with a bounded wait queue; sheds
+                # with a busy ack when the queue is full. A no-op when no gate
+                # is configured, so legacy behaviour is preserved exactly.
+                _admission_cm = self._admission_context(user_id)
+                try:
+                    await _admission_cm.__aenter__()
+                    _admission_active = True
+                except AdmissionRejected as _rej:
+                    # Over capacity and the wait queue is full: shed this turn
+                    # with a clean, model-readable busy ack rather than starting
+                    # an (N+1)th concurrent provider call. Release the journal
+                    # claim (if any) so the message can be retried later.
+                    _admission_cm = None
+                    if claim_ctx is not None:
+                        try:
+                            await claim_ctx.__aexit__(
+                                type(_rej), _rej, _rej.__traceback__
+                            )
+                        except Exception as e:  # pragma: no cover — defensive
+                            logger.debug("Failed to release claim on shed: %s", e)
+                    return _rej.message
+                # The gate is held for the full turn; released in the outer
+                # finally below so a slot is never leaked on any exit path.
                 async with user_lock:
                     # Load history (may hit disk via run_in_executor for async safety)
                     loop = asyncio.get_running_loop()
@@ -1088,6 +1147,14 @@ class BotSessionManager:
                     await claim_ctx.__aexit__(None, None, None)
                 return result or ""
         finally:
+            # Issue #2454: release the admission slot for this turn (frees a
+            # global concurrency slot and lets a queued waiter proceed). Done
+            # first so capacity is returned promptly on every exit path.
+            if _admission_active and _admission_cm is not None:
+                try:
+                    await _admission_cm.__aexit__(None, None, None)
+                except Exception as e:  # pragma: no cover — defensive
+                    logger.debug("Failed to release admission slot: %s", e)
             # Always clear task-local session context, even if an exception occurred.
             if ctx_token is not None and _clear_ctx is not None:
                 try:

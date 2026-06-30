@@ -255,6 +255,11 @@ class GatewayConfig:
     ssl_key: Optional[str] = None
     max_buffered_bytes: int = 1024 * 1024  # 1MB default
     max_queued_frames: int = 1000  # Per-client outbound frame ceiling
+    # Issue #2454: gateway-wide inbound admission control. 0 disables the gate
+    # (today's behaviour: every inbound turn dispatches immediately).
+    max_concurrent_runs: int = 0  # Aggregate concurrency ceiling (0 = unlimited)
+    queue_depth: int = 0  # Bounded wait queue when at the ceiling
+    overflow_policy: str = "reject"  # reject | queue | shed_oldest
     push: PushConfig = field(default_factory=PushConfig)
     auth_scopes: Optional[Dict[str, List[str]]] = None
 
@@ -276,6 +281,16 @@ class GatewayConfig:
             raise ValueError("heartbeat_interval must be >= 0")
         if self.reconnect_timeout < 0:
             raise ValueError("reconnect_timeout must be >= 0")
+        if self.max_concurrent_runs < 0:
+            raise ValueError(
+                "max_concurrent_runs must be >= 0 (use 0 to disable admission control)"
+            )
+        if self.queue_depth < 0:
+            raise ValueError("queue_depth must be >= 0")
+        if self.overflow_policy not in ("reject", "queue", "shed_oldest"):
+            raise ValueError(
+                "overflow_policy must be one of 'reject', 'queue', 'shed_oldest'"
+            )
 
     @property
     def has_scope_policy(self) -> bool:
@@ -344,6 +359,9 @@ class GatewayConfig:
             "ssl_enabled": bool(self.ssl_cert and self.ssl_key),
             "max_buffered_bytes": self.max_buffered_bytes,
             "max_queued_frames": self.max_queued_frames,
+            "max_concurrent_runs": self.max_concurrent_runs,
+            "queue_depth": self.queue_depth,
+            "overflow_policy": self.overflow_policy,
             "push": self.push.to_dict(),
             "scope_policy_enabled": self.has_scope_policy,
         }
@@ -522,6 +540,9 @@ class MultiChannelGatewayConfig:
             ssl_key=gw_data.get("ssl_key"),
             max_buffered_bytes=int(gw_data.get("max_buffered_bytes", 1024 * 1024)),
             max_queued_frames=int(gw_data.get("max_queued_frames", 1000)),
+            max_concurrent_runs=int(gw_data.get("max_concurrent_runs", 0) or 0),
+            queue_depth=int(gw_data.get("queue_depth", 0) or 0),
+            overflow_policy=str(gw_data.get("overflow_policy", "reject") or "reject"),
             auth_scopes=auth_scopes,
         )
         

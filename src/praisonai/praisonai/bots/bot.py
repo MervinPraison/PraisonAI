@@ -108,6 +108,13 @@ class Bot:
         # post-construction pattern as ``identity_resolver``).
         self._delivery_router: Optional[Any] = None
 
+        # Issue #2454: optional gateway-wide inbound admission gate, set by the
+        # owning BotOS so the adapter's ``_session`` enforces the concurrency
+        # ceiling / fair wait queue / overflow policy on the run-dispatch path.
+        # Spliced into the adapter session in ``_build_adapter`` (same duck-typed
+        # post-construction pattern as the delivery router).
+        self._admission_gate: Optional[Any] = None
+
         self._adapter: Optional[Any] = None
         self._is_running = False
 
@@ -221,6 +228,16 @@ class Bot:
             )
             if session is not None and hasattr(session, "_delivery_router"):
                 session._delivery_router = self._delivery_router
+
+        # Issue #2454: splice the gateway-wide admission gate into the adapter's
+        # session so inbound runs are admitted through the global concurrency
+        # ceiling / fair queue. Same duck-typed post-construction wire-up.
+        if self._admission_gate is not None:
+            session = getattr(adapter, "_session", None) or getattr(
+                adapter, "_session_mgr", None
+            )
+            if session is not None and hasattr(session, "_admission_gate"):
+                session._admission_gate = self._admission_gate
 
         return adapter
 

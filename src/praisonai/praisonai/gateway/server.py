@@ -550,6 +550,13 @@ class WebSocketGateway:
             max_queued_frames=int(
                 gateway_config.get("max_queued_frames", 1000)
             ),
+            max_concurrent_runs=int(
+                gateway_config.get("max_concurrent_runs", 0) or 0
+            ),
+            queue_depth=int(gateway_config.get("queue_depth", 0) or 0),
+            overflow_policy=str(
+                gateway_config.get("overflow_policy", "reject") or "reject"
+            ),
             session_config=session_config,
         )
         
@@ -2032,7 +2039,23 @@ class WebSocketGateway:
                 
                 try:
                     loop = asyncio.get_event_loop()
-                    response = await loop.run_in_executor(None, agent.chat, content)
+                    gate = getattr(self, "_admission_gate", None)
+                    if gate is not None and getattr(gate, "enabled", False):
+                        # Gateway-wide inbound admission ceiling (#2454). The
+                        # direct WebSocket path bypasses the bot-session gate,
+                        # so enforce the shared gate here too.
+                        from ..bots._admission import AdmissionRejected
+                        try:
+                            async with gate.admit(session_id=session.session_id):
+                                response = await loop.run_in_executor(
+                                    None, agent.chat, content
+                                )
+                        except AdmissionRejected as rej:
+                            response = rej.message
+                    else:
+                        response = await loop.run_in_executor(
+                            None, agent.chat, content
+                        )
                 except Exception as e:
                     logger.error(f"Agent error in queue processor: {e}")
                     response = f"Error: {str(e)}"
@@ -2533,7 +2556,29 @@ class WebSocketGateway:
 
         try:
             loop = asyncio.get_running_loop()
-            reply = await loop.run_in_executor(None, agent.chat, message)
+            gate = getattr(self, "_admission_gate", None)
+            if gate is not None and getattr(gate, "enabled", False):
+                # Gateway-wide inbound admission ceiling (#2454). Hook-triggered
+                # runs are a distinct inbound surface; route them through the
+                # shared gate so a burst of POST /hooks/<path> requests cannot
+                # exceed max_concurrent_runs and recreate the overload it guards.
+                from ..bots._admission import AdmissionRejected
+                try:
+                    async with gate.admit(session_id=session_key):
+                        reply = await loop.run_in_executor(
+                            None, agent.chat, message
+                        )
+                except AdmissionRejected as rej:
+                    return {
+                        "ok": False,
+                        "error": rej.message,
+                        "action": "agent",
+                        "agent": agent_id,
+                        "session": session_key,
+                        "rejected": True,
+                    }
+            else:
+                reply = await loop.run_in_executor(None, agent.chat, message)
         except Exception as e:  # noqa: BLE001 - report run failure to caller
             logger.error("Hook '%s' agent run failed: %s", hook.path, e)
             return {"ok": False, "error": str(e), "session": session_key}
@@ -3655,6 +3700,10 @@ class WebSocketGateway:
                 bot = self._create_bot(channel_type, token, default_agent, config, ch_cfg)
                 if bot is None:
                     continue
+                # Issue #2454: share the gateway-wide admission gate with this
+                # channel bot so inbound runs are admitted through the global
+                # concurrency ceiling / fair queue. No-op when not configured.
+                self._stamp_admission_gate(bot)
                 self._channel_bots[channel_name] = bot
                 logger.info(f"Channel '{channel_name}' ({channel_type}) initialized")
             except Exception as e:
@@ -3672,6 +3721,27 @@ class WebSocketGateway:
                 task = asyncio.create_task(self._run_bot_safe(name, bot))
                 self._channel_tasks[name] = task
             logger.info(f"Started {len(self._channel_bots)} channel bot(s)")
+
+    def _stamp_admission_gate(self, bot: Any) -> None:
+        """Share the gateway-wide admission gate with a channel bot (Issue #2454).
+
+        The concrete adapters (TelegramBot, DiscordBot, …) expose their session
+        under ``_session`` / ``_session_mgr``. No-op when admission control is
+        not configured, preserving today's immediate-dispatch path. Called from
+        both ``start_channels`` and ``_start_single_channel`` (hot-reload) so a
+        restarted channel can't silently bypass the global concurrency ceiling.
+        """
+        gate = getattr(self, "_admission_gate", None)
+        if gate is None:
+            return
+        sess = (
+            getattr(bot, "_session", None)
+            or getattr(bot, "_session_mgr", None)
+        )
+        if sess is not None and hasattr(sess, "_admission_gate"):
+            sess._admission_gate = gate
+        elif hasattr(bot, "_admission_gate"):
+            bot._admission_gate = gate
 
     def _create_bot(
         self,
@@ -4332,6 +4402,9 @@ class WebSocketGateway:
             bot = self._create_bot(channel_type, token, default_agent, config, ch_cfg)
             if bot is None:
                 return
+            # Issue #2454: stamp the shared admission gate so a channel restarted
+            # during hot-reload still enforces the global concurrency ceiling.
+            self._stamp_admission_gate(bot)
             self._channel_bots[channel_name] = bot
             logger.info(f"Channel '{channel_name}' ({channel_type}) initialized")
         except Exception as e:
@@ -4626,7 +4699,46 @@ class WebSocketGateway:
                     drain_timeout_cfg,
                 )
                 drain_timeout_cfg = None
-        
+
+        # Issue #2454: gateway-wide inbound admission control. Build a single
+        # shared admission gate from the gateway config (CLI overrides win over
+        # YAML) and stamp it onto each channel bot in ``start_channels`` so the
+        # concurrency ceiling / fair queue / overflow policy is enforced on the
+        # inbound run-dispatch path. Disabled (no gate) when no positive
+        # ceiling is configured — preserving today's immediate-dispatch path.
+        def _ovr(attr: str, key: str, default: Any) -> Any:
+            val = getattr(self, attr, None)
+            if val is None:
+                val = gw_cfg.get(key, default)
+            return val
+
+        # Coerce + validate admission config. Invalid config is fail-fast: a
+        # typo in the overload-control knobs must NOT silently start the
+        # gateway with unbounded inbound runs (which would remove the very
+        # protection the operator asked for). ``build_admission_gate`` raises
+        # ``ValueError`` on bad values; we let that propagate to abort startup.
+        try:
+            _max_runs = int(_ovr("_max_concurrent_runs_override", "max_concurrent_runs", 0) or 0)
+            _queue_depth = int(_ovr("_queue_depth_override", "queue_depth", 0) or 0)
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                f"Invalid gateway admission config "
+                f"(max_concurrent_runs/queue_depth must be integers): {e}"
+            ) from e
+        _overflow = str(_ovr("_overflow_policy_override", "overflow_policy", "reject") or "reject")
+        from ..bots._admission import build_admission_gate
+        self._admission_gate = build_admission_gate(
+            max_concurrent_runs=_max_runs,
+            queue_depth=_queue_depth,
+            overflow_policy=_overflow,
+        )
+        if self._admission_gate is not None:
+            logger.info(
+                "Gateway admission control enabled "
+                "(max_concurrent_runs=%d queue_depth=%d overflow=%s)",
+                _max_runs, _queue_depth, _overflow,
+            )
+
         # Parse health monitoring configuration
         health_cfg = gw_cfg.get("health")
         if health_cfg and isinstance(health_cfg, dict):

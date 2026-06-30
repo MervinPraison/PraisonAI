@@ -1,0 +1,251 @@
+"""Unit tests for gateway inbound admission control (Issue #2454).
+
+Verifies the wrapper-side ``AdmissionGate`` enforcement (concurrency ceiling +
+bounded wait queue + overflow shed), its wiring into ``BotOS``, and that the
+gate is a transparent no-op when admission control is not configured.
+"""
+
+import asyncio
+
+import pytest
+
+# Admission primitives have no optional deps, so import them unconditionally —
+# a failure here is a real package regression and must surface, not be skipped.
+from praisonai.bots._admission import (  # noqa: E402
+    AdmissionGate,
+    AdmissionRejected,
+    build_admission_gate,
+)
+
+# BotOS may pull optional adapter deps; only a genuine optional-dependency miss
+# (ModuleNotFoundError) is allowed to skip — any other import error propagates.
+try:
+    from praisonai.bots.botos import BotOS
+except ModuleNotFoundError:  # pragma: no cover - optional deps not installed
+    BotOS = None
+
+pytestmark = pytest.mark.skipif(
+    BotOS is None, reason="praisonai BotOS optional dependency not installed"
+)
+
+
+def test_disabled_by_default_no_gate():
+    botos = BotOS()
+    assert botos._admission_gate is None
+    assert botos.admission_stats is None
+
+
+def test_botos_builds_gate_from_config():
+    botos = BotOS(max_concurrent_runs=8, queue_depth=16, overflow_policy="reject")
+    assert botos._admission_gate is not None
+    assert botos._admission_gate.enabled is True
+    stats = botos.admission_stats
+    assert stats["max_concurrent_runs"] == 8
+    assert stats["queue_depth"] == 16
+
+
+def test_build_admission_gate_returns_none_when_unconfigured():
+    assert build_admission_gate(max_concurrent_runs=0) is None
+    assert build_admission_gate() is None
+
+
+def test_build_admission_gate_rejects_negative_runs():
+    # A negative ceiling is a misconfiguration, NOT "disabled": it must fail
+    # fast so a numeric typo can't silently remove overload protection.
+    with pytest.raises(ValueError):
+        build_admission_gate(max_concurrent_runs=-1)
+
+
+def test_gate_disabled_is_transparent():
+    async def main():
+        gate = AdmissionGate(policy=None)
+        assert gate.enabled is False
+        async with gate.admit(session_id="u1"):
+            return True
+
+    assert asyncio.run(main()) is True
+
+
+def test_gate_enforces_ceiling_and_rejects_overflow():
+    async def main():
+        gate = build_admission_gate(
+            max_concurrent_runs=2, queue_depth=1, overflow_policy="reject"
+        )
+        release = asyncio.Event()
+        rejected = []
+
+        async def run(i):
+            try:
+                async with gate.admit(session_id=str(i)):
+                    await release.wait()
+            except AdmissionRejected as r:
+                rejected.append(r.message)
+
+        tasks = [asyncio.create_task(run(i)) for i in range(4)]
+
+        async def settled():
+            # Wait for the steady state instead of a fixed sleep (CI-robust):
+            # 2 admitted (in flight), 1 queued, 1 rejected (queue full).
+            while gate.in_flight != 2 or gate.queued != 1 or len(rejected) != 1:
+                await asyncio.sleep(0)
+
+        await asyncio.wait_for(settled(), timeout=2)
+        assert gate.in_flight == 2
+        assert gate.queued == 1
+        release.set()
+        await asyncio.gather(*tasks)
+        assert len(rejected) == 1
+        assert gate.in_flight == 0
+        assert gate.stats()["rejected"] == 1
+
+    asyncio.run(main())
+
+
+def test_shed_oldest_evicts_oldest_waiter():
+    async def main():
+        # ceiling=1, queue_depth=1, shed_oldest: 1 in-flight, 1 queued; a third
+        # turn must evict the *oldest* waiter (not the newcomer, not unbounded).
+        gate = build_admission_gate(
+            max_concurrent_runs=1, queue_depth=1, overflow_policy="shed_oldest"
+        )
+        release = asyncio.Event()
+        shed = []
+
+        async def run(i):
+            try:
+                async with gate.admit(session_id=str(i)):
+                    await release.wait()
+            except AdmissionRejected as r:
+                shed.append(i)
+
+        t0 = asyncio.create_task(run(0))  # admitted, holds the slot
+        await asyncio.sleep(0.02)
+        t1 = asyncio.create_task(run(1))  # queued (oldest waiter)
+        await asyncio.sleep(0.02)
+        assert gate.in_flight == 1
+        assert gate.queued == 1
+        t2 = asyncio.create_task(run(2))  # newcomer evicts the oldest waiter
+        await asyncio.sleep(0.02)
+        # Oldest waiter (1) was shed; newcomer (2) took its queue slot. Queue
+        # never grew past its depth, so shedding is bounded.
+        assert shed == [1]
+        assert gate.queued == 1
+        assert gate.stats()["shed"] == 1
+        release.set()
+        await asyncio.gather(t0, t1, t2)
+        assert gate.in_flight == 0
+
+    asyncio.run(main())
+
+
+def test_shed_signal_wins_when_slot_also_free():
+    # Regression (#2454): an evicted (shed_oldest) waiter must NOT run even when
+    # a slot becomes free in the same scheduler wakeup as the eviction signal.
+    # Drives the real ``admit()`` path: we evict the queued waiter and free the
+    # in-flight slot together, then assert the evicted turn sheds (no capacity
+    # leak, no admitting a shed request during overload).
+    async def main():
+        gate = build_admission_gate(
+            max_concurrent_runs=1, queue_depth=1, overflow_policy="shed_oldest"
+        )
+        release = asyncio.Event()
+        outcomes = {}
+
+        async def holder():
+            async with gate.admit(session_id="holder"):
+                outcomes["holder"] = "ran"
+                await release.wait()
+
+        async def waiter():
+            try:
+                async with gate.admit(session_id="waiter"):
+                    outcomes["waiter"] = "ran"
+            except AdmissionRejected:
+                outcomes["waiter"] = "shed"
+
+        t_hold = asyncio.create_task(holder())
+        while gate.in_flight != 1:
+            await asyncio.sleep(0)
+        t_wait = asyncio.create_task(waiter())
+        while gate.queued != 1:
+            await asyncio.sleep(0)
+
+        # Free the slot and evict the oldest waiter in the same turn.
+        release.set()
+        gate._shed_oldest_waiter()
+
+        await asyncio.gather(t_hold, t_wait)
+        # The evicted waiter must have shed, not run, and the slot must be back.
+        assert outcomes["waiter"] == "shed"
+        assert gate.in_flight == 0
+        assert gate.stats()["shed"] == 1
+        assert gate._ensure_sem()._value == 1
+
+    asyncio.run(main())
+
+
+def test_shed_oldest_no_free_slot_rejects_newcomer():
+    # Regression (#2454): under shed_oldest, if every queued waiter is already
+    # signalled (mid-cleanup) so no live waiter can be evicted, a newcomer must
+    # be rejected — the wait set must NOT grow past ``queue_depth``.
+    async def main():
+        gate = build_admission_gate(
+            max_concurrent_runs=1, queue_depth=1, overflow_policy="shed_oldest"
+        )
+        release = asyncio.Event()
+
+        async def holder():
+            async with gate.admit(session_id="holder"):
+                await release.wait()
+
+        t_hold = asyncio.create_task(holder())
+        while gate.in_flight != 1:
+            await asyncio.sleep(0)
+
+        async def waiter():
+            try:
+                async with gate.admit(session_id="w"):
+                    await release.wait()
+            except AdmissionRejected:
+                pass
+
+        t_wait = asyncio.create_task(waiter())
+        while gate.queued != 1:
+            await asyncio.sleep(0)
+
+        # Simulate the race window: the lone queued waiter is already signalled
+        # but has not yet popped itself out of the registry.
+        gate._shed_oldest_waiter()
+        assert gate._shed_oldest_waiter() is False
+
+        # With the queue full and no live waiter to shed, the newcomer must be
+        # rejected rather than enqueued past ``queue_depth``.
+        with pytest.raises(AdmissionRejected):
+            async with gate.admit(session_id="newcomer"):
+                pass
+        assert gate.queued == 1
+
+        release.set()
+        await asyncio.gather(t_hold, t_wait)
+        assert gate.in_flight == 0
+
+    asyncio.run(main())
+
+
+def test_gate_releases_slot_on_exception():
+    async def main():
+        gate = build_admission_gate(max_concurrent_runs=1, queue_depth=0)
+
+        async def boom():
+            async with gate.admit(session_id="u"):
+                raise RuntimeError("turn failed")
+
+        with pytest.raises(RuntimeError):
+            await boom()
+        # Slot must be released even though the body raised.
+        assert gate.in_flight == 0
+        # A subsequent turn can still be admitted.
+        async with gate.admit(session_id="u2"):
+            assert gate.in_flight == 1
+
+    asyncio.run(main())

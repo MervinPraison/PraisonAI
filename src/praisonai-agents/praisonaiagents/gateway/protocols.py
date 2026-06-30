@@ -2143,6 +2143,176 @@ class DrainTimeoutPolicy:
 
 
 # ---------------------------------------------------------------------------
+# Gateway inbound admission control (Issue #2454)
+#
+# The gateway protects the *outbound* path (slow-consumer eviction, bounded
+# send queues, send-rate limiting) and serialises runs *per user*, but it has
+# no gateway-wide ceiling on concurrent inbound agent runs. A burst of inbound
+# traffic from many distinct users therefore translates directly into a burst
+# of concurrent provider calls, with no admission gate in front of it.
+#
+# This is the pure, import-free decision contract for an admission gate. The
+# wrapper's run-dispatch path (``BotSessionManager.chat``) supplies live facts
+# (in-flight and queued counts) and the policy returns an ``AdmissionDecision``:
+# admit now, queue (wait for capacity), or reject (busy ack). A config-driven
+# default (:class:`ConcurrencyLimitPolicy`) is provided for the common bounded
+# concurrency + bounded queue case; the wrapper owns the semaphore/queue
+# mechanism (it needs the running event loop), this owns the *decision*.
+# ---------------------------------------------------------------------------
+
+
+class AdmissionDecision(str, Enum):
+    """Outcome of an inbound admission evaluation.
+
+    * ``ADMIT`` — capacity is available; run immediately.
+    * ``QUEUE`` — at the concurrency ceiling but the wait queue has room;
+      block until a slot frees up.
+    * ``REJECT`` — over capacity and the queue is full; shed the run with a
+      busy acknowledgement (a ``503``-style signal to the user).
+    """
+
+    ADMIT = "admit"
+    QUEUE = "queue"
+    REJECT = "reject"
+
+
+@runtime_checkable
+class GatewayConcurrencyPolicyProtocol(Protocol):
+    """Protocol for gateway-wide inbound admission decisions.
+
+    Pure, import-free decision contract consumed by the wrapper's run-dispatch
+    path. The wrapper supplies the live aggregate counts (turns currently
+    in flight and turns currently waiting) and the policy decides whether the
+    next inbound turn may run now, must wait, or should be shed. Concrete
+    enforcement (an ``asyncio.Semaphore`` ceiling plus a bounded
+    ``asyncio.Queue`` with per-session fairness) lives in the wrapper, since it
+    needs the running event loop and live session manager; this contract keeps
+    the *decision* testable in isolation.
+
+    A config-driven default (:class:`ConcurrencyLimitPolicy`) is provided for
+    the common "N concurrent runs, bounded wait queue, declared overflow"
+    case.
+    """
+
+    max_concurrent_runs: int
+    queue_depth: int
+
+    def decide(
+        self,
+        *,
+        in_flight: int,
+        queued: int,
+        session_id: str = "",
+    ) -> AdmissionDecision:
+        """Return an :class:`AdmissionDecision` for the supplied facts."""
+        ...
+
+
+class ConcurrencyLimitPolicy:
+    """Config-driven inbound admission policy for a bounded gateway.
+
+    The default referenced by ``gateway.max_concurrent_runs`` /
+    ``gateway.queue_depth`` / ``gateway.overflow_policy`` in ``gateway.yaml``
+    and the ``BotOS(..., max_concurrent_runs=...)`` Python surface. It is
+    intentionally minimal and dependency-free so the decision lives in core and
+    is provable in isolation; the wrapper owns the side effects (acquire a
+    semaphore slot, enqueue/dequeue, return a busy ack).
+
+    The decision is:
+
+    * ``ADMIT`` while ``in_flight < max_concurrent_runs``.
+    * At the ceiling, ``QUEUE`` while ``queued < queue_depth`` and the
+      ``overflow_policy`` permits waiting.
+    * Otherwise the ``overflow_policy`` decides the shed behaviour:
+        - ``"reject"`` → :attr:`AdmissionDecision.REJECT` (busy ack).
+        - ``"queue"`` → :attr:`AdmissionDecision.QUEUE` (block beyond the
+          declared depth — for callers that prefer unbounded waiting to
+          shedding; the wrapper still bounds the actual queue object).
+        - ``"shed_oldest"`` → :attr:`AdmissionDecision.QUEUE`; the wrapper
+          drops the oldest waiter to make room rather than rejecting the new
+          arrival.
+
+    A ``max_concurrent_runs`` of ``0`` disables admission control entirely
+    (today's behaviour: every inbound turn is admitted immediately).
+
+    Example::
+
+        ConcurrencyLimitPolicy(max_concurrent_runs=32, queue_depth=128,
+                               overflow_policy="reject")
+    """
+
+    _OVERFLOW = ("reject", "queue", "shed_oldest")
+
+    def __init__(
+        self,
+        max_concurrent_runs: int = 0,
+        queue_depth: int = 0,
+        overflow_policy: str = "reject",
+    ):
+        try:
+            ceiling = int(max_concurrent_runs)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"max_concurrent_runs must be an integer, "
+                f"got {max_concurrent_runs!r}"
+            )
+        if ceiling < 0:
+            raise ValueError(
+                f"max_concurrent_runs must be >= 0, got {max_concurrent_runs!r}"
+            )
+        try:
+            depth = int(queue_depth)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"queue_depth must be an integer, got {queue_depth!r}"
+            )
+        if depth < 0:
+            raise ValueError(f"queue_depth must be >= 0, got {queue_depth!r}")
+        overflow = (overflow_policy or "reject").strip().lower()
+        if overflow not in self._OVERFLOW:
+            raise ValueError(
+                f"overflow_policy must be one of {self._OVERFLOW}, "
+                f"got {overflow_policy!r}"
+            )
+        self.max_concurrent_runs = ceiling
+        self.queue_depth = depth
+        self.overflow_policy = overflow
+
+    @property
+    def enabled(self) -> bool:
+        """Whether admission control is active (a positive ceiling is set)."""
+        return self.max_concurrent_runs > 0
+
+    def decide(
+        self,
+        *,
+        in_flight: int,
+        queued: int,
+        session_id: str = "",
+    ) -> AdmissionDecision:
+        # Disabled: preserve legacy always-admit behaviour.
+        if self.max_concurrent_runs <= 0:
+            return AdmissionDecision.ADMIT
+        if in_flight < self.max_concurrent_runs:
+            return AdmissionDecision.ADMIT
+        # At the ceiling: consult the bounded wait queue.
+        if queued < self.queue_depth:
+            return AdmissionDecision.QUEUE
+        # Queue is full: declared overflow behaviour.
+        if self.overflow_policy == "queue":
+            # Caller opted into waiting beyond the declared depth.
+            return AdmissionDecision.QUEUE
+        if self.overflow_policy == "shed_oldest":
+            # Make room by dropping the oldest waiter (wrapper enforces).
+            return AdmissionDecision.QUEUE
+        return AdmissionDecision.REJECT
+
+
+# Backward-compatible alias following the repo's ``*Protocol`` convention.
+GatewayConcurrencyPolicy = GatewayConcurrencyPolicyProtocol
+
+
+# ---------------------------------------------------------------------------
 # Port-less, restart-safe external drain trigger (Issue #2390)
 #
 # Hosted/containerised deployments (Docker, Fly, Kubernetes) need to ask a
