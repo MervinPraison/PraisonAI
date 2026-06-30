@@ -115,12 +115,64 @@ async def test_pairing_flow_sends_owner_approval_dm():
     adapter.send_approval_dm.assert_awaited_once()
     kwargs = adapter.send_approval_dm.call_args.kwargs
     assert kwargs["owner_user_id"] == "owner-123"
+    assert kwargs["user_name"] == "testuser"
+    assert kwargs["user_id"] == "unknown_user"
     assert kwargs["code"] == "ABCD1234"
     assert kwargs["channel"] == "telegram"
 
     # User is notified the request was sent to the owner.
     adapter.reply.assert_awaited_once()
     assert "approval" in adapter.reply.call_args[0][1].lower()
+
+
+@pytest.mark.asyncio
+async def test_pairing_owner_dm_failure_falls_back_to_cli():
+    """When the owner approval DM cannot be delivered, fall back to CLI instructions."""
+    config = BotConfig(
+        allowed_users=["allowed_user"],
+        unknown_user_policy="pair",
+        owner_user_id="owner-123",
+    )
+    mock_store = Mock(spec=PairingStore)
+    mock_store.is_paired.return_value = False
+    mock_store.generate_code.return_value = "ABCD1234"
+
+    adapter = Mock()
+    adapter.reply = AsyncMock()
+    adapter.send_approval_dm = AsyncMock(return_value=None)
+    bot_ctx = BotContext(config=config, pairing_store=mock_store, adapter=adapter)
+
+    result = await UnknownUserHandler.handle(make_message(), bot_ctx)
+
+    assert result is False
+    adapter.send_approval_dm.assert_awaited_once()
+    adapter.reply.assert_awaited_once()
+    assert "praisonai pairing approve telegram ABCD1234" in adapter.reply.call_args[0][1]
+
+
+@pytest.mark.asyncio
+async def test_pairing_owner_dm_exception_falls_back_to_cli():
+    """When the owner approval DM raises, fall back to CLI instructions."""
+    config = BotConfig(
+        allowed_users=["allowed_user"],
+        unknown_user_policy="pair",
+        owner_user_id="owner-123",
+    )
+    mock_store = Mock(spec=PairingStore)
+    mock_store.is_paired.return_value = False
+    mock_store.generate_code.return_value = "ABCD1234"
+
+    adapter = Mock()
+    adapter.reply = AsyncMock()
+    adapter.send_approval_dm = AsyncMock(side_effect=RuntimeError("DM failed"))
+    bot_ctx = BotContext(config=config, pairing_store=mock_store, adapter=adapter)
+
+    result = await UnknownUserHandler.handle(make_message(), bot_ctx)
+
+    assert result is False
+    adapter.send_approval_dm.assert_awaited_once()
+    adapter.reply.assert_awaited_once()
+    assert "praisonai pairing approve telegram ABCD1234" in adapter.reply.call_args[0][1]
 
 
 @pytest.mark.asyncio
