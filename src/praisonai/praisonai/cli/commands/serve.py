@@ -204,7 +204,11 @@ def serve_gateway(
     try:
         from ..features.gateway import GatewayHandler
         handler = GatewayHandler()
-        handler.start(host=host, port=port, agent_file=agents_file)
+        # ``start`` returns a sysexits-based exit code (0 OK, 75 restart,
+        # 78 fatal config) so supervisors react correctly; propagate it
+        # instead of swallowing fatal/transient failures as success (#2437).
+        exit_code = handler.start(host=host, port=port, agent_file=agents_file)
+        raise typer.Exit(exit_code or 0)
     except ImportError as e:
         output.print_error(f"Gateway module not available: {e}")
         output.print("Install with: pip install praisonai[api]")
