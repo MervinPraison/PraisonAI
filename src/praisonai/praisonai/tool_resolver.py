@@ -146,8 +146,10 @@ class ToolResolver:
         # equivalent to the historical hardcoded order.
         if sources is not None:
             self._sources: List[ToolSource] = list(sources)
+            self._uses_default_sources = False
         else:
             self._sources = self.default_sources(registry)
+            self._uses_default_sources = True
 
         # Auto-wire cache invalidation so register_function() on the registry
         # invalidates this resolver's cache without the caller having to
@@ -539,38 +541,56 @@ class ToolResolver:
         Returns:
             Dict mapping tool names to descriptions
         """
-        available: Dict[str, str] = {}
-        
-        # 1. Add local tools
+        return {name: desc for name, (desc, _src) in self._discover_available().items()}
+
+    def list_available_sources(self) -> Dict[str, str]:
+        """List all available tools with their canonical resolution source.
+
+        Unlike :meth:`list_available` (which returns human-readable
+        descriptions that may come from tool docstrings), this returns a
+        stable source identifier per tool — one of ``"local"``, ``"builtin"``,
+        ``"external"`` or ``"registered"``. The source reflects the chain that
+        :meth:`resolve` would actually use, so callers can attribute a tool to
+        its true origin without fragile substring matching on descriptions.
+
+        Returns:
+            Dict mapping tool names to source identifiers
+        """
+        return {name: src for name, (_desc, src) in self._discover_available().items()}
+
+    def _discover_available(self) -> Dict[str, "tuple[str, str]"]:
+        """Discover all available tools as ``{name: (description, source)}``.
+
+        Discovery walks sources in the SAME precedence order as
+        :meth:`resolve` / :meth:`default_sources` so that the reported source
+        matches the callable that would actually be resolved at run time:
+
+        1. local tools.py
+        2. wrapper ToolRegistry (register_function API)
+        3. praisonaiagents.tools (built-in)
+        4. praisonai-tools (external, optional)
+        5. core SDK registry (entry-point plugins / runtime-registered)
+
+        Higher-precedence sources win; a name is never overwritten by a
+        later, lower-precedence source.
+
+        When the resolver is constructed with a custom ``sources=`` chain we do
+        NOT enumerate the default built-in / external / core-registry sources,
+        because :meth:`resolve` only walks ``self._sources`` — advertising tools
+        the resolver cannot resolve would make discovery lie about resolution.
+        The wrapper ``ToolRegistry`` is always enumerated when present, since it
+        is passed independently of the source chain.
+        """
+        available: Dict[str, tuple[str, str]] = {}
+
+        # 1. Local tools (highest precedence)
         local_tools = self._load_local_tools()
         for name, tool in local_tools.items():
             doc = getattr(tool, '__doc__', None) or f"Local tool: {name}"
-            available[name] = doc.split('\n')[0].strip()  # First line only
-        
-        # 2. Add praisonaiagents.tools
-        try:
-            from praisonaiagents.tools import TOOL_MAPPINGS
-            for name in TOOL_MAPPINGS.keys():
-                if name not in available:
-                    available[name] = "Built-in tool from praisonaiagents"
-        except ImportError:
-            pass
-        
-        # 3. Add praisonai-tools (if installed)
-        if self._praisonai_tools_available is None:
-            from ._framework_availability import is_available
-            self._praisonai_tools_available = is_available("praisonai_tools")
-        
-        if self._praisonai_tools_available:
-            try:
-                from praisonai_tools import __all__ as praisonai_tools_all
-                for name in praisonai_tools_all:
-                    if name not in available:
-                        available[name] = "External tool from praisonai-tools"
-            except (ImportError, AttributeError):
-                pass
+            available[name] = (doc.split('\n')[0].strip(), "local")
 
-        # 4. Add tools registered in the wrapper ToolRegistry (register_function API)
+        # 2. Wrapper ToolRegistry (register_function API) — must precede the
+        # built-in / external mappings to mirror resolution precedence.
         if self._registry is not None:
             try:
                 names = self._registry.list_functions()
@@ -578,11 +598,40 @@ class ToolResolver:
                 names = []
             for name in names:
                 if name not in available:
-                    available[name] = "Registered tool (wrapper registry)"
+                    available[name] = ("Registered tool (wrapper registry)", "registered")
 
-        # 5. Add tools from the core SDK tool registry (entry-point plugins and
-        # runtime-registered tools). These resolve at run time via the resolution
-        # chain, so discovery must surface them too. Mirror the resolution path by
+        # The remaining sources are only part of the *default* resolution chain.
+        # A resolver built with custom sources= owns its own chain and must not
+        # advertise tools it would not actually resolve.
+        if not self._uses_default_sources:
+            return available
+
+        # 3. praisonaiagents.tools (built-in)
+        try:
+            from praisonaiagents.tools import TOOL_MAPPINGS
+            for name in TOOL_MAPPINGS.keys():
+                if name not in available:
+                    available[name] = ("Built-in tool from praisonaiagents", "builtin")
+        except ImportError:
+            pass
+
+        # 4. praisonai-tools (external, optional)
+        if self._praisonai_tools_available is None:
+            from ._framework_availability import is_available
+            self._praisonai_tools_available = is_available("praisonai_tools")
+
+        if self._praisonai_tools_available:
+            try:
+                from praisonai_tools import __all__ as praisonai_tools_all
+                for name in praisonai_tools_all:
+                    if name not in available:
+                        available[name] = ("External tool from praisonai-tools", "external")
+            except (ImportError, AttributeError):
+                pass
+
+        # 5. Core SDK tool registry (entry-point plugins and runtime-registered
+        # tools). These resolve at run time via the resolution chain, so
+        # discovery must surface them too. Mirror the resolution path by
         # triggering entry-point discovery (idempotent) before listing.
         try:
             from praisonaiagents.tools.registry import get_registry
@@ -593,7 +642,7 @@ class ToolResolver:
                 pass
             for name in reg.list_tools():
                 if name not in available:
-                    available[name] = "Registered/entry-point tool"
+                    available[name] = ("Registered/entry-point tool", "registered")
         except ImportError:
             pass
         except Exception as e:

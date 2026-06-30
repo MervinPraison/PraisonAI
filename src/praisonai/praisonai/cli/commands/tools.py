@@ -37,26 +37,26 @@ def tools_list(
     
     resolver = ToolResolver()
     available = resolver.list_available()
+    sources = resolver.list_available_sources()
     
     if not available:
         console.print("[yellow]No tools available.[/yellow]")
         return
     
-    # Categorize tools
+    # Categorize tools by their authoritative resolution source (not by
+    # substring matching on the description, which may come from a docstring).
     builtin_tools = {}
     local_tools = {}
     external_tools = {}
     registered_tools = {}
-    
+    bucket = {
+        "local": local_tools,
+        "external": external_tools,
+        "registered": registered_tools,
+        "builtin": builtin_tools,
+    }
     for name, desc in available.items():
-        if "Local tool" in desc:
-            local_tools[name] = desc
-        elif "praisonai-tools" in desc:
-            external_tools[name] = desc
-        elif "Registered" in desc or "entry-point" in desc:
-            registered_tools[name] = desc
-        else:
-            builtin_tools[name] = desc
+        bucket.get(sources.get(name, "builtin"), builtin_tools)[name] = desc
     
     # Filter by source if specified
     if source == "builtin":
@@ -78,14 +78,7 @@ def tools_list(
     # Add rows
     for name in sorted(available.keys()):
         desc = available[name]
-        if "Local tool" in desc:
-            src = "local"
-        elif "praisonai-tools" in desc:
-            src = "external"
-        elif "Registered" in desc or "entry-point" in desc:
-            src = "registered"
-        else:
-            src = "builtin"
+        src = sources.get(name, "builtin")
         
         if verbose:
             table.add_row(name, src, desc[:60] + "..." if len(desc) > 60 else desc)
@@ -181,18 +174,16 @@ def tools_info(
     except (ValueError, TypeError):
         pass
     
-    # Show source
-    available = resolver.list_available()
-    if name in available:
-        desc = available[name]
-        if "Local tool" in desc:
-            console.print("\n[blue]Source:[/blue] Local tools.py")
-        elif "praisonai-tools" in desc:
-            console.print("\n[blue]Source:[/blue] praisonai-tools package")
-        elif "Registered" in desc or "entry-point" in desc:
-            console.print("\n[blue]Source:[/blue] Registered/entry-point tool (registry)")
-        else:
-            console.print("\n[blue]Source:[/blue] praisonaiagents.tools (built-in)")
+    # Show source (authoritative, matches runtime resolution precedence)
+    sources = resolver.list_available_sources()
+    if name in sources:
+        labels = {
+            "local": "Local tools.py",
+            "external": "praisonai-tools package",
+            "registered": "Registered/entry-point tool (registry)",
+            "builtin": "praisonaiagents.tools (built-in)",
+        }
+        console.print(f"\n[blue]Source:[/blue] {labels.get(sources[name], labels['builtin'])}")
 
 
 @app.command("test")

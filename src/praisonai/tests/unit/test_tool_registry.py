@@ -190,3 +190,59 @@ class TestListAvailableSurfacesRegistry:
         finally:
             # Avoid leaking the test tool into the process-wide singleton.
             core_reg.unregister(tool_name)
+
+
+class TestListAvailableSourceAttribution:
+    """Source attribution must match the resolution precedence chain.
+
+    Regression for the discovery-ordering and docstring-as-source-tag issues
+    raised in review of #2474: the reported source must reflect the callable
+    that ``resolve()`` would actually return, independent of descriptions.
+    """
+
+    def test_source_matches_resolution_precedence(self):
+        """A name in both wrapper registry and a higher-precedence-listed source
+        is attributed to the source resolve() actually returns."""
+        from praisonai.tool_resolver import ToolResolver
+
+        registry = ToolRegistry()
+
+        sentinel = lambda x: x
+        registry.register_function("issue2474_precedence_tool", sentinel)
+        resolver = ToolResolver(registry=registry)
+
+        sources = resolver.list_available_sources()
+        # Wrapper-registry tool surfaces and is attributed to the registry.
+        assert sources.get("issue2474_precedence_tool") == "registered"
+        # And resolution returns the wrapper-registry callable (precedence holds).
+        assert resolver.resolve("issue2474_precedence_tool") is sentinel
+
+    def test_local_docstring_does_not_change_source(self):
+        """A local tool whose docstring mentions 'Registered' stays 'local'."""
+        from praisonai.tool_resolver import ToolResolver
+
+        def _ResolveResult(x):
+            """Registered user handler that looks like a registry tool."""
+            return x
+
+        resolver = ToolResolver()
+        # Inject a local tool directly into the (immutable) cache to avoid
+        # touching the filesystem / PRAISONAI_ALLOW_LOCAL_TOOLS gate.
+        from types import MappingProxyType
+        resolver._local_tools_cache = MappingProxyType(
+            {"registered_looking_local": _ResolveResult}
+        )
+        resolver._local_tools_loaded = True
+
+        sources = resolver.list_available_sources()
+        assert sources["registered_looking_local"] == "local"
+
+    def test_custom_sources_do_not_advertise_default_registry(self):
+        """A resolver with a custom source chain must not list default-chain
+        tools it cannot resolve (built-in / external / core registry)."""
+        from praisonai.tool_resolver import ToolResolver
+
+        # Empty custom chain: resolves nothing, so discovery must be empty too.
+        resolver = ToolResolver(sources=[])
+        available = resolver.list_available()
+        assert available == {}
