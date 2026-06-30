@@ -128,3 +128,89 @@ roles:
         result = OpenAIAgentsAdapter().run(config, llm_config, "Quick test", tools_dict={})
         assert "### OpenAI Agents Output ###" in result
         assert "OK" in result.upper()
+
+    @pytest.mark.skipif(
+        not os.getenv("PRAISONAI_LIVE_TESTS"),
+        reason="Set PRAISONAI_LIVE_TESTS=1 to run real API calls",
+    )
+    @pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="OPENAI_API_KEY not set")
+    def test_openai_agents_full_execution_sequential_context(self):
+        try:
+            from praisonai import PraisonAI
+        except ImportError as exc:
+            pytest.skip(f"PraisonAI not available: {exc}")
+
+        pytest.importorskip("agents")
+        pytest.importorskip("praisonai_frameworks")
+
+        yaml_content = """
+framework: openai_agents
+topic: text processing
+roles:
+  writer:
+    role: Writer
+    goal: Transform text
+    backstory: Professional writer
+    tasks:
+      draft:
+        description: Write one word hello
+        expected_output: hello
+      polish:
+        description: Uppercase the prior draft word only.
+        expected_output: HELLO
+        context:
+          - draft
+"""
+        test_file = _write_yaml(yaml_content)
+        try:
+            praisonai = PraisonAI(agent_file=test_file, framework="openai_agents")
+            result = praisonai.run()
+            text = str(result)
+            assert text.strip()
+            assert "HELLO" in text.upper()
+        finally:
+            if os.path.exists(test_file):
+                os.unlink(test_file)
+
+    @pytest.mark.skipif(
+        not os.getenv("PRAISONAI_LIVE_TESTS"),
+        reason="Set PRAISONAI_LIVE_TESTS=1 to run real API calls",
+    )
+    @pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="OPENAI_API_KEY not set")
+    def test_openai_agents_full_execution_handoff_yaml(self):
+        try:
+            from praisonai import PraisonAI
+        except ImportError as exc:
+            pytest.skip(f"PraisonAI not available: {exc}")
+
+        pytest.importorskip("agents")
+        pytest.importorskip("praisonai_frameworks")
+
+        yaml_content = """
+framework: openai_agents
+topic: greeting
+roles:
+  triage:
+    role: Triage Agent
+    goal: Route English requests to English Agent
+    backstory: Delegate English to the English Agent.
+    handoff:
+      to:
+        - English Agent
+    tasks:
+      route:
+        description: User says hello in English. Delegate appropriately.
+        expected_output: A friendly English reply
+  english:
+    role: English Agent
+    goal: Reply in English only
+    backstory: English specialist.
+"""
+        test_file = _write_yaml(yaml_content)
+        try:
+            praisonai = PraisonAI(agent_file=test_file, framework="openai_agents")
+            result = praisonai.run()
+            assert str(result).strip()
+        finally:
+            if os.path.exists(test_file):
+                os.unlink(test_file)
