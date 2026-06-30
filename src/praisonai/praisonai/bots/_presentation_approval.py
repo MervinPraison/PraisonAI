@@ -281,11 +281,23 @@ class PresentationApprovalHandler:
             logger.exception("Failed to record approval decision %s", approval_id)
             return False
 
-    async def rehydrate(self) -> int:
+    async def rehydrate(
+        self,
+        allowed_actors: Optional[Iterable[str]] = None,
+    ) -> int:
         """Re-hydrate outstanding pending approvals from the durable store.
 
         Called on startup so a late "Allow"/"Deny" tap that arrives after a
         restart can still be resolved by :meth:`handle_approval_command`.
+
+        Args:
+            allowed_actors: Optional actor allowlist to re-apply to every
+                rehydrated approval. The durable store does not persist the
+                authorised-actor set, so on restart pending approvals would
+                otherwise lose their restriction and become resolvable by any
+                actor. Pass the backend's configured allowlist here to keep
+                rehydrated approvals fail-closed. When ``None`` the legacy
+                unrestricted behaviour is preserved.
 
         Returns:
             Number of pending approvals re-hydrated.  ``0`` when no store is
@@ -293,6 +305,9 @@ class PresentationApprovalHandler:
         """
         if self._store is None:
             return 0
+        normalized_actors: Optional[Set[str]] = (
+            {str(a) for a in allowed_actors} if allowed_actors is not None else None
+        )
         count = 0
         try:
             lister = getattr(self._store, "list_pending", None) or self._store.load_pending
@@ -309,6 +324,10 @@ class PresentationApprovalHandler:
                 "arguments": request.arguments,
                 "risk_level": request.risk_level,
                 "target": (request.context or {}).get("target"),
+                # Re-apply the configured allowlist so a rehydrated approval
+                # keeps the same actor authorisation as the original request
+                # (the durable store does not persist allowed_actors).
+                "allowed_actors": normalized_actors,
                 # Flag so handle_approval_command treats the durable store as
                 # the source of truth and ignores a stale tap on an already
                 # expired/resolved row.

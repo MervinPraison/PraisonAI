@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from ._discord_approval import DiscordApproval
     from ._webhook_approval import WebhookApproval
     from ._http_approval import HTTPApproval
+    from ._presentation_approval_backend import PresentationApprovalBackend
     from ._streaming import StreamingConfig, StreamingMode, DraftStreamer
     from ._outbox import OutboundQueue, OutboundEntry
     from ._approval_store import ApprovalStore
@@ -86,6 +87,9 @@ def __getattr__(name: str):
     if name == "HTTPApproval":
         from ._http_approval import HTTPApproval
         return HTTPApproval
+    if name == "PresentationApprovalBackend":
+        from ._presentation_approval_backend import PresentationApprovalBackend
+        return PresentationApprovalBackend
     # W1 — cross-platform mirror + identity
     if name == "mirror_to_session":
         from ._mirror import mirror_to_session
@@ -193,6 +197,7 @@ __all__ = [
     "use_correlation_id", "GatewayMetrics",
     "SlackApproval", "TelegramApproval", "DiscordApproval",
     "WebhookApproval", "HTTPApproval",
+    "PresentationApprovalBackend",
     # Streaming
     "StreamingConfig", "StreamingMode", "DraftStreamer",
     # W1
