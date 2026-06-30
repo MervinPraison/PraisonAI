@@ -81,7 +81,7 @@ class TestAssertFrameworkAvailableRaises:
             with pytest.raises(ImportError) as exc_info:
                 assert_framework_available("some_unknown_framework_xyz")
             assert "some_unknown_framework_xyz" in str(exc_info.value)
-            assert "praisonai-frameworks[some_unknown_framework_xyz]" in str(exc_info.value)
+            assert "pip install 'praisonai-frameworks[some_unknown_framework_xyz]'" in str(exc_info.value)
 
 
 class TestRegistryImportErrorIsContained:
