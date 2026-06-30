@@ -97,7 +97,7 @@ roles:
             text = str(result)
             assert text.strip()
             assert "6" in text
-            assert "Agno Output" in text or "agno" in text.lower()
+            assert "Agno Output" in text
         finally:
             if os.path.exists(test_file):
                 os.unlink(test_file)

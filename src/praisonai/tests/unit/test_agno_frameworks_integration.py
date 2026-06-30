@@ -106,7 +106,19 @@ def test_agents_generator_agno_via_frameworks_adapter(mock_completion):
         result = gen.generate_crew_and_kickoff()
 
     assert "Frameworks output" in result
-    mock_run.assert_called_once()
+    mock_run.assert_called_once_with(
+        {
+            "framework": "agno",
+            "topic": "AI trends",
+            "roles": gen._load_config()["roles"],
+        },
+        [{"model": "openai/gpt-4o-mini", "api_key": "test-key"}],
+        "AI trends",
+        tools_dict={},
+        agent_callback=None,
+        task_callback=None,
+        cli_config=None,
+    )
 
 
 def test_entry_point_metadata_registers_frameworks_agno():

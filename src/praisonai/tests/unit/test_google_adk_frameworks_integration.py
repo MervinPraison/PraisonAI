@@ -106,7 +106,19 @@ def test_agents_generator_google_adk_via_frameworks_adapter(mock_completion):
         result = gen.generate_crew_and_kickoff()
 
     assert "Frameworks output" in result
-    mock_run.assert_called_once()
+    mock_run.assert_called_once_with(
+        {
+            "framework": "google_adk",
+            "topic": "AI trends",
+            "roles": gen._load_config()["roles"],
+        },
+        [{"model": "gemini-2.5-flash", "api_key": "test-key"}],
+        "AI trends",
+        tools_dict={},
+        agent_callback=None,
+        task_callback=None,
+        cli_config=None,
+    )
 
 
 def test_entry_point_metadata_registers_frameworks_google_adk():
