@@ -167,3 +167,152 @@ class TestPermissionZeroOverhead:
         from praisonaiagents import Agent
         agent = Agent(name="test", instructions="test")
         assert agent._perm_allow is None
+
+
+def _tool_names(formatted_tools):
+    """Extract function names from a list of OpenAI-schema tool defs."""
+    return {
+        t.get("function", {}).get("name")
+        for t in formatted_tools
+        if isinstance(t, dict) and t.get("type") == "function"
+    }
+
+
+class TestAdvertisedToolPruning:
+    """Permission-denied tools must be pruned from the LLM-advertised set.
+
+    Regression for: the agent advertised its entire tool set to the model
+    regardless of permission rules, only blocking at execution time. The
+    advertised surface should be shaped by the permission tier.
+    """
+
+    def test_denied_tool_absent_from_payload(self):
+        from praisonaiagents import Agent
+
+        def execute_command(command: str) -> str:
+            """Run a shell command."""
+            return "ok"
+
+        def read_file(path: str) -> str:
+            """Read a file."""
+            return "contents"
+
+        agent = Agent(
+            name="test",
+            instructions="test",
+            tools=[execute_command, read_file],
+            approval="safe",  # blocks execute_command (dangerous)
+        )
+        formatted = agent._format_tools_for_completion()
+        names = _tool_names(formatted)
+        assert "execute_command" not in names, "denied tool must not be advertised"
+        assert "read_file" in names, "allowed tool must remain advertised"
+
+    def test_no_rules_advertises_all(self):
+        """Backward compat: with no deny set, all tools are advertised."""
+        from praisonaiagents import Agent
+
+        def execute_command(command: str) -> str:
+            """Run a shell command."""
+            return "ok"
+
+        def read_file(path: str) -> str:
+            """Read a file."""
+            return "contents"
+
+        agent = Agent(
+            name="test",
+            instructions="test",
+            tools=[execute_command, read_file],
+            approval="full",  # no denials
+        )
+        names = _tool_names(agent._format_tools_for_completion())
+        assert "execute_command" in names
+        assert "read_file" in names
+
+    def test_prune_helper_respects_allow_set(self):
+        """When _perm_allow is set, only allowed tools survive."""
+        from praisonaiagents import Agent
+
+        agent = Agent(name="test", instructions="test")
+        agent._perm_allow = frozenset({"read_file"})
+        payload = [
+            {"type": "function", "function": {"name": "read_file"}},
+            {"type": "function", "function": {"name": "write_file"}},
+        ]
+        names = _tool_names(agent._prune_denied_tools(payload))
+        assert names == {"read_file"}
+
+    def test_prune_helper_noop_without_rules(self):
+        """No deny set and no allow set -> input returned unchanged."""
+        from praisonaiagents import Agent
+
+        agent = Agent(name="test", instructions="test")
+        # Explicitly clear any env/interactivity-derived default preset so we
+        # are asserting the true fast path (empty deny, None allow).
+        agent._perm_deny = frozenset()
+        agent._perm_allow = None
+        payload = [
+            {"type": "function", "function": {"name": "read_file"}},
+            {"type": "function", "function": {"name": "write_file"}},
+        ]
+        result = agent._prune_denied_tools(payload)
+        assert result is payload  # exact same object (fast path)
+
+    def test_prune_helper_drops_denied(self):
+        """Explicit deny set removes matching tool from payload."""
+        from praisonaiagents import Agent
+
+        agent = Agent(name="test", instructions="test")
+        agent._perm_deny = frozenset({"write_file"})
+        payload = [
+            {"type": "function", "function": {"name": "read_file"}},
+            {"type": "function", "function": {"name": "write_file"}},
+        ]
+        names = _tool_names(agent._prune_denied_tools(payload))
+        assert names == {"read_file"}
+
+    def test_denied_tool_absent_from_system_prompt(self):
+        """Denied tools must not be named in the system prompt either.
+
+        The schema list and the natural-language tool enumeration in the
+        system prompt must advertise the same (permission-filtered) surface.
+        """
+        from praisonaiagents import Agent
+
+        def execute_command(command: str) -> str:
+            """Run a shell command."""
+            return "ok"
+
+        def read_file(path: str) -> str:
+            """Read a file."""
+            return "contents"
+
+        agent = Agent(
+            name="test",
+            instructions="test",
+            tools=[execute_command, read_file],
+            approval="safe",  # blocks execute_command (dangerous)
+        )
+        prompt = agent._build_system_prompt() or ""
+        assert "execute_command" not in prompt, "denied tool must not be named in prompt"
+        assert "read_file" in prompt, "allowed tool should still be named in prompt"
+
+    def test_tool_name_allowed_helper(self):
+        """_tool_name_allowed mirrors deny/allow rules and the no-op fast path."""
+        from praisonaiagents import Agent
+
+        agent = Agent(name="test", instructions="test")
+        agent._perm_deny = frozenset({"write_file"})
+        agent._perm_allow = None
+        assert agent._tool_name_allowed("read_file") is True
+        assert agent._tool_name_allowed("write_file") is False
+
+        agent._perm_deny = frozenset()
+        agent._perm_allow = frozenset({"read_file"})
+        assert agent._tool_name_allowed("read_file") is True
+        assert agent._tool_name_allowed("write_file") is False
+
+        agent._perm_deny = frozenset()
+        agent._perm_allow = None
+        assert agent._tool_name_allowed("anything") is True

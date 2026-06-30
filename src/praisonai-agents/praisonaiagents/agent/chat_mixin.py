@@ -192,6 +192,10 @@ Your Goal: {self.goal}"""
                     logging.warning(f"Could not extract tool name from {tool}: {e}")
                     continue
             
+            # Prune permission-denied tool names so the advertised surface in the
+            # system prompt matches the function schema (and execution-time rules).
+            tool_names = [n for n in tool_names if self._tool_name_allowed(n)]
+
             if tool_names:
                 system_prompt += f"\n\nYou have access to the following tools: {', '.join(tool_names)}. Use these tools when appropriate to help complete your tasks. Always use tools when they can help provide accurate information or perform actions."
                 system_prompt += "\n\nExplain Before Acting: Before calling a tool, provide a brief one-sentence explanation of what you are about to do and why. Skip explanations only for repetitive low-level operations where narration would be noisy. When performing a batch of similar operations (e.g. searching for multiple items), explain the group once rather than narrating each call individually."
@@ -520,6 +524,12 @@ Your Goal: {self.goal}"""
         
         cleaned_tools = sort_formatted_tools(cleaned_tools)
         
+        # Prune permission-denied tools from the advertised set so the model is
+        # only ever offered tools it can actually call. Mirrors the execution-time
+        # enforcement in tool_execution.py (_perm_deny / _perm_allow). No-op when
+        # no deny set and no allow set are configured (backward compatible).
+        cleaned_tools = self._prune_denied_tools(cleaned_tools)
+        
         # Cache the formatted tools with LRU eviction, including tool search metadata
         self._cache_put(
             self._formatted_tools_cache,
@@ -584,6 +594,69 @@ Your Goal: {self.goal}"""
         except Exception as _e:
             logging.debug(f"[before-tool-definitions] async hook skipped: {_e}")
             return formatted_tools
+
+    def _prune_denied_tools(self, formatted_tools):
+        """Remove tools whose permission resolves to ``deny`` from the payload.
+
+        The advertised tool surface is shaped by the agent's effective
+        permission tier (resolved at ``__init__`` into ``_perm_deny`` /
+        ``_perm_allow``) so the model is never offered a tool it cannot call.
+        ``ask``/``allow`` tools stay advertised — approval still happens at
+        execution time (defence in depth). This is a no-op when no ``deny`` set
+        and no ``allow`` set are configured, preserving backward compatibility.
+
+        Args:
+            formatted_tools: List of OpenAI-schema tool definitions.
+
+        Returns:
+            The filtered list (a new list only when something is pruned).
+        """
+        if not formatted_tools:
+            return formatted_tools
+
+        perm_deny = getattr(self, "_perm_deny", None)
+        perm_allow = getattr(self, "_perm_allow", None)
+
+        # Fast path: no permission shaping configured -> advertise everything.
+        if not perm_deny and perm_allow is None:
+            return formatted_tools
+
+        def _tool_id(tool):
+            if isinstance(tool, dict) and tool.get("type") == "function":
+                return str(tool.get("function", {}).get("name") or "")
+            return ""
+
+        pruned = []
+        for tool in formatted_tools:
+            name = _tool_id(tool)
+            if not name:
+                # Keep unrecognized schemas as-is; cannot evaluate permission.
+                pruned.append(tool)
+                continue
+            if not self._tool_name_allowed(name):
+                logging.debug("Pruning permission-denied tool from payload: %s", name)
+                continue
+            pruned.append(tool)
+        return pruned
+
+    def _tool_name_allowed(self, name):
+        """Return ``True`` if ``name`` is callable under the agent's permissions.
+
+        Mirrors the execution-time enforcement in ``tool_execution.py``
+        (``_perm_deny`` / ``_perm_allow``): a tool is denied if it is in the
+        deny set or, when an allow set is configured, absent from it.
+        ``ask``/``allow`` tools remain callable (approval happens at execution
+        time). No-op (always allowed) when no permission shaping is configured.
+        """
+        if not name:
+            return True
+        perm_deny = getattr(self, "_perm_deny", None)
+        perm_allow = getattr(self, "_perm_allow", None)
+        if perm_deny and name in perm_deny:
+            return False
+        if perm_allow is not None and name not in perm_allow:
+            return False
+        return True
 
     def _build_multimodal_prompt(
         self, 
