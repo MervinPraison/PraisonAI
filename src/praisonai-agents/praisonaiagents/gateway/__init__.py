@@ -71,6 +71,12 @@ from .protocols import (
     drain_timeout_has_headroom,
     # Code-skew guard for hot operations (Issue #2460)
     detect_code_skew,
+    # Restart-intent exit-code protocol (Issue #2437)
+    GATEWAY_OK_EXIT_CODE,
+    GATEWAY_RESTART_EXIT_CODE,
+    GATEWAY_FATAL_CONFIG_EXIT_CODE,
+    FatalConfigError,
+    classify_exit_reason,
     # Protocol version negotiation
     PROTOCOL_VERSION,
     MIN_PROTOCOL_VERSION,
@@ -199,6 +205,12 @@ __all__ = [
     "drain_timeout_has_headroom",
     # Code-skew guard for hot operations (Issue #2460)
     "detect_code_skew",
+    # Restart-intent exit-code protocol (Issue #2437)
+    "GATEWAY_OK_EXIT_CODE",
+    "GATEWAY_RESTART_EXIT_CODE",
+    "GATEWAY_FATAL_CONFIG_EXIT_CODE",
+    "FatalConfigError",
+    "classify_exit_reason",
     # Protocol version negotiation
     "PROTOCOL_VERSION",
     "MIN_PROTOCOL_VERSION",
