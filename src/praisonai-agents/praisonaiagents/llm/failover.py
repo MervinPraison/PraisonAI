@@ -21,8 +21,6 @@ from typing import (
     Dict,
     List,
     Optional,
-    Protocol,
-    runtime_checkable,
 )
 
 logger = get_logger(__name__)
@@ -141,22 +139,6 @@ class AuthProfile:
         self.cooldown_until = None
         self.last_error = None
         self.last_error_time = None
-
-@runtime_checkable
-class FailoverProtocol(Protocol):
-    """Protocol for failover management."""
-    
-    def get_next_profile(self) -> Optional[AuthProfile]:
-        """Get the next available profile."""
-        ...
-    
-    def mark_failure(self, profile: AuthProfile, error: str) -> None:
-        """Mark a profile as failed."""
-        ...
-    
-    def mark_success(self, profile: AuthProfile) -> None:
-        """Mark a profile as successful."""
-        ...
 
 @dataclass
 class FailoverConfig:
