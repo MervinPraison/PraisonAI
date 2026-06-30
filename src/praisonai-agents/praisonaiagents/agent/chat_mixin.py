@@ -1601,6 +1601,26 @@ Your Goal: {self.goal}"""
             
             # Cache the dispatcher
             self._unified_dispatcher = dispatcher
+
+        # Pre-call budget guard (parity with sync _chat_completion). Bots and
+        # other async callers route through here, not _chat_completion.
+        if self._max_budget and self._on_budget_exceeded == "stop":
+            _est_min_cost = self._estimate_min_call_cost(
+                messages, getattr(self, 'max_tokens', None)
+            )
+            with self._cost_lock:
+                _projected_cost = self._total_cost + _est_min_cost
+                _current_cost = self._total_cost
+            if _projected_cost >= self._max_budget:
+                raise BudgetExceededError(
+                    f"Agent '{self.name}' would exceed budget before call: "
+                    f"${_current_cost:.4f} + est ${_est_min_cost:.4f} >= "
+                    f"${self._max_budget:.4f}",
+                    budget_type="cost",
+                    limit=self._max_budget,
+                    used=_current_cost,
+                    agent_id=self.name
+                )
         
         # Execute unified async dispatch with all necessary parameters
         # Includes all parameters from both legacy paths to ensure full compatibility
@@ -1642,8 +1662,47 @@ Your Goal: {self.goal}"""
                     or None
                 ),
             )
+
+            # Post-call budget accounting (parity with sync _chat_completion).
+            _prompt_tokens = 0
+            _completion_tokens = 0
+            _cost_usd = 0.0
+            if final_response:
+                _usage = getattr(final_response, 'usage', None)
+                if _usage:
+                    _prompt_tokens = getattr(_usage, 'prompt_tokens', 0) or 0
+                    _completion_tokens = getattr(_usage, 'completion_tokens', 0) or 0
+                    _cost_usd = self._calculate_llm_cost(
+                        _prompt_tokens, _completion_tokens, response=final_response
+                    )
+            with self._cost_lock:
+                self._total_cost += _cost_usd
+                self._total_tokens_in += _prompt_tokens
+                self._total_tokens_out += _completion_tokens
+                self._llm_call_count += 1
+                budget_exceeded = self._max_budget and self._total_cost >= self._max_budget
+                current_cost = self._total_cost
+            if budget_exceeded:
+                if self._on_budget_exceeded == "stop":
+                    raise BudgetExceededError(
+                        f"Agent '{self.name}' exceeded budget: ${current_cost:.4f} >= ${self._max_budget:.4f}",
+                        budget_type="cost",
+                        limit=self._max_budget,
+                        used=current_cost,
+                        agent_id=self.name
+                    )
+                elif self._on_budget_exceeded == "warn":
+                    logging.warning(
+                        f"[budget] {self.name}: ${current_cost:.4f} exceeded "
+                        f"${self._max_budget:.4f} budget"
+                    )
+                elif callable(self._on_budget_exceeded):
+                    self._on_budget_exceeded(current_cost, self._max_budget)
+
             return final_response
-            
+
+        except BudgetExceededError:
+            raise
         except Exception as e:
             from ..errors import LLMError
             # Apply the same structured error classification for async path
