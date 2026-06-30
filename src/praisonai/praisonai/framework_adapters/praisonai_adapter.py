@@ -33,6 +33,11 @@ class PraisonAIAdapter(FrameworkAdapter):
     def name(self) -> str:
         """Return adapter name."""
         return "praisonai"
+
+    @property
+    def install_hint(self) -> str:
+        """Install hint for the native PraisonAI agents runtime."""
+        return "pip install praisonaiagents"
     
     @property
     def supported_runtimes(self) -> List[str]:

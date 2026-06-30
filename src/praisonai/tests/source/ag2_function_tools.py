@@ -5,7 +5,7 @@ AG2 (community fork of AutoGen, PyPI package: ag2) installs under the
 'autogen' namespace but is a distinct package from pyautogen/pyautogen2.
 
 Usage with PraisonAI:
-    pip install "praisonai[ag2]"
+    pip install "praisonai-frameworks[ag2]"
     praisonai --framework ag2 agents.yaml
 
 Standalone run:

@@ -15,7 +15,7 @@ class CrewAIAdapter(BaseFrameworkAdapter):
     """Adapter for CrewAI framework with scoped telemetry disabling."""
     
     name = "crewai"
-    install_hint = 'pip install "praisonai[crewai]"'
+    install_hint = 'pip install "praisonai-frameworks[crewai]"'
     requires_tools_extra = True
     
     def is_available(self) -> bool:
