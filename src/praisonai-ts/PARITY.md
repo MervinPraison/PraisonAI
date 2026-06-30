@@ -1,6 +1,6 @@
 # Feature Parity Tracker
 
-> **Version:** 1.5.87 | **Last Updated:** 2026-06-29
+> **Version:** 1.5.87 | **Last Updated:** 2026-06-30
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 ## Summary
@@ -8,7 +8,7 @@
 | Metric | Count |
 |--------|-------|
 | Python Core Features | 394 |
-| Python Wrapper Features | 100 |
+| Python Wrapper Features | 101 |
 | TypeScript Features | 1190 |
 | **Gap Count** | **101** |
 | P0 (Critical) | 2 |
